@@ -3,6 +3,7 @@ import type { ObjectQuery, ObjectQueryPredicate } from "@sixb/core"
 import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
 import { isConnectionLost } from "../storage-errors"
 import { withReservedPgConnection } from "../transactions"
+import { ensureObjectPartition } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
 import {
   compilePgFacetSummary,
@@ -108,9 +109,12 @@ export async function preparePgObjectTextCounts(
 
       for (const item of definitions) {
         const statements = textCountIndexStatements(item)
+        const partition = `${identifier(schema)}.${identifier(
+          await ensureObjectPartition(connection, schema, item.definition.objectTypeId)
+        )}`
         for (const [name, expression] of statements) {
           await connection.unsafe(
-            `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(name)} ON ${table} ${expression}`
+            `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(name)} ON ${partition} ${expression}`
           )
           const [valid] = await connection<{ indisvalid: boolean }[]>`
             SELECT indisvalid FROM pg_index
@@ -204,7 +208,7 @@ async function compilePgIndexedTextAggregate(
   const rows = await sql<{ name: string; definition: string }[]>`
     SELECT c.relname AS name, obj_description(c.oid,'pg_class') AS definition
     FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
-    WHERE i.indrelid='objects'::regclass AND i.indisvalid
+    WHERE i.indrelid IN (SELECT inhrelid FROM pg_inherits WHERE inhparent='objects'::regclass) AND i.indisvalid
       AND c.relname LIKE 'sixb_text_count_%' AND obj_description(c.oid,'pg_class') IS NOT NULL`
   for (const row of rows) {
     const definition = parseDefinition(row.definition)

@@ -126,7 +126,7 @@ test("a published bulk load leaves selective statistics for the next sparse proj
   const sql = createPgClient({ connectionString, schemaName, max: 1 })
   try {
     await sql.unsafe(
-      "ALTER TABLE links SET (autovacuum_enabled=false); ALTER TABLE objects SET (autovacuum_enabled=false); ANALYZE links"
+      "ALTER TABLE links SET (autovacuum_enabled=false); ALTER TABLE objects_default SET (autovacuum_enabled=false); ANALYZE links"
     )
     const Device = defineObjectType({
       id: "Device",

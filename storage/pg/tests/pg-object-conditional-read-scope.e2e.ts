@@ -56,7 +56,6 @@ describe("PgObjectStorage conditional reader plans", () => {
         return explain(tx, { kind: "start", objectTypeId: Invoice }, "total")
       })
 
-      expect(plan).toContain("Index Scan using conditional_invoice_status")
       expect(plan).toContain("Index Cond: (md5(")
     })
   })

@@ -142,6 +142,11 @@ CLI development runtime or production services start. `bun sixb db migrate` perf
 `SIXB_SKIP_MIGRATION=1` disable both steps for production services when a separate release step
 has already run them. No index is built in a request handler.
 
+`objects` is partitioned by object type, so a query plans against its own type's indexes alone,
+however many types the ontology has. Preparation gives each type its partition and builds its
+indexes and statistics there. A row of a type without a partition waits in `objects_default`, and
+moves across at that type's first preparation.
+
 Custom runtimes can opt into the same lifecycle with:
 
 ```ts

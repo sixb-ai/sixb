@@ -3,6 +3,7 @@ import type { ObjectQueryIndexDefinition } from "@sixb/core"
 import type { ObjectQueryPreparationPlan, ObjectQueryPreparationResult } from "@sixb/core/storage"
 import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
 import { undoOnFailure, withReservedPgConnection } from "../transactions"
+import { ensureObjectPartition } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
 import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./query-indexes"
 import { type PgObjectTextCountIndex, preparePgObjectTextCounts } from "./text-count-index"
@@ -59,7 +60,7 @@ function preparationFingerprint(plan: ObjectQueryPreparationPlan): string {
     .sort((a, b) => a.objectTypeId.localeCompare(b.objectTypeId))
 
   // Bump the version when physical generation changes, even if the ontology stays the same.
-  const definition = { version: 2, projectId: plan.projectId, objectTypes }
+  const definition = { version: 3, projectId: plan.projectId, objectTypes }
   return createHash("sha256").update(JSON.stringify(definition)).digest("hex")
 }
 
@@ -105,6 +106,9 @@ async function prepareStructures(
   if (indexes.some((index) => index.kind === "text") || textCounts.length > 0) {
     await ensureTrigrams(sql)
   }
+
+  // Every ontology type gets its partition, whether or not it declares an index.
+  for (const type of plan.objectTypes) await ensureObjectPartition(sql, schema, type.objectTypeId)
 
   const names = await ensurePgObjectQueryIndexes(sql, schema, indexes)
   const texts = await preparePgObjectTextCounts(sql, schema, textCounts)
