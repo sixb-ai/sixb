@@ -32,3 +32,12 @@ describe("createPgClient direct TLS", () => {
     ).toThrow("one TCP host:port")
   })
 })
+
+describe("createPgClient idle connections", () => {
+  const options = { connectionString: "postgres://u:p@127.0.0.1:1/db", schemaName: "s", max: 1 }
+
+  test("are closed after a minute unless configured", () => {
+    expect(createPgClient(options).options.idle_timeout).toBe(60)
+    expect(createPgClient({ ...options, idleTimeoutMillis: 5_000 }).options.idle_timeout).toBe(5)
+  })
+})

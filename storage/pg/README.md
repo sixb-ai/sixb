@@ -81,7 +81,7 @@ Tested with pgvector 0.8.1; no approximate index is created.
 | `max` | `10` | Pool size. Size it per role, not per project — an API replica and a worker each get their own pool. |
 | `statementTimeoutMillis` | unset | A single stalled query can otherwise pin its connection until the process restarts. Keep it generous or unset for workers that run long bulk writes. |
 | `idleInTransactionSessionTimeoutMillis` | unset | Aborts transactions left open and idle, releasing the connection. |
-| `idleTimeoutMillis` | `30000` | Returns idle connections to the server. |
+| `idleTimeoutMillis` | `60000` | Returns idle connections to the server. Longer keeps quiet apps warm, but holds slots: the pools of every role and replica must fit `max_connections`. |
 | `connectTimeoutMillis` | `10000` | Fail fast when the database is unreachable. |
 | `shutdownTimeoutMillis` | `5000` | `close()` stops accepting queries and waits this long for in-flight work, so a restart drains instead of severing live writes. |
 
