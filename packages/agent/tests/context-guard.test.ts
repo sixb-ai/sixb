@@ -3,6 +3,7 @@ import type { PrepareModelStepInput } from "@sixb/core/internal/agents"
 import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
+  type JsonObject,
   type ModelMessage,
   ModelProviderError,
   type ModelStep,
@@ -446,14 +447,16 @@ describe("what a turn adds", () => {
     return tokens(messages) - Math.floor(dense / 3) + Math.ceil(dense / 1.33)
   }
 
-  /** One step: the call, then its result. */
-  function resultStep(index: number, output: string): ModelMessage[] {
+  /** One step: the call, with `input`, then its result. */
+  function resultStep(
+    index: number,
+    output: string,
+    input: JsonObject = { index }
+  ): ModelMessage[] {
     return [
       {
         role: "assistant",
-        content: [
-          { type: "tool-call", toolCallId: `call_${index}`, toolName: "bash", input: { index } },
-        ],
+        content: [{ type: "tool-call", toolCallId: `call_${index}`, toolName: "bash", input }],
       },
       {
         role: "tool",
@@ -473,7 +476,7 @@ describe("what a turn adds", () => {
    * A turn whose steps return `results` in order, as the model loop drives the guard: each call
    * counted by the provider before the next is prepared. What each call carried, as counted.
    */
-  async function runTurn(results: readonly string[]): Promise<number[]> {
+  async function runTurn(results: readonly string[], input?: JsonObject): Promise<number[]> {
     const guard = createAgentContextGuard({ budget: SMALL, tools: [] })
     const completed: ModelStep[] = []
     const sentCounts: number[] = []
@@ -485,7 +488,7 @@ describe("what a turn adds", () => {
       if (index === results.length) break
 
       completed.push({ ...steps(1)[0]!, usage: { inputTokens: sentCounts.at(-1)! } })
-      messages = [...sent, ...resultStep(index, results[index]!)]
+      messages = [...sent, ...resultStep(index, results[index]!, input)]
     }
     return sentCounts
   }
@@ -513,5 +516,19 @@ describe("what a turn adds", () => {
     // The last call carries about 76 % of the limit, and nothing was cleared on the way.
     expect(counts.at(-1)! / SMALL.inputBudgetTokens).toBeGreaterThan(0.75)
     expect(counts).toEqual([...counts].sort((a, b) => a - b))
+  })
+
+  // Reproduce: protect every copy of a call once one was cleared (drop the newest check from
+  // ContextGuard.needed); the same command run again and again then has nothing left to clear,
+  // and its calls go out past the limit.
+  test("clears the older copies of a command the turn runs again and again", async () => {
+    const command = { command: "git log -p -1" }
+    // Twenty runs of the same command, 16 KB of prose each: about 5,300 tokens.
+    const counts = await runTurn(
+      Array.from({ length: 20 }, () => "word ".repeat(3_200)),
+      command
+    )
+
+    expect(Math.max(...counts)).toBeLessThanOrEqual(SMALL.inputBudgetTokens)
   })
 })
