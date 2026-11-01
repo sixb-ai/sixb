@@ -86,7 +86,7 @@ describe("agent context budget resolution", () => {
     expect(outputs).toEqual([200_000 - (Math.ceil(300_000 / 2.1) + 16)])
   })
 
-  test("gives a long thread on an Anthropic model the room its window leaves, at the rate its calls measure", async () => {
+  test("gives a long thread on an Anthropic model the room its window leaves", async () => {
     // Reproduce: size the ceiling at the family rate less a quarter, as before; the second call,
     // about 130,000 real tokens of a 200,000 window, is then capped at the 16,384 reserve.
     const base = selection({
@@ -118,10 +118,48 @@ describe("agent context budget resolution", () => {
       }
     }
 
-    // The first call goes by Anthropic's family rate, the second by what the first measured: about
-    // 130,000 tokens, which leave 70,000 of the window and so the whole 64,000-token cap.
+    // About 130,000 real tokens: weighed at Anthropic's 2.1, denser than the 2.4 the first call
+    // measured, they leave more than three times the reserve.
     expect(outputs[0]).toBeGreaterThan(16_384)
-    expect(outputs[1]).toBe(64_000)
+    expect(outputs[1]).toBe(200_000 - (Math.ceil(312_000 / 2.1) + 16))
+  })
+
+  test("never lets input and allowance pass the window when a call reads denser than measured", async () => {
+    // Reproduce: weigh the request at the measured rate alone in prepareAgentModel; the call after
+    // the large result is then given the whole 64,000-token cap, about 21,000 past the window.
+    const base = selection({
+      modelId: "claude-haiku-5-5",
+      contextWindow: 200_000,
+      maxOutputTokens: 64_000,
+    })
+    const calls: { readonly inputTokens: number; readonly maxOutputTokens?: number }[] = []
+    base.model.stream = async (request) => {
+      const bytes = request.messages
+        .flatMap((message) =>
+          message.role === "system"
+            ? []
+            : message.content.map((part) => (part.type === "text" ? part.text.length : 0))
+        )
+        .reduce((total, value) => total + value, 0)
+      // Conversation text at 2.6 bytes per token; the large tool result after it at 2.1.
+      const inputTokens = calls.length === 0 ? Math.ceil(bytes / 2.6) : Math.ceil(bytes / 2.1)
+      calls.push({ inputTokens, maxOutputTokens: request.maxOutputTokens })
+      return {
+        events: (async function* () {
+          yield { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 10 } }
+        })(),
+      }
+    }
+    const { model } = await pinAndPrepare(base)
+
+    for (const bytes of [100_000, 330_000]) {
+      for await (const _event of (await model.stream(request([text(bytes)]))).events) {
+        // Read to the end, as the model loop does.
+      }
+    }
+
+    const after = calls[1]!
+    expect(after.inputTokens + (after.maxOutputTokens ?? 0)).toBeLessThanOrEqual(200_000)
   })
 
   test("keeps a reasoning budget's reserve and rejects one the model cannot exceed", async () => {

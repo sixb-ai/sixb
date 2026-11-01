@@ -63,7 +63,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
   }
 
   // The rate the run's calls measured: the latest one the provider counted, else the family's.
-  let bytesPerToken = budget.bytesPerToken
+  let measuredBytesPerToken = budget.bytesPerToken
 
   return {
     budget,
@@ -82,7 +82,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
           maxOutputTokens: Math.min(
             request.maxOutputTokens ?? maxOutputTokens,
             outputCeilingTokens(
-              agentContextSizeTokens(size, bytesPerToken),
+              agentContextSizeTokens(size, Math.min(budget.bytesPerToken, measuredBytesPerToken)),
               budget,
               maxOutputTokens
             )
@@ -91,7 +91,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
 
         return {
           events: withCountedInput(stream.events, (inputTokens) => {
-            bytesPerToken = calibrateAgentContextBytesPerToken({
+            measuredBytesPerToken = calibrateAgentContextBytesPerToken({
               bytesPerToken: budget.bytesPerToken,
               size,
               inputTokens,
@@ -105,8 +105,10 @@ export function prepareAgentModel(selection: AgentModelSelection): {
 
 /**
  * A call may write whatever its input leaves of the window, up to the cap, and the reserve at
- * least. The input is weighed at the rate the run's calls measured, not a pessimistic margin: a
- * provider that still finds the request too long refuses it, and the turn recovers.
+ * least. The input is weighed at the denser of the family's rate and the one the run's calls
+ * measured, so it errs high whichever way this request's content tokenizes: a call right after a
+ * large tool result can read denser than the calls it was calibrated on, and with no turn to ask
+ * it again, an allowance past the window's room is a refused call.
  */
 function outputCeilingTokens(
   inputTokens: number,
