@@ -122,7 +122,7 @@ export async function readAgentThreadContextUse(
 function contextUsed(
   history: Pick<AgentTurnHistory, "checkpoint" | "messages" | "usageAnchor">,
   model: LanguageModel,
-  budget: Pick<AgentContextBudget, "bytesPerToken" | "typicalBytesPerToken">
+  budget: Pick<AgentContextBudget, "bytesPerToken">
 ):
   | { readonly tokens: number; readonly parts: NonNullable<AgentThreadContextUse["parts"]> }
   | undefined {
@@ -140,9 +140,6 @@ function contextUsed(
     modelMessages: projectAgentThreadModelContext({ checkpoint, messages }),
     model,
     bytesPerToken: budget.bytesPerToken,
-    ...(budget.typicalBytesPerToken === undefined
-      ? {}
-      : { typicalBytesPerToken: budget.typicalBytesPerToken }),
     fixed: fixedAgentContextSize({
       systemBytes,
       tools: request?.tools ?? { count: 0, bytes: 0 },
@@ -169,7 +166,7 @@ function contextUsed(
     parts: apportionAgentContextTokens({
       totalTokens: tokens,
       prompt: { ...request?.system, tools: request?.tools.bytes ?? 0 },
-      promptBytesPerToken: budget.typicalBytesPerToken ?? budget.bytesPerToken,
+      promptBytesPerToken: budget.bytesPerToken,
       history: estimate.history.parts,
       ...(estimate.history.images ? { images: estimate.history.images } : {}),
       bytesPerToken: estimate.bytesPerToken,
