@@ -31,6 +31,7 @@ export function deployReleaseView({
   configPath: string
 }): string {
   const steps = [
+    ...(release.steps.env ? [{ label: "env", commands: [release.steps.env] }] : []),
     { label: "build", commands: release.steps.build },
     { label: "before start", commands: release.steps.beforeStart },
   ]
@@ -105,9 +106,12 @@ export function deployStepLine(label: string, seconds: string): string {
 export function deployCompleteView({
   release,
   seconds,
+  keptEnv = false,
 }: {
   release: DeployRelease
   seconds?: number
+  /** The deploy couldn't update the server's `.env`, so this release runs on its current values. */
+  keptEnv?: boolean
 }): string {
   const urls = release.services.flatMap((service) =>
     service.http ? [{ label: service.name, value: service.http.publicOrigin }] : []
@@ -118,7 +122,14 @@ export function deployCompleteView({
       `${release.name} deployed`,
       seconds === undefined ? undefined : `${seconds.toFixed(1)}s`
     ),
-    urls.length > 0 ? rows(urls) : null
+    urls.length > 0 ? rows(urls) : null,
+    keptEnv
+      ? marked(
+          tone.warn(glyph.warn),
+          "This release runs on the server's current .env, not on the latest values. Deploy again to update them.",
+          tone.muted
+        )
+      : null
   )
 }
 

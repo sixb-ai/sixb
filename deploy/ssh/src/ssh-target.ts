@@ -19,10 +19,11 @@ import type {
   DeployTarget,
 } from "@sixb/core/deploy"
 import { addKey, listKeys, removeKeys, removeKeysWhere } from "./access"
-import { checkDns, runChecks } from "./check"
+import { checkDns, ENV_TOKEN_CHECK, runChecks } from "./check"
 import { generateCiKey, knownHostsLines, readHostKeys, renderCiInstall } from "./ci"
+import { ENV_TOKEN_FILE } from "./layout"
 import { controlServices, deployRelease, readStatus, streamLogs } from "./operations"
-import { pickPublicKey, renderAdminScript } from "./setup"
+import { ensureEnvToken, pickPublicKey, renderAdminScript } from "./setup"
 import { shellQuote } from "./shell"
 import { resolveSshConfig } from "./ssh-config"
 import { RemoteScriptError, type RemoteShell, SshShell } from "./transport"
@@ -123,6 +124,7 @@ export class SshTarget implements DeployTarget {
           ports: release.services.flatMap((service) =>
             service.http ? [{ service: service.name, port: service.http.port }] : []
           ),
+          envFromSource: release.steps.env !== undefined,
           location: this.location,
         })),
       ])
@@ -140,7 +142,9 @@ export class SshTarget implements DeployTarget {
     const before = await this.check(release, context)
     const serverFixes = before.filter(
       (check) =>
-        (check.status === "fixable" && check.id !== "project.env") ||
+        (check.status === "fixable" &&
+          check.id !== "project.env" &&
+          check.id !== ENV_TOKEN_CHECK) ||
         (check.id === "ssh" && check.status !== "ok")
     )
     const unreachable = before.find((check) => check.id === "ssh" && check.status === "manual")
@@ -169,9 +173,19 @@ export class SshTarget implements DeployTarget {
           `project="$HOME"/${shellQuote(`${context.name}/code/${context.projectPath}`)}`,
           'mkdir -p "$project"',
           'if [ -f "$project/.env" ]; then chmod 600 "$project/.env"; fi',
+          `token="$HOME"/${shellQuote(`${context.name}/${ENV_TOKEN_FILE}`)}`,
+          'if [ -f "$token" ]; then chmod 600 "$token"; fi',
         ].join("\n")
       )
     )
+
+    const { createEnvToken } = context
+    if (release.steps.env && createEnvToken) {
+      const installed = await this.#connected((shell) =>
+        ensureEnvToken(shell, context.name, createEnvToken)
+      )
+      if (installed) context.write(`Installed a read-only token for ${context.name}.`)
+    }
   }
 
   readonly access: DeployAccess = {

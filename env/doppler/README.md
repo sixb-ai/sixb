@@ -35,6 +35,8 @@ A failed request throws `EnvSourceUnreachableError` when Doppler can't answer: n
 timeout, a 429, or a 5xx. Anything else means Doppler refused, and throws a plain error. The CLI
 tells them apart: a deploy can continue through an outage, but never past a revoked token.
 
+`createServerToken` asks for a `read` token on one config, which is what a server keeps.
+
 `read` drops the `DOPPLER_*` names Doppler adds about itself, so they never reach a project's `.env`.
 
 `tests/doppler.e2e.ts` runs against a real project and is skipped without `DOPPLER_TOKEN`. See the
