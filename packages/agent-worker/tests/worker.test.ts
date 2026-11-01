@@ -14770,13 +14770,13 @@ function contextWindowRejection(): ModelProviderError {
 describe("context within a turn", () => {
   const HARD_LIMIT_TOKENS = 83_616
 
-  test("clears what the model read before a call would cross the target", async () => {
+  test("clears what the model read before a call would cross the limit", async () => {
     // Reproduce: leave out contextLimits where runConversationTurn calls runAgentTurn; the
-    // seventh call then carries six chapters of about 15,000 tokens, past the 83,616-token limit.
+    // ninth call then carries eight chapters of about 10,000 tokens, past the 83,616-token limit.
     const requests: LanguageModelRequest[] = []
-    const model = chapterReadingModel({ chapters: 8, requests })
+    const model = chapterReadingModel({ chapters: 10, requests })
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      projectTools: [chapterTool(45_000)],
+      projectTools: [chapterTool(30_000)],
     })
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
@@ -14786,7 +14786,7 @@ describe("context within a turn", () => {
       const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("succeeded")
-      expect(requests).toHaveLength(9)
+      expect(requests).toHaveLength(11)
       for (const sent of requests) {
         expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
       }
@@ -14796,16 +14796,16 @@ describe("context within a turn", () => {
         chapterResults(sent).some((output) => output.value === cleared.value)
       )
       expect(first).toBeGreaterThan(0)
-      // Oldest first; the most recent it read stays, and so does the one it has not read.
+      // Oldest first; the three most recent it read stay, and so does the one it has not read.
       const results = chapterResults(requests[first]!)
       const kept = results.findIndex((output) => output.type === "json")
       expect(kept).toBeGreaterThan(0)
       expect(results.slice(0, kept)).toEqual(Array(kept).fill(cleared))
       expect(results.slice(kept).every((output) => output.type === "json")).toBe(true)
-      expect(results.length - kept).toBeGreaterThanOrEqual(2)
+      expect(results.length - kept).toBeGreaterThanOrEqual(4)
       // The call after a clearing reads its request through: only the step it adds is new.
-      // Reproduce: set KEPT_TOOL_RESULTS to 3 in context-guard.ts; the call after the clearing
-      // then clears one more result, and rewrites the cache from it.
+      // Reproduce: aim the clearing at the limit instead of 60 % of it in ContextGuard.reduce; the
+      // call after the clearing then clears one more result, and rewrites the cache from it.
       const clearedRequest = [...requests[first]!.messages]
       expect(requests[first + 1]!.messages.slice(0, clearedRequest.length)).toEqual(clearedRequest)
       // The transcript keeps every result whole.
@@ -14815,7 +14815,7 @@ describe("context within a turn", () => {
         roles: ["assistant"],
       })
       const calls = messages[0]?.parts.filter((part) => part.type === "tool-call") ?? []
-      expect(calls).toHaveLength(8)
+      expect(calls).toHaveLength(10)
       expect(JSON.stringify(calls)).not.toContain("was cleared")
     } finally {
       await worker.stop()
@@ -14862,7 +14862,7 @@ describe("context within a turn", () => {
     }
   })
 
-  test("compacts the turns before it when clearing cannot bring a call under the target", async () => {
+  test("compacts the turns before it when clearing cannot bring a call under the limit", async () => {
     // Reproduce: leave out compactInTurn where runConversationTurn builds contextLimits; the turn
     // then cuts its newest chapter to fit, and writes no checkpoint.
     const requests: LanguageModelRequest[] = []

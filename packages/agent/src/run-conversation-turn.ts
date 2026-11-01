@@ -17,11 +17,7 @@ import type {
   ExecutionRecord,
   SubagentRunRecord,
 } from "@sixb/core/storage"
-import {
-  expectedRemainingAgentCalls,
-  prepareAgentModel,
-  resolveAgentContextTarget,
-} from "./context-budget"
+import { prepareAgentModel } from "./context-budget"
 import { AgentEnvironmentSaveError, AgentRequesterLeftThreadError, isLostExecution } from "./errors"
 import { resolveRunPlan } from "./execution-plan"
 import type { AgentRunFailure } from "./failure"
@@ -143,9 +139,6 @@ export async function runConversationTurn(input: {
       children: await delegation.turnChildren(),
       contextLimits: {
         budget: prepared.model.budget,
-        targetTokens: resolveAgentContextTarget(prepared.model.budget, {
-          expectedRemainingCalls: expectedRemainingAgentCalls(prepared.history),
-        }).tokens,
         ...(environment.compactInTurn ? { compactInTurn: environment.compactInTurn } : {}),
         ...(environment.bytesPerToken === undefined
           ? {}

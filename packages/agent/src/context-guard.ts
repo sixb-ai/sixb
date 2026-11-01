@@ -19,15 +19,14 @@ import {
 } from "./context-budget"
 
 /**
- * The most recent tool result the model has read always stays. Clearing goes oldest first down to
- * the aim, through the more recent ones when it must: a turn that adds a large result at every
- * step, clearing only past the three most recent, would clear one at every step and break the
- * cache each time.
+ * The three most recent tool results the model has read always stay, as Anthropic's
+ * `clear_tool_uses` keeps by default: the work in progress reads from them. Clearing goes oldest
+ * first down to the aim.
  */
-const KEPT_TOOL_RESULTS = 1
+const KEPT_TOOL_RESULTS = 3
 
 /**
- * What clearing has to free, as a share of the target, to be worth the cache it breaks: every
+ * What clearing has to free, as a share of the limit, to be worth the cache it breaks: every
  * request after it rewrites the conversation from the first result it cleared.
  */
 const CLEARED_AT_LEAST_SHARE = 0.1
@@ -38,7 +37,7 @@ const CLEARED_MIN_BYTES = 1_024
 /** How far a step's estimated growth may run over what it really adds, as a share of it. */
 const GROWTH_MARGIN = 0.1
 
-/** A result the model has not read, cut to fit the hard limit, keeps at least this much. */
+/** A result the model has not read, cut to fit the model's limit, keeps at least this much. */
 const CUT_MIN_BYTES = 512
 
 /** What a turn's requests start with in place of the turn's history, once it compacted. */
@@ -46,14 +45,11 @@ export type CompactConversationBeforeTurn = (input: {
   readonly reason: AgentContextCheckpointReason
   /** What the request the turn is about to send weighs. */
   readonly estimatedInputTokens: number
-  /** The soft limit the turn keeps under. */
-  readonly targetTokens: number
 }) => Promise<readonly ModelMessage[] | undefined>
 
 export interface AgentContextGuardInput {
+  /** Its `inputBudgetTokens` is the limit the turn's requests keep under. */
   readonly budget: AgentContextBudget
-  /** The soft limit the turn's requests keep under: a price tier, or the hard limit. */
-  readonly targetTokens: number
   /** The tools every request sends. */
   readonly tools: readonly ModelToolSpecification[]
   /** The bytes per token the turn measured its history at, else the model family's. */
@@ -68,7 +64,7 @@ export interface AgentContextGuardInput {
 }
 
 export interface AgentContextGuard {
-  /** Before each call: the request, reduced when it would cross the target. */
+  /** Before each call: the request, reduced when it would cross the model's limit. */
   readonly prepareStep: (
     input: PrepareModelStepInput
   ) => Promise<PrepareModelStepResult | undefined>
@@ -84,15 +80,17 @@ export interface AgentContextGuard {
 }
 
 /**
- * Keep every request of a model loop under its target, checked before each call from what the
- * last call really read and what was added since:
+ * Keep every request of a model loop under the model's limit (the window less the output reserve),
+ * checked before each call from what the last call really read and what was added since. Right
+ * before a request would cross it:
  *
- * 1. clear the oldest tool results the model has read, in one batch that frees enough to be worth
- *    the cache it breaks, down to {@link AGENT_CONTEXT_COMPACTED_SHARE} of the target, so the
- *    steps after it read the cleared request through;
+ * 1. clear the oldest tool results the model has read, all but the {@link KEPT_TOOL_RESULTS} most
+ *    recent, in one batch that frees enough to be worth the cache it breaks, down to
+ *    {@link AGENT_CONTEXT_COMPACTED_SHARE} of the limit, so the steps after it read the cleared
+ *    request through;
  * 2. else compact what came before the turn, once, and clear again what is still needed;
- * 3. what neither removes goes on above the target. Only the hard limit is never crossed: past
- *    it, every result the model has read is cleared, and those it has not are cut to fit.
+ * 3. past the limit even so, clear as many of the results the model has read as it takes, the
+ *    {@link KEPT_TOOL_RESULTS} most recent still kept, and cut those it has not read to fit.
  *
  * A call the provider rejects as too long for the window is measured at the window at least, and
  * reduced the same way, compacting first when it can, for the loop to ask it again once.
@@ -154,7 +152,7 @@ class ContextGuard {
     const margin = fixed > 0 ? Math.ceil(added * this.scale * GROWTH_MARGIN) : 0
     const tokens = this.projectedTokens(messages, steps) + margin
     const reduced =
-      tokens > this.input.targetTokens
+      tokens > this.input.budget.inputBudgetTokens
         ? await this.reduce(messages, steps, tokens, "threshold")
         : undefined
 
@@ -205,8 +203,8 @@ class ContextGuard {
   }
 
   /**
-   * Bring `messages` under the target, else as close as clearing and compaction go. Undefined
-   * when nothing was worth changing.
+   * Bring `messages` under the model's limit, else as close as clearing, compaction and cutting
+   * go. Undefined when nothing was worth changing.
    */
   private async reduce(
     messages: readonly ModelMessage[],
@@ -214,10 +212,9 @@ class ContextGuard {
     tokens: number,
     reason: AgentContextCheckpointReason
   ): Promise<readonly ModelMessage[] | undefined> {
-    const { targetTokens } = this.input
-    const hardTokens = this.input.budget.inputBudgetTokens
-    const aimTokens = Math.floor(targetTokens * AGENT_CONTEXT_COMPACTED_SHARE)
-    const clearAtLeast = Math.ceil(targetTokens * CLEARED_AT_LEAST_SHARE)
+    const limitTokens = this.input.budget.inputBudgetTokens
+    const aimTokens = Math.floor(limitTokens * AGENT_CONTEXT_COMPACTED_SHARE)
+    const clearAtLeast = Math.ceil(limitTokens * CLEARED_AT_LEAST_SHARE)
     const overflow = reason === "overflow"
     this.cleared = false
 
@@ -225,7 +222,7 @@ class ContextGuard {
     //    the provider rejected compacts first: the estimate it was sent on was wrong.
     if (!overflow) {
       const cleared = this.clear(messages, steps, tokens - aimTokens)
-      if (cleared.tokens >= clearAtLeast && tokens - cleared.tokens <= targetTokens) {
+      if (cleared.tokens >= clearAtLeast && tokens - cleared.tokens <= limitTokens) {
         this.cleared = true
         return cleared.messages
       }
@@ -236,32 +233,28 @@ class ContextGuard {
     let currentTokens = tokens
     if (this.input.compact && !this.compacted) {
       this.compacted = true
-      const head = await this.input.compact({
-        reason,
-        estimatedInputTokens: tokens,
-        targetTokens,
-      })
+      const head = await this.input.compact({ reason, estimatedInputTokens: tokens })
       if (head) {
         current = [...head, ...messages.slice(this.headLength)]
         this.headLength = head.length
         currentTokens = this.projectedTokens(current, steps)
-        if (currentTokens <= targetTokens) return current
+        if (currentTokens <= limitTokens) return current
       }
     }
 
     // 3. What is left of the turn: its results the model has read, cleared in one batch when it
-    //    frees enough to be worth the cache it breaks, and whatever it frees past the hard limit
-    //    or when the provider refused the request.
+    //    frees enough to be worth the cache it breaks, and whatever it frees past the limit or
+    //    when the provider refused the request.
     const cleared = this.clear(current, steps, currentTokens - aimTokens)
-    if (overflow || cleared.tokens >= clearAtLeast || currentTokens > hardTokens) {
+    if (overflow || cleared.tokens >= clearAtLeast || currentTokens > limitTokens) {
       if (cleared.messages !== current) this.cleared = true
       current = cleared.messages
       currentTokens = this.projectedTokens(current, steps)
     }
 
-    // Past the hard limit even so, the results the model has not read are cut to fit it.
-    if (currentTokens > hardTokens) {
-      const cut = this.cutUnread(current, currentTokens - hardTokens)
+    // Past the limit even so, the results the model has not read are cut to fit it.
+    if (currentTokens > limitTokens) {
+      const cut = this.cutUnread(current, currentTokens - limitTokens)
       if (cut.messages !== current) this.cleared = true
       current = cut.messages
     }

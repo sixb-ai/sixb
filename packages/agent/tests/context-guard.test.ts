@@ -8,15 +8,20 @@ import {
   createAgentContextGuard,
 } from "../src/context-guard"
 
-/** A 100,000-token window: 83,616 tokens of input at most, counted at 3 bytes per token. */
-const BUDGET: AgentContextBudget = {
-  windowTokens: 100_000,
-  inputBudgetTokens: 83_616,
-  reserveTokens: 16_384,
-  source: "model",
-  bytesPerToken: 3,
-  priceTiers: [],
+/** A model whose input stops at `inputBudgetTokens`, counted at 3 bytes per token. */
+function limited(inputBudgetTokens: number): AgentContextBudget {
+  return {
+    windowTokens: inputBudgetTokens + 16_384,
+    inputBudgetTokens,
+    reserveTokens: 16_384,
+    keepRecentTokens: 20_000,
+    source: "model",
+    bytesPerToken: 3,
+  }
 }
+
+/** A 100,000-token window: 83,616 tokens of input at most. */
+const BUDGET = limited(83_616)
 
 const HEAD: readonly ModelMessage[] = [
   { role: "system", content: "You read chapters." },
@@ -87,27 +92,28 @@ function tokens(messages: readonly ModelMessage[]): number {
 
 describe("createAgentContextGuard", () => {
   // Reproduce: return undefined from ContextGuard.reduce; the request then goes out at about
-  // 80,000 tokens, past its 60,000-token target.
-  test("clears the oldest results the model read before a call that would cross the target", async () => {
-    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 60_000, tools: [] })
+  // 80,000 tokens, past its 60,000-token limit. Keep only the most recent result
+  // (KEPT_TOOL_RESULTS = 1) and a fifth chapter is cleared.
+  test("clears the oldest results the model read, all but the three most recent, before a call would cross the limit", async () => {
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
     await guard.prepareStep(step(0, HEAD))
     // Eight chapters of about 10,000 tokens each; the model has not read the last one yet.
     const messages = [...HEAD, ...Array.from({ length: 8 }, (_, i) => readStep(i, 30_000)).flat()]
 
     const prepared = await guard.prepareStep(step(8, messages))
 
-    // Oldest first, down to 60 % of the target: the steps after it read the request through.
+    // Oldest first, toward 60 % of the limit: the steps after it read the request through.
     const cleared = outputs(prepared?.messages ?? messages)
-    expect(cleared.slice(0, 5)).toEqual(Array(5).fill(clearedToolResultText("read")))
-    // The most recent it read stays, and so does the one it has not read.
-    expect(cleared.slice(5).every((output) => output.startsWith("chapter "))).toBe(true)
+    expect(cleared.slice(0, 4)).toEqual(Array(4).fill(clearedToolResultText("read")))
+    // The three most recent it read stay, and so does the one it has not read.
+    expect(cleared.slice(4).every((output) => output.startsWith("chapter "))).toBe(true)
     expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(60_000)
   })
 
   // Reproduce: return undefined from prepareStep at step 0; a turn whose history replays results
-  // an earlier turn cleared then sends them all again, past its 60,000-token target.
+  // an earlier turn cleared then sends them all again, past its 60,000-token limit.
   test("weighs a turn's first call too, from its whole request", async () => {
-    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 60_000, tools: [] })
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
     const messages = [
       ...HEAD,
       ...Array.from({ length: 8 }, (_, i) => readStep(i, 30_000)).flat(),
@@ -121,35 +127,42 @@ describe("createAgentContextGuard", () => {
     expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(60_000)
   })
 
-  // Reproduce: set CLEARED_AT_LEAST_SHARE to 0; the two small results are then cleared, which
-  // breaks the cache to free about 1,000 tokens of a 30,000-token target.
-  test("goes on above the target when clearing would free too little to be worth it", async () => {
+  // Reproduce: set CLEARED_AT_LEAST_SHARE to 0; the two oldest small results are then cleared,
+  // which breaks the cache to free about 900 tokens, and the earlier turn stays.
+  test("compacts rather than clear too little to be worth the cache it breaks", async () => {
     let compactions = 0
+    const summarized: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: "<sixb_thread_summary>…" }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    const head: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(30_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    const turn = Array.from({ length: 6 }, (_, i) => readStep(i, 1_500)).flat()
+    const messages = [...head, ...turn]
+    // 600 tokens past the limit: clearing the two results it may would bring it under.
     const guard = createAgentContextGuard({
-      budget: BUDGET,
-      targetTokens: 30_000,
+      budget: limited(tokens(messages) - 600),
       tools: [],
       compact: async () => {
         compactions += 1
-        return undefined
+        return summarized
       },
     })
-    await guard.prepareStep(step(0, HEAD))
-    const messages = [
-      ...HEAD,
-      ...Array.from({ length: 5 }, (_, i) => readStep(i, 1_500)).flat(),
-      ...readStep(5, 100_000),
-    ]
+    await guard.prepareStep(step(0, head))
 
     const prepared = await guard.prepareStep(step(6, messages))
 
-    expect(prepared).toBeUndefined()
-    // Nothing before the turn could be compacted either.
     expect(compactions).toBe(1)
+    expect(prepared?.messages).toEqual([...summarized, ...turn])
   })
 
   // Reproduce: skip the compact call in ContextGuard.reduce; the earlier turn then stays, and the
-  // request goes out past its target.
+  // request goes out past its limit.
   test("compacts what came before the turn, and keeps the turn's steps as they are", async () => {
     const reasons: string[] = []
     const summarized: ModelMessage[] = [
@@ -161,12 +174,7 @@ describe("createAgentContextGuard", () => {
       reasons.push(reason)
       return summarized
     }
-    const guard = createAgentContextGuard({
-      budget: BUDGET,
-      targetTokens: 50_000,
-      tools: [],
-      compact,
-    })
+    const guard = createAgentContextGuard({ budget: limited(50_000), tools: [], compact })
     const head: ModelMessage[] = [
       { role: "system", content: "You read chapters." },
       { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(90_000)}` }] },
@@ -184,8 +192,8 @@ describe("createAgentContextGuard", () => {
 
   // Reproduce: drop the cutUnread call in ContextGuard.reduce; the step's 300,000 bytes then go
   // out past the model's 83,616-token input limit.
-  test("cuts the results the model has not read to fit the hard limit", async () => {
-    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 83_616, tools: [] })
+  test("cuts the results the model has not read to fit the limit", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, tools: [] })
     await guard.prepareStep(step(0, HEAD))
     const parallel: ModelMessage[] = [
       {
@@ -220,9 +228,9 @@ describe("createAgentContextGuard", () => {
   })
 
   // Reproduce: measure every request whole in ContextGuard.measure; the small request then looks
-  // far under its target, though the last call read 90,000 tokens.
+  // far under its limit, though the last call read 90,000 tokens.
   test("weighs a request from what the last call really read", async () => {
-    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 60_000, tools: [] })
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
     const messages = [...HEAD, ...Array.from({ length: 6 }, (_, i) => readStep(i, 3_000)).flat()]
     await guard.prepareStep(step(0, HEAD))
     for (let index = 1; index < 6; index += 1) {
@@ -242,7 +250,6 @@ describe("createAgentContextGuard", () => {
     const reasons: string[] = []
     const guard = createAgentContextGuard({
       budget: BUDGET,
-      targetTokens: 83_616,
       tools: [],
       compact: async ({ reason }) => {
         reasons.push(reason)
@@ -280,7 +287,6 @@ describe("createAgentContextGuard", () => {
   test("weighs a rejected request after compaction at the rate the rejection showed", async () => {
     const guard = createAgentContextGuard({
       budget: BUDGET,
-      targetTokens: 83_616,
       tools: [],
       compact: async () => HEAD,
     })
@@ -309,7 +315,7 @@ describe("createAgentContextGuard", () => {
   // Reproduce: ignore `usage` in recoverStep (count the rejected request at the window); an answer
   // the window cut then sets the rate about ten times higher, and the next step clears for nothing.
   test("rates a turn from what the provider counted when the answer filled the window", async () => {
-    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 83_616, tools: [] })
+    const guard = createAgentContextGuard({ budget: BUDGET, tools: [] })
     const first = [...HEAD, ...readStep(0, 30_000)]
     const second = [...first, ...readStep(1, 30_000)]
     const read = (messages: readonly ModelMessage[]) => ({ inputTokens: tokens(messages) })
