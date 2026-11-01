@@ -4196,9 +4196,8 @@ describe("AgentWorker", () => {
   })
 
   test("lets a thread past a price tier grow to its model's limit", async () => {
-    // Reproduce: compact before the first price tier that repays a compaction within a fresh
-    // thread's 8 expected calls, as the budget's former soft limit did; Haiku 5.5's ×5 tier at
-    // 100,000 tokens repays one within 6, and the thread is summarized far below its limit.
+    // Reproduce: in prepareAgentConversationContext, compare the estimate with 100,000 (the tier)
+    // instead of budget.inputBudgetTokens; the thread is then summarized far below its limit.
     const summaryPrompts: LanguageModelRequest["messages"][] = []
     const answerPrompts: LanguageModelRequest["messages"][] = []
     const haiku = (base: number) => ({
