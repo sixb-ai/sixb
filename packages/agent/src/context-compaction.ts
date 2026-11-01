@@ -431,6 +431,8 @@ async function compactAgentConversation(
       )
     }
 
+    // Only a conversation's turn can print its thread's stored messages: what a summary says of them.
+    const historyReadable = run.kind === "conversation"
     const checkpointId = agentContextCheckpointId(run.id)
     const observedHeadSeq = requiredHeadSeq(initialContext.retainedMessages, run)
     const candidateBase: AgentContextCheckpointRecord = {
@@ -459,6 +461,7 @@ async function compactAgentConversation(
       projectAgentThreadModelContext({
         checkpoint: candidateBase,
         messages: boundary.retainedMessages,
+        historyReadable,
       }),
       bytesPerToken
     ).tokens
@@ -484,6 +487,7 @@ async function compactAgentConversation(
       estimateShape,
       bytesPerToken,
       summaryTokens,
+      historyReadable,
       inputLimitTokens: Math.min(
         plan.model.definition.maxInputTokens ?? Number.POSITIVE_INFINITY,
         budget.windowTokens - summaryTokens - requiredTokens,
@@ -517,6 +521,7 @@ async function compactAgentConversation(
       bytesPerToken,
       summaryTokens: Math.min(summaryTokens, budget.inputBudgetTokens - minimumContinuationTokens),
       coldCache: input.coldCache,
+      historyReadable,
     })
     runtime.assertCanContinue()
     const candidate = { ...candidateBase, summary }
@@ -525,6 +530,7 @@ async function compactAgentConversation(
       projectAgentThreadModelContext({
         checkpoint: candidate,
         messages: boundary.retainedMessages,
+        historyReadable,
       }),
       bytesPerToken
     ).tokens
@@ -544,7 +550,8 @@ async function compactAgentConversation(
         candidate,
         estimatedInputTokensAfter,
         expectedPreviousCheckpointId: initialContext.checkpoint?.id ?? null,
-      })
+      }),
+      { historyReadable }
     )
     runtime.assertCanContinue()
     const checkpoint = candidate
@@ -746,8 +753,10 @@ async function generateCheckpointSummary(input: {
   readonly summaryTokens: number
   /** Whether the conversation's cache has expired: see summarize. */
   readonly coldCache: boolean
+  /** Whether the run can print the thread's stored messages, for the summary to say so. */
+  readonly historyReadable: boolean
 }): Promise<string> {
-  const { threadContext, summaryTokens } = input
+  const { threadContext, summaryTokens, historyReadable } = input
   const retained = threadContext.retainedMessages
   const offset = threadContext.modelMessages.length - retained.length
   const maxBytes = Math.floor(summaryTokens * input.bytesPerToken)
@@ -764,6 +773,7 @@ async function generateCheckpointSummary(input: {
           : projectAgentThreadModelContext({
               checkpoint: input.stepCheckpoint(summary, messages),
               messages,
+              historyReadable,
             })
     let request: ConversationRequest
     try {
@@ -793,11 +803,11 @@ async function generateCheckpointSummary(input: {
     })
     summary =
       text.output.length === 0
-        ? userMessagesSummary({ previous: summary, messages, maxBytes })
+        ? userMessagesSummary({ previous: summary, messages, maxBytes, historyReadable })
         : // A summary the output limit cut short, or longer than the room it has, is kept up to
           // its last complete line: the thread goes on from it instead of failing every turn.
           text.cut || utf8Bytes(text.output) > maxBytes
-          ? cutSummary(text.output, maxBytes)
+          ? cutSummary(text.output, maxBytes, historyReadable)
           : text.output
   }
 
@@ -901,6 +911,8 @@ function planSummary(input: {
   readonly estimateShape: AgentContextEstimateShape
   readonly bytesPerToken: number
   readonly summaryTokens: number
+  /** Whether the run can print the thread's stored messages, for a turn cut short to say so. */
+  readonly historyReadable: boolean
   /** The most a summary request may read. */
   readonly inputLimitTokens: number
 }): readonly SummaryStep[] | undefined {
@@ -974,6 +986,7 @@ function planSummary(input: {
       baseTokens: requestTokens(start, start),
       inputLimitTokens: input.inputLimitTokens,
       bytesPerToken,
+      historyReadable: input.historyReadable,
     })
     if (!step) return undefined
 
@@ -994,6 +1007,7 @@ function shrunkStep(input: {
   readonly baseTokens: number
   readonly inputLimitTokens: number
   readonly bytesPerToken: number
+  readonly historyReadable: boolean
 }): SummaryStep | undefined {
   const longest = Math.max(
     0,
@@ -1007,7 +1021,9 @@ function shrunkStep(input: {
   ) {
     const messages = input.messages.map((message) => ({
       ...message,
-      parts: message.parts.map((part) => cutPart(part, maxBytes, message.seq)),
+      parts: message.parts.map((part) =>
+        cutPart(part, maxBytes, input.historyReadable ? message.seq : undefined)
+      ),
     }))
     const estimatedInputTokens =
       input.baseTokens + estimateAgentContextMessagesTokens(messages, input.bytesPerToken).tokens
@@ -1031,12 +1047,19 @@ function partBytes(part: AgentMessagePart): number {
   }
 }
 
-/** A text or tool result cut to `maxBytes`, saying where the whole is. */
-function cutPart(part: AgentMessagePart, maxBytes: number, seq: number): AgentMessagePart {
+/**
+ * A text or tool result cut to `maxBytes`, saying where the whole is when the run can read it: the
+ * message `seq` its history prints.
+ */
+function cutPart(
+  part: AgentMessagePart,
+  maxBytes: number,
+  seq: number | undefined
+): AgentMessagePart {
+  const note =
+    seq === undefined ? "[Cut short.]" : `[Cut short: \`sixb history ${seq}\` prints it whole.]`
   const cut = (value: string) =>
-    utf8Bytes(value) <= maxBytes
-      ? value
-      : `${upToLastLine(value, maxBytes)}\n[Cut short: \`sixb history ${seq}\` prints it whole.]`
+    utf8Bytes(value) <= maxBytes ? value : `${upToLastLine(value, maxBytes)}\n${note}`
 
   switch (part.type) {
     case "text":
@@ -1181,8 +1204,9 @@ function quoteStart(message: AgentMessageRecord): string {
 }
 
 /** A summary up to its last complete line within `maxBytes`, marked as cut short. */
-function cutSummary(text: string, maxBytes: number): string {
-  return `${upToLastLine(text, maxBytes)}\n\n[The summary was cut short here. ${HISTORY_POINTER}]`
+function cutSummary(text: string, maxBytes: number, historyReadable: boolean): string {
+  const note = historyReadable ? ` ${HISTORY_POINTER}` : ""
+  return `${upToLastLine(text, maxBytes)}\n\n[The summary was cut short here.${note}]`
 }
 
 /**
@@ -1194,9 +1218,10 @@ function userMessagesSummary(input: {
   readonly previous: string | undefined
   readonly messages: readonly AgentMessageRecord[]
   readonly maxBytes: number
+  readonly historyReadable: boolean
 }): string {
   const header = "The summary could not be written. What the user asked, newest last:"
-  const footer = HISTORY_POINTER
+  const footer = input.historyReadable ? [HISTORY_POINTER] : []
   const quotes = input.messages
     .filter((message) => message.role === "user")
     .map((message) => messageText(message).trim())
@@ -1209,7 +1234,7 @@ function userMessagesSummary(input: {
       return `> ${quoted.replaceAll("\n", "\n> ")}`
     })
 
-  let bytes = utf8Bytes(header) + utf8Bytes(footer) + 4
+  let bytes = [header, ...footer].reduce((total, line) => total + utf8Bytes(line) + 2, 0)
   const kept: string[] = []
   for (const quote of [...quotes].reverse()) {
     bytes += utf8Bytes(quote) + 2
@@ -1222,7 +1247,7 @@ function userMessagesSummary(input: {
       ? [input.previous]
       : []
 
-  return [...previous, header, ...kept, footer].join("\n\n")
+  return [...previous, header, ...kept, ...footer].join("\n\n")
 }
 
 function messageText(message: AgentMessageRecord): string {
