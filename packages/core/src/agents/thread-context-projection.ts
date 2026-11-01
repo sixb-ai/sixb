@@ -67,12 +67,21 @@ function assertConsistentCheckpointProjection(
   }
 }
 
+const SUMMARY_INTRO = "The earlier conversation was compacted into this continuation summary."
+
+/**
+ * Whether a user message's text is the summary this projection writes, for a context meter to
+ * name it: a message a user typed the same way would count as one there, and nowhere else.
+ */
+export function isAgentThreadSummaryText(text: string): boolean {
+  return text.startsWith(SUMMARY_INTRO) && text.includes("\n<sixb_thread_summary>\n")
+}
+
 function serializeThreadSummary(summary: string, historyReadable: boolean): string {
-  const intro = "The earlier conversation was compacted into this continuation summary."
   return [
     historyReadable
-      ? `${intro} Its messages are still stored: \`sixb history\` prints them.`
-      : intro,
+      ? `${SUMMARY_INTRO} Its messages are still stored: \`sixb history\` prints them.`
+      : SUMMARY_INTRO,
     "",
     "<sixb_thread_summary>",
     escapeXmlText(summary),

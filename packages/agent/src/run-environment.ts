@@ -4,6 +4,7 @@ import {
   type AgentContextBudget,
   type AgentRunArtifacts,
   type AgentRunSession,
+  type AgentSystemPromptSize,
   type AgentToolCallFile,
   type AgentTurnHistory,
   conversationThreadId,
@@ -23,7 +24,7 @@ import type {
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import {
   type AgentExecutionMode,
-  renderAgentSystemPrompt,
+  measureAgentSystemPrompt,
   renderCurrentTime,
   sentSettings,
 } from "./agent-prompt"
@@ -298,17 +299,20 @@ export async function createConversationAgentEnvironment(
       : undefined
     const conversation = authorsOf(threadContext.retainedMessages)
 
+    const systemPrompt = measureEnvironmentSystemPrompt({
+      mode: "conversation",
+      sandbox,
+      context,
+      plan,
+      ontologyDocs: plan.ontologyDocs,
+      ...(workspace ? { workspace } : {}),
+      ...(conversation === undefined ? {} : { conversation }),
+      ...(memory ? { memory } : {}),
+    })
+
     return {
-      systemPrompt: renderEnvironmentSystemPrompt({
-        mode: "conversation",
-        sandbox,
-        context,
-        plan,
-        ontologyDocs: plan.ontologyDocs,
-        ...(workspace ? { workspace } : {}),
-        ...(conversation === undefined ? {} : { conversation }),
-        ...(memory ? { memory } : {}),
-      }),
+      systemPrompt: systemPrompt.text,
+      systemPromptSize: systemPrompt,
       tools: [
         ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined }),
         ...(input.frameworkTools ?? []),
@@ -914,13 +918,13 @@ async function startAgentEnvironment(
 
   const dispose = () => disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown)
 
-  let systemPrompt: string
+  let systemPrompt: AgentSystemPromptSize
   try {
     const workspace = sandbox.waitBeforeModel
       ? await waitForAbort(ready, input.sandboxSignal)
       : undefined
 
-    systemPrompt = renderEnvironmentSystemPrompt({
+    systemPrompt = measureEnvironmentSystemPrompt({
       mode,
       sandbox,
       context,
@@ -975,7 +979,9 @@ async function startAgentEnvironment(
       tools: toolOutputFiles.wrap(tools),
       outputFileOf: (toolCallId) => toolOutputFiles.fileOf(toolCallId),
       prepareStep: mediaBridge.prepareStep,
-      systemPrompt,
+      systemPrompt: systemPrompt.text,
+      systemPromptSize: systemPrompt,
+      contextDirectory: sandbox.contextDirectory,
       projectTimeZone: context.timeZone,
       projectLocale: context.locale,
       sandboxReady: ready,
@@ -988,7 +994,14 @@ async function startAgentEnvironment(
  * A run's system prompt, from its plan and what its sandbox tells it: the environment renders it,
  * and so does the summary that continues a conversation's prompt.
  */
-function renderEnvironmentSystemPrompt(input: {
+function renderEnvironmentSystemPrompt(
+  input: Parameters<typeof measureEnvironmentSystemPrompt>[0]
+): string {
+  return measureEnvironmentSystemPrompt(input).text
+}
+
+/** The same, with each section's bytes, for the turn's steps to record what they sent. */
+function measureEnvironmentSystemPrompt(input: {
   readonly mode: AgentExecutionMode
   readonly sandbox: RunSandbox
   readonly context: AgentExecutionContext
@@ -998,11 +1011,11 @@ function renderEnvironmentSystemPrompt(input: {
   readonly workspace?: Pick<AcquiredRunSandbox, "promptContext" | "resetAt">
   readonly conversation?: string
   readonly memory?: ConversationMemory
-}): string {
+}): AgentSystemPromptSize {
   const { mode, plan, workspace } = input
   const { requester } = input.context
 
-  return renderAgentSystemPrompt({
+  return measureAgentSystemPrompt({
     mode,
     contextDirectory: input.sandbox.contextDirectory,
     instructions: plan.instructions,

@@ -14987,6 +14987,52 @@ describe("context within a turn", () => {
     }
   })
 
+  test("records on each step what its request sent: the prompt by section, the tools, the history", async () => {
+    // Reproduce: leave systemPromptSize out of the turn context runEnvironment builds; the steps
+    // then count the whole prompt as Sixb's own, without the project's instructions. Drop the
+    // recordStepRequests calls from runAgentTurn instead, and no step records anything.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 1, requests })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(2_000)],
+      projectInstructions: "Answer in euros.",
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+      expect(run.status).toBe("succeeded")
+
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId: run.threadId,
+        order: "asc",
+      })
+      const steps = messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts)
+        .flatMap((part) => (part.type === "step-start" ? [part.request] : []))
+      expect(steps).toHaveLength(2)
+
+      const bytes = (text: string) => new TextEncoder().encode(text).byteLength
+      const sent = requests[0]!
+      const prompt = sent.messages[0]?.role === "system" ? sent.messages[0].content : ""
+      const system = steps[0]?.system ?? {}
+      expect(system.instructions).toBe(
+        bytes("<agent_instructions>\nAnswer in euros.\n</agent_instructions>")
+      )
+      expect(Object.values(system).reduce((sum, part) => sum + (part ?? 0), 0)).toBe(bytes(prompt))
+      expect(steps[0]?.tools.count).toBe(sent.tools.length)
+      // The second call carries the chapter the first one asked for.
+      expect(steps[0]?.history.toolResults).toBeUndefined()
+      expect(steps[1]?.history.toolResults).toBeGreaterThan(2_000)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("clears in batches that land at 60 % of the limit, so the cache breaks once per batch", async () => {
     // Reproduce: keep the three most recent results whatever the aim (candidates.slice(0, -3) in
     // ContextGuard.clear); chapters of about 15,000 tokens then leave one to clear at each step
