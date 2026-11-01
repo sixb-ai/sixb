@@ -255,6 +255,8 @@ interface InRunCompaction {
   /** The memory the run's prompt shows. */
   readonly memory: ConversationMemory | undefined
   readonly reason: AgentContextCheckpointReason
+  /** Whether the thread came back idle, its cache expired: see summarize. */
+  readonly coldCache: boolean
 }
 
 /**
@@ -317,7 +319,7 @@ export async function compactAgentThreadInRun(
       boundary,
       ownCheckpoint: false,
       estimatedInputTokensBefore: tokens,
-      coldCache: false,
+      coldCache: input.coldCache,
     })
   } catch (error) {
     if (!(error instanceof AgentContextCompactionError)) throw error

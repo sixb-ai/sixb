@@ -15975,6 +15975,9 @@ describe("context of a child and of a workflow step", () => {
         result: { text: "Read the second edition." },
       })
       expect(childRequests[0] && isSummaryRequest(childRequests[0])).toBe(true)
+      // Its cache has gone cold: the summary writes none for a history no call reads again.
+      // Reproduce: pass `coldCache: false` from preflightSubagentContext.
+      expect(childRequests[0]?.caching).toBe("off")
       const checkpoint = await storage.checkpoints.getLatest({
         projectId: PROJECT_ID,
         threadId: second.child.threadId,

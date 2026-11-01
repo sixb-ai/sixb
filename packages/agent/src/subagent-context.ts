@@ -152,6 +152,8 @@ export async function preflightSubagentContext(
     ...input,
     memory: undefined,
     reason: "threshold",
+    // Below the limit, the thread compacts because it came back idle: its cache has gone cold.
+    coldCache: !overLimit,
   })
   return {
     threadContext: compacted?.threadContext ?? threadContext,
