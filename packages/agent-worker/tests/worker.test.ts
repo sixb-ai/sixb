@@ -15031,7 +15031,7 @@ describe("context within a turn", () => {
   })
 
   test("weighs the next turn by what it replays after a turn cleared results", async () => {
-    // Reproduce: drop the reducedRequest check in matchingUsageAnchor; the next turn then goes by
+    // Reproduce: drop the reducedRequest check in matchingAgentUsageAnchor; the next turn then goes by
     // the cleared call and a rate measured on it, and its first call replays every chapter, past
     // the 83,616-token limit. Drop `replaysReduced` from the summary's input limit instead; the
     // summary then reads that whole replay at once, past the limit too.
