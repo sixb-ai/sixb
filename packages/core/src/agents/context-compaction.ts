@@ -55,12 +55,12 @@ export interface AgentContextCompactionBoundary {
   readonly summarizedThroughSeq: number
 }
 
-/** Compaction begins only once the estimated request crosses the turn's context target. */
+/** Compaction begins only once the estimated request crosses the reserved input budget. */
 export function shouldCompactAgentContext(input: {
   readonly estimatedInputTokens: number
-  readonly targetTokens: number
+  readonly inputBudgetTokens: number
 }): boolean {
-  return input.estimatedInputTokens > input.targetTokens
+  return input.estimatedInputTokens > input.inputBudgetTokens
 }
 
 /** Estimate the provider request shape at the model's bytes-per-token rate. */

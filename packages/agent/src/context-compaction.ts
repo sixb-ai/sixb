@@ -25,12 +25,7 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { renderAgentSystemPrompt } from "./agent-prompt"
-import {
-  type AgentContextBudget,
-  contextSummaryOutputTokens,
-  expectedRemainingAgentCalls,
-  resolveAgentContextTarget,
-} from "./context-budget"
+import { type AgentContextBudget, contextSummaryOutputTokens } from "./context-budget"
 import type { ConversationMemory } from "./conversation-memory"
 import { AgentContextCompactionError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
@@ -136,31 +131,14 @@ export async function prepareAgentConversationContext(input: {
   })
   runtime.assertCanContinue()
 
-  const target = resolveAgentContextTarget(budget, {
-    expectedRemainingCalls: expectedRemainingAgentCalls(input.history),
-  })
-  const unchanged = { threadContext: initialContext, ...(memory ? { memory } : {}) }
   if (
     !shouldCompactAgentContext({
       estimatedInputTokens: estimatedInputTokensBefore,
-      targetTokens: target.tokens,
+      inputBudgetTokens: budget.inputBudgetTokens,
     })
   ) {
-    return unchanged
+    return { threadContext: initialContext, ...(memory ? { memory } : {}) }
   }
-
-  // This run's own checkpoint is already as compact as it gets.
-  const boundary =
-    initialContext.checkpoint?.createdByRunId === run.id
-      ? null
-      : selectAgentContextCompactionBoundary({
-          messages: initialContext.retainedMessages,
-          keepRecentTokens: target.keepRecentTokens,
-          bytesPerToken,
-        })
-  // Past a price tier alone, a context nothing can shrink goes on as it is: only the hard limit
-  // stops a turn.
-  if (!boundary && estimatedInputTokensBefore <= budget.inputBudgetTokens) return unchanged
 
   const reason = "threshold" satisfies AgentContextCheckpointReason
   await session.events.publishCompactionStarted({
@@ -177,6 +155,11 @@ export async function prepareAgentConversationContext(input: {
         "The current run already compacted this thread, but its retained context still exceeds the model input budget."
       )
     }
+    const boundary = selectAgentContextCompactionBoundary({
+      messages: initialContext.retainedMessages,
+      keepRecentTokens: budget.keepRecentTokens,
+      bytesPerToken,
+    })
     if (!boundary) {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
@@ -289,14 +272,7 @@ export async function prepareAgentConversationContext(input: {
       reason,
       errorCode: compactionError.code,
     })
-    if (estimatedInputTokensBefore > budget.inputBudgetTokens) throw compactionError
-
-    // Past a price tier alone, a failed compaction leaves the turn as it was.
-    console.warn(
-      `[SixbAgent] Run '${run.id}' goes on uncompacted: ${compactionError.message}`,
-      compactionError
-    )
-    return unchanged
+    throw compactionError
   }
 }
 
