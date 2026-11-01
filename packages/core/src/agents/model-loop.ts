@@ -18,6 +18,7 @@ import { ModelUsageRecordingError } from "../models/execution/errors"
 import { LanguageModelCallMeter } from "../models/language-call"
 import type {
   LanguageModel,
+  ModelCaching,
   ModelReasoning,
   ModelToolSpecification,
 } from "../models/language-model"
@@ -41,7 +42,7 @@ interface ModelLoopOptions {
   readonly tools?: readonly ModelTool[]
   readonly reasoning?: ModelReasoning
   readonly maxOutputTokens?: number
-  readonly caching?: "auto" | "off"
+  readonly caching?: ModelCaching
   /** At most this many provider calls. Without it, the loop runs until the model answers. */
   readonly maxSteps?: number
   /** Direct generation cannot execute or synthesize local tool results. */

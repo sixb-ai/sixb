@@ -15,6 +15,7 @@ import {
   type LanguageModelRequest,
   MODEL_REASONING_EFFORTS,
   MODEL_REASONING_LEVELS,
+  type ModelCaching,
   type ModelCapabilities,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
@@ -775,12 +776,13 @@ function supported(capabilities: JsonObject | undefined, name: string): boolean 
  *
  * A one-shot request (no tools and no earlier answer) is left alone unless it asks for `"auto"`:
  * nothing reads its prefix again, so a cache write would only add 25% to its input price.
- * `caching: "off"` adds nothing, and a `cache_control` in the binding's `request` sets the TTL
- * for every breakpoint, since longer TTLs must come first.
+ * `caching: "off"` adds nothing. Every breakpoint shares one TTL, since longer TTLs must come
+ * first: the binding's `cache_control` in `request`, else an hour for a prompt read again after a
+ * human pause (an intent's `"long"` lifetime), else Anthropic's five minutes.
  */
 function withPromptCaching(
   body: JsonObject,
-  caching: "auto" | "off" | undefined,
+  caching: ModelCaching | undefined,
   localTools: number
 ): JsonObject {
   if (caching === "off") return body
@@ -788,7 +790,11 @@ function withPromptCaching(
   const continues = messages.some((message) => object(message)?.role === "assistant")
   if (caching !== "auto" && localTools === 0 && !continues) return body
 
-  const marker = object(body.cache_control) ?? { type: "ephemeral" }
+  const long = typeof caching === "object" && caching.lifetime === "long"
+  const marker = object(body.cache_control) ?? {
+    type: "ephemeral",
+    ...(long ? { ttl: "1h" } : {}),
+  }
   const tools = Array.isArray(body.tools) ? body.tools : []
   const system = Array.isArray(body.system) ? body.system : []
   const lastSystem = object(system.at(-1))
