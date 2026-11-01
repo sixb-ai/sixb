@@ -24,10 +24,10 @@ export function shownFolder(folder: string): string {
   return folder.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~")
 }
 
-/** A folder short enough for the badge: its home or root, then its last name. */
+/** A folder short enough for the badge beside its computer's name: its last name is what tells. */
 function shortFolder(folder: string): string {
   const parts = shownFolder(folder).split("/")
-  return parts.length > 3 ? `${parts[0]}/…/${parts.at(-1)}` : parts.join("/")
+  return parts.length > 2 ? `${parts[0]}/…/${parts.at(-1)}` : parts.join("/")
 }
 
 /** The computer a conversation runs on, its folder there, and whether `sixb` is open in it. */
@@ -84,11 +84,6 @@ export function ComputerOfflineNotice({
           ? messages.offlineNotice(computer.name, shownFolder(computer.folder))
           : messages.noFolder}
       </span>
-      {error ? (
-        <span role="alert" className="text-destructive">
-          {error === "busy" ? messages.moveBusy : messages.moveFailed}
-        </span>
-      ) : null}
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button
@@ -114,6 +109,11 @@ export function ComputerOfflineNotice({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {error ? (
+        <span role="alert" className="w-full pl-6.5 text-destructive">
+          {error === "busy" ? messages.moveBusy : messages.moveFailed}
+        </span>
+      ) : null}
     </div>
   )
 }
