@@ -264,6 +264,7 @@ export const fr: Translation<AgentMessages> = {
   },
   activity: {
     fullOutput: "Sortie complète",
+    savedOutputName: (tool, extension) => `sortie ${tool}${extension}`,
     thinking: "Réflexion",
     working: "Travail en cours",
     workingThroughIt: "Analyse en cours",

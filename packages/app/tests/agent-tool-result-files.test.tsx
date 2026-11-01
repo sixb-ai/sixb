@@ -95,3 +95,60 @@ describe("a tool's files in the work trace", () => {
     expect(view.getByLabelText("Preview margins.png")).toBeDefined()
   })
 })
+
+describe("a call's saved output", () => {
+  // Removal proof: leave outputFile out of normalizeDurableParts' tool, or SavedOutputLink out of
+  // ToolCallRow; the whole output can then no longer be opened from the conversation.
+  test("opens beside the conversation from a quiet link under its call", async () => {
+    const log: AgentFileRef = {
+      blobId: `blob_${"c".repeat(64)}`,
+      digest: `sha256:${"c".repeat(64)}`,
+      sizeBytes: 421_888,
+      fileName: "call-build.txt",
+      mediaType: "text/plain",
+    }
+    const build: AgentMessagePart = {
+      type: "tool-call",
+      toolCallId: "call-build",
+      toolName: "run_build",
+      input: { target: "all" },
+      state: "output-available",
+      output: "The first 30 KB of the build log…",
+      outputFile: { fileRef: log, path: "tool-outputs/call-build.txt" },
+    }
+    const parts = normalizeDurableParts([build], {
+      fileSource: (fileRef, path) =>
+        messageFileSource({
+          threadId: "thread",
+          messageId: "message",
+          path,
+          fileRef,
+          baseUrl: "https://example.test",
+        }),
+    })
+    const view = mount(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <ArtifactPanelRoot scopeKey="thread">
+            <AssistantBody parts={parts} />
+          </ArtifactPanelRoot>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const work = view
+      .getAllByRole("button")
+      .find((button) => button.textContent?.includes("1 step"))
+    if (!work) throw new Error("Expected the work's trigger.")
+    await act(async () => {
+      fireEvent.click(work)
+    })
+
+    const link = view.getByRole("button", { name: /Full output/ })
+    expect(link.textContent).toContain("412 KB")
+    expect(link.getAttribute("aria-pressed")).toBe("false")
+    await act(async () => {
+      fireEvent.click(link)
+    })
+    expect(link.getAttribute("aria-pressed")).toBe("true")
+  })
+})

@@ -281,6 +281,8 @@ export const en = {
   activity: {
     /** Under a call whose output was saved as a file: it opens the whole output. */
     fullOutput: "Full output",
+    /** The saved output's name in the viewer: `bash output.txt`. */
+    savedOutputName: (tool: string, extension: string) => `${tool} output${extension}`,
     thinking: "Thinking",
     working: "Working",
     workingThroughIt: "Working through it",

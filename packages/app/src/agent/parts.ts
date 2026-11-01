@@ -13,6 +13,8 @@ export type NormalizedTool = {
   readonly errorText?: string
   /** Files in a saved rich result, such as the image `view_file` prepared for the model. */
   readonly files?: readonly NormalizedFile[]
+  /** The whole output, saved as a file when it was too large for the model's context. */
+  readonly outputFile?: NormalizedFile
 }
 
 /** A file shown in a message. Its source, which reads the bytes, exists once the message is saved. */
@@ -66,6 +68,14 @@ export function normalizeDurableParts(
                     input: part.input,
                     output: part.output,
                     ...toolFiles(part.output, index),
+                    ...(part.outputFile
+                      ? {
+                          outputFile: file(
+                            part.outputFile.fileRef,
+                            `/parts/${index}/outputFile/fileRef`
+                          ),
+                        }
+                      : {}),
                   }
                 : {
                     toolName: part.toolName,

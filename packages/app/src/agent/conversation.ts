@@ -43,6 +43,8 @@ export type AgentConversationToolPart = {
   readonly toolCallId?: string
   /** Files in a saved rich result, such as the image `view_file` prepared for the model. */
   readonly files?: readonly AgentConversationFile[]
+  /** The whole output, saved as a file when it was too large for the model's context. */
+  readonly outputFile?: AgentConversationFile
 } & AgentToolViewProps
 
 /**
@@ -350,6 +352,14 @@ function savedParts(
           toolCallId: part.toolCallId,
           ...toolViewProps(tool),
           ...(files.length === 0 ? {} : { files }),
+          ...(part.state === "output-available" && part.outputFile
+            ? {
+                outputFile: {
+                  fileRef: part.outputFile.fileRef,
+                  source: fileSource(part.outputFile.fileRef, `/parts/${index}/outputFile/fileRef`),
+                },
+              }
+            : {}),
         })
         break
       }
