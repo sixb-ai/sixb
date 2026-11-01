@@ -9,9 +9,10 @@ import {
   SixbHost,
 } from "@sixb/core"
 import {
+  AGENT_IMAGE_INPUT_TOKENS,
   agentContextBytesPerToken,
   createAgentRunExecutionToken,
-  estimateAgentContextMessagesTokens,
+  estimateAgentContextRequestTokens,
 } from "@sixb/core/internal/agents"
 import type { ModelRateCard } from "@sixb/core/models"
 import type { AgentMessageRecord, ConversationAgentRunSpec } from "@sixb/core/storage"
@@ -98,6 +99,8 @@ function createFixture() {
       readonly earlier?: boolean
       /** The turn's last call read a request it reduced. */
       readonly reduced?: boolean
+      /** Screenshots the user message attaches. */
+      readonly screenshots?: number
       readonly reasoning?: ConversationAgentRunSpec["reasoning"]
     } = {}
   ) {
@@ -122,7 +125,19 @@ function createFixture() {
       threadId,
       runId: null,
       role: "user",
-      parts: [{ type: "text", text: "Read the repository." }],
+      parts: [
+        { type: "text", text: "Read the repository." },
+        ...Array.from({ length: options.screenshots ?? 0 }, (_, index) => ({
+          type: "file" as const,
+          fileRef: {
+            blobId: `blob_${String(index).padStart(64, "0")}`,
+            digest: `sha256:${String(index).padStart(64, "0")}` as const,
+            sizeBytes: 400_000,
+            fileName: `screen-${index}.png`,
+            mediaType: "image/png",
+          },
+        })),
+      ],
     })
 
     const runId = `${threadId}_run`
@@ -166,12 +181,19 @@ function createFixture() {
     return { runId, executionId, token }
   }
 
-  /** What a thread's stored messages weigh at a model's family rate, as an estimate counts them. */
+  /**
+   * What a request of a thread's stored messages weighs at a model's family rate, as the worker's
+   * estimate counts it, less the system prompt and tools the API cannot render.
+   */
   async function messagesEstimate(threadId: string, modelId: string): Promise<number> {
     const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
     const records: readonly AgentMessageRecord[] = messages
-    return estimateAgentContextMessagesTokens(records, agentContextBytesPerToken({ modelId }))
-      .tokens
+    return estimateAgentContextRequestTokens({
+      systemPrompt: "",
+      tools: [],
+      messages: records,
+      bytesPerToken: agentContextBytesPerToken({ modelId }),
+    }).tokens
   }
 
   return { storage, read, seedTurn, messagesEstimate }
@@ -235,6 +257,31 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       limitTokens: 200_000 - 16_384,
       usedTokens: await messagesEstimate("thr_tiered", "flat"),
     })
+  })
+
+  // Removal proof: answer the anchored count alone when the call matches the model, as the meter
+  // once did; it then reads 60,500 while the worker weighs fifteen screenshots at 5,400 each and
+  // compacts at the next message.
+  test("counts what the worker counts: images at the most a provider charges for one", async () => {
+    const { storage, read, seedTurn } = createFixture()
+    // The call read the screenshots, and its provider counted them for less.
+    const turn = await seedTurn("thr_screenshots", "tiered", { screenshots: 15 })
+    await storage.aiUsage.recordModelCall({
+      id: "usage_screenshots",
+      projectId,
+      executionId: turn.executionId,
+      attempt: 1,
+      callId: "call_screenshots",
+      requesterGroupIds: [],
+      providerId: "test",
+      requestedModelId: "tiered",
+      responseId: "response_screenshots",
+      usage: { inputTokens: 60_000, outputTokens: 500 },
+      occurredAt: at(1),
+    })
+
+    const { body } = await read("thr_screenshots")
+    expect(body.usedTokens).toBeGreaterThanOrEqual(15 * AGENT_IMAGE_INPUT_TOKENS)
   })
 
   // Removal proof: drop the reduced-request check from `matchingAgentUsageAnchor`; the meter

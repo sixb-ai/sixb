@@ -104,6 +104,8 @@ export {
   shouldCompactAgentContext,
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
+export type { AgentThreadRequestEstimateInput } from "./context-request"
+export { estimateAgentThreadRequest } from "./context-request"
 export { resolveAgentContextParts } from "./context-resolution"
 export type { AgentContextTokenRateSample } from "./context-token-rate"
 export {
