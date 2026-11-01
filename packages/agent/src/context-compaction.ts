@@ -127,7 +127,7 @@ export async function prepareAgentConversationContext(
     readonly history: AgentTurnHistory
   }
 ): Promise<PreparedAgentConversationContext> {
-  const { plan, budget, run, runtime } = input
+  const { context, plan, budget, run, runtime } = input
   const initialContext = agentThreadModelContext(input.history)
   const memory = await input.loadMemory?.(initialContext.checkpoint)
   runtime.assertCanContinue()
@@ -201,7 +201,6 @@ export async function prepareAgentConversationContext(
       boundary,
       ownCheckpoint,
       estimatedInputTokensBefore,
-      targetTokens: budget.inputBudgetTokens,
     })
     return { ...compacted, bytesPerToken }
   } catch (error) {
@@ -229,8 +228,6 @@ export async function compactAgentConversationInTurn(
     readonly reason: AgentContextCheckpointReason
     /** What the turn's next request weighs, as the turn measured it. */
     readonly estimatedInputTokens: number
-    /** The soft limit the turn keeps under. */
-    readonly targetTokens: number
   }
 ): Promise<PreparedAgentConversationContext | undefined> {
   const { threadContext, run } = input
@@ -335,8 +332,6 @@ async function compactAgentConversation(
     readonly boundary: AgentContextCompactionBoundary | null
     readonly ownCheckpoint: boolean
     readonly estimatedInputTokensBefore: number
-    /** The soft limit the turn keeps under. */
-    readonly targetTokens: number
   }
 ): Promise<PreparedAgentConversationContext> {
   const { context, session, plan, budget, run, runtime, reason, boundary, bytesPerToken } = input
@@ -408,8 +403,8 @@ async function compactAgentConversation(
 
     // The summary request leaves the window room for the summary, and for a reasoning budget the
     // provider requires below the output limit. A history whose turns cleared tool results replays
-    // them whole, a prefix no call sent and no provider cached: its summary stays under the turn's
-    // target, read in steps, rather than read all of it past a price tier or the hard limit.
+    // them whole, a prefix no call sent and no provider cached: its summary reads it in steps under
+    // the model's limit, rather than all of it at once.
     const { requiredTokens } = summaryReasoning(plan.reasoning, summaryTokens)
     const replaysReduced = initialContext.retainedMessages.some((message) =>
       message.parts.some((part) => part.type === "step-start" && part.reducedRequest)
@@ -423,7 +418,7 @@ async function compactAgentConversation(
       inputLimitTokens: Math.min(
         plan.model.definition.maxInputTokens ?? Number.POSITIVE_INFINITY,
         budget.windowTokens - summaryTokens - requiredTokens,
-        replaysReduced ? input.targetTokens : Number.POSITIVE_INFINITY
+        replaysReduced ? budget.inputBudgetTokens : Number.POSITIVE_INFINITY
       ),
     })
     if (!steps) {

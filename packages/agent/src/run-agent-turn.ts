@@ -52,12 +52,12 @@ export interface RunAgentTurnInput {
   /** What the turn's children ask it, and the work it waits for, when it can delegate. */
   readonly children?: TurnChildren
   /**
-   * The limits every call of the turn keeps under (see createAgentContextGuard), and how it
-   * compacts the history before it from within. Without them, only the turn's start was weighed.
+   * The model's limit every call of the turn keeps under (see createAgentContextGuard), and how
+   * it compacts the history before it from within. Without them, only the turn's start was
+   * weighed.
    */
   readonly contextLimits?: {
     readonly budget: AgentContextBudget
-    readonly targetTokens: number
     /** The bytes per token the turn's history was measured at, else the model family's. */
     readonly bytesPerToken?: number
     readonly compactInTurn?: ConversationAgentExecutionEnvironment["compactInTurn"]
@@ -151,7 +151,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     limits &&
     createAgentContextGuard({
       budget: limits.budget,
-      targetTokens: limits.targetTokens,
       ...(limits.bytesPerToken === undefined ? {} : { bytesPerToken: limits.bytesPerToken }),
       tools: tools.map((tool) => ({
         name: tool.name,
