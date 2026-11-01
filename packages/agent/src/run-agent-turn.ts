@@ -60,6 +60,8 @@ export interface RunAgentTurnInput {
     readonly budget: AgentContextBudget
     /** The bytes per token the turn's history was measured at, else its run's starting one. */
     readonly bytesPerToken?: number
+    /** What the run's latest counted call measured (see prepareAgentModel). */
+    readonly measuredBytesPerToken?: () => number | undefined
     readonly compactInTurn?: ConversationAgentExecutionEnvironment["compactInTurn"]
   }
   /**
@@ -152,6 +154,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     createAgentContextGuard({
       budget: limits.budget,
       ...(limits.bytesPerToken === undefined ? {} : { bytesPerToken: limits.bytesPerToken }),
+      ...(limits.measuredBytesPerToken === undefined
+        ? {}
+        : { measuredBytesPerToken: limits.measuredBytesPerToken }),
       tools: tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
