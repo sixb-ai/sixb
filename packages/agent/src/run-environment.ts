@@ -86,11 +86,7 @@ import {
   type SuppliesToolFiles,
 } from "./tools/result-media"
 import { AgentFileBudget, createAgentToolFiles, installAgentToolFiles } from "./tools/tool-files"
-import {
-  replayedToolOutputs,
-  type SavedToolOutput,
-  withToolOutputFiles,
-} from "./tools/tool-outputs"
+import { readSavedToolOutputs, type SavedToolOutput, ToolOutputFiles } from "./tools/tool-outputs"
 import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
@@ -353,9 +349,15 @@ export async function createConversationAgentEnvironment(
     const threadContext = prepared?.threadContext ?? agentThreadModelContext(input.history)
     const messages = threadContext.retainedMessages
     const conversation = authorsOf(messages)
-    const [{ attachmentContext, imageBudget }, memory] = await Promise.all([
+    const [{ attachmentContext, imageBudget }, memory, toolOutputs] = await Promise.all([
       prepareFiles(messages),
       prepared ? prepared.memory : loadMemory(threadContext.checkpoint),
+      readSavedToolOutputs({
+        messages,
+        contextDirectory: sandbox.contextDirectory,
+        blobStorage: context.blobStorage,
+        signal: sandboxSignal,
+      }),
     ])
     environment = await startAgentEnvironment({
       mode: "conversation",
@@ -375,7 +377,7 @@ export async function createConversationAgentEnvironment(
       ...(publishing ? { publishing } : {}),
       apiBaseUrl,
       attachmentContext,
-      toolOutputs: replayedToolOutputs(messages, sandbox.contextDirectory),
+      toolOutputs,
       imageBudget,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
@@ -625,7 +627,15 @@ async function startSubagentEnvironment(
     ? await preflightSubagentContext({ ...compaction, threadContext: initial.threadContext })
     : undefined
   const threadContext = prepared?.threadContext ?? initial.threadContext
-  const { attachmentContext, imageBudget } = await prepareFiles(threadContext.retainedMessages)
+  const [{ attachmentContext, imageBudget }, toolOutputs] = await Promise.all([
+    prepareFiles(threadContext.retainedMessages),
+    readSavedToolOutputs({
+      messages: threadContext.retainedMessages,
+      contextDirectory: sandbox.contextDirectory,
+      blobStorage: context.blobStorage,
+      signal,
+    }),
+  ])
 
   const environment = await startAgentEnvironment({
     mode: "subagent",
@@ -641,7 +651,7 @@ async function startSubagentEnvironment(
     ...(publishing ? { publishing } : {}),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
-    toolOutputs: replayedToolOutputs(threadContext.retainedMessages, sandbox.contextDirectory),
+    toolOutputs,
     imageBudget,
     ontologyDocs: plan.ontologyDocs,
     ...(memory ? { memory } : {}),
@@ -751,7 +761,7 @@ interface AgentEnvironmentSetup
   readonly threadId?: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
-  /** The outputs the history saved to files, written again where their notices name them. */
+  /** The outputs the history saved to files, written again where their previews name them. */
   readonly toolOutputs?: readonly SavedToolOutput[]
   /** What the history left of the request's inline image budget, which the run's steps take. */
   readonly imageBudget: InlineImageBudget
@@ -847,6 +857,11 @@ async function startAgentEnvironment(
     })
   )
   const resolveSandbox = () => ready
+  const toolOutputFiles = new ToolOutputFiles({
+    sandbox: resolveSandbox,
+    blobStorage: context.blobStorage,
+    budget: fileBudget,
+  })
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
@@ -962,7 +977,8 @@ async function startAgentEnvironment(
       blobStorage: context.blobStorage,
       apiBaseUrl,
       attachmentContext,
-      tools: withToolOutputFiles(tools, resolveSandbox),
+      tools: toolOutputFiles.wrap(tools),
+      outputFileOf: (toolCallId) => toolOutputFiles.fileOf(toolCallId),
       prepareStep: mediaBridge.prepareStep,
       systemPrompt,
       projectTimeZone: context.timeZone,

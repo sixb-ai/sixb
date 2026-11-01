@@ -14691,11 +14691,12 @@ describe("a later turn's request", () => {
 })
 
 /**
- * A recording sandbox with no room for tool outputs: a chapter too large for the context reaches
- * the model whole, as when saving it to a file fails, and these tests are about what the context
- * guard does with results that large.
+ * Test double: a recording sandbox that refuses every write under `tool-outputs/`, so saving a
+ * tool output fails and a chapter too large for the context reaches the model whole, as the run
+ * falls back when saving fails. The context guard tests use it: they are about what the guard does
+ * with results that large, which outside such a failure only `read` and `view_file` return.
  */
-class UnsavedOutputsSandboxFactory extends RecordingSandboxFactory {
+class ToolOutputWritesFailingSandboxFactory extends RecordingSandboxFactory {
   override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     const sandbox = (await super.create(options)) as RecordingSandbox
     const writeFiles = sandbox.writeFiles.bind(sandbox)
@@ -14984,9 +14985,14 @@ describe("context within a turn", () => {
     // past the first clearing, and every one of those calls rewrites the cache.
     const requests: LanguageModelRequest[] = []
     const model = chapterReadingModel({ chapters: 12, requests })
-    const sixb = buildSixb(model, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      projectTools: [chapterTool(45_000)],
-    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(45_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
@@ -15023,9 +15029,14 @@ describe("context within a turn", () => {
     // summary then reads that whole replay at once, past the limit too.
     const requests: LanguageModelRequest[] = []
     const model = chapterReadingModel({ chapters: 6, requests })
-    const sixb = buildSixb(model, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      projectTools: [chapterTool(42_000)],
-    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(42_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
@@ -15062,9 +15073,14 @@ describe("context within a turn", () => {
     // then cuts its newest chapter to fit, and writes no checkpoint.
     const requests: LanguageModelRequest[] = []
     const model = chapterReadingModel({ chapters: 2, requests })
-    const sixb = buildSixb(model, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      projectTools: [chapterTool(105_000)],
-    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(105_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     await seedMeasuredTokenRate(storage, 3)
     const threadId = "in_turn_compaction_thread"
@@ -15256,9 +15272,14 @@ describe("context within a turn", () => {
       },
     })
     // Four chapters of about 14,000 tokens each: more than the 45,000-token limit together.
-    const sixb = buildSixb(model, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      projectTools: [chapterTool(42_000)],
-    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(42_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -15450,9 +15471,14 @@ describe("context within a turn", () => {
         return new ModelProviderError("[test] Overloaded.", "mock", "mock-model", { status: 529 })
       },
     })
-    const sixb = buildSixb(model, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      projectTools: [chapterTool(105_000)],
-    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(105_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     await seedMeasuredTokenRate(storage, 3)
     const threadId = "failed_after_compaction_thread"
@@ -15644,10 +15670,15 @@ describe("context of a child and of a workflow step", () => {
       },
     })
     const parentModel = readerParent(parentCalls)
-    const sixb = buildSixb(parentModel, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      models: { language: [parentModel, childModel] },
-      projectTools: [chapterTool(45_000)],
-    })
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(45_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
 
@@ -16038,10 +16069,15 @@ describe("context of a child and of a workflow step", () => {
             ])(request),
     })
     const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
-    const sixb = buildSixb(parentModel, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      models: { language: [parentModel, childModel] },
-      projectTools: [chapterTool(75_000)],
-    })
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(75_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
     const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
@@ -16103,10 +16139,15 @@ describe("context of a child and of a workflow step", () => {
             ])(request),
     })
     const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
-    const sixb = buildSixb(parentModel, new InMemoryBroker(), new UnsavedOutputsSandboxFactory(), {
-      models: { language: [parentModel, childModel] },
-      projectTools: [chapterTool(42_000)],
-    })
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(42_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
     const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
@@ -16201,8 +16242,9 @@ describe("context of a child and of a workflow step", () => {
     }
   })
 
-  // Reproduce: pass no toolOutputs to startAgentEnvironment in startSubagentEnvironment; the
-  // continuation's new sandbox then lacks the file the child's preview names.
+  // Reproduce: pass no toolOutputs to startAgentEnvironment in startSubagentEnvironment, or no
+  // outputFileOf to subagentWorkMessages; the continuation's new sandbox then lacks the file the
+  // child's preview names.
   test("a child saves a large output in its own sandbox, and its continuation's has it again", async () => {
     const ANSWERS = ["The second edition."]
     const parentCalls: LanguageModelRequest[] = []
@@ -16280,7 +16322,7 @@ describe("context of a child and of a workflow step", () => {
     const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
       model,
       tools: [chapterTool(45_000)],
-      sandboxes: new UnsavedOutputsSandboxFactory(),
+      sandboxes: new ToolOutputWritesFailingSandboxFactory(),
       runId: "workflow-context-run",
     })
     const worker = new AgentWorker(sixb, workerOptions())
@@ -16340,10 +16382,10 @@ function textReadOf(request: LanguageModelRequest | undefined, toolCallId: strin
 }
 
 describe("tool outputs too large for the context", () => {
-  // Reproduce: return `tools` as they are from withToolOutputFiles; the model then reads the
+  // Reproduce: return `tools` as they are from ToolOutputFiles.wrap; the model then reads the
   // whole report. Pass no toolOutputs to startAgentEnvironment in createConversationAgentEnvironment;
-  // the next turn's sandbox then lacks the file its preview names. Keep the bash tool's 20,000
-  // characters per stream; the file then holds the report cut in its middle.
+  // the next turn's sandbox then lacks the file its preview names. Pass no outputFileOf to
+  // agentTraceFromModelSteps in runAgentTurn; the part then names no stored file.
   test("reach the model as a preview, in a file every later turn's sandbox has again", async () => {
     const calls: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
@@ -16383,20 +16425,28 @@ describe("tool outputs too large for the context", () => {
       expect(again?.options.env?.SIXB_TOOL_OUTPUTS_DIR).toBe(
         dirname(savedOutputPath(nextSandbox, "report"))
       )
-      // The next turn replays the preview byte for byte; the transcript keeps the whole output.
+      // The next turn replays the preview byte for byte.
       expectReplayedPrefix(calls[1], calls[2], model.providerId)
+      // The part keeps a bounded copy, and names the stored file that holds the whole output.
       const stored = (await listMessages(storage, first.run.threadId)).flatMap(
         (message) => message.parts
       )
       const call = stored.find((part) => part.type === "tool-call" && part.toolCallId === "report")
-      expect(call).toMatchObject({ state: "output-available", output: { stdout: report } })
+      if (call?.type !== "tool-call" || call.state !== "output-available" || !call.outputFile) {
+        throw new Error("[test] Expected the report's saved output.")
+      }
+      expect(call.output).toMatchObject({ exitCode: 0, stdoutTruncated: true })
+      expect(JSON.stringify(call.output).length).toBeLessThan(21_000)
+      expect(call.outputFile.path).toBe("tool-outputs/report.txt")
+      const blob = await sixb.blobStorage.open(call.outputFile.fileRef.blobId)
+      expect(await new Response(blob).text()).toBe(report)
     } finally {
       await worker.stop()
     }
   })
 
-  // Reproduce: return `tools` as they are from withToolOutputFiles; the step then reads the whole
-  // report.
+  // Reproduce: return `tools` as they are from ToolOutputFiles.wrap; the step then reads the
+  // whole report. Pass no outputFileOf in runWorkflowAgentNode; its trace names no file.
   test("of a workflow step are saved in the step's sandbox", async () => {
     const requests: LanguageModelRequest[] = []
     const model = scriptedWindowModel({
@@ -16428,6 +16478,13 @@ describe("tool outputs too large for the context", () => {
       const [sandbox] = sandboxes.sandboxes
       expect(sandbox?.readFileContents(savedOutputPath(sandbox, "step_report"))).toBe(
         LargeOutputSandboxFactory.REPORT
+      )
+      // The step's trace names the stored file, as a conversation's message does.
+      expect(node.trace).toContainEqual(
+        expect.objectContaining({
+          toolCallId: "step_report",
+          outputFile: expect.objectContaining({ path: "tool-outputs/step_report.txt" }),
+        })
       )
     } finally {
       await worker.stop()

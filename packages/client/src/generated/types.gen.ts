@@ -8993,6 +8993,17 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                 [key: string]: unknown
               }
             | null
+          outputFile?: {
+            fileRef: {
+              blobId: string
+              digest: string
+              sizeBytes: number
+              fileName?: string
+              mediaType?: string
+              logicalPath?: string
+            }
+            path: string
+          }
         }
       | {
           type: "tool-call"
@@ -13348,6 +13359,17 @@ export type ListAgentThreadMessagesResponses = {
                   [key: string]: unknown
                 }
               | null
+            outputFile?: {
+              fileRef: {
+                blobId: string
+                digest: string
+                sizeBytes: number
+                fileName?: string
+                mediaType?: string
+                logicalPath?: string
+              }
+              path: string
+            }
           }
         | {
             type: "tool-call"
@@ -16408,6 +16430,17 @@ export type ListObservedAgentThreadMessagesResponses = {
                   [key: string]: unknown
                 }
               | null
+            outputFile?: {
+              fileRef: {
+                blobId: string
+                digest: string
+                sizeBytes: number
+                fileName?: string
+                mediaType?: string
+                logicalPath?: string
+              }
+              path: string
+            }
           }
         | {
             type: "tool-call"
