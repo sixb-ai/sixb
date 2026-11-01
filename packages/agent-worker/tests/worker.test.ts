@@ -14000,7 +14000,7 @@ describe("agent tools act as the requester", () => {
         plan,
         run: childRun,
         thread: childThread,
-        history: { messages: [] },
+        history: { checkpoint: null, messages: [], sentTimeZones: {} },
       })
     )
     const openQuote = (environment: typeof task, key: string) => {

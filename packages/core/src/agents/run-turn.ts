@@ -69,8 +69,13 @@ export interface AgentChildContext {
   readonly thread: AgentThreadRecord | null
   /** The thread of the conversation the child works for. */
   readonly conversation: AgentThreadRecord | null
-  /** The child's thread, oldest first. */
-  readonly messages: readonly AgentMessageRecord[]
+  /** The child's thread as a run reads it: its latest checkpoint and what follows it. */
+  readonly history: AgentTurnHistory
+  /**
+   * The message that started the thread, its task, when a checkpoint summarized it: a child's
+   * requests keep it as it is, ahead of the summary.
+   */
+  readonly task?: AgentMessageRecord
   /** The run of the thread that paused on its held calls, when this run continues it. */
   readonly paused?: SubagentRunRecord
   /** The display name of whoever asked for the parent turn, by `type:id`, when they have one. */
@@ -150,15 +155,20 @@ async function readChildContext(
 ): Promise<AgentChildContext> {
   const { projectId } = host
   const agents = host.storage.agents
-  const [parent, thread, { messages }, runs] = await Promise.all([
+  const [parent, thread, history, runs] = await Promise.all([
     agents.runs.getById({ projectId, id: run.parentRunId }),
     agents.threads.getById({ projectId, id: run.threadId }),
-    agents.messages.list({ projectId, threadId: run.threadId, order: "asc" }),
+    readAgentTurnHistory(host, run.threadId),
     listSubagentThreadRuns(agents, { projectId, threadId: run.threadId }),
   ])
-  const conversation = thread
-    ? await agents.threads.getById({ projectId, id: conversationThreadId(thread) })
-    : null
+  const [conversation, task] = await Promise.all([
+    thread ? agents.threads.getById({ projectId, id: conversationThreadId(thread) }) : null,
+    history.checkpoint
+      ? agents.messages
+          .list({ projectId, threadId: run.threadId, order: "asc", limit: 1 })
+          .then(({ messages }) => messages[0])
+      : undefined,
+  ])
   // A continuation goes on from the latest run that succeeded: only a child paused on its calls
   // succeeds without ending its thread.
   const previous = runs.filter((each) => each.status === "succeeded").at(-1)
@@ -169,7 +179,8 @@ async function readChildContext(
     execution,
     thread,
     conversation,
-    messages,
+    history,
+    ...(task ? { task } : {}),
     ...(paused ? { paused } : {}),
     names: await readNames(host, execution?.requestedBy ? [execution.requestedBy] : []),
   }
