@@ -1,15 +1,12 @@
 import { AgentDefinitionError } from "@sixb/core"
 import {
-  AGENT_IMAGE_INPUT_TOKENS,
   AGENT_TOKEN_RATE_SAMPLES,
-  type AgentContextSize,
   type AgentContextTokenRateSample,
-  type AgentModelTokenRateSample,
   agentContextSizeTokens,
   calibrateAgentContextBytesPerToken,
   learnedAgentContextBytesPerToken,
   measureAgentContextTokenRate,
-  measureModelRequest,
+  measureAgentModelRequest,
 } from "@sixb/core/internal/agents"
 import {
   defineLanguageModel,
@@ -52,13 +49,9 @@ interface AgentModelSelection {
 
 /**
  * Derive the model's input and output budgets from its definition, and cap each call's output to
- * them. The model comes pinned: whoever hands it over resolved it once for the run. `measured`
- * hears what each call measured of the model's tokenizer, for the run to record.
+ * them. The model comes pinned: whoever hands it over resolved it once for the run.
  */
-export function prepareAgentModel(
-  selection: AgentModelSelection,
-  measured?: (sample: AgentModelTokenRateSample) => void
-): {
+export function prepareAgentModel(selection: AgentModelSelection): {
   readonly model: LanguageModel
   readonly budget: AgentContextBudget
 } {
@@ -96,7 +89,7 @@ export function prepareAgentModel(
         ? {}
         : { validateResponseFormat: model.validateResponseFormat.bind(model) }),
       stream: async (request: LanguageModelRequest) => {
-        const size = measureRequestInput(request)
+        const size = measureAgentModelRequest(request)
         const stream = await model.stream({
           ...request,
           maxOutputTokens: Math.min(
@@ -117,7 +110,6 @@ export function prepareAgentModel(
               runTokenRates.unshift(sample)
               runTokenRates.splice(AGENT_TOKEN_RATE_SAMPLES)
               runBytesPerToken = learnedAgentContextBytesPerToken([...runTokenRates, ...tokenRates])
-              measured?.({ providerId: model.providerId, modelId: model.modelId, ...sample })
             }
 
             measuredBytesPerToken = calibrateAgentContextBytesPerToken({
@@ -145,32 +137,6 @@ function outputCeilingTokens(
   capTokens: number
 ): number {
   return Math.min(capTokens, Math.max(budget.reserveTokens, budget.windowTokens - inputTokens))
-}
-
-/**
- * What a call's request weighs before any tokenizer, as the conversation estimator weighs it.
- *
- * An image counts as the most a provider charges for one, never as its base64 bytes. Attachments
- * stay in a thread's requests until compaction, so giving up on any file would cap every later
- * call of the thread at the reserve. Other inline files count by their encoded bytes.
- */
-function measureRequestInput(request: LanguageModelRequest): AgentContextSize {
-  const size = { ...measureModelRequest(request), images: 0 }
-  for (const message of request.messages) {
-    if (message.role !== "user") continue
-
-    for (const part of message.content) {
-      if (part.type !== "file") continue
-
-      if (part.mediaType.startsWith("image/")) {
-        size.tokens += AGENT_IMAGE_INPUT_TOKENS
-        size.images += 1
-      } else {
-        size.bytes += new TextEncoder().encode(part.data.href).byteLength
-      }
-    }
-  }
-  return size
 }
 
 /** The events as they come, handing over the input tokens the provider counted once it says. */
@@ -224,7 +190,8 @@ export function resolveAgentContextBudget(
     windowTokens - reserveTokens
   )
   assertPositiveSafeInteger(inputBudgetTokens, "inputBudgetTokens")
-  const bytesPerToken = learnedAgentContextBytesPerToken(selection.tokenRates ?? [])
+  const tokenRates = selection.tokenRates ?? []
+  const bytesPerToken = learnedAgentContextBytesPerToken(tokenRates)
   if (!Number.isFinite(bytesPerToken) || bytesPerToken <= 0) {
     throw invalidBudget("token rates must measure a positive number of bytes per token.")
   }

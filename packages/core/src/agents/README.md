@@ -63,8 +63,9 @@ both publish through it.
 ```text
 renewLease · cancelled · assertOwned   ownership, and a cancel of the run or of its parent
 models.language(ref)                   the run's model, pinned once: each call is admitted against
-                                       the requester's AI limits and records itself, so the runner
-                                       never reports what a call used
+                                       the requester's AI limits and records itself, and what it
+                                       measured of the tokenizer (context-token-rate.ts), so the
+                                       runner never reports what a call used
 callTool(call)                         one call of a project tool the run offers, for the runner
                                        that holds the run, run as the run (run-tools.ts): its input
                                        checked against the tool's schema, its model calls billed to
@@ -87,8 +88,7 @@ files                                  where the run's files are stored and read
 authorization · workspace              for a runner that binds the project in its own process: the
                                        execution's authority, and a persistent workspace's moves
 finish                                 messages and the run's end in one transaction, then the
-                                       host's afterFinish: children stopped, a decided turn resumed;
-                                       then, best effort, what noteTokenRate kept of its latest call
+                                       host's afterFinish: children stopped, a decided turn resumed
 ```
 
 `tests/agent-run-session-contract.ts` is what every session does: the in-process one and the one
