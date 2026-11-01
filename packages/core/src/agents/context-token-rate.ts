@@ -52,14 +52,17 @@ export interface AgentModelTokenRateSample extends AgentContextTokenRateSample {
 /**
  * What a request a thread sent measures of its model's tokenizer: its bytes, as measured (see
  * measureAgentContextRequest, measureModelRequest), against the input tokens the provider counted
- * for it, less those the measure already counts as such (overheads, images). None when the request
- * holds too little text to tell.
+ * for it, less those the measure already counts as such (overheads). None when the request holds
+ * too little text to tell, or any image: an image counts as the most a provider charges for one,
+ * so the text's share of the count comes out low, and the rate sparse, the unsafe side.
  */
 export function measureAgentContextTokenRate(input: {
   readonly size: AgentContextSize
   readonly inputTokens: number
 }): AgentContextTokenRateSample | undefined {
   const { size } = input
+  if ((size.images ?? 0) > 0) return undefined
+
   const tokens = input.inputTokens - size.tokens
   if (tokens < CALIBRATION_MIN_TEXT_TOKENS || size.bytes <= 0) return undefined
 

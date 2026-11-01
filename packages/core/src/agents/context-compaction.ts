@@ -42,6 +42,8 @@ export interface EstimateAgentContextRequestTokensInput {
 export interface AgentContextSize {
   readonly bytes: number
   readonly tokens: number
+  /** The images among `tokens`, each counted as the most a provider charges for one. */
+  readonly images?: number
 }
 
 export interface AgentContextTokenEstimate {
@@ -103,7 +105,11 @@ export function measureAgentContextRequest(
   }
 
   const messages = measureAgentContextMessages(input.messages)
-  return { bytes: size.bytes + messages.bytes, tokens: size.tokens + messages.tokens }
+  return {
+    bytes: size.bytes + messages.bytes,
+    tokens: size.tokens + messages.tokens,
+    images: messages.images ?? 0,
+  }
 }
 
 function measureAgentContextMessages(messages: readonly AgentMessage[]): AgentContextSize {
@@ -113,7 +119,7 @@ function measureAgentContextMessages(messages: readonly AgentMessage[]): AgentCo
     measureMessage(message, { textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES }, images, size)
     if (message.role === "assistant") size.tokens += toolImageTokens(message, images)
   }
-  return size
+  return { ...size, images: AGENT_INLINE_IMAGE_LIMITS.maxImages - images.remaining }
 }
 
 /** Price a measured request at a tokenizer's rate. */
