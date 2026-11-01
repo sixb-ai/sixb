@@ -827,6 +827,34 @@ describe("a conversation on its owner's computer", () => {
     expect(await view.findByRole("textbox", { name: "Message" })).toBeDefined()
   })
 
+  // Guard proof: anchor the marker to the last saved message in useAgentConversation; a hidden one,
+  // such as a resumed turn's approval outcomes, leaves the conversation without it.
+  test("marks the move after the last message it shows, hidden ones aside", async () => {
+    const { view } = renderChat("alice", {
+      thread: thread({ movedAt: "2099-01-01T00:00:00.000Z" }),
+      messages: [
+        ...messages,
+        {
+          ...messages[0],
+          id: "msg_hidden",
+          seq: 3,
+          parts: [
+            {
+              type: "approval-outcome",
+              approvalId: "apr_1",
+              status: "denied",
+              call: { kind: "action", actionId: "pay", subject: { kind: "none" } },
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(
+      await view.findByText("Moved to the cloud. Files from before stayed on the computer.")
+    ).toBeDefined()
+  })
+
   // Guard proof: show moveFailed for every error in ComputerOfflineNotice; the owner is told to
   // try again, which can't work until the turn is answered or stopped.
   test("says what to do when a turn keeps it from moving", async () => {
@@ -897,7 +925,7 @@ describe("a conversation on its owner's computer", () => {
 
     expect(
       await view.findByText(
-        "Alice's MacBook Pro is offline. Your message runs when you open sixb in ~/q3."
+        "Alice's MacBook Pro is offline. Your message waits until sixb is open in ~/q3 with messages from the web on."
       )
     ).toBeDefined()
     expect(await view.findByText("Waiting for Alice's MacBook Pro…")).toBeDefined()

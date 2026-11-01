@@ -277,7 +277,19 @@ export class SqliteAgentRunStore implements AgentRunStore {
     const startedAt = input.startedAt ?? new Date()
     return this.db.transaction(() => {
       const run = this.requireStatus(input.projectId, input.id, "queued")
-      if (input.onComputer) assertStartsOnComputer(rowToRunRecord(run), "SixbSqlite")
+      if (input.onComputer) {
+        const thread = this.db
+          .query(
+            "SELECT computer_id AS id, computer_folder AS folder FROM agent_threads WHERE project_id = ? AND id = ?"
+          )
+          .get(input.projectId, run.thread_id) as { id: string; folder: string } | null
+        assertStartsOnComputer(
+          rowToRunRecord(run),
+          thread?.id ? thread : undefined,
+          input.onComputer,
+          "SixbSqlite"
+        )
+      }
       this.db
         .query(
           `
@@ -590,6 +602,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
     if (input.parentRunId) {
       whereClauses.push("parent_run_id = ?")
       args.push(input.parentRunId)
+    }
+
+    if (input.excludeComputerTurns) {
+      whereClauses.push("json_extract(spec, '$.runsOn') IS NOT 'computer'")
     }
 
     appendRunListFilters(whereClauses, args, input, "COALESCE(started_at, created_at)")

@@ -1,5 +1,6 @@
 import { MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import { MAX_AGENT_CONTEXT_LABEL_LENGTH } from "@sixb/core/agents/context"
+import { CONTROL_CHARACTER } from "@sixb/core/internal/agent-run-storage-provider"
 import { LANGUAGE_MODEL_TIERS } from "@sixb/core/models"
 import {
   AGENT_RUN_DIAGNOSTIC_CODES,
@@ -105,22 +106,18 @@ export const AgentThreadListQuerySchema = z
   .strict()
 
 /** Shown back to its owner as written, so it holds no control character. */
-const PlainTextSchema = z
-  .string()
-  .regex(
-    /^[^\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]*$/,
-    "has a control character"
-  )
+const plainText = (schema: z.ZodString) =>
+  schema.refine((text) => !CONTROL_CHARACTER.test(text), "has a control character")
 
 /** Where on your computer a thread runs: the computer `sixb` is open on, and its folder there. */
 export const AgentThreadComputerInputSchema = z
   .object({
     /** The id `sixb` keeps for the computer, beside its sign-in. */
-    id: PlainTextSchema.trim().min(1).max(200),
+    id: plainText(z.string().trim().min(1).max(200)),
     /** What you call the computer, such as "Anthony's MacBook Pro". */
-    name: PlainTextSchema.trim().min(1).max(120),
+    name: plainText(z.string().trim().min(1).max(120)),
     /** The absolute path its turns work in. */
-    folder: PlainTextSchema.min(1).max(4096),
+    folder: plainText(z.string().min(1).max(4096)),
   })
   .strict()
 

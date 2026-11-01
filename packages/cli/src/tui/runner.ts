@@ -160,11 +160,6 @@ export class LocalRunner {
     await this.closing
   }
 
-  /** Whether the session is open, so turns sent from elsewhere run here. */
-  get sessionOpen(): boolean {
-    return this.session !== null
-  }
-
   /**
    * Claim a turn sent from elsewhere when this computer runs its conversation: its owner's, on this
    * computer and in this folder, and still queued, while the session is open. A running turn is
@@ -215,6 +210,8 @@ export class LocalRunner {
   }
 
   private claimElsewhere(runId: string): Promise<boolean> {
+    // Claimed here already: typed here, it heard of itself on its way.
+    if (this.running.has(runId)) return this.claim(runId)
     this.sentElsewhere.add(runId)
     return this.claim(runId).finally(() => this.sentElsewhere.delete(runId))
   }

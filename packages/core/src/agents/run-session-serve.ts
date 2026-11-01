@@ -1,5 +1,5 @@
 import type { LanguageModelRequest } from "../models/language-model"
-import type { AgentRunRecord } from "../storage/agents"
+import type { AgentRunRecord, AgentThreadComputer } from "../storage/agents"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
 import { agentRunLeaseLapsed, endInterruptedAgentRun } from "./run-liveness"
 import {
@@ -204,8 +204,8 @@ export async function claimAgentRunForRunner(
   input: {
     readonly run: AgentRunRecord
     readonly leaseExpiresAt: string
-    /** A computer's turn, which a move to the cloud keeps from starting. */
-    readonly onComputer?: boolean
+    /** A computer's turn, which a move keeps from starting: the place it claims to run in. */
+    readonly onComputer?: Pick<AgentThreadComputer, "id" | "folder">
   }
 ): Promise<{ readonly run: AgentRunRecord; readonly runnerToken: string } | null> {
   if (input.run.status === "running") {
@@ -224,7 +224,7 @@ export async function claimAgentRunForRunner(
   const session = await claimAgentRun(host, {
     run: input.run,
     leaseExpiresAt: capLease(input.leaseExpiresAt),
-    ...(input.onComputer ? { onComputer: true } : {}),
+    ...(input.onComputer ? { onComputer: input.onComputer } : {}),
     ...(input.run.kind === "subagent" ? { cancelWith: [input.run.parentRunId] } : {}),
   })
   if (!session) return null

@@ -962,13 +962,17 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   // Where the conversation moved, after the last message saved before then: the files earlier
   // turns worked on stayed behind.
   const movedAt = thread?.movedAt
-  const movedAfter = movedAt
-    ? savedMessages.filter((message) => message.createdAt <= movedAt).at(-1)
-    : undefined
+  const savedBefore = new Set(
+    movedAt
+      ? savedMessages.filter((message) => message.createdAt <= movedAt).map(({ id }) => id)
+      : []
+  )
+  // The last one the transcript shows: not every saved message is drawn.
+  const movedAfterId = messages.filter(({ id }) => id !== null && savedBefore.has(id)).at(-1)?.id
   const moved =
-    thread && movedAfter
+    thread && movedAfterId
       ? {
-          afterMessageId: movedAfter.id,
+          afterMessageId: movedAfterId,
           label:
             thread.runsOn !== "computer"
               ? agentMessages.computer.movedToCloud

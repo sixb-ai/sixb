@@ -926,6 +926,87 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    // Guard proof: drop the folder check from assertStartsOnComputer; a claim that passed its check
+    // just before a move starts the turn in the folder its thread left.
+    test("starts a computer's turn only where its thread runs now", async () => {
+      await withStorage(async (storage, fixture) => {
+        const spec = { model: { provider: "test", modelId: "large" }, runsOn: "computer" as const }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await createRun(storage, fixture, runInput({ id: "run_1", spec }))
+        const elsewhere = { ...laptop, folder: "/Users/anthony/other" }
+        await storage.threads.assignComputer({ projectId, id: "thr_1", computer: elsewhere })
+
+        const start = (onComputer: typeof laptop) =>
+          storage.runs.start({
+            projectId,
+            id: "run_1",
+            execution: execution("laptop"),
+            onComputer,
+          })
+        await expectAgentError(start(laptop), "invalid_state")
+        await expect(start(elsewhere)).resolves.toMatchObject({ status: "running" })
+      })
+    })
+
+    // Guard proof: leave the filter out of a store's list; turns waiting for closed sixbs fill the
+    // worker's recovery scan, and a cloud turn whose publication failed is never found.
+    test("lists runs without the turns waiting for a computer", async () => {
+      await withStorage(async (storage, fixture) => {
+        const model = { provider: "test", modelId: "large" }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await storage.threads.create(threadInput({ id: "thr_cloud" }))
+        await createRun(
+          storage,
+          fixture,
+          runInput({ id: "run_computer", spec: { model, runsOn: "computer" } })
+        )
+        await createRun(
+          storage,
+          fixture,
+          runInput({
+            id: "run_cloud",
+            threadId: "thr_cloud",
+            spec: { model },
+            execution: execution("cloud"),
+          })
+        )
+
+        const listed = await storage.runs.list({
+          projectId,
+          statuses: ["queued"],
+          excludeComputerTurns: true,
+        })
+        expect(listed.runs.map((run) => run.id)).toEqual(["run_cloud"])
+        expect(listed.total).toBe(1)
+      })
+    })
+
+    // Guard proof: drop `workspace` from a store's fork; a fork of a computer's conversation reads
+    // its local paths as if they were in its cloud workspace.
+    test("forks a computer's thread into the cloud, as a move", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await storage.threads.create(threadInput({ id: "thr_cloud" }))
+
+        const createdAt = at("2026-06-23T12:00:00.000Z")
+        const fork = await storage.threads.fork(
+          forkInput({ sourceThreadId: "thr_1", id: "thr_fork", createdAt })
+        )
+        expect(fork).toMatchObject({ movedAt: createdAt })
+        expect(fork).not.toHaveProperty("runsOn")
+        await expect(storage.threads.getById({ projectId, id: "thr_fork" })).resolves.toMatchObject(
+          {
+            movedAt: createdAt,
+          }
+        )
+
+        const cloudFork = await storage.threads.fork(
+          forkInput({ sourceThreadId: "thr_cloud", id: "thr_cloud_fork" })
+        )
+        expect(cloudFork).not.toHaveProperty("movedAt")
+      })
+    })
+
     // Guard proof: drop `onComputer` from a store's start; the laptop starts the turn that moved
     // to the cloud, and the worker's run of it waits on a lease nobody gives back.
     test("starts a computer's turn only while it still runs on the computer", async () => {
@@ -936,7 +1017,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         await storage.threads.moveToCloud({ projectId, id: "thr_1" })
 
         const start = (id: string, token: string) =>
-          storage.runs.start({ projectId, id, execution: execution(token), onComputer: true })
+          storage.runs.start({ projectId, id, execution: execution(token), onComputer: laptop })
         await expectAgentError(start("run_1", "laptop"), "invalid_state")
         expect((await storage.runs.getById({ projectId, id: "run_1" }))?.status).toBe("queued")
 

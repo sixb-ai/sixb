@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import type { LanguageModel } from "@sixb/core"
 import {
   agent,
@@ -594,6 +594,99 @@ describe("a runner outside the worker", () => {
     })
     expect(moved.status).toBe(200)
     expect(await moved.json()).toMatchObject({ approvalMode: expect.any(String) })
+  })
+
+  // Guard proof: check refuseHeldTurn before the transaction instead of inside it; a running turn
+  // passes the check, pauses, and its thread moves with the call Ava was asked about.
+  test("keeps a thread in place when its turn pauses just as it moves", async () => {
+    const { person, ask, call, claim, host, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const session = await claim(ava, runId)
+    const running = await storage.agents.runs.getById({ projectId, id: runId })
+    const createdAt = new Date()
+    await storage.agents.approvals.request({
+      id: "apr_1",
+      projectId,
+      runId,
+      callerRunId: runId,
+      executionToken: running?.execution?.token ?? "",
+      requestedBy: { type: "user", id: "ava" },
+      mode: "manual",
+      call: {
+        kind: "action",
+        actionId: "tidy",
+        subject: { kind: "none" },
+        params: {},
+        actionRunId: "act_1",
+        effect: "external",
+      },
+      createdAt,
+      expiresAt: new Date(createdAt.getTime() + 60_000),
+    } as Parameters<typeof storage.agents.approvals.request>[0])
+
+    // The turn pauses at the last moment a move could have missed it.
+    const transaction = host.storage.transaction.bind(host.storage)
+    host.storage.transaction = (async (...input: Parameters<typeof transaction>) => {
+      await session?.finish({ status: "succeeded", finishReason: "awaiting_approval" })
+      host.storage.transaction = transaction
+      return transaction(...input)
+    }) as typeof host.storage.transaction
+
+    const refused = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
+    expect(refused.status).toBe(409)
+    expect(await storage.agents.threads.getById({ projectId, id: threadId })).toMatchObject({
+      runsOn: "computer",
+      computer: LAPTOP,
+    })
+  })
+
+  // Guard proof: leave `onComputer` out of the claim route's start; the thread moves right after
+  // the laptop's claim passed its check, and the turn runs in the folder it left.
+  test("claims no turn whose thread moved just after the claim was checked", async () => {
+    const { person, ask, claim, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const threads = storage.agents.threads
+    const getById = threads.getById.bind(threads)
+    threads.getById = async (input) => {
+      const thread = await getById(input)
+      if (input.id === threadId && thread?.computer?.folder === LAPTOP.folder) {
+        await threads.assignComputer({
+          projectId,
+          id: threadId,
+          computer: { ...LAPTOP, folder: "/Users/ava/other" },
+        })
+      }
+      return thread
+    }
+
+    expect(await claim(ava, runId).catch((error: unknown) => error)).toBeInstanceOf(Error)
+    threads.getById = getById
+    expect((await storage.agents.runs.getById({ projectId, id: runId }))?.status).toBe("queued")
+  })
+
+  // Guard proof: let dispatchMovedTurn's error reach the route; the thread moved, but its owner is
+  // told it didn't, and each try again fails, as it runs in the cloud already.
+  test("answers a move that committed, whatever its dispatch does", async () => {
+    const { person, ask, call, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const runs = storage.agents.runs
+    const getByIds = runs.getByIds.bind(runs)
+    runs.getByIds = async () => {
+      throw new Error("The database blinked.")
+    }
+    const logged = spyOn(console, "error").mockImplementation(() => {})
+
+    const moved = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
+    runs.getByIds = getByIds
+    expect(moved.status).toBe(200)
+    expect(logged).toHaveBeenCalled()
+    logged.mockRestore()
   })
 
   // Removal proof: drop the runsOn check from the claim route; Ava's own runner takes her cloud

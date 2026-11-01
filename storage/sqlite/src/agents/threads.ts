@@ -150,11 +150,11 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       .transaction(() => {
         const source = this.db
           .query(
-            "SELECT id, kind, active_run_id FROM agent_threads WHERE project_id = ? AND id = ?"
+            "SELECT id, kind, active_run_id, runs_on, moved_at FROM agent_threads WHERE project_id = ? AND id = ?"
           )
           .get(input.projectId, input.sourceThreadId) as Pick<
           AgentThreadRow,
-          "id" | "kind" | "active_run_id"
+          "id" | "kind" | "active_run_id" | "runs_on" | "moved_at"
         > | null
 
         if (!source) {
@@ -201,6 +201,10 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
         const plan = planAgentThreadFork(
           input,
           {
+            workspace: {
+              ...(source.runs_on === "computer" ? { runsOn: "computer" as const } : {}),
+              ...(source.moved_at ? { movedAt: new Date(source.moved_at) } : {}),
+            },
             ...(activeRun?.trigger_message_id
               ? { triggerMessageId: activeRun.trigger_message_id }
               : {}),
@@ -570,9 +574,10 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             active_run_id,
             last_message_at,
             message_count,
+            moved_at,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -586,6 +591,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           thread.status,
           thread.lastMessageAt?.toISOString() ?? null,
           thread.messageCount,
+          thread.movedAt?.toISOString() ?? null,
           thread.createdAt.toISOString(),
           thread.updatedAt.toISOString()
         )

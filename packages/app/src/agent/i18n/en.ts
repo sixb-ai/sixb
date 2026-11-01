@@ -740,7 +740,7 @@ export const en = {
     online: "sixb is open there",
     offline: "sixb is closed there",
     offlineNotice: (computer: string, folder: string) =>
-      `${computer} is offline. Your message runs when you open sixb in ${folder}.`,
+      `${computer} is offline. Your message waits until sixb is open in ${folder} with messages from the web on.`,
     noFolder:
       "This conversation has no folder yet. Open sixb in its folder and press ctrl+f, or continue in the cloud.",
     waitingFor: (computer: string) => `Waiting for ${computer}`,

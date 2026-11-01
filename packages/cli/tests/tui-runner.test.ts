@@ -173,7 +173,6 @@ describe("a session", () => {
 
     await runner.closeSession()
     expect(sessions.at(-1)?.method).toBe("DELETE")
-    expect(runner.sessionOpen).toBe(false)
   })
 })
 
@@ -213,6 +212,27 @@ describe("a session closing while its renewal is on its way", () => {
     const closing = runner.closeSession()
     await Promise.all([reading, closing])
     expect(claimed).toEqual([])
+  })
+})
+
+describe("a turn claimed here already", () => {
+  // Guard proof: drop the running check from claimElsewhere; a message typed here is announced as
+  // sent from elsewhere, when its own activity event arrives while its claim is on its way.
+  test("is not taken for one sent from elsewhere", async () => {
+    const { runner, claimed } = await avasRunner({ status: "queued" })
+    const inner = runner as unknown as {
+      running: Map<string, { stop: AbortController; done: Promise<boolean> }>
+      sentElsewhere: Set<string>
+    }
+    runner.openSession()
+    inner.running.set("run_1", { stop: new AbortController(), done: Promise.resolve(true) })
+
+    await runner.claimIfHere("thr_1", "run_1")
+
+    expect(claimed).toContain("run_1")
+    expect(inner.sentElsewhere.has("run_1")).toBe(false)
+    inner.running.clear()
+    await runner.closeSession()
   })
 })
 

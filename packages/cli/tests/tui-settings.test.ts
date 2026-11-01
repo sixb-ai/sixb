@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadSettings, rememberWebMessages, saveSettings } from "../src/tui/settings"
@@ -57,5 +57,18 @@ describe("messages from the web", () => {
   test("stay off when the choice can't be read", async () => {
     await writeFile(join(configHome, "sixb", "web-messages-off.json"), "{ damaged")
     expect((await loadSettings(FOLDER)).continueFromWeb).toBe(false)
+  })
+
+  // Guard proof: read the list as empty when it can't be parsed, in rememberWebMessages; the write
+  // that follows turns messages back on in every other folder that had them off.
+  test("refuse a new choice rather than overwrite one they can't read", async () => {
+    const path = join(configHome, "sixb", "web-messages-off.json")
+    await writeFile(path, "{ damaged")
+
+    expect(
+      await rememberWebMessages(FOLDER, false).catch((error: unknown) => error)
+    ).toBeInstanceOf(Error)
+    expect(await readFile(path, "utf8")).toBe("{ damaged")
+    expect(await readdir(join(configHome, "sixb"))).toEqual(["web-messages-off.json"])
   })
 })

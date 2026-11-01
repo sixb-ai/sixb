@@ -509,10 +509,10 @@ export interface StartAgentRunInput {
   readonly execution: AgentRunExecution
   readonly startedAt?: Date
   /**
-   * Start it only as a computer's turn: one its thread moved to the cloud meanwhile is refused
-   * with `invalid_state`, so it never starts on both.
+   * Start it only as a computer's turn, there and in that folder: one whose thread moved meanwhile
+   * is refused with `invalid_state`, so it never starts where its thread no longer runs.
    */
-  readonly onComputer?: boolean
+  readonly onComputer?: Pick<AgentThreadComputer, "id" | "folder">
 }
 
 export interface FinishQueuedAgentRunInput {
@@ -586,6 +586,8 @@ export interface ListAgentRunsInput {
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"
+  /** Leave out the turns that wait for a computer: only a worker's to run. */
+  readonly excludeComputerTurns?: boolean
 }
 
 export interface ListThreadSubagentsInput {

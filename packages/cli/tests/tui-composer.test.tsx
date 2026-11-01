@@ -7,7 +7,7 @@ import type { SyntaxStyle } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { createSixbClient } from "@sixb/client"
-import { Workspace } from "../src/tui/app"
+import { queuedLabel, Workspace } from "../src/tui/app"
 import type { LocalRunner } from "../src/tui/runner"
 import { tuiColors } from "../src/tui/theme"
 import { Composer } from "../src/tui/ui"
@@ -163,4 +163,20 @@ describe("ctrl+c", () => {
     screen.mockInput.pressCtrlC()
     expect(exits).toBe(1)
   })
+})
+
+// Guard proof: answer "Starting" for every queued turn in queuedLabel; a turn nothing here will
+// claim reads as about to run.
+test("says why a queued turn isn't starting here", () => {
+  const runs = [{ id: "run_1", status: "queued" }] as unknown as Parameters<typeof queuedLabel>[0]
+  const where = { onComputer: true, mine: true, here: true, continueFromWeb: true, runsHere: false }
+  const label = (change: Partial<typeof where>) =>
+    queuedLabel(runs, "run_1", { ...where, ...change })
+
+  expect(label({})).toBe("Starting")
+  expect(label({ onComputer: false })).toBe("Starting")
+  expect(label({ mine: false })).toBe("Waiting for its owner's computer")
+  expect(label({ here: false })).toBe("Waiting for sixb in its folder")
+  expect(label({ continueFromWeb: false })).toBe("Waiting: messages from the web are off")
+  expect(label({ continueFromWeb: false, runsHere: true })).toBe("Starting")
 })

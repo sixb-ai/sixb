@@ -296,6 +296,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       .sort(compareLatestCheckpoints)
 
     const plan = planAgentThreadFork(input, {
+      workspace: source,
       ...(activeRun?.kind === "conversation"
         ? { triggerMessageId: activeRun.triggerMessageId }
         : {}),
@@ -714,7 +715,10 @@ class InMemoryAgentRunStore implements AgentRunStore {
 
   async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireStatus(input.projectId, input.id, "queued")
-    if (input.onComputer) assertStartsOnComputer(run)
+    if (input.onComputer) {
+      const thread = this.state.threads.get(key(input.projectId, run.threadId))
+      assertStartsOnComputer(run, thread?.computer, input.onComputer)
+    }
     const startedAt = new Date(input.startedAt ?? new Date())
     const next: AgentRunRecord = {
       ...run,
@@ -895,6 +899,12 @@ class InMemoryAgentRunStore implements AgentRunStore {
         input.parentRunId ? run.kind === "subagent" && run.parentRunId === input.parentRunId : true
       )
       .filter((run) => (statuses ? statuses.has(run.status) : true))
+      .filter(
+        (run) =>
+          !input.excludeComputerTurns ||
+          run.kind !== "conversation" ||
+          run.spec?.runsOn !== "computer"
+      )
       .filter((run) =>
         input.startedAfter ? (run.startedAt ?? run.createdAt) >= input.startedAfter : true
       )

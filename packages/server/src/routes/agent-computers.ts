@@ -45,25 +45,37 @@ const SESSION_MS = 60_000
 /** How many sessions one person holds at once: one per open `sixb`, a terminal each. */
 const MAX_SESSIONS = 20
 
+type ComputerClaim =
+  | { readonly computer: AgentThreadComputer }
+  | {
+      readonly refused: {
+        readonly status: 400 | 403
+        readonly error: Record<string, string>
+      }
+    }
+
 /**
- * Why a computer's turn is not this computer's to claim, or null when it is: its thread runs on
- * the claiming computer, in the folder it names.
+ * The computer and folder claiming a computer's turn, or why the turn is not theirs: its thread
+ * runs on the claiming computer, in the folder it names. It reads as of now, for a refusal that
+ * says why; the run's start is what decides, should the thread move right after.
  */
-export async function refuseOtherComputer(
+export async function computerClaiming(
   sessions: AgentRunSessionHost,
   run: ConversationAgentRunRecord,
   body: unknown
-): Promise<{ readonly status: 400 | 403; readonly error: Record<string, string> } | null> {
+): Promise<ComputerClaim> {
   const claimed = AgentThreadComputerInputSchema.safeParse(
     (body as { readonly computer?: unknown } | null)?.computer
   )
   if (!claimed.success) {
     return {
-      status: 400,
-      error: {
-        kind: "Error",
-        message:
-          "[SixbServer] A claim of a computer's turn names the computer and folder it comes from.",
+      refused: {
+        status: 400,
+        error: {
+          kind: "Error",
+          message:
+            "[SixbServer] A claim of a computer's turn names the computer and folder it comes from.",
+        },
       },
     }
   }
@@ -73,16 +85,18 @@ export async function refuseOtherComputer(
     id: run.threadId,
   })
   const place = thread?.computer
-  if (place?.id === claimed.data.id && place.folder === claimed.data.folder) return null
+  if (place && sameFolder(place, claimed.data)) return { computer: claimed.data }
   return {
-    status: 403,
-    error: {
-      kind: "AgentRunRefusedError",
-      message: !place
-        ? `[SixbServer] Agent thread '${run.threadId}' has no folder yet: move it to this one to run its turns here.`
-        : place.id === claimed.data.id
-          ? `[SixbServer] Agent thread '${run.threadId}' works in ${place.folder}: open sixb there, or move it to this folder.`
-          : `[SixbServer] Agent thread '${run.threadId}' runs on ${place.name}: move it to this computer to run its turns here.`,
+    refused: {
+      status: 403,
+      error: {
+        kind: "AgentRunRefusedError",
+        message: !place
+          ? `[SixbServer] Agent thread '${run.threadId}' has no folder yet: move it to this one to run its turns here.`
+          : place.id === claimed.data.id
+            ? `[SixbServer] Agent thread '${run.threadId}' works in ${place.folder}: open sixb there, or move it to this folder.`
+            : `[SixbServer] Agent thread '${run.threadId}' runs on ${place.name}: move it to this computer to run its turns here.`,
+      },
     },
   }
 }
@@ -108,12 +122,15 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
 
           const { computer } = MoveAgentThreadToComputerBodySchema.parse(body)
           const actor = requestActor(sixb)
-          const thread = await ownedComputerThread(sixb, params.threadId, actor, "moves it")
+          const thread = await ownedComputerThread(sixb, params.threadId, actor)
           const stays = thread.computer && sameFolder(thread.computer, computer)
-          if (!stays) await refuseHeldTurn(agents, thread)
-          const moved = await agents.threads
-            .assignComputer({ projectId: host.id, id: params.threadId, computer })
-            .catch(refuseRunningTurn)
+          const moved = await host.storage.transaction(async (tx) => {
+            const assigned = await requireAgents(tx)
+              .threads.assignComputer({ projectId: host.id, id: thread.id, computer })
+              .catch(refuseRunningTurn)
+            if (!stays) await refuseHeldTurn(requireAgents(tx), thread)
+            return assigned
+          })
           if (!stays) await announceMove(host, thread)
           return movedThread(host, sixb, { ...moved, participants: thread.participants }, actor)
         } catch (error) {
@@ -151,26 +168,15 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
           if (!agents) return unconfiguredStorageResponse(set, "Agent storage")
 
           const actor = requestActor(sixb)
-          const thread = await ownedComputerThread(sixb, params.threadId, actor, "moves it")
-          await refuseHeldTurn(agents, thread)
-          const moved = await agents.threads
-            .moveToCloud({ projectId: host.id, id: thread.id })
-            .catch(refuseRunningTurn)
-          if (moved.queued) {
-            const dispatch = await dispatchQueuedAgentRuns({
-              projectId: host.id,
-              storage: agents,
-              queue: host.queues.agents,
-              runIds: [moved.queued.id],
-            })
-            // The queued run is the dispatch intent: the worker's reconciliation picks it up.
-            for (const failure of dispatch.failures) {
-              console.error(
-                `[SixbServer] Could not dispatch agent run '${failure.runId}' after its thread moved to the cloud; it is retried.`,
-                failure.error
-              )
-            }
-          }
+          const thread = await ownedComputerThread(sixb, params.threadId, actor)
+          const moved = await host.storage.transaction(async (tx) => {
+            const inCloud = await requireAgents(tx)
+              .threads.moveToCloud({ projectId: host.id, id: thread.id })
+              .catch(refuseRunningTurn)
+            await refuseHeldTurn(requireAgents(tx), thread)
+            return inCloud
+          })
+          if (moved.queued) await dispatchMovedTurn(host, agents, moved.queued.id)
           await announceMove(host, thread)
           return movedThread(
             host,
@@ -304,8 +310,16 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
     )
 }
 
-/** A computer's thread the actor owns: refused for anyone else, and for a cloud thread. */
-/** A turn's held calls were reviewed for where it runs: it moves once they are answered. */
+function requireAgents(tx: { readonly agents?: AgentStorage }): AgentStorage {
+  if (!tx.agents) throw new Error("[SixbServer] Agent storage is not configured.")
+  return tx.agents
+}
+
+/**
+ * A turn's held calls were reviewed for where it runs: it moves once they are answered. Asked after
+ * the move, in its transaction: with the thread locked, a turn that was running has either paused
+ * by now, which this sees, or still runs, which refused the move.
+ */
 async function refuseHeldTurn(
   agents: AgentStorage,
   thread: { readonly projectId: string; readonly id: string }
@@ -352,11 +366,33 @@ async function announceMove(
   })
 }
 
+/** The move is committed: a queued turn that fails to publish is one the worker reconciles. */
+async function dispatchMovedTurn(
+  host: SixbHostView,
+  agents: AgentStorage,
+  runId: string
+): Promise<void> {
+  try {
+    const { failures } = await dispatchQueuedAgentRuns({
+      projectId: host.id,
+      storage: agents,
+      queue: host.queues.agents,
+      runIds: [runId],
+    })
+    for (const failure of failures) throw failure.error
+  } catch (error) {
+    console.error(
+      `[SixbServer] Could not dispatch agent run '${runId}' after its thread moved to the cloud; it is retried.`,
+      error
+    )
+  }
+}
+
+/** A computer's thread the actor owns: refused for anyone else, and for a cloud thread. */
 async function ownedComputerThread(
   sixb: ReturnType<typeof requireRequestSixb>,
   threadId: string,
-  actor: Principal,
-  what: string
+  actor: Principal
 ) {
   const thread = await sixb.agent.threads.getById(threadId)
   if (!thread) {
@@ -368,7 +404,7 @@ async function ownedComputerThread(
   if (!principalsEqual(thread.ownerPrincipal, actor)) {
     throw new AgentRequestError(
       "not_thread_owner",
-      `[SixbServer] Only the owner of Agent thread '${threadId}' ${what}.`
+      `[SixbServer] Only the owner of Agent thread '${threadId}' moves it.`
     )
   }
   if (thread.runsOn !== "computer") {

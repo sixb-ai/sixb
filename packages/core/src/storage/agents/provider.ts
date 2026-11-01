@@ -235,6 +235,8 @@ export function remapArtifactIds(
 
 /** What a fork reads from its source thread, inside the provider's transaction. */
 export interface AgentThreadForkSource {
+  /** Where the source runs: a fork starts in the cloud, without the files its turns worked on. */
+  readonly workspace: Pick<AgentThreadRecord, "runsOn" | "movedAt">
   /** The active run's trigger message, when a turn is running. */
   readonly triggerMessageId?: string
   /**
@@ -294,12 +296,15 @@ export function planAgentThreadFork(
     (candidate) => candidate.observedHeadSeq <= lastCopiedSeq
   )
 
+  const movedAt =
+    source.workspace.movedAt ?? (source.workspace.runsOn === "computer" ? createdAt : undefined)
   const thread: AgentThreadRecord = {
     id: input.id,
     projectId: input.projectId,
     kind: "conversation",
     ownerPrincipal: structuredClone(input.ownerPrincipal),
     ...(input.title === undefined ? {} : { title: input.title }),
+    ...(movedAt === undefined ? {} : { movedAt }),
     ...(input.sandboxParams === undefined
       ? {}
       : { sandboxParams: snapshotAgentThreadSandboxParams(input.sandboxParams) }),
@@ -495,8 +500,9 @@ export function assertAgentComputerSession(
   assertAgentThreadComputer(session.computer, prefix)
 }
 
-// C0 and C1 controls, DEL, and the marks that reorder text where a terminal or page shows it.
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/
+/** C0 and C1 controls, DEL, and the marks that reorder text where a terminal or page shows it. */
+export const CONTROL_CHARACTER =
+  /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/
 
 /** Refuse to assign a computer to a thread that runs in the cloud, or does not exist. */
 export function assertAssignableComputer(
@@ -569,11 +575,22 @@ export function assertTurnInThreadPlace(
 }
 
 /** Refuse to start a computer's turn that moved to the cloud before it started. */
-export function assertStartsOnComputer(run: AgentRunRecord, prefix = "Sixb"): void {
+export function assertStartsOnComputer(
+  run: AgentRunRecord,
+  threadComputer: Pick<AgentThreadComputer, "id" | "folder"> | undefined,
+  place: Pick<AgentThreadComputer, "id" | "folder">,
+  prefix = "Sixb"
+): void {
   if (run.kind !== "conversation" || run.spec?.runsOn !== "computer") {
     throw new AgentStorageError(
       "invalid_state",
       `[${prefix}] Agent run '${run.id}' runs in the cloud now: no computer starts it.`
+    )
+  }
+  if (threadComputer?.id !== place.id || threadComputer.folder !== place.folder) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Agent run '${run.id}' moved to another folder or computer: it starts there.`
     )
   }
 }
@@ -583,10 +600,8 @@ export function movesComputerPlace(
   thread: AgentThreadRecord,
   computer: AgentThreadComputer
 ): boolean {
-  return (
-    thread.computer !== undefined &&
-    (thread.computer.id !== computer.id || thread.computer.folder !== computer.folder)
-  )
+  // One from before folders were kept ran somewhere unknown: its first folder is a move too.
+  return thread.computer?.id !== computer.id || thread.computer.folder !== computer.folder
 }
 
 /** A computer's queued turn as the cloud runs it. */

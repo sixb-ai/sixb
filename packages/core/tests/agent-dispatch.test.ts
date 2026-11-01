@@ -53,6 +53,41 @@ describe("dispatchQueuedAgentRuns", () => {
     expect(claimed[0]?.job.payload).toEqual({ runId: run.id })
   })
 
+  // Guard proof: drop excludeComputerTurns from dispatchQueuedAgentRuns; the older turn waiting for
+  // a computer fills the scan, and the cloud run it hides stays queued.
+  test("finds cloud runs however many older turns wait for a computer", async () => {
+    const storage = new InMemoryStorage()
+    const queues = new InMemoryQueues()
+    await storage.agents.threads.create({
+      id: "thread-computer",
+      projectId: PROJECT_ID,
+      ownerPrincipal: { type: "system", id: "system" },
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
+    })
+    await storage.agents.runs.create({
+      id: "run-computer",
+      projectId: PROJECT_ID,
+      executionId: await createTestAgentExecution(storage, {
+        projectId: PROJECT_ID,
+        runId: "run-computer",
+      }),
+      threadId: "thread-computer",
+      triggerMessageId: "message-computer",
+      spec: { model: { provider: "test", modelId: "test-model" }, runsOn: "computer" },
+    })
+    const cloud = await createQueuedRun(storage)
+
+    const dispatch = await dispatchQueuedAgentRuns({
+      projectId: PROJECT_ID,
+      storage: storage.agents,
+      queue: queues.agents,
+      limit: 1,
+    })
+
+    expect(dispatch.dispatched.map(({ runId }) => runId)).toEqual([cloud.id])
+  })
+
   test("skips runs that are no longer queued", async () => {
     const storage = new InMemoryStorage()
     const queues = new InMemoryQueues()

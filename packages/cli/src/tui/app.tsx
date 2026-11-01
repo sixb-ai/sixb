@@ -962,6 +962,8 @@ function ThreadView(
                     : queuedLabel(runs, activeRunId, {
                         onComputer,
                         mine,
+                        here,
+                        continueFromWeb,
                         runsHere: activeRunId !== null && runner.runs(activeRunId),
                       })
               }
@@ -1013,14 +1015,25 @@ function ThreadView(
   )
 }
 
-function queuedLabel(
+export function queuedLabel(
   runs: readonly Run[],
   runId: string | null,
-  where: { readonly onComputer: boolean; readonly mine: boolean; readonly runsHere: boolean }
+  where: {
+    readonly onComputer: boolean
+    readonly mine: boolean
+    readonly here: boolean
+    readonly continueFromWeb: boolean
+    readonly runsHere: boolean
+  }
 ): string {
   const run = runs.find((entry) => entry.id === runId)
   if (run?.status === "queued") {
-    return where.onComputer && !where.mine ? "Waiting for its owner's computer" : "Starting"
+    if (!where.onComputer) return "Starting"
+    if (!where.mine) return "Waiting for its owner's computer"
+    if (!where.here) return "Waiting for sixb in its folder"
+    return where.continueFromWeb || where.runsHere
+      ? "Starting"
+      : "Waiting: messages from the web are off"
   }
   // Yours, running, and not here: another sixb runs it, or one that closed, whose turn ends
   // interrupted once its lease lapses.

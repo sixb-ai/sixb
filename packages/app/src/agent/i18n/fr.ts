@@ -795,7 +795,7 @@ export const fr: Translation<AgentMessages> = {
     online: "sixb y est ouvert",
     offline: "sixb y est fermé",
     offlineNotice: (computer, folder) =>
-      `${computer} est hors ligne. Votre message s’exécutera quand vous ouvrirez sixb dans ${folder}.`,
+      `${computer} est hors ligne. Votre message attendra que sixb soit ouvert dans ${folder} avec les messages du web activés.`,
     noFolder:
       "Cette conversation n’a pas encore de dossier. Ouvrez sixb dans son dossier et appuyez sur ctrl+f, ou continuez dans le cloud.",
     waitingFor: (computer) => `En attente de ${computer}`,

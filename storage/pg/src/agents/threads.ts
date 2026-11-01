@@ -144,8 +144,10 @@ export class PgAgentThreadStore implements AgentThreadStore {
       return await runPgTransaction(this.sql, async (tx) => {
         // A share lock holds back the writes that take the thread for update: an admitted request
         // or a finalized answer lands before the copy or after it, never inside it.
-        const [source] = await tx<Pick<AgentThreadRow, "id" | "kind" | "active_run_id">[]>`
-          SELECT id, kind, active_run_id FROM agent_threads
+        const [source] = await tx<
+          Pick<AgentThreadRow, "id" | "kind" | "active_run_id" | "runs_on" | "moved_at">[]
+        >`
+          SELECT id, kind, active_run_id, runs_on, moved_at FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.sourceThreadId}
           FOR SHARE
         `
@@ -189,6 +191,10 @@ export class PgAgentThreadStore implements AgentThreadStore {
         const plan = planAgentThreadFork(
           input,
           {
+            workspace: {
+              ...(source.runs_on === "computer" ? { runsOn: "computer" as const } : {}),
+              ...(source.moved_at ? { movedAt: new Date(source.moved_at) } : {}),
+            },
             ...(activeRun?.trigger_message_id
               ? { triggerMessageId: activeRun.trigger_message_id }
               : {}),
@@ -215,6 +221,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
             status,
             last_message_at,
             message_count,
+            moved_at,
             created_at,
             updated_at
           ) VALUES (
@@ -228,6 +235,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
             ${thread.status},
             ${thread.lastMessageAt ?? null},
             ${thread.messageCount},
+            ${thread.movedAt ?? null},
             ${thread.createdAt},
             ${thread.updatedAt}
           )

@@ -253,7 +253,19 @@ export class PgAgentRunStore implements AgentRunStore {
     const startedAt = input.startedAt ?? new Date()
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockStatus(tx, input.projectId, input.id, "queued")
-      if (input.onComputer) assertStartsOnComputer(rowToRunRecord(run), "SixbPg")
+      if (input.onComputer) {
+        // A move locks this run first, so it landed already or waits for this start.
+        const [thread] = await tx<{ id: string | null; folder: string }[]>`
+          SELECT computer_id AS id, computer_folder AS folder FROM agent_threads
+          WHERE project_id = ${input.projectId} AND id = ${run.thread_id}
+        `
+        assertStartsOnComputer(
+          rowToRunRecord(run),
+          thread?.id ? { id: thread.id, folder: thread.folder } : undefined,
+          input.onComputer,
+          "SixbPg"
+        )
+      }
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
         SET
@@ -492,6 +504,10 @@ export class PgAgentRunStore implements AgentRunStore {
     if (input.parentRunId) {
       whereClauses.push(`parent_run_id = $${index++}`)
       params.push(input.parentRunId)
+    }
+
+    if (input.excludeComputerTurns) {
+      whereClauses.push("spec->>'runsOn' IS DISTINCT FROM 'computer'")
     }
 
     index = appendRunListFilters(

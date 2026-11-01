@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile, rename, writeFile } from "node:fs/promises"
 import { type as osType } from "node:os"
 import { dirname, join } from "node:path"
 import type { ListModelsResponses } from "@sixb/client"
@@ -74,29 +74,36 @@ const SETTINGS_FILE = () => join(dirname(resolveConfigPath()), "tui.json")
 const WEB_MESSAGES_OFF_FILE = () => join(dirname(resolveConfigPath()), "web-messages-off.json")
 
 async function foldersWithWebMessagesOff(): Promise<readonly string[]> {
-  const stored: unknown = JSON.parse(await readFile(WEB_MESSAGES_OFF_FILE(), "utf8"))
+  const text = await readFile(WEB_MESSAGES_OFF_FILE(), "utf8").catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "[]"
+    throw error
+  })
+  const stored: unknown = JSON.parse(text)
   if (!Array.isArray(stored)) throw new Error("[SixbCLI] Unreadable web-messages-off.json.")
   return stored.filter((folder): folder is string => typeof folder === "string")
 }
 
 /** On unless turned off in `folder`. A choice it can't read stays off rather than run turns here. */
 async function webMessagesOnIn(folder: string): Promise<boolean> {
-  try {
-    return !(await foldersWithWebMessagesOff()).includes(folder)
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT"
-  }
+  return foldersWithWebMessagesOff().then(
+    (folders) => !folders.includes(folder),
+    () => false
+  )
 }
 
-/** Keep the choice for this folder alone. Reads the file first: another `sixb` may have written it. */
+/**
+ * Keep the choice for this folder alone. Reads the file first, as another `sixb` may have written
+ * it, and refuses one it can't read rather than lose the other folders' choices. Written whole, so
+ * no reader ever finds half of it.
+ */
 export async function rememberWebMessages(folder: string, on: boolean): Promise<void> {
-  const folders = await foldersWithWebMessagesOff().catch(() => [])
-  const others = folders.filter((other) => other !== folder)
-  await writeFile(
-    WEB_MESSAGES_OFF_FILE(),
-    `${JSON.stringify(on ? others : [...others, folder], null, 2)}\n`,
-    { mode: 0o600 }
-  )
+  const others = (await foldersWithWebMessagesOff()).filter((other) => other !== folder)
+  const path = WEB_MESSAGES_OFF_FILE()
+  const written = `${path}.${process.pid}`
+  await writeFile(written, `${JSON.stringify(on ? others : [...others, folder], null, 2)}\n`, {
+    mode: 0o600,
+  })
+  await rename(written, path)
 }
 
 export async function loadSettings(folder: string): Promise<Settings> {
