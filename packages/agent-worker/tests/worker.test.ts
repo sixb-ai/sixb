@@ -15038,6 +15038,82 @@ describe("context within a turn", () => {
     }
   })
 
+  test("ends a turn whose working set does not fit rather than clear and read it again", async () => {
+    // Reproduce: drop the needed() checks in ContextGuard.clear and cutUnread; the model then
+    // reads each chapter cleared or cut again, the guard reduces another, and the turn goes round
+    // until the model gives up after 40 calls.
+    const requests: LanguageModelRequest[] = []
+    const NEEDED = 4
+    const model = new WorkerTestModel({
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "mock-model",
+        capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+        contextWindow: 60_000,
+        maxOutputTokens: 16_384,
+      },
+      stream: async (request) => {
+        requests.push(request)
+        const inputTokens = estimateAgentRequestTokens(request, 3)
+        if (inputTokens > 60_000) throw contextWindowRejection()
+
+        const usage = { inputTokens, outputTokens: 20 }
+        // It needs every chapter whole at once: a cleared or missing one, it reads again.
+        const whole = new Set(
+          request.messages.flatMap((message) =>
+            message.role === "tool"
+              ? message.content.flatMap((part) =>
+                  part.toolName === "chapter" && part.output.type === "json"
+                    ? [String((part.output.value as { chapter?: string }).chapter)]
+                    : []
+                )
+              : []
+          )
+        )
+        const missing = Array.from({ length: NEEDED }, (_, i) => String(i)).find(
+          (number) => !whole.has(number)
+        )
+        if (missing === undefined || requests.length > 40) {
+          return stream([
+            { type: "stream-start" },
+            { type: "text-start", id: "text" },
+            { type: "text-delta", id: "text", delta: "Compared them all." },
+            { type: "text-end", id: "text" },
+            { type: "finish", finishReason: "stop", usage },
+          ])
+        }
+        return stream([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: `chapter_${requests.length}`,
+            toolName: "chapter",
+            input: JSON.stringify({ number: missing }),
+          },
+          { type: "finish", finishReason: "tool-calls", usage },
+        ])
+      },
+    })
+    // Four chapters of about 14,000 tokens each: more than the 45,000-token limit together.
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(42_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Compare the four chapters, read whole." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("failed")
+      expect(run.error?.code).toBe("agent.context_limit_exceeded")
+      expect(requests.length).toBeLessThan(15)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("fails a call rejected again, keeping the steps the turn completed", async () => {
     // Reproduce: drop the messages recordFate takes in runConversationTurn; the failed turn then
     // leaves no answer, and the chapter it read is lost.
