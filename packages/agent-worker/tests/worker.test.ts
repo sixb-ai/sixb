@@ -14991,4 +14991,54 @@ describe("context within a turn", () => {
       await worker.stop()
     }
   })
+
+  test("fails a call rejected again, keeping the steps the turn completed", async () => {
+    // Reproduce: drop the messages recordFate takes in runConversationTurn; the failed turn then
+    // leaves no answer, and the chapter it read is lost.
+    const requests: LanguageModelRequest[] = []
+    let rejected = 0
+    const model = chapterReadingModel({
+      chapters: 2,
+      requests,
+      reject: (request) => {
+        if (chapterResults(request).length === 0) return undefined
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(3_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("failed")
+      // Reproduce: drop the context-window case in runAgentTurn's catch; the run then fails as
+      // agent.execution_failed, which offers a Retry that fails the same way.
+      expect(run.error?.code).toBe("agent.context_limit_exceeded")
+      // Asked once again, never more.
+      expect(rejected).toBe(2)
+
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId: run.threadId,
+        roles: ["assistant"],
+      })
+      expect(messages).toHaveLength(1)
+      expect(messages[0]?.runId).toBe(run.id)
+      expect(messages[0]?.parts).toContainEqual(
+        expect.objectContaining({
+          type: "tool-call",
+          toolCallId: "chapter_0",
+          state: "output-available",
+        })
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
 })
