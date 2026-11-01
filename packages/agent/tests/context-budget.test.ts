@@ -3,6 +3,7 @@ import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "@sixb/core/internal/agent
 import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
+  type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelRequest,
   ModelCatalogUnavailableError,
@@ -47,6 +48,40 @@ function request(content: readonly (ModelTextPart | ModelFilePart)[] = []): Lang
 
 const text = (bytes: number): ModelTextPart => ({ type: "text", text: "a".repeat(bytes) })
 
+/** What the project's earlier runs measured of a model: twenty calls at `bytesPerToken`. */
+const measured = (bytesPerToken: number) =>
+  Array.from({ length: 20 }, () => ({ bytes: Math.round(bytesPerToken * 10_000), tokens: 10_000 }))
+
+/** A model whose provider counts the request's text at `bytesPerToken`. */
+function countingAt(model: WorkerTestModel, bytesPerToken: number): (number | undefined)[] {
+  const outputs: (number | undefined)[] = []
+  model.stream = async (request) => {
+    outputs.push(request.maxOutputTokens)
+    const bytes = request.messages
+      .flatMap((message) =>
+        message.role === "system"
+          ? []
+          : message.content.map((part) => (part.type === "text" ? part.text.length : 0))
+      )
+      .reduce((total, value) => total + value, 0)
+    // The request's and its message's 8 overhead tokens each, then its text.
+    const inputTokens = Math.ceil(bytes / bytesPerToken) + 16
+    return {
+      events: (async function* () {
+        yield { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 10 } }
+      })(),
+    }
+  }
+  return outputs
+}
+
+/** One call, read to the end as the model loop reads it. */
+async function streamAll(model: LanguageModel, input: LanguageModelRequest): Promise<void> {
+  for await (const _event of (await model.stream(input)).events) {
+    // Each event is read.
+  }
+}
+
 /** A model as a session hands it over, pinned once, then budgeted by the harness. */
 async function pinAndPrepare(selection: Parameters<typeof prepareAgentModel>[0]) {
   return prepareAgentModel({ ...selection, model: await resolveLanguageModel(selection.model) })
@@ -72,7 +107,7 @@ describe("agent context budget resolution", () => {
   })
 
   test("estimates each call like the conversation, at the rate its model's runs measured", async () => {
-    // Removal proof: estimate the call by its serialized JSON, or ignore selection.bytesPerToken in
+    // Removal proof: estimate the call by its serialized JSON, or ignore selection.tokenRates in
     // resolveAgentContextBudget; the escaped quotes double, or the call is weighed at the default
     // 2, and it asks for another output.
     const base = selection({
@@ -81,7 +116,7 @@ describe("agent context budget resolution", () => {
       maxOutputTokens: 64_000,
     })
     const outputs = recordOutputs(base.model)
-    const { model, budget } = await pinAndPrepare({ ...base, bytesPerToken: 2.1 })
+    const { model, budget } = await pinAndPrepare({ ...base, tokenRates: measured(2.1) })
     await model.stream(request([{ type: "text", text: '"'.repeat(300_000) }]))
 
     expect(budget.bytesPerToken).toBe(2.1)
@@ -95,9 +130,37 @@ describe("agent context budget resolution", () => {
     const { budget } = await pinAndPrepare(selection({ modelId: "claude-haiku-5-5" }))
 
     expect(budget.bytesPerToken).toBe(AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN)
-    expect(() => resolveAgentContextBudget({ ...selection(), bytesPerToken: 0 })).toThrow(
-      "bytesPerToken must be a positive number"
-    )
+    expect(() =>
+      resolveAgentContextBudget({ ...selection(), tokenRates: [{ bytes: 0, tokens: 10_000 }] })
+    ).toThrow("token rates must measure a positive number of bytes per token")
+  })
+
+  test("weighs an unmeasured model's next call at the rate its first call measured", async () => {
+    // Reproduce: leave the run's own calls out of runBytesPerToken in prepareAgentModel; the
+    // second call is weighed at the default 2, 280,000 tokens, and given only the reserve.
+    const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
+    // A sparse tokenizer, as OpenAI's measures about 4.4 bytes per token.
+    const outputs = countingAt(base.model, 4)
+    const { model, budget } = await pinAndPrepare(base)
+
+    for (const bytes of [100_000, 560_000]) await streamAll(model, request([text(bytes)]))
+
+    expect(budget.bytesPerToken).toBe(2)
+    // 560,000 bytes at the 4 per token the first call measured, plus the 16 overhead tokens.
+    expect(outputs[1]).toBe(200_000 - (140_000 + 16))
+  })
+
+  test("barely moves a model's twenty measurements with one call of a run", async () => {
+    // Reproduce: make the run's rate its latest call's alone; 4 bytes per token then weigh the
+    // second call, which the project's twenty runs measured at 2.4.
+    const base = selection({ contextWindow: 400_000, maxOutputTokens: 64_000 })
+    const outputs = countingAt(base.model, 4)
+    const { model } = await pinAndPrepare({ ...base, tokenRates: measured(2.4) })
+
+    for (const bytes of [100_000, 840_000]) await streamAll(model, request([text(bytes)]))
+
+    // 840,000 bytes at the project's 2.4 per token, plus the 16 overhead tokens.
+    expect(outputs[1]).toBe(400_000 - (350_000 + 16))
   })
 
   test("reports what each call measured of its model's tokenizer, for the run to record", async () => {
@@ -140,7 +203,7 @@ describe("agent context budget resolution", () => {
         maxOutputTokens: 64_000,
       }),
       // The densest the project's runs measured on the model lately.
-      bytesPerToken: 2.1,
+      tokenRates: measured(2.1),
     }
     const outputs: (number | undefined)[] = []
     base.model.stream = async (request) => {
@@ -182,7 +245,7 @@ describe("agent context budget resolution", () => {
         maxOutputTokens: 64_000,
       }),
       // What the project's runs measured on the model: its large tool results read at 2.1.
-      bytesPerToken: 2.1,
+      tokenRates: measured(2.1),
     }
     const calls: { readonly inputTokens: number; readonly maxOutputTokens?: number }[] = []
     base.model.stream = async (request) => {

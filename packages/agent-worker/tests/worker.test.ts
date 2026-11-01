@@ -66,7 +66,6 @@ import {
 import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
-  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   AgentExecutionLostError,
   AgentFinalizationError,
   type AgentRunSession,
@@ -2147,8 +2146,7 @@ function executionPlanFor(sixb: TestSixb) {
   const model = sixb.definitions.models?.language?.default.model
   if (!model) throw new Error("Expected a default language model.")
   // A project none of whose runs measured the model yet.
-  const bytesPerToken = AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
-  return resolveRunPlan({ ...plan, sandboxModels: [], bytesPerToken }, { model })
+  return resolveRunPlan({ ...plan, sandboxModels: [], tokenRates: [] }, { model })
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */

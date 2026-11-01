@@ -6,7 +6,7 @@ import {
   estimateAgentContextRequestTokens,
   measureAgentContextRequest,
   measureModelRequest,
-  readAgentContextBytesPerToken,
+  readAgentContextTokenRates,
   recordAgentContextTokenRate,
 } from "../src/agents"
 import {
@@ -153,8 +153,11 @@ describe("a model's learned rate", () => {
     })
   }
 
-  const learned = (tokenRates: AgentTokenRateStore) =>
-    readAgentContextBytesPerToken({ tokenRates, projectId: "project", model })
+  /** The rate a run on the model starts from, as its plan reads the project's measurements. */
+  const learned = async (tokenRates: AgentTokenRateStore) =>
+    learnedAgentContextBytesPerToken(
+      await readAgentContextTokenRates({ tokenRates, projectId: "project", model })
+    )
 
   const samples = (...rates: number[]): AgentContextTokenRateSample[] =>
     rates.map((rate) => ({ bytes: Math.round(rate * 10_000), tokens: 10_000 }))
@@ -167,19 +170,19 @@ describe("a model's learned rate", () => {
   })
 
   test("is what the model's previous runs measured, for its next one", async () => {
-    // Removal proof: return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN from readAgentContextBytesPerToken;
-    // the next run starts at 2 again.
+    // Removal proof: return no measurement from readAgentContextTokenRates; the next run starts at
+    // 2 again.
     const tokenRates = project()
     await recordRun(tokenRates, 4.5)
 
     expect(await learned(tokenRates)).toBe(4.5)
     expect(
-      await readAgentContextBytesPerToken({
+      await readAgentContextTokenRates({
         tokenRates,
         projectId: "project",
         model: { ...model, modelId: "claude-sonnet-5" },
       })
-    ).toBe(2)
+    ).toEqual([])
   })
 
   test("follows a denser tokenizer from its second run, a sparser one within the window", async () => {
@@ -210,7 +213,7 @@ describe("a model's learned rate", () => {
   })
 
   test("falls back to the default when storage cannot read, and never fails a run on a write", async () => {
-    // Removal proof: drop the try in readAgentContextBytesPerToken or recordAgentContextTokenRate;
+    // Removal proof: drop the try in readAgentContextTokenRates or recordAgentContextTokenRate;
     // the storage failure reaches the run.
     const warn = spyOn(console, "warn").mockImplementation(() => {})
     const broken: AgentTokenRateStore = {

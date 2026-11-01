@@ -350,7 +350,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       const session = await claim(host, { run, leaseExpiresAt: LEASE })
       if (!session) throw new Error("Expected the run to be claimed.")
 
-      expect((await session.plan()).bytesPerToken).toBe(2)
+      expect((await session.plan()).tokenRates).toEqual([])
       session.noteTokenRate({ ...model, bytes: 30_000, tokens: 10_000 })
       session.noteTokenRate({ ...model, bytes: 24_000, tokens: 10_000 })
       // Nothing is kept before the run's end.
@@ -386,7 +386,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       })
       const nextSession = await claim(host, { run: next, leaseExpiresAt: LEASE })
       if (!nextSession) throw new Error("Expected the next run to be claimed.")
-      expect((await nextSession.plan()).bytesPerToken).toBe(2.4)
+      expect((await nextSession.plan()).tokenRates).toEqual([{ bytes: 24_000, tokens: 10_000 }])
       nextSession.close()
     })
   })
