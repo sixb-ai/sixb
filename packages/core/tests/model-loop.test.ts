@@ -1509,3 +1509,205 @@ describe("a model call its reader does not finish", () => {
     }
   })
 })
+
+describe("a rejected model call", () => {
+  // Reproduce: drop the recoverStep call in runModelLoop (throw failure.error at once); the
+  // rejected call then fails the loop instead of being asked again with the shorter request.
+  test("asks a rejected call again, once, with the request recoverStep makes of it", async () => {
+    const overflow = new Error("[test] Input exceeds the context window.")
+    const requests: (readonly ModelMessage[])[] = []
+    const recoveries: { stepIndex: number; error: unknown; steps: number }[] = []
+    let calls = 0
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        requests.push(request.messages)
+        calls += 1
+        if (calls === 2) throw overflow
+        return streamFromArray(
+          calls === 1
+            ? [
+                { type: "stream-start" },
+                { type: "tool-call", toolCallId: "call", toolName: "echo", input: '{"value":"a"}' },
+                finish("tool-calls"),
+              ]
+            : [
+                { type: "stream-start" },
+                { type: "text-start", id: "answer" },
+                { type: "text-delta", id: "answer", delta: "Done." },
+                { type: "text-end", id: "answer" },
+                finish(),
+              ]
+        )
+      },
+    })
+    const shorter: ModelMessage[] = [{ role: "user", content: [{ type: "text", text: "Short." }] }]
+
+    const result = await runModelLoop({
+      model,
+      messages: [{ role: "user", content: [{ type: "text", text: "Long." }] }],
+      tools: [echo],
+      signal: new AbortController().signal,
+      recoverStep: ({ stepIndex, error, steps }) => {
+        recoveries.push({ stepIndex, error, steps: steps.length })
+        return { messages: shorter }
+      },
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "Done." })
+    expect(recoveries).toEqual([{ stepIndex: 1, error: overflow, steps: 1 }])
+    expect(requests).toHaveLength(3)
+    expect(requests[2]).toEqual(shorter)
+    // The step after the one asked again goes on from the shorter request.
+    expect(result.steps).toHaveLength(2)
+  })
+
+  // Reproduce: let recoverStep run on every attempt in runModelLoop; the call is then asked a
+  // third time, which answers.
+  test("fails with the second rejection of a call asked again", async () => {
+    let calls = 0
+    let recoveries = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        if (calls <= 2) throw new Error(`[test] rejected ${calls}`)
+        return streamFromArray([{ type: "stream-start" }, finish()])
+      },
+    })
+
+    const error = await runModelLoop({
+      model,
+      messages: [],
+      signal: new AbortController().signal,
+      recoverStep: ({ messages }) => {
+        recoveries += 1
+        return { messages }
+      },
+    }).catch((error: unknown) => error)
+
+    expect(error).toMatchObject({ message: "[test] rejected 2" })
+    expect(calls).toBe(2)
+    expect(recoveries).toBe(1)
+  })
+
+  test("fails with the rejection when recoverStep makes no request", async () => {
+    let calls = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        throw new Error("[test] rejected")
+      },
+    })
+
+    const error = await runModelLoop({
+      model,
+      messages: [],
+      signal: new AbortController().signal,
+      recoverStep: () => undefined,
+    }).catch((error: unknown) => error)
+
+    expect(error).toMatchObject({ message: "[test] rejected" })
+    expect(calls).toBe(1)
+  })
+
+  /** A call that streams a partial answer, then finds the context window filled. */
+  function windowFilled(text: string): LanguageModelStreamEvent[] {
+    return [
+      { type: "stream-start" },
+      { type: "text-start", id: "answer" },
+      { type: "text-delta", id: "answer", delta: text },
+      { type: "text-end", id: "answer" },
+      {
+        type: "finish",
+        finishReason: "length",
+        rawFinishReason: "model_context_window_exceeded",
+        contextWindowExceeded: true,
+        usage: USAGE,
+      },
+    ]
+  }
+
+  // Reproduce: throw `failure.error` where runModelLoop throws `call.failure.error`; a caller that
+  // cannot compact then loses an answer the window cut, which it was billed for.
+  test("ends with an answer the window cut short when nothing asks it again", async () => {
+    const result = await runModelLoop({
+      model: modelFromCalls([windowFilled("Partial.")]),
+      messages: [],
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({
+      status: "completed",
+      output: "Partial.",
+      finishReason: "length",
+    })
+  })
+
+  // Reproduce: leave out the start-step retry chunk in runModelLoop; the reader then keeps the
+  // first attempt's text above the answer.
+  test("asks again an answer the window cut short, and tells the reader to drop it", async () => {
+    const chunks: ModelUiChunk[] = []
+    const recoveries: unknown[] = []
+    const result = await runModelLoop({
+      model: modelFromCalls([
+        windowFilled("Partial."),
+        [
+          { type: "stream-start" },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Whole." },
+          { type: "text-end", id: "answer" },
+          finish(),
+        ],
+      ]),
+      messages: [{ role: "user", content: [{ type: "text", text: "Long." }] }],
+      signal: new AbortController().signal,
+      onEvent: (chunk) => {
+        chunks.push(chunk)
+      },
+      recoverStep: ({ error, usage, messages }) => {
+        recoveries.push({ error, usage })
+        return { messages }
+      },
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "Whole." })
+    expect(recoveries).toEqual([
+      { error: expect.objectContaining({ reason: "context-window-exceeded" }), usage: USAGE },
+    ])
+    const retry = chunks.findIndex((chunk) => chunk.type === "start-step" && chunk.retry)
+    expect(retry).toBeGreaterThan(chunks.findIndex((chunk) => chunk.type === "text-delta"))
+    expect(chunks.slice(retry + 1)).toContainEqual({
+      type: "text-delta",
+      id: "answer",
+      delta: "Whole.",
+    })
+  })
+
+  test("ends with the second answer the window cut short", async () => {
+    const result = await runModelLoop({
+      model: modelFromCalls([windowFilled("First."), windowFilled("Second.")]),
+      messages: [],
+      signal: new AbortController().signal,
+      recoverStep: ({ messages }) => ({ messages }),
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "Second.", finishReason: "length" })
+  })
+
+  // Reproduce: treat an abort error as a cancel only while the loop's signal is aborted in
+  // callModel; the loop then reads the stream that never started and fails with "Stream did not
+  // start", hiding the abort.
+  test("ends as stopped when a call fails with an abort error of its own", async () => {
+    const result = await runModelLoop({
+      model: new MockLanguageModel({
+        stream: async () => {
+          throw new DOMException("The provider's request was aborted.", "AbortError")
+        },
+      }),
+      messages: [],
+      signal: new AbortController().signal,
+      recoverStep: ({ messages }) => ({ messages }),
+    })
+
+    expect(result).toMatchObject({ status: "aborted" })
+  })
+})

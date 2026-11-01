@@ -51,6 +51,16 @@ interface ModelLoopOptions {
   readonly prepareStep?: (
     input: PrepareModelStepInput
   ) => PrepareModelStepResult | undefined | Promise<PrepareModelStepResult | undefined>
+  /**
+   * Asked when a provider call fails before its step completes, or answers cut short by the
+   * model's context window, with what it failed with. Messages it returns replace the call's
+   * request, and the call is made again with them, once: a second failure of the same step, or no
+   * messages, fails the loop with its error, and an answer the window cut ends it as one the
+   * output limit cut short.
+   */
+  readonly recoverStep?: (
+    input: RecoverModelStepInput
+  ) => PrepareModelStepResult | undefined | Promise<PrepareModelStepResult | undefined>
   readonly onEvent?: (event: ModelUiChunk) => void | Promise<void>
   readonly onStepEnd?: (step: ModelStep) => void | Promise<void>
   /**
@@ -80,8 +90,17 @@ export type RunModelLoopInput<TOutput = string> = ModelLoopOptions &
 export interface PrepareModelStepInput {
   readonly stepIndex: number
   readonly messages: readonly ModelMessage[]
+  /** The steps the loop completed before this one, the provider's usage of each included. */
+  readonly steps: readonly ModelStep[]
   readonly model: LanguageModel
   readonly signal: AbortSignal
+}
+
+export interface RecoverModelStepInput extends PrepareModelStepInput {
+  /** What the call failed with. */
+  readonly error: unknown
+  /** What the provider counted for the call, when it finished before it failed. */
+  readonly usage?: ModelUsage
 }
 
 export interface PrepareModelStepResult {
@@ -117,6 +136,7 @@ interface CompletedResponse {
   readonly toolCalls: readonly ParsedToolCall[]
   readonly finishReason: ModelFinishReason
   readonly rawFinishReason?: string
+  readonly contextWindowExceeded?: boolean
   readonly usage: ModelUsage
   readonly responseId?: string
   readonly responseModelId?: string
@@ -171,6 +191,7 @@ export async function runModelLoop(
       const prepared = await input.prepareStep?.({
         stepIndex,
         messages,
+        steps,
         model: input.model,
         signal: input.signal,
       })
@@ -183,69 +204,78 @@ export async function runModelLoop(
       return { status: "aborted", steps, partialContent: [] }
     }
 
-    const callId = generateCallId()
-    if (!callId || callIds.has(callId)) {
-      throw new ModelStreamError(`[SixbModels] Model call IDs must be nonempty and unique.`)
-    }
-    callIds.add(callId)
-    const accumulator = new StreamAccumulator(input.onEvent)
-    let accepted = false
-    let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
-    let terminalStreamError: { readonly error: unknown } | undefined
-    try {
-      const stream = await input.model.stream({
+    let callId: string
+    let cost: ModelCallCost
+    let completed: CompletedResponse
+    for (let attempt = 0; ; attempt += 1) {
+      callId = generateCallId()
+      if (!callId || callIds.has(callId)) {
+        throw new ModelStreamError(`[SixbModels] Model call IDs must be nonempty and unique.`)
+      }
+      callIds.add(callId)
+      const accumulator = new StreamAccumulator(input.onEvent)
+      const call = await callModel(input, {
         callId,
         messages: requestMessages,
         tools: toolSpecifications,
-        ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
-        ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
-        ...(input.caching === undefined ? {} : { caching: input.caching }),
-        ...(input.output === undefined
-          ? {}
-          : {
-              responseFormat: {
-                type: "json" as const,
-                name: input.output.name,
-                ...(input.output.description === undefined
-                  ? {}
-                  : { description: input.output.description }),
-                schema: input.output.schema,
-              },
-            }),
-        // A call the provider leaves silent fails where it is recorded (see reportModelCalls).
-        signal: input.signal,
+        accumulator,
       })
-      accepted = true
-      for await (const event of stream.events) {
-        await accumulator.accept(event)
+      cost = call.cost
+      if (call.aborted) {
+        return { status: "aborted", steps, partialContent: accumulator.partialContent() }
       }
-    } catch (error) {
-      // A call that could not be recorded fails the run, even one that was being cancelled.
-      if (error instanceof ModelUsageRecordingError) throw error
-      const aborted = input.signal.aborted || isAbortError(error)
-      if (accumulator.isFinished()) {
-        if (!aborted) terminalStreamError = { error }
-      } else if (!aborted) {
-        throw error
-      } else {
-        return {
-          status: "aborted",
-          steps,
-          partialContent: accumulator.partialContent(),
+
+      // A stream that failed after its finish is still read whole first: a malformed one fails
+      // as such.
+      const finished =
+        call.failure && !accumulator.isFinished() ? undefined : accumulator.complete()
+
+      // A call that failed before its step completed, or whose answer the context window cut
+      // short, may be asked again, once, with a request the caller makes of it. Without one, a
+      // failure fails the loop, and the answer ends it as one the output limit cut short.
+      const failure =
+        call.failure ??
+        (finished?.finishReason === "length" && finished.contextWindowExceeded
+          ? {
+              error: new ModelProviderError(
+                "[SixbModels] The answer filled the model's context window.",
+                input.model.providerId,
+                input.model.modelId,
+                { reason: "context-window-exceeded" }
+              ),
+            }
+          : undefined)
+      if (failure && attempt === 0 && input.recoverStep) {
+        let recovered: PrepareModelStepResult | undefined
+        try {
+          recovered = await input.recoverStep({
+            stepIndex,
+            messages: requestMessages,
+            steps,
+            model: input.model,
+            signal: input.signal,
+            error: failure.error,
+            ...(finished ? { usage: finished.usage } : {}),
+          })
+        } catch (error) {
+          if (!input.signal.aborted && !isAbortError(error)) throw error
+          return { status: "aborted", steps, partialContent: [] }
+        }
+        if (input.signal.aborted) return { status: "aborted", steps, partialContent: [] }
+
+        if (recovered?.messages) {
+          requestMessages = recovered.messages
+          // What the call streamed is not the step's: its reader drops it.
+          if (accumulator.streamed) await input.onEvent?.({ type: "start-step", retry: true })
+          continue
         }
       }
-    } finally {
-      // The step's cost, as the model records the call: the model is what records it (see
-      // AiModelCallRecorder.wrapModel), never the loop that reads it.
-      if (accepted) cost = accumulator.meter.end({ model: input.model, callId }).cost
-    }
+      if (call.failure) throw call.failure.error
 
-    if (input.signal.aborted && !accumulator.isFinished()) {
-      return { status: "aborted", steps, partialContent: accumulator.partialContent() }
+      completed = finished!
+      break
     }
-    const completed = accumulator.complete()
     const responseId = completed.responseId ?? `${callId}:response`
-    if (terminalStreamError) throw terminalStreamError.error
     if (completed.projectionError) throw completed.projectionError
     if (input.signal.aborted) {
       return { status: "aborted", steps, partialContent: completed.content }
@@ -379,6 +409,74 @@ export async function runModelLoop(
   }
 
   throw new ModelStreamError("[SixbModels] Model loop exited without a terminal result.")
+}
+
+/**
+ * One provider call of a step, streamed into its accumulator. A cancel, or an abort error, leaves
+ * what arrived partial; any other error is the call's failure, whether it came before the
+ * stream's finish or after it.
+ */
+async function callModel(
+  input: RunModelLoopInput<unknown>,
+  call: {
+    readonly callId: string
+    readonly messages: readonly ModelMessage[]
+    readonly tools: readonly ModelToolSpecification[]
+    readonly accumulator: StreamAccumulator
+  }
+): Promise<{
+  readonly cost: ModelCallCost
+  readonly aborted: boolean
+  readonly failure?: { readonly error: unknown }
+}> {
+  const { accumulator } = call
+  let accepted = false
+  let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
+  let failure: { readonly error: unknown } | undefined
+  let cancelled = false
+  try {
+    const stream = await input.model.stream({
+      callId: call.callId,
+      messages: call.messages,
+      tools: call.tools,
+      ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+      ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
+      ...(input.caching === undefined ? {} : { caching: input.caching }),
+      ...(input.output === undefined
+        ? {}
+        : {
+            responseFormat: {
+              type: "json" as const,
+              name: input.output.name,
+              ...(input.output.description === undefined
+                ? {}
+                : { description: input.output.description }),
+              schema: input.output.schema,
+            },
+          }),
+      // A call the provider leaves silent fails where it is recorded (see reportModelCalls).
+      signal: input.signal,
+    })
+    accepted = true
+    for await (const event of stream.events) {
+      await accumulator.accept(event)
+    }
+  } catch (error) {
+    // A call that could not be recorded fails the run, even one that was being cancelled.
+    if (error instanceof ModelUsageRecordingError) throw error
+    if (input.signal.aborted || isAbortError(error)) cancelled = true
+    else failure = { error }
+  } finally {
+    // The step's cost, as the model records the call: the model is what records it (see
+    // AiModelCallRecorder.wrapModel), never the loop that reads it.
+    if (accepted) cost = accumulator.meter.end({ model: input.model, callId: call.callId }).cost
+  }
+
+  return {
+    cost,
+    aborted: (cancelled || input.signal.aborted) && !accumulator.isFinished(),
+    ...(failure === undefined ? {} : { failure }),
+  }
 }
 
 function assertLoopInput(input: RunModelLoopInput<unknown>): void {
@@ -652,11 +750,19 @@ class StreamAccumulator {
   private finished = false
   private finishReason: ModelFinishReason | undefined
   private rawFinishReason: string | undefined
+  private contextWindowExceeded = false
+  /** Whether the call handed its reader anything. */
+  streamed = false
   /** Who served the call, what it used and what the provider charged. */
   readonly meter = new LanguageModelCallMeter()
   private projectionError: Error | undefined
 
-  constructor(private readonly onEvent: RunModelLoopInput["onEvent"]) {}
+  constructor(private readonly reader: RunModelLoopInput["onEvent"]) {}
+
+  private async onEvent(chunk: ModelUiChunk): Promise<void> {
+    this.streamed = true
+    await this.reader?.(chunk)
+  }
 
   isFinished(): boolean {
     return this.finished
@@ -730,6 +836,7 @@ class StreamAccumulator {
         this.finished = true
         this.finishReason = event.finishReason
         this.rawFinishReason = event.rawFinishReason
+        this.contextWindowExceeded = event.contextWindowExceeded === true
         this.meter.accept(event)
         return
       case "error":
@@ -760,6 +867,7 @@ class StreamAccumulator {
       toolCalls: parsed.toolCalls,
       finishReason: this.finishReason,
       ...(this.rawFinishReason === undefined ? {} : { rawFinishReason: this.rawFinishReason }),
+      ...(this.contextWindowExceeded ? { contextWindowExceeded: true } : {}),
       ...this.meter.facts(),
       ...(this.projectionError === undefined ? {} : { projectionError: this.projectionError }),
     }
@@ -854,7 +962,7 @@ class StreamAccumulator {
     }
     this.spans.set(event.id, part)
     this.parts.push(part)
-    await this.onEvent?.({ type: "text-start", id: event.id })
+    await this.onEvent({ type: "text-start", id: event.id })
   }
 
   private async startReasoning(
@@ -871,7 +979,7 @@ class StreamAccumulator {
     }
     this.spans.set(event.id, part)
     this.parts.push(part)
-    await this.onEvent?.({ type: "reasoning-start", id: event.id })
+    await this.onEvent({ type: "reasoning-start", id: event.id })
   }
 
   private async appendText(
@@ -885,7 +993,7 @@ class StreamAccumulator {
       )
     }
     part.text += event.delta
-    await this.onEvent?.({ type: event.type, id: event.id, delta: event.delta })
+    await this.onEvent({ type: event.type, id: event.id, delta: event.delta })
   }
 
   private async endText(
@@ -904,7 +1012,7 @@ class StreamAccumulator {
     )
     part.complete = true
     this.spans.delete(event.id)
-    await this.onEvent?.({ type: event.type, id: event.id })
+    await this.onEvent({ type: event.type, id: event.id })
   }
 
   private async startTool(
@@ -935,7 +1043,7 @@ class StreamAccumulator {
     }
     this.toolCalls.set(event.id, part)
     this.parts.push(part)
-    await this.onEvent?.({
+    await this.onEvent({
       type: "tool-input-start",
       toolCallId: event.id,
       toolName: event.toolName,
@@ -952,7 +1060,7 @@ class StreamAccumulator {
       )
     }
     part.inputText += event.delta
-    await this.onEvent?.({
+    await this.onEvent({
       type: "tool-input-delta",
       toolCallId: event.id,
       toolName: part.toolName,

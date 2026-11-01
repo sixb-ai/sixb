@@ -137,7 +137,14 @@ export type LanguageModelStreamEvent =
   | { readonly type: "error"; readonly error: unknown }
 
 export type ModelUiChunk =
-  | { readonly type: "start-step" }
+  | {
+      readonly type: "start-step"
+      /**
+       * The step's call is made again: what it streamed since the step started is dropped. A
+       * reader that does not know the field sees a new step.
+       */
+      readonly retry?: true
+    }
   | { readonly type: "text-start"; readonly id: string }
   | { readonly type: "text-delta"; readonly id: string; readonly delta: string }
   | { readonly type: "text-end"; readonly id: string }
