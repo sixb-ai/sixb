@@ -257,6 +257,22 @@ describe("describeBash", () => {
     expect(title("sixb pipeline-runs list --pipeline daily")).toBe("Listed pipeline runs")
   })
 
+  // Guard proof: drop the `history` branch from classifySixbCommand; these read "Checked
+  // available project operations".
+  test("names what the agent read from its earlier conversation", () => {
+    const described = (command: string) => describeBash(classifyCommand(command), null)
+
+    expect(described("sixb history").title).toBe("Read the earlier conversation")
+    expect(described("sixb history --offset 20 --limit 10").title).toBe(
+      "Read the earlier conversation"
+    )
+
+    const message = described("sixb history 12")
+    expect(message.icon).toBe("transcript")
+    expect(message.title).toBe("Read message 12")
+    expect(message.runningTitle).toBe("Reading message 12")
+  })
+
   // Guard proof: name the dataset from intent.args[0] again; it reads "the limit dataset".
   test("names the dataset when an option comes before its id", () => {
     const { title } = describeBash(
