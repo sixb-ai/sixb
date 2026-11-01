@@ -25,6 +25,8 @@ export interface ResolvedAgentExecutionPlan {
   readonly sandboxModels?: readonly SandboxModel[]
   /** Reference docs for the object types the run's requester can see, from their own view. */
   readonly ontologyDocs: RenderedOntologyDocs
+  /** What the project's runs measured of the model's bytes per token; absent, the default. */
+  readonly bytesPerToken?: number
 }
 
 /**
@@ -39,6 +41,7 @@ export function resolveRunPlan(
   return Object.freeze({
     model: resolved.model,
     ontologyDocs,
+    bytesPerToken: plan.bytesPerToken,
     ...(instructions === undefined ? {} : { instructions }),
     tools,
     skills: withBuiltInSkills(plan.skills),

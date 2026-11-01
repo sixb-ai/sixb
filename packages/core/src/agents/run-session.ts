@@ -43,6 +43,11 @@ import {
   resolveInheritedAgentExecutionAuthorization,
   userCanRunAgent,
 } from "./authority"
+import {
+  type AgentModelTokenRateSample,
+  readAgentContextBytesPerToken,
+  recordAgentContextTokenRate,
+} from "./context-token-rate"
 import { AgentToolPublicError } from "./errors"
 import { createAgentRunExecutionToken } from "./ids"
 import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
@@ -139,6 +144,12 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
     outcome: AgentRunOutcome,
     messages?: readonly AppendAgentMessageInput[]
   ): Promise<AgentRunRecord>
+  /**
+   * Note what the run's latest model call measured of its model's tokenizer. The session keeps the
+   * latest until `finish`, which records it after the run's end: the project's next runs on that
+   * model start their context estimate from it.
+   */
+  noteTokenRate(sample: AgentModelTokenRateSample): void
   /**
    * Throws {@link AgentExecutionLostError} unless the run still runs under this session, within
    * its lease. Run it right before a side effect the run must not make once another delivery owns
@@ -323,6 +334,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     throw new Error(`[Sixb] Agent run '${run.id}' has no execution token, so it was never claimed.`)
   }
 
+  let tokenRate: AgentModelTokenRateSample | undefined
   let modelCalls: Promise<AiModelCallRecorder> | undefined
   const openedModelCalls = () => {
     modelCalls ??= openModelCalls(host, run).catch((error: unknown) => {
@@ -485,7 +497,20 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       await host.afterFinish?.(finished).catch((error: unknown) => {
         console.error(`[Sixb] What follows agent run '${run.id}' failed; repair retries it.`, error)
       })
+
+      if (tokenRate) {
+        await recordAgentContextTokenRate({
+          tokenRates: agents.tokenRates,
+          projectId: host.projectId,
+          runId: run.id,
+          sample: tokenRate,
+          measuredAt: finished.completedAt ?? new Date(),
+        })
+      }
       return finished
+    },
+    noteTokenRate(sample) {
+      tokenRate = sample
     },
     assertOwned: () => assertAgentRunOwned(agents, fence),
     threads,
@@ -537,10 +562,17 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         host.definitions.ontology,
         authorization
       )
-      return readAgentRunPlan(host.definitions, run, {
+      const plan = readAgentRunPlan(host.definitions, run, {
         sixb,
         ...(propertyClearance === undefined ? {} : { propertyClearance }),
       })
+
+      const bytesPerToken = await readAgentContextBytesPerToken({
+        tokenRates: agents.tokenRates,
+        projectId: host.projectId,
+        model: { providerId: plan.model.provider, modelId: plan.model.modelId },
+      })
+      return Object.freeze({ ...plan, bytesPerToken })
     },
     async memory({ asOf }) {
       // Others read a shared conversation, so its runs reach no one's own memory.

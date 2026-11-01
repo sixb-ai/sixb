@@ -66,6 +66,7 @@ import {
 import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
+  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   AgentExecutionLostError,
   AgentFinalizationError,
   type AgentRunSession,
@@ -536,6 +537,27 @@ function delegatingParentModel(input: {
         { type: "text-delta", id: "parent-answer", delta: "Delegation complete" },
         { type: "text-end", id: "parent-answer" },
         finish("stop"),
+      ])
+    },
+  })
+}
+
+/** A model whose provider counts 6 bytes of the request's messages per input token. */
+function sixBytesPerTokenModel(): WorkerTestModel {
+  return new WorkerTestModel({
+    modelId: "mock-model",
+    stream: async (request) => {
+      const bytes = new TextEncoder().encode(JSON.stringify(request.messages)).byteLength
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Done" },
+        { type: "text-end", id: "answer" },
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: { inputTokens: Math.ceil(bytes / 6), outputTokens: 10 },
+        },
       ])
     },
   })
@@ -2124,7 +2146,9 @@ function executionPlanFor(sixb: TestSixb) {
   })
   const model = sixb.definitions.models?.language?.default.model
   if (!model) throw new Error("Expected a default language model.")
-  return resolveRunPlan({ ...plan, sandboxModels: [] }, { model })
+  // A project none of whose runs measured the model yet.
+  const bytesPerToken = AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
+  return resolveRunPlan({ ...plan, sandboxModels: [], bytesPerToken }, { model })
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
@@ -2472,6 +2496,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2496,7 +2521,6 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
   return {
     ...storage,
     agents: wrapAgents(agents),
-    tokenRates: agents.tokenRates,
     transaction: (run, options) =>
       storage.transaction((tx) => {
         const agents = tx.agents
@@ -2520,6 +2544,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2544,7 +2569,6 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
         return run({
           ...tx,
           ...(agents ? { agents: wrapAgents(agents) } : {}),
-    tokenRates: agents.tokenRates,
         })
       }, options),
   }
@@ -2565,6 +2589,7 @@ function withObservedAgentMessageAppendStorage(
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    tokenRates: agents.tokenRates,
     messages: {
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
@@ -2589,7 +2614,6 @@ function withObservedAgentMessageAppendStorage(
   }
 }
 
-    tokenRates: agents.tokenRates,
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
 function hangingModel(onStart?: () => void): WorkerTestModel {
   return new WorkerTestModel({
@@ -4148,7 +4172,7 @@ describe("AgentWorker", () => {
         return {
           providerId: answeringModel.providerId,
           modelId: answeringModel.modelId,
-          definition: { ...definition, contextWindow: 32_768 },
+          definition: { ...definition, contextWindow: 49_152 },
           stream: (request: LanguageModelRequest) => answeringModel.stream(request),
         }
       },
@@ -4231,7 +4255,7 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `tier-turn-${index}-${"x".repeat(36_000)}`,
+        text: `tier-turn-${index}-${"x".repeat(24_000)}`,
       })
     }
     const worker = new AgentWorker(sixb, workerOptions())
@@ -4242,8 +4266,8 @@ describe("AgentWorker", () => {
 
       expect(run.status).toBe("succeeded")
       expect(summaryPrompts).toHaveLength(0)
-      // 300,000 bytes are 100,000 tokens at the 3 bytes per token of an unknown tokenizer.
-      expect(JSON.stringify(answerPrompts[0]).length).toBeGreaterThan(300_000)
+      // 200,000 bytes are 100,000 tokens at the 2 bytes per token of a model no run measured yet.
+      expect(JSON.stringify(answerPrompts[0]).length).toBeGreaterThan(200_000)
       expect(await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })).toBeNull()
     } finally {
       await worker.stop()
@@ -4252,34 +4276,34 @@ describe("AgentWorker", () => {
 
   test("counts a thread at the bytes per token its own calls measured", async () => {
     // Reproduce: estimate prepareAgentConversationContext at budget.bytesPerToken instead of
-    // agentConversationBytesPerToken; the second turn then compacts at the family's rate.
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async (request) => {
-        // This provider counts 6 bytes per token, twice an unknown tokenizer's assumed 3.
-        const bytes = new TextEncoder().encode(JSON.stringify(request.messages)).byteLength
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "answer" },
-          { type: "text-delta", id: "answer", delta: "Done" },
-          { type: "text-end", id: "answer" },
-          {
-            type: "finish",
-            finishReason: "stop",
-            usage: { inputTokens: Math.ceil(bytes / 6), outputTokens: 10 },
-          },
-        ])
-      },
-    })
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
+    // agentConversationBytesPerToken; the second turn then compacts at the project's rate.
+    const sixb = buildSixb(
+      sixBytesPerTokenModel(),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {}
+    )
     const storage = agentStorageOf(sixb)
+    // The model's earlier runs in this project measured 3 bytes per token: this thread's text
+    // tokenizes at twice that.
+    for (let index = 0; index < 20; index += 1) {
+      await storage.tokenRates.record({
+        projectId: PROJECT_ID,
+        providerId: "mock",
+        modelId: "mock-model",
+        runId: `earlier_run_${index}`,
+        bytes: 30_000,
+        tokens: 10_000,
+        measuredAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000),
+      })
+    }
     const threadId = "measured_rate_thread"
     await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       // About 88,000 tokens at 3 bytes per token, then 30,000 more: past the 111,616 hard limit
-      // at the assumed rate, about 60,000 tokens at the measured one.
+      // at the project's rate, about 60,000 tokens at the thread's own.
       for (const text of ["x".repeat(240_000), "y".repeat(90_000)]) {
         const request = await requestAgentAs(sixb, REQUESTER, { threadId, text })
         const run = await waitForTerminalRun(storage, request.run.id)
@@ -4288,6 +4312,49 @@ describe("AgentWorker", () => {
           (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
         ).not.toContain("agent.compaction.started")
       }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("starts a run at the bytes per token its model's earlier runs measured", async () => {
+    // Reproduce: return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN from readAgentContextBytesPerToken;
+    // the new thread's 300,000 bytes then count as 150,000 tokens, past its model's limit.
+    const sixb = buildSixb(
+      sixBytesPerTokenModel(),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {}
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      // One turn measures the model; the next starts a thread of its own, with no call to anchor on.
+      for (const [threadId, text] of [
+        ["first_thread", "x".repeat(60_000)],
+        ["second_thread", "z".repeat(300_000)],
+      ] as const) {
+        await storage.threads.create({
+          id: threadId,
+          projectId: PROJECT_ID,
+          ownerPrincipal: REQUESTER,
+        })
+        const request = await requestAgentAs(sixb, REQUESTER, { threadId, text })
+        const run = await waitForTerminalRun(storage, request.run.id)
+        expect(run.status).toBe("succeeded")
+        expect(
+          (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
+        ).not.toContain("agent.compaction.started")
+      }
+
+      const measured = await storage.tokenRates.listLatest({
+        projectId: PROJECT_ID,
+        providerId: "mock",
+        modelId: "mock-model",
+      })
+      expect(measured).toHaveLength(2)
+      for (const { bytes, tokens } of measured) expect(bytes / tokens).toBeGreaterThan(5)
     } finally {
       await worker.stop()
     }
@@ -4331,7 +4398,7 @@ describe("AgentWorker", () => {
         threadId,
         index,
         // Over the continuation budget, but the serialized removable turns fit the summary call.
-        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 44_000)}`,
+        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 29_000)}`,
         includeAttachment: index === 0,
       })
     }
@@ -4601,7 +4668,7 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 44_000)}`,
+        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 29_000)}`,
       })
     }
 
@@ -4651,7 +4718,7 @@ describe("AgentWorker", () => {
       threadId,
       index: 0,
       text: "Research this organization.",
-      assistantText: "x".repeat(345_000),
+      assistantText: "x".repeat(230_000),
     })
     const request = await requestAgentAs(sixb, REQUESTER, {
       threadId,
@@ -4803,7 +4870,7 @@ describe("AgentWorker", () => {
       threadId,
       index: 0,
       text: "Research this organization.",
-      assistantText: `oversized-result-marker ${"x".repeat(345_000)}`,
+      assistantText: `oversized-result-marker ${"x".repeat(230_000)}`,
     })
 
     const worker = new AgentWorker(sixb, workerOptions())
@@ -4854,7 +4921,7 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `${`failed-turn-${index}-`}${"x".repeat(84_000)}`,
+        text: `${`failed-turn-${index}-`}${"x".repeat(56_000)}`,
       })
     }
 

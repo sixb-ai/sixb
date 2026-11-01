@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "@sixb/core"
 import {
-  agentContextBytesPerToken,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
   projectAgentThreadModelContext,
@@ -77,8 +76,8 @@ describe("agent conversation context estimation", () => {
     })
 
     const model = new WorkerTestModel({ modelId: "mock-model" })
-    const bytesPerToken = agentContextBytesPerToken(model)
     const budget = prepareAgentModel({ model }).budget
+    const { bytesPerToken } = budget
     const plan = {
       model,
       instructions: "Answer clearly.",
@@ -257,7 +256,8 @@ describe("agent conversation token rate", () => {
     ontologyDocs: { files: [], index: [] },
     maxSteps: 4,
   }
-  const budget = prepareAgentModel({ model }).budget
+  // The rate the project's runs measured on the model lately.
+  const budget = prepareAgentModel({ model, bytesPerToken: 2.1 }).budget
   // 30,000 bytes sent before the answer's last step; that step's text is the call's output.
   const user = record("user", "user", [{ type: "text", text: "a".repeat(20_000) }], 1)
   const answer = record(
@@ -303,7 +303,7 @@ describe("agent conversation token rate", () => {
       tools: [],
     }).bytesPerToken
 
-  test("starts from the tokenizer family's rate", () => {
+  test("starts from the rate its run starts from", () => {
     expect(budget.bytesPerToken).toBe(2.1)
     expect(rate({ providerId: "other", inputTokens: 12_526 })).toBe(2.1)
   })
