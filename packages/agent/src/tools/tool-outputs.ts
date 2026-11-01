@@ -27,9 +27,8 @@ import { VIEW_FILE_TOOL_SPEC } from "./view-file"
 
 /**
  * Past this, a tool's output reaches the model as a preview, and the whole of it as a file in the
- * sandbox that the agent reads in pieces or searches. Claude Code does the same from about 30 KB
- * (measured on its transcripts): one result then never takes more than a few KB of the context,
- * and nothing past a cap is lost.
+ * sandbox that the agent reads in pieces or searches: one result then never takes more than a few
+ * KB of the context, and nothing past a cap is lost.
  */
 export const TOOL_OUTPUT_FILE_MIN_BYTES = 30 * 1024
 
