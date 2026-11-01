@@ -37,6 +37,7 @@ import { type LoadConversationMemory, prepareAgentConversationContext } from "./
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
 import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
+import { InlineImageBudget } from "./inline-images"
 import type { ConversationReaders } from "./message-authors"
 import { type AgentErrorDetails, type AgentToolCaller, projectModelTools } from "./model-adapters"
 import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
@@ -55,7 +56,8 @@ import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
 import {
   AgentToolResultMediaBridge,
-  replayToolFileMessages,
+  allocateInlineImages,
+  replayToolFiles,
   type SuppliesToolFiles,
 } from "./tools/result-media"
 import { AgentFileBudget, createAgentToolFiles, installAgentToolFiles } from "./tools/tool-files"
@@ -210,26 +212,31 @@ export async function createConversationAgentEnvironment(
       modelSupportsInlineImages(plan.model),
       prepared ? prepared.memory : loadMemory(threadContext.checkpoint),
     ])
-    const [attachments, toolFilesByStep] = await Promise.all([
-      prepareAgentAttachments({
-        projectId: context.id,
-        threadId: run.threadId,
+    const attachments = await prepareAgentAttachments({
+      projectId: context.id,
+      threadId: run.threadId,
+      messages,
+      blobStorage: context.blobStorage,
+      apiBaseUrl,
+      contextDirectory: sandbox.contextDirectory,
+      inlineImages,
+      signal: sandboxSignal,
+    })
+
+    // The history takes the request's inline image budget first; the run's steps, what is left.
+    const imageBudget = new InlineImageBudget()
+    const attachmentContext = await allocateInlineImages({
+      messages,
+      attachments,
+      toolFiles: replayToolFiles({
         messages,
-        blobStorage: context.blobStorage,
-        apiBaseUrl,
-        contextDirectory: sandbox.contextDirectory,
-        inlineImages,
-        signal: sandboxSignal,
-      }),
-      replayToolFileMessages({
-        messages,
-        blobStorage: context.blobStorage,
         suppliesToolFiles: suppliesToolFiles(plan),
         supportsImages: inlineImages,
-        signal: sandboxSignal,
       }),
-    ])
-    const attachmentContext = { ...attachments, toolFilesByStep }
+      budget: imageBudget,
+      blobStorage: context.blobStorage,
+      signal: sandboxSignal,
+    })
     environment = await startAgentEnvironment({
       mode: "conversation",
       sandbox,
@@ -251,6 +258,7 @@ export async function createConversationAgentEnvironment(
         : {}),
       apiBaseUrl,
       attachmentContext,
+      imageBudget,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
       ...(memory ? { memory } : {}),
@@ -310,7 +318,7 @@ async function startSubagentEnvironment(
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const history = input.history.messages
   const inlineImages = modelSupportsInlineImages(plan.model)
-  const [memory, handedContext, historyContext, toolFilesByStep] = await Promise.all([
+  const [memory, handedContext, historyContext] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
     loadConversationMemory({ session: input.session, asOf: input.thread.createdAt }),
     files.length
@@ -337,18 +345,23 @@ async function startSubagentEnvironment(
           signal: input.signal,
         })
       : undefined,
-    replayToolFileMessages({
+  ])
+
+  const imageBudget = new InlineImageBudget()
+  const attachmentContext = await allocateInlineImages({
+    messages: history,
+    attachments: historyContext
+      ? mergeAttachmentContexts(handedContext, historyContext)
+      : handedContext,
+    toolFiles: replayToolFiles({
       messages: history,
-      blobStorage: context.blobStorage,
       suppliesToolFiles: suppliesToolFiles(plan),
       supportsImages: inlineImages,
-      signal: input.signal ?? NEVER_ABORTED_SIGNAL,
     }),
-  ])
-  const attachmentContext = {
-    ...(historyContext ? mergeAttachmentContexts(handedContext, historyContext) : handedContext),
-    toolFilesByStep,
-  }
+    budget: imageBudget,
+    blobStorage: context.blobStorage,
+    signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+  })
 
   return startAgentEnvironment({
     mode: "subagent",
@@ -371,6 +384,7 @@ async function startSubagentEnvironment(
       : {}),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
+    imageBudget,
     ontologyDocs: plan.ontologyDocs,
     ...(memory ? { memory } : {}),
     frameworkTools: input.frameworkTools,
@@ -421,6 +435,8 @@ export async function createWorkflowAgentNodeEnvironment(
       callTool: input.callTool,
       apiBaseUrl: context.apiBaseUrl,
       attachmentContext,
+      // A step's inputs are files, never inline images: its own steps have the whole budget.
+      imageBudget: new InlineImageBudget(),
       ontologyDocs: plan.ontologyDocs,
       errorDetails: input.errorDetails,
       onDetachedTeardown: input.onDetachedTeardown,
@@ -453,6 +469,8 @@ interface AgentEnvironmentSetup
   readonly threadId?: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
+  /** What the history left of the request's inline image budget, which the run's steps take. */
+  readonly imageBudget: InlineImageBudget
   /** Installed under `$SIXB_ONTOLOGY_DIR`; a workflow step's prompt does not list them. */
   readonly ontologyDocs?: RenderedOntologyDocs
   readonly errorDetails?: AgentErrorDetails
@@ -489,6 +507,7 @@ async function startAgentEnvironment(
   const mediaBridge = new AgentToolResultMediaBridge({
     blobStorage: context.blobStorage,
     suppliesToolFiles: suppliesToolFiles(plan),
+    inlineImages: input.imageBudget,
     // As the agent names it, so the output a later turn replays names the path that turn
     // materializes the file at, in its own sandbox.
     sandboxPathForFileRef: async (fileRef) => {
@@ -704,6 +723,7 @@ function mergeAttachmentContexts(
       ...history.modelFileDataByPartKey,
     ]),
     sandboxFiles: [...handed.sandboxFiles, ...history.sandboxFiles],
+    ...(history.pendingImages === undefined ? {} : { pendingImages: history.pendingImages }),
     manifestJson: JSON.stringify(
       {
         ...handedManifest,

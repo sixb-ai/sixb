@@ -117,6 +117,7 @@ export {
   createSubagentRunId,
   createSubagentThreadId,
 } from "./ids"
+export { AGENT_IMAGE_INPUT_TOKENS, AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
   type AgentApprovalCaller,

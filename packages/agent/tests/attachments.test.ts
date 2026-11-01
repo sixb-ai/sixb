@@ -4,6 +4,8 @@ import { InMemoryBlobStorage } from "@sixb/core"
 import { agentToolFilePath, SANDBOX_CONTEXT_DIRECTORY } from "@sixb/core/internal/agents"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { attachmentKey, prepareAgentAttachments, toolResultAttachmentKey } from "../src/attachments"
+import { INLINE_IMAGE_BUDGET_NOTE, InlineImageBudget } from "../src/inline-images"
+import { allocateInlineImages } from "../src/tools/result-media"
 
 const PNG_BYTES = Uint8Array.from(
   Buffer.from(
@@ -67,8 +69,9 @@ function toolFiles(
   ])
 }
 
-function prepare(blobStorage: BlobStorage, messages: readonly AgentMessageRecord[]) {
-  return prepareAgentAttachments({
+/** The attachments as a request reads them: prepared, then their images within its budget. */
+async function prepare(blobStorage: BlobStorage, messages: readonly AgentMessageRecord[]) {
+  const attachments = await prepareAgentAttachments({
     projectId: "project",
     threadId: "thread",
     messages,
@@ -76,6 +79,14 @@ function prepare(blobStorage: BlobStorage, messages: readonly AgentMessageRecord
     apiBaseUrl: "http://sixb.test/api",
     contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
     inlineImages: true,
+  })
+  return allocateInlineImages({
+    messages,
+    attachments,
+    toolFiles: new Map(),
+    budget: new InlineImageBudget(),
+    blobStorage,
+    signal: new AbortController().signal,
   })
 }
 
@@ -120,6 +131,34 @@ describe("agent attachment projection", () => {
       )
     }
   })
+
+  // Removal proof: skip budget.take in decideAttachment; the 101st image reads as inline, past the
+  // 100 a request takes.
+  test.skipIf(typeof Bun.Image !== "function")(
+    "inlines a request's first 100 images and keeps the next as metadata, saying why",
+    async () => {
+      const blobStorage = new InMemoryBlobStorage()
+      const png = await blobStorage.put({
+        body: PNG_BYTES,
+        fileName: "dot.png",
+        mediaType: "image/png",
+      })
+      const messages = Array.from({ length: 101 }, (_, index) => userFiles(`msg-${index + 1}`, png))
+
+      const prepared = await prepare(blobStorage, messages)
+
+      expect(prepared.modelFileDataByPartKey.size).toBe(100)
+      expect(prepared.modelFileDataByPartKey.has(attachmentKey("msg-101", 1))).toBe(false)
+      expect(prepared.promptTextByPartKey.get(attachmentKey("msg-101", 1))).toContain(
+        INLINE_IMAGE_BUDGET_NOTE
+      )
+      expect(JSON.parse(prepared.manifestJson).attachments.at(-1)).toMatchObject({
+        inlineDisposition: "metadata-only",
+        notes: [INLINE_IMAGE_BUDGET_NOTE],
+      })
+      expect(prepared.pendingImages).toBeUndefined()
+    }
+  )
 
   // Removal proof: share the inline text budget across messages; the second message's file reads
   // "[File not inlined: the attachment text budget is exhausted…]" once the first used it up.

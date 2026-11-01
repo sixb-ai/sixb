@@ -107,8 +107,14 @@ turn N's last request sent, on every storage:
   had. The 50-file window and the sandbox budget bound what is materialized, never what is replayed;
   a user's files take the budget first.
 - **Runtime input is derived again.** The `<sixb_tool_files>` message after a step's results is
-  rebuilt from the stored trace by the same function (`replayToolFileMessages`).
+  rebuilt from the stored trace by the same functions (`replayToolFiles`).
 - **Attachments stay inline until compaction**, each user message with its own text budget.
+- **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
+  spent in thread order, oldest first: attachments, then the images after each step, then the
+  run's own steps (`allocateInlineImages`). The first image that does not fit closes the budget:
+  nothing after it is projected, and projections run a few at a time, decided in order. An image
+  that fitted stays inline; one past the budget reads as metadata from its own turn on, until
+  compaction frees the budget. Estimates count each inline image as `AGENT_IMAGE_INPUT_TOKENS`.
 
 ## How agents use a sandbox
 
@@ -231,7 +237,7 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   starts like the paused run's last one. A call whose tool projected its output replays the stored
   `modelOutput`, what the model read, and the files those calls returned are materialized again at
   the paths that output named (`prepareAgentAttachments` over the thread's messages), with the
-  images that followed their step (`replayToolFileMessages`), as a turn replays its history.
+  images that followed their step (`replayToolFiles`), as a turn replays its history.
   At its finish everything under `out/` returns, the inherited files included.
 - **Its workspace is kept on a provider that resumes.** The child's thread holds its own
   `sandbox_state` (a random name), through the conversation's state machine: the fence is the

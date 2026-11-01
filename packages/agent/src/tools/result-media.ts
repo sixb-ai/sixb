@@ -4,11 +4,21 @@ import type {
   PrepareModelStepInput,
   PrepareModelStepResult,
 } from "@sixb/core/internal/agents"
-import { isAgentToolResult } from "@sixb/core/internal/agents"
+import { agentMessageSteps, isAgentToolResult } from "@sixb/core/internal/agents"
 import type { ModelFilePart, ModelMessage, ModelTextPart } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
-import { modelSupportsInlineImages, prepareAgentToolFileProjection } from "../attachments"
+import {
+  type AttachmentImageOutcome,
+  type AttachmentImageProjection,
+  attachmentKey,
+  modelSupportsInlineImages,
+  type PendingAttachmentImage,
+  type PreparedAgentAttachmentContext,
+  prepareAgentToolFileProjection,
+  settleAttachmentImages,
+} from "../attachments"
 import { fileContentKey } from "../file-ref"
+import { type InlineImageBudget, projectInOrder } from "../inline-images"
 import { type AgentToolModelOutput, agentToolResultToModelOutput } from "./result-output"
 
 const TOOL_RESULT_IMAGE_OMISSION_NOTE =
@@ -17,6 +27,12 @@ const TOOL_RESULT_IMAGE_OMISSION_NOTE =
 /** Whether the images a tool's results return reach the model after its step. */
 export type SuppliesToolFiles = (toolName: string) => boolean
 
+/** An image a step's tool returned, not projected yet. */
+interface ToolFileCandidate {
+  readonly toolCallId: string
+  readonly fileRef: FileRef
+}
+
 /** One tool call's durable result, as the step that ran it produced it. */
 interface StepToolResult {
   readonly toolCallId: string
@@ -24,22 +40,30 @@ interface StepToolResult {
   readonly output: JsonValue | undefined
 }
 
-interface ToolFilesMessageInput {
+interface ToolFileProjectionInput {
   readonly blobStorage: AgentRunFileStore
-  readonly suppliesToolFiles: SuppliesToolFiles
   readonly signal: AbortSignal
   /** Test seam; production uses the bounded attachment projector. */
   readonly projectFile?: typeof prepareAgentToolFileProjection
 }
 
+/** What became of a step's image: inline, left out by the budget, or no image to project. */
+type ToolFileDecision =
+  | { readonly kind: "inline"; readonly toolCallId: string; readonly file: ModelFilePart }
+  | { readonly kind: "budget"; readonly toolCallId: string; readonly name: string }
+  | { readonly kind: "none" }
+
 /**
  * Move tool-created images into a user message after their step without changing their durable
  * result. The message is derived from the step's results alone, so a later turn derives the same
- * one from the stored trace ({@link replayToolFileMessages}) and its request keeps the prefix.
+ * one from the stored trace ({@link replayToolFiles}) and its request keeps the prefix. Its images
+ * take what the request's inline image budget has left, after the history's.
  */
 export class AgentToolResultMediaBridge {
   constructor(
-    private readonly input: Omit<ToolFilesMessageInput, "signal"> & {
+    private readonly input: Omit<ToolFileProjectionInput, "signal"> & {
+      readonly suppliesToolFiles: SuppliesToolFiles
+      readonly inlineImages: InlineImageBudget
       readonly sandboxPathForFileRef?: (
         fileRef: FileRef
       ) => string | undefined | Promise<string | undefined>
@@ -49,7 +73,6 @@ export class AgentToolResultMediaBridge {
   async toModelOutput(input: {
     readonly output: JsonValue
     readonly signal: AbortSignal
-    readonly toolCallId: string
   }): Promise<AgentToolModelOutput> {
     input.signal.throwIfAborted()
     return agentToolResultToModelOutput({
@@ -72,14 +95,13 @@ export class AgentToolResultMediaBridge {
     // Only after a step this loop ran: a replayed history holds its own steps' messages already,
     // and a retried request keeps the one it added.
     const results = messages.at(-1)
-    if (stepIndex === 0 || results?.role !== "tool") return undefined
+    if (stepIndex === 0 || results?.role !== "tool" || !modelSupportsInlineImages(model)) {
+      return undefined
+    }
 
     signal.throwIfAborted()
-    const message = await toolFilesMessage({
-      ...this.input,
-      signal,
-      supportsImages: modelSupportsInlineImages(model),
-      results: results.content.map((part) => ({
+    const candidates = toolFileCandidates(
+      results.content.map((part) => ({
         toolCallId: part.toolCallId,
         toolName: part.toolName,
         output:
@@ -88,7 +110,19 @@ export class AgentToolResultMediaBridge {
             ? part.output.value
             : undefined),
       })),
+      this.input.suppliesToolFiles
+    )
+
+    const decisions: ToolFileDecision[] = []
+    await projectInOrder({
+      items: candidates,
+      budget: this.input.inlineImages,
+      project: (candidate) => projectToolFile(candidate, { ...this.input, signal }),
+      decide: (candidate, file) =>
+        decisions.push(decideToolFile(candidate, file, this.input.inlineImages)),
     })
+
+    const message = toolFilesMessage(decisions)
     return message ? { messages: [...messages, message] } : undefined
   }
 }
@@ -99,70 +133,146 @@ export function toolFilesStepKey(messageId: string, partIndex: number): string {
 }
 
 /**
- * The `<sixb_tool_files>` message each stored step was followed by when it ran, derived again from
- * its results: same images, same projection, same order, by {@link toolFilesStepKey}. Images are
- * never stored; their bytes are projected again from their blobs, which is deterministic.
+ * The images each stored step's tools returned, by {@link toolFilesStepKey}, not projected yet:
+ * {@link allocateInlineImages} projects them as far as the request's budget goes.
  */
-export async function replayToolFileMessages(
-  input: ToolFilesMessageInput & {
-    readonly messages: readonly AgentMessageRecord[]
-    readonly supportsImages: boolean
-  }
-): Promise<ReadonlyMap<string, ModelMessage>> {
-  const replayed = new Map<string, ModelMessage>()
+export function replayToolFiles(input: {
+  readonly messages: readonly AgentMessageRecord[]
+  readonly suppliesToolFiles: SuppliesToolFiles
+  readonly supportsImages: boolean
+}): ReadonlyMap<string, readonly ToolFileCandidate[]> {
+  const replayed = new Map<string, readonly ToolFileCandidate[]>()
   if (!input.supportsImages) return replayed
 
   for (const message of input.messages) {
     if (message.role !== "assistant") continue
 
-    for (const step of localToolCallsByStep(message)) {
-      const first = step[0]
+    for (const step of agentMessageSteps(message)) {
+      const first = step.localToolCalls[0]
       if (!first) continue
 
-      const toolFiles = await toolFilesMessage({
-        ...input,
-        results: step.map(({ part }) => ({
+      const candidates = toolFileCandidates(
+        step.localToolCalls.map(({ part }) => ({
           toolCallId: part.toolCallId,
           toolName: part.toolName,
           output: part.state === "output-available" ? part.output : undefined,
         })),
-      })
-      if (toolFiles) replayed.set(toolFilesStepKey(message.id, first.partIndex), toolFiles)
+        input.suppliesToolFiles
+      )
+      if (candidates.length > 0) {
+        replayed.set(toolFilesStepKey(message.id, first.partIndex), candidates)
+      }
     }
   }
   return replayed
 }
 
-/** A message's local tool calls, one list per step, as `toModelMessages` groups them. */
-function localToolCallsByStep(message: AgentMessageRecord) {
-  type ToolCall = Extract<AgentMessageRecord["parts"][number], { readonly type: "tool-call" }>
-  const steps: { readonly part: ToolCall; readonly partIndex: number }[][] = [[]]
-  message.parts.forEach((part, partIndex) => {
-    if (part.type === "step-start") steps.push([])
-    if (part.type === "tool-call" && part.providerExecuted !== true) {
-      steps.at(-1)?.push({ part, partIndex })
+/**
+ * Spend the request's inline image budget on the history, in thread order, oldest first: each user
+ * message's attachments, then the images after each step of the turn that answered it. Images are
+ * projected only while the budget is open, a few at a time; what does not fit reads as metadata.
+ * The run's own steps then take what is left, in the order a later replay walks them, so every
+ * turn takes the same decisions. Images are never stored: their bytes are projected again from
+ * their blobs, which is deterministic.
+ */
+export async function allocateInlineImages(
+  input: ToolFileProjectionInput & {
+    readonly messages: readonly AgentMessageRecord[]
+    readonly attachments: PreparedAgentAttachmentContext
+    readonly toolFiles: ReadonlyMap<string, readonly ToolFileCandidate[]>
+    readonly budget: InlineImageBudget
+  }
+): Promise<PreparedAgentAttachmentContext> {
+  const { attachments, budget } = input
+  type Item =
+    | { readonly kind: "attachment"; readonly key: string; readonly image: PendingAttachmentImage }
+    | { readonly kind: "tool"; readonly step: string; readonly candidate: ToolFileCandidate }
+
+  const items: Item[] = []
+  for (const message of input.messages) {
+    if (message.role === "user") {
+      message.parts.forEach((_part, partIndex) => {
+        const key = attachmentKey(message.id, partIndex)
+        const image = attachments.pendingImages?.get(key)
+        if (image) items.push({ kind: "attachment", key, image })
+      })
+      continue
     }
+
+    for (const step of agentMessageSteps(message)) {
+      const first = step.localToolCalls[0]
+      if (!first) continue
+
+      const key = toolFilesStepKey(message.id, first.partIndex)
+      for (const candidate of input.toolFiles.get(key) ?? []) {
+        items.push({ kind: "tool", step: key, candidate })
+      }
+    }
+  }
+
+  const outcomes = new Map<string, AttachmentImageOutcome>()
+  const decisionsByStep = new Map<string, ToolFileDecision[]>()
+  await projectInOrder({
+    items,
+    budget,
+    project: async (item) =>
+      item.kind === "attachment"
+        ? { attachment: await item.image.project(input.signal) }
+        : { tool: await projectToolFile(item.candidate, input) },
+    decide: (item, projected) => {
+      if (item.kind === "attachment") {
+        outcomes.set(item.key, decideAttachment(projected?.attachment, budget))
+        return
+      }
+
+      const decisions = decisionsByStep.get(item.step) ?? []
+      decisions.push(decideToolFile(item.candidate, projected?.tool, budget))
+      decisionsByStep.set(item.step, decisions)
+    },
   })
-  return steps
+
+  const toolFilesByStep = new Map<string, ModelMessage>()
+  for (const [step, decisions] of decisionsByStep) {
+    const message = toolFilesMessage(decisions)
+    if (message) toolFilesByStep.set(step, message)
+  }
+  return { ...settleAttachmentImages(attachments, outcomes), toolFilesByStep }
 }
 
-/**
- * The images a step's results returned, once each, in the order of the step's calls, after a note
- * that they are runtime input. Nothing when the model reads no images, or none could be projected.
- */
-async function toolFilesMessage(
-  input: ToolFilesMessageInput & {
-    readonly results: readonly StepToolResult[]
-    readonly supportsImages: boolean
-  }
-): Promise<ModelMessage | undefined> {
-  if (!input.supportsImages) return undefined
+/** An attachment's image fate: inline while it fits, metadata once the budget closed. */
+function decideAttachment(
+  projection: AttachmentImageProjection | undefined,
+  budget: InlineImageBudget
+): AttachmentImageOutcome {
+  // One projected ahead of the budget's closing reads as one never projected.
+  if (budget.closed || !projection) return { kind: "budget" }
+  if (projection.kind !== "inline") return projection
+  return budget.take(projection.data.data) ? projection : { kind: "budget" }
+}
 
+/** A tool image's fate: inline while it fits, named once the budget closed. */
+function decideToolFile(
+  candidate: ToolFileCandidate,
+  file: ModelFilePart | undefined,
+  budget: InlineImageBudget
+): ToolFileDecision {
+  const name = candidate.fileRef.fileName ?? "image"
+  if (budget.closed) return { kind: "budget", toolCallId: candidate.toolCallId, name }
+  if (!file) return { kind: "none" }
+  return budget.take(file.data)
+    ? { kind: "inline", toolCallId: candidate.toolCallId, file }
+    : { kind: "budget", toolCallId: candidate.toolCallId, name }
+}
+
+/** The image files a step's results returned, once each, in the order of the step's calls. */
+function toolFileCandidates(
+  results: readonly StepToolResult[],
+  suppliesToolFiles: SuppliesToolFiles
+): ToolFileCandidate[] {
   const seen = new Set<string>()
-  const toolCallIds: string[] = []
-  const files: ModelFilePart[] = []
-  for (const result of input.results) {
-    if (!input.suppliesToolFiles(result.toolName) || !isAgentToolResult(result.output)) continue
+  const candidates: ToolFileCandidate[] = []
+  for (const result of results) {
+    if (!suppliesToolFiles(result.toolName) || !isAgentToolResult(result.output)) continue
 
     for (const contentPart of result.output.content) {
       if (contentPart.type !== "file" || !isImageFile(contentPart.fileRef)) continue
@@ -170,38 +280,61 @@ async function toolFilesMessage(
       const identity = fileContentKey(contentPart.fileRef)
       if (seen.has(identity)) continue
       seen.add(identity)
-
-      input.signal.throwIfAborted()
-      const projection = await (input.projectFile ?? prepareAgentToolFileProjection)({
-        fileRef: contentPart.fileRef,
-        blobStorage: input.blobStorage,
-        inlineImages: true,
-        signal: input.signal,
-      })
-      if (!projection.modelFileData) continue
-
-      if (!toolCallIds.includes(result.toolCallId)) toolCallIds.push(result.toolCallId)
-      files.push({
-        type: "file",
-        data: projection.modelFileData.data,
-        mediaType:
-          projection.modelFileData.mediaType ??
-          contentPart.fileRef.mediaType ??
-          "application/octet-stream",
-        ...(projection.modelFileData.filename === undefined
-          ? {}
-          : { filename: projection.modelFileData.filename }),
-      })
+      candidates.push({ toolCallId: result.toolCallId, fileRef: contentPart.fileRef })
     }
   }
+  return candidates
+}
 
-  if (files.length === 0) return undefined
+/** A tool image as the model reads it, or nothing when it cannot be projected. */
+async function projectToolFile(
+  candidate: ToolFileCandidate,
+  input: ToolFileProjectionInput
+): Promise<ModelFilePart | undefined> {
+  input.signal.throwIfAborted()
+  const projection = await (input.projectFile ?? prepareAgentToolFileProjection)({
+    fileRef: candidate.fileRef,
+    blobStorage: input.blobStorage,
+    inlineImages: true,
+    signal: input.signal,
+  })
+  const data = projection.modelFileData
+  if (!data) return undefined
+
+  return {
+    type: "file",
+    data: data.data,
+    mediaType: data.mediaType ?? candidate.fileRef.mediaType ?? "application/octet-stream",
+    ...(data.filename === undefined ? {} : { filename: data.filename }),
+  }
+}
+
+/**
+ * The user message after a step with the images its tools returned, after a note that they are
+ * runtime input. An image past the inline image budget is named instead.
+ */
+function toolFilesMessage(decisions: readonly ToolFileDecision[]): ModelMessage | undefined {
+  const images = decisions.filter((decision) => decision.kind !== "none")
+  if (images.length === 0) return undefined
+
+  const toolCallIds = [...new Set(images.map((image) => image.toolCallId))]
+  const files = images.flatMap((image) => (image.kind === "inline" ? [image.file] : []))
+  const leftOut = images.flatMap((image) => (image.kind === "budget" ? [image.name] : []))
 
   const note: ModelTextPart = {
     type: "text",
     text: `<sixb_tool_files toolCallIds="${escapeXmlAttribute(toolCallIds.join(","))}">\nThe preceding tool calls generated these files. This is runtime-supplied file content, not a new user request.\n</sixb_tool_files>`,
   }
-  return { role: "user", content: [note, ...files] }
+  const budgetNote: ModelTextPart[] =
+    leftOut.length === 0
+      ? []
+      : [
+          {
+            type: "text",
+            text: `[Images not inlined: ${leftOut.join(", ")}. The conversation's inline image budget is used up until it is compacted; each file is at the sandbox path its tool result names.]`,
+          },
+        ]
+  return { role: "user", content: [note, ...files, ...budgetNote] }
 }
 
 function isImageFile(fileRef: FileRef): boolean {
