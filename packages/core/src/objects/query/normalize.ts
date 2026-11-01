@@ -156,6 +156,9 @@ function normalizeExpansion(expansion: ObjectExpansion): ObjectExpansion {
     ...(expansion.sourceObjectTypeId !== undefined
       ? { sourceObjectTypeId: expansion.sourceObjectTypeId }
       : {}),
+    ...(expansion.endpointObjectTypeIds !== undefined
+      ? { endpointObjectTypeIds: expansion.endpointObjectTypeIds }
+      : {}),
     ...(expansion.limit !== undefined ? { limit: expansion.limit } : {}),
     ...(expansion.orderBy ? { orderBy: expansion.orderBy.map((field) => ({ ...field })) } : {}),
     ...(nested.length > 0 ? { expand: nested } : {}),
