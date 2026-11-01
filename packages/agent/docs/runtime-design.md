@@ -109,11 +109,15 @@ turn N's last request sent, on every storage:
 - **Runtime input is derived again.** The `<sixb_tool_files>` message after a step's results is
   rebuilt from the stored trace by the same functions (`replayToolFiles`).
 - **An output too large for the context is saved to a file** ([tool-outputs.ts](../src/tools/tool-outputs.ts)).
-  Past `TOOL_OUTPUT_FILE_MIN_BYTES`, the model reads a preview, the call's `modelOutput`, and the
-  whole output is in `tool-outputs/<call id>.txt` of the context directory. The file is derived from
-  the stored output alone, so each run writes its history's files again, newest first within a
-  budget: a blank sandbox, or a computer's, starts without them. `read` and `view_file` page by
-  themselves and are never saved; a sandbox that cannot take the file leaves the output whole.
+  Past `TOOL_OUTPUT_FILE_MIN_BYTES`, the whole output is stored as a file of the run (the run's
+  blob store, counted in its file budget) and copied to `tool-outputs/<call id>.txt` of the context
+  directory; the model reads a preview with that path, the call's `modelOutput`. The tool-call part
+  names the stored file as `outputFile`, which the message's file route serves to the thread's
+  readers, and keeps a bounded copy as `output`: a command's streams cut to 20,000 characters, any
+  other tool's output as it returned it. Each run copies its history's saved files back, newest
+  first within a budget, as a blank sandbox or a computer's starts without them. `read` and
+  `view_file` page by themselves and are never saved; a sandbox or store that cannot take the file
+  leaves the model the part's copy. A cleared preview points at the file.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the
