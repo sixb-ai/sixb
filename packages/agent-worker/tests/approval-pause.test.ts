@@ -33,6 +33,7 @@ import { waitFor as pollFor } from "../../agent/tests/helpers"
 import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
 import { repairAgentApprovals } from "../src/approval-repair"
+import { expectReplayedPrefix, withJsonbKeyOrder } from "./replay-bytes"
 
 const projectId = "agent-approval-pause"
 const alice = { type: "user", id: "usr_alice" } as const
@@ -168,6 +169,23 @@ function scriptedModel() {
   return { model, requests }
 }
 
+function answer(text: string) {
+  return testStream([
+    { type: "stream-start", warnings: [] },
+    { type: "text-start", id: "answer" },
+    { type: "text-delta", id: "answer", delta: text },
+    { type: "text-end", id: "answer" },
+    finish("stop"),
+  ])
+}
+
+const PNG_BYTES = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64"
+  )
+)
+
 function finish(finishReason: "stop" | "tool-calls") {
   return {
     type: "finish",
@@ -183,10 +201,14 @@ function setup(
     readonly host: SixbHost
     readonly signal?: AbortSignal
   }) => Promise<void>,
-  /** Another host's storage, as a second worker process shares it. */
-  options: { readonly storage?: InMemoryStorage } = {}
+  options: {
+    /** Another host's storage, as a second worker process shares it. */
+    readonly storage?: InMemoryStorage
+    /** The model's script, instead of a call it holds then an answer. */
+    readonly scripted?: ReturnType<typeof scriptedModel>
+  } = {}
 ) {
-  const { model, requests } = scriptedModel()
+  const { model, requests } = options.scripted ?? scriptedModel()
   const storage = options.storage ?? new InMemoryStorage()
   const host: SixbHost = new SixbHost({
     id: projectId,
@@ -372,6 +394,70 @@ describe("a turn whose call waits for approval", () => {
         id: "INV-2041",
         status: "paid",
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Guard proofs: inline only the newest user message's files in fileWorkItems, and the resumed
+  // turn reads the request's attachments as metadata; serialize tool JSON with JSON.stringify in
+  // models/protocols, and the bash output the jsonb double reordered prints other bytes.
+  test("resumes with every byte the paused turn sent last, its attachments included", async () => {
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      capabilities: { inputMediaTypes: ["image/png"], localTools: true },
+      stream: async (request) => {
+        requests.push(request)
+        if (requests.length > 2) return answer("INV-2041 is paid.")
+
+        const command = requests.length === 1 ? "ls invoices" : HELD_COMMAND
+        return testStream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: `call-${requests.length}`,
+            toolName: "bash",
+            input: JSON.stringify({ command }),
+          },
+          finish("tool-calls"),
+        ])
+      },
+    })
+    const { host, agents } = setup(({ runId, host }) => holdTheCall(host, runId), {
+      storage: withJsonbKeyOrder(new InMemoryStorage()),
+      scripted: { model, requests },
+    })
+    const alicesSixb = await signedIn(host)
+    await seedInvoice(host)
+    const attachments = await Promise.all([
+      host.blobStorage.put({
+        body: new TextEncoder().encode("invoice,amount\nINV-2041,1200\n"),
+        fileName: "invoices.csv",
+        mediaType: "text/csv",
+      }),
+      host.blobStorage.put({ body: PNG_BYTES, fileName: "stamp.png", mediaType: "image/png" }),
+    ])
+    const worker = startWorker(host)
+    await worker.start()
+    try {
+      const { run } = await alicesSixb.agent.runs.request({
+        text: "Mark the invoice in this file paid",
+        approvalMode: "manual",
+        attachments,
+      })
+      await terminal(agents, run.id)
+      const [held] = (await alicesSixb.agent.approvals.list({ threadId: run.threadId })).approvals
+      const decision = await alicesSixb.agent.approvals.decide(held?.id ?? "", {
+        decision: "approve",
+      })
+      await terminal(agents, decision.run?.id ?? "")
+
+      expect(requests).toHaveLength(3)
+      expectReplayedPrefix(requests[1], requests[2], model.providerId)
+      expect(modelText(requests[2])).toContain("INV-2041,1200")
+      if (typeof Bun.Image === "function") {
+        expect(modelText(requests[2])).toContain(Buffer.from(PNG_BYTES).toString("base64"))
+      }
     } finally {
       await worker.stop()
     }
