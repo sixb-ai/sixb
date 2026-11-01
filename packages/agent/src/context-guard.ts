@@ -93,6 +93,10 @@ export interface AgentContextGuard {
  * 3. past the limit even so, clear as many of the results the model has read as it takes, the
  *    newest still kept, and cut those it has not read to fit.
  *
+ * A result the model asks for again after it was cleared or cut is one the turn needs: it is
+ * neither cleared nor cut again, so a turn whose working set does not fit ends on the provider's
+ * refusal instead of reading and reducing the same results in turn.
+ *
  * A call the provider rejects as too long for the window is measured at the window at least, and
  * reduced the same way, compacting first when it can, for the loop to ask it again once.
  *
@@ -129,6 +133,12 @@ class ContextGuard {
   reducedFrom: number | undefined
   /** Whether the request `reduce` returned last had tool results cleared or cut. */
   private cleared = false
+  /**
+   * The calls whose results this run cleared or cut, by tool and input. A result the model asks
+   * for again after that is one it needs: it is never cleared or cut again, or the two would take
+   * turns forever when the turn's working set does not fit.
+   */
+  private readonly reducedCalls = new Map<string, Set<string>>()
   private readonly excluded: ReadonlySet<string>
 
   constructor(private readonly input: AgentContextGuardInput) {
@@ -225,6 +235,7 @@ class ContextGuard {
       const cleared = this.clear(messages, steps, tokens - aimTokens)
       if (cleared.tokens >= clearAtLeast && tokens - cleared.tokens <= limitTokens) {
         this.cleared = true
+        this.remember(cleared.calls)
         return cleared.messages
       }
     }
@@ -249,6 +260,7 @@ class ContextGuard {
     const cleared = this.clear(current, steps, currentTokens - aimTokens)
     if (overflow || cleared.tokens >= clearAtLeast || currentTokens > limitTokens) {
       if (cleared.messages !== current) this.cleared = true
+      this.remember(cleared.calls)
       current = cleared.messages
       currentTokens = this.projectedTokens(current, steps)
     }
@@ -257,6 +269,7 @@ class ContextGuard {
     if (currentTokens > limitTokens) {
       const cut = this.cutUnread(current, currentTokens - limitTokens)
       if (cut.messages !== current) this.cleared = true
+      this.remember(cut.calls)
       current = cut.messages
     }
 
@@ -265,17 +278,27 @@ class ContextGuard {
 
   /**
    * The oldest tool results the model has read, cleared until `neededTokens` are freed or only
-   * the most recent {@link KEPT_TOOL_RESULTS} is left.
+   * the most recent {@link KEPT_TOOL_RESULTS} is left, and the calls they answered. A result the
+   * model asked for again after this run cleared or cut it stays.
    */
   private clear(
     messages: readonly ModelMessage[],
     steps: readonly ModelStep[],
     neededTokens: number
-  ): { readonly messages: readonly ModelMessage[]; readonly tokens: number } {
+  ): {
+    readonly messages: readonly ModelMessage[]
+    readonly tokens: number
+    readonly calls: readonly ReducedCall[]
+  } {
     const counted = this.countedMessages(steps)
+    const calls = toolCallKeys(messages)
     const read = messages.map((message) => message.role).lastIndexOf("assistant")
-    const candidates: { readonly message: number; readonly part: number; readonly gain: number }[] =
-      []
+    const candidates: {
+      readonly message: number
+      readonly part: number
+      readonly gain: number
+      readonly call: ReducedCall | undefined
+    }[] = []
     for (const [index, message] of messages.entries()) {
       if (index >= read || message.role !== "tool") continue
 
@@ -283,16 +306,20 @@ class ContextGuard {
         const bytes = clearableBytes(part)
         if (bytes === undefined || this.excluded.has(part.toolName)) continue
 
+        if (this.needed(calls, part.toolCallId)) continue
+
         const placeholder = utf8Bytes(clearedToolResultText(part.toolName))
         candidates.push({
           message: index,
           part: partIndex,
           gain: this.tokensOf(bytes - placeholder, !counted.has(message)),
+          call: reducedCall(calls, part.toolCallId),
         })
       }
     }
 
     const chosen = new Map<number, Set<number>>()
+    const chosenCalls: ReducedCall[] = []
     let tokens = 0
     for (const candidate of candidates.slice(0, -KEPT_TOOL_RESULTS)) {
       if (tokens >= neededTokens) break
@@ -301,11 +328,13 @@ class ContextGuard {
       const parts = chosen.get(candidate.message) ?? new Set<number>()
       parts.add(candidate.part)
       chosen.set(candidate.message, parts)
+      if (candidate.call !== undefined) chosenCalls.push(candidate.call)
     }
-    if (chosen.size === 0) return { messages, tokens: 0 }
+    if (chosen.size === 0) return { messages, tokens: 0, calls: [] }
 
     return {
       tokens,
+      calls: chosenCalls,
       messages: replaceToolResults(messages, chosen, (part) => ({
         ...withoutOriginalOutput(part),
         output: { type: "text", value: clearedToolResultText(part.toolName) },
@@ -316,12 +345,14 @@ class ContextGuard {
   /**
    * The results of the step the model has not read yet, each cut to the same length, halved
    * until `excessTokens` are freed: they are the turn's newest work, so the model reads what fits
-   * of each and learns how to read the rest.
+   * of each and learns how to read the rest. One it asked for again after it was cleared or cut
+   * stays whole: what the turn needs then does not fit, and the provider's refusal ends the turn.
    */
   private cutUnread(
     messages: readonly ModelMessage[],
     excessTokens: number
-  ): { readonly messages: readonly ModelMessage[] } {
+  ): { readonly messages: readonly ModelMessage[]; readonly calls: readonly ReducedCall[] } {
+    const calls = toolCallKeys(messages)
     const read = messages.map((message) => message.role).lastIndexOf("assistant")
     const unread = new Map<number, Set<number>>()
     let longest = 0
@@ -332,6 +363,8 @@ class ContextGuard {
         const bytes = clearableBytes(part)
         if (bytes === undefined) continue
 
+        if (this.needed(calls, part.toolCallId)) continue
+
         longest = Math.max(longest, bytes)
         const parts = unread.get(index) ?? new Set<number>()
         parts.add(partIndex)
@@ -341,20 +374,42 @@ class ContextGuard {
 
     let maxBytes = Math.floor(longest / 2)
     let cut = messages
+    let cutCalls: ReducedCall[] = []
     while (maxBytes >= CUT_MIN_BYTES) {
       let freed = 0
       const limit = maxBytes
+      const calledFor: ReducedCall[] = []
       cut = replaceToolResults(messages, unread, (part) => {
         const text = toolResultText(part)
         const kept = cutText(text, limit, part.toolName)
+        const call = reducedCall(calls, part.toolCallId)
+        if (kept !== text && call) calledFor.push(call)
+
         freed += this.tokensOf(utf8Bytes(text) - utf8Bytes(kept), true)
         return { ...withoutOriginalOutput(part), output: { type: "text", value: kept } }
       })
+      cutCalls = calledFor
       if (freed >= excessTokens) break
 
       maxBytes = Math.floor(maxBytes / 2)
     }
-    return { messages: cut }
+    return { messages: cut, calls: cutCalls }
+  }
+
+  /** Remember the calls whose results were cleared or cut. */
+  private remember(calls: readonly ReducedCall[]): void {
+    for (const { key, toolCallId } of calls) {
+      const reduced = this.reducedCalls.get(key) ?? new Set<string>()
+      reduced.add(toolCallId)
+      this.reducedCalls.set(key, reduced)
+    }
+  }
+
+  /** Whether the model asked for this result again after the run cleared or cut another's. */
+  private needed(calls: ReadonlyMap<string, string>, toolCallId: string): boolean {
+    const key = calls.get(toolCallId)
+    const reduced = key === undefined ? undefined : this.reducedCalls.get(key)
+    return reduced !== undefined && !reduced.has(toolCallId)
   }
 
   /**
@@ -412,6 +467,35 @@ class ContextGuard {
   private tokensOf(bytes: number, added: boolean): number {
     return Math.max(0, Math.ceil((bytes / this.bytesPerToken) * (added ? this.scale : 1)))
   }
+}
+
+/** A call whose result was cleared or cut: what it asked, and which call it was. */
+interface ReducedCall {
+  readonly key: string
+  readonly toolCallId: string
+}
+
+function reducedCall(
+  calls: ReadonlyMap<string, string>,
+  toolCallId: string
+): ReducedCall | undefined {
+  const key = calls.get(toolCallId)
+  return key === undefined ? undefined : { key, toolCallId }
+}
+
+/** What each call in `messages` asked, by its id: its tool and its input. */
+function toolCallKeys(messages: readonly ModelMessage[]): ReadonlyMap<string, string> {
+  const keys = new Map<string, string>()
+  for (const message of messages) {
+    if (message.role !== "assistant") continue
+
+    for (const part of message.content) {
+      if (part.type !== "tool-call") continue
+
+      keys.set(part.toolCallId, `${part.toolName}\u0000${stableJsonStringify(part.input)}`)
+    }
+  }
+  return keys
 }
 
 /** What a result weighs when clearing it is worth it: text or JSON past the note's own size. */
