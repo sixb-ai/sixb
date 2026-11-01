@@ -1,6 +1,7 @@
 import { AgentDefinitionError } from "@sixb/core"
 import {
   AGENT_IMAGE_INPUT_TOKENS,
+  AGENT_TOKEN_RATE_SAMPLES,
   type AgentContextSize,
   type AgentContextTokenRateSample,
   type AgentModelTokenRateSample,
@@ -112,7 +113,9 @@ export function prepareAgentModel(
           events: withCountedInput(stream.events, (inputTokens) => {
             const sample = measureAgentContextTokenRate({ size, inputTokens })
             if (sample) {
+              // The newest 20 are all the statistic reads.
               runTokenRates.unshift(sample)
+              runTokenRates.splice(AGENT_TOKEN_RATE_SAMPLES)
               runBytesPerToken = learnedAgentContextBytesPerToken([...runTokenRates, ...tokenRates])
               measured?.({ providerId: model.providerId, modelId: model.modelId, ...sample })
             }
