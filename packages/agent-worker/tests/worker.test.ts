@@ -15447,8 +15447,8 @@ describe("context within a turn", () => {
 })
 
 /**
- * A 100,000-token window (83,616 tokens of input at most) as `chapterReadingModel` has, under
- * other ids, answering each call as `script` says. It reports each request as the estimator counts
+ * A 100,000-token window (83,616 tokens of input at most) as `chapterReadingModel` has, or
+ * `contextWindow`, under other ids, answering each call as `script` says. It reports each request as the estimator counts
  * it at 3 bytes per token, keeps every request, and calls `reject` first: what it throws, the
  * provider rejected. A summary request is answered with a summary.
  */
@@ -15458,6 +15458,7 @@ function scriptedWindowModel(input: {
   readonly requests: LanguageModelRequest[]
   readonly script: (request: LanguageModelRequest) => readonly WorkerTestStreamEvent[]
   readonly reject?: (request: LanguageModelRequest) => Error | undefined
+  readonly contextWindow?: number
   /**
    * Each call a second after the one before it: under fake time, calls would share a timestamp,
    * and the latest of a run, which a later run's estimate anchors on, would be any of them.
@@ -15475,7 +15476,7 @@ function scriptedWindowModel(input: {
         parallelToolCalls: true,
         nativeStructuredOutput: true,
       },
-      contextWindow: 100_000,
+      contextWindow: input.contextWindow ?? 100_000,
       maxOutputTokens: 16_384,
     },
     stream: async (request) => {
@@ -15846,6 +15847,62 @@ describe("context of a child and of a workflow step", () => {
       await stopUnderFakeTime(worker)
       setSystemTime()
       jest.restoreAllMocks()
+    }
+  })
+
+  test("a child that comes back idle and large compacts its thread first", async () => {
+    // Reproduce: leave `idle` out of preflightSubagentContext; the continuation then replays the
+    // whole earlier run, about 225,000 tokens its cache no longer holds, and writes no checkpoint.
+    const ANSWER = "The second edition."
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    // A 383,616-token limit, so that 225,000 tokens fit well.
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      contextWindow: 400_000,
+      requests: childRequests,
+      script: (request) =>
+        JSON.stringify(request.messages).includes(ANSWER)
+          ? textEvents("Read the second edition.")
+          : readChapters(9, () => [
+              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+            ])(request),
+    })
+    const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(75_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      expect(childRequests.splice(0).some(isSummaryRequest)).toBe(false)
+
+      // Its calls can wait on its parent, so they asked for the hour-long cache: it went cold.
+      jest.setSystemTime(new Date(Date.now() + 61 * 60_000))
+      const second = await parentTurn(sixb, ANSWER, first.run.threadId, childRunOf)
+
+      expect(second.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition." },
+      })
+      expect(childRequests[0] && isSummaryRequest(childRequests[0])).toBe(true)
+      const checkpoint = await storage.checkpoints.getLatest({
+        projectId: PROJECT_ID,
+        threadId: second.child.threadId,
+      })
+      expect(checkpoint).toMatchObject({ createdByRunId: second.child.id, reason: "threshold" })
+      expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThanOrEqual(200_000)
+      expect(checkpoint?.estimatedInputTokensBefore).toBeLessThan(383_616)
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
     }
   })
 

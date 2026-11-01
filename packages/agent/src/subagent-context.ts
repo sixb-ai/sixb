@@ -17,6 +17,7 @@ import {
   type AgentThreadCompactionInput,
   compactAgentThreadInRun,
   estimateAgentConversation,
+  shouldCompactIdleContext,
 } from "./context-compaction"
 import { childCacheLifetime, conversationPromptCaching } from "./prompt-cache"
 import type { SubagentHistory } from "./subagent-continuation"
@@ -27,8 +28,9 @@ import { toolFilesStepKey } from "./tools/result-media"
 // createAgentContextGuard): its thread is its history, its task apart. Every request opens with
 // the task as it was sent, then the thread: from its latest checkpoint's summary once it has one.
 // A run that continues the thread compacts what came before the message it started from, on the
-// child's own thread, before its environment is built, as a conversation's preflight does; its own
-// steps are cleared, never summarized. A first run has nothing before its task, so it only clears.
+// child's own thread, before its environment is built, as a conversation's preflight does: past
+// the limit, or idle and large. Its own steps are cleared, never summarized. A first run has
+// nothing before its task, so it only clears.
 
 /** A child's thread as its requests send it: its task, and the history after it. */
 export interface SubagentThreadContext {
@@ -110,8 +112,9 @@ export function subagentPromptCaching(input: {
 }
 
 /**
- * Weigh a child's thread before its first call, and compact it when it crosses the model's limit:
- * what the run then starts from, and the bytes per token the thread was measured at.
+ * Weigh a child's thread before its first call, and compact it when it crosses the model's limit,
+ * or when it comes back idle and large (see shouldCompactIdleContext): what the run then starts
+ * from, and the bytes per token the thread was measured at.
  */
 export async function preflightSubagentContext(
   input: AgentThreadCompactionInput & { readonly threadContext: LoadedAgentThreadModelContext }
@@ -126,14 +129,16 @@ export async function preflightSubagentContext(
     threadContext,
     ...input.estimateShape(threadContext, undefined),
   })
-  if (
-    !shouldCompactAgentContext({
-      estimatedInputTokens: estimate.tokens,
-      inputBudgetTokens: budget.inputBudgetTokens,
-    })
-  ) {
-    return { threadContext, bytesPerToken: estimate.bytesPerToken }
-  }
+  const overLimit = shouldCompactAgentContext({
+    estimatedInputTokens: estimate.tokens,
+    inputBudgetTokens: budget.inputBudgetTokens,
+  })
+  const idle = shouldCompactIdleContext({
+    history: threadContext.history,
+    caching: input.caching,
+    estimatedInputTokens: estimate.tokens,
+  })
+  if (!overLimit && !idle) return { threadContext, bytesPerToken: estimate.bytesPerToken }
 
   const compacted = await compactAgentThreadInRun({
     ...input,
