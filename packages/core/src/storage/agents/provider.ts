@@ -42,6 +42,8 @@ import {
   AGENT_APPROVAL_MODES,
   AGENT_HOLDING_APPROVAL_MODES,
   AGENT_MEMORY_HISTORY_DAYS,
+  AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN,
+  AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
 } from "./types"
 
 const SANDBOX_NAME_PATTERN = /^[a-zA-Z0-9-]{1,80}$/
@@ -1085,6 +1087,13 @@ export function assertAgentTokenRateRecord(input: AgentTokenRateRecord, prefix =
   }
   if (!(input.measuredAt instanceof Date) || !Number.isFinite(input.measuredAt.getTime())) {
     fail("measurement time must be a valid date.")
+  }
+
+  const rate = input.bytes / input.tokens
+  if (rate < AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN || rate > AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN) {
+    fail(
+      `bytes per token must be between ${AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN} and ${AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN}.`
+    )
   }
 }
 
