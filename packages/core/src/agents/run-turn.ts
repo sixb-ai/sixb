@@ -51,7 +51,8 @@ export interface AgentTurnHistory {
   readonly sentLocales?: Readonly<Record<string, string>>
   /**
    * The model call that ended the latest assistant message after the checkpoint: what a token
-   * estimate anchors on, as the provider counted it.
+   * estimate anchors on, as the provider counted it. None when that message's run compacted the
+   * thread and did not succeed.
    */
   readonly usageAnchor?: {
     readonly messageId: string
@@ -106,7 +107,7 @@ export async function readAgentTurnHistory(
   })
   const [sent, usageAnchor] = await Promise.all([
     readSentSettings(host, threadId, messages),
-    readUsageAnchor(host, messages, checkpoint?.observedHeadSeq ?? 0),
+    readUsageAnchor(host, messages, checkpoint),
   ])
   return { checkpoint, messages, ...sent, ...(usageAnchor ? { usageAnchor } : {}) }
 }
@@ -256,8 +257,9 @@ async function readSentSettings(
 async function readUsageAnchor(
   host: AgentRunSessionHost,
   messages: readonly AgentMessageRecord[],
-  afterSeq: number
+  checkpoint: AgentContextCheckpointRecord | null
 ): Promise<AgentTurnHistory["usageAnchor"]> {
+  const afterSeq = checkpoint?.observedHeadSeq ?? 0
   const anchor = [...messages]
     .reverse()
     .find((message) => message.role === "assistant" && message.seq > afterSeq && message.runId)
@@ -267,6 +269,11 @@ async function readUsageAnchor(
     id: anchor.runId,
   })
   if (!run) return undefined
+
+  // A run that compacted the thread and did not finish may have ended on its summary's call, which
+  // read the history the summary replaced: it anchors nothing.
+  if (run.id === checkpoint?.createdByRunId && run.status !== "succeeded") return undefined
+
   const modelCall = await host.storage.aiUsage.getLatestForExecution({
     projectId: host.projectId,
     executionId: run.executionId,
