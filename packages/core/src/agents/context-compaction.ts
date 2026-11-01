@@ -1,4 +1,5 @@
 import { stableJsonStringify } from "../json"
+import type { ModelMessage, ModelResponseFormat, ModelToolSpecification } from "../models"
 import type { AgentMessageRecord } from "../storage/agents/types"
 import { AGENT_CONTINUATION_INSTRUCTION, agentMessageSteps } from "./adapters"
 import { agentMailInstruction } from "./agent-mail"
@@ -7,9 +8,12 @@ import { AGENT_IMAGE_INPUT_TOKENS, AGENT_INLINE_IMAGE_LIMITS } from "./inline-im
 import type { AgentMessage, AgentMessagePart } from "./message"
 import { isAgentToolResult } from "./tool-result"
 
-export const AGENT_CONTEXT_ESTIMATOR_VERSION = 1 as const
+/**
+ * 2: text counts in UTF-8 bytes at the model's own bytes per token; retained attachments, the
+ * images tools returned and stored model-facing tool output count as the model reads them.
+ */
+export const AGENT_CONTEXT_ESTIMATOR_VERSION = 2 as const
 
-const CHARS_PER_TOKEN = 4
 const REQUEST_OVERHEAD_TOKENS = 8
 const MESSAGE_OVERHEAD_TOKENS = 8
 const TOOL_OVERHEAD_TOKENS = 16
@@ -31,6 +35,15 @@ export interface EstimateAgentContextRequestTokensInput {
   readonly messages: readonly AgentMessage[]
 }
 
+/**
+ * What a request weighs before any tokenizer: the UTF-8 bytes of its text, and the tokens already
+ * counted as such (per-item overheads, image allowances).
+ */
+export interface AgentContextSize {
+  readonly bytes: number
+  readonly tokens: number
+}
+
 export interface AgentContextTokenEstimate {
   readonly tokens: number
   readonly estimatorVersion: typeof AGENT_CONTEXT_ESTIMATOR_VERSION
@@ -42,33 +55,20 @@ export interface AgentContextCompactionBoundary {
   readonly summarizedThroughSeq: number
 }
 
-/** Compaction begins only once the estimated request crosses the reserved input budget. */
+/** Compaction begins only once the estimated request crosses the turn's context target. */
 export function shouldCompactAgentContext(input: {
   readonly estimatedInputTokens: number
-  readonly inputBudgetTokens: number
+  readonly targetTokens: number
 }): boolean {
-  return input.estimatedInputTokens > input.inputBudgetTokens
+  return input.estimatedInputTokens > input.targetTokens
 }
 
-/** Estimate the provider request shape with one stable, conservative character heuristic. */
+/** Estimate the provider request shape at the model's bytes-per-token rate. */
 export function estimateAgentContextRequestTokens(
-  input: EstimateAgentContextRequestTokensInput
+  input: EstimateAgentContextRequestTokensInput & { readonly bytesPerToken: number }
 ): AgentContextTokenEstimate {
-  const toolTokens = input.tools.reduce(
-    (total, tool) =>
-      total +
-      TOOL_OVERHEAD_TOKENS +
-      textTokens(tool.name) +
-      textTokens(tool.description) +
-      textTokens(tool.inputSchema),
-    0
-  )
   return {
-    tokens:
-      REQUEST_OVERHEAD_TOKENS +
-      textTokens(input.systemPrompt) +
-      toolTokens +
-      estimateAgentContextMessagesTokens(input.messages).tokens,
+    tokens: agentContextTokens(measureAgentContextRequest(input), input.bytesPerToken),
     estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION,
   }
 }
@@ -83,27 +83,110 @@ export function estimateAgentContextRequestTokens(
  * overflow.
  */
 export function estimateAgentContextMessagesTokens(
-  messages: readonly AgentMessage[]
+  messages: readonly AgentMessage[],
+  bytesPerToken: number
 ): AgentContextTokenEstimate {
-  const images = { remaining: AGENT_INLINE_IMAGE_LIMITS.maxImages }
-  let tokens = 0
-  for (const message of messages) {
-    tokens += estimateMessageTokens(
-      message,
-      {
-        textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES,
-      },
-      images
-    )
-    if (message.role === "assistant") tokens += toolImageTokens(message, images)
+  return {
+    tokens: agentContextTokens(measureAgentContextMessages(messages), bytesPerToken),
+    estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION,
   }
-  return { tokens, estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION }
+}
+
+/** Weigh a stored conversation request: its system prompt, tool catalog and messages. */
+export function measureAgentContextRequest(
+  input: EstimateAgentContextRequestTokensInput
+): AgentContextSize {
+  const size = { bytes: utf8Bytes(input.systemPrompt), tokens: REQUEST_OVERHEAD_TOKENS }
+  for (const tool of input.tools) {
+    size.tokens += TOOL_OVERHEAD_TOKENS
+    size.bytes += utf8Bytes(tool.name) + utf8Bytes(tool.description) + utf8Bytes(tool.inputSchema)
+  }
+
+  const messages = measureAgentContextMessages(input.messages)
+  return { bytes: size.bytes + messages.bytes, tokens: size.tokens + messages.tokens }
+}
+
+function measureAgentContextMessages(messages: readonly AgentMessage[]): AgentContextSize {
+  const images = { remaining: AGENT_INLINE_IMAGE_LIMITS.maxImages }
+  const size = { bytes: 0, tokens: 0 }
+  for (const message of messages) {
+    measureMessage(message, { textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES }, images, size)
+    if (message.role === "assistant") size.tokens += toolImageTokens(message, images)
+  }
+  return size
+}
+
+/** Price a measured request at a tokenizer's rate. */
+function agentContextTokens(size: AgentContextSize, bytesPerToken: number): number {
+  return size.tokens + Math.ceil(size.bytes / bytesPerToken)
+}
+
+/**
+ * Estimate one outgoing model request the same way as a stored conversation: the same parts, the
+ * same overheads, the same rate. A file part counts by its name and media type only; what an
+ * attached file costs is the caller's call.
+ */
+export function estimateModelRequestTokens(
+  request: {
+    readonly messages: readonly ModelMessage[]
+    readonly tools: readonly ModelToolSpecification[]
+    readonly responseFormat?: ModelResponseFormat
+  },
+  bytesPerToken: number
+): number {
+  const size = { bytes: 0, tokens: REQUEST_OVERHEAD_TOKENS }
+  for (const tool of request.tools) {
+    size.tokens += TOOL_OVERHEAD_TOKENS
+    size.bytes +=
+      utf8Bytes(tool.name) +
+      utf8Bytes(tool.description) +
+      utf8Bytes(stableJsonStringify(tool.inputSchema))
+  }
+  if (request.responseFormat) {
+    size.bytes += utf8Bytes(stableJsonStringify(request.responseFormat.schema))
+  }
+
+  for (const message of request.messages) {
+    size.tokens += MESSAGE_OVERHEAD_TOKENS
+    if (message.role === "system") {
+      size.bytes += utf8Bytes(message.content)
+      continue
+    }
+    for (const part of message.content) {
+      switch (part.type) {
+        case "text":
+        case "reasoning":
+          size.bytes += utf8Bytes(part.text)
+          break
+        case "file":
+          size.bytes += utf8Bytes(`${part.filename ?? ""} ${part.mediaType}`)
+          break
+        case "provider-state":
+          size.bytes += utf8Bytes(stableJsonStringify(part.data))
+          break
+        case "tool-call":
+          size.tokens += TOOL_OVERHEAD_TOKENS
+          size.bytes += utf8Bytes(part.toolName) + utf8Bytes(stableJsonStringify(part.input))
+          break
+        case "tool-result":
+          size.tokens += TOOL_OVERHEAD_TOKENS
+          size.bytes +=
+            typeof part.output.value === "string"
+              ? utf8Bytes(part.output.value)
+              : utf8Bytes(stableJsonStringify(part.output.value))
+          break
+      }
+    }
+  }
+
+  return agentContextTokens(size, bytesPerToken)
 }
 
 /** Select the safe user boundary whose retained tail is closest to the configured recent budget. */
 export function selectAgentContextCompactionBoundary(input: {
   readonly messages: readonly AgentMessageRecord[]
   readonly keepRecentTokens: number
+  readonly bytesPerToken: number
 }): AgentContextCompactionBoundary | null {
   if (input.messages.length < 2) return null
 
@@ -111,7 +194,10 @@ export function selectAgentContextCompactionBoundary(input: {
   let boundaryIndex: number | null = null
   let closestDistance = Number.POSITIVE_INFINITY
   for (let index = input.messages.length - 1; index > 0; index -= 1) {
-    retainedTokens += estimateAgentContextMessagesTokens([input.messages[index]!]).tokens
+    retainedTokens += estimateAgentContextMessagesTokens(
+      [input.messages[index]!],
+      input.bytesPerToken
+    ).tokens
     if (input.messages[index]?.role !== "user") continue
 
     const distance = Math.abs(input.keepRecentTokens - retainedTokens)
@@ -149,53 +235,54 @@ export function serializeAgentMessagesForSummary(messages: readonly AgentMessage
   return lines.join("\n")
 }
 
-function estimateMessageTokens(
+function measureMessage(
   message: AgentMessage,
   attachments: { textBytesRemaining: number },
-  images: { remaining: number }
-): number {
-  let tokens = MESSAGE_OVERHEAD_TOKENS
+  images: { remaining: number },
+  size: { bytes: number; tokens: number }
+): void {
+  size.tokens += MESSAGE_OVERHEAD_TOKENS
   for (const part of message.parts) {
     switch (part.type) {
       case "text":
       case "reasoning":
-        tokens += textTokens(part.text)
+        size.bytes += utf8Bytes(part.text)
         break
       case "step-start":
-        tokens += STEP_OVERHEAD_TOKENS
+        size.tokens += STEP_OVERHEAD_TOKENS
         break
       case "continuation":
-        tokens += textTokens(AGENT_CONTINUATION_INSTRUCTION)
+        size.bytes += utf8Bytes(AGENT_CONTINUATION_INSTRUCTION)
         break
       case "approval-outcome":
-        tokens += textTokens(approvalOutcomeInstruction(part))
+        size.bytes += utf8Bytes(approvalOutcomeInstruction(part))
         break
       case "mail":
-        tokens += textTokens(agentMailInstruction(part))
+        size.bytes += utf8Bytes(agentMailInstruction(part))
         break
       case "context":
-        tokens += textTokens(stableJsonStringify(part.context))
+        size.bytes += utf8Bytes(stableJsonStringify(part.context))
         break
       case "provider-state":
-        tokens += textTokens(stableJsonStringify(part.data))
+        size.bytes += utf8Bytes(stableJsonStringify(part.data))
         break
       case "tool-call":
-        tokens +=
-          TOOL_OVERHEAD_TOKENS +
-          textTokens(part.toolName) +
-          textTokens(stableJsonStringify(part.input)) +
-          toolOutputTokens(part)
+        size.tokens += TOOL_OVERHEAD_TOKENS
+        size.bytes +=
+          utf8Bytes(part.toolName) +
+          utf8Bytes(stableJsonStringify(part.input)) +
+          toolOutputBytes(part)
         break
       case "file": {
         const file = part.fileRef
-        tokens += textTokens(
+        size.bytes += utf8Bytes(
           [file.blobId, file.digest, file.fileName, file.mediaType, file.logicalPath]
             .filter((value): value is string => value !== undefined)
             .join(" ")
         )
         if (message.role !== "assistant") {
           if (looksLikeImage(file.mediaType, file.fileName)) {
-            tokens += imageTokens(images)
+            size.tokens += imageTokens(images)
           } else {
             const inlineBytes = Math.min(
               file.sizeBytes,
@@ -203,14 +290,13 @@ function estimateMessageTokens(
               attachments.textBytesRemaining
             )
             attachments.textBytesRemaining -= inlineBytes
-            tokens += Math.ceil(inlineBytes / CHARS_PER_TOKEN)
+            size.bytes += inlineBytes
           }
         }
         break
       }
     }
   }
-  return tokens
 }
 
 function serializeSummaryPart(
@@ -319,15 +405,15 @@ function imageTokens(images: { remaining: number }): number {
 }
 
 /** What the model reads of a call's outcome: the output its tool projected, when it stored one. */
-function toolOutputTokens(part: Extract<AgentMessagePart, { readonly type: "tool-call" }>): number {
-  if (part.state === "output-error") return textTokens(part.errorText)
-  if (part.modelOutput?.type === "text") return textTokens(part.modelOutput.value)
-  if (part.modelOutput) return textTokens(stableJsonStringify(part.modelOutput.value))
-  return textTokens(stableJsonStringify(part.output))
+function toolOutputBytes(part: Extract<AgentMessagePart, { readonly type: "tool-call" }>): number {
+  if (part.state === "output-error") return utf8Bytes(part.errorText)
+  if (part.modelOutput?.type === "text") return utf8Bytes(part.modelOutput.value)
+  if (part.modelOutput) return utf8Bytes(stableJsonStringify(part.modelOutput.value))
+  return utf8Bytes(stableJsonStringify(part.output))
 }
 
-function textTokens(value: string): number {
-  return Math.ceil(new TextEncoder().encode(value).byteLength / CHARS_PER_TOKEN)
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength
 }
 
 function escapeXml(value: string): string {

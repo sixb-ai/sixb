@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "@sixb/core"
 import {
+  agentContextBytesPerToken,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
   projectAgentThreadModelContext,
 } from "@sixb/core/internal/agents"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { estimateAgentConversationInputTokens } from "../src/context-compaction"
+import { prepareAgentModel } from "../src/context-budget"
+import { estimateAgentConversation } from "../src/context-compaction"
 import { agentThreadModelContext } from "../src/thread-context"
 import { WorkerTestModel } from "./worker-model-fixture"
 
@@ -75,6 +77,8 @@ describe("agent conversation context estimation", () => {
     })
 
     const model = new WorkerTestModel({ modelId: "mock-model" })
+    const bytesPerToken = agentContextBytesPerToken(model)
+    const budget = prepareAgentModel({ model }).budget
     const plan = {
       model,
       instructions: "Answer clearly.",
@@ -109,14 +113,17 @@ describe("agent conversation context estimation", () => {
         usageAnchor: { messageId: assistant.id, modelCall },
       })
     }
-    const estimate = estimateAgentConversationInputTokens({
+    const estimate = estimateAgentConversation({
       plan,
+      budget,
       threadContext: await anchored(),
       systemPrompt: "This full fallback prompt should not be counted.",
       tools: [],
-    })
+    }).tokens
 
-    expect(estimate).toBe(1_200 + estimateAgentContextMessagesTokens([trailing]).tokens)
+    expect(estimate).toBe(
+      1_200 + estimateAgentContextMessagesTokens([trailing], bytesPerToken).tokens
+    )
 
     // Regression proof: provider usage belongs to the historical request shape. New instructions
     // or skill/tool catalog content must still contribute to the next request's preflight size.
@@ -125,15 +132,17 @@ describe("agent conversation context estimation", () => {
       systemPrompt: expandedSystemPrompt,
       tools: [],
       messages,
+      bytesPerToken,
     }).tokens
     expect(expandedFullEstimate).toBeGreaterThan(estimate)
     expect(
-      estimateAgentConversationInputTokens({
+      estimateAgentConversation({
         plan,
+        budget,
         threadContext: await anchored(),
         systemPrompt: expandedSystemPrompt,
         tools: [],
-      })
+      }).tokens
     ).toBe(expandedFullEstimate)
 
     const retainedAfterCheckpoint: readonly AgentMessageRecord[] = [
@@ -164,10 +173,12 @@ describe("agent conversation context estimation", () => {
       systemPrompt: "System",
       tools: [],
       messages: modelMessages,
+      bytesPerToken,
     }).tokens
     expect(
-      estimateAgentConversationInputTokens({
+      estimateAgentConversation({
         plan,
+        budget,
         // The session found no anchor after the checkpoint's head.
         threadContext: agentThreadModelContext({
           checkpoint,
@@ -176,7 +187,7 @@ describe("agent conversation context estimation", () => {
         }),
         systemPrompt: "System",
         tools: [],
-      })
+      }).tokens
     ).toBe(fallback)
 
     // A provider call that reports no output or no input tokens is no anchor, however large the
@@ -201,15 +212,107 @@ describe("agent conversation context estimation", () => {
         occurredAt: new Date(`2026-08-27T12:0${3 + index}:00.000Z`),
       })
       expect(
-        estimateAgentConversationInputTokens({
+        estimateAgentConversation({
           plan,
+          budget,
           threadContext: await anchored(),
           systemPrompt: "System",
           tools: [],
-        })
+        }).tokens
       ).toBe(
-        estimateAgentContextRequestTokens({ systemPrompt: "System", tools: [], messages }).tokens
+        estimateAgentContextRequestTokens({
+          systemPrompt: "System",
+          tools: [],
+          messages,
+          bytesPerToken,
+        }).tokens
       )
     }
+  })
+})
+
+describe("agent conversation token rate", () => {
+  const record = (
+    id: string,
+    role: AgentMessageRecord["role"],
+    parts: AgentMessageRecord["parts"],
+    seq: number
+  ): AgentMessageRecord => ({
+    id,
+    projectId,
+    threadId,
+    runId: role === "assistant" ? "run_1" : null,
+    role,
+    seq,
+    parts,
+    contentVersion: 1,
+    createdAt: new Date("2026-08-27T12:00:00.000Z"),
+  })
+  const model = new WorkerTestModel({ modelId: "anthropic/claude-haiku-5.5" })
+  const plan = {
+    model,
+    instructions: "Answer clearly.",
+    tools: [],
+    skills: [],
+    ontologyDocs: { files: [], index: [] },
+    maxSteps: 4,
+  }
+  const budget = prepareAgentModel({ model }).budget
+  // 30,000 bytes sent before the answer's last step; that step's text is the call's output.
+  const user = record("user", "user", [{ type: "text", text: "a".repeat(20_000) }], 1)
+  const answer = record(
+    "answer",
+    "assistant",
+    [
+      { type: "step-start" },
+      { type: "text", text: "b".repeat(10_000) },
+      { type: "step-start" },
+      { type: "text", text: "c".repeat(50_000) },
+    ],
+    2
+  )
+  const context = (usage: { providerId?: string; inputTokens: number }) =>
+    agentThreadModelContext({
+      checkpoint: null,
+      messages: [user, answer, record("next", "user", [{ type: "text", text: "Next" }], 3)],
+      sentTimeZones: {},
+      usageAnchor: {
+        messageId: answer.id,
+        modelCall: {
+          id: "usage",
+          projectId,
+          executionId: "execution",
+          attempt: 1,
+          callId: "call",
+          requesterGroupIds: [],
+          providerId: usage.providerId ?? model.providerId,
+          requestedModelId: model.modelId,
+          responseId: "response",
+          usage: { inputTokens: usage.inputTokens, outputTokens: 500, reportingStatus: "complete" },
+          occurredAt: new Date("2026-08-27T12:01:00.000Z"),
+          recordedAt: new Date("2026-08-27T12:01:00.000Z"),
+        },
+      },
+    })
+  const rate = (usage: Parameters<typeof context>[0]) =>
+    estimateAgentConversation({
+      plan,
+      budget,
+      threadContext: context(usage),
+      systemPrompt: "",
+      tools: [],
+    }).bytesPerToken
+
+  test("starts from the tokenizer family's rate", () => {
+    expect(budget.bytesPerToken).toBe(2.1)
+    expect(rate({ providerId: "other", inputTokens: 12_526 })).toBe(2.1)
+  })
+
+  // Removal proof: measure the whole anchored answer, last step included; the 50,000 bytes the
+  // call wrote count as input it read, and the rate comes out at 6.4 bytes per token, clamped to
+  // 2.625.
+  test("measures the rate on what the anchored call read", () => {
+    // 30,000 bytes over 12,500 text tokens: the provider's count less 8 + 2 × 8 + 2 overhead.
+    expect(rate({ inputTokens: 12_526 })).toBe(2.4)
   })
 })

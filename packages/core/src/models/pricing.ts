@@ -583,7 +583,8 @@ function componentAtRate(
   }
 }
 
-function resolvePrice(price: ModelTokenPrice, tokens: number): string {
+/** The price a request of `tokens` input tokens pays: tiers go by the whole request's input. */
+export function resolvePrice(price: ModelTokenPrice, tokens: number): string {
   if (typeof price === "string") return price
   return (
     price.tiers.find(
