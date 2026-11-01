@@ -122,6 +122,42 @@ describe("createAgentContextGuard", () => {
     expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(36_000)
   })
 
+  // Reproduce: write clearedToolResultText(part.toolName) in clearedNote; the note then says to
+  // call the tool again, which for a command runs it again.
+  test("points a cleared saved output at its file", async () => {
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
+    await guard.prepareStep(step(0, HEAD))
+    const path = (index: number) => `.sixb/agent/tool-outputs/call_${index}.txt`
+    // Each a saved output's preview, of the same size as the chapters above.
+    const messages = [
+      ...HEAD,
+      ...Array.from({ length: 8 }, (_, i) =>
+        readStep(i, 30_000).map((message) =>
+          message.role === "tool"
+            ? {
+                ...message,
+                content: message.content.map((part) => ({
+                  ...part,
+                  output: {
+                    type: "text" as const,
+                    value: `<tool_output_file sandboxPath="${path(i)}" sizeBytes="1" lines="1">\n${"x".repeat(30_000)}`,
+                  },
+                })),
+              }
+            : message
+        )
+      ).flat(),
+    ]
+
+    const prepared = await guard.prepareStep(step(8, messages))
+
+    const cleared = outputs(prepared?.messages ?? messages)
+    expect(cleared[0]).toBe(clearedToolResultText("read", path(0)))
+    expect(cleared[0]).toBe(
+      "[This read result was cleared to fit the model's context. Its whole output is in .sixb/agent/tool-outputs/call_0.txt: read it again from there.]"
+    )
+  })
+
   // Reproduce: clear newest first in ContextGuard.clear; the three most recent are then cleared
   // although the older ones were enough.
   test("keeps the three most recent results it read when clearing the older ones reaches the aim", async () => {
