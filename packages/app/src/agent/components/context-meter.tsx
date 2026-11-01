@@ -107,12 +107,23 @@ export function ContextMeter({ context, modelName, condensing = false }: Context
           data-tone={reading.tone}
           data-condensing={condensing || undefined}
           className={cn(
-            "mb-0.5 flex size-9 shrink-0 items-center justify-center rounded-full text-foreground/70 outline-none transition-colors",
+            "group/meter mb-0.5 flex h-9 shrink-0 items-center gap-1.5 rounded-full pr-2.5 pl-2 text-foreground/70 outline-none transition-colors",
             "hover:bg-black/[0.05] hover:text-foreground/90 focus-visible:ring-2 focus-visible:ring-ring/40 aria-expanded:bg-black/[0.05] dark:hover:bg-white/[0.08] dark:aria-expanded:bg-white/[0.08]",
             "data-[tone=near]:text-amber-600 data-[tone=over]:text-red-600 dark:data-[tone=near]:text-amber-400 dark:data-[tone=over]:text-red-400"
           )}
         >
           <ContextRing share={reading.share} condensing={condensing} />
+          {/* The share in figures: a ring alone, nearly empty, reads as a loading spinner. */}
+          <span
+            aria-hidden="true"
+            className={cn(
+              "text-[12.5px] font-medium tabular-nums text-muted-foreground",
+              "group-data-[tone=near]/meter:text-amber-700 group-data-[tone=over]/meter:text-red-600",
+              "dark:group-data-[tone=near]/meter:text-amber-400 dark:group-data-[tone=over]/meter:text-red-400"
+            )}
+          >
+            {sharePercent(reading.share, locale)}
+          </span>
         </button>
       }
     >
@@ -125,6 +136,12 @@ export function ContextMeter({ context, modelName, condensing = false }: Context
       />
     </ComposerMenu>
   )
+}
+
+/** A share as the meter writes it: `2%`, `<1%` for a sliver, `104%` past the limit. */
+function sharePercent(share: number, locale: string): string {
+  if (share > 0 && share < 0.01) return "<1%"
+  return `${Math.round(share * 100).toLocaleString(locale)}%`
 }
 
 /** The least of the ring a conversation fills, so a small one still reads as a reading. */
@@ -147,7 +164,7 @@ function ContextRing({
 }) {
   const filled = Math.min(1, Math.max(RING_MIN_SHARE, share))
   return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" className="size-5">
+    <svg viewBox="0 0 20 20" aria-hidden="true" className="size-[18px] shrink-0">
       <circle
         cx="10"
         cy="10"
@@ -191,8 +208,7 @@ function ContextDetails({
   const agentMessages = useAgentMessages()
   const locale = useLocale()
   const tokens = (value: number) => formatTokenCount(value, locale)
-  const percent = (share: number) =>
-    share > 0 && share < 0.01 ? "<1%" : `${Math.round(share * 100).toLocaleString(locale)}%`
+  const percent = (share: number) => sharePercent(share, locale)
 
   // "12m ago", "just now", or a date once it is a week old: `ago` reads only a relative time.
   const condensedWhen = (iso: string) => {
