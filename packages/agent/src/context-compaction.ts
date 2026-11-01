@@ -310,9 +310,6 @@ export function estimateAgentConversation(input: {
   const answered = lastStep > 0 ? [{ ...answer, parts: answer.parts.slice(0, lastStep) }] : []
   const bytesPerToken = calibrateAgentContextBytesPerToken({
     bytesPerToken: budget.bytesPerToken,
-    ...(budget.typicalBytesPerToken === undefined
-      ? {}
-      : { typicalBytesPerToken: budget.typicalBytesPerToken }),
     inputTokens: anchor.inputTokens,
     size: measureAgentContextRequest({
       systemPrompt,
