@@ -111,6 +111,24 @@ describe("AiModelCallRecorder", () => {
     )
   })
 
+  // Reproduce: record `this.now()` as is in onModelCallEnd; both calls then end at the same
+  // instant, and the latest call is the one whose id sorts last, the first here.
+  test("records each call after the one before it, so the latest is the one that ended last", async () => {
+    const storage = await seededStorage()
+    const ids = ["ai_usage_b", "ai_usage_a"]
+    const usage = recorder(storage, { now: () => occurredAt, generateId: () => ids.shift()! })
+
+    await usage.onModelCallEnd({ ...callEndEvent(), callId: "first" })
+    await usage.onModelCallEnd({ ...callEndEvent(), callId: "second" })
+
+    const latest = await storage.aiUsage.getLatestForExecution({
+      projectId: "project_1",
+      executionId,
+    })
+    expect(latest?.callId).toBe("second")
+    expect(latest?.occurredAt.getTime()).toBe(occurredAt.getTime() + 1)
+  })
+
   test("invalid estimates cannot discard usage or inline provider costs", async () => {
     // Removal proof: bypass validatedEstimate in model-call-accounting; the first append rejects.
     const estimates = [

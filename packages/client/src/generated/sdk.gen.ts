@@ -3014,7 +3014,10 @@ export const listAgentThreadMessages = <ThrowOnError extends boolean = false>(
     ListAgentThreadMessagesErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads/{threadId}/messages",
     ...options,
   })

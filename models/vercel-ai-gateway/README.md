@@ -37,15 +37,16 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
 - **Caching:** automatic where a prompt is reused. Agent steps and chat turns (requests with tools
   or an earlier answer) use Gateway automatic caching, anchored after the leading system messages
   so they hold across turns even when replayed history differs. One-shot requests, such as
-  compaction summaries and `generate()`, write no cache: on Anthropic and OpenAI GPT-5.6 and later a
-  write costs 1.25x input and nothing would read it. Set per-call `caching: "off"` to disable
-  caching, or `"auto"` to cache a one-shot request. A `caching` set in `providerOptions.gateway` or
-  `request`, or an OpenAI `promptCacheOptions`, replaces this policy. Usage reports cache writes.
-- **Cache lifetime and affinity:** a chat turn, read again after the user's next message, asks for
-  the one-hour cache (`cache_ttl: "1h"`; a model without one keeps its default, with a warning).
-  Its steps and its sub-agents' send the conversation's opaque key as `x-session-affinity`, which
-  keeps them on the upstream holding their cache. A `cache_ttl` in `request`, or an
-  `x-session-affinity` in `headers`, wins.
+  `generate()`, write no cache: on Anthropic and OpenAI GPT-5.6 and later a write costs 1.25x input
+  and nothing would read it. A compaction summary continues its conversation's cached request, so
+  it reads that cache and keeps its lifetime. Set per-call `caching: "off"` to disable caching, or
+  `"auto"` to cache a one-shot request. A `caching` set in `providerOptions.gateway` or `request`,
+  or an OpenAI `promptCacheOptions`, replaces this policy. Usage reports cache writes.
+- **Cache lifetime and affinity:** a chat turn, read again after the user's next message, and a
+  sub-agent that can wait on an approval ask for the one-hour cache (`cache_ttl: "1h"`; a model
+  without one keeps its default, with a warning). A chat turn's steps and its sub-agents' send the
+  conversation's opaque key as `x-session-affinity`, which keeps them on the upstream holding their
+  cache. A `cache_ttl` in `request`, or an `x-session-affinity` in `headers`, wins.
 - **Output limits:** the strictest per-call, configured, or model limit wins, for agents too.
 - **Retries:** `429` and `5xx` responses are retried before streaming starts. Configure
   `maxRetries` and `maxRetryDelayMs` on `createVercelGateway`.

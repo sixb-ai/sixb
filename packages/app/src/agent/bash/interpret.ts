@@ -44,6 +44,7 @@ type SixbCommandName =
   | "version"
   | "status"
   | "context"
+  | "history"
   | "objects.query-example"
   | CliCommandName
   | "unknown"
@@ -222,6 +223,9 @@ function classifySixbCommand(
   }
   if (cliArgs[0] === "context") {
     return { kind: "sixb", command: "context", args: cliArgs.slice(1) }
+  }
+  if (cliArgs[0] === "history") {
+    return { kind: "sixb", command: "history", args: cliArgs.slice(1) }
   }
 
   const [group, operation, ...args] = cliArgs
@@ -510,6 +514,10 @@ function describeSixb(
       return icon("terminal", m.doctor)
     case "context":
       return icon("project", m.runContext)
+    case "history": {
+      const seq = positionals(intent.args)[0]
+      return seq ? icon("transcript", m.historyMessage, seq) : icon("transcript", m.history)
+    }
     case "ontology.list":
       return withDetail(
         icon("ontology", m.ontology),

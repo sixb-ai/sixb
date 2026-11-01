@@ -216,6 +216,8 @@ export const fr: Translation<AgentMessages> = {
     retry: "Réessayer",
     retrying: "Nouvelle tentative…",
     notStarted: "Je n’ai pas pu commencer à répondre.",
+    contextFull:
+      "Cette conversation est trop longue pour ce modèle. Ouvrez un nouveau fil, ou choisissez un modèle au contexte plus grand.",
     notFinished: "Je n’ai pas pu terminer cette réponse.",
     interrupted: "La réponse a été interrompue avant la fin.",
     reconnecting: "Connexion perdue — reconnexion…",
@@ -490,6 +492,14 @@ export const fr: Translation<AgentMessages> = {
       running: "Vérification de l’environnement de l’agent",
     },
     runContext: { title: "Contexte d’exécution lu", running: "Lecture du contexte d’exécution" },
+    history: {
+      title: "Conversation précédente relue",
+      running: "Lecture de la conversation précédente",
+    },
+    historyMessage: {
+      title: (seq) => `Message ${seq} relu`,
+      running: (seq) => `Lecture du message ${seq}`,
+    },
     ontology: { title: "Ontologie explorée", running: "Exploration de l’ontologie" },
     objectType: {
       title: (type) => (type ? `Type ${quoted(type)} examiné` : "Type d’objet examiné"),

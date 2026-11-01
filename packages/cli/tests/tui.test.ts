@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentRunStreamEvent } from "@sixb/client"
-import { duration, friendlyPath, shortPath, toolLine } from "../src/tui/format"
+import { duration, friendlyPath, runFailureText, shortPath, toolLine } from "../src/tui/format"
 import { liveRun, type Part, reduceLive, type StoredMessage, shownMessage } from "../src/tui/parts"
 import { type LanguageModel, messageSelection, modelLabel } from "../src/tui/settings"
 import { pickSlash, slashMatches } from "../src/tui/slash"
@@ -229,6 +229,21 @@ describe("slash commands", () => {
 })
 
 describe("formatting", () => {
+  test("a conversation too long for its model names the commands that go on", () => {
+    // Removal proof: print run.error.message for every code in the run line.
+    expect(
+      runFailureText({
+        code: "agent.context_limit_exceeded",
+        message: "This conversation is too long for the model's context window.",
+      })
+    ).toBe(
+      "This conversation is too long for the model: /new starts another, /model picks a larger one."
+    )
+    expect(
+      runFailureText({ code: "agent.execution_failed", message: "Agent execution failed." })
+    ).toBe("Agent execution failed.")
+  })
+
   test("never shows sixty seconds", () => {
     expect(duration(59_960)).toBe("1m 00s")
     expect(duration(179_600)).toBe("3m 00s")

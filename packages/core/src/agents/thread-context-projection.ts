@@ -69,10 +69,10 @@ function assertConsistentCheckpointProjection(
 
 function serializeThreadSummary(summary: string): string {
   return [
-    "The earlier conversation was compacted into this continuation summary.",
+    "The earlier conversation was compacted into this continuation summary. Its messages are still stored: `sixb history` prints them.",
     "",
     "<sixb_thread_summary>",
-    escapeXml(summary),
+    escapeXmlText(summary),
     "</sixb_thread_summary>",
   ].join("\n")
 }
@@ -83,11 +83,7 @@ function projectionError(checkpoint: AgentContextCheckpointRecord, detail: strin
   )
 }
 
-function escapeXml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;")
+/** Text inside a tag: quotes stay as written, so the summary reads as the model wrote it. */
+function escapeXmlText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 }

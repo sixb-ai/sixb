@@ -165,8 +165,17 @@ per answer, cap it with `maxOutputTokens` on the binding, such as
 `vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`.
 A chat answer cut short by this limit says so and can be continued; an AI workflow step fails.
 
-A conversation is summarized only near its model's limit, whatever the provider's price tiers. To
-summarize earlier, set a smaller `contextWindow` on the model definition.
+A conversation is summarized near its model's limit, whatever the provider's price tiers; to
+summarize earlier, set a smaller `contextWindow` on the model definition. It is also summarized
+when it resumes after an hour idle with 200,000 tokens or more, if summarizing brings it under
+200,000: its prompt cache has expired, and the summary is far cheaper to read again than the whole
+conversation.
+
+A summary brings the conversation well under that limit, so the next turns do not summarize again.
+The latest turns stay as they are, and the agent can still read the whole conversation with
+`sixb history`. A conversation that does not fit even summarized fails with
+[`agent.context_limit_exceeded`](../errors/overview.md): start a new one, or switch to a model with a
+larger window.
 
 ## Generate a response
 

@@ -25,6 +25,7 @@ import {
 import { heldInCard } from "../delegation/model"
 import { useAgentMessages } from "../i18n"
 import { principalKey } from "../message-authors"
+import { CONTEXT_LIMIT_EXCEEDED } from "../run-presentation"
 import { ApprovalCards } from "./approval-card"
 import {
   CompactionMarker,
@@ -48,6 +49,8 @@ export interface TranscriptProps {
   readonly anchorCurrentTurn?: boolean
   readonly onRetry?: () => void
   readonly onContinue?: () => void
+  /** Start a new thread: the way on from a conversation too long for its model. */
+  readonly onNewThread?: () => void
   /**
    * The thread's calls held for approval. Each shows as a card under the work that made it, which
    * its requester answers; without them, as for an observer, the cards show only what the messages
@@ -102,6 +105,7 @@ function TranscriptView({
   anchorCurrentTurn,
   onRetry,
   onContinue,
+  onNewThread,
   approvals,
 }: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
   // Messages one person sends in a row name them once; an answer in between names them again.
@@ -265,7 +269,12 @@ function TranscriptView({
               </MessageScrollerItem>
             ) : turn.kind === "failed" ? (
               <MessageScrollerItem messageId="run-failed">
-                <RunFailureMarker onRetry={onRetry} retrying={turn.retrying} />
+                <RunFailureMarker
+                  onRetry={onRetry}
+                  retrying={turn.retrying}
+                  contextFull={turn.errorCode === CONTEXT_LIMIT_EXCEEDED}
+                  {...(onNewThread ? { onNewThread } : {})}
+                />
               </MessageScrollerItem>
             ) : turn.kind === "cancelled" ? (
               <MessageScrollerItem messageId="run-cancelled">

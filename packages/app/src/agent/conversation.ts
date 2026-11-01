@@ -575,8 +575,11 @@ export type AgentConversationTurn = AgentConversationTurnActions &
         /** Who asked for the answer, when it is someone other than the reader. */
         readonly answeringFor: AgentConversationAuthor | null
       }
-    /** The turn failed without an answer. One that failed mid-answer says so on its reply. */
-    | { readonly kind: "failed" }
+    /**
+     * The turn failed without an answer, and why, by the run's error code. One that failed
+     * mid-answer says so on its reply.
+     */
+    | { readonly kind: "failed"; readonly errorCode?: string }
     /** The turn hit its time limit. With progress saved it can continue, else run again. */
     | { readonly kind: "timeout"; readonly hasProgress: boolean; readonly timeoutMs?: number }
     /** The worker running the turn stopped. With progress saved it can continue, else run again. */
@@ -633,6 +636,12 @@ export function conversationTurn(input: ConversationTurnInput): AgentConversatio
       return { ...actions, kind: "interrupted", hasProgress: presentation.hasProgress }
 
     case "failed":
+      return {
+        ...actions,
+        kind: "failed",
+        ...(presentation.run.error ? { errorCode: presentation.run.error.code } : {}),
+      }
+
     case "cancelled":
     case "idle":
       return { ...actions, kind: presentation.kind }

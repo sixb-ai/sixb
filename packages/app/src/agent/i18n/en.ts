@@ -229,6 +229,8 @@ export const en = {
     retry: "Retry",
     retrying: "Retrying…",
     notStarted: "I couldn’t get a response started.",
+    contextFull:
+      "This conversation is too long for this model. Start a new thread, or pick a model with a larger context.",
     notFinished: "I couldn’t finish that response.",
     interrupted: "The response was interrupted before it finished.",
     reconnecting: "Connection lost — reconnecting…",
@@ -502,6 +504,14 @@ export const en = {
     version: { title: "Checked the Sixb version", running: "Checking the Sixb version" },
     doctor: { title: "Checked the agent runtime", running: "Checking the agent runtime" },
     runContext: { title: "Read the run context", running: "Reading the run context" },
+    history: {
+      title: "Read the earlier conversation",
+      running: "Reading the earlier conversation",
+    },
+    historyMessage: {
+      title: (seq: string) => `Read message ${seq}`,
+      running: (seq: string) => `Reading message ${seq}`,
+    },
     ontology: { title: "Explored the ontology", running: "Exploring the ontology" },
     objectType: {
       title: (type: string) => `Inspected the ${type || "object"} type`,

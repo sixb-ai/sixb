@@ -42,6 +42,9 @@ describe("access token auth boundary", () => {
       ["GET", "/api/workflow-runs"],
       ["GET", "/api/workflow-runs/run_1"],
       ["GET", "/api/workflow-runs/run_1/files/content?path=/input/document"],
+      // The Agent reads its own conversation with `sixb history`: run tokens reach only agentApi
+      // routes, which access tokens reach too.
+      ["GET", "/api/agent-threads/thr_1/messages"],
       ["GET", "/api/agent-threads/thr_1/messages/msg_1/files/content?path=/parts/1/fileRef"],
       ["GET", "/api/events"],
       ["POST", "/api/share-grants"],
@@ -79,7 +82,6 @@ describe("access token auth boundary", () => {
       ["GET", "/api/agent-threads"],
       ["POST", "/api/agent-threads"],
       ["GET", "/api/agent-threads/thr_1"],
-      ["GET", "/api/agent-threads/thr_1/messages"],
       ["POST", "/api/agent-threads/thr_1/messages"],
       ["GET", "/api/agent-runs/run_1"],
       // Reading syncs and pipelines takes a token; running one still takes a signed-in session.

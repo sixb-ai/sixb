@@ -131,6 +131,37 @@ test("a custom chat renders a thread from the conversation's transcript and comp
   }
 })
 
+test("a conversation too long for its model says how to go on, and offers no retry", () => {
+  // Removal proof: drop the error-code check from canRetry in useAgentConversation; "Retry" then
+  // runs again a turn that fails the same way.
+  const tooLong: AgentRun = {
+    ...failedRun,
+    error: {
+      code: "agent.context_limit_exceeded",
+      message: "This conversation is too long for the model's context window.",
+      retryable: false,
+      at: "2026-10-01T12:00:01.000Z",
+    },
+  }
+  const queryClient = seeded([question], [tooLong])
+
+  try {
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <CustomChat threadId={thread.id} />
+      </QueryClientProvider>
+    )
+
+    expect(html).toContain(
+      "This conversation is too long for this model. Start a new thread, or pick a model with a larger context."
+    )
+    expect(html).not.toContain("I couldn’t get a response started.")
+    expect(html).not.toContain("Retry")
+  } finally {
+    queryClient.clear()
+  }
+})
+
 const answer: AgentMessage = {
   ...question,
   id: "message-answer",

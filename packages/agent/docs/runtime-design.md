@@ -116,6 +116,35 @@ turn N's last request sent, on every storage:
   that fitted stays inline; one past the budget reads as metadata from its own turn on, until
   compaction frees the budget. Estimates count each inline image as `AGENT_IMAGE_INPUT_TOKENS`.
 
+## Compacting a conversation
+
+A turn's preflight (`context-compaction.ts`) compacts once the estimate crosses the model's limit,
+its window less the output reserve (see `context-budget.ts`):
+
+- **It aims at 60 % of the limit**: the system prompt and tools, the summary at its longest, and
+  the recent turns that fit the rest stay; the next turns grow into the room left. A context that
+  does not fit even compacted fails the turn as `agent.context_limit_exceeded`, which the app and
+  the TUI show without a retry.
+- **An idle thread compacts below the limit** when its last model call is older than the cache its
+  calls ask for (`modelCacheLifetimeMs`: an hour for a conversation) and it weighs at least
+  `AGENT_IDLE_COMPACTION_TOKENS`, when compacting brings it under that size
+  (`shouldCompactIdleContext`): the next call rewrites the cache anyway. Its summary is sent without
+  caching, as the next request starts from the summary. One whose compaction fails goes on as it
+  is.
+- **The summary continues the cached request.** The environment builds it as the turn would
+  (`BuildConversationRequest`): the previous turn's request, with the same system prompt, tools,
+  reasoning and cache intent, then one `<sixb_summary_request>` message. Changing thinking, effort
+  or tools would make the provider read the conversation again at full price; `summaryReasoning`
+  is where to change that choice. Its output allows the summary plus the reasoning.
+- **It is rewritten, not chained**: the earlier summary is part of what the model reads, and the
+  instruction states the length. A summary the output limit cut short, or past its allowance, keeps
+  its complete lines and says so; an empty answer leaves the user's messages instead. Nothing the
+  summary writes fails the thread.
+- **A history too long to read at once** is summarized in steps, oldest first, each from the summary
+  so far; a turn too large alone is read with its longest texts and results cut.
+- The whole conversation stays stored: `sixb history` reads it in the sandbox, through the run's
+  own thread only.
+
 ## How agents use a sandbox
 
 You rarely call `runCommand` yourself. The agent worker does it, and every run kind goes through

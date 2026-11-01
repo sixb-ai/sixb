@@ -8,6 +8,8 @@ export const CLI_LIMITS = {
   linkPage: { default: 100, maximum: 1_000 },
   /** The server lists at most 200 members per page. */
   users: { default: 20, maximum: 200 },
+  /** A page of a conversation's messages, as `sixb history` prints them. */
+  history: { default: 20, maximum: 100 },
   /** The server's dataset bounds: 100 versions and 1,000 rows per page. */
   datasetVersions: { default: 20, maximum: 100 },
   datasetRows: { default: 100, maximum: 1_000 },
