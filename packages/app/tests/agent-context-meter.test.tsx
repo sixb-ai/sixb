@@ -109,7 +109,8 @@ describe("the context meter", () => {
     const text = details.textContent ?? ""
     expect(text).toContain("38k / 184k")
     expect(text).toContain("21%")
-    expect(text).toContain("Condensed before it reaches Claude Haiku 4.5’s 184k-token limit.")
+    expect(text).toContain("Claude Haiku 4.5")
+    expect(text).toContain("Earlier messages are condensed as it nears 184k\u00a0tokens.")
     expect(text).toContain("Read from cache92%")
     expect(text).toContain("Last condensed12m ago · 131k → 41k")
     expect(within(details).getByRole("meter").getAttribute("aria-valuenow")).toBe("38200")
@@ -142,11 +143,72 @@ describe("the context meter", () => {
     expect(details.textContent).not.toContain("ago")
   })
 
-  test("turns while the conversation is condensed", () => {
+  // Removal proof: draw the arc from the share alone (no RING_MIN_SHARE); a conversation at 0.5%
+  // of its limit draws a dot on the track that reads as nothing, or as a spinner's head.
+  test("reads as a gauge at any level: a full track and an arc, which breathes while condensed", () => {
+    const low = render(<ContextMeter context={context({ usedTokens: 900 })} />)
+    const [track, arc] = Array.from(meter(low).querySelectorAll("circle"))
+    expect(track?.getAttribute("stroke-dasharray")).toBeNull()
+    const length = Number(arc?.getAttribute("stroke-dasharray"))
+    const offset = Number(arc?.getAttribute("stroke-dashoffset"))
+    // At least a fifteenth of the ring, from twelve o'clock.
+    expect((length - offset) / length).toBeGreaterThan(1 / 15)
+    low.unmount()
+
     const view = render(<ContextMeter context={context()} condensing />)
     const button = view.getByRole("button", { name: "Condensing the conversation" })
     expect(button.dataset.condensing).toBe("true")
-    expect(button.querySelector("svg")?.getAttribute("class")).toContain("animate-spin")
+    expect(button.innerHTML).not.toContain("animate-spin")
+    expect(button.innerHTML).toContain("animate-pulse")
+  })
+
+  // Removal proof: leave the answer's room out of contextMeterReading; the bar and its legend no
+  // longer add up to the model's window.
+  test("lists what each part uses, the room left and the room kept for the answer", async () => {
+    const parts = [
+      { part: "system" as const, tokens: 9_000 },
+      { part: "tools" as const, tokens: 6_200 },
+      { part: "messages" as const, tokens: 8_000 },
+      { part: "toolResults" as const, tokens: 15_000 },
+    ]
+    const reading = contextMeterReading(context({ parts }))
+    expect(reading.used + reading.freeTokens + reading.reservedTokens).toBe(200_000)
+
+    const view = render(<ContextMeter context={context({ parts })} modelName="Claude Haiku 4.5" />)
+    fireEvent.click(meter(view))
+    const details = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-context-details]")
+      if (!found) throw new Error("No details.")
+      return found
+    })
+    const rows = within(details)
+      .getAllByRole("listitem")
+      .map((row) => row.textContent)
+    expect(rows).toEqual([
+      "Sixb instructions9k24%",
+      "Tools6.2k16%",
+      "Messages8k21%",
+      "Tool results15k39%",
+      "Free space145k",
+      "Kept for the answer16k",
+    ])
+  })
+
+  test("says what happens when the conversation nears its limit, and past it", async () => {
+    for (const [usedTokens, said] of [
+      [150_000, "Almost full: earlier messages will be condensed soon."],
+      [190_000, "Full: earlier messages are condensed before the next answer."],
+    ] as const) {
+      const view = render(<ContextMeter context={context({ usedTokens })} />)
+      fireEvent.click(meter(view))
+      const details = await waitFor(() => {
+        const found = document.querySelector<HTMLElement>("[data-context-details]")
+        if (!found) throw new Error("No details.")
+        return found
+      })
+      expect(details.textContent).toContain(said)
+      view.unmount()
+    }
   })
 
   // Removal proof: open the details in a plain Popover instead of a ComposerMenu; on a phone they

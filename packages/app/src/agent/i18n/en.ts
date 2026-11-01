@@ -215,10 +215,26 @@ export const en = {
     label: (used: string, limit: string) => `Context: ${used} of ${limit} tokens`,
     condensing: "Condensing…",
     condensingLabel: "Condensing the conversation",
-    limit: (model: string, limit: string) =>
-      `Condensed before it reaches ${model}’s ${limit}-token limit.`,
+    limit: (limit: string) => `Earlier messages are condensed as it nears ${limit}\u00a0tokens.`,
+    near: "Almost full: earlier messages will be condensed soon.",
+    over: "Full: earlier messages are condensed before the next answer.",
     /** What the meter calls a model it cannot name. */
     thisModel: "This model",
+    breakdown: "What the conversation uses",
+    parts: {
+      system: "Sixb instructions",
+      instructions: "Project instructions",
+      memory: "Memory",
+      skills: "Skills",
+      ontology: "Ontology",
+      tools: "Tools",
+      summary: "Summary of earlier messages",
+      messages: "Messages",
+      toolResults: "Tool results",
+      files: "Files and images",
+    },
+    free: "Free space",
+    reserved: "Kept for the answer",
     cached: "Read from cache",
     lastCondensed: "Last condensed",
     justNow: "just now",
@@ -263,6 +279,8 @@ export const en = {
     unknown: "Something went wrong during this response.",
   } satisfies Record<AgentRunDiagnosticCode | "unknown", string>,
   activity: {
+    /** Under a call whose output was saved as a file: it opens the whole output. */
+    fullOutput: "Full output",
     thinking: "Thinking",
     working: "Working",
     workingThroughIt: "Working through it",
