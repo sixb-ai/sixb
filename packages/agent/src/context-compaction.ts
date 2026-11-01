@@ -167,16 +167,6 @@ export async function prepareAgentConversationContext(input: {
     estimatedInputTokens: estimatedInputTokensBefore,
     inputBudgetTokens: budget.inputBudgetTokens,
   })
-  const idle = shouldCompactIdleContext({
-    history: input.history,
-    caching: conversationModelSettings({
-      reasoning: undefined,
-      projectId: context.id,
-      threadId: run.threadId,
-    }).caching,
-    estimatedInputTokens: estimatedInputTokensBefore,
-  })
-  if (!overLimit && !idle) return unchanged
 
   // Compaction aims well under the limit, so the turns after it grow into the room it leaves
   // instead of compacting again: the system prompt and tools, the summary at its longest, and the
@@ -203,16 +193,24 @@ export async function prepareAgentConversationContext(input: {
         bytesPerToken,
       })
 
-  // Below the limit, compacting an idle thread only makes its cold cache's rewrite smaller: one it
-  // cannot bring under the idle size goes on as it is, rather than summarize at every idle turn.
-  if (!overLimit) {
-    const compactedTokens = boundary
-      ? fixedTokens +
-        summaryMessageTokens +
-        estimateAgentContextMessagesTokens(boundary.retainedMessages, bytesPerToken).tokens
-      : Number.POSITIVE_INFINITY
-    if (compactedTokens >= AGENT_IDLE_COMPACTION_TOKENS) return unchanged
-  }
+  const idle =
+    !overLimit &&
+    shouldCompactIdleContext({
+      history: input.history,
+      caching: conversationModelSettings({
+        reasoning: undefined,
+        projectId: context.id,
+        threadId: run.threadId,
+      }).caching,
+      estimatedInputTokens: estimatedInputTokensBefore,
+      compactedTokens: compactedRequestTokens({
+        fixedTokens,
+        summaryMessageTokens,
+        boundary,
+        bytesPerToken,
+      }),
+    })
+  if (!overLimit && !idle) return unchanged
 
   const reason = "threshold" satisfies AgentContextCheckpointReason
   await session.events.publishCompactionStarted({
@@ -386,19 +384,42 @@ export async function prepareAgentConversationContext(input: {
 
 /**
  * Whether a run starts on a thread worth compacting though it fits: its last model call is older
- * than the cache its calls ask for, so the next one rewrites the whole prompt anyway, and the
- * prompt is large enough for a summary to make that rewrite much smaller. A thread whose last call
- * the session cannot date (none since its checkpoint) is not compacted for it.
+ * than the cache its calls ask for, so the next one rewrites the whole prompt anyway, the prompt
+ * is large enough for a summary to make that rewrite much smaller, and compacting brings it under
+ * that size, rather than summarize at every idle turn. A thread whose last call the session cannot
+ * date (none since its checkpoint) is not compacted for it.
  */
 function shouldCompactIdleContext(input: {
   readonly history: AgentTurnHistory
   readonly caching: ModelCachingIntent
   readonly estimatedInputTokens: number
+  /** What the next request weighs once compacted: see compactedRequestTokens. */
+  readonly compactedTokens: number
 }): boolean {
   const lastCall = input.history.usageAnchor?.modelCall.occurredAt
   if (!lastCall || input.estimatedInputTokens < AGENT_IDLE_COMPACTION_TOKENS) return false
+  if (Date.now() - lastCall.getTime() <= modelCacheLifetimeMs(input.caching.lifetime)) return false
 
-  return Date.now() - lastCall.getTime() > modelCacheLifetimeMs(input.caching.lifetime)
+  return input.compactedTokens < AGENT_IDLE_COMPACTION_TOKENS
+}
+
+/**
+ * What the next request weighs once compacted at `boundary`: what it carries besides its history,
+ * the summary at its longest, and the messages that stay. Without a boundary, nothing can be.
+ */
+function compactedRequestTokens(input: {
+  readonly fixedTokens: number
+  readonly summaryMessageTokens: number
+  readonly boundary: AgentContextCompactionBoundary | null
+  readonly bytesPerToken: number
+}): number {
+  if (!input.boundary) return Number.POSITIVE_INFINITY
+
+  return (
+    input.fixedTokens +
+    input.summaryMessageTokens +
+    estimateAgentContextMessagesTokens(input.boundary.retainedMessages, input.bytesPerToken).tokens
+  )
 }
 
 /**

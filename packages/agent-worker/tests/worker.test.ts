@@ -4403,7 +4403,8 @@ describe("AgentWorker", () => {
   // Reproduce: leave out `idle` in prepareAgentConversationContext and the first row goes on
   // uncompacted; drop its 200,000-token floor and the second compacts; compare the idle time with
   // a default cache's five minutes, not the conversation's hour, and the third does; drop the
-  // check that compacting brings it under the floor and the last summarizes a turn for nothing.
+  // check that compacting brings it under the floor (shouldCompactIdleContext) and the last
+  // summarizes a turn for nothing.
   test.each([
     {
       thread: "an hour idle at about 210,000 tokens",
