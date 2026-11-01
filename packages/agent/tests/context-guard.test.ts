@@ -92,9 +92,9 @@ function tokens(messages: readonly ModelMessage[]): number {
 
 describe("createAgentContextGuard", () => {
   // Reproduce: return undefined from ContextGuard.reduce; the request then goes out at about
-  // 80,000 tokens, past its 60,000-token limit. Keep only the most recent result
-  // (KEPT_TOOL_RESULTS = 1) and a fifth chapter is cleared.
-  test("clears the oldest results the model read, all but the three most recent, before a call would cross the limit", async () => {
+  // 80,000 tokens, past its 60,000-token limit. Keep the three most recent whatever the aim
+  // (KEPT_TOOL_RESULTS = 3); the batch then stops at 40,000 tokens, and the next steps clear again.
+  test("clears the oldest results the model read in one batch, down to 60 % of the limit", async () => {
     const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
     await guard.prepareStep(step(0, HEAD))
     // Eight chapters of about 10,000 tokens each; the model has not read the last one yet.
@@ -102,12 +102,28 @@ describe("createAgentContextGuard", () => {
 
     const prepared = await guard.prepareStep(step(8, messages))
 
-    // Oldest first, toward 60 % of the limit: the steps after it read the request through.
+    // Oldest first, through the three most recent it read since the aim needs it: the newest
+    // it read stays, and so does the one it has not read.
     const cleared = outputs(prepared?.messages ?? messages)
-    expect(cleared.slice(0, 4)).toEqual(Array(4).fill(clearedToolResultText("read")))
-    // The three most recent it read stay, and so does the one it has not read.
-    expect(cleared.slice(4).every((output) => output.startsWith("chapter "))).toBe(true)
-    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(60_000)
+    expect(cleared.slice(0, 5)).toEqual(Array(5).fill(clearedToolResultText("read")))
+    expect(cleared.slice(5).every((output) => output.startsWith("chapter "))).toBe(true)
+    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(36_000)
+  })
+
+  // Reproduce: clear newest first in ContextGuard.clear; the three most recent are then cleared
+  // although the older ones were enough.
+  test("keeps the three most recent results it read when clearing the older ones reaches the aim", async () => {
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
+    await guard.prepareStep(step(0, HEAD))
+    // Twelve chapters of about 5,500 tokens each, the last one unread.
+    const messages = [...HEAD, ...Array.from({ length: 12 }, (_, i) => readStep(i, 16_500)).flat()]
+
+    const prepared = await guard.prepareStep(step(12, messages))
+
+    const cleared = outputs(prepared?.messages ?? messages)
+    expect(cleared[0]).toBe(clearedToolResultText("read"))
+    expect(cleared.slice(-4).every((output) => output.startsWith("chapter "))).toBe(true)
+    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(36_000)
   })
 
   // Reproduce: return undefined from prepareStep at step 0; a turn whose history replays results
@@ -127,8 +143,8 @@ describe("createAgentContextGuard", () => {
     expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(60_000)
   })
 
-  // Reproduce: set CLEARED_AT_LEAST_SHARE to 0; the two oldest small results are then cleared,
-  // which breaks the cache to free about 900 tokens, and the earlier turn stays.
+  // Reproduce: set CLEARED_AT_LEAST_SHARE to 0; the four older small results are then cleared,
+  // which breaks the cache to free about 1,900 tokens, and the earlier turn stays.
   test("compacts rather than clear too little to be worth the cache it breaks", async () => {
     let compactions = 0
     const summarized: ModelMessage[] = [
@@ -138,13 +154,13 @@ describe("createAgentContextGuard", () => {
     ]
     const head: ModelMessage[] = [
       { role: "system", content: "You read chapters." },
-      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(30_000)}` }] },
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(90_000)}` }] },
       { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
       { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
     ]
     const turn = Array.from({ length: 6 }, (_, i) => readStep(i, 1_500)).flat()
     const messages = [...head, ...turn]
-    // 600 tokens past the limit: clearing the two results it may would bring it under.
+    // 600 tokens past the limit: clearing the results it may would bring it under.
     const guard = createAgentContextGuard({
       budget: limited(tokens(messages) - 600),
       tools: [],
