@@ -52,7 +52,7 @@ export interface AgentContextGuardInput {
   readonly budget: AgentContextBudget
   /** The tools every request sends. */
   readonly tools: readonly ModelToolSpecification[]
-  /** The bytes per token the turn measured its history at, else the model family's. */
+  /** The bytes per token the turn measured its history at, else the one its run started from. */
   readonly bytesPerToken?: number
   /** Tools whose results are never cleared. */
   readonly excludeTools?: readonly string[]

@@ -58,7 +58,7 @@ export interface RunAgentTurnInput {
    */
   readonly contextLimits?: {
     readonly budget: AgentContextBudget
-    /** The bytes per token the turn's history was measured at, else the model family's. */
+    /** The bytes per token the turn's history was measured at, else its run's starting one. */
     readonly bytesPerToken?: number
     readonly compactInTurn?: ConversationAgentExecutionEnvironment["compactInTurn"]
   }
