@@ -162,7 +162,7 @@ describe("Anthropic prompt caching", () => {
   })
 
   test("leaves one-shot requests uncached: nothing would read their prefix again", async () => {
-    // Regression proof: mark every request; compaction summaries and generate() pay 1.25x input.
+    // Regression proof: mark every request; generate() calls pay 1.25x input.
     const { model, bodies } = agent()
     await runModelLoop({
       model,
