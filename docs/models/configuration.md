@@ -194,6 +194,16 @@ The conversation shown to users and `sixb history` keep every result whole. A pr
 rejects a call as too long for the window gets it again once, summarized, and the turn goes on. A
 turn that fails keeps the steps it completed, and can be continued.
 
+Subagents and AI workflow steps keep each call under their own model's limit the same way:
+
+| Run | Clears old results | Summarizes |
+|---|---|---|
+| Subagent | yes | what came before, when it continues after a question or an approval |
+| AI workflow step | yes | nothing: its history starts with its prompt |
+
+One still too long for its model fails with what to do: a narrower task or prompt, or a model with
+a larger window.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies
