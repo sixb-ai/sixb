@@ -53,9 +53,13 @@ import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
-import { AgentToolResultMediaBridge } from "./tools/result-media"
+import {
+  AgentToolResultMediaBridge,
+  replayToolFileMessages,
+  type SuppliesToolFiles,
+} from "./tools/result-media"
 import { AgentFileBudget, createAgentToolFiles, installAgentToolFiles } from "./tools/tool-files"
-import { createViewFileTool } from "./tools/view-file"
+import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
@@ -206,16 +210,26 @@ export async function createConversationAgentEnvironment(
       modelSupportsInlineImages(plan.model),
       prepared ? prepared.memory : loadMemory(threadContext.checkpoint),
     ])
-    const attachmentContext = await prepareAgentAttachments({
-      projectId: context.id,
-      threadId: run.threadId,
-      messages,
-      blobStorage: context.blobStorage,
-      apiBaseUrl,
-      contextDirectory: sandbox.contextDirectory,
-      inlineImages,
-      signal: sandboxSignal,
-    })
+    const [attachments, toolFilesByStep] = await Promise.all([
+      prepareAgentAttachments({
+        projectId: context.id,
+        threadId: run.threadId,
+        messages,
+        blobStorage: context.blobStorage,
+        apiBaseUrl,
+        contextDirectory: sandbox.contextDirectory,
+        inlineImages,
+        signal: sandboxSignal,
+      }),
+      replayToolFileMessages({
+        messages,
+        blobStorage: context.blobStorage,
+        suppliesToolFiles: suppliesToolFiles(plan),
+        supportsImages: inlineImages,
+        signal: sandboxSignal,
+      }),
+    ])
+    const attachmentContext = { ...attachments, toolFilesByStep }
     environment = await startAgentEnvironment({
       mode: "conversation",
       sandbox,
@@ -295,7 +309,8 @@ async function startSubagentEnvironment(
   // Still listed, as handed over, but never copied over what the child made of them.
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const history = input.history.messages
-  const [memory, handedContext, historyContext] = await Promise.all([
+  const inlineImages = modelSupportsInlineImages(plan.model)
+  const [memory, handedContext, historyContext, toolFilesByStep] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
     loadConversationMemory({ session: input.session, asOf: input.thread.createdAt }),
     files.length
@@ -318,14 +333,22 @@ async function startSubagentEnvironment(
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
           contextDirectory: sandbox.contextDirectory,
-          inlineImages: modelSupportsInlineImages(plan.model),
+          inlineImages,
           signal: input.signal,
         })
       : undefined,
+    replayToolFileMessages({
+      messages: history,
+      blobStorage: context.blobStorage,
+      suppliesToolFiles: suppliesToolFiles(plan),
+      supportsImages: inlineImages,
+      signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+    }),
   ])
-  const attachmentContext = historyContext
-    ? mergeAttachmentContexts(handedContext, historyContext)
-    : handedContext
+  const attachmentContext = {
+    ...(historyContext ? mergeAttachmentContexts(handedContext, historyContext) : handedContext),
+    toolFilesByStep,
+  }
 
   return startAgentEnvironment({
     mode: "subagent",
@@ -465,7 +488,13 @@ async function startAgentEnvironment(
   const fileBudget = new AgentFileBudget()
   const mediaBridge = new AgentToolResultMediaBridge({
     blobStorage: context.blobStorage,
-    sandboxPathForFileRef: (fileRef) => fileRegistry.pathFor(fileRef),
+    suppliesToolFiles: suppliesToolFiles(plan),
+    // As the agent names it, so the output a later turn replays names the path that turn
+    // materializes the file at, in its own sandbox.
+    sandboxPathForFileRef: async (fileRef) => {
+      const path = fileRegistry.pathFor(fileRef)
+      return path === undefined ? undefined : agentSandboxPath(await ready, path)
+    },
   })
   const filesForToolCall = (input: {
     readonly toolName: string
@@ -643,6 +672,21 @@ async function startAgentEnvironment(
     },
     dispose,
   }
+}
+
+/** An absolute sandbox path relative to the working directory when it is inside it. */
+function agentSandboxPath(handle: AgentSandboxHandle, path: string): string {
+  const relative = posix.relative(handle.sandbox.workingDirectory, path)
+  return relative && !relative.startsWith("../") && !posix.isAbsolute(relative) ? relative : path
+}
+
+/**
+ * The tools whose images reach the model after their step: the project's and `view_file`, whose
+ * outputs go through the run's media bridge. A replay asks the same of the stored trace.
+ */
+function suppliesToolFiles(plan: Pick<ResolvedAgentExecutionPlan, "tools">): SuppliesToolFiles {
+  const names = new Set([...plan.tools.map((tool) => tool.name), VIEW_FILE_TOOL_SPEC.name])
+  return (toolName) => names.has(toolName)
 }
 
 /** The handed files' context, with what a continuation's history showed its tools. */

@@ -1,9 +1,14 @@
 import { posix } from "node:path"
 import type { AgentFileDataProjection, BlobInfo, FileRef } from "@sixb/core"
-import { type AgentRunFileStore, listMessageAttachments } from "@sixb/core/internal/agents"
-import type { LanguageModel } from "@sixb/core/models"
+import {
+  type AgentRunFileStore,
+  agentToolFilePath,
+  listMessageAttachments,
+} from "@sixb/core/internal/agents"
+import type { LanguageModel, ModelMessage } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
+import { fileRefKey } from "./file-ref"
 import { type AgentAttachmentLimits, processAgentImageAttachment } from "./image-attachments"
 
 const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {
@@ -21,6 +26,13 @@ const TEXT_INLINE_TOTAL_MAX_BYTES = 200 * 1024
 const MAX_ASSISTANT_ATTACHMENTS = 50
 
 /**
+ * Where a parent finds what its children wrote to `out/`, a directory per spawn key, in the context
+ * directory: `wait_agent` copies them there, and later turns materialize them there again.
+ */
+export const CHILD_FILES_DIRECTORY = "children"
+const WAIT_AGENT_TOOL = "wait_agent"
+
+/**
  * How many files, and bytes, a sandbox receives of a run's attachments: also what a parent Agent
  * and its child hand each other.
  */
@@ -36,6 +48,8 @@ export interface PreparedAgentAttachmentContext {
   readonly modelFileDataByPartKey: ReadonlyMap<string, AgentFileDataProjection>
   readonly sandboxFiles: readonly PreparedSandboxAttachmentFile[]
   readonly manifestJson: string
+  /** The images each stored step's tools returned, as the model read them after that step. */
+  readonly toolFilesByStep?: ReadonlyMap<string, ModelMessage>
 }
 
 export interface PreparedAgentAttachment {
@@ -74,6 +88,8 @@ interface AttachmentWorkItem {
   readonly sandboxName: string
   readonly inlineContent: boolean
   readonly origin: "message-file" | "tool-result-file"
+  /** For a tool-result file, the call that returned it. */
+  readonly toolCall?: { readonly toolName: string; readonly toolCallId: string }
 }
 
 export async function prepareAgentAttachments(input: {
@@ -90,32 +106,47 @@ export async function prepareAgentAttachments(input: {
   const promptTextByPartKey = new Map<string, string>()
   const modelFileDataByPartKey = new Map<string, AgentFileDataProjection>()
   const sandboxFiles: PreparedSandboxAttachmentFile[] = []
-  const entries: PreparedAgentAttachment[] = []
+  const entries: { readonly order: number; readonly entry: PreparedAgentAttachment }[] = []
+  const materialized = new Map<string, string>()
+  const textInlineBytesByMessage = new Map<string, number>()
   let sandboxBytes = 0
-  let textInlineBytes = 0
 
-  for (const item of fileWorkItems(input.messages)) {
+  // The user's files take the sandbox budget first, in message order: what a user message reads
+  // then depends only on the messages before it, never on the tool files the window keeps.
+  const items = fileWorkItems(input.messages).map((item, order) => ({ item, order }))
+  const userFirst = [
+    ...items.filter(({ item }) => item.message.role === "user"),
+    ...items.filter(({ item }) => item.message.role !== "user"),
+  ]
+
+  for (const { item, order } of userFirst) {
     input.signal?.throwIfAborted()
     const prepared = await prepareOneAttachment({
       ...input,
       item,
       sandboxBytes,
-      textInlineBytes,
+      textInlineBytes: textInlineBytesByMessage.get(item.message.id) ?? 0,
+      materialized,
     })
     sandboxBytes += prepared.sandboxBytesAdded
-    textInlineBytes += prepared.textInlineBytesAdded
-    entries.push(prepared.entry)
+    textInlineBytesByMessage.set(
+      item.message.id,
+      (textInlineBytesByMessage.get(item.message.id) ?? 0) + prepared.textInlineBytesAdded
+    )
+    entries.push({ order, entry: prepared.entry })
     promptTextByPartKey.set(prepared.entry.key, prepared.promptText)
     if (prepared.modelFileData) {
       modelFileDataByPartKey.set(prepared.entry.key, prepared.modelFileData)
     }
     if (prepared.sandboxFile) {
       sandboxFiles.push(prepared.sandboxFile)
+      materialized.set(fileRefKey(prepared.sandboxFile.fileRef), prepared.sandboxFile.path)
     }
   }
 
+  const ordered = entries.sort((left, right) => left.order - right.order).map(({ entry }) => entry)
   return {
-    entries,
+    entries: ordered,
     promptTextByPartKey,
     modelFileDataByPartKey,
     sandboxFiles,
@@ -123,7 +154,7 @@ export async function prepareAgentAttachments(input: {
       {
         projectId: input.projectId,
         threadId: input.threadId,
-        attachments: entries.map((entry) => manifestEntry(entry)),
+        attachments: ordered.map((entry) => manifestEntry(entry)),
       },
       null,
       2
@@ -227,18 +258,23 @@ export async function prepareAgentToolFileProjection(input: {
   }
 }
 
+/**
+ * Every retained user message keeps its files inline, as its own turn read them, until compaction
+ * summarizes it: later turns then send the same bytes. Tool files are metadata in the manifest; the
+ * model reads what their call's output showed.
+ */
 function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkItem[] {
   const items: AttachmentWorkItem[] = []
-  const currentUserMessageId = latestUserMessageId(messages)
   for (const message of messages) {
     for (const file of listMessageAttachments(message)) {
+      const part = message.parts[file.partIndex]
       items.push({
         message,
         ...file,
-        inlineContent:
-          file.origin === "message-file" &&
-          message.role === "user" &&
-          message.id === currentUserMessageId,
+        inlineContent: file.origin === "message-file" && message.role === "user",
+        ...(file.origin === "tool-result-file" && part?.type === "tool-call"
+          ? { toolCall: { toolName: part.toolName, toolCallId: part.toolCallId } }
+          : {}),
       })
     }
   }
@@ -254,14 +290,6 @@ function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkI
   )
 }
 
-function latestUserMessageId(messages: readonly AgentMessageRecord[]): string | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (message?.role === "user") return message.id
-  }
-  return undefined
-}
-
 async function prepareOneAttachment(input: {
   readonly projectId: string
   readonly threadId: string
@@ -271,7 +299,10 @@ async function prepareOneAttachment(input: {
   readonly contextDirectory: string
   readonly inlineImages: boolean
   readonly sandboxBytes: number
+  /** What the message's earlier files took of its inline text budget. */
   readonly textInlineBytes: number
+  /** Where the files already prepared went in the sandbox, by file. */
+  readonly materialized: ReadonlyMap<string, string>
   readonly signal?: AbortSignal
 }): Promise<{
   readonly entry: PreparedAgentAttachment
@@ -321,7 +352,11 @@ async function prepareOneAttachment(input: {
       shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
     const shouldReadForImage =
       mayInlineContent && input.inlineImages && shouldAttemptImageInline(mediaType, fileName)
-    const needsFullBytes = canMaterializeFile && canMaterializeTotal
+    // A tool can return a file the sandbox holds already, such as an attachment view_file showed:
+    // its output named that path, and the file stays there once.
+    const alreadyAt =
+      item.origin === "tool-result-file" ? input.materialized.get(fileRefKey(fileRef)) : undefined
+    const needsFullBytes = alreadyAt === undefined && canMaterializeFile && canMaterializeTotal
     const readLimit = needsFullBytes
       ? stat.sizeBytes
       : shouldReadForText
@@ -343,13 +378,12 @@ async function prepareOneAttachment(input: {
       }
     }
 
-    if (bytes && needsFullBytes && bytes.byteLength === stat.sizeBytes) {
-      sandboxPath = sandboxAttachmentPath(
-        input.contextDirectory,
-        item.message.id,
-        item.sandboxName,
-        fileName
-      )
+    if (alreadyAt !== undefined) {
+      sandboxPath = alreadyAt
+    } else if (bytes && needsFullBytes && bytes.byteLength === stat.sizeBytes) {
+      sandboxPath =
+        toolResultSandboxPath(input.contextDirectory, item) ??
+        sandboxAttachmentPath(input.contextDirectory, item.message.id, item.sandboxName, fileName)
       sandboxFile = { key, path: sandboxPath, bytes, fileRef }
       sandboxBytesAdded = stat.sizeBytes
     } else if (!canMaterializeFile) {
@@ -742,6 +776,32 @@ function sandboxAttachmentPath(
     safePathSegment(messageId),
     `${safePathSegment(sandboxName)}-${safeFileName(fileName)}`
   )
+}
+
+/**
+ * Where the call that returned a tool file put it in the sandbox, as its output showed: a later
+ * turn materializes it there again, so the replayed output still names a file that exists.
+ * `wait_agent` copies a child's file under `children/<key>/`, its `logicalPath`; a tool that
+ * stored a file put it at its call's tool-file path.
+ */
+function toolResultSandboxPath(
+  contextDirectory: string,
+  item: AttachmentWorkItem
+): string | undefined {
+  const { toolCall, fileRef } = item
+  if (!toolCall) return undefined
+
+  if (toolCall.toolName === WAIT_AGENT_TOOL) {
+    const path =
+      fileRef.logicalPath === undefined ? undefined : posix.normalize(fileRef.logicalPath)
+    if (!path || path.startsWith("/") || path === ".." || path.startsWith("../")) return undefined
+    return posix.join(contextDirectory, CHILD_FILES_DIRECTORY, path)
+  }
+
+  const name = fileRef.fileName
+  if (!name || name === "." || name === ".." || /[\\/\u0000-\u001f\u007f]/.test(name))
+    return undefined
+  return posix.join(contextDirectory, agentToolFilePath(toolCall.toolCallId, fileRef, name))
 }
 
 function fileNameFor(fileRef: FileRef): string {

@@ -72,14 +72,18 @@ export function estimateAgentContextRequestTokens(
   }
 }
 
-/** Estimate message-only growth after a provider-usage anchor. */
+/**
+ * Estimate message-only growth after a provider-usage anchor. Every user message the history keeps
+ * sends its files inline, each message within its own text budget, until compaction summarizes it.
+ */
 export function estimateAgentContextMessagesTokens(
   messages: readonly AgentMessage[]
 ): AgentContextTokenEstimate {
-  const attachments = { textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES }
   let tokens = 0
   for (const message of messages) {
-    tokens += estimateMessageTokens(message, attachments)
+    tokens += estimateMessageTokens(message, {
+      textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES,
+    })
   }
   return { tokens, estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION }
 }
@@ -167,9 +171,7 @@ function estimateMessageTokens(
           TOOL_OVERHEAD_TOKENS +
           textTokens(part.toolName) +
           textTokens(stableJsonStringify(part.input)) +
-          (part.state === "output-available"
-            ? textTokens(stableJsonStringify(part.output))
-            : textTokens(part.errorText))
+          toolOutputTokens(part)
         break
       case "file": {
         const file = part.fileRef
@@ -267,6 +269,14 @@ function truncateToolResult(value: string): string {
 function looksLikeImage(mediaType: string | undefined, fileName: string | undefined): boolean {
   if (mediaType?.toLowerCase().startsWith("image/")) return true
   return /\.(?:avif|gif|jpe?g|png|webp)$/i.test(fileName ?? "")
+}
+
+/** What the model reads of a call's outcome: the output its tool projected, when it stored one. */
+function toolOutputTokens(part: Extract<AgentMessagePart, { readonly type: "tool-call" }>): number {
+  if (part.state === "output-error") return textTokens(part.errorText)
+  if (part.modelOutput?.type === "text") return textTokens(part.modelOutput.value)
+  if (part.modelOutput) return textTokens(stableJsonStringify(part.modelOutput.value))
+  return textTokens(stableJsonStringify(part.output))
 }
 
 function textTokens(value: string): number {
