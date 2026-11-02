@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises"
 import { createInterface } from "node:readline/promises"
 import {
   type AgentRunStreamEvent,
@@ -11,8 +12,8 @@ import {
   listModels,
   postAgentThreadMessage,
 } from "@sixb/client"
+import { thisComputer, thisComputerId } from "../tui/computer"
 import { type Connection, connect } from "../tui/connection"
-import { folderOf, rememberFolder } from "../tui/folders"
 import { toolLine } from "../tui/format"
 import { liveRun, reduceLive, shownMessage } from "../tui/parts"
 import { LocalRunner } from "../tui/runner"
@@ -57,7 +58,9 @@ export async function runAgent(options: {
     )
   }
   const { client } = connection
-  const settings = await loadSettings()
+  const settings = await loadSettings(process.cwd())
+  // As the project keeps it, and the local sandbox compares it: its real path.
+  const folder = await realpath(process.cwd())
   const models = (await listModels({ client })).data?.language ?? []
 
   const threadId =
@@ -67,7 +70,9 @@ export async function runAgent(options: {
         client,
         body: {
           title: text.split("\n")[0]?.slice(0, 72) ?? "Conversation",
-          ...(options.cloud ? {} : { runsOn: "computer" as const }),
+          ...(options.cloud
+            ? {}
+            : { runsOn: "computer" as const, computer: { ...(await thisComputer()), folder } }),
         },
         throwOnError: true,
       })
@@ -76,18 +81,20 @@ export async function runAgent(options: {
   const { data: thread } = await getAgentThread({ client, path: { threadId }, throwOnError: true })
   const onComputer = thread.runsOn === "computer"
   if (onComputer) {
-    const folder = await folderOf(thread.id)
-    if (options.thread && folder !== process.cwd()) {
+    const place = thread.computer
+    const computerId = await thisComputerId()
+    if (place?.id !== computerId || place.folder !== folder) {
       throw new Error(
-        folder
-          ? `[SixbCLI] This conversation works in ${folder}: run sixb agent there.`
-          : "[SixbCLI] This conversation started on another computer: open it with sixb there."
+        !place
+          ? "[SixbCLI] This conversation has no folder yet: open it with sixb in its folder, and press ctrl+f."
+          : place.id === computerId
+            ? `[SixbCLI] This conversation works in ${place.folder}: run sixb agent there.`
+            : `[SixbCLI] This conversation runs on ${place.name}: run sixb agent there.`
       )
     }
-    if (!options.thread) await rememberFolder(thread.id, process.cwd())
   }
   const runner = onComputer
-    ? new LocalRunner(connection, process.cwd(), (error) => step(tone.fail(errorText(error))))
+    ? new LocalRunner(connection, folder, (error) => step(tone.fail(errorText(error))))
     : null
   if (!options.json) {
     const mode = approvalMode ?? thread.approvalMode

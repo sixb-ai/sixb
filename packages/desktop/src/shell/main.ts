@@ -4,7 +4,14 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { app, BrowserWindow, type Event, nativeTheme, session, shell } from "electron"
 import { createNavigationState, isWebUrl, nextNavigationStep, type ShellConfig } from "./navigation"
-import { HIDDEN_TITLE_BAR_CSS, isAppUrl, mayNavigate, WINDOW_BACKGROUND } from "./window"
+import {
+  HIDDEN_TITLE_BAR_CSS,
+  hasHiddenTitleBar,
+  isAppUrl,
+  mayNavigate,
+  pageWebPreferences,
+  WINDOW_BACKGROUND,
+} from "./window"
 
 // Chromium's code for a load that was replaced by another one, which is not a failure.
 const ERR_ABORTED = -3
@@ -15,8 +22,7 @@ const appDir = app.getAppPath()
 const config = JSON.parse(readFileSync(join(appDir, "shell.json"), "utf-8")) as ShellConfig
 const loadingPage = join(appDir, "index.html")
 const icon = existsSync(join(appDir, "icon.png")) ? join(appDir, "icon.png") : undefined
-// Only macOS draws window controls over the page; elsewhere the title bar stays.
-const inset = process.platform === "darwin"
+const inset = hasHiddenTitleBar(process.platform)
 const state = createNavigationState()
 
 app.setName(config.name)
@@ -33,13 +39,7 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors
       ? WINDOW_BACKGROUND.dark
       : WINDOW_BACKGROUND.light,
-    webPreferences: {
-      // The window shows a remote page: it gets no Node, and a world apart from the preload's.
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: inset ? join(appDir, "preload.js") : undefined,
-    },
+    webPreferences: pageWebPreferences(join(appDir, "preload.js")),
   })
   const contents = win.webContents
   win.once("ready-to-show", () => win.show())

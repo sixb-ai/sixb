@@ -455,7 +455,8 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("082-agent-run-cancel-requests", agentRunCancelRequestsSql),
     pgSql("083-agent-thread-runs-on", agentThreadRunsOnSql),
     pgSql("084-agent-token-rates", agentTokenRatesSql),
-    pgSql("085-partition-objects", partitionObjectsSql),
+    pgSql("085-agent-computer-sessions", agentComputerSessionsSql),
+    pgSql("086-partition-objects", partitionObjectsSql),
   ],
 })
 
@@ -524,4 +525,7 @@ import agentRunCancelRequestsSql from "./migrations/082-agent-run-cancel-request
 }
 import agentThreadRunsOnSql from "./migrations/083-agent-thread-runs-on.sql" with { type: "text" }
 import agentTokenRatesSql from "./migrations/084-agent-token-rates.sql" with { type: "text" }
-import partitionObjectsSql from "./migrations/085-partition-objects.sql" with { type: "text" }
+import agentComputerSessionsSql from "./migrations/085-agent-computer-sessions.sql" with {
+  type: "text",
+}
+import partitionObjectsSql from "./migrations/086-partition-objects.sql" with { type: "text" }

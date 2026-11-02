@@ -8,6 +8,7 @@ import {
   snapshotShareAccessPlan,
 } from "../shares/access-plan"
 import type { ObjectReadExecutionLimits } from "../storage/objects/execution-limits"
+import { bindRequestClient } from "./request-client"
 import {
   createDelegatedRequestScope,
   createDisabledRequestScope,
@@ -102,6 +103,7 @@ export function bindRequestExecution(
   const requestId = requestIdentifier(input.request)
   const correlationId = correlationIdentifier(input.request, requestId)
   const scope = createRequestScope(host.id, requestId, correlationId, input.authorization)
+  bindRequestClient(scope.execution, input.request)
 
   const sixb = host.withScope(scope)
   if (!isBoundSixb(sixb)) {

@@ -134,9 +134,21 @@ async function runProduction(root: string): Promise<void> {
     assert(await Bun.file(join(outdir, `${asset}.br`)).exists(), `${asset} Brotli artifact`)
     assert(await Bun.file(join(outdir, `${asset}.gz`)).exists(), `${asset} gzip artifact`)
   }
-  assertNoEagerPageSentinel(
-    await readFile(join(outdir, sharedScript), "utf-8"),
-    "initial production shared entry"
+  const sharedEntry = await readFile(join(outdir, sharedScript), "utf-8")
+  assertNoEagerPageSentinel(sharedEntry, "initial production shared entry")
+  // The project's unavailable screen is its own chunk, loaded only once a link fails to open.
+  assert(
+    !sharedEntry.includes("SIXB_E2E_UNAVAILABLE_SENTINEL"),
+    "initial production shared entry eagerly contains the unavailable screen"
+  )
+  const scripts = await Promise.all(
+    files
+      .filter((name) => name.endsWith(".js"))
+      .map((name) => readFile(join(outdir, name), "utf-8"))
+  )
+  assert(
+    scripts.some((script) => script.includes("SIXB_E2E_UNAVAILABLE_SENTINEL")),
+    "production build must emit the unavailable screen"
   )
 
   const server = await app.start({
@@ -255,6 +267,15 @@ async function prepareProject(root: string): Promise<void> {
     [
       "export default function Page() {",
       '  return <main data-sentinel="SIXB_E2E_ORDINARY_PAGE_SENTINEL">Ordinary page</main>',
+      "}",
+      "",
+    ].join("\n")
+  )
+  await writeFile(
+    join(root, "app", "shared-unavailable.tsx"),
+    [
+      "export default function Unavailable({ title }: { title: string }) {",
+      '  return <main data-sentinel="SIXB_E2E_UNAVAILABLE_SENTINEL">{title}</main>',
       "}",
       "",
     ].join("\n")

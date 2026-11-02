@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
+import type { Principal } from "../auth"
 import { AuthorizationError, assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
@@ -90,8 +91,21 @@ export interface SharesRuntime {
     input?: ListSharedAccessInput<TDefinition>
   ): Promise<SharedAccessGrantListResult>
   listById(input: ListSharedAccessByIdInput): Promise<SharedAccessGrantListResult>
+  /**
+   * Revoke one grant. Returns null when it does not exist or the caller may not manage its Share.
+   * Revoking a revoked grant returns its first revocation.
+   */
   revoke(grantId: string): Promise<SharedAccessGrant | null>
 }
+
+/**
+ * What an Action's writeback or effects, or a workflow step, may do with shared access: revoke a
+ * grant it knows. Issuing and listing links stay with users and service accounts.
+ */
+export type TrustedSharesRuntime = Pick<SharesRuntime, "revoke">
+
+/** Primitives whose trusted code may revoke grants, recorded as the revoking system principal. */
+const REVOKING_PRIMITIVE_KINDS = new Set(["action", "workflow"])
 
 export function createSharesRuntime(
   runtime: SixbRuntimeContext,
@@ -113,6 +127,20 @@ export function createSharesRuntime(
       type: authority.context.principal.type,
       id: authority.context.principal.id,
     }
+  }
+
+  // An Action or a workflow closes the process a link was issued for, and revokes it as itself: the
+  // grant records `{ type: "system", id: "action:<actionId>" }` or `"workflow:<workflowId>"`.
+  const revocationActor = (): Principal => {
+    const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+      execution,
+      authorization: runtime.runtimeAuthorization,
+    })
+    if (authority.type === "unrestricted" && authority.ref.type === "trustedPrimitive") {
+      const { kind, id } = authority.ref.primitive
+      if (REVOKING_PRIMITIVE_KINDS.has(kind)) return { type: "system", id: `${kind}:${id}` }
+    }
+    return managementPrincipal()
   }
 
   const canManage = (shareId: string): boolean => {
@@ -274,7 +302,7 @@ export function createSharesRuntime(
       })
     },
     revoke: async (grantId) => {
-      const actor = managementPrincipal()
+      const actor = revocationActor()
       const storage = requireShareStorage(runtime)
       if (typeof grantId !== "string" || !grantId.trim()) {
         throw new ShareError("invalid_input", "[Sixb] Shared access grant id must not be empty.")
@@ -287,8 +315,12 @@ export function createSharesRuntime(
       }
       if (!current) return null
       // Do not turn grant ids into an existence oracle. Missing definitions and grants outside the
-      // caller's management authority are indistinguishable from missing grants.
-      if (!definitions.getById(current.definitionId) || !canManage(current.definitionId)) {
+      // caller's management authority are indistinguishable from missing grants. Trusted code
+      // manages every Share.
+      if (
+        !definitions.getById(current.definitionId) ||
+        (actor.type !== "system" && !canManage(current.definitionId))
+      ) {
         return null
       }
       try {
