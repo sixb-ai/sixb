@@ -98,7 +98,7 @@ export interface PostgresStorageOptions {
   max?: number
   /** Concurrent root count/facet calculations per instance; defaults to 1. */
   maxConcurrentAggregates?: number
-  /** Idle connection timeout in milliseconds. Defaults to 30000. */
+  /** Idle connection timeout in milliseconds. Defaults to 60000. */
   idleTimeoutMillis?: number
 
   /**

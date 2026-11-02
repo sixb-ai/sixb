@@ -54,7 +54,7 @@ export interface CreatePgClientOptions {
   readonly max: number
   /** Schema pinned via `search_path` on every connection. */
   readonly schemaName: string
-  /** Close idle connections after this many ms (frees slots back to the server). Default 30s. */
+  /** Close idle connections after this many ms (frees slots back to the server). Default 60s. */
   readonly idleTimeoutMillis?: number
   /** Per-connection `statement_timeout` (ms). Unset = no timeout. */
   readonly statementTimeoutMillis?: number
@@ -73,7 +73,10 @@ export interface CreatePgClientOptions {
   readonly ssl?: boolean | "require" | "prefer"
 }
 
-const DEFAULT_IDLE_TIMEOUT_SECONDS = 30
+// A new connection has an empty catalog cache, so its first query plans several times slower. A
+// short pause should not cost that. Not much longer than this: idle connections hold their slots,
+// and one a failover dropped silently can hang the next query until TCP gives up.
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 60
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10
 
 /** Build a configured porsager `postgres` pool. */
