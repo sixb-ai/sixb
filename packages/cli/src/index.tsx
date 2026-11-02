@@ -372,6 +372,42 @@ async function main(): Promise<void> {
       break
     }
 
+    case "env:init": {
+      const { runEnvInit } = await import("./commands/env")
+      const dev = getFlag("dev")
+      const prod = getFlag("prod")
+      await runEnvInit({
+        project: positionals[0] ?? "",
+        ...(dev === undefined ? {} : { dev }),
+        ...(prod === undefined ? {} : { prod }),
+      })
+      break
+    }
+
+    case "env:pull": {
+      const { runEnvPull } = await import("./commands/env")
+      const env = getFlag("env")
+      const tokenFile = getFlag("token-file")
+      await runEnvPull({
+        ...(env === undefined ? {} : { env }),
+        ...(tokenFile === undefined ? {} : { tokenFile }),
+        force: hasFlag("force"),
+      })
+      break
+    }
+
+    case "env:set": {
+      const { runEnvSet } = await import("./commands/env")
+      await runEnvSet({ name: positionals[0] ?? "", env: getFlag("env") })
+      break
+    }
+
+    case "env:status": {
+      const { runEnvStatus } = await import("./commands/env")
+      await runEnvStatus()
+      break
+    }
+
     case "deploy": {
       const { runDeploy } = await import("./commands/deploy")
       await runDeploy({ dryRun: hasFlag("dry-run"), json: hasFlag("json"), ref: getFlag("ref") })

@@ -19,6 +19,7 @@ Repo-wide agent instructions for `sixb`.
   Console and Settings sections in `src/pages/`), dev server and build
 - `models/`: model providers such as Anthropic and Vercel AI Gateway
 - `connectors/`, `storage/`, `broker/`: integrations and infrastructure providers
+- `env/`: where a project's environment variables live, such as Doppler
 - `examples/`: runnable sample projects
 
 ## Toolchain
