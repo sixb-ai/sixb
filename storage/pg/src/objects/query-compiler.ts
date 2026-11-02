@@ -1512,7 +1512,12 @@ export function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredi
     case "eq":
       return predicate.scalarKind === "decimal"
         ? compileDecimalEqualityPredicate(predicate.propertyId, "eq", predicate.value)
-        : compileEqualityPredicate(predicate.propertyId, "eq", predicate.value)
+        : compileEqualityPredicate(
+            predicate.propertyId,
+            "eq",
+            predicate.value,
+            predicate.scalarKind
+          )
     case "neq":
       return predicate.scalarKind === "decimal"
         ? compileDecimalEqualityPredicate(predicate.propertyId, "neq", predicate.value)
@@ -1544,7 +1549,7 @@ export function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredi
     case "in":
       return predicate.scalarKind === "decimal"
         ? compileDecimalInPredicate(predicate.propertyId, predicate.values)
-        : compileInPredicate(predicate.propertyId, predicate.values)
+        : compileInPredicate(predicate.propertyId, predicate.values, predicate.scalarKind)
     case "exists": {
       const sql = `jsonb_exists(properties, ?::text)`
       const item: CompiledPredicate = { sql, args: [predicate.propertyId] }
@@ -1618,7 +1623,8 @@ function negatePredicate(predicate: CompiledPredicate): CompiledPredicate {
 function compileEqualityPredicate(
   propertyId: string,
   op: "eq" | "neq",
-  value: unknown
+  value: unknown,
+  scalarKind?: QueryScalarKind
 ): CompiledPredicate {
   if (value === null) {
     const sql = `${jsonTypeExpression()} = 'null'`
@@ -1626,7 +1632,7 @@ function compileEqualityPredicate(
     return op === "eq" ? item : negatePredicate(item)
   }
 
-  if (typeof value === "string") {
+  if (typeof value === "string" && !(op === "eq" && hasJsonValueIndex(scalarKind))) {
     if (op === "eq") {
       return {
         sql: `(${jsonTypeExpression()} = 'string' AND ${jsonTextExpression()} = ?::text AND md5(${jsonTextExpression()}) = md5(?::text))`,
@@ -1653,12 +1659,18 @@ function compileEqualityPredicate(
   }
 }
 
-function compileInPredicate(propertyId: string, values: readonly unknown[]): CompiledPredicate {
+function compileInPredicate(
+  propertyId: string,
+  values: readonly unknown[],
+  scalarKind?: QueryScalarKind
+): CompiledPredicate {
   if (values.length === 0) return { sql: "0 = 1", args: [] }
 
   const nonNullValues = values.filter((value) => value !== null)
-  const stringValues = nonNullValues.filter((value): value is string => typeof value === "string")
-  const jsonbValues = nonNullValues.filter((value) => typeof value !== "string")
+  const comparedAsText = (value: unknown): value is string =>
+    typeof value === "string" && !hasJsonValueIndex(scalarKind)
+  const stringValues = nonNullValues.filter(comparedAsText)
+  const jsonbValues = nonNullValues.filter((value) => !comparedAsText(value))
   const clauses: string[] = []
   const args: unknown[] = []
 
@@ -2083,6 +2095,14 @@ function orderedValueExpression(
   if (scalarKind === "decimal") return `(${jsonTextExpression(propertyColumn)})::numeric`
   if (isTextScalarKind(scalarKind)) return `((${jsonTextExpression(propertyColumn)}) COLLATE "C")`
   return `NULLIF(${jsonValueExpression(propertyColumn)}, 'null'::jsonb)`
+}
+
+/**
+ * Strings whose equality index is on the JSON value, not on the text: preparation builds it, so a
+ * filter has to compare the JSON value too, or PostgreSQL scans every row of the type.
+ */
+export function hasJsonValueIndex(scalarKind: QueryScalarKind | undefined): boolean {
+  return scalarKind === "date" || scalarKind === "timestamp" || scalarKind === "uuid"
 }
 
 export function isTextScalarKind(scalarKind: QueryScalarKind | undefined): boolean {
