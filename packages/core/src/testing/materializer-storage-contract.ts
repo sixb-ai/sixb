@@ -972,7 +972,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       try {
         await publishDevices(materializer, storage, 1, [sourceEntry("one", "One")])
 
-        const paused = pauseBeforeFinalize(storage)
+        const paused = pauseBefore(storage, "finalize")
         const rename = renameDevice(
           contractMaterializer(paused.storage).withScope(runtimeScope()),
           "one",
@@ -1652,7 +1652,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
             executionId: "shared-run-second",
           }),
         }
-        const paused = pauseBeforeFinalize(storage)
+        const paused = pauseBefore(storage, "finalize")
         const first = contractMaterializer(paused.storage)
           .withScope(await scopeOf(firstRun.executionId))
           .edits.commit(commitOf(firstRun, "first"))
@@ -1694,13 +1694,93 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
     })
   }
 
+  // Two commits fence the same read of one object, as an Action's commit fences its subject. The
+  // second opens its transaction, then the first commits: its fenced read fails as a serialization
+  // conflict, the retry reads afresh, and the read conflict is what it reports.
+  // Removal proof: in PostgreSQL's `begin()`, release the failed session with
+  // `await this.sessions.release(session)`: its DELETE fails with 25P02 and nothing retries.
+  if (provider.concurrentTransactions) {
+    test(`${name} retries a commit whose fenced read a concurrent commit changed`, async () => {
+      const createdStorage = await provider.createStorage()
+      const storage = requireContractStorage(createdStorage)
+      const ref = deviceRef("shared")
+      let retries = 0
+      const rename = (
+        target: Storage,
+        name: string,
+        fence: ExpectedObjectRevision,
+        onSerializationRetry?: () => void
+      ) =>
+        contractMaterializer(target, onSerializationRetry ? { onSerializationRetry } : {})
+          .withScope(runtimeScope())
+          .edits.commit({
+            mode: "atomic",
+            source: { kind: "runtime", requestId: `fenced-read-${name}` },
+            operations: [{ id: "rename", kind: "object.upsert", ref, properties: { name } }],
+            expectedObjects: [fence],
+            expectedLinks: [],
+            expectedLinkScopes: [],
+          })
+
+      try {
+        await contractMaterializer(storage)
+          .withScope(runtimeScope())
+          .edits.commit({
+            mode: "atomic",
+            source: { kind: "runtime", requestId: "fenced-read-setup" },
+            operations: [
+              { id: "create", kind: "object.create", ref, properties: { name: "seed" } },
+            ],
+            expectedObjects: [],
+            expectedLinks: [],
+            expectedLinkScopes: [],
+          })
+        const read = await device(storage, "shared")
+        if (!read) throw new Error("The fenced object was not created.")
+        const fence: ExpectedObjectRevision = {
+          ref,
+          exists: true,
+          version: read.version,
+          lastCommitId: read.lastCommitId,
+        }
+
+        const first = pauseBefore(storage, "finalize")
+        const committing = rename(first.storage, "first", fence)
+        await first.reached
+
+        // Its transaction is open, and has read, before the first commit lands.
+        const second = pauseBefore(storage, "begin")
+        const refused = rename(second.storage, "second", fence, () => {
+          retries += 1
+        }).then(
+          () => null,
+          (error: unknown) => error
+        )
+        await second.reached
+        first.release()
+        await expect(committing).resolves.toMatchObject({ created: true })
+        second.release()
+
+        const error = await refused
+        expect(error).toBeInstanceOf(MaterializationConflictError)
+        expect(error instanceof MaterializationConflictError ? error.kind : error).toBe(
+          "expectation"
+        )
+        expect(retries).toBe(1)
+        expect(await device(storage, "shared")).toMatchObject({ properties: { name: "first" } })
+      } finally {
+        await provider.cleanup?.(createdStorage)
+      }
+    })
+  }
+
   // Removal proof: in PostgreSQL's `committedSince`, count only commits at or past the
   // watermark's xmax; the edit, in flight when the plan opened, is then taken as seen.
   if (provider.concurrentTransactions) {
     test(`${name} plans again what a commit in flight when the plan opened changed`, async () => {
       const createdStorage = await provider.createStorage()
       const storage = requireContractStorage(createdStorage)
-      const paused = pauseBeforeFinalize(storage)
+      const paused = pauseBefore(storage, "finalize")
       const runtime = contractMaterializer(paused.storage).withScope(runtimeScope())
       let edit: Promise<unknown> | undefined
       let armed = false
@@ -2373,8 +2453,8 @@ function observeActionRunRecords(storage: ContractStorage) {
   return { storage: observed, reached: reached.promise }
 }
 
-/** The same storage, whose transactions wait before they finalize until `release` is called. */
-function pauseBeforeFinalize(storage: ContractStorage) {
+/** The same storage, whose transactions wait before `step` until `release` is called. */
+function pauseBefore(storage: ContractStorage, step: "begin" | "finalize") {
   let reach!: () => void
   const reached = new Promise<void>((resolve) => {
     reach = resolve
@@ -2394,11 +2474,11 @@ function pauseBeforeFinalize(storage: ContractStorage) {
           const materializations = new Proxy(tx.ontology.materializations, {
             get(store, key) {
               const value = Reflect.get(store, key, store)
-              if (key !== "finalize") return typeof value === "function" ? value.bind(store) : value
-              return async (...args: Parameters<typeof store.finalize>) => {
+              if (key !== step) return typeof value === "function" ? value.bind(store) : value
+              return async (...args: unknown[]) => {
                 reach()
                 await released
-                return store.finalize(...args)
+                return Reflect.apply(value, store, args)
               }
             },
           })

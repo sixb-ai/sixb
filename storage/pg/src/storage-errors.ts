@@ -65,6 +65,9 @@ const LOCK_TABLES = [
 
 const OUT_OF_MEMORY = "53200"
 
+/** PostgreSQL SQLSTATE for a statement sent after an earlier one aborted its transaction. */
+const IN_FAILED_SQL_TRANSACTION = "25P02"
+
 /** The SQLSTATE / system error code carried by a thrown database or connection error. */
 export function pgErrorCode(error: unknown): string | undefined {
   if (error instanceof Error) {
@@ -130,11 +133,15 @@ export function isConnectionLost(error: unknown): boolean {
 /**
  * Replace an error that says something about the database rather than the statement: a lost or
  * unopenable connection becomes the retryable `storage.unavailable`, a full lock table an error
- * naming the table and the setting that sizes it. Every other error is returned unchanged.
+ * naming the table and the setting that sizes it, and 25P02 an error saying the first failure was
+ * lost. Every other error is returned unchanged.
  */
 export function explainPgError(error: unknown): unknown {
   if (isStorageUnavailable(error)) {
     return storageUnavailable(error)
+  }
+  if (pgErrorCode(error) === IN_FAILED_SQL_TRANSACTION) {
+    return failedStatementLost(error)
   }
   if (!(error instanceof Error) || pgErrorCode(error) !== OUT_OF_MEMORY) {
     return error
@@ -152,6 +159,20 @@ export function explainPgError(error: unknown): unknown {
       `(SQLSTATE 53200 "${error.message}"). The table holds ${setting} × (max_connections + ` +
       `max_prepared_transactions) entries shared by all sessions.${note} Raise ${setting} ` +
       "(applied at server restart) or shorten the transactions that overlap.",
+    { cause: error }
+  )
+}
+
+/**
+ * PostgreSQL rejects every statement after one that failed, without saying which one failed or
+ * why. The transaction's own error, a retryable serialization failure included, was replaced by a
+ * statement that the code handling it sent: a cleanup, a log write, a fallback query.
+ */
+function failedStatementLost(error: unknown): Error {
+  return new Error(
+    "[SixbPg] A statement was sent after an earlier statement of the same transaction failed, so " +
+      "PostgreSQL rejected it (SQLSTATE 25P02) and the earlier error was lost. Code that handles " +
+      "a failure inside a transaction must not send more SQL on it: let the error propagate.",
     { cause: error }
   )
 }

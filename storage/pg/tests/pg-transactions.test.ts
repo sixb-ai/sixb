@@ -143,6 +143,21 @@ describe("runPgTransaction", () => {
     ).rejects.toBe(outOfMemory)
   })
 
+  test("says a 25P02 replaced the transaction's first error", async () => {
+    const aborted = pgError("25P02", {
+      message: "current transaction is aborted, commands ignored until end of transaction block",
+    })
+
+    const error = await runPgTransaction(fakePool().sql, async () => {
+      throw aborted
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain("[SixbPg]")
+    expect((error as Error).message).toContain("the earlier error was lost")
+    expect((error as Error).cause).toBe(aborted)
+  })
+
   test("runs a nested call inside the open transaction", async () => {
     const pool = fakePool()
 
