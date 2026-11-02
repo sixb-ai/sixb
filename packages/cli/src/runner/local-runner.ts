@@ -15,9 +15,9 @@ import {
 } from "@sixb/client"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
+import type { Connection } from "../lib/connection"
 import { resolveConfigPath } from "../lib/profiles"
 import { thisComputer, thisComputerId } from "./computer"
-import type { Connection } from "./connection"
 
 /** How long a closed terminal waits for a turn running here to record its end. */
 const HANG_UP_WAIT_MS = 10_000

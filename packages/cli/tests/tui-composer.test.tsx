@@ -8,7 +8,7 @@ import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { createSixbClient } from "@sixb/client"
 import { activityLabel, Workspace } from "../src/tui/app"
-import type { LocalRunner } from "../src/tui/runner"
+import type { LocalRunner } from "../src/runner/local-runner"
 import { tuiColors } from "../src/tui/theme"
 import { Composer } from "../src/tui/ui"
 

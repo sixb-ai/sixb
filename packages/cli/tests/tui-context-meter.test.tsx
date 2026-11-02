@@ -8,8 +8,8 @@ import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { createSixbClient } from "@sixb/client"
 import { Workspace } from "../src/tui/app"
-import type { Connection } from "../src/tui/connection"
-import type { LocalRunner } from "../src/tui/runner"
+import type { Connection } from "../src/lib/connection"
+import type { LocalRunner } from "../src/runner/local-runner"
 import { tuiColors } from "../src/tui/theme"
 
 // The status line ends with the conversation's context against the model the next message goes

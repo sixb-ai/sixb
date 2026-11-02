@@ -8,9 +8,9 @@ import type {
   ComputerRunner,
 } from "@sixb/agent"
 import { createSixbClient } from "@sixb/client"
-import { thisComputerId } from "../src/tui/computer"
-import type { Connection } from "../src/tui/connection"
-import { LocalRunner, stopOnHangUp, stopOnQuit } from "../src/tui/runner"
+import type { Connection } from "../src/lib/connection"
+import { thisComputerId } from "../src/runner/computer"
+import { LocalRunner, stopOnHangUp, stopOnQuit } from "../src/runner/local-runner"
 
 // This computer as a runner: which turns `sixb` claims while it is open, how its session tells
 // the project so, and how it lets go of the turns it runs when its terminal closes.

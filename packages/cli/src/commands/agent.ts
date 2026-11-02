@@ -12,11 +12,11 @@ import {
   listModels,
   postAgentThreadMessage,
 } from "@sixb/client"
-import { thisComputer, thisComputerId } from "../tui/computer"
-import { type Connection, connect } from "../tui/connection"
+import { type Connection, connect } from "../lib/connection"
+import { thisComputer, thisComputerId } from "../runner/computer"
+import { LocalRunner } from "../runner/local-runner"
 import { toolLine } from "../tui/format"
 import { liveRun, reduceLive, shownMessage } from "../tui/parts"
-import { LocalRunner } from "../tui/runner"
 import {
   APPROVAL_MODES,
   type ApprovalMode,
