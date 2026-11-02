@@ -6,7 +6,7 @@ import { isConnectionLost } from "../storage-errors"
 import { withReservedPgConnection } from "../transactions"
 import { ensureObjectPartition, objectPartitionName } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
-import { isTextScalarKind } from "./query-compiler"
+import { hasJsonValueIndex, isTextScalarKind } from "./query-compiler"
 import { identifier, literal } from "./sql-text"
 
 export interface PgObjectQueryIndexScope {
@@ -358,12 +358,17 @@ export async function findPgSortIndexBound(
     if (input.kind === "filter") {
       const inspect = (predicate: Extract<ObjectQuery, { kind: "filter" }>["predicate"]): void => {
         if (predicate.op === "and") predicate.items.forEach(inspect)
-        else if (predicate.op === "eq" && typeof predicate.value === "string")
+        else if (
+          predicate.op === "eq" &&
+          typeof predicate.value === "string" &&
+          !hasJsonValueIndex(predicate.scalarKind)
+        )
           equality.add(predicate.propertyId)
         else if (
           predicate.op === "in" &&
           predicate.values.length === 1 &&
-          typeof predicate.values[0] === "string"
+          typeof predicate.values[0] === "string" &&
+          !hasJsonValueIndex(predicate.scalarKind)
         )
           equality.add(predicate.propertyId)
       }

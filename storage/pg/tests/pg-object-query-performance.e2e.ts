@@ -216,6 +216,81 @@ test("a correlated traversal scans only the object types its link can reach", as
 
 // Guard removal: restore compileTextPredicate's position() expression. This plan loses
 // its trigram bitmap index scan; the literal matching assertions also guard LIKE escaping.
+// Removal proof: compare a date as text. It still returns the right rows, by scanning every one.
+test("a date filter reads its equality index and matches exactly what comparing text would", async () => {
+  await sql`INSERT INTO objects
+    SELECT 'bench', 'Visit', lpad(n::text, 5, '0'),
+      CASE
+        WHEN n % 1000 = 0 THEN '{"on": null}'::jsonb
+        WHEN n % 1000 = 1 THEN '{}'::jsonb
+        ELSE jsonb_build_object('on', '2026-01-' || lpad((n % 28 + 1)::text, 2, '0'))
+      END,
+      now(), now(), 1, 'seed'
+    FROM generate_series(1, 5000) n`
+  await storage.ensureObjectQueryIndexes([
+    { projectId: "bench", objectTypeId: "Visit", kind: "value", propertyId: "on" },
+  ])
+  await sql.unsafe("ANALYZE objects")
+
+  const count = async (predicate: Extract<ObjectQuery, { kind: "filter" }>["predicate"]) => {
+    const query: ObjectQuery = {
+      kind: "limit",
+      limit: 5000,
+      input: {
+        kind: "filter",
+        input: { kind: "start", objectTypeId: "Visit" },
+        predicate,
+      },
+    }
+    const compiled = compilePgObjectQuery("bench", query)
+    const args = compiled.args as SqlParameter[]
+    const [row] = await sql.unsafe<{ "QUERY PLAN": { Plan: unknown }[] }[]>(
+      `EXPLAIN (ANALYZE, FORMAT JSON) ${compiled.sql}`,
+      args
+    )
+    const plan = row?.["QUERY PLAN"][0]?.Plan as Parameters<typeof visitedRows>[0]
+    return { rows: (await sql.unsafe(compiled.sql, args)).length, visited: visitedRows(plan) }
+  }
+  const [{ matching }] = await sql<{ matching: number }[]>`
+    SELECT count(*)::int AS matching FROM objects
+    WHERE object_type_id = 'Visit' AND properties ->> 'on' = '2026-01-05'`
+  const [{ either }] = await sql<{ either: number }[]>`
+    SELECT count(*)::int AS either FROM objects
+    WHERE object_type_id = 'Visit' AND properties ->> 'on' IN ('2026-01-05', '2026-01-06')`
+  const [{ orNull }] = await sql<{ orNull: number }[]>`
+    SELECT count(*)::int AS "orNull" FROM objects
+    WHERE object_type_id = 'Visit'
+      AND (properties ->> 'on' = '2026-01-05' OR jsonb_typeof(properties -> 'on') = 'null')`
+
+  const equal = await count({
+    propertyId: "on",
+    op: "eq",
+    value: "2026-01-05",
+    scalarKind: "date",
+  })
+  expect(equal.rows).toBe(matching)
+  expect(equal.visited).toBeLessThan(5000)
+
+  const anyOf = await count({
+    propertyId: "on",
+    op: "in",
+    values: ["2026-01-05", "2026-01-06"],
+    scalarKind: "date",
+  })
+  expect(anyOf.rows).toBe(either)
+  expect(anyOf.visited).toBeLessThan(5000)
+
+  const withNull = await count({
+    propertyId: "on",
+    op: "in",
+    values: ["2026-01-05", null],
+    scalarKind: "date",
+  })
+  expect(withNull.rows).toBe(orNull)
+
+  await sql`DELETE FROM objects WHERE object_type_id = 'Visit'`
+})
+
 test("substring search uses trigrams and treats wildcard characters literally", async () => {
   const query: ObjectQuery = { kind: "text", input: start, query: "AL%_\\NEE", fields: ["text"] }
   const plan = await explain(query)
