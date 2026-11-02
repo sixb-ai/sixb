@@ -95,6 +95,33 @@ A URL is valid for one hour by default; pass `{ expiresInMs }` to choose another
 
 Check the HTTP status and structured error code instead of parsing message text. See [Errors](../errors/overview.md) for the response format and code reference.
 
+## Find a slow request
+
+The API logs any request that takes a second or more, with where its time went. It names the route and the object type a query starts from, never a URL or a value:
+
+```text
+[SixbServer] Slow request: POST /api/objects/query (Timecard) 200 in 1240 ms: auth 4, storage 1200 in 2 calls, app 36
+```
+
+| Part | Covers |
+| --- | --- |
+| `auth` | Reading the body and identifying the caller. |
+| `storage` | Time at least one storage call was running, including waiting for a connection and decoding rows. Calls made during `auth` count there. |
+| `app` | Everything else: validation, permission checks and building the response. |
+
+Set `SIXB_SERVER_TIMING=1` to also send those numbers on the response of any signed-in request. `bun sixb dev` always does. Your browser shows them in the Network tab, under a request's **Timing** section, and anything the browser waited for beyond `total` was the network or its own queue:
+
+```http
+Server-Timing: auth;dur=4.0, storage;dur=1200.0;desc="2 calls", app;dur=36.0, total;dur=1240.0
+```
+
+The header reveals how the server spends its time, so it's off by default in production, and a share or an Agent's run token never receives it.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SIXB_SERVER_TIMING` | Off | `1` or `true` sends the header. |
+| `SIXB_SLOW_REQUEST_MS` | `1000` | How long a request takes before it's logged. `0` turns the log off. |
+
 ## Custom server setup
 
 Most projects start the API through the [CLI](../cli/overview.md#production-services). If you need to embed it in your own process, use `createSixbServer` from `@sixb/server`; the [package README](https://github.com/sixb-ai/sixb/tree/main/packages/server#readme) documents its options.
