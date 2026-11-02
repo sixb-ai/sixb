@@ -56,7 +56,8 @@ describe("PgObjectStorage conditional reader plans", () => {
         return explain(tx, { kind: "start", objectTypeId: Invoice }, "total")
       })
 
-      expect(plan).toContain("Index Scan using conditional_invoice_status")
+      // The index on the parent reaches the partition under a generated name.
+      expect(plan).toMatch(/Index Scan using objects_default_\w+ on objects_default/)
       expect(plan).toContain("Index Cond: (md5(")
     })
   })

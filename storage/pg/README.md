@@ -142,6 +142,30 @@ CLI development runtime or production services start. `bun sixb db migrate` perf
 `SIXB_SKIP_MIGRATION=1` disable both steps for production services when a separate release step
 has already run them. No index is built in a request handler.
 
+`objects` is partitioned by object type, so a query plans against its own type's indexes alone,
+however many types the ontology has. Preparation gives each type its partition and builds its
+indexes and statistics there. A row of a type without a partition waits in `objects_default`, and
+moves across at that type's first preparation.
+
+### Upgrading to the partitioned layout
+
+Migration `084-partition-objects` holds `objects` exclusively while it copies the rows, and
+preparation then rebuilds every query index. **Stop every service first**: a repeatable-read
+transaction already waiting on that lock when it commits reads the new table with an older snapshot,
+and sees no rows instead of an error. Services also read without query indexes until preparation
+finishes.
+
+```sh
+pg_dump --format=custom ...   # There is no down migration.
+bun sixb deploy stop
+bun sixb deploy               # Migrates and prepares, then starts the services.
+```
+
+A deployment from before this layout cannot start against the migrated database, so going back means
+restoring the backup. Autovacuum never analyzes a partitioned table itself, only its partitions, and
+a large publication analyzes `objects` as before; if yours are all small, run `ANALYZE objects` now
+and then so queries that read across types keep good statistics.
+
 Custom runtimes can opt into the same lifecycle with:
 
 ```ts

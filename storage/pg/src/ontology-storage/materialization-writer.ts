@@ -76,6 +76,20 @@ export class PgMaterializationWriter {
     return { objectWrites, linkWrites, uniqueValueWrites, eventCount }
   }
 
+  /** How many staged object writes each type has, for types a publication changed substantially. */
+  async stagedObjectWritesByType(target: PgStagedPlanTarget): Promise<ReadonlyMap<string, number>> {
+    const rows = await this.sql<{ readonly object_type_id: string; readonly writes: string }[]>`
+      SELECT object_type_id, COUNT(*) AS writes FROM (
+        SELECT value->'row'->'ref'->>'objectTypeId' AS object_type_id
+        FROM (${this.staged(target, "object-upsert")}) AS staged
+        UNION ALL
+        SELECT value->'ref'->>'objectTypeId'
+        FROM (${this.staged(target, "object-delete")}) AS staged
+      ) AS writes
+      GROUP BY object_type_id`
+    return new Map(rows.map((row) => [row.object_type_id, Number(row.writes)]))
+  }
+
   /** Two probes of the work table's lane index: a commit with no unique values runs nothing else. */
   private async stagedUniqueWork(target: PgStagedPlanTarget): Promise<PgUniqueWork> {
     const probe = (kind: "unique-value-release" | "unique-value-claim") => this.sql`

@@ -103,6 +103,12 @@ export function isRetryableTransactionConflict(error: unknown): boolean {
   return code !== undefined && RETRYABLE_TRANSACTION_CONFLICT_CODES.has(code)
 }
 
+/** Another session held a lock this one gave up on, or PostgreSQL broke a lock cycle. */
+export function isLockConflict(error: unknown): boolean {
+  const code = pgErrorCode(error)
+  return code === "55P03" || code === "40P01"
+}
+
 /**
  * True when the error means the session is gone: PostgreSQL has already rolled back its open
  * transaction and released its locks, and nothing more may be sent on that connection.
