@@ -63,10 +63,14 @@ function connected(respond: (status: number) => number = () => 200) {
   }
   const events: ComputerEvent[] = []
   const waiters = new Set<() => void>()
-  const computer = new ComputerConnection(connection, (event) => {
-    events.push(event)
-    for (const wake of waiters) wake()
-  })
+  const computer = new ComputerConnection(
+    connection,
+    (event) => {
+      events.push(event)
+      for (const wake of waiters) wake()
+    },
+    false
+  )
   /** Until an event `matches`, without waiting on a clock. */
   const until = async (matches: (event: ComputerEvent) => boolean) => {
     while (!events.some(matches)) {

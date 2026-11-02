@@ -474,7 +474,12 @@ describe("what a message is sent with", () => {
 
   test("asks for nothing the person did not choose, so the project's defaults apply", () => {
     const models = [model("a", { isDefault: true }), model("b")]
-    const settings = { place: "computer", approvalMode: "manual", continueFromWeb: true } as const
+    const settings = {
+      place: "computer",
+      approvalMode: "manual",
+      continueFromWeb: true,
+      keepAwake: true,
+    } as const
     expect(messageSelection(models, settings)).toEqual({})
     expect(modelLabel(models, settings)).toEqual({ name: "a" })
     expect(
@@ -489,7 +494,12 @@ describe("what a message is sent with", () => {
   test("names Auto when the project picks each message's model by tier", () => {
     const models = [model("a", { tier: "standard" }), model("b", { tier: "heavy" })]
     expect(
-      modelLabel(models, { place: "cloud", approvalMode: "auto", continueFromWeb: true })
+      modelLabel(models, {
+        place: "cloud",
+        approvalMode: "auto",
+        continueFromWeb: true,
+        keepAwake: true,
+      })
     ).toEqual({ name: "Auto" })
   })
 })

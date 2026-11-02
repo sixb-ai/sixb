@@ -10,6 +10,7 @@ import type {
 import { createSixbClient } from "@sixb/client"
 import type { Connection } from "../src/lib/connection"
 import { thisComputerId } from "../src/runner/computer"
+import { createKeepAwake } from "../src/runner/keep-awake"
 import { LocalRunner, stopOnHangUp, stopOnQuit } from "../src/runner/local-runner"
 
 // This computer as a runner: which turns `sixb` claims while it is open, how its session tells
@@ -349,6 +350,70 @@ describe("a turn sent from elsewhere", () => {
     claimedBy("run_9")
     await typed
     expect(heard).toEqual([])
+  })
+})
+
+describe("staying awake", () => {
+  // Guard proof: end the process's hold after each turn instead of counting them, in createKeepAwake;
+  // the computer sleeps through a turn that's still running because another one finished.
+  test("holds while any turn runs, and starts and stops once", () => {
+    let starts = 0
+    let stops = 0
+    const { hold } = createKeepAwake(() => {
+      starts += 1
+      return () => {
+        stops += 1
+      }
+    })
+
+    const first = hold()
+    const second = hold()
+    first()
+    first()
+    expect([starts, stops]).toEqual([1, 0])
+    second()
+    expect([starts, stops]).toEqual([1, 1])
+
+    hold()()
+    expect([starts, stops]).toEqual([2, 2])
+  })
+
+  // Guard proof: release before runTurn has ended, or never, in LocalRunner.claim; the computer sleeps
+  // in the middle of a turn, or stays awake for good.
+  test.each([
+    [true, 1],
+    [false, 0],
+  ])("a turn holds it for as long as it runs, when the setting is %s", async (setting, holds) => {
+    const { runner } = await avasRunner({ status: "queued" })
+    runner.claim = LocalRunner.prototype.claim
+    let held = 0
+    let released = 0
+    const awake = new LocalRunner(
+      (runner as unknown as { connection: Connection }).connection,
+      FOLDER,
+      () => {},
+      {
+        holdAwake: () => {
+          held += 1
+          return () => {
+            released += 1
+          }
+        },
+      }
+    )
+    awake.keepsAwake = setting
+    let finish = (_ran: boolean) => {}
+    const inner = awake as unknown as { runner: { runTurn(): Promise<boolean> } }
+    inner.runner.runTurn = () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+
+    const turn = awake.claim("run_1")
+    expect([held, released]).toEqual([holds, 0])
+    finish(true)
+    await turn
+    expect([held, released]).toEqual([holds, holds])
   })
 })
 

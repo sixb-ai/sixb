@@ -18,6 +18,7 @@ import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import type { Connection } from "../lib/connection"
 import { resolveConfigPath } from "../lib/profiles"
 import { thisComputer, thisComputerId } from "./computer"
+import { keepAwake, type ReleaseAwake } from "./keep-awake"
 
 /** How long a closed terminal waits for a turn running here to record its end. */
 const HANG_UP_WAIT_MS = 10_000
@@ -46,6 +47,8 @@ export class SessionRefusedError extends Error {
 export interface LocalRunnerOptions {
   /** The session stopped renewing, or started again. Called when that changes, not each time. */
   readonly onSessionChange?: (failure: unknown | null) => void
+  /** How a running turn keeps the computer awake. By default, `keepAwake`. */
+  readonly holdAwake?: () => ReleaseAwake
 }
 
 /**
@@ -70,6 +73,8 @@ export class LocalRunner {
     readonly renew: () => void
   } | null = null
   private sessionFailing = false
+  /** Whether a running turn keeps the computer awake: the person's setting. */
+  keepsAwake = true
   /** The session's last call: its release follows a renewal, which would open it again. */
   private lastCall: Promise<void> = Promise.resolve()
 
@@ -127,13 +132,18 @@ export class LocalRunner {
     const running = this.running.get(runId)
     if (running) return running.done
     const stop = new AbortController()
+    const holdAwake = this.options.holdAwake ?? keepAwake.hold
+    const releaseAwake = this.keepsAwake ? holdAwake() : null
     const done = this.runner
       .runTurn(runId, stop.signal, onClaimed)
       .catch((error: unknown) => {
         this.onFailure(error)
         return false
       })
-      .finally(() => this.running.delete(runId))
+      .finally(() => {
+        this.running.delete(runId)
+        releaseAwake?.()
+      })
     // What waited for this turn runs now, not at the next renewal. Only after one that ran: one that
     // couldn't be claimed may be listed again, and asking at once would ask forever.
     void done.then((ran) => {

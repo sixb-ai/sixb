@@ -25,12 +25,15 @@ export interface Settings {
    * Kept per folder, apart from the settings every `sixb` rewrites: `runner/allowed-folders.ts`.
    */
   readonly continueFromWeb: boolean
+  /** Whether a turn running on this computer keeps it from going to sleep. */
+  readonly keepAwake: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   place: "computer",
   approvalMode: "manual",
   continueFromWeb: false,
+  keepAwake: true,
 }
 
 export const APPROVAL_MODES: readonly {
@@ -83,6 +86,7 @@ export async function loadSettings(folder: string): Promise<Settings> {
       ...(stored.model?.provider && stored.model.modelId ? { model: stored.model } : {}),
       ...(stored.reasoning ? { reasoning: stored.reasoning } : {}),
       continueFromWeb,
+      keepAwake: stored.keepAwake !== false,
     }
   } catch {
     return { ...DEFAULT_SETTINGS, continueFromWeb }
