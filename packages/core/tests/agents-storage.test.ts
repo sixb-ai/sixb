@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
+import { movesComputerPlace } from "../src/storage/agents/provider"
 import { createTestAgentExecution, runAgentStorageContractSuite } from "../src/testing"
 
 runAgentStorageContractSuite("InMemoryAgentStorage", {
@@ -53,4 +54,16 @@ describe("InMemoryStorage agents", () => {
     const thread = await storage.agents.threads.getById({ projectId: "p", id: "thr_1" })
     expect(thread).toMatchObject({ activeRunId: null, messageCount: 0 })
   })
+})
+
+// Guard proof: require a previous computer in movesComputerPlace; the first folder of a conversation
+// from before folders were kept skips the running-turn refusal and the note about earlier files.
+test("a first folder counts as a move for a thread from before folders were kept", () => {
+  const computer = { id: "laptop", name: "Laptop", folder: "/work" }
+  const thread = (place?: typeof computer) =>
+    ({ ...(place ? { computer: place } : {}) }) as Parameters<typeof movesComputerPlace>[0]
+
+  expect(movesComputerPlace(thread(), computer)).toBe(true)
+  expect(movesComputerPlace(thread(computer), { ...computer, name: "Renamed" })).toBe(false)
+  expect(movesComputerPlace(thread(computer), { ...computer, folder: "/other" })).toBe(true)
 })

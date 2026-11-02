@@ -116,6 +116,8 @@ export type ModelLoopResult<TOutput = string> =
       readonly output: TOutput
       readonly steps: readonly ModelStep[]
       readonly finishReason: ModelFinishReason
+      /** The loop stopped at `maxSteps` after a step that ran tools, before the model answered. */
+      readonly stepLimitReached?: true
     }
   | {
       readonly status: "aborted"
@@ -412,7 +414,13 @@ export async function runModelLoop(
         )
       }
       const output = responseText(response)
-      return { status: "completed", output, steps, finishReason: response.finishReason }
+      return {
+        status: "completed",
+        output,
+        steps,
+        finishReason: response.finishReason,
+        stepLimitReached: true,
+      }
     }
   }
 

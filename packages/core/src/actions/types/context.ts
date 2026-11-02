@@ -1,6 +1,7 @@
 import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors"
 import type { RecordEditsContext } from "../../edits"
+import type { RequestClient } from "../../execution/request-client"
 import type { AuthorizablePrincipal } from "../../execution/types"
 import type { Logger } from "../../logging"
 import type {
@@ -14,6 +15,7 @@ import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/infer
 import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type { UserRef } from "../../ontology/user-ref"
 import type { ObjectReader } from "../../runtime/types"
+import type { TrustedSharesRuntime } from "../../shares/execution"
 import type { UsersRuntime } from "../../users"
 import type { ActionPrimitiveSchemaValues } from "./params"
 
@@ -166,6 +168,8 @@ export interface ActionRuntimeFacade {
   readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime
   readonly users: UsersRuntime
+  /** Revoke a shared link the run is done with, such as one issued for a request it closes. */
+  readonly shares: TrustedSharesRuntime
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): ActionTelemetryObjectSet<TObjectType>
@@ -201,6 +205,13 @@ export interface BaseActionPhaseContext<TParams extends Record<string, unknown>>
    * store.
    */
   readonly requestedBy: AuthorizablePrincipal | undefined
+  /**
+   * The client of the HTTP request that requested the run, signed-in or through a shared link:
+   * its IP address and user agent. `undefined` when no request did directly, as for a schedule, an
+   * event, a workflow, the agent, or a run another run requests. Sixb never stores it: write it to
+   * an object yourself when you need to keep it.
+   */
+  readonly client: RequestClient | undefined
   /**
    * Aborts when the caller cancels the run or it runs out of time: a run has 30 seconds until its
    * writeback succeeds or its edits commit, and its effects have 30 more after the commit. Forward

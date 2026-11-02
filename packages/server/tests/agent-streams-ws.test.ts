@@ -535,6 +535,26 @@ describe("canAccessAgentThreadActivity", () => {
         })
       ).resolves.toBe(false)
     }
+
+    // Guard proof: read a move as a run's activity in canAccessAgentThreadActivity; a thread's move
+    // is refused to its owner, whose other windows keep showing where it no longer runs.
+    const moved = {
+      schemaVersion: event.schemaVersion,
+      type: "agent.thread.moved",
+      projectId,
+      ownerPrincipal: owner,
+      threadId,
+      occurredAt: event.occurredAt,
+    } as const
+    await expect(canAccessAgentThreadActivity(requestSdk(sixb, authz(owner)), moved)).resolves.toBe(
+      true
+    )
+    await expect(
+      canAccessAgentThreadActivity(
+        requestSdk(sixb, authz({ type: "user", id: "usr_other" })),
+        moved
+      )
+    ).resolves.toBe(false)
   })
 })
 
