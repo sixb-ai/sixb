@@ -79,6 +79,11 @@ it running decides how long it stays connected. With no folder it uses the ones 
 
 If your sign-in ends it exits with code `3`.
 
+While a turn runs on your computer, in `sixb` or `sixb connect`, it keeps a Mac awake, on battery too.
+Closing the lid still puts it to sleep, and a turn asleep for more than a minute ends interrupted.
+Turn this off with **Keep computer awake during turns** in `ctrl+p`. On Linux and Windows, your
+computer's own sleep settings apply.
+
 From a script, `sixb agent` asks once and prints the answer:
 
 ```bash

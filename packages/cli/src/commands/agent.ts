@@ -98,6 +98,7 @@ export async function runAgent(options: {
   const runner = here
     ? new LocalRunner(connection, folder, (error) => step(tone.fail(errorText(error))))
     : null
+  if (runner) runner.keepsAwake = settings.keepAwake
   if (!options.json) {
     const mode = approvalMode ?? thread.approvalMode
     step(

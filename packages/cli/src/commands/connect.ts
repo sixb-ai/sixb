@@ -9,6 +9,7 @@ import { thisComputer } from "../runner/computer"
 import { ComputerConnection, type ComputerEvent } from "../runner/computer-connection"
 import { stopOnHangUp } from "../runner/local-runner"
 import { shortPath } from "../tui/format"
+import { loadSettings } from "../tui/settings"
 import { glyph, tone } from "../ui/theme"
 
 /** Exit status when the person's sign-in ended: a service manager should not just restart this. */
@@ -38,21 +39,26 @@ export async function runConnect(options: {
 
   await allowFolders(options)
 
+  const settings = await loadSettings(process.cwd())
   const report = options.json ? printJson : printLine
   let finish: (code: number) => void = () => {}
   const finished = new Promise<number>((resolve) => {
     finish = resolve
   })
   let signedOut = false
-  const computer = new ComputerConnection(connection, (event) => {
-    // Every folder's session ends with the sign-in: once is enough to say so.
-    if (event.type === "signed-out") {
-      if (signedOut) return
-      signedOut = true
-      finish(EXIT_SIGNED_OUT)
-    }
-    report(event)
-  })
+  const computer = new ComputerConnection(
+    connection,
+    (event) => {
+      // Every folder's session ends with the sign-in: once is enough to say so.
+      if (event.type === "signed-out") {
+        if (signedOut) return
+        signedOut = true
+        finish(EXIT_SIGNED_OUT)
+      }
+      report(event)
+    },
+    settings.keepAwake
+  )
 
   const unhook = stopOnHangUp(
     () => computer,

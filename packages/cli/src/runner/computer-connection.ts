@@ -45,7 +45,8 @@ export class ComputerConnection {
 
   constructor(
     private readonly connection: Connection,
-    private readonly onEvent: (event: ComputerEvent) => void
+    private readonly onEvent: (event: ComputerEvent) => void,
+    private readonly keepsAwake: boolean
   ) {}
 
   async start(): Promise<void> {
@@ -128,6 +129,7 @@ export class ComputerConnection {
       (error) => this.onEvent({ type: "error", message: messageOf(error) }),
       { onSessionChange: (failure) => this.onSessionChange(folder, failure) }
     )
+    runner.keepsAwake = this.keepsAwake
     runner.onElsewhere((run, ended) => {
       const turn = { folder, threadId: run.threadId, runId: run.id }
       this.onEvent({ type: "turn.started", ...turn })

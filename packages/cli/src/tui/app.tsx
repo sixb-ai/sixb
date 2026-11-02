@@ -397,6 +397,17 @@ export function Workspace(props: WorkspaceProps) {
               newConversation: () => setScreen({ kind: "home" }),
               open: setDialog,
               setPlace: (place) => setSettings((current) => ({ ...current, place })),
+              toggleKeepAwake: () =>
+                setSettings((current) => {
+                  const keepAwake = !current.keepAwake
+                  runner.keepsAwake = keepAwake
+                  say(
+                    keepAwake
+                      ? "This computer stays awake while a turn runs here"
+                      : "This computer may sleep while a turn runs here, which stops the turn"
+                  )
+                  return { ...current, keepAwake }
+                }),
               toggleContinueFromWeb: () =>
                 setSettings((current) => {
                   const continueFromWeb = !current.continueFromWeb
@@ -1286,6 +1297,7 @@ function commandItems(input: {
   readonly setPlace: (place: Settings["place"]) => void
   /** Whether your messages from the web, or another device, run in this folder. */
   readonly toggleContinueFromWeb: () => void
+  readonly toggleKeepAwake: () => void
   readonly cycleEffort: () => void
   readonly quit: () => void
 }): PaletteItem[] {
@@ -1345,6 +1357,13 @@ function commandItems(input: {
       label: "Messages from the web",
       detail: settings.continueFromWeb ? "run here" : "off",
       run: input.toggleContinueFromWeb,
+    },
+    {
+      id: "keep-awake",
+      group: "Agent",
+      label: "Keep computer awake during turns",
+      detail: settings.keepAwake ? "on" : "off",
+      run: input.toggleKeepAwake,
     },
     { id: "quit", group: "Sixb", label: "Quit", keys: "ctrl+c", run: input.quit },
   ]

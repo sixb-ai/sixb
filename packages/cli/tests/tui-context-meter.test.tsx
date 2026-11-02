@@ -7,9 +7,9 @@ import type { SyntaxStyle } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { createSixbClient } from "@sixb/client"
-import { Workspace } from "../src/tui/app"
 import type { Connection } from "../src/lib/connection"
 import type { LocalRunner } from "../src/runner/local-runner"
+import { Workspace } from "../src/tui/app"
 import { tuiColors } from "../src/tui/theme"
 
 // The status line ends with the conversation's context against the model the next message goes
@@ -160,7 +160,12 @@ async function openTerminal(api: ReturnType<typeof fakeApi>, width: number) {
       colors={tuiColors("dark")}
       syntax={{} as SyntaxStyle}
       version="sixb v0.0.0"
-      initialSettings={{ place: "cloud", approvalMode: "auto", continueFromWeb: false }}
+      initialSettings={{
+        place: "cloud",
+        approvalMode: "auto",
+        continueFromWeb: false,
+        keepAwake: false,
+      }}
       onExit={() => {}}
     />,
     { width, height: 30 }

@@ -94,6 +94,7 @@ export async function runTui(options: {
           connectWith={(apiUrl) => connect(apiUrl ? { ...options, apiUrl } : options)}
           runnerFor={(connection) => {
             runner ??= new LocalRunner(connection, folder, (error) => console.error(error))
+            runner.keepsAwake = settings.keepAwake
             return runner
           }}
           onExit={resolve}

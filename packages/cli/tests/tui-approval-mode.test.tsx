@@ -7,9 +7,9 @@ import type { SyntaxStyle } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { createSixbClient } from "@sixb/client"
-import { Workspace } from "../src/tui/app"
 import type { Connection } from "../src/lib/connection"
 import type { LocalRunner } from "../src/runner/local-runner"
+import { Workspace } from "../src/tui/app"
 import type { ApprovalMode } from "../src/tui/settings"
 import { tuiColors } from "../src/tui/theme"
 
@@ -192,7 +192,12 @@ async function openTerminal(api: Awaited<ReturnType<typeof fakeApi>>, mode: Appr
       // Only an answer's text uses it, and these turns have none.
       syntax={{} as SyntaxStyle}
       version="sixb v0.0.0"
-      initialSettings={{ place: "cloud", approvalMode: mode, continueFromWeb: false }}
+      initialSettings={{
+        place: "cloud",
+        approvalMode: mode,
+        continueFromWeb: false,
+        keepAwake: false,
+      }}
       onExit={() => {}}
     />,
     { width: 100, height: 30 }
