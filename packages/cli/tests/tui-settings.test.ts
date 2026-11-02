@@ -61,6 +61,14 @@ describe("messages from the web", () => {
     expect((await loadSettings(FOLDER)).continueFromWeb).toBe(false)
   })
 
+  // Guard proof: name the temporary file for the process alone, in setFoldersAllowed; a quick off and
+  // on in one sixb share it, and the second write fails or the wrong one lands.
+  test("take two quick changes without failing either", async () => {
+    await Promise.all([setFoldersAllowed([FOLDER], true), setFoldersAllowed([OTHER], true)])
+
+    expect(await readdir(join(configHome, "sixb"))).toEqual(["allowed-folders.json"])
+  })
+
   // Guard proof: read the list as empty when it can't be parsed, in setFoldersAllowed; the write
   // that follows forgets every folder chosen before.
   test("refuse a new choice rather than overwrite a list they can't read", async () => {
