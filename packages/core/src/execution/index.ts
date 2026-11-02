@@ -1,3 +1,4 @@
+export type { RequestClient } from "./request-client"
 export type {
   AuthorizablePrincipal,
   AuthorizationRef,

@@ -144,6 +144,33 @@ Or record who created a note:
 })
 ```
 
+## Know where the request came from
+
+Every handler also receives `client`, the browser or program behind the HTTP request that
+requested the run: `{ address, userAgent }`. It is there for a signed-in user, a service account
+token, and a [shared link](../auth/shared-access.md) alike, so an action can record where a
+signature or an approval came from:
+
+```ts
+.edits(({ objects, subject, client }) => {
+  objects(Signature).create({
+    contract: subject.primaryId,
+    signedAt: new Date(),
+    ipAddress: client?.address,
+    userAgent: client?.userAgent,
+  })
+})
+```
+
+`address` is the client's IP address, read from the connection or from the `x-forwarded-for`
+entries your [trusted proxies](../deployment/overview.md#run-behind-a-proxy) add; it is `undefined`
+when the server could not resolve one. `userAgent` is the request's `User-Agent` header, cut to 512
+characters.
+
+`client` is `undefined` when no HTTP request asked for the run directly: a schedule, an event, a
+workflow step, the agent, or an action another action requests. Sixb never stores it, in the run or
+anywhere else: store what you need yourself, and only what you need.
+
 ## Call external systems
 
 Use `.writeback()` before `.edits()` when a change depends on an external call. Return the data

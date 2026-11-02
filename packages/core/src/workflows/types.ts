@@ -27,6 +27,7 @@ import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import type { SchedulesRuntime } from "../schedules/execution"
 import type { GroupDefinition } from "../security"
+import type { TrustedSharesRuntime } from "../shares/execution"
 import type { SyncsRuntime } from "../syncs/execution"
 import type { UsersRuntime } from "../users"
 import type { WorkflowsRuntime } from "./execution"
@@ -80,6 +81,8 @@ export interface WorkflowRuntimeFacade {
   readonly users: UsersRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
+  /** Revoke a shared link the workflow is done with. Issuing links stays with people. */
+  readonly shares: TrustedSharesRuntime
 }
 
 export type StepHandler<
