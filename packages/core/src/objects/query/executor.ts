@@ -32,6 +32,7 @@ import type {
   ObjectQueryResultShape,
   ObjectQuerySortField,
 } from "./ir"
+import { linkEndpointObjectTypeIds } from "./link-endpoints"
 import { matchesPredicate } from "./matches-predicate"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
@@ -447,6 +448,7 @@ function validateExecutableQuery(
     maxPageSize: options.maxPageSize,
     maxRefs: options.maxRefs,
     normalize: false,
+    resolveLinkEndpoints: true,
   }
   const normalized = normalizeObjectQuery(input.query)
   const validated = validateObjectQuery(normalized, validationOptions)
@@ -878,6 +880,7 @@ async function collectOutgoingEdges(
   expansion: ObjectExpansion,
   options: QueryExecutorOptions
 ): Promise<ExpansionEdge[][]> {
+  const endpoints = linkEndpointObjectTypeIds(expansion)
   const linksByKey = await options.storage.listLinksBatch({
     projectId,
     items: parents.map((parent) => ({
@@ -892,11 +895,13 @@ async function collectOutgoingEdges(
       linkBatchKey(parent.objectTypeId, parent.primaryId, expansion.linkId)
     )
     if (!links) return []
-    return links.map((link) => ({
-      neighborTypeId: link.targetTypeId,
-      neighborId: link.targetId,
-      edgeProperties: link.properties,
-    }))
+    return links
+      .filter((link) => !endpoints || endpoints.includes(link.targetTypeId))
+      .map((link) => ({
+        neighborTypeId: link.targetTypeId,
+        neighborId: link.targetId,
+        edgeProperties: link.properties,
+      }))
   })
 }
 
@@ -906,6 +911,7 @@ async function collectIncomingEdges(
   expansion: ObjectExpansion,
   options: QueryExecutorOptions
 ): Promise<ExpansionEdge[][]> {
+  const endpoints = linkEndpointObjectTypeIds(expansion)
   const linksByKey = await options.storage.listLinksBatch({
     projectId,
     direction: "incoming",
@@ -923,10 +929,7 @@ async function collectIncomingEdges(
     if (!links) return []
     // For an incoming expansion the hydrated object is the link's source.
     return links
-      .filter(
-        (link) =>
-          !expansion.sourceObjectTypeId || link.sourceTypeId === expansion.sourceObjectTypeId
-      )
+      .filter((link) => !endpoints || endpoints.includes(link.sourceTypeId))
       .map((link) => ({
         neighborTypeId: link.sourceTypeId,
         neighborId: link.sourceId,

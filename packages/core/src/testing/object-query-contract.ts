@@ -1194,6 +1194,54 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
       })
     })
 
+    test("reads a link as the ontology declares it, without deleting older edges", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
+        const Elsewhere = defineObjectType({
+          id: "ContractElsewhere",
+          name: "Contract Elsewhere",
+          properties: [prop("id", "string", { required: true, primary: true })],
+        })
+        const narrowedRoom = defineObjectType({
+          id: Room.id,
+          name: Room.name,
+          properties: Room.properties,
+          links: [link("hasDevice", Elsewhere)],
+        })
+        const narrowed = new OntologyRegistry({ sources: [narrowedRoom, Device, Elsewhere] })
+        const follow: ObjectQuery = {
+          kind: "traverse",
+          direction: "outgoing",
+          linkId: "hasDevice",
+          input: { kind: "start", objectTypeId: Room.id },
+        }
+        const expand: ObjectQuery = {
+          kind: "expand",
+          input: { kind: "limit", limit: 1, input: { kind: "start", objectTypeId: Room.id } },
+          expansions: [{ linkId: "hasDevice", direction: "outgoing" }],
+        }
+        const links = (result: Awaited<ReturnType<typeof executeObjectQuery>>) =>
+          result.objects.flatMap((row) => row.links?.hasDevice ?? [])
+
+        const before = { ontology: objectQueryContractOntology, storage }
+        const after = { ontology: narrowed, storage }
+        expect(
+          (await executeObjectQuery({ projectId, query: follow }, before)).objects.length
+        ).toBeGreaterThan(0)
+        expect(
+          links(await executeObjectQuery({ projectId, query: expand }, before)).length
+        ).toBeGreaterThan(0)
+
+        expect((await executeObjectQuery({ projectId, query: follow }, after)).objects).toEqual([])
+        expect(links(await executeObjectQuery({ projectId, query: expand }, after))).toEqual([])
+
+        // Allowing the type again brings the edges back: nothing was deleted.
+        expect(
+          (await executeObjectQuery({ projectId, query: follow }, before)).objects.length
+        ).toBeGreaterThan(0)
+      })
+    })
+
     test("pushes down traversal and set operations", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         await seedObjectQueryContractData(fixture)

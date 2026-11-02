@@ -1,4 +1,5 @@
 import type { QueryScalarKind } from "../../objects/query/ir"
+import { linkTargetObjectTypeIds } from "../../objects/query/link-endpoints"
 import {
   queryScalarKindForSchema,
   resolvePropertyQueryCapabilities,
@@ -20,6 +21,11 @@ export interface ObjectQueryPreparationPlan {
       readonly text: boolean
     }[]
     readonly indexes: readonly ObjectQueryIndexDefinition[]
+    /** The object types each link allows, subtypes included. Undefined for a wildcard link. */
+    readonly links: readonly {
+      readonly linkId: string
+      readonly targetObjectTypeIds: readonly string[] | undefined
+    }[]
   }[]
 }
 
@@ -72,6 +78,10 @@ export async function prepareObjectQueries(input: {
       })
       .filter((property) => property.filterable || property.sortable || property.text),
     indexes: type.query?.indexes ?? [],
+    links: type.links.map((link) => ({
+      linkId: link.id,
+      targetObjectTypeIds: linkTargetObjectTypeIds(link.targetObjectTypeId, input.ontology),
+    })),
   }))
   return input.storage.prepareObjectQueries({ projectId: input.projectId, objectTypes })
 }

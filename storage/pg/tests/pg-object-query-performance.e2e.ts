@@ -70,6 +70,19 @@ async function explain(query: ObjectQuery) {
   return rows[0]?.["QUERY PLAN"][0]
 }
 
+function endpointRowsVisited(plan: {
+  Alias?: string
+  "Actual Rows"?: number
+  "Rows Removed by Filter"?: number
+  Plans?: Parameters<typeof endpointRowsVisited>[0][]
+}): number {
+  const own =
+    plan.Alias === "selected"
+      ? (plan["Actual Rows"] ?? 0) + (plan["Rows Removed by Filter"] ?? 0)
+      : 0
+  return own + (plan.Plans ?? []).reduce((sum, child) => sum + endpointRowsVisited(child), 0)
+}
+
 function visitedRows(plan: {
   "Actual Rows"?: number
   "Actual Loops"?: number
@@ -173,6 +186,32 @@ test("a high-fanout traversal pages through indexed endpoints and preserves tota
   expect(JSON.stringify(totalPlan)).toContain("Index Only Scan")
   // Removing incoming aggregate batching removes the grouped primary-key lookup on PG17.
   expect(groupedLookupLoops(totalPlan[0]?.["QUERY PLAN"][0].Plan)).toBeLessThan(100)
+})
+
+// Guard removal: drop compileEndpointTypes from compileTraversalRelation. The correlated plan then
+// probes all 5,080 objects for an endpoint instead of the 80 of the link's target type.
+test("a correlated traversal scans only the object types its link can reach", async () => {
+  const query: ObjectQuery = {
+    kind: "limit",
+    limit: 10,
+    input: {
+      kind: "traverse",
+      input: start,
+      linkId: "group",
+      direction: "outgoing",
+      endpointObjectTypeIds: ["Small"],
+    },
+  }
+  const compiled = compilePgObjectQuery("bench", query, {
+    includeTotal: false,
+    correlatedTraversal: true,
+  })
+  const rows = await sql.unsafe(
+    `EXPLAIN (ANALYZE, FORMAT JSON) ${compiled.sql}`,
+    compiled.args as SqlParameter[]
+  )
+
+  expect(endpointRowsVisited(rows[0]?.["QUERY PLAN"][0].Plan)).toBeLessThanOrEqual(80)
 })
 
 // Guard removal: restore compileTextPredicate's position() expression. This plan loses
