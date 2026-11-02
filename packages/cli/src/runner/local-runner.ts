@@ -32,11 +32,27 @@ export function deniedPaths(): readonly string[] {
   return [dirname(resolveConfigPath()), join(homedir(), ".ssh"), join(homedir(), ".aws")]
 }
 
+/** The project refused a session's renewal, as opposed to being out of reach. */
+export class SessionRefusedError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message)
+    this.name = "SessionRefusedError"
+  }
+}
+
+export interface LocalRunnerOptions {
+  /** The session stopped renewing, or started again. Called when that changes, not each time. */
+  readonly onSessionChange?: (failure: unknown | null) => void
+}
+
 /**
- * This computer as a runner: it claims its owner's turns from the project and runs them in the
- * folder `sixb` was opened in, one at a time per turn, each until it ends or is stopped. While its
- * session is open, the project knows `sixb` is open here, and the turns sent from elsewhere to the
- * conversations of this folder run here too.
+ * This computer as a runner: it claims its owner's turns from the project and runs them in one
+ * folder, each until it ends or is stopped. While its session is open, the project knows `sixb` is
+ * open here, and the turns sent from elsewhere to the conversations of this folder run here too, one
+ * at a time: nobody may be watching, and two turns would edit the same files.
  */
 export class LocalRunner {
   private readonly runner: ComputerRunner
@@ -44,13 +60,16 @@ export class LocalRunner {
     string,
     { readonly stop: AbortController; readonly done: Promise<boolean> }
   >()
-  private readonly elsewhereListeners = new Set<(run: ConversationAgentRunRecord) => void>()
+  private readonly elsewhereListeners = new Set<
+    (run: ConversationAgentRunRecord, ended: Promise<boolean>) => void
+  >()
   private readonly backgroundListeners = new Set<() => void>()
   private session: {
     readonly id: string
     readonly timer: ReturnType<typeof setInterval>
     readonly renew: () => void
   } | null = null
+  private sessionFailing = false
   /** The session's last call: its release follows a renewal, which would open it again. */
   private lastCall: Promise<void> = Promise.resolve()
 
@@ -58,7 +77,8 @@ export class LocalRunner {
     private readonly connection: Connection,
     /** The folder `sixb` was opened in: its real path, as the project keeps it. */
     readonly folder: string,
-    private readonly onFailure: (error: unknown) => void
+    private readonly onFailure: (error: unknown) => void,
+    private readonly options: LocalRunnerOptions = {}
   ) {
     this.runner = new ComputerRunner({
       apiUrl: connection.apiUrl,
@@ -87,7 +107,9 @@ export class LocalRunner {
   }
 
   /** Hear each turn sent from elsewhere as it starts to run here. Returns the unsubscribe. */
-  onElsewhere(listener: (run: ConversationAgentRunRecord) => void): () => void {
+  onElsewhere(
+    listener: (run: ConversationAgentRunRecord, ended: Promise<boolean>) => void
+  ): () => void {
     this.elsewhereListeners.add(listener)
     return () => this.elsewhereListeners.delete(listener)
   }
@@ -112,6 +134,11 @@ export class LocalRunner {
         return false
       })
       .finally(() => this.running.delete(runId))
+    // What waited for this turn runs now, not at the next renewal. Only after one that ran: one that
+    // couldn't be claimed may be listed again, and asking at once would ask forever.
+    void done.then((ran) => {
+      if (ran) this.session?.renew()
+    })
     this.running.set(runId, { stop, done })
     return done
   }
@@ -126,7 +153,7 @@ export class LocalRunner {
     const hold = async () => {
       // Read as it is sent, so a renewal that waited its turn reports the commands as they are.
       const backgroundCommands = this.runner.backgroundCommands()
-      const { data, error } = await holdAgentComputerSession({
+      const { data, error, response } = await holdAgentComputerSession({
         client: this.connection.client,
         path: { sessionId: id },
         body: {
@@ -134,7 +161,8 @@ export class LocalRunner {
           ...(backgroundCommands.length > 0 ? { backgroundCommands: [...backgroundCommands] } : {}),
         },
       })
-      if (error) throw error
+      if (error) throw new SessionRefusedError(response?.status ?? 0, refusalText(error))
+      this.noteSession(null)
       // Closed meanwhile, with the setting or by quitting: what waits keeps waiting.
       if (this.session?.id !== id) return
       for (const runId of data?.waiting ?? []) void this.claimElsewhere(runId)
@@ -153,7 +181,7 @@ export class LocalRunner {
           queued = false
           return hold()
         })
-        .catch((error: unknown) => console.error("[SixbCLI] Session renewal failed.", error))
+        .catch((error: unknown) => this.noteSession(error))
     }
     this.session = { id, timer: setInterval(renew, SESSION_RENEW_MS), renew }
     renew()
@@ -197,6 +225,7 @@ export class LocalRunner {
     const session = this.session
     if (session) {
       this.session = null
+      this.sessionFailing = false
       clearInterval(session.timer)
       // Whoever closes it next waits for this one, as quitting does after the screen let go.
       this.lastCall = this.lastCall
@@ -224,10 +253,16 @@ export class LocalRunner {
     if (!this.session || (runId && this.running.has(runId))) return
     const { client } = this.connection
     const { data: thread } = await getAgentThread({ client, path: { threadId } })
-    if (!thread || !this.runsHere(thread, await thisComputerId())) return
+    if (thread) await this.offer(thread, runId)
+  }
+
+  /** As `claimIfHere`, for a caller that has read the thread already. */
+  async offer(thread: GetAgentThreadResponses[200], runId?: string): Promise<void> {
+    if (!this.session || !this.runsHere(thread, await thisComputerId())) return
 
     const turn = runId ?? thread.activeRunId
     if (!turn) return
+    const { client } = this.connection
     const { data: run } = await getAgentRun({ client, path: { runId: turn } })
     if (run?.status === "queued" && this.session) void this.claimElsewhere(turn)
   }
@@ -269,12 +304,26 @@ export class LocalRunner {
     await this.runner.drain()
   }
 
-  /** A turn this computer already runs joins that run, and is no news. */
+  /** Left waiting while a turn runs here: it runs once that one ends, or at a later renewal. */
   private claimElsewhere(runId: string): Promise<boolean> {
+    if (this.running.size > 0) return Promise.resolve(false)
     return this.claim(runId, (run) => {
-      for (const listener of this.elsewhereListeners) listener(run)
+      const ended = this.running.get(run.id)?.done ?? Promise.resolve(false)
+      for (const listener of this.elsewhereListeners) listener(run, ended)
     })
   }
+
+  private noteSession(failure: unknown | null): void {
+    if ((failure !== null) === this.sessionFailing) return
+    this.sessionFailing = failure !== null
+    if (this.options.onSessionChange) this.options.onSessionChange(failure)
+    else if (failure !== null) this.onFailure(failure)
+  }
+}
+
+function refusalText(error: unknown): string {
+  const message = (error as { readonly error?: unknown } | null)?.error
+  return typeof message === "string" ? message : "[SixbCLI] The project refused this session."
 }
 
 /** Whether the person signed in owns `thread`: with sign-in off, the system owns what it starts. */

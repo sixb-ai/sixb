@@ -58,6 +58,27 @@ the web** in `ctrl+p` to choose this one, and off again to forget it. Until then
 you can move the conversation to the cloud. Once a folder is chosen, whoever is signed in as you can
 send it messages, and the agent's commands run there without asking.
 
+To keep a computer available without `sixb` open, such as a machine that stays on, run:
+
+```bash
+sixb connect ~/projects/notes
+```
+
+It asks once before allowing each folder, runs turns sent to conversations in your allowed folders,
+one at a time per folder, and stops on `ctrl+c`, ending a running turn as interrupted. Whatever keeps
+it running decides how long it stays connected. With no folder it uses the ones you've allowed;
+`--yes` allows those named without asking, and `--json` prints status as JSON lines:
+
+```json
+{"type":"folders","folders":["/Users/you/projects/notes"]}
+{"type":"turn.started","folder":"/Users/you/projects/notes","threadId":"…","runId":"…"}
+{"type":"turn.ended","folder":"/Users/you/projects/notes","threadId":"…","runId":"…","ran":true}
+{"type":"session.lost","folder":"/Users/you/projects/notes","message":"…"}
+{"type":"session.back","folder":"/Users/you/projects/notes"}
+```
+
+If your sign-in ends it exits with code `3`.
+
 From a script, `sixb agent` asks once and prints the answer:
 
 ```bash

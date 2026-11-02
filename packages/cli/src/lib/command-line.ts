@@ -119,6 +119,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "What this turn may do without asking (default: your mode in the conversation)",
     kind: "string",
   },
+  yes: {
+    syntax: "--yes",
+    summary: "Allow the folders named without asking",
+    kind: "boolean",
+  },
   outdir: { syntax: "--outdir <path>", summary: "Build output directory", kind: "string" },
   ref: {
     syntax: "--ref <ref>",
@@ -191,6 +196,7 @@ export const CLI_OPTION_DEFINITIONS = {
 export type CliOptionName = keyof typeof CLI_OPTION_DEFINITIONS
 export type LocalCommandId =
   | "agent"
+  | "connect"
   | "dev"
   | "api"
   | "app"
@@ -359,6 +365,12 @@ const commandTree: readonly CommandNode[] = [
     // The message, quoted or not; standard input when there is none.
     maximumPositionals: Number.POSITIVE_INFINITY,
     rootHelpLabel: 'agent "<message>"',
+  }),
+  command("connect", "Run messages from the web in folders on this computer", {
+    usage: "sixb connect [folder...] [--yes] [--json]",
+    options: ["api-url", "profile", "yes", "json"],
+    maximumPositionals: Number.POSITIVE_INFINITY,
+    rootHelpLabel: "connect [folder...]",
   }),
   {
     name: "profile",
@@ -720,7 +732,7 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
   /** Listed by name only: each has its own help. */
   readonly compact?: boolean
 }[] = [
-  { title: "Agent", names: ["agent"] },
+  { title: "Agent", names: ["agent", "connect"] },
   { title: "Develop", names: ["init", "dev", "env", "check", "typegen", "build"] },
   { title: "Deploy", names: ["deploy", "desktop"] },
   {
@@ -813,6 +825,7 @@ export function wantsManagementJson(args: readonly string[]): boolean {
       "service-account",
       "deploy",
       "agent",
+      "connect",
     ].includes(args[0] ?? "") &&
     args.some((argument) => argument === "--json" || argument.startsWith("--json="))
   )
