@@ -182,16 +182,21 @@ async function runnerUntilHeld(
   signal: AbortSignal
 ): Promise<"unclaimed" | "offline" | null> {
   const { client } = connection
-  const isQueued = async () => {
-    const { data: run } = await getAgentRun({ client, path: { runId } })
-    return !run || run.status === "queued"
-  }
+  const statusOf = async () => (await getAgentRun({ client, path: { runId } })).data?.status
   while (!signal.aborted) {
-    const { data: thread } = await getAgentThread({ client, path: { threadId } })
-    if (!(await isQueued()) || signal.aborted) return null
-    if (!thread?.computer?.online) {
-      if (!runner) return "offline"
-      return (await runner.claim(runId)) || !(await isQueued()) ? null : "unclaimed"
+    const [{ data: thread }, status] = await Promise.all([
+      getAgentThread({ client, path: { threadId } }),
+      statusOf(),
+    ])
+    if (signal.aborted) return null
+    // A read that failed says nothing about who holds the folder: only a later one can.
+    if (thread && status) {
+      if (status !== "queued") return null
+      if (!thread.computer?.online) {
+        if (!runner) return "offline"
+        if (await runner.claim(runId)) return null
+        return (await statusOf()) === "queued" ? "unclaimed" : null
+      }
     }
     await Bun.sleep(HOLDER_CHECK_MS)
   }

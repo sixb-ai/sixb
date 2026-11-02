@@ -1,8 +1,8 @@
 import { stat } from "node:fs/promises"
-import { createAgentActivitySocket, getAgentThread } from "@sixb/client"
+import { createAgentActivitySocket, getAgentThread, isSixbApiError } from "@sixb/client"
 import type { Connection } from "../lib/connection"
 import { readAllowedFolders, watchAllowedFolders } from "./allowed-folders"
-import { LocalRunner, SessionRefusedError } from "./local-runner"
+import { LocalRunner } from "./local-runner"
 
 /** How often the allowed folders are checked for being there still. */
 const FOLDER_RECHECK_MS = 20_000
@@ -76,7 +76,7 @@ export class ComputerConnection {
     this.socket?.close()
     this.unwatch?.()
     if (this.recheck) clearInterval(this.recheck)
-    await this.reconciled
+    // Not after `reconciled`: a stalled call there mustn't keep a turn from hearing its stop.
     await Promise.allSettled([...this.runners.values()].map((runner) => runner.stop()))
   }
 
@@ -89,13 +89,13 @@ export class ComputerConnection {
   private async applyAllowedFolders(): Promise<void> {
     if (this.stopped) return
     const folders = await this.existing(await this.readAllowed())
+    if (this.stopped) return
 
     for (const folder of folders) this.runnerFor(folder).openSession()
-    await Promise.all(
-      [...this.runners]
-        .filter(([folder]) => !folders.includes(folder))
-        .map(([, runner]) => runner.closeSession())
-    )
+    for (const [folder, runner] of this.runners) {
+      // Not awaited: a stalled call there mustn't keep the next change from being applied.
+      if (!folders.includes(folder)) void runner.closeSession()
+    }
 
     if (folders.join("\n") !== this.shown?.join("\n")) {
       this.shown = folders
@@ -149,7 +149,7 @@ export class ComputerConnection {
   private onSessionChange(folder: string, failure: unknown | null): void {
     if (failure === null) {
       this.onEvent({ type: "session.back", folder })
-    } else if (failure instanceof SessionRefusedError && failure.status === 401) {
+    } else if (isSixbApiError(failure) && failure.status === 401) {
       this.onEvent({ type: "signed-out" })
     } else {
       this.onEvent({ type: "session.lost", folder, message: messageOf(failure) })

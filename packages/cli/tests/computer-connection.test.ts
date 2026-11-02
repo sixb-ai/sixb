@@ -173,8 +173,27 @@ describe("a connected computer", () => {
     await computer.stop()
   })
 
-  // Guard proof: drop `noteSession`'s transition check; every failed renewal reports again, every
-  // twenty seconds, for as long as the network is out.
+  // Guard proof: call onSessionChange only when failing starts, in noteSession; a sign-in that ends
+  // during an outage is never told apart from it, and this keeps retrying for good.
+  test("says its sign-in ended when that follows a network failure", async () => {
+    const a = await folder("a")
+    await setFoldersAllowed([a], true)
+    let status = 503
+
+    jest.useFakeTimers()
+    const { computer, until } = connected(() => status)
+    await computer.start()
+    await until((event) => event.type === "session.lost")
+
+    status = 401
+    jest.advanceTimersByTime(20_000)
+    await until((event) => event.type === "signed-out")
+    jest.useRealTimers()
+    await computer.stop()
+  })
+
+  // Guard proof: report in noteSession whatever the last reason was; every failed renewal reports
+  // again, every twenty seconds, for as long as the network is out.
   test("says once that a session was lost", async () => {
     const a = await folder("a")
     await setFoldersAllowed([a], true)

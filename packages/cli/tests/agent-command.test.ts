@@ -288,13 +288,40 @@ describe("sixb agent", () => {
     let reads = 0
     const { env } = await fakeApi({
       queued: true,
-      thread: () =>
-        computerThread({ id: "cmp_other", folder: "/work/q3", online: (reads += 1) <= 2 }),
+      thread: () => {
+        reads += 1
+        return computerThread({ id: "cmp_other", folder: "/work/q3", online: reads <= 2 })
+      },
     })
     const result = await sendTo(env, "--json")
 
     expect(result.exitCode).toBe(5)
     expect(JSON.parse(result.stdout)).toMatchObject({ status: "queued" })
+  })
+
+  // Guard proof: read a failed thread read as offline in runnerUntilHeld; one 502 while a connected
+  // sixb runs another turn starts a second turn beside it, or exits 5 with the computer online.
+  test("takes a failed read as knowing nothing about who holds the folder", async () => {
+    let reads = 0
+    let turn: { send(data: string): void } | undefined
+    const { env, claims } = await fakeApi({
+      queued: true,
+      stream: (socket) => {
+        turn = socket
+      },
+      thread: () => {
+        reads += 1
+        if (reads === 2) return Response.json({ error: "[Test] Bad gateway." }, { status: 502 })
+        if (reads === 3) turn?.send(snapshot("succeeded"))
+        return computerThread({ id: "cmp_here", folder: REPOSITORY, online: true })
+      },
+    })
+    await mkdir(join(env.XDG_CONFIG_HOME, "sixb"), { recursive: true })
+    await writeFile(join(env.XDG_CONFIG_HOME, "sixb", "computer.json"), '{"id":"cmp_here"}')
+    const result = await sendTo(env)
+
+    expect(result.exitCode).toBe(0)
+    expect(claims).toEqual([])
   })
 
   describe("in the conversation's own folder", () => {
@@ -311,9 +338,19 @@ describe("sixb agent", () => {
     // Guard proof: claim once a moment has passed, as a timer in place of runnerUntilHeld would; a
     // connected sixb busy with another turn would get a second one running beside it in the folder.
     test("leaves the turn to what holds the folder, however long it waits", async () => {
+      let reads = 0
+      let turn: { send(data: string): void } | undefined
       const { env, claims } = await here(true, {
         queued: true,
-        stream: (socket) => setTimeout(() => socket.send(snapshot("succeeded")), 1_500),
+        stream: (socket) => {
+          turn = socket
+        },
+        thread: () => {
+          // Ends once it has looked more than once, and been left to the holder each time.
+          reads += 1
+          if (reads === 3) turn?.send(snapshot("succeeded"))
+          return computerThread({ id: "cmp_here", folder: REPOSITORY, online: true })
+        },
       })
       const result = await sendTo(env)
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { watch } from "node:fs"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
@@ -38,7 +39,7 @@ export async function setFoldersAllowed(
 ): Promise<void> {
   const others = (await readAllowedFolders()).filter((folder) => !changed.includes(folder))
   const path = ALLOWED_FOLDERS_FILE()
-  const written = `${path}.${process.pid}`
+  const written = `${path}.${randomUUID()}`
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   await writeFile(
     written,

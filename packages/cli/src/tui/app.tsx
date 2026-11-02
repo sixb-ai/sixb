@@ -423,8 +423,8 @@ export function Workspace(props: WorkspaceProps) {
                   runner.keepsAwake = keepAwake
                   say(
                     keepAwake
-                      ? "This computer stays awake while a turn runs here"
-                      : "This computer may sleep while a turn runs here, which stops the turn"
+                      ? "From the next turn, this computer stays awake while one runs here"
+                      : "From the next turn, this computer may sleep while one runs here"
                   )
                   return { ...current, keepAwake }
                 }),
