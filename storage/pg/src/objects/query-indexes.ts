@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import type { ObjectQuery, QueryScalarKind } from "@sixb/core"
+import { linkEndpointObjectTypeIds } from "@sixb/core/internal/query"
 import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
 import { isConnectionLost } from "../storage-errors"
 import { withReservedPgConnection } from "../transactions"
@@ -367,8 +368,9 @@ export async function findPgSortIndexBound(
   let objectTypeId: string | undefined
   if (input.kind === "start" && !input.includeSubtypes) {
     objectTypeId = input.objectTypeId
-  } else if (input.kind === "traverse" && input.direction === "incoming") {
-    objectTypeId = input.sourceObjectTypeId
+  } else if (input.kind === "traverse") {
+    const endpoints = linkEndpointObjectTypeIds(input)
+    objectTypeId = endpoints?.length === 1 ? endpoints[0] : undefined
   }
 
   if (!objectTypeId || !fields?.length || fields.some((field) => field.kind !== "property"))

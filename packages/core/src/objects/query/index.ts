@@ -62,6 +62,7 @@ export type {
   ObjectQueryVector,
   QueryScalarKind,
 } from "./ir"
+export { linkEndpointObjectTypeIds } from "./link-endpoints"
 export type {
   ExecuteObjectQueryLinksInput,
   ExecuteObjectQueryLinksResult,

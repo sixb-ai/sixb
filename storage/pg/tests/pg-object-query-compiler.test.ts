@@ -281,3 +281,48 @@ test("expand SQL nests a child expansion correlated on the parent neighbour", ()
   expect(compiled.sql).toContain("edge_0_0.source_id = tgt_0.primary_id")
   expect(compiled.sql).toContain("jsonb_agg(ranked_0_0.elem")
 })
+
+test("a traversal looks only at the object types its link can reach", () => {
+  const traversal = (endpointObjectTypeIds?: readonly string[]): ObjectQuery => ({
+    kind: "traverse",
+    input: { kind: "start", objectTypeId: "Quote" },
+    linkId: "organization",
+    direction: "outgoing",
+    ...(endpointObjectTypeIds ? { endpointObjectTypeIds } : {}),
+  })
+
+  const one = compilePgObjectQuery("project-a", traversal(["Organization"]))
+  expect(one.sql).toContain("AND selected.object_type_id = $2")
+  expect(one.args.slice(0, 2)).toEqual(["project-a", "Organization"])
+
+  const two = compilePgObjectQuery("project-a", traversal(["Organization", "Vendor"]))
+  expect(two.sql).toContain("AND selected.object_type_id IN ($2, $3)")
+  expect(two.args.slice(0, 3)).toEqual(["project-a", "Organization", "Vendor"])
+
+  // A wildcard link names no types, so every type stays in scope.
+  const wildcard = compilePgObjectQuery("project-a", traversal())
+  expect(wildcard.sql).not.toContain("selected.object_type_id = $2")
+  expect(wildcard.sql).not.toContain("selected.object_type_id IN")
+})
+
+test("an expansion joins only the object types its link can reach", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Quote" } },
+    expansions: [
+      {
+        linkId: "organization",
+        direction: "outgoing",
+        cardinality: "one",
+        limit: 1000,
+        endpointObjectTypeIds: ["Organization"],
+      },
+    ],
+  })
+
+  expect(compiled.sql).toMatch(/AND tgt_0\.object_type_id = \$\d+\s+WHERE edge_0\.project_id/)
+  // The type sits in the join, ahead of the link id: placeholder order must follow the SQL.
+  const typeAt = compiled.args.indexOf("Organization")
+  expect(typeAt).toBeGreaterThan(-1)
+  expect(compiled.args[typeAt + 1]).toBe("organization")
+})

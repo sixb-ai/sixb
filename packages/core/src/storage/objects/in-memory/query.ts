@@ -1,4 +1,5 @@
 import type { ObjectQuery, ObjectQuerySortField } from "../../../objects/query"
+import { linkEndpointObjectTypeIds } from "../../../objects/query/link-endpoints"
 import { matchesPredicate } from "../../../objects/query/matches-predicate"
 import { compareQueryScalarValues } from "../../../objects/query/scalar-values"
 import { vectorSources } from "../../../objects/vectors/profile"
@@ -169,7 +170,10 @@ export function evaluateObjectQuery(
         query.direction === "outgoing"
           ? traverseOutgoing(input.entries, query.linkId, source)
           : traverseIncoming(input.entries, query.linkId, query.sourceObjectTypeId, source)
-      return completeEvaluation(entries)
+      const endpoints = linkEndpointObjectTypeIds(query)
+      return completeEvaluation(
+        endpoints ? entries.filter((entry) => endpoints.includes(entry.row.objectTypeId)) : entries
+      )
     }
     case "set":
       return evaluateSet(query.op, query.inputs, source)
