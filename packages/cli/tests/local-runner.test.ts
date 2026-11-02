@@ -352,6 +352,42 @@ describe("a turn sent from elsewhere", () => {
   })
 })
 
+describe("turns sent from elsewhere", () => {
+  // Guard proof: drop the running check from claimElsewhere; two turns edit the same files at once,
+  // with nobody watching. Drop the renewal after a turn from claim; the next one waits up to twenty
+  // seconds for no reason. Renew after a turn that didn't run as well; this test never ends, and a
+  // refused claim hammers the project.
+  test("run one at a time, the next as soon as the first ends", async () => {
+    const { runner, sessions } = await avasRunner({ status: "queued" })
+    runner.claim = LocalRunner.prototype.claim
+    const started: string[] = []
+    let finishFirst = () => {}
+    const inner = runner as unknown as {
+      runner: { runTurn(id: string): Promise<boolean> }
+    }
+    inner.runner.runTurn = (id) => {
+      started.push(id)
+      // Listed again, and refused: renewing after this one would ask forever.
+      if (started.length > 1) return Promise.resolve(false)
+      return new Promise((resolve) => {
+        finishFirst = () => resolve(true)
+      })
+    }
+
+    runner.openSession()
+    while (started.length === 0) await Bun.sleep(0)
+    await runner.claimIfHere("thr_1", "run_1")
+    expect(started).toEqual(["run_9"])
+
+    const renewals = sessions.filter((session) => session.method === "PUT").length
+    finishFirst()
+    while (sessions.filter((session) => session.method === "PUT").length === renewals) {
+      await Bun.sleep(0)
+    }
+    await runner.closeSession()
+  })
+})
+
 describe("a closed terminal", () => {
   // Guard proof: drop the SIGHUP handler from stopOnHangUp; nothing stops the turn, which keeps
   // renewing its lease from a process nobody sees.

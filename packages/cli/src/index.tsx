@@ -232,6 +232,18 @@ async function main(): Promise<void> {
       break
     }
 
+    case "connect": {
+      const { runConnect } = await import("./commands/connect")
+      await runConnect({
+        folders: positionals,
+        yes: hasFlag("yes"),
+        json: hasFlag("json"),
+        apiUrl: getFlag("api-url"),
+        profile: getFlag("profile"),
+      })
+      break
+    }
+
     case "status": {
       const { runStatus } = await import("./commands/status")
       await runStatus({
