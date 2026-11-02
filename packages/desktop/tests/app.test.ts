@@ -2,8 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { SixbDesktop } from "@sixb/client/hooks"
 import { renderShellPage, writeDesktopApp } from "../src/generate"
 import { bundleIdentifier, readAppIdentity } from "../src/identity"
+import { desktopBridge } from "../src/shell/bridge"
+import { pageWebPreferences } from "../src/shell/window"
 
 const cleanup: (() => Promise<unknown> | undefined)[] = []
 
@@ -21,6 +24,38 @@ const PIXEL_PNG = Buffer.from(
 /** A PNG's width, from its header. */
 function pngWidth(png: Uint8Array): number {
   return new DataView(png.buffer, png.byteOffset).getUint32(16)
+}
+
+/**
+ * Runs a compiled preload as Electron's sandbox does, where `require` knows `electron` alone, over
+ * a page with its `<html>` and body ready.
+ */
+function runPreload(code: string, platform: NodeJS.Platform) {
+  const exposed: Record<string, unknown> = {}
+  const root = {
+    dataset: {} as Record<string, string | undefined>,
+    style: { setProperty: () => {} },
+  }
+  let dragHandles = 0
+  const document = {
+    documentElement: root,
+    readyState: "complete",
+    body: { prepend: () => dragHandles++ },
+    getElementById: () => null,
+    createElement: () => ({ setAttribute: () => {} }),
+  }
+  const require = (name: string) => {
+    if (name !== "electron") throw new Error(`module not found: ${name}`)
+    return {
+      contextBridge: {
+        exposeInMainWorld: (key: string, value: unknown) => {
+          exposed[key] = value
+        },
+      },
+    }
+  }
+  new Function("require", "process", "document", code)(require, { platform }, document)
+  return { exposed, mark: root.dataset.sixbDesktop, dragHandles }
 }
 
 /** Serves a web app manifest and its icons, the way `sixb dev` and a deployed app do. */
@@ -132,6 +167,45 @@ describe("generated desktop app", () => {
     expect(page).not.toContain("{{")
     expect(await Bun.file(join(app.dir, "main.js")).exists()).toBe(true)
     expect(await Bun.file(join(app.dir, "preload.js")).exists()).toBe(true)
+  })
+
+  // Guard proof: expose nothing from src/shell/preload.ts; useDesktop answers null. Use anything but
+  // electron in the preload, such as node:path; Electron's sandbox refuses it, and the window has no
+  // preload at all.
+  // Append the drag handle instead of prepending it; it comes after the page's controls in document
+  // order and re-covers the gaps cut for them, so buttons under it stop taking clicks.
+  test.each([
+    ["darwin", "inset"],
+    ["linux", undefined],
+    ["win32", undefined],
+  ] as const)("offers the page its platform on %s, running under the sandbox's rules", async (platform, mark) => {
+    const projectRoot = await createProject({ name: "orders", version: "1.0.0" })
+    const appUrl = serveApp({ name: "Orders", icons: [] })
+    const app = await writeDesktopApp({ projectRoot, appUrl, apiOrigin: appUrl })
+
+    const page = runPreload(await readFile(join(app.dir, "preload.js"), "utf-8"), platform)
+
+    expect(page.exposed).toEqual({ sixbDesktop: { platform } })
+    expect(page.mark).toBe(mark)
+    expect(page.dragHandles).toBe(mark ? 1 : 0)
+  })
+
+  // Guard proof: turn any of these off in pageWebPreferences; a remote page reaches Node, or the
+  // preload's world.
+  test("keeps the page sandboxed, with the preload its only way to the shell", () => {
+    expect(pageWebPreferences("/app/preload.js")).toEqual({
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: "/app/preload.js",
+    })
+  })
+
+  // Guard proof: return a different shape from desktopBridge; `bun run typecheck` fails here, where
+  // the shell's bridge and the page's view of it meet.
+  test("offers what the hook expects", () => {
+    const bridge: SixbDesktop = desktopBridge("darwin")
+    expect(bridge).toEqual({ platform: "darwin" })
   })
 
   test("clears what an earlier run left behind", async () => {
