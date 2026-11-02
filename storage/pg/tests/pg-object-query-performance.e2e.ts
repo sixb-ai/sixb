@@ -307,3 +307,10 @@ test("index definitions safely quote identifiers and reject invalid inputs befor
     storage.transaction(async () => storage.ensureObjectQueryIndexes([]))
   ).rejects.toThrow()
 })
+
+// The plan this prevents needs far more rows than a test seeds: on a production copy, a home page
+// query went from 71 ms to 3,298 ms, reading 1.15M rows through an ascending index for its null rank.
+test("connections leave incremental sort off", async () => {
+  const [row] = await sql<{ enable_incremental_sort: string }[]>`SHOW enable_incremental_sort`
+  expect(row?.enable_incremental_sort).toBe("off")
+})
