@@ -151,7 +151,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       }
       return session.publicSession()
     } catch (error) {
-      await this.sessions.release(session)
+      this.sessions.discard(session)
       throw error
     }
   }

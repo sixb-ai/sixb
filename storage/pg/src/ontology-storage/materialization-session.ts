@@ -106,6 +106,15 @@ export class PgMaterializationSessions {
     if (!session.active) return
     // A plan's rows outlive the session: maintenance deletes them once the candidate moved on.
     if (!session.plan) await this.deleteWork(session.id)
+    this.discard(session)
+  }
+
+  /**
+   * Ends a session without sending SQL, for a session that failed before staging any work. The
+   * failure may be a statement PostgreSQL already aborted the transaction for: anything sent after
+   * it fails with 25P02 and replaces the original error, a retryable 40001 included.
+   */
+  discard(session: PgMaterializationSessionState): void {
     session.active = false
     this.live.delete(session)
     this.context?.materializations.complete(session.providerToken)
