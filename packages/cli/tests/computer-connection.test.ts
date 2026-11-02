@@ -5,7 +5,6 @@ import { join } from "node:path"
 import { createSixbClient } from "@sixb/client"
 import type { Connection } from "../src/lib/connection"
 import { setFoldersAllowed } from "../src/runner/allowed-folders"
-import { thisComputerId } from "../src/runner/computer"
 import { ComputerConnection, type ComputerEvent } from "../src/runner/computer-connection"
 
 // A computer connected to a project, against an API that answers sessions: which folders it holds
@@ -144,8 +143,9 @@ describe("a connected computer", () => {
   test("closes the session of a folder that goes away while connected", async () => {
     const a = await folder("a")
     await setFoldersAllowed([a], true)
-    // The filesystem's report of that write can arrive late, and would read the folders again too:
-    // this test would pass without the recheck. Timers are real until here; faked, this never ends.
+    // macOS can report that write late, and more than once: a report after the folder goes would read
+    // the folders again, and the guard proof above would pass. This test passes either way. Real
+    // time because there's no event to wait for, and before the fake timers, which would stop it.
     await Bun.sleep(300)
 
     jest.useFakeTimers()
@@ -197,15 +197,40 @@ describe("a connected computer", () => {
   test("says once that a session was lost", async () => {
     const a = await folder("a")
     await setFoldersAllowed([a], true)
-    let status = 503
+    let renewals = 0
+    let reachedSecond = () => {}
+    const second = new Promise<void>((resolve) => {
+      reachedSecond = resolve
+    })
 
-    const { computer, events, until } = connected(() => status)
+    jest.useFakeTimers()
+    // The third is refused differently, and says so: what the second said has landed by then.
+    const { computer, events, until } = connected(() => {
+      renewals += 1
+      if (renewals === 2) reachedSecond()
+      return renewals === 3 ? 401 : 503
+    })
     await computer.start()
     await until((event) => event.type === "session.lost")
+
+    jest.advanceTimersByTime(20_000)
+    await second
+    // Timers are faked, and a message still yields: the second's answer lands before the third asks.
+    for (let turn = 0; turn < 5; turn += 1) {
+      await new Promise<void>((resolve) => {
+        const channel = new MessageChannel()
+        channel.port1.onmessage = () => {
+          channel.port1.close()
+          resolve()
+        }
+        channel.port2.postMessage(null)
+      })
+    }
+    jest.advanceTimersByTime(20_000)
+    await until((event) => event.type === "signed-out")
     expect(events.filter((event) => event.type === "session.lost")).toHaveLength(1)
 
-    status = 200
+    jest.useRealTimers()
     await computer.stop()
-    expect(await thisComputerId()).toStartWith("cmp_")
   })
 })
