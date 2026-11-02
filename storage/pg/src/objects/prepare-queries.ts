@@ -2,7 +2,9 @@ import { createHash } from "node:crypto"
 import type { ObjectQueryIndexDefinition } from "@sixb/core"
 import type { ObjectQueryPreparationPlan, ObjectQueryPreparationResult } from "@sixb/core/storage"
 import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
+import { isConnectionLost } from "../storage-errors"
 import { undoOnFailure, withReservedPgConnection } from "../transactions"
+import { ensureObjectPartition } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
 import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./query-indexes"
 import { type PgObjectTextCountIndex, preparePgObjectTextCounts } from "./text-count-index"
@@ -43,7 +45,10 @@ export async function preparePgObjectQueries(
     }, unlock)
     await unlock()
 
-    return result
+    // Advice, so it runs after the lock: other instances starting up need not wait for this scan.
+    return result.status === "current"
+      ? result
+      : { ...result, warnings: [...result.warnings, ...(await linkWarnings(connection, plan))] }
   })
 }
 
@@ -55,11 +60,12 @@ function preparationFingerprint(plan: ObjectQueryPreparationPlan): string {
       indexes: type.indexes
         .map(normalizeIndex)
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+      links: [...type.links].sort((a, b) => a.linkId.localeCompare(b.linkId)),
     }))
     .sort((a, b) => a.objectTypeId.localeCompare(b.objectTypeId))
 
   // Bump the version when physical generation changes, even if the ontology stays the same.
-  const definition = { version: 2, projectId: plan.projectId, objectTypes }
+  const definition = { version: 3, projectId: plan.projectId, objectTypes }
   return createHash("sha256").update(JSON.stringify(definition)).digest("hex")
 }
 
@@ -106,6 +112,9 @@ async function prepareStructures(
     await ensureTrigrams(sql)
   }
 
+  // Every ontology type gets its partition, whether or not it declares an index.
+  for (const type of plan.objectTypes) await ensureObjectPartition(sql, schema, type.objectTypeId)
+
   const names = await ensurePgObjectQueryIndexes(sql, schema, indexes)
   const texts = await preparePgObjectTextCounts(sql, schema, textCounts)
   return {
@@ -113,6 +122,45 @@ async function prepareStructures(
     objectTypes: plan.objectTypes.length,
     indexes: new Set([...names, ...texts]).size,
     warnings,
+  }
+}
+
+/**
+ * Queries read a link as the ontology declares it, so narrowing or removing one hides its older
+ * edges. Told once, when the ontology changes: not stored with the plan, so it cannot outlive the
+ * edges. This is advice, so failing to work it out does not fail the preparation.
+ */
+async function linkWarnings(
+  sql: ReservedSQL,
+  plan: ObjectQueryPreparationPlan
+): Promise<readonly string[]> {
+  const declared = new Map(
+    plan.objectTypes.flatMap((type) =>
+      type.links.map((link) => [`${type.objectTypeId}\0${link.linkId}`, link] as const)
+    )
+  )
+  try {
+    const edges = await sql<
+      { source_type_id: string; link_id: string; target_type_id: string; edges: string }[]
+    >`
+      SELECT source_type_id, link_id, target_type_id, COUNT(*) AS edges
+      FROM links WHERE project_id = ${plan.projectId}
+      GROUP BY source_type_id, link_id, target_type_id`
+
+    return edges.flatMap((edge) => {
+      const name = `${edge.source_type_id}.${edge.link_id}`
+      const link = declared.get(`${edge.source_type_id}\0${edge.link_id}`)
+      if (!link) {
+        return `${name}: ${edge.edges} stored edges to ${edge.target_type_id} belong to a link the ontology no longer declares. Queries may not return them.`
+      }
+
+      return !link.targetObjectTypeIds || link.targetObjectTypeIds.includes(edge.target_type_id)
+        ? []
+        : `${name}: ${edge.edges} stored edges point to ${edge.target_type_id}, which this link no longer allows. Queries may not return them.`
+    })
+  } catch (error) {
+    if (isConnectionLost(error)) throw error
+    return [`Could not check stored links against the ontology: ${String(error)}`]
   }
 }
 

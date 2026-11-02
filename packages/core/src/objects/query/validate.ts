@@ -32,9 +32,11 @@ import type {
   ObjectQueryResultShape,
   ObjectQuerySetOperation,
   ObjectQuerySortField,
+  ObjectQueryTraverse,
   ObjectQueryVector,
   QueryScalarKind,
 } from "./ir"
+import { linkTargetObjectTypeIds } from "./link-endpoints"
 import { normalizeObjectQuery } from "./normalize"
 import { MAX_RERANK_CANDIDATES } from "./reranking-limits"
 
@@ -60,6 +62,8 @@ export interface ObjectQueryValidationOptions {
   maxPageSize?: number
   maxRefs?: number
   normalize?: boolean
+  /** Name the types each traversal and expansion can reach, for a provider. See `ObjectQueryTraverse`. */
+  resolveLinkEndpoints?: boolean
 }
 
 /** Opaque semantic state carried by the canonical query validator for an internal admission. */
@@ -128,7 +132,10 @@ export interface AdmittedObjectQuery extends ValidatedObjectQuery {
 }
 
 type QueryValidationContext = Required<
-  Pick<ObjectQueryValidationOptions, "maxLimit" | "maxPageSize" | "maxRefs">
+  Pick<
+    ObjectQueryValidationOptions,
+    "maxLimit" | "maxPageSize" | "maxRefs" | "resolveLinkEndpoints"
+  >
 > & {
   ontology: OntologyRegistry
   valueTypesById: ReadonlyMap<string, ValueType>
@@ -307,6 +314,7 @@ function createValidationContext(
     maxLimit: options.maxLimit ?? DEFAULT_MAX_LIMIT,
     maxPageSize: options.maxPageSize ?? DEFAULT_MAX_PAGE_SIZE,
     maxRefs: options.maxRefs ?? DEFAULT_MAX_REFS,
+    resolveLinkEndpoints: options.resolveLinkEndpoints ?? false,
     issues: [],
     touchedObjectTypeIds: new Set<string>(),
     admission,
@@ -428,7 +436,7 @@ function dispatchQueryNode(
       )
       return {
         result,
-        query: { ...query, input: input.query },
+        query: { ...withLinkEndpoints(query, input.result, ctx), input: input.query },
         admissionState: admitTransition(
           ctx,
           ctx.admission.edge({
@@ -1401,7 +1409,69 @@ function validateExpansion(
     : undefined
   validateUserExpansions(expansion.users, targetShape, `${path}.users`, ctx, usersAllowed)
 
-  return { ...expansion, orderBy, expand }
+  return { ...withLinkEndpoints(expansion, shape, ctx), orderBy, expand }
+}
+
+/**
+ * Replaces any value the caller sent: only the ontology says what a link can reach. Whatever a
+ * provider is told to read counts as touched, so a read grant is checked for each of them.
+ */
+function withLinkEndpoints<TLink extends ObjectQueryTraverse | ObjectExpansion>(
+  link: TLink,
+  parents: ObjectQueryResultShape,
+  ctx: QueryValidationContext
+): TLink {
+  if (!ctx.resolveLinkEndpoints) return link
+
+  const { endpointObjectTypeIds: _authored, ...rest } = link
+  const endpoints = resolveLinkEndpoints(link, parents, ctx)
+  if (!endpoints) return rest as TLink
+
+  for (const objectTypeId of endpoints) ctx.touchedObjectTypeIds.add(objectTypeId)
+  return { ...rest, endpointObjectTypeIds: endpoints } as TLink
+}
+
+/**
+ * Every type a link can reach, which authorization then checks: a parent can be any subtype, and a
+ * subtype can override the link. Returns undefined when the ontology cannot name them all, which
+ * leaves a provider scanning every type.
+ */
+function resolveLinkEndpoints(
+  link: Pick<ObjectExpansion, "linkId" | "direction" | "sourceObjectTypeId">,
+  parents: ObjectQueryResultShape,
+  ctx: QueryValidationContext
+): readonly string[] | undefined {
+  const parentIds = withSubtypes(parents.objectTypeIds, ctx)
+  if (parentIds.length === 0) return undefined
+
+  if (link.direction === "incoming") {
+    if (link.sourceObjectTypeId !== undefined) return [link.sourceObjectTypeId]
+
+    const sources = ctx.ontology
+      .listObjectTypes()
+      .filter((type) => {
+        const declared = type.links.find((candidate) => candidate.id === link.linkId)
+        return (
+          declared !== undefined &&
+          parentIds.some((id) => ctx.ontology.isValidLinkTarget(declared.targetObjectTypeId, id))
+        )
+      })
+      .map((type) => type.id)
+    return sources.length > 0 ? sources : undefined
+  }
+
+  const targets = new Set<string>()
+  for (const parentId of parentIds) {
+    const declared = ctx.ontology
+      .getObjectTypeById(parentId)
+      ?.links.find((candidate) => candidate.id === link.linkId)?.targetObjectTypeId
+    if (declared === undefined) continue
+
+    const reachable = linkTargetObjectTypeIds(declared, ctx.ontology)
+    if (!reachable) return undefined
+    for (const id of reachable) targets.add(id)
+  }
+  return targets.size > 0 ? [...targets] : undefined
 }
 
 /**

@@ -33,7 +33,7 @@ export interface PgOntologyTransactionContext {
 
 export class PgMaterializationSessionState extends ProviderMaterializationSessionState {
   stagedWorkCount = 0
-  changedObjects = 0
+  changedObjects: ReadonlyMap<string, number> = new Map()
   changedLinks = 0
   changedUniqueValues = 0
   /** What unique value items this session staged, known without reading its work back. */

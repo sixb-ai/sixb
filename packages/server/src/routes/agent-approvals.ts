@@ -2,7 +2,7 @@ import type { AgentApprovalRecord, SixbHostView } from "@sixb/core"
 import { agentApprovalCallers } from "@sixb/core/internal/agents"
 import type { AgentStorage } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { requireRequestSixb } from "../auth/scope"
+import { requestActor, requireRequestSixb } from "../auth/scope"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
@@ -146,7 +146,7 @@ export function registerAgentApprovalRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
-          return { ...(await serializeThread(host, thread)), ...approvalMode }
+          return { ...(await serializeThread(host, thread, requestActor(sixb))), ...approvalMode }
         } catch (error) {
           return handleAgentRouteError(error, set)
         }

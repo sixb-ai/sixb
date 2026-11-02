@@ -5,11 +5,13 @@ import {
   type ObjectQueryPredicate,
   type ObjectQuerySetOperation,
   type ObjectQuerySortField,
+  type ObjectQueryTraverse,
   type QueryScalarKind,
 } from "@sixb/core"
 import {
   hasVectorProfile,
   isVectorProfileQuery,
+  linkEndpointObjectTypeIds,
   normalizeVector,
   vectorSearchCandidateLimit,
 } from "@sixb/core/internal/query"
@@ -395,14 +397,7 @@ function compileObjectQueryInternal(
     case "page":
       return compilePage(projectId, query.input, query.pageSize, query.pageToken, ctx)
     case "traverse":
-      return compileTraversal(
-        projectId,
-        query.input,
-        query.linkId,
-        query.direction,
-        query.sourceObjectTypeId,
-        ctx
-      )
+      return compileTraversal(projectId, query, ctx)
     case "set":
       return compileSet(projectId, query.op, query.inputs, ctx)
     case "project":
@@ -502,7 +497,7 @@ function compileStart(
   const order = compileOrder(identityOrderFields())
   const objects = pgObjectsOfType(ctx.source, query.objectTypeId)
   const sql = `
-    SELECT *, properties AS _cursor_properties
+    SELECT *
     FROM ${objects.table}
     WHERE project_id = ? AND object_type_id = ? ${objects.filter}
     ${ctx.startPredicate ? `AND (${ctx.startPredicate})` : ""}
@@ -548,7 +543,7 @@ function compileRefs(
     FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
   `
   const sql = `
-    SELECT selected.*, selected.properties AS _cursor_properties
+    SELECT selected.*
     FROM (${requested}) AS requested
     JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
@@ -660,7 +655,6 @@ function compileSort(
         input.object_type_id,
         input.primary_id,
         input.properties,
-        input.properties AS _cursor_properties,
         input.created_at,
         input.updated_at,
         input.version,
@@ -794,13 +788,10 @@ function compilePage(
 
 function compileTraversal(
   projectId: string,
-  inputQuery: ObjectQuery,
-  linkId: string,
-  direction: "outgoing" | "incoming",
-  sourceObjectTypeId: string | undefined,
+  traversal: ObjectQueryTraverse,
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, {
+  const input = compileObjectQueryInternal(projectId, traversal.input, {
     ...exactContext(ctx),
     unordered: true,
     startPredicate: undefined,
@@ -809,16 +800,14 @@ function compileTraversal(
   const relation = compileTraversalRelation(
     projectId,
     input,
-    linkId,
-    direction,
-    sourceObjectTypeId,
+    traversal,
     ctx.source,
     ctx.correlatedTraversal,
     ctx.startPredicate
   )
   const order = compileOrder(identityOrderFields())
   return {
-    sql: `SELECT selected.*, selected.properties AS _cursor_properties ${relation.sql} ${ctx.unordered ? "" : `ORDER BY ${order.sql}`} ${ctx.isolateSortOverflow ? "OFFSET 0" : ""}`,
+    sql: `SELECT selected.* ${relation.sql} ${ctx.unordered ? "" : `ORDER BY ${order.sql}`} ${ctx.isolateSortOverflow ? "OFFSET 0" : ""}`,
     args: [...relation.args, ...(ctx.unordered ? [] : order.args)],
     totalSql: `SELECT COUNT(*)::bigint AS total ${relation.sql}`,
     totalArgs: relation.args,
@@ -833,21 +822,22 @@ function compileTraversal(
 function compileTraversalRelation(
   projectId: string,
   input: CompiledAggregateSource,
-  linkId: string,
-  direction: "outgoing" | "incoming",
-  sourceObjectTypeId: string | undefined,
+  traversal: Pick<
+    ObjectQueryTraverse,
+    "linkId" | "direction" | "sourceObjectTypeId" | "endpointObjectTypeIds"
+  >,
   source: PgObjectQuerySource,
   correlated = false,
   endpointPredicate?: string
 ): CompiledAggregateSource {
-  const incoming = direction === "incoming"
+  const incoming = traversal.direction === "incoming"
   const parent = incoming ? "target" : "source"
   const endpoint = incoming ? "source" : "target"
-  const constrainedType = incoming ? sourceObjectTypeId : undefined
+  const endpointType = compileEndpointTypes("selected", linkEndpointObjectTypeIds(traversal))
   return {
     sql: `FROM ${source.objectsTable} AS selected
       WHERE selected.project_id = ?
-      ${constrainedType === undefined ? "" : "AND selected.object_type_id = ?"}
+      ${endpointType.sql}
       ${endpointPredicate ? `AND (${endpointPredicate})` : ""}
       AND EXISTS (
         SELECT 1 FROM (${input.sql}) AS input
@@ -861,13 +851,23 @@ function compileTraversalRelation(
           AND edge.link_id = ?
           ${correlated ? "OFFSET 0" : ""}
       )`,
-    args: [
-      projectId,
-      ...(constrainedType === undefined ? [] : [constrainedType]),
-      ...input.args,
-      linkId,
-    ],
+    args: [projectId, ...endpointType.args, ...input.args, traversal.linkId],
   }
+}
+
+/** Names the types a link can reach, so PostgreSQL looks only at their rows and their indexes. */
+function compileEndpointTypes(
+  alias: string,
+  objectTypeIds: readonly string[] | undefined
+): CompiledPredicate {
+  if (!objectTypeIds?.length) return { sql: "", args: [] }
+
+  return objectTypeIds.length === 1
+    ? { sql: `AND ${alias}.object_type_id = ?`, args: [objectTypeIds[0]] }
+    : {
+        sql: `AND ${alias}.object_type_id IN (${objectTypeIds.map(() => "?").join(", ")})`,
+        args: [...objectTypeIds],
+      }
 }
 
 /** Only a bounded page benefits from choosing an ordered, correlated endpoint scan. */
@@ -963,7 +963,11 @@ function expandRows(
     "",
     ctx
   )
-  const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
+  const inputOrder = compileOrder(
+    input.order.fields,
+    "input",
+    `input.${input.order.propertyColumn}`
+  )
   return {
     sql: `
     SELECT input.*, ${expand.sql} AS _expand
@@ -1026,7 +1030,8 @@ function compileExpansionValue(
     `${parentId} = ${parent.id}`,
     `${edge}.link_id = ?::text`,
   ]
-  const whereArgs: unknown[] = [expansion.linkId]
+  const endpointType = compileEndpointTypes(target, expansion.endpointObjectTypeIds)
+  const whereArgs: unknown[] = [...endpointType.args, expansion.linkId]
   if (incoming && expansion.sourceObjectTypeId !== undefined) {
     whereParts.push(`${edge}.source_type_id = ?::text`)
     whereArgs.push(expansion.sourceObjectTypeId)
@@ -1038,6 +1043,7 @@ function compileExpansionValue(
       ON ${target}.project_id = ${edge}.project_id
      AND ${target}.object_type_id = ${neighborType}
      AND ${target}.primary_id = ${neighborId}
+     ${endpointType.sql}
     WHERE ${whereParts.join(" AND ")}
   `
 
@@ -1142,7 +1148,7 @@ function compileSet(
     const order = compileOrder(identityOrderFields())
     return {
       sql: `
-        SELECT *, properties AS _cursor_properties
+        SELECT *
         FROM ${ctx.source.objectsTable}
         WHERE 1 = 0
         ORDER BY ${order.sql}
@@ -1164,7 +1170,7 @@ function compileSet(
   const order = compileOrder(identityOrderFields())
   const selectedOrder = compileOrder(identityOrderFields(), "selected")
   const sql = `
-    SELECT selected.*, selected.properties AS _cursor_properties
+    SELECT selected.*
     FROM (${identities.sql}) AS ids
     JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
@@ -1195,7 +1201,9 @@ function compileProject(
   if (!properties) return input
 
   const projection = compileProjectionExpression(properties)
-  const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
+  // Only a projection replaces the document, so only it keeps the original for ordering and cursors.
+  const original = `input.${input.order.propertyColumn}`
+  const inputOrder = compileOrder(input.order.fields, "input", original)
   const outputOrder = compileOrder(input.order.fields, undefined, "_cursor_properties")
 
   return {
@@ -1205,7 +1213,7 @@ function compileProject(
         input.object_type_id,
         input.primary_id,
         ${projection.sql} AS properties,
-        input._cursor_properties AS _cursor_properties,
+        ${original} AS _cursor_properties,
         input.created_at,
         input.updated_at,
         input.version,
@@ -1256,14 +1264,7 @@ function compileAggregateSource(
       )
     }
     case "traverse":
-      return compileAggregateTraversal(
-        projectId,
-        query.input,
-        query.linkId,
-        query.direction,
-        query.sourceObjectTypeId,
-        source
-      )
+      return compileAggregateTraversal(projectId, query, source)
     case "set":
       return compileAggregateSet(projectId, query.op, query.inputs, source)
     case "sort":
@@ -1353,13 +1354,13 @@ function compileAggregateWhere(
 
 function compileAggregateTraversal(
   projectId: string,
-  inputQuery: ObjectQuery,
-  linkId: string,
-  direction: "outgoing" | "incoming",
-  sourceObjectTypeId: string | undefined,
+  traversal: ObjectQueryTraverse,
   source: PgObjectQuerySource
 ): CompiledAggregateSource {
-  const input = compileAggregateSource(projectId, inputQuery, source)
+  const { linkId, direction } = traversal
+  const input = compileAggregateSource(projectId, traversal.input, source)
+  const endpoints = linkEndpointObjectTypeIds(traversal)
+  const sourceObjectTypeId = endpoints?.length === 1 ? endpoints[0] : undefined
   if (direction === "incoming" && sourceObjectTypeId !== undefined) {
     // Deduplicate endpoint identities before fetching objects. Bounded arrays let PostgreSQL
     // visit primary keys in groups instead of doing one random B-tree descent per edge.
@@ -1383,14 +1384,7 @@ function compileAggregateTraversal(
       args: [...input.args, linkId, sourceObjectTypeId, projectId, sourceObjectTypeId],
     }
   }
-  const relation = compileTraversalRelation(
-    projectId,
-    input,
-    linkId,
-    direction,
-    sourceObjectTypeId,
-    source
-  )
+  const relation = compileTraversalRelation(projectId, input, traversal, source)
   return {
     sql: `SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties ${relation.sql}`,
     args: relation.args,
@@ -1523,7 +1517,12 @@ export function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredi
     case "eq":
       return predicate.scalarKind === "decimal"
         ? compileDecimalEqualityPredicate(predicate.propertyId, "eq", predicate.value)
-        : compileEqualityPredicate(predicate.propertyId, "eq", predicate.value)
+        : compileEqualityPredicate(
+            predicate.propertyId,
+            "eq",
+            predicate.value,
+            predicate.scalarKind
+          )
     case "neq":
       return predicate.scalarKind === "decimal"
         ? compileDecimalEqualityPredicate(predicate.propertyId, "neq", predicate.value)
@@ -1555,7 +1554,7 @@ export function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredi
     case "in":
       return predicate.scalarKind === "decimal"
         ? compileDecimalInPredicate(predicate.propertyId, predicate.values)
-        : compileInPredicate(predicate.propertyId, predicate.values)
+        : compileInPredicate(predicate.propertyId, predicate.values, predicate.scalarKind)
     case "exists": {
       const sql = `jsonb_exists(properties, ?::text)`
       const item: CompiledPredicate = { sql, args: [predicate.propertyId] }
@@ -1629,7 +1628,8 @@ function negatePredicate(predicate: CompiledPredicate): CompiledPredicate {
 function compileEqualityPredicate(
   propertyId: string,
   op: "eq" | "neq",
-  value: unknown
+  value: unknown,
+  scalarKind?: QueryScalarKind
 ): CompiledPredicate {
   if (value === null) {
     const sql = `${jsonTypeExpression()} = 'null'`
@@ -1637,7 +1637,7 @@ function compileEqualityPredicate(
     return op === "eq" ? item : negatePredicate(item)
   }
 
-  if (typeof value === "string") {
+  if (typeof value === "string" && !(op === "eq" && hasJsonValueIndex(scalarKind))) {
     if (op === "eq") {
       return {
         sql: `(${jsonTypeExpression()} = 'string' AND ${jsonTextExpression()} = ?::text AND md5(${jsonTextExpression()}) = md5(?::text))`,
@@ -1664,12 +1664,18 @@ function compileEqualityPredicate(
   }
 }
 
-function compileInPredicate(propertyId: string, values: readonly unknown[]): CompiledPredicate {
+function compileInPredicate(
+  propertyId: string,
+  values: readonly unknown[],
+  scalarKind?: QueryScalarKind
+): CompiledPredicate {
   if (values.length === 0) return { sql: "0 = 1", args: [] }
 
   const nonNullValues = values.filter((value) => value !== null)
-  const stringValues = nonNullValues.filter((value): value is string => typeof value === "string")
-  const jsonbValues = nonNullValues.filter((value) => typeof value !== "string")
+  const comparedAsText = (value: unknown): value is string =>
+    typeof value === "string" && !hasJsonValueIndex(scalarKind)
+  const stringValues = nonNullValues.filter(comparedAsText)
+  const jsonbValues = nonNullValues.filter((value) => !comparedAsText(value))
   const clauses: string[] = []
   const args: unknown[] = []
 
@@ -2094,6 +2100,14 @@ function orderedValueExpression(
   if (scalarKind === "decimal") return `(${jsonTextExpression(propertyColumn)})::numeric`
   if (isTextScalarKind(scalarKind)) return `((${jsonTextExpression(propertyColumn)}) COLLATE "C")`
   return `NULLIF(${jsonValueExpression(propertyColumn)}, 'null'::jsonb)`
+}
+
+/**
+ * Strings whose equality index is on the JSON value, not on the text: preparation builds it, so a
+ * filter has to compare the JSON value too, or PostgreSQL scans every row of the type.
+ */
+export function hasJsonValueIndex(scalarKind: QueryScalarKind | undefined): boolean {
+  return scalarKind === "date" || scalarKind === "timestamp" || scalarKind === "uuid"
 }
 
 export function isTextScalarKind(scalarKind: QueryScalarKind | undefined): boolean {

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import {
   type AgentApprovalActivityEvent,
+  type AgentComputerActivityEvent,
   type AgentRunActivityEvent,
+  type AgentThreadMovedEvent,
   createAgentActivitySocket,
 } from "./agent-streams"
 import type { Client } from "./generated/client"
@@ -16,6 +18,9 @@ export interface UseAgentActivityStreamOptions {
   readonly onActivity?: (event: AgentRunActivityEvent) => void
   /** One of a turn's held calls was held, decided, ran, or was set aside. */
   readonly onApprovalActivity?: (event: AgentApprovalActivityEvent) => void
+  /** `sixb` opened or closed on one of your computers, in a folder. */
+  readonly onComputerActivity?: (event: AgentComputerActivityEvent) => void
+  readonly onThreadMoved?: (event: AgentThreadMovedEvent) => void
   readonly onSubscribed?: () => void
   readonly onError?: (message: string) => void
 }
@@ -33,6 +38,10 @@ export function useAgentActivityStream(
   onActivityRef.current = options.onActivity
   const onApprovalActivityRef = useRef(options.onApprovalActivity)
   onApprovalActivityRef.current = options.onApprovalActivity
+  const onComputerActivityRef = useRef(options.onComputerActivity)
+  onComputerActivityRef.current = options.onComputerActivity
+  const onThreadMovedRef = useRef(options.onThreadMoved)
+  onThreadMovedRef.current = options.onThreadMoved
   const onSubscribedRef = useRef(options.onSubscribed)
   onSubscribedRef.current = options.onSubscribed
   const onErrorRef = useRef(options.onError)
@@ -50,6 +59,8 @@ export function useAgentActivityStream(
       client,
       onActivity: (event) => onActivityRef.current?.(event),
       onApprovalActivity: (event) => onApprovalActivityRef.current?.(event),
+      onComputerActivity: (event) => onComputerActivityRef.current?.(event),
+      onThreadMoved: (event) => onThreadMovedRef.current?.(event),
       onSubscribed: () => onSubscribedRef.current?.(),
       onError: (message) => onErrorRef.current?.(message),
       onStateChange: setState,

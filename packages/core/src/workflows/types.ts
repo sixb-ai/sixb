@@ -27,6 +27,7 @@ import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import type { SchedulesRuntime } from "../schedules/execution"
 import type { GroupDefinition } from "../security"
+import type { TrustedSharesRuntime } from "../shares/execution"
 import type { SyncsRuntime } from "../syncs/execution"
 import type { UsersRuntime } from "../users"
 import type { WorkflowsRuntime } from "./execution"
@@ -80,6 +81,8 @@ export interface WorkflowRuntimeFacade {
   readonly users: UsersRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
+  /** Revoke a shared link the workflow is done with. Issuing links stays with people. */
+  readonly shares: TrustedSharesRuntime
 }
 
 export type StepHandler<
@@ -146,6 +149,8 @@ export interface DefineAgentStepConfig {
   /** A model runs as given; a tier runs that tier's model from `models.language`. */
   readonly model?: LanguageModel | LanguageModelTier
   readonly reasoning?: AgentReasoning
+  /** At most this many model calls before its answer. Defaults to 500. */
+  readonly maxSteps?: number
   readonly instructions: string
   readonly groups?: readonly GroupDefinition[]
   /** Project tools this workflow task may call. Defaults to none. */
@@ -172,6 +177,7 @@ export interface AgentStepDefinition<
   readonly id: TId
   readonly model?: LanguageModel | LanguageModelTier
   readonly reasoning?: AgentReasoning
+  readonly maxSteps?: number
   readonly instructions: string
   readonly groupIds: readonly string[]
   readonly toolNames: readonly string[]

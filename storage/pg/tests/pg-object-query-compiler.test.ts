@@ -143,6 +143,30 @@ test("count aggregate SQL supports scoped text defaults", () => {
   ])
 })
 
+// Removal proof: select the document a second time for cursors. Every row then crosses the network
+// twice, which is half of what a page of large objects transfers.
+test("each row carries its document once, unless a projection replaces it", () => {
+  const sorted: ObjectQuery = {
+    kind: "sort",
+    input: { kind: "start", objectTypeId: "Task" },
+    fields: [{ kind: "property", propertyId: "dueOn", direction: "desc" }],
+  }
+  const page: ObjectQuery = { kind: "page", input: sorted, pageSize: 10 }
+
+  expect(compilePgObjectQuery("project-a", page).sql).not.toContain("_cursor_properties")
+  expect(
+    compilePgObjectQuery("project-a", {
+      kind: "expand",
+      input: page,
+      expansions: [{ linkId: "owner", direction: "outgoing", cardinality: "one" }],
+    }).sql
+  ).not.toContain("_cursor_properties")
+
+  expect(
+    compilePgObjectQuery("project-a", { kind: "project", input: page, properties: ["title"] }).sql
+  ).toContain("_cursor_properties")
+})
+
 test("facet aggregate SQL projects scalar values without sorting object rows", () => {
   const compiled = compilePgObjectFacetQuery("project-a", sitePointQuery, "objectType", 100)
 
@@ -280,4 +304,49 @@ test("expand SQL nests a child expansion correlated on the parent neighbour", ()
   expect(compiled.sql).toContain("'links', jsonb_build_object(")
   expect(compiled.sql).toContain("edge_0_0.source_id = tgt_0.primary_id")
   expect(compiled.sql).toContain("jsonb_agg(ranked_0_0.elem")
+})
+
+test("a traversal looks only at the object types its link can reach", () => {
+  const traversal = (endpointObjectTypeIds?: readonly string[]): ObjectQuery => ({
+    kind: "traverse",
+    input: { kind: "start", objectTypeId: "Quote" },
+    linkId: "organization",
+    direction: "outgoing",
+    ...(endpointObjectTypeIds ? { endpointObjectTypeIds } : {}),
+  })
+
+  const one = compilePgObjectQuery("project-a", traversal(["Organization"]))
+  expect(one.sql).toContain("AND selected.object_type_id = $2")
+  expect(one.args.slice(0, 2)).toEqual(["project-a", "Organization"])
+
+  const two = compilePgObjectQuery("project-a", traversal(["Organization", "Vendor"]))
+  expect(two.sql).toContain("AND selected.object_type_id IN ($2, $3)")
+  expect(two.args.slice(0, 3)).toEqual(["project-a", "Organization", "Vendor"])
+
+  // A wildcard link names no types, so every type stays in scope.
+  const wildcard = compilePgObjectQuery("project-a", traversal())
+  expect(wildcard.sql).not.toContain("selected.object_type_id = $2")
+  expect(wildcard.sql).not.toContain("selected.object_type_id IN")
+})
+
+test("an expansion joins only the object types its link can reach", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Quote" } },
+    expansions: [
+      {
+        linkId: "organization",
+        direction: "outgoing",
+        cardinality: "one",
+        limit: 1000,
+        endpointObjectTypeIds: ["Organization"],
+      },
+    ],
+  })
+
+  expect(compiled.sql).toMatch(/AND tgt_0\.object_type_id = \$\d+\s+WHERE edge_0\.project_id/)
+  // The type sits in the join, ahead of the link id: placeholder order must follow the SQL.
+  const typeAt = compiled.args.indexOf("Organization")
+  expect(typeAt).toBeGreaterThan(-1)
+  expect(compiled.args[typeAt + 1]).toBe("organization")
 })

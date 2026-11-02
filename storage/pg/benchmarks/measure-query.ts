@@ -358,7 +358,7 @@ if (!selected)
 const settings =
   await sql`SELECT name,setting,unit FROM pg_settings WHERE name IN ('shared_buffers','work_mem','effective_cache_size','max_parallel_workers_per_gather','server_version','jit')`
 const sizes =
-  await sql`SELECT relname,pg_relation_size(oid) AS bytes FROM pg_class WHERE relnamespace=${schemaName}::regnamespace AND (relname IN ('objects','links') OR relname LIKE 'sixb_query_%' OR relname LIKE 'idx_objects_%' OR relname LIKE 'sixb_text_count_%') ORDER BY relname`
+  await sql`SELECT relname,pg_relation_size(oid) AS bytes FROM pg_class WHERE relnamespace=${schemaName}::regnamespace AND (relname IN ('links') OR relname LIKE 'objects_%' OR relname LIKE 'sixb_query_%' OR relname LIKE 'idx_objects_%' OR relname LIKE 'sixb_text_count_%') ORDER BY relname`
 await Bun.write(
   `.local/query-bench/${label}-${n}.json`,
   JSON.stringify({ n, label, repetitions, settings, sizes, results }, null, 2)

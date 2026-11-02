@@ -3,6 +3,7 @@ import type { ActionDefinition } from "../actions"
 import type { ActivityOptions } from "../activity/service"
 import type { AgentToolDefinition } from "../agents"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
+import type { AgentOptions } from "../agents/step-limits"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import {
@@ -72,6 +73,8 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   models?: ModelCatalogInput
   /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]
+  /** How the project's Agent runs: how many steps a turn or a sub-agent may take. */
+  agent?: AgentOptions
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
@@ -121,6 +124,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   const skills = await discoverAgentSkills(projectRoot)
   const instructions = await discoverProjectInstructions(projectRoot)
   const ontologyFiles = await discoverOntologyFiles(projectRoot)
+  const { maxSteps, subagentMaxSteps } = options.agent ?? {}
 
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
@@ -159,6 +163,8 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     models: options.models,
     tools: options.tools,
     agent: {
+      ...(maxSteps === undefined ? {} : { maxSteps }),
+      ...(subagentMaxSteps === undefined ? {} : { subagentMaxSteps }),
       skills,
       ...(instructions === undefined ? {} : { instructions }),
       ontologyDocs: { modules: discoveredOntology.modules, ...ontologyFiles },

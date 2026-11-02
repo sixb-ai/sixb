@@ -9,6 +9,7 @@ import {
 import {
   hasVectorProfile,
   isVectorProfileQuery,
+  linkEndpointObjectTypeIds,
   normalizeVector,
   vectorSearchCandidateLimit,
 } from "@sixb/core/internal/query"
@@ -190,14 +191,7 @@ function compileObjectQueryInternal(
     case "page":
       return compilePage(projectId, query.input, query.pageSize, query.pageToken, ctx)
     case "traverse":
-      return compileTraversal(
-        projectId,
-        query.input,
-        query.linkId,
-        query.direction,
-        query.sourceObjectTypeId,
-        ctx
-      )
+      return compileTraversal(projectId, query, ctx)
     case "set":
       return compileSet(projectId, query.op, query.inputs, ctx)
     case "project":
@@ -571,14 +565,13 @@ function compilePage(
 
 function compileTraversal(
   projectId: string,
-  inputQuery: ObjectQuery,
-  linkId: string,
-  direction: "outgoing" | "incoming",
-  sourceObjectTypeId: string | undefined,
+  traversal: Extract<ObjectQuery, { kind: "traverse" }>,
   ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
+  const { linkId, direction, sourceObjectTypeId } = traversal
+  const input = compileObjectQueryInternal(projectId, traversal.input, exactContext(ctx))
   const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
+  const endpointType = compileEndpointTypes(outputAlias, linkEndpointObjectTypeIds(traversal))
   const joinSql =
     direction === "outgoing"
       ? `
@@ -591,6 +584,7 @@ function compileTraversal(
           ON target_object.project_id = edge.project_id
          AND target_object.object_type_id = edge.target_type_id
          AND target_object.primary_id = edge.target_id
+         ${endpointType.sql}
       `
       : `
         JOIN ${ctx.source.linksTable} AS edge
@@ -602,6 +596,7 @@ function compileTraversal(
           ON source_object.project_id = edge.project_id
          AND source_object.object_type_id = edge.source_type_id
          AND source_object.primary_id = edge.source_id
+         ${endpointType.sql}
       `
   const order = compileOrder(identityOrderFields())
   const qualifiedOrder = compileOrder(identityOrderFields(), outputAlias)
@@ -614,7 +609,8 @@ function compileTraversal(
   const args = [
     ...input.args,
     linkId,
-    ...(sourceObjectTypeId === undefined ? [] : [sourceObjectTypeId]),
+    ...(direction === "incoming" && sourceObjectTypeId !== undefined ? [sourceObjectTypeId] : []),
+    ...endpointType.args,
     ...qualifiedOrder.args,
   ]
 
@@ -627,6 +623,19 @@ function compileTraversal(
     hasMore: () => false,
     trimRows: identityRows,
     nextPageToken: () => undefined,
+  }
+}
+
+/** Only the types the ontology says this link can reach. */
+function compileEndpointTypes(
+  alias: string,
+  objectTypeIds: readonly string[] | undefined
+): CompiledPredicate {
+  if (!objectTypeIds?.length) return { sql: "", args: [] }
+
+  return {
+    sql: `AND ${alias}.object_type_id IN (${objectTypeIds.map(() => "?").join(", ")})`,
+    args: [...objectTypeIds],
   }
 }
 
@@ -730,7 +739,8 @@ function compileExpansionValue(
     `${parentId} = ${parent.id}`,
     `${edge}.link_id = ?`,
   ]
-  const whereArgs: SqliteValue[] = [expansion.linkId]
+  const endpointType = compileEndpointTypes(target, expansion.endpointObjectTypeIds)
+  const whereArgs: SqliteValue[] = [...endpointType.args, expansion.linkId]
   if (incoming && expansion.sourceObjectTypeId !== undefined) {
     whereParts.push(`${edge}.source_type_id = ?`)
     whereArgs.push(expansion.sourceObjectTypeId)
@@ -742,6 +752,7 @@ function compileExpansionValue(
       ON ${target}.project_id = ${edge}.project_id
      AND ${target}.object_type_id = ${neighborType}
      AND ${target}.primary_id = ${neighborId}
+     ${endpointType.sql}
     WHERE ${whereParts.join(" AND ")}
   `
 

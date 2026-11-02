@@ -40,6 +40,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | `agent.approval_authority_lost` | No | An approved Agent call did not run: its requester's sign-in ended before Sixb could run it, after a crash. | Ask the Agent again. |
 | `agent.context_limit_exceeded` | No | A conversation is too long for its model's context window, even once its earlier turns are summarized. | Start a new conversation, or switch to a model with a larger context window. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
+| `agent.step_limit_reached` | No | A sub-agent or a workflow agent step made as many model calls as its `maxSteps` allows before answering. | Narrow its task, or raise `maxSteps`. |
 | `ai.usage_limit_exceeded` | No | An applicable AI usage limit has no capacity for another model call. | Wait until `details.resetAt`, or raise or disable the applicable limit policy. |
 | `ai.usage_limit_unavailable` | Yes | Sixb could not evaluate an applicable AI usage limit safely. | Restore complete accounting or the limit storage provider, then retry. |
 | `connector.adapter_invalid` | No | A connector adapter returned data that violates its Sixb contract. | Fix or upgrade the adapter before retrying. |
