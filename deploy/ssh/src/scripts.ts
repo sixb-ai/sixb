@@ -54,6 +54,7 @@ export function renderDeployScript(input: DeployScriptInput): DeployScript {
     { label: "Apply files", body: renderApplyFiles(layout, input.incoming) },
     { label: `Install Bun ${release.bunVersion}`, body: renderInstallBun(release.bunVersion) },
     { label: "Install dependencies", body: renderInstallDependencies() },
+    ...(release.steps.env ? [envStep(release.steps.env, layout)] : []),
     ...release.steps.build.map((command) => runStep(command)),
     // Everything that can be rejected happens while the previous release still serves: services
     // are down only from here to "Start services".
@@ -212,6 +213,12 @@ function runStep(command: DeployCommand): Step {
       `"$BUN" ${program} ${command.args.map(shellQuote).join(" ")}`.replace(/ {2,}/g, " "),
     ].join("\n"),
   }
+}
+
+/** Pulls `.env` with the token only this step reads, so no build or service ever holds it. */
+function envStep(command: DeployCommand, layout: DeploymentLayout): Step {
+  const step = runStep(command)
+  return { ...step, body: `${step.body} --token-file ${shellQuote(layout.envToken)}` }
 }
 
 function renderStopServices(): string {

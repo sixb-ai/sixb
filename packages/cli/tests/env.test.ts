@@ -64,6 +64,7 @@ const FAKE_SOURCE = `
       const state = await load()
       await save({ ...state, [env]: { ...state[env], ...values } })
     },
+    createServerToken: async () => "unused",
   }
 `
 
@@ -485,6 +486,7 @@ describe("sixb env init", () => {
         const state = await load()
         await Bun.write(file, JSON.stringify({ ...state, project, [env]: { ...state[env], ...values } }))
       },
+      createServerToken: async () => "unused",
     })
   `
 

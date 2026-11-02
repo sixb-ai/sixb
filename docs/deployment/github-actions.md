@@ -35,6 +35,10 @@ gh secret set SIXB_GITHUB_TOKEN --env production
 
 Without that secret, the workflow stops at its first step and says which secret to set.
 
+## The project's own variables
+
+The workflow needs no secrets for them. With [a source](environment-variables.md#deploy), the server pulls `.env` itself, so the job never holds a value or a token.
+
 ## Environment variables in `sixb.deploy.ts`
 
 The workflow connects to the server directly, so `host` must be an address GitHub's runners can reach, not a server behind a jump host. When `sixb.deploy.ts` reads environment variables, set them for the job in the workflow:

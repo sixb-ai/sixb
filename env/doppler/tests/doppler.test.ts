@@ -133,6 +133,31 @@ describe("doppler", () => {
     })
   })
 
+  describe("createServerToken", () => {
+    test("asks for a read-only token on this environment's config", async () => {
+      process.env.DOPPLER_TOKEN = "person-token"
+      const sent = fakeDoppler(() => json({ token: { key: "dp.st.prd.abc" } }))
+
+      expect(await source().createServerToken("prod", "sixb-shop")).toBe("dp.st.prd.abc")
+
+      expect(sent[0]?.method).toBe("POST")
+      expect(sent[0]?.url.pathname).toBe("/v3/configs/config/tokens")
+      expect(sent[0]?.url.searchParams.get("config")).toBe("prd")
+      expect(sent[0]?.body).toEqual({ name: "sixb-shop", access: "read" })
+    })
+
+    test("fails when no token comes back", async () => {
+      process.env.DOPPLER_TOKEN = "person-token"
+      fakeDoppler(() => json({ token: {} }))
+
+      const error = await source()
+        .createServerToken("prod", "sixb-shop")
+        .catch((failure) => failure)
+
+      expect(String(error)).toContain("did not return a token")
+    })
+  })
+
   describe("failures", () => {
     const read = () =>
       source()

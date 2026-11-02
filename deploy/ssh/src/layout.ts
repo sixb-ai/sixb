@@ -5,13 +5,17 @@ import { posix } from "node:path"
  * sits in one directory in the deploy user's home, so projects under one user never share files.
  *
  *   ~/<name>/code      the deployed commit; the project is `code/<projectPath>`
+ *   ~/<name>/env-token the read-only token a deploy pulls `.env` with, if it has a source
  *   ~/<name>/deploy    lock, uploads, file list, release record, process manifest, ctl
  *   ~/<name>/run       supervisor state, control requests, and logs
  *   ~/.sixb/bun/<v>    Bun, shared by the user's projects that pin the same version
  */
+export const ENV_TOKEN_FILE = "env-token"
+
 export interface DeploymentLayout {
   readonly root: string
   readonly code: string
+  readonly envToken: string
   readonly project: string
   readonly deployDir: string
   readonly incomingDir: string
@@ -49,6 +53,7 @@ export function deploymentLayout(input: {
   return {
     root,
     code,
+    envToken: posix.join(root, ENV_TOKEN_FILE),
     project: posix.join(code, input.projectPath),
     deployDir,
     incomingDir: posix.join(deployDir, "incoming"),
