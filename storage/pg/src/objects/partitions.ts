@@ -11,7 +11,7 @@ const LOCK_TIMEOUT = "1s"
 const LOCK_ATTEMPTS = 120
 const LOCK_RETRY_MS = 1_000
 
-/** Migration 085 derives the same name in SQL: `'objects_' || left(md5(type), 24)`. */
+/** Migration 086 derives the same name in SQL: `'objects_' || left(md5(type), 24)`. */
 export function objectPartitionName(objectTypeId: string): string {
   return `objects_${createHash("md5").update(objectTypeId).digest("hex").slice(0, 24)}`
 }

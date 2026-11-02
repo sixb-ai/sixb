@@ -4,6 +4,7 @@ import type { AgentDefinitionsInput, AgentToolDefinition } from "../agents"
 import { assertTurnModelRouting } from "../agents/model-routing"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
 import { createAgentSkillCatalog } from "../agents/skills"
+import { assertMaxSteps } from "../agents/step-limits"
 import { createAgentToolCatalog } from "../agents/tool-catalog"
 import type { ConnectorDefinition } from "../connectors"
 import { isDatasetPick } from "../datasets/builders"
@@ -100,6 +101,10 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   }
   const tools = createAgentToolCatalog(options.tools)
   const skills = createAgentSkillCatalog(options.agent?.skills)
+  const maxSteps = options.agent?.maxSteps
+  const subagentMaxSteps = options.agent?.subagentMaxSteps
+  assertMaxSteps(maxSteps, "agent.maxSteps")
+  assertMaxSteps(subagentMaxSteps, "agent.subagentMaxSteps")
   const ontologyDocs = createOntologyDocsCatalog({
     objectTypes: ontology.listObjectTypes(),
     ...(options.agent?.ontologyDocs === undefined ? {} : { docs: options.agent.ontologyDocs }),
@@ -219,6 +224,8 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
         ? {}
         : { instructions: options.agent.instructions }),
       ontologyDocs,
+      ...(maxSteps === undefined ? {} : { maxSteps }),
+      ...(subagentMaxSteps === undefined ? {} : { subagentMaxSteps }),
     }),
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),

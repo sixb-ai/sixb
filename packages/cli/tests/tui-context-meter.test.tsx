@@ -118,6 +118,8 @@ const runner = {
   folder: tmpdir(),
   claim: async () => false,
   claimIfHere: async () => {},
+  onElsewhere: () => () => {},
+  runsHere: () => false,
   runs: () => false,
   hearStop: () => {},
 } as unknown as LocalRunner
@@ -156,7 +158,7 @@ async function openTerminal(api: ReturnType<typeof fakeApi>, width: number) {
       colors={tuiColors("dark")}
       syntax={{} as SyntaxStyle}
       version="sixb v0.0.0"
-      initialSettings={{ place: "cloud", approvalMode: "auto" }}
+      initialSettings={{ place: "cloud", approvalMode: "auto", continueFromWeb: false }}
       onExit={() => {}}
     />,
     { width, height: 30 }

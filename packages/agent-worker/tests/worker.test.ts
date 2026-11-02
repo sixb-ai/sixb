@@ -16,6 +16,7 @@ import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
 import {
   AgentDefinitionError,
   type AgentMessagePart,
+  type AgentOptions,
   type AgentRuntime,
   type AgentSkillDefinition,
   type AgentToolDefinition,
@@ -495,6 +496,36 @@ function answerModel(
         { type: "text-delta", id: "answer", delta: "Done" },
         { type: "text-end", id: "answer" },
         finish("stop"),
+      ])
+    },
+  })
+}
+
+/**
+ * A model that never answers: each call writes where it is, then calls a tool nobody offers, whose
+ * error result sends it on to its next step.
+ */
+function neverAnsweringModel(
+  calls: { count: number },
+  identity: { readonly providerId?: string; readonly modelId?: string } = {}
+): WorkerTestModel {
+  return new WorkerTestModel({
+    modelId: "mock-model",
+    ...identity,
+    stream: async () => {
+      calls.count += 1
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "progress" },
+        { type: "text-delta", id: "progress", delta: `Checked ${calls.count} files.` },
+        { type: "text-end", id: "progress" },
+        {
+          type: "tool-call",
+          toolCallId: `read-${calls.count}`,
+          toolName: "read_missing",
+          input: "{}",
+        },
+        finish("tool-calls"),
       ])
     },
   })
@@ -1692,6 +1723,7 @@ function buildSixb(
     readonly connectors?: readonly ConnectorDefinition[]
     readonly models?: ModelCatalogInput
     readonly security?: TestSecurity
+    readonly agentOptions?: AgentOptions
   } = {}
 ): TestSixb {
   return new SixbHost({
@@ -1724,6 +1756,7 @@ function buildSixb(
     },
     models: options.models ?? { language: [model] },
     agent: {
+      ...options.agentOptions,
       ...(options.skills === undefined ? {} : { skills: options.skills }),
       ...(options.projectInstructions === undefined
         ? {}
@@ -1854,9 +1887,11 @@ async function queueWorkflowAgentNode(input: {
   readonly requesterGroupIds?: readonly string[]
   /** Declared groups double as the step's groups. */
   readonly security?: TestSecurity
+  readonly maxSteps?: number
 }) {
   const agentStep = defineAgentStep("workflow-usage-step", {
     model: input.model,
+    ...(input.maxSteps === undefined ? {} : { maxSteps: input.maxSteps }),
     instructions: "Resolve the best project.",
     groups: input.security?.groups ?? [AGENT_RUNTIME_GROUP],
     ...(input.tools === undefined ? {} : { tools: input.tools }),
@@ -2116,7 +2151,7 @@ async function coordinatorFor(
   const language = sixb.definitions.models?.language
   if (!language) throw new Error("Expected a language model catalog.")
   const delegation = {
-    models: readAgentRunDelegation(language),
+    models: readAgentRunDelegation(language, sixb.definitions.agent.subagentMaxSteps),
     toolNames: sixb.definitions.tools.list().map((tool) => tool.name),
   }
   return new SubagentCoordinator(delegation, context, parent, session, () => {})
@@ -2592,6 +2627,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
@@ -2640,6 +2676,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
@@ -2685,6 +2722,7 @@ function withObservedAgentMessageAppendStorage(
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     tokenRates: agents.tokenRates,
     messages: {
       getById: (params) => agents.messages.getById(params),
@@ -6973,6 +7011,40 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("fails a workflow agent step that reached its maxSteps before answering", async () => {
+    // Removal proof: drop the `stepLimitReached` check from runWorkflowAgentNode; the step's last
+    // narration is structured as its answer.
+    const calls = { count: 0 }
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: neverAnsweringModel(calls),
+      runId: "workflow-step-limit",
+      maxSteps: 3,
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "step-limited workflow agent step" }
+      )
+      expect(execution).toMatchObject({
+        status: "failed",
+        error: {
+          code: "agent.step_limit_reached",
+          message:
+            "The agent reached its step limit before finishing. The agent stopped after 3 steps before finishing its answer. Narrow the step's prompt, or raise its maxSteps.",
+        },
+      })
+      expect(calls.count).toBe(3)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("keeps workflow usage when structured output validation fails", async () => {
     const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
       model: invalidStructuredAnswerModel(),
@@ -10393,6 +10465,105 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("stops a subagent at the project's step limit and tells its parent what it got", async () => {
+    // Removal proof: drop the `stepLimitReached` check from runSubagent; the child succeeds and the
+    // parent reads its last narration as its answer. Drop `partialAnswerOf` from the wait and the
+    // parent gets none of it.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childCalls = { count: 0 }
+    const childModel = neverAnsweringModel(childCalls, {
+      providerId: "gateway",
+      modelId: "zai/glm-5.3-flash",
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+      onCall: (options) => parentCalls.push(options),
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      agentOptions: { subagentMaxSteps: 3 },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate this research task." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await waitFor(
+        async () =>
+          (await storage.runs.getById({ projectId: PROJECT_ID, id: requested.run.id }))?.status ===
+          "succeeded",
+        { label: "delegating parent run terminal" }
+      )
+      const message =
+        "The agent reached its step limit before finishing. The subagent stopped after 3 steps before finishing its task. Spawn it again with a narrower task, or do the rest yourself."
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toMatchObject({
+        status: "failed",
+        error: { code: "agent.step_limit_reached", message },
+      })
+      expect(childCalls.count).toBe(3)
+
+      const waited = parentCalls[2]?.messages.at(-1)
+      const output = waited?.role === "tool" ? waited.content[0]?.output : undefined
+      expect(JSON.parse(output?.type === "text" ? output.value : "{}")).toMatchObject({
+        results: [
+          {
+            status: "failed",
+            error: { code: "agent.step_limit_reached", message },
+            partialAnswer: "Checked 3 files.",
+          },
+        ],
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("lets a spawn ask for fewer steps than the project allows, never more", async () => {
+    // Removal proof: drop `resolveMaxSteps`'s check and the spawn above the limit is admitted;
+    // drop `maxSteps` from `childSpec` and the child runs to the project's limit.
+    const calls = { count: 0 }
+    const model = neverAnsweringModel(calls)
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      agentOptions: { subagentMaxSteps: 3 },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate." })
+    const parent = requireConversationRun(
+      await storage.runs.start({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+        execution: freshTestExecution(),
+      })
+    )
+    const coordinator = await coordinatorFor(sixb, parent)
+    const signal = new AbortController().signal
+
+    const refused = await coordinator
+      .spawn({ key: "wide", task: "Read everything.", maxSteps: 4 }, signal)
+      .catch((error) => error)
+    expect(refused).toBeInstanceOf(AgentToolPublicError)
+    expect(refused.message).toBe(
+      "[SixbAgent] spawn_agent maxSteps must be at most 3, the project's limit. Omit it to use that limit."
+    )
+
+    const child = await coordinator.spawn(
+      { key: "narrow", task: "Read two files.", maxSteps: 2 },
+      signal
+    )
+    await runChildren(sixb, [child.runId])
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })).toMatchObject({
+      status: "failed",
+      spec: { maxSteps: 2 },
+      error: { code: "agent.step_limit_reached" },
+    })
+    expect(calls.count).toBe(2)
+  })
+
   test("tells the parent what to do about a subagent that gave no answer", async () => {
     // Removal proof: fail an empty answer with a bare `createSixbError` again; the parent then
     // reads "Agent execution failed." and nothing it can act on.
@@ -11170,6 +11341,41 @@ describe("AgentWorker", () => {
       expect(answered).toMatchObject({ status: "succeeded", finishReason: "stop" })
       expect(answered.diagnostics).toBeUndefined()
       expect(requests[1]?.input.map((item) => item.role ?? item.type)).toEqual([...replayed])
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("ends a turn at the project's maxSteps with its work and a step-limit diagnostic", async () => {
+    // Removal proof: drop `stepLimitDiagnostic` from runAgentTurn; the turn ends without saying
+    // why it stopped, so the chat offers no Continue.
+    const calls = { count: 0 }
+    const sixb = buildSixb(neverAnsweringModel(calls), new InMemoryBroker(), undefined, {
+      agentOptions: { maxSteps: 2 },
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const requested = await requestAgent(sixb, { text: "Read every file." })
+      expect(await waitForTerminalRun(storage, requested.run.id)).toMatchObject({
+        status: "succeeded",
+        finishReason: "tool-calls",
+        diagnostics: [
+          {
+            code: "step_limit_reached",
+            severity: "warning",
+            scope: "run",
+            message: "The agent reached its step limit before producing a final answer.",
+          },
+        ],
+      })
+      expect(calls.count).toBe(2)
+
+      const [, assistant] = await listMessages(storage, requested.run.threadId)
+      expect(assistant?.parts.flatMap((part) => (part.type === "text" ? [part.text] : []))).toEqual(
+        ["Checked 1 files.", "Checked 2 files."]
+      )
     } finally {
       await worker.stop()
     }
@@ -14061,7 +14267,11 @@ describe("agent tools act as the requester", () => {
       new RecordingSandboxFactory(),
       { projectTools: [summarizeInvoice] }
     )
-    const request = await requestAgent(sixb, { text: "Summarize inv-1.", runsOn: "computer" })
+    const request = await requestAgent(sixb, {
+      text: "Summarize inv-1.",
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
+    })
     const { workerHost, recorded } = recordUsage(sixb)
     const api = createSixbApi(
       new SixbServer({ host: workerHost as never, quiet: true, browser: createTestBrowserPolicy() })
@@ -14073,7 +14283,7 @@ describe("agent tools act as the requester", () => {
       apiUrl,
       runId: request.run.id,
       authorization: "",
-      computerId: "laptop",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
       leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       fetch: send,
     })
@@ -14164,18 +14374,22 @@ describe("agent tools act as the requester", () => {
     const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [parentModel, childModel] },
     })
-    const request = await requestAgent(sixb, { text: "Delegate this.", runsOn: "computer" })
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const request = await requestAgent(sixb, {
+      text: "Delegate this.",
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder },
+    })
     childRunId = createSubagentRunId(request.run.id, "research")
     const api = createSixbApi(
       new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
     )
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
     const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
     const opened: { workingDirectory?: string; runFiles: string }[] = []
     const runner = new ComputerRunner({
       apiUrl: "http://api.localhost",
       authorization: async () => "",
-      computerId: async () => "laptop",
+      computer: async () => ({ id: "laptop", name: "Laptop" }),
       folder,
       runFilesRoot,
       fetch: async (outgoing) => api.fetch(outgoing),
@@ -14199,11 +14413,19 @@ describe("agent tools act as the requester", () => {
         await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
       ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
       // The turn in the user's folder, the child in one of its own; each thread's files
-      // elsewhere, and gone once its run ended.
+      // elsewhere, named as a cloud sandbox names them, and gone once its run ended.
       expect(opened).toEqual([
-        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.threadId) },
         {
-          runFiles: join(runFilesRoot, createSubagentThreadId(request.run.id, "research")),
+          workingDirectory: folder,
+          runFiles: join(runFilesRoot, request.run.threadId, ".sixb", "agent"),
+        },
+        {
+          runFiles: join(
+            runFilesRoot,
+            createSubagentThreadId(request.run.id, "research"),
+            ".sixb",
+            "agent"
+          ),
         },
       ])
       expect(readdirSync(runFilesRoot)).toEqual([])
@@ -14245,7 +14467,7 @@ describe("agent tools act as the requester", () => {
       new ComputerRunner({
         apiUrl: "http://api.localhost",
         authorization: async () => "",
-        computerId: async () => "laptop",
+        computer: async () => ({ id: "laptop", name: "Laptop" }),
         folder,
         runFilesRoot,
         fetch: async (outgoing) => api.fetch(outgoing),
@@ -14275,7 +14497,11 @@ describe("agent tools act as the requester", () => {
 
     jest.useFakeTimers()
     try {
-      const one = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const one = await requestAgent(sixb, {
+        text: "First.",
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
       const ranOne = first.runTurn(one.run.id, new AbortController().signal)
       // Its end is written before its sandbox is given back.
       await underFakeTime(
@@ -14344,7 +14570,7 @@ describe("agent tools act as the requester", () => {
     const runner = new ComputerRunner({
       apiUrl: "http://api.localhost",
       authorization: async () => "",
-      computerId: async () => "laptop",
+      computer: async () => ({ id: "laptop", name: "Laptop" }),
       folder,
       runFilesRoot,
       fetch: async (outgoing) => api.fetch(outgoing),
@@ -14356,14 +14582,23 @@ describe("agent tools act as the requester", () => {
     })
 
     try {
-      const first = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const first = await requestAgent(sixb, {
+        text: "First.",
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
       const { threadId } = first.run
       // What a crashed run left behind is gone before the next one starts.
       mkdirSync(join(runFilesRoot, threadId, "attachments"), { recursive: true })
       writeFileSync(join(runFilesRoot, threadId, "attachments", "stale.txt"), "stale")
       expect(await runner.runTurn(first.run.id, new AbortController().signal)).toBe(true)
 
-      const second = await requestAgent(sixb, { text: "Second.", threadId, runsOn: "computer" })
+      const second = await requestAgent(sixb, {
+        text: "Second.",
+        threadId,
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
       expect(await runner.runTurn(second.run.id, new AbortController().signal)).toBe(true)
       await runner.drain()
 
@@ -14372,13 +14607,14 @@ describe("agent tools act as the requester", () => {
           status: "succeeded",
         })
       }
-      expect(opened).toEqual([join(runFilesRoot, threadId), join(runFilesRoot, threadId)])
+      const runFiles = join(runFilesRoot, threadId, ".sixb", "agent")
+      expect(opened).toEqual([runFiles, runFiles])
       expect(leftovers).toEqual([[], []])
       expect(readdirSync(runFilesRoot)).toEqual([])
 
       const [one, two] = requests
       if (!one || !two) throw new Error("Expected two model requests.")
-      expect(systemPromptOf(one.messages)).toContain(join(runFilesRoot, threadId, "skills"))
+      expect(systemPromptOf(one.messages)).toContain(join(runFiles, "skills"))
       expect(two.messages[0]).toEqual(one.messages[0])
       expect(two.messages.slice(0, one.messages.length)).toEqual([...one.messages])
     } finally {
