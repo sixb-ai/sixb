@@ -496,6 +496,12 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
     required: ["mode", "providerIssues", "fallbackIssues", "issues"],
     additionalProperties: false,
     properties: {
+      readObjectTypeIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Every object type the query reads: where it starts, and what it traverses or expands",
+      },
       mode: { type: "string", enum: ["pushdown", "fallback", "pipeline", "rejected"] },
       providerIssues: {
         type: "array",

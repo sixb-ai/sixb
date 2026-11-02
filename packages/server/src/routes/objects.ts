@@ -93,6 +93,7 @@ function serializePlan(plan: {
   readonly providerIssues: readonly unknown[]
   readonly fallbackIssues: readonly unknown[]
   readonly issues: readonly unknown[]
+  readonly readObjectTypeIds?: readonly string[]
   readonly fallback?: { readonly maxRows: number; readonly requiresExplicitBound: boolean }
 }) {
   return {
@@ -101,6 +102,7 @@ function serializePlan(plan: {
     fallbackIssues: plan.fallbackIssues,
     issues: plan.issues,
     fallback: plan.fallback,
+    readObjectTypeIds: plan.readObjectTypeIds,
   }
 }
 

@@ -180,7 +180,7 @@ export async function executeObjectQuery(
     },
     options.maxExpansionFanout
   )
-  const plan = planObjectQuery(plannedQuery, {
+  const plan = planValidatedQuery(validated, plannedQuery, {
     capabilities,
     hasQueryObjects,
     hasCountObjects,
@@ -272,7 +272,7 @@ export async function countObjects(
     maxFallbackRows: options.maxFallbackRows,
     requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
   })
-  const plan = planObjectQuery(plannedQuery, {
+  const plan = planValidatedQuery(validated, plannedQuery, {
     capabilities,
     operation: "countObjects",
     hasQueryObjects,
@@ -325,7 +325,7 @@ export async function existsObjects(
     maxFallbackRows: options.maxFallbackRows,
     requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
   })
-  const plan = planObjectQuery(plannedQuery, {
+  const plan = planValidatedQuery(validated, plannedQuery, {
     capabilities,
     operation: "existsObjects",
     hasQueryObjects,
@@ -388,7 +388,7 @@ export async function facetObjects(
     maxFallbackRows: options.maxFallbackRows,
     requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
   })
-  const plan = planObjectQuery(plannedQuery, {
+  const plan = planValidatedQuery(validated, plannedQuery, {
     capabilities,
     operation: "facetObjects",
     hasQueryObjects,
@@ -490,6 +490,18 @@ function assertQueryViewable(
 interface ExpansionResolutionContext {
   ontology: OntologyRegistry
   maxExpansionFanout: number | undefined
+}
+
+/** The plan every entry point answers with, naming what the query reads for its caller's cache. */
+function planValidatedQuery(
+  validated: ValidatedObjectQuery,
+  query: ObjectQuery,
+  options: ObjectQueryPlanningOptions
+): ObjectQueryPlan {
+  return {
+    ...planObjectQuery(query, options),
+    readObjectTypeIds: validated.touchedObjectTypeIds,
+  }
 }
 
 function expandPushdownQuery(
