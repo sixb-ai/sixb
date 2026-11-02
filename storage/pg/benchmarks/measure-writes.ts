@@ -52,7 +52,8 @@ for (const mode of ["plain", "indexed", "text_counts"] as const) {
     await sql`UPDATE objects SET properties=jsonb_set(jsonb_set(properties,'{status}',to_jsonb(${String((pass % 3) + 1)}::text)),'{searchText}',to_jsonb((properties->>'searchText')||${` pass${pass}`}::text)),version=version+1 WHERE project_id='query-benchmark' AND object_type_id='User' AND primary_id=ANY(SELECT primary_id FROM objects WHERE project_id='query-benchmark' AND object_type_id='User' ORDER BY primary_id LIMIT 1000)`
     times.update.push(performance.now() - started)
   }
-  const [size] = await sql`SELECT pg_total_relation_size('objects') AS bytes`
+  const [size] =
+    await sql`SELECT (SELECT sum(pg_total_relation_size(relid))::bigint FROM pg_partition_tree('objects')) AS bytes`
   const result = { mode, rows: 55000, batch: 1000, times, bytes: size?.bytes }
   results.push(result)
   console.log(JSON.stringify(result))

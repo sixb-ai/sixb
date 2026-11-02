@@ -3,6 +3,7 @@ import type { ObjectQuery, ObjectQueryPredicate } from "@sixb/core"
 import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
 import { isConnectionLost } from "../storage-errors"
 import { withReservedPgConnection } from "../transactions"
+import { ensureObjectPartition, objectPartitionName } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
 import {
   compilePgFacetSummary,
@@ -10,6 +11,7 @@ import {
   compilePgObjectQuery,
   DEFAULT_OBJECT_QUERY_SOURCE,
 } from "./query-compiler"
+import { identifier, literal } from "./sql-text"
 
 export interface PgObjectTextCountIndex {
   readonly projectId: string
@@ -106,11 +108,19 @@ export async function preparePgObjectTextCounts(
         )
       }
 
+      const objectTypeIds = new Set(definitions.map((item) => item.definition.objectTypeId))
+      for (const objectTypeId of objectTypeIds) {
+        await ensureObjectPartition(connection, schema, objectTypeId)
+      }
+
       for (const item of definitions) {
         const statements = textCountIndexStatements(item)
+        const partition = `${identifier(schema)}.${identifier(
+          objectPartitionName(item.definition.objectTypeId)
+        )}`
         for (const [name, expression] of statements) {
           await connection.unsafe(
-            `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(name)} ON ${table} ${expression}`
+            `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(name)} ON ${partition} ${expression}`
           )
           const [valid] = await connection<{ indisvalid: boolean }[]>`
             SELECT indisvalid FROM pg_index
@@ -126,7 +136,11 @@ export async function preparePgObjectTextCounts(
         )
         names.push(item.name)
       }
-      await connection.unsafe(`ANALYZE ${table}`)
+      for (const objectTypeId of objectTypeIds) {
+        await connection.unsafe(
+          `ANALYZE ${identifier(schema)}.${identifier(objectPartitionName(objectTypeId))}`
+        )
+      }
     } catch (error) {
       connected = !isConnectionLost(error)
       throw error
@@ -204,7 +218,7 @@ async function compilePgIndexedTextAggregate(
   const rows = await sql<{ name: string; definition: string }[]>`
     SELECT c.relname AS name, obj_description(c.oid,'pg_class') AS definition
     FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
-    WHERE i.indrelid='objects'::regclass AND i.indisvalid
+    WHERE i.indrelid=to_regclass(${objectPartitionName(shape.objectTypeId)}) AND i.indisvalid
       AND c.relname LIKE 'sixb_text_count_%' AND obj_description(c.oid,'pg_class') IS NOT NULL`
   for (const row of rows) {
     const definition = parseDefinition(row.definition)
@@ -444,13 +458,4 @@ function parseDefinition(text: string): PgObjectTextCountIndex | undefined {
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 24)
-}
-
-function identifier(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`
-}
-
-function literal(value: string): string {
-  if (value.includes("\0")) throw new Error("[SixbPg] Text count identifiers cannot contain NUL")
-  return `E'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`
 }

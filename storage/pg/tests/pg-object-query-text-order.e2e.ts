@@ -50,11 +50,11 @@ beforeAll(async () => {
 
   // The previous generation of the same index: identical definition, JSONB expression.
   const code = "properties -> 'code'"
-  await sql.unsafe(`CREATE INDEX sixb_query_previous ON objects (
+  await sql.unsafe(`CREATE INDEX sixb_query_previous ON objects_default (
       (CASE WHEN jsonb_typeof(${code}) IS NULL OR jsonb_typeof(${code}) = 'null' THEN 1 ELSE 0 END),
       (NULLIF(${code}, 'null'::jsonb)) ASC, primary_id
     ) WHERE project_id = 'bench' AND object_type_id = 'Label'`)
-  await sql.unsafe("CREATE INDEX sixb_query_previous_overflow ON objects (primary_id)")
+  await sql.unsafe("CREATE INDEX sixb_query_previous_overflow ON objects_default (primary_id)")
   await sql.unsafe(
     `COMMENT ON INDEX sixb_query_previous IS '${JSON.stringify(definition).replaceAll("'", "''")}'`
   )
@@ -90,7 +90,8 @@ function removedByFilter(plan: string): number {
 test("replaces an earlier generation of a sort index", async () => {
   const indexes = await sql<{ name: string }[]>`
     SELECT c.relname AS name FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
-    WHERE i.indrelid = 'objects'::regclass AND c.relname LIKE 'sixb_query_%'
+    WHERE i.indrelid IN (SELECT inhrelid FROM pg_inherits WHERE inhparent = 'objects'::regclass)
+      AND c.relname LIKE 'sixb_query_%'
     ORDER BY c.relname`
   const names = indexes.map((index) => index.name)
 
