@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
 import { afterEach, describe, expect, test } from "bun:test"
-import { RGBA, SyntaxStyle } from "@opentui/core"
+import { CodeRenderable, type Renderable, RGBA, SyntaxStyle } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { useRenderer } from "@opentui/react"
 import { testRender } from "@opentui/react/test-utils"
@@ -215,13 +215,29 @@ function StreamedTurn() {
   )
 }
 
-/** The screen's rows once `turn` is drawn, after highlighting that is ready has landed. */
+/**
+ * The screen's rows once `turn` is drawn and its highlighting has landed. Highlighting runs off
+ * the frame, so a single tick is not enough under load: a list item could still show the text it
+ * was last highlighted with.
+ */
 async function draw(screen: TestRendererSetup, turn: Turn): Promise<string[]> {
   showTurn(turn)
-  await screen.renderOnce()
-  await new Promise((resolve) => setImmediate(resolve))
-  await screen.renderOnce()
-  return rowsOf(screen)
+
+  for (let frame = 0; frame < 20; frame++) {
+    await screen.renderOnce()
+
+    const highlighting = codeIn(screen.renderer.root).filter((code) => code.isHighlighting)
+    if (highlighting.length === 0) return rowsOf(screen)
+
+    await Promise.all(highlighting.map((code) => code.highlightingDone))
+  }
+
+  throw new Error("The answer was still being highlighted after 20 frames.")
+}
+
+function codeIn(node: Renderable): CodeRenderable[] {
+  const below = node.getChildren().flatMap(codeIn)
+  return node instanceof CodeRenderable ? [node, ...below] : below
 }
 
 function rowsOf(screen: TestRendererSetup): string[] {
