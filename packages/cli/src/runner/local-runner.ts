@@ -171,7 +171,9 @@ export class LocalRunner {
           ...(backgroundCommands.length > 0 ? { backgroundCommands: [...backgroundCommands] } : {}),
         },
       })
-      if (error) throw new SessionRefusedError(response?.status ?? 0, refusalText(error))
+      // No response is a network failure, which says what's wrong better than a refusal would.
+      if (error)
+        throw response ? new SessionRefusedError(response.status, refusalText(error)) : error
       this.noteSession(null)
       // Closed meanwhile, with the setting or by quitting: what waits keeps waiting.
       if (this.session?.id !== id) return
@@ -314,8 +316,11 @@ export class LocalRunner {
     await this.runner.drain()
   }
 
-  /** Left waiting while a turn runs here: it runs once that one ends, or at a later renewal. */
-  private claimElsewhere(runId: string): Promise<boolean> {
+  /**
+   * Claim a turn sent from elsewhere, and say so. Left waiting while a turn runs here: it runs once
+   * that one ends, or at a later renewal.
+   */
+  claimElsewhere(runId: string): Promise<boolean> {
     if (this.running.size > 0) return Promise.resolve(false)
     return this.claim(runId, (run) => {
       const ended = this.running.get(run.id)?.done ?? Promise.resolve(false)

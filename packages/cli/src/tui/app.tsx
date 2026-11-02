@@ -27,7 +27,7 @@ import {
 } from "@sixb/client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Connection } from "../lib/connection"
-import { setFoldersAllowed } from "../runner/allowed-folders"
+import { isFolderAllowed, setFoldersAllowed, watchAllowedFolders } from "../runner/allowed-folders"
 import { thisComputer } from "../runner/computer"
 import { type LocalRunner, owns } from "../runner/local-runner"
 import { Logo } from "./brand"
@@ -147,6 +147,26 @@ export function Workspace(props: WorkspaceProps) {
     runner.openSession()
     return () => void runner.closeSession()
   }, [settings.continueFromWeb, runner])
+  // Another sixb may forget this folder, or choose it: that holds here too, with no restart.
+  useEffect(() => {
+    let stop: (() => void) | null = null
+    let unmounted = false
+    const follow = () =>
+      void isFolderAllowed(runner.folder).then((continueFromWeb) =>
+        setSettingsState((current) => ({ ...current, continueFromWeb }))
+      )
+    void watchAllowedFolders(follow).then(
+      (unwatch) => {
+        if (unmounted) unwatch()
+        else stop = unwatch
+      },
+      () => {}
+    )
+    return () => {
+      unmounted = true
+      stop?.()
+    }
+  }, [runner])
   useEffect(
     () => runner.onElsewhere(() => say("A message sent from elsewhere runs here")),
     [runner, say]
@@ -844,7 +864,8 @@ function ThreadView(
   const queued = runs.find((run) => run.id === activeRunId)?.status === "queued"
   const { continueFromWeb } = props.settings
   useEffect(() => {
-    if (activeRunId && runsHere && queued && continueFromWeb) void runner.claim(activeRunId)
+    if (activeRunId && runsHere && queued && continueFromWeb)
+      void runner.claimElsewhere(activeRunId)
   }, [activeRunId, runsHere, queued, continueFromWeb, runner])
   // Its turns move to this computer, which alone claims them from now on, and to this folder.
   const moveHere = async () => {

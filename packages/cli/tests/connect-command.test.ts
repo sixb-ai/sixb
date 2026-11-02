@@ -79,6 +79,23 @@ describe("sixb connect", () => {
     expect(await Bun.file(allowedFile).exists()).toBe(false)
   })
 
+  // Guard proof: offer this folder under --yes as well, in allowFolders; a service started with --yes
+  // and no folder allows whatever directory it was started in, / or home included.
+  test("doesn't take --yes as a choice of this folder", async () => {
+    const { env, root, allowedFile } = await project()
+    const result = await runCliToCompletion({
+      cmd: [process.execPath, CLI, "connect", "--yes"],
+      cwd: root,
+      env,
+      stdin: "",
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("No folders are allowed")
+    expect(await Bun.file(allowedFile).exists()).toBe(false)
+  })
+
   test("says what's wrong with a folder that doesn't exist", async () => {
     const { env, root } = await project()
     const result = await runCliToCompletion({

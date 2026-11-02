@@ -4,6 +4,9 @@ import type { Connection } from "../lib/connection"
 import { readAllowedFolders, watchAllowedFolders } from "./allowed-folders"
 import { LocalRunner, SessionRefusedError } from "./local-runner"
 
+/** How often the allowed folders are checked for being there still. */
+const FOLDER_RECHECK_MS = 20_000
+
 /** What a connected computer reports, one line each with `sixb connect --json`. */
 export type ComputerEvent =
   | { readonly type: "folders"; readonly folders: readonly string[] }
@@ -39,6 +42,7 @@ export class ComputerConnection {
   private readonly runners = new Map<string, LocalRunner>()
   private socket: { close(): void } | null = null
   private unwatch: (() => void) | null = null
+  private recheck: ReturnType<typeof setInterval> | null = null
   private reconciled: Promise<void> = Promise.resolve()
   private shown: readonly string[] | null = null
   private stopped = false
@@ -52,6 +56,8 @@ export class ComputerConnection {
   async start(): Promise<void> {
     this.unwatch = await watchAllowedFolders(() => void this.reconcile())
     await this.reconcile()
+    // A folder can go or come back with no change to the list: a deleted one, an unmounted volume.
+    this.recheck = setInterval(() => void this.reconcile(), FOLDER_RECHECK_MS)
     this.socket = createAgentActivitySocket({
       client: this.connection.client,
       onActivity: (event) => {
@@ -69,6 +75,7 @@ export class ComputerConnection {
     this.stopped = true
     this.socket?.close()
     this.unwatch?.()
+    if (this.recheck) clearInterval(this.recheck)
     await this.reconciled
     await Promise.allSettled([...this.runners.values()].map((runner) => runner.stop()))
   }
@@ -106,7 +113,7 @@ export class ComputerConnection {
     }
   }
 
-  /** A folder since deleted reads as offline, rather than as one whose turns all fail. */
+  /** A folder that's gone reads as offline, rather than as one whose turns all fail. */
   private async existing(folders: readonly string[]): Promise<readonly string[]> {
     const found = await Promise.all(
       folders.map((folder) =>

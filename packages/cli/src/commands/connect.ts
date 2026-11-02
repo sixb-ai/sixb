@@ -95,21 +95,25 @@ async function allowFolders(options: {
       `[SixbCLI] Could not read your allowed folders. ${error instanceof Error ? error.message : ""}`
     )
   })
-  const named = await Promise.all(options.folders.map(realFolder))
-  // Nothing named and nothing allowed yet: this folder is the obvious one to offer.
-  const offered = named.length === 0 && allowed.length === 0 ? [await realFolder(".")] : named
-  const asked = [...new Set(offered)].filter((folder) => !allowed.includes(folder))
-
+  const named = [...new Set(await Promise.all(options.folders.map(realFolder)))]
   const interactive = process.stdin.isTTY && !options.json
-  if (asked.length > 0 && !options.yes && !interactive) {
+  const newlyNamed = named.filter((folder) => !allowed.includes(folder))
+
+  if (newlyNamed.length > 0 && !options.yes && !interactive) {
     throw refusal(
-      `[SixbCLI] ${asked.join(", ")} isn't allowed yet: run sixb connect in a terminal to choose it, or pass --yes.`
+      `[SixbCLI] ${newlyNamed.join(", ")} isn't allowed yet: run sixb connect in a terminal to choose it, or pass --yes.`
     )
   }
-  const chosen = options.yes ? asked : await askEach(asked)
+  const chosen: string[] = options.yes ? [...newlyNamed] : [...(await askEach(newlyNamed))]
+  // Nothing named and nothing allowed: this folder is the one to offer, to a person, never by --yes.
+  if (named.length === 0 && allowed.length === 0 && interactive) {
+    chosen.push(...(await askEach([await realFolder(".")])))
+  }
   if (chosen.length > 0) await setFoldersAllowed(chosen, true)
   if (allowed.length + chosen.length === 0) {
-    throw refusal("[SixbCLI] No folders are allowed, so nothing would run here.")
+    throw refusal(
+      "[SixbCLI] No folders are allowed, so nothing would run here. Choose one: sixb connect <folder>."
+    )
   }
 }
 

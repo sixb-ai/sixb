@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -24,6 +24,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  jest.useRealTimers()
   if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME
   else process.env.XDG_CONFIG_HOME = previousConfigHome
   await rm(home, { recursive: true, force: true })
@@ -135,6 +136,28 @@ describe("a connected computer", () => {
     const { computer, held } = connected()
     await computer.start()
     await holding(held, [a])
+    await computer.stop()
+  })
+
+  // Guard proof: read the folders only when the list changes, dropping `recheck` from start; a folder
+  // deleted while connected reads as online, and every message sent to it fails.
+  test("closes the session of a folder that goes away while connected", async () => {
+    const a = await folder("a")
+    await setFoldersAllowed([a], true)
+    // The filesystem's report of that write can arrive late, and would read the folders again too:
+    // this test would pass without the recheck. Timers are real until here; faked, this never ends.
+    await Bun.sleep(300)
+
+    jest.useFakeTimers()
+    const { computer, until } = connected()
+    await computer.start()
+    await until((event) => event.type === "folders" && event.folders.length === 1)
+
+    await rm(a, { recursive: true })
+    jest.advanceTimersByTime(20_000)
+    await until((event) => event.type === "folders" && event.folders.length === 0)
+
+    jest.useRealTimers()
     await computer.stop()
   })
 

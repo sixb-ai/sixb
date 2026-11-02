@@ -42,8 +42,8 @@ afterEach(async () => {
 async function avasRunner(
   turn: { status: string },
   computer: { readonly id?: string; readonly folder?: string } = {},
-  /** What a session's renewal waits for before it answers. */
-  renewalGate: Promise<void> = Promise.resolve()
+  /** What each of a session's renewals waits for before it answers, by its number from 0. */
+  renewalGate: (renewal: number) => Promise<void> = () => Promise.resolve()
 ) {
   const thread = {
     id: "thr_1",
@@ -78,7 +78,7 @@ async function avasRunner(
         body: request.method === "PUT" ? await request.json() : undefined,
       })
       if (request.method === "DELETE") return new Response(null, { status: 204 })
-      await renewalGate
+      await renewalGate(sessions.filter((session) => session.method === "PUT").length - 1)
       return Response.json({
         expiresAt: "2026-10-31T09:01:00.000Z",
         waiting: ["run_9"],
@@ -262,7 +262,7 @@ describe("a session closing while its renewal is on its way", () => {
     const gate = new Promise<void>((resolve) => {
       answer = resolve
     })
-    const { runner, claimed, sessions } = await avasRunner({ status: "queued" }, {}, gate)
+    const { runner, claimed, sessions } = await avasRunner({ status: "queued" }, {}, () => gate)
     runner.openSession()
     while (sessions.length === 0) await Bun.sleep(0)
 
@@ -350,6 +350,34 @@ describe("a turn sent from elsewhere", () => {
     claimedBy("run_9")
     await typed
     expect(heard).toEqual([])
+  })
+})
+
+describe("a session's renewals", () => {
+  // Guard proof: overwrite lastCall with each renewal; the release overtakes an older one in flight,
+  // which opens the session again, reading online for a minute with nothing holding it.
+  test("all land before its release, however many are in flight", async () => {
+    let answerFirst = () => {}
+    const gate = new Promise<void>((resolve) => {
+      answerFirst = resolve
+    })
+    // The first stalls, and the second answers: only the release's wait for both can hold it back.
+    const { runner, sessions } = await avasRunner({ status: "queued" }, {}, (renewal) =>
+      renewal === 0 ? gate : Promise.resolve()
+    )
+    runner.claim = async () => true
+    runner.openSession()
+    while (sessions.length === 0) await Bun.sleep(0)
+    const inner = runner as unknown as { session: { renew(): void } }
+    inner.session.renew()
+    while (sessions.length < 2) await Bun.sleep(0)
+
+    const closed = runner.closeSession()
+    for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(0)
+    expect(sessions.map((session) => session.method)).toEqual(["PUT", "PUT"])
+    answerFirst()
+    await closed
+    expect(sessions.at(-1)?.method).toBe("DELETE")
   })
 })
 
