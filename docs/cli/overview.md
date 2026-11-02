@@ -51,9 +51,12 @@ A message you send from the app runs on your computer as one typed in `sixb` doe
 permission mode the app sends it with; while `sixb` is closed, it waits for it. **Continue in the
 cloud** moves the conversation to the cloud instead, for good: the waiting message runs there,
 and the files in the folder stay on your computer. A conversation moves only once no turn is
-running or waiting for your approval. To keep messages from the app from running in
-a folder, turn off **Messages from the web** in `ctrl+p` there: they wait until you turn it back
-on, or move the conversation to the cloud.
+running or waiting for your approval.
+
+Messages from the app run only in folders you've chosen on this computer. Turn on **Messages from
+the web** in `ctrl+p` to choose this one, and off again to forget it. Until then a message waits, or
+you can move the conversation to the cloud. Once a folder is chosen, whoever is signed in as you can
+send it messages, and the agent's commands run there without asking.
 
 From a script, `sixb agent` asks once and prints the answer:
 

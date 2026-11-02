@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadSettings, rememberWebMessages, saveSettings } from "../src/tui/settings"
+import { setFoldersAllowed } from "../src/runner/allowed-folders"
+import { loadSettings, saveSettings } from "../src/tui/settings"
 
 // Messages from the web decide what runs on this computer, so the choice belongs to one folder
 // and nothing else `sixb` saves may undo it.
@@ -27,48 +28,49 @@ afterEach(async () => {
 })
 
 describe("messages from the web", () => {
-  test("are on until turned off, in that folder alone, until turned back on", async () => {
-    expect((await loadSettings(FOLDER)).continueFromWeb).toBe(true)
-
-    await rememberWebMessages(FOLDER, false)
+  // Guard proof: answer true from isFolderAllowed for an absent list, as `sixb` first did; a message
+  // from a stolen sign-in runs in a folder nobody chose.
+  test("are off until a folder is chosen, in that folder alone, until it's forgotten", async () => {
     expect((await loadSettings(FOLDER)).continueFromWeb).toBe(false)
-    expect((await loadSettings(OTHER)).continueFromWeb).toBe(true)
 
-    await rememberWebMessages(OTHER, false)
-    await rememberWebMessages(FOLDER, true)
+    await setFoldersAllowed([FOLDER], true)
     expect((await loadSettings(FOLDER)).continueFromWeb).toBe(true)
     expect((await loadSettings(OTHER)).continueFromWeb).toBe(false)
+
+    await setFoldersAllowed([OTHER], true)
+    await setFoldersAllowed([FOLDER], false)
+    expect((await loadSettings(FOLDER)).continueFromWeb).toBe(false)
+    expect((await loadSettings(OTHER)).continueFromWeb).toBe(true)
   })
 
-  // Guard proof: write continueFromWeb in saveSettings and read it in loadSettings, as it first
-  // was; another sixb saving its model turns messages back on where they were turned off.
-  test("stay off when another sixb, with them on, saves its settings", async () => {
-    await rememberWebMessages(FOLDER, false)
+  // Guard proof: write continueFromWeb in saveSettings and read it in loadSettings; another sixb
+  // saving its model turns messages on or off in folders it was never open in.
+  test("are kept apart from the settings another sixb saves", async () => {
+    await setFoldersAllowed([FOLDER], true)
     const another = await loadSettings(OTHER)
     await saveSettings({ ...another, reasoning: "high" })
 
-    const stored = await readFile(join(configHome, "sixb", "tui.json"), "utf8")
+    const stored = await readFile(join(configHome, "sixb", "tui.json"), "utf-8")
     expect(JSON.parse(stored)).not.toHaveProperty("continueFromWeb")
-    expect(await loadSettings(FOLDER)).toMatchObject({ continueFromWeb: false, reasoning: "high" })
+    expect(await loadSettings(FOLDER)).toMatchObject({ continueFromWeb: true, reasoning: "high" })
   })
 
-  // Guard proof: answer true from webMessagesOnIn's catch; a damaged file runs turns here that the
-  // person had turned off.
-  test("stay off when the choice can't be read", async () => {
-    await writeFile(join(configHome, "sixb", "web-messages-off.json"), "{ damaged")
+  // Guard proof: answer true from isFolderAllowed's failure; a damaged list runs turns anywhere.
+  test("stay off when the list can't be read", async () => {
+    await writeFile(join(configHome, "sixb", "allowed-folders.json"), "{ damaged")
     expect((await loadSettings(FOLDER)).continueFromWeb).toBe(false)
   })
 
-  // Guard proof: read the list as empty when it can't be parsed, in rememberWebMessages; the write
-  // that follows turns messages back on in every other folder that had them off.
-  test("refuse a new choice rather than overwrite one they can't read", async () => {
-    const path = join(configHome, "sixb", "web-messages-off.json")
+  // Guard proof: read the list as empty when it can't be parsed, in setFoldersAllowed; the write
+  // that follows forgets every folder chosen before.
+  test("refuse a new choice rather than overwrite a list they can't read", async () => {
+    const path = join(configHome, "sixb", "allowed-folders.json")
     await writeFile(path, "{ damaged")
 
-    expect(
-      await rememberWebMessages(FOLDER, false).catch((error: unknown) => error)
-    ).toBeInstanceOf(Error)
-    expect(await readFile(path, "utf8")).toBe("{ damaged")
-    expect(await readdir(join(configHome, "sixb"))).toEqual(["web-messages-off.json"])
+    expect(await setFoldersAllowed([FOLDER], true).catch((error: unknown) => error)).toBeInstanceOf(
+      Error
+    )
+    expect(await readFile(path, "utf-8")).toBe("{ damaged")
+    expect(await readdir(join(configHome, "sixb"))).toEqual(["allowed-folders.json"])
   })
 })
