@@ -67,7 +67,8 @@ sixb connect ~/projects/notes
 It asks once before allowing each folder, runs turns sent to conversations in your allowed folders,
 one at a time per folder, and stops on `ctrl+c`, ending a running turn as interrupted. Whatever keeps
 it running decides how long it stays connected. With no folder it uses the ones you've allowed;
-`--yes` allows those named without asking, and `--json` prints status as JSON lines:
+`--yes` allows those named without asking, and `--json` prints status as JSON lines. Keep to one of
+`sixb` or `sixb connect` holding a folder: each runs its own turns one at a time, not each other's.
 
 ```json
 {"type":"folders","folders":["/Users/you/projects/notes"]}
@@ -81,8 +82,9 @@ If your sign-in ends it exits with code `3`.
 
 While a turn runs on your computer, in `sixb` or `sixb connect`, it keeps a Mac awake, on battery too.
 Closing the lid still puts it to sleep, and a turn asleep for more than a minute ends interrupted.
-Turn this off with **Keep computer awake during turns** in `ctrl+p`. On Linux and Windows, your
-computer's own sleep settings apply.
+Turn this off with **Keep computer awake during turns** in `ctrl+p`; it applies from the next turn,
+and `sixb connect` reads it when it starts. On Linux and Windows, your computer's own sleep settings
+apply.
 
 From a script, `sixb agent` asks once and prints the answer:
 

@@ -14,6 +14,8 @@ import { glyph, tone } from "../ui/theme"
 
 /** Exit status when the person's sign-in ended: a service manager should not just restart this. */
 const EXIT_SIGNED_OUT = 3
+/** How long stopping waits for a running turn to record its end, or the project to answer. */
+const STOP_WAIT_MS = 10_000
 
 /**
  * `sixb connect [folder...]`: keep this computer available without `sixb` open. Turns sent from
@@ -67,7 +69,7 @@ export async function runConnect(options: {
   // Ctrl+C is how this is meant to stop; a second one doesn't wait for a turn to record its end.
   process.once("SIGINT", () => {
     process.once("SIGINT", () => process.exit(130))
-    void computer.stop().finally(() => finish(0))
+    void Promise.race([computer.stop(), Bun.sleep(STOP_WAIT_MS)]).finally(() => finish(0))
   })
 
   if (!options.json) {

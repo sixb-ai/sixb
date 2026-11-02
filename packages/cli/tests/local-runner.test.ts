@@ -43,7 +43,8 @@ async function avasRunner(
   turn: { status: string },
   computer: { readonly id?: string; readonly folder?: string } = {},
   /** What each of a session's renewals waits for before it answers, by its number from 0. */
-  renewalGate: (renewal: number) => Promise<void> = () => Promise.resolve()
+  renewalGate: (renewal: number) => Promise<void> = () => Promise.resolve(),
+  waiting: readonly string[] = ["run_9"]
 ) {
   const thread = {
     id: "thr_1",
@@ -81,7 +82,7 @@ async function avasRunner(
       await renewalGate(sessions.filter((session) => session.method === "PUT").length - 1)
       return Response.json({
         expiresAt: "2026-10-31T09:01:00.000Z",
-        waiting: ["run_9"],
+        waiting,
         ...renewals,
       })
     }
@@ -378,6 +379,55 @@ describe("a session's renewals", () => {
     answerFirst()
     await closed
     expect(sessions.at(-1)?.method).toBe("DELETE")
+  })
+})
+
+describe("turns waiting for a folder", () => {
+  // Guard proof: claim only the first listed, in claimFirst; a turn that keeps failing to claim holds
+  // up every turn behind it, for good.
+  test("aren't held up by one that can't be claimed", async () => {
+    const { runner, claimed } = await avasRunner(
+      { status: "queued" },
+      {},
+      () => Promise.resolve(),
+      ["run_stuck", "run_next"]
+    )
+    let arrived = () => {}
+    const reachedNext = new Promise<void>((resolve) => {
+      arrived = resolve
+    })
+    runner.claim = async (runId) => {
+      claimed.push(runId)
+      if (runId === "run_next") arrived()
+      return false
+    }
+
+    runner.openSession()
+    await reachedNext
+    expect(claimed).toEqual(["run_stuck", "run_next"])
+    await runner.closeSession()
+  })
+
+  // Guard proof: drop the session check from noteSession; a renewal failing after a clean stop reports
+  // a sign-in or a session lost, for a session nobody holds any more.
+  test("say nothing of a session that closed while its renewal was on its way", async () => {
+    let fail = (_reason: unknown) => {}
+    const gate = new Promise<void>((_resolve, reject) => {
+      fail = reject
+    })
+    const { runner, sessions } = await avasRunner({ status: "queued" }, {}, () => gate)
+    const told: unknown[] = []
+    Object.assign(runner, {
+      options: { onSessionChange: (failure: unknown) => told.push(failure) },
+    })
+    runner.openSession()
+    while (sessions.length === 0) await Bun.sleep(0)
+
+    const closed = runner.closeSession()
+    fail(new Error("The network went away."))
+    await closed
+    expect(sessions.at(-1)?.method).toBe("DELETE")
+    expect(told).toEqual([])
   })
 })
 

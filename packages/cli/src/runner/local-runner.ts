@@ -11,6 +11,7 @@ import {
   getAgentRun,
   getAgentThread,
   holdAgentComputerSession,
+  isSixbApiError,
   releaseAgentComputerSession,
 } from "@sixb/client"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
@@ -33,19 +34,11 @@ export function deniedPaths(): readonly string[] {
   return [dirname(resolveConfigPath()), join(homedir(), ".ssh"), join(homedir(), ".aws")]
 }
 
-/** The project refused a session's renewal, as opposed to being out of reach. */
-export class SessionRefusedError extends Error {
-  constructor(
-    readonly status: number,
-    message: string
-  ) {
-    super(message)
-    this.name = "SessionRefusedError"
-  }
-}
-
 export interface LocalRunnerOptions {
-  /** The session stopped renewing, or started again. Called when that changes, not each time. */
+  /**
+   * The session stopped renewing, or started again, or fails differently now: called when that
+   * changes, not at each renewal. A refusal from the project is a `SixbApiError`.
+   */
   readonly onSessionChange?: (failure: unknown | null) => void
   /** How a running turn keeps the computer awake. By default, `keepAwake`. */
   readonly holdAwake?: () => ReleaseAwake
@@ -72,7 +65,8 @@ export class LocalRunner {
     readonly timer: ReturnType<typeof setInterval>
     readonly renew: () => void
   } | null = null
-  private sessionFailing = false
+  /** Why the session last failed, null while it renews. A change in why is news: see noteSession. */
+  private sessionFailure: string | null = null
   /** Whether a running turn keeps the computer awake: the person's setting. */
   keepsAwake = true
   /** The session's last call: its release follows a renewal, which would open it again. */
@@ -163,7 +157,7 @@ export class LocalRunner {
     const hold = async () => {
       // Read as it is sent, so a renewal that waited its turn reports the commands as they are.
       const backgroundCommands = this.runner.backgroundCommands()
-      const { data, error, response } = await holdAgentComputerSession({
+      const { data, error } = await holdAgentComputerSession({
         client: this.connection.client,
         path: { sessionId: id },
         body: {
@@ -171,13 +165,11 @@ export class LocalRunner {
           ...(backgroundCommands.length > 0 ? { backgroundCommands: [...backgroundCommands] } : {}),
         },
       })
-      // No response is a network failure, which says what's wrong better than a refusal would.
-      if (error)
-        throw response ? new SessionRefusedError(response.status, refusalText(error)) : error
-      this.noteSession(null)
+      if (error) throw error
+      this.noteSession(id, null)
       // Closed meanwhile, with the setting or by quitting: what waits keeps waiting.
       if (this.session?.id !== id) return
-      for (const runId of data?.waiting ?? []) void this.claimElsewhere(runId)
+      void this.claimFirst(data?.waiting ?? [])
       for (const ref of data?.stop ?? []) void this.stopBackground(ref)
     }
 
@@ -193,7 +185,7 @@ export class LocalRunner {
           queued = false
           return hold()
         })
-        .catch((error: unknown) => this.noteSession(error))
+        .catch((error: unknown) => this.noteSession(id, error))
     }
     this.session = { id, timer: setInterval(renew, SESSION_RENEW_MS), renew }
     renew()
@@ -237,7 +229,7 @@ export class LocalRunner {
     const session = this.session
     if (session) {
       this.session = null
-      this.sessionFailing = false
+      this.sessionFailure = null
       clearInterval(session.timer)
       // Whoever closes it next waits for this one, as quitting does after the screen let go.
       this.lastCall = this.lastCall
@@ -328,17 +320,31 @@ export class LocalRunner {
     })
   }
 
-  private noteSession(failure: unknown | null): void {
-    if ((failure !== null) === this.sessionFailing) return
-    this.sessionFailing = failure !== null
-    if (this.options.onSessionChange) this.options.onSessionChange(failure)
-    else if (failure !== null) this.onFailure(failure)
+  /** The first that can be claimed, so one that keeps failing can't hold up those behind it. */
+  private async claimFirst(runIds: readonly string[]): Promise<void> {
+    for (const runId of runIds) {
+      if (await this.claimElsewhere(runId)) return
+    }
+  }
+
+  /** A renewal that lands after its session closed says nothing about the one now, if any. */
+  private noteSession(sessionId: string, failure: unknown | null): void {
+    if (this.session?.id !== sessionId) return
+    const reason = failure === null ? null : failureReason(failure)
+    if (reason === this.sessionFailure) return
+    const wasFailing = this.sessionFailure !== null
+    this.sessionFailure = reason
+    if (this.options.onSessionChange) {
+      if (failure !== null || wasFailing) this.options.onSessionChange(failure)
+    } else if (failure !== null) {
+      this.onFailure(failure)
+    }
   }
 }
 
-function refusalText(error: unknown): string {
-  const message = (error as { readonly error?: unknown } | null)?.error
-  return typeof message === "string" ? message : "[SixbCLI] The project refused this session."
+function failureReason(failure: unknown): string {
+  if (isSixbApiError(failure)) return `${failure.status}`
+  return failure instanceof Error ? failure.message : String(failure)
 }
 
 /** Whether the person signed in owns `thread`: with sign-in off, the system owns what it starts. */
