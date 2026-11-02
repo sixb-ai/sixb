@@ -519,6 +519,7 @@ export type {
   ShareTarget,
   ShareViewGrant,
   ShareViewGrantBuilder,
+  TrustedSharesRuntime,
 } from "./shares"
 export { defineShare, ShareDefinitionError, ShareError } from "./shares"
 
@@ -881,6 +882,7 @@ export type {
   ExecutionScope,
   ExecutionSource,
   KernelOperation,
+  RequestClient,
   RuntimeAuthorization,
   TrustedPrimitiveKind,
   TrustedPrimitiveRef,
@@ -1193,6 +1195,7 @@ export type {
   AgentMessagePart,
   AgentMessagePartType,
   AgentMessageRole,
+  AgentOptions,
   AgentProjectFile,
   AgentProviderStatePart,
   AgentReasoning,

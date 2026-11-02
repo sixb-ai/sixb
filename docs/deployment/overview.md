@@ -32,7 +32,7 @@ If your pages show another site in an `<iframe>`, set `SIXB_APP_FRAME_ORIGINS` f
 
 ## Run behind a proxy
 
-The API records each client's IP address for sessions and access tokens, and limits CLI login requests per address. Behind a reverse proxy or load balancer, it reads the client from `X-Forwarded-For`, but only the entries appended by proxies it trusts. Entries a client sends itself are ignored.
+The API records each client's IP address for sessions and access tokens, limits CLI login requests per address, and passes it to [actions](../actions/overview.md#know-where-the-request-came-from). Behind a reverse proxy or load balancer, it reads the client from `X-Forwarded-For`, but only the entries appended by proxies it trusts. Entries a client sends itself are ignored.
 
 By default the API trusts proxies on loopback, private, and link-local networks. This covers a proxy on the same host (such as Caddy or nginx), Docker and Kubernetes networking, and most hosting platforms. If a proxy with a public address sits in front, such as a CDN, add its ranges:
 

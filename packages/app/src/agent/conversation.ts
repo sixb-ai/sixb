@@ -578,6 +578,8 @@ export type AgentConversationTurn = AgentConversationTurnActions &
         readonly runId: string
         /** The answer has waited in the queue longer than usual. */
         readonly waitingLonger: boolean
+        /** The computer the answer waits for, while it is offline. */
+        readonly waitingFor: string | null
         /** Earlier turns are being condensed before the answer starts, or to let it go on. */
         readonly compacting: boolean
         /** The condensing follows a request the provider refused as too long. */
@@ -604,6 +606,8 @@ export interface ConversationTurnInput extends AgentConversationTurnActions {
   readonly presentation: ActiveTurnPresentation
   readonly activeRunId: string | null
   readonly waitingLonger: boolean
+  /** The offline computer a conversation that runs on one waits for. */
+  readonly waitingFor: string | null
   readonly compacting: boolean
   readonly contextFull: boolean
   readonly reconnecting: boolean
@@ -632,6 +636,7 @@ export function conversationTurn(input: ConversationTurnInput): AgentConversatio
         runId: input.activeRunId,
         // Set while the wait is the queue's, before the run starts.
         waitingLonger: presentation.queuedRun !== null && input.waitingLonger,
+        waitingFor: presentation.queuedRun !== null ? input.waitingFor : null,
         compacting: input.compacting,
         contextFull: input.compacting && input.contextFull,
         reconnecting: input.reconnecting,
@@ -675,6 +680,7 @@ export const READ_ONLY_TURN = {
   retrying: false,
   continuing: false,
   waitingLonger: false,
+  waitingFor: null,
   compacting: false,
   contextFull: false,
   reconnecting: false,

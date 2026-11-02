@@ -21,6 +21,7 @@ const responding = {
   waitingLonger: false,
   reconnecting: false,
   answeringFor: null,
+  waitingFor: null,
   canStop: false,
   canRetry: false,
   canContinue: false,

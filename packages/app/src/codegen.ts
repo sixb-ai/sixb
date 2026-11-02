@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 import { en, fr } from "./locale-messages"
 import { renderAppManifest } from "./manifest"
@@ -1093,6 +1093,23 @@ function ApiUnavailableView({ apiBaseUrl }: { readonly apiBaseUrl: string }) {
   const runtimePath = join(generatedDir, "app-runtime.tsx")
   await writeFileIfChanged(runtimePath, runtimeContent)
 
+  // A project can draw the screen a dead shared link shows. Only the shared bootstrap imports this
+  // module, and only once the link has failed to open a session.
+  const sharedUnavailablePath = join(appDir, "shared-unavailable.tsx")
+  const hasSharedUnavailable = await fileExists(sharedUnavailablePath)
+  const sharedUnavailableModulePath = join(generatedDir, "shared-unavailable.tsx")
+  if (hasSharedUnavailable) {
+    await writeFileIfChanged(
+      sharedUnavailableModulePath,
+      renderSharedUnavailableModule(
+        relativeTo(generatedDir, sharedUnavailablePath),
+        globalsCssImport
+      )
+    )
+  } else {
+    await rm(sharedUnavailableModulePath, { force: true })
+  }
+
   // The normal entry owns only ambient application authentication. Its imported runtime is the
   // exact same module the shared bootstrap loads after establishing delegated authority.
   const mainContent = `import {
@@ -1160,6 +1177,19 @@ export interface SharedAppStartOptions {
 
 let activeController: SixbSharedBrowserClientController | null = null
 
+interface UnavailableScreenModule {
+  renderSharedUnavailable(
+    container: HTMLElement,
+    props: { readonly locale: string; readonly title: string; readonly description: string },
+    onError: () => void
+  ): void
+}
+
+// The project's own screen for a link that opens nothing, from app/shared-unavailable.tsx.
+const loadUnavailableScreen: (() => Promise<UnavailableScreenModule>) | null = ${
+    hasSharedUnavailable ? '() => import("./shared-unavailable")' : "null"
+  }
+
 if (import.meta.hot) {
   import.meta.hot.accept()
   import.meta.hot.dispose(() => {
@@ -1174,12 +1204,12 @@ export function startSharedApp(
 ): void {
   // A shared link speaks the reader's language: the grant cannot read the project's.
   document.documentElement.lang = browserAppLocale()
+  let loadAppStyles = options.loadAppStyles
   if (!isValidBootstrap(bootstrap)) {
-    renderSharedFallback("unavailable")
+    renderUnavailable(loadAppStyles)
     return
   }
   const { basename, grantId } = bootstrap
-  let loadAppStyles = options.loadAppStyles
 
   activeController?.dispose()
   let controller: SixbSharedBrowserClientController
@@ -1190,13 +1220,14 @@ export function startSharedApp(
     })
     activeController = controller
   } catch {
-    renderSharedFallback("unavailable")
+    renderUnavailable(loadAppStyles)
     return
   }
 
   let secret = bootstrap.secret
   let canonicalDestinationPath: string | null = null
   let appStylesLoaded = false
+  let established = false
   let pending = false
 
   const open = async () => {
@@ -1207,6 +1238,7 @@ export function startSharedApp(
     try {
       const exchangedSecret = secret !== null
       const session = await controller.establish(secret)
+      established = true
       // Once a server session exists the one-time link credential must not survive a retry.
       secret = null
       if (exchangedSecret) canonicalDestinationPath = session.destinationPath
@@ -1240,8 +1272,13 @@ export function startSharedApp(
       if (isRetryableSharedFailure(error)) {
         console.error("[SixbSharedApp] Shared access could not be opened; retry is available.")
         renderSharedFallback("retryable", () => void open())
-      } else {
+      } else if (established) {
+        // The link opened a session that is still live: project code does not run beside it.
         renderSharedFallback("unavailable")
+      } else {
+        controller.dispose()
+        if (activeController === controller) activeController = null
+        renderUnavailable(loadAppStyles)
       }
     } finally {
       pending = false
@@ -1249,6 +1286,40 @@ export function startSharedApp(
   }
 
   void open()
+}
+
+/**
+ * Show that the link opens nothing: the project's screen when it has one, Sixb's otherwise, and
+ * Sixb's again if the project's cannot load or render.
+ */
+function renderUnavailable(loadAppStyles?: () => Promise<void>): void {
+  const load = loadUnavailableScreen
+  if (!load) {
+    renderSharedFallback("unavailable")
+    return
+  }
+
+  const messages = browserAppMessages().shared
+  const fallBack = () => renderSharedFallback("unavailable")
+  void (async () => {
+    await loadAppStyles?.()
+    const { renderSharedUnavailable } = await load()
+    const root = document.getElementById("root")
+    if (!root) return
+    root.replaceChildren()
+    renderSharedUnavailable(
+      root,
+      {
+        locale: browserAppLocale(),
+        title: messages.unavailableTitle,
+        description: messages.unavailableDetail,
+      },
+      fallBack
+    )
+  })().catch(() => {
+    console.error("[SixbSharedApp] The project's unavailable screen could not be shown.")
+    fallBack()
+  })
 }
 
 function isValidBootstrap(value: SharedAppBootstrap): boolean {
@@ -1494,6 +1565,60 @@ ${renderSharedMetadataHead(metadata)}
     sharedHtmlPath,
     sharedMainPath,
   }
+}
+
+/** The module that renders `app/shared-unavailable.tsx` into a session-less React root. */
+function renderSharedUnavailableModule(componentPath: string, stylesheetImports: string): string {
+  return `import React from "react"
+import { createRoot, type Root } from "react-dom/client"
+import type { SharedUnavailableProps } from "@sixb/app"
+import SharedUnavailable from ${JSON.stringify(componentPath)}
+${stylesheetImports}
+
+interface BoundaryProps {
+  readonly onError: () => void
+  readonly children: React.ReactNode
+}
+
+// A screen that throws gives way to Sixb's own, so a dead link always says what it is.
+class Boundary extends React.Component<BoundaryProps, { readonly failed: boolean }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch() {
+    this.props.onError()
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children
+  }
+}
+
+// No provider wraps the screen: it has no session, router, or data client to read the project with.
+export function renderSharedUnavailable(
+  container: HTMLElement,
+  props: SharedUnavailableProps,
+  onError: () => void
+): void {
+  let root: Root | null = null
+  const fail = () => {
+    setTimeout(() => {
+      root?.unmount()
+      root = null
+      onError()
+    })
+  }
+  root = createRoot(container)
+  root.render(
+    <Boundary onError={fail}>
+      <SharedUnavailable {...props} />
+    </Boundary>
+  )
+}
+`
 }
 
 function renderSharedMetadataHead(

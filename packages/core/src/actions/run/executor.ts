@@ -1,5 +1,6 @@
 import { reportRunFailure } from "../../error-reporting/capability"
 import { createSixbError, type SixbCodedError } from "../../errors/internal"
+import type { RequestClient } from "../../execution/request-client"
 import type { ActionRunRecord } from "../../storage"
 import {
   type ActionRunRequestPayload,
@@ -26,6 +27,8 @@ export interface ActionRunRequest {
   readonly onRequested?: (runId: string) => void | Promise<void>
   /** Set when the requester views the subject's type through a condition. */
   readonly readSubjectAsRequester?: ReadSubjectAsRequester
+  /** Set when an HTTP request requested the run directly. Never persisted. */
+  readonly client?: RequestClient
 }
 
 type NewActionRun = Extract<PersistedActionRun, { readonly kind: "new" }>
@@ -189,6 +192,7 @@ export class ActionRunExecutor {
         ...(request.readSubjectAsRequester === undefined
           ? {}
           : { readSubjectAsRequester: request.readSubjectAsRequester }),
+        ...(request.client === undefined ? {} : { client: request.client }),
       })
     } catch (error) {
       throw this.failRequest(run, error)

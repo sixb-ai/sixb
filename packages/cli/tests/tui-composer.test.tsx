@@ -7,7 +7,7 @@ import type { SyntaxStyle } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { createSixbClient } from "@sixb/client"
-import { Workspace } from "../src/tui/app"
+import { activityLabel, Workspace } from "../src/tui/app"
 import type { LocalRunner } from "../src/tui/runner"
 import { tuiColors } from "../src/tui/theme"
 import { Composer } from "../src/tui/ui"
@@ -119,12 +119,19 @@ async function workspace(onExit: () => void): Promise<TestRendererSetup> {
         project: { id: "acme", timeZone: "UTC", locale: "en" },
         authorization: async () => "",
       }}
-      runner={{ folder: config, claimIfHere: async () => {} } as unknown as LocalRunner}
+      runner={
+        {
+          folder: config,
+          claimIfHere: async () => {},
+          onElsewhere: () => () => {},
+          runsHere: () => false,
+        } as unknown as LocalRunner
+      }
       computerId="cmp_1"
       colors={tuiColors("dark")}
       syntax={{} as SyntaxStyle}
       version="sixb v0.0.0"
-      initialSettings={{ place: "cloud", approvalMode: "manual" }}
+      initialSettings={{ place: "cloud", approvalMode: "manual", continueFromWeb: false }}
       onExit={onExit}
     />,
     // As the terminal's renderer is: the app decides what ctrl+c does.
@@ -157,4 +164,26 @@ describe("ctrl+c", () => {
     screen.mockInput.pressCtrlC()
     expect(exits).toBe(1)
   })
+})
+
+// Guard proof: answer "Starting" for every queued turn in activityLabel; a turn nothing here will
+// claim reads as about to run.
+test("says why a queued turn isn't starting here", () => {
+  const runs = [{ id: "run_1", status: "queued" }] as unknown as Parameters<typeof activityLabel>[0]
+  const where = {
+    onComputer: true,
+    mine: true,
+    here: true,
+    continueFromWeb: true,
+    runningHere: false,
+  }
+  const label = (change: Partial<typeof where>) =>
+    activityLabel(runs, "run_1", { ...where, ...change })
+
+  expect(label({})).toBe("Starting")
+  expect(label({ onComputer: false })).toBe("Starting")
+  expect(label({ mine: false })).toBe("Waiting for its owner's computer")
+  expect(label({ here: false })).toBe("Waiting for sixb in its folder")
+  expect(label({ continueFromWeb: false })).toBe("Waiting: messages from the web are off")
+  expect(label({ continueFromWeb: false, runningHere: true })).toBe("Starting")
 })

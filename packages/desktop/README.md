@@ -24,17 +24,19 @@ origin. Both generate the same Electron app first:
         ▼
 .sixb/desktop/app/        rewritten on every call (src/generate.ts)
   main.js                 the main process, compiled from src/shell/main.ts
+  preload.js              what the page can reach, compiled from src/shell/preload.ts
   shell.json              name, app URL, API origin
   index.html              the page shown while the app loads
-  preload.js, icon.png
+  icon.png
         │
         ├─ openDesktopApp   electron .sixb/desktop/app
         └─ buildDesktopApp  @electron/packager ─▶ .sixb/desktop/dist/
 ```
 
 The window loads the app from where it is served; `app/` is not compiled into the binary. The
-page runs sandboxed, with no Node and no channel into the main process, and the window stays on the
-app and API origins (`src/shell/window.ts`): any other link opens in the user's browser.
+page runs sandboxed, with no Node, and reaches the shell only through what `src/shell/bridge.ts`
+exposes, which says how to add to it. The window stays on the app and API origins
+(`src/shell/window.ts`): any other link opens in the user's browser.
 
 ### macOS builds
 
