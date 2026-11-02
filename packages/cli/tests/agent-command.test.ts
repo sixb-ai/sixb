@@ -8,6 +8,7 @@ import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
 // `sixb agent` against a fake API: what a script reads of a turn is its exit code and stdout.
 
 const CLI = resolve(import.meta.dir, "..", "src", "index.tsx")
+const REPOSITORY = resolve(import.meta.dir, "..", "..", "..")
 const THREAD = "agt_thread_1"
 const RUN = "agt_run_1"
 
@@ -19,15 +20,18 @@ afterEach(async () => {
 
 /** How the fake API answers: the thread, the turn's stream, and the turn as it ended. */
 interface Script {
-  readonly thread?: Response
+  readonly thread?: Response | (() => Response)
   /** The person's mode in the thread, as reading it says. */
   readonly mode?: string
   readonly stream?: (socket: ServerWebSocket<unknown>) => void
   readonly run?: Record<string, unknown>
+  /** The turn stays queued, as nothing has taken it. */
+  readonly queued?: boolean
 }
 
 async function fakeApi(script: Script) {
   const posted: Record<string, unknown>[] = []
+  const claims: string[] = []
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -46,7 +50,7 @@ async function fakeApi(script: Script) {
 
       if (path === `/api/agent-threads/${THREAD}`) {
         return (
-          script.thread?.clone() ??
+          (typeof script.thread === "function" ? script.thread() : script.thread?.clone()) ??
           Response.json({
             id: THREAD,
             runsOn: "cloud",
@@ -59,6 +63,13 @@ async function fakeApi(script: Script) {
         return Response.json({ run: { id: RUN } })
       }
       if (path === `/api/agent-threads/${THREAD}/messages`) return Response.json({ messages: [] })
+      if (path === `/api/agent-runs/${RUN}/claim`) {
+        claims.push(RUN)
+        return Response.json({ error: { kind: "Error", message: "No." } }, { status: 409 })
+      }
+      if (path === `/api/agent-runs/${RUN}`) {
+        return Response.json({ id: RUN, status: script.queued ? "queued" : "succeeded" })
+      }
       if (path === `/api/agent-threads/${THREAD}/runs`) {
         return Response.json({ runs: [{ id: RUN, ...script.run }] })
       }
@@ -79,6 +90,7 @@ async function fakeApi(script: Script) {
   return {
     config,
     posted,
+    claims,
     env: {
       XDG_CONFIG_HOME: config,
       SIXB_API_URL: `http://127.0.0.1:${server.port}`,
@@ -233,6 +245,7 @@ describe("sixb agent", () => {
   // until someone stops it.
   test("says a turn waits for a computer that isn't connected, and exits 5", async () => {
     const { env, posted } = await fakeApi({
+      queued: true,
       thread: computerThread({ id: "cmp_other", folder: "/work/q3", online: false }),
     })
     const result = await sendTo(env, "--json")
@@ -267,5 +280,56 @@ describe("sixb agent", () => {
     expect(result.exitCode).toBe(0)
     expect(JSON.parse(result.stdout)).toEqual({ threadId: THREAD, runId: RUN, status: "queued" })
     expect(posted).toHaveLength(1)
+  })
+
+  // Guard proof: follow forever in runnerUntilHeld once the turn is someone else's; a session that
+  // outlives its crashed sixb leaves a script waiting for good.
+  test("exits 5 when what held the conversation's folder goes away", async () => {
+    let reads = 0
+    const { env } = await fakeApi({
+      queued: true,
+      thread: () =>
+        computerThread({ id: "cmp_other", folder: "/work/q3", online: (reads += 1) <= 2 }),
+    })
+    const result = await sendTo(env, "--json")
+
+    expect(result.exitCode).toBe(5)
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "queued" })
+  })
+
+  describe("in the conversation's own folder", () => {
+    const here = async (online: boolean, script: Partial<Script> = {}) => {
+      const api = await fakeApi({
+        thread: computerThread({ id: "cmp_here", folder: REPOSITORY, online }),
+        ...script,
+      })
+      await mkdir(join(api.config, "sixb"), { recursive: true })
+      await writeFile(join(api.config, "sixb", "computer.json"), '{"id":"cmp_here"}')
+      return api
+    }
+
+    // Guard proof: claim once a moment has passed, as a timer in place of runnerUntilHeld would; a
+    // connected sixb busy with another turn would get a second one running beside it in the folder.
+    test("leaves the turn to what holds the folder, however long it waits", async () => {
+      const { env, claims } = await here(true, {
+        queued: true,
+        stream: (socket) => setTimeout(() => socket.send(snapshot("succeeded")), 1_500),
+      })
+      const result = await sendTo(env)
+
+      expect(result.exitCode).toBe(0)
+      expect(claims).toEqual([])
+    })
+
+    // Guard proof: drop the claim from runnerUntilHeld; with nothing connected, the turn waits for a
+    // computer this command was to be.
+    test("claims the turn itself when nothing holds it, and says if it can't", async () => {
+      const { env, claims } = await here(false, { queued: true })
+      const result = await sendTo(env)
+
+      expect(claims).toEqual([RUN])
+      expect(result.exitCode).toBe(1)
+      expect(result.stderr).toContain("couldn't claim")
+    })
   })
 })

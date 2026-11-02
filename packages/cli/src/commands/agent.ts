@@ -32,8 +32,8 @@ import { glyph, paint, palette, tone } from "../ui/theme"
 const EXIT_WAITING = 4
 /** Exit status when the turn waits for a computer that isn't connected. */
 const EXIT_OFFLINE = 5
-/** How long a connected sixb has to take a turn before this one runs it. */
-const CLAIM_GRACE_MS = 3_000
+/** How often this checks that something still holds the folder of a turn it waits for. */
+const HOLDER_CHECK_MS = 1_000
 
 /**
  * `sixb agent "<message>"`: one message to the agent, answered in the terminal. The turn runs on
@@ -131,19 +131,22 @@ export async function runAgent(options: {
 
     let followed: Awaited<ReturnType<typeof follow>> = "finished"
     while (runId) {
-      // Read again each turn: a sixb may have opened, or closed, since the last.
-      const { data } = await getAgentThread({ client, path: { threadId: thread.id } })
-      const current = data ?? thread
-      const online = current.computer?.online === true
-      if (onComputer && !runner && !online) {
-        step(tone.faint(waitingNote(current.computer)))
+      // Only while this follows: once it stops, nothing may start a turn nobody follows.
+      const watching = new AbortController()
+      const stopWatching = () => watching.abort()
+      stop.signal.addEventListener("abort", stopWatching, { once: true })
+      const nobody =
+        onComputer && runnerUntilHeld(connection, thread.id, runId, runner, watching.signal)
+      followed = await follow(connection, runId, options.json, stop.signal, nobody || undefined)
+      stopWatching()
+      stop.signal.removeEventListener("abort", stopWatching)
+      if (followed === "offline") {
+        const { data } = await getAgentThread({ client, path: { threadId: thread.id } })
+        step(tone.faint(waitingNote(data?.computer ?? thread.computer)))
         printSent(thread.id, runId, options.json)
         process.exitCode = EXIT_OFFLINE
         return
       }
-      // A turn nothing could claim would wait here for nobody.
-      const unclaimed = runner && claimUnlessTaken(connection, runner, runId, online, stop.signal)
-      followed = await follow(connection, runId, options.json, stop.signal, unclaimed ?? undefined)
       if (followed === "unclaimed") {
         process.exitCode = 1
         step(tone.fail("This computer couldn't claim the turn."))
@@ -166,27 +169,33 @@ export async function runAgent(options: {
 }
 
 /**
- * Run the turn here, unless a sixb connected to this folder takes it first: only when none does in
- * a moment, because a session can outlive the sixb that held it. Resolves to whether it stayed
- * unclaimed: a turn another runner holds isn't, and is followed like any other.
+ * Watch a queued turn until something runs it. While a sixb holds its folder that's whose it is, even
+ * if busy: it runs one at a time, and taking the turn would run two. Once nothing does, which a
+ * crashed sixb's session reaches within a minute, this computer runs it if it's the place to, and
+ * otherwise it waits for a computer nobody has open. Null when the turn left the queue by itself.
  */
-async function claimUnlessTaken(
+async function runnerUntilHeld(
   connection: Connection,
-  runner: LocalRunner,
+  threadId: string,
   runId: string,
-  online: boolean,
+  runner: LocalRunner | null,
   signal: AbortSignal
-): Promise<boolean> {
+): Promise<"unclaimed" | "offline" | null> {
   const { client } = connection
   const isQueued = async () => {
     const { data: run } = await getAgentRun({ client, path: { runId } })
     return !run || run.status === "queued"
   }
-  if (online) {
-    await Bun.sleep(CLAIM_GRACE_MS)
-    if (signal.aborted || !(await isQueued())) return false
+  while (!signal.aborted) {
+    const { data: thread } = await getAgentThread({ client, path: { threadId } })
+    if (!(await isQueued()) || signal.aborted) return null
+    if (!thread?.computer?.online) {
+      if (!runner) return "offline"
+      return (await runner.claim(runId)) || !(await isQueued()) ? null : "unclaimed"
+    }
+    await Bun.sleep(HOLDER_CHECK_MS)
   }
-  return (await runner.claim(runId)) ? false : isQueued()
+  return null
 }
 
 /** Where a turn waits, for a person reading why nothing is happening yet. */
@@ -205,20 +214,20 @@ function printSent(threadId: string, runId: string, json: boolean): void {
 
 /**
  * Show a turn's steps as they finish, until it ends, the stream fails, the person stops waiting,
- * or `unclaimed` says this computer could not run it.
+ * or `nobody` says nothing will run it.
  */
 async function follow(
   connection: Connection,
   runId: string,
   json: boolean,
   signal: AbortSignal,
-  unclaimed?: Promise<boolean>
-): Promise<"finished" | "stopped" | "failed" | "unclaimed"> {
+  nobody?: Promise<"unclaimed" | "offline" | null>
+): Promise<"finished" | "stopped" | "failed" | "unclaimed" | "offline"> {
   let live = liveRun(runId)
   const shown = new Set<string>()
   return new Promise((resolve) => {
     let settled = false
-    const settle = (outcome: "finished" | "stopped" | "failed" | "unclaimed") => {
+    const settle = (outcome: "finished" | "stopped" | "failed" | "unclaimed" | "offline") => {
       if (settled) return
       settled = true
       socket.close()
@@ -258,8 +267,8 @@ async function follow(
       },
     })
     signal.addEventListener("abort", onAbort)
-    void unclaimed?.then((refused) => {
-      if (refused) settle("unclaimed")
+    void nobody?.then((outcome) => {
+      if (outcome) settle(outcome)
     })
   })
 }
@@ -287,7 +296,7 @@ async function afterTurn(
   const approvals = data?.approvals ?? []
   if (approvals.length === 0 || json || !process.stdin.isTTY) {
     for (const approval of approvals) step(tone.warn(`? ${describe(approval.call)}`))
-    step(tone.faint(`Decide in the app, or run sixb in this folder and open the conversation.`))
+    step(tone.faint("Decide in the app, or open the conversation with sixb in its folder."))
     process.exitCode = EXIT_WAITING
     return null
   }
