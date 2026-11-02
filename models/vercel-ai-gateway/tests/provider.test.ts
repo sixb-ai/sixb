@@ -658,8 +658,7 @@ describe("Vercel AI Gateway provider", () => {
       money: { amountNanos: "6250000" },
     })
   })
-  test("estimates safe Gateway settings but declines routing and extra pricing dimensions", async () => {
-    // Removal proof: reject every request/providerOptions object; safe settings become unpriceable.
+  test("reserves at catalog rates whatever the options, and at the dearest fallback", async () => {
     const provider = createVercelGateway({
       fetch: async () =>
         Response.json({
@@ -669,64 +668,69 @@ describe("Vercel AI Gateway provider", () => {
               type: "language",
               pricing: { input: "0.000003", output: "0.000015" },
             },
+            {
+              id: "test/cheaper",
+              type: "language",
+              pricing: { input: "0.000001", output: "0.000004" },
+            },
+            {
+              id: "test/dearer",
+              type: "language",
+              pricing: { input: "0.00001", output: "0.00003" },
+            },
           ],
         }),
     })
     await provider.catalog.list()
-    const safeOptions: import("../src/provider").VercelGatewayModelOptions[] = [
+    const tokens = { inputTokens: 1000, outputTokens: 200 }
+    const usage = { inputTokens: 1000, outputTokens: 200 }
+
+    // Removal proof: price only an allowlist of options, as before; the thinking budget, the service
+    // tier and the option no provider has yet each leave the call with nothing to reserve, and a cost
+    // limit refuses it. What the call really cost is what the Gateway reports it billed.
+    const options: import("../src/provider").VercelGatewayModelOptions[] = [
       {},
-      { request: {} },
-      { request: { temperature: 0.2 } },
-      { providerOptions: { gateway: { caching: "off" } } },
-      // Removal proof: accept only `gateway` provider options; a Claude binding that sets its
-      // thinking, as most do, becomes unpriceable and its cost limits fail closed.
-      { providerOptions: { anthropic: { thinking: { type: "adaptive", display: "summarized" } } } },
-      { providerOptions: { openai: { reasoningEffort: "high", reasoningSummary: "auto" } } },
-      {
-        providerOptions: {
-          google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } },
-        },
-      },
-    ]
-    for (const options of safeOptions) {
-      // Removal proof: remove the provider's reservation estimator; this fails before inference.
-      expect(
-        provider("test/model", options).costEstimator?.estimateReservation?.({
-          inputTokens: 1000,
-          outputTokens: 200,
-        })
-      ).toEqual({ currency: "USD", amountNanos: "6000000" })
-      expect(
-        provider("test/model", options).costEstimator?.estimate({
-          usage: { inputTokens: 1000, outputTokens: 200 },
-        })
-      ).toMatchObject({ status: "rated", money: { amountNanos: "6000000" } })
-    }
-    const unpricedOptions: import("../src/provider").VercelGatewayModelOptions[] = [
-      { request: { service_tier: "priority" } },
-      { providerOptions: { gateway: { models: ["other/model"] } } },
-      { providerOptions: { anthropic: { thinking: { type: "adaptive" }, speed: "fast" } } },
-      // A thinking budget may raise the call's output limit past what a reservation covers.
+      { request: { temperature: 0.2, service_tier: "priority" } },
       { providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 8_000 } } } },
-      { providerOptions: { anthropic: { thinking: { type: "adaptive", budgetTokens: 8_000 } } } },
-      { providerOptions: { google: { thinkingConfig: { thinkingBudget: 8_000 } } } },
-      { providerOptions: { openai: { serviceTier: "flex" } } },
-      { providerOptions: { constructor: {} } },
+      { providerOptions: { openai: { reasoningEffort: "high", serviceTier: "flex" } } },
+      { providerOptions: { acme: { turbo: true } } },
       { providerTools: [{ type: "web_search" }] },
     ]
-    for (const options of unpricedOptions) {
-      expect(
-        provider("test/model", options).costEstimator?.estimate({
-          usage: { inputTokens: 1000, outputTokens: 200 },
-        })
-      ).toMatchObject({ status: "unpriceable" })
-      expect(
-        provider("test/model", options).costEstimator?.estimateReservation?.({
-          inputTokens: 1000,
-          outputTokens: 200,
-        })
-      ).toBeUndefined()
+    for (const binding of options) {
+      expect(provider("test/model", binding).costEstimator?.estimateReservation?.(tokens)).toEqual({
+        currency: "USD",
+        amountNanos: "6000000",
+      })
     }
+    expect(
+      provider("test/model", {
+        providerOptions: { acme: { turbo: true } },
+      }).costEstimator?.estimate({ usage })
+    ).toMatchObject({ status: "rated", money: { amountNanos: "6000000" } })
+    // A tool's per-use charge has no meter on the card: only the Gateway's bill holds it.
+    expect(
+      provider("test/model", { providerTools: [{ type: "web_search" }] }).costEstimator?.estimate({
+        usage,
+      })
+    ).toEqual({ status: "unpriceable", reason: "missing-rate-card" })
+
+    // Removal proof: reserve the requested model only; the dearer fallback reserves 6000000.
+    const fallback = (models: unknown) =>
+      provider("test/model", { providerOptions: { gateway: { models } } as never }).costEstimator
+    expect(fallback(["test/cheaper"])?.estimateReservation?.(tokens)?.amountNanos).toBe("6000000")
+    expect(fallback(["test/dearer"])?.estimateReservation?.(tokens)?.amountNanos).toBe("16000000")
+    expect(fallback("test/dearer")?.estimateReservation?.(tokens)?.amountNanos).toBe("16000000")
+    expect(fallback(["test/unlisted"])?.estimateReservation?.(tokens)).toBeUndefined()
+    expect(fallback([7])?.estimateReservation?.(tokens)).toBeUndefined()
+
+    // With fallbacks, the requested model's card prices only an answer the Gateway says it gave.
+    expect(fallback(["test/dearer"])?.estimate({ usage }).status).toBe("unpriceable")
+    expect(
+      fallback(["test/dearer"])?.estimate({ usage, route: { modelId: "test/dearer" } }).status
+    ).toBe("unpriceable")
+    expect(
+      fallback(["test/dearer"])?.estimate({ usage, route: { modelId: "test/model" } })
+    ).toMatchObject({ status: "rated", money: { amountNanos: "6000000" } })
   })
   // Regression proof: disable reasoningEvents; the live-shape fixture loses its reasoning deltas.
   // Captured from Gateway GLM 5.3 Flash (Baseten), reasoning: high, on 2026-09-14.
@@ -1748,7 +1752,7 @@ describe("Vercel AI Gateway provider", () => {
         },
       })
     ).toMatchObject({ status: "rated", money: { amountNanos: "500040000" } })
-    // A resolved binding shows the card it prices with; routing overrides show none.
+    // A resolved binding shows the card of the model it asks for, fallbacks or not.
     expect(gateway("creator/reasoner").rateCard).toBeUndefined()
     expect((await gateway("creator/reasoner").resolve?.())?.rateCard).toEqual({
       currency: "USD",
@@ -1768,7 +1772,7 @@ describe("Vercel AI Gateway provider", () => {
           providerOptions: { gateway: { models: ["other/model"] } },
         }).resolve?.()
       )?.rateCard
-    ).toBeUndefined()
+    ).toMatchObject({ output: "4" })
     expect(requests).toBe(1)
     await gateway.catalog.refresh()
     expect(requests).toBe(2)

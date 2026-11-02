@@ -132,11 +132,8 @@ test("image models use the image endpoint, with quality and style for the routed
     providerIds: { requestId: "req_image", generationId: "gen_image1" },
     reportedCost: { money: { amountNanos: "2196000" } },
   })
-  // Custom provider options may change the tariff, so only a plain binding prices locally.
-  expect(model.costEstimator?.estimate({ usage: result.usage! }).status).toBe("unpriceable")
-  // Token-priced images match the Gateway's bill from the reported usage.
-  const plain = await provider.image("openai/gpt-image-1-mini").resolve!()
-  expect(plain.costEstimator?.estimate({ usage: result.usage! })).toMatchObject({
+  // Provider options do not change the card: token-priced images match the Gateway's bill.
+  expect(model.costEstimator?.estimate({ usage: result.usage! })).toMatchObject({
     status: "rated",
     money: { amountNanos: "2196000" },
   })
@@ -298,7 +295,7 @@ test("reservations cover every image, and refuse what has no bound", async () =>
   })
   expect(await reserve("openai/gpt-image-1-mini")).toBeUndefined()
   expect(await reserve("google/gemini-3.1-flash-lite-image", { inputImages: 1 })).toBeUndefined()
-  // Routing overrides may change the tariff.
+  // A fallback the catalog does not price leaves nothing to reserve.
   expect(await reserve("bfl/flux-3-image", {}, { models: "other" })).toBeUndefined()
 })
 
