@@ -44,8 +44,20 @@ export const SIXB_ERROR_DEFINITIONS = {
       "The approved call did not run: the sign-in of whoever asked for it ended first. Ask the Agent again.",
     retryable: false,
   },
+  // The conversation does not fit the model's window, even compacted: running it again fails the
+  // same way. Only a new conversation or a model with a larger window gets past it.
+  "agent.context_limit_exceeded": {
+    publicMessage:
+      "This conversation is too long for the model's context window. Start a new conversation, or switch to a model with a larger context window.",
+    retryable: false,
+  },
   "agent.execution_failed": {
     publicMessage: "Agent execution failed.",
+    retryable: false,
+  },
+  // Not retryable: the same task runs into the same limit. Whoever started the run decides.
+  "agent.step_limit_reached": {
+    publicMessage: "The agent reached its step limit before finishing.",
     retryable: false,
   },
   "ai.usage_limit_exceeded": {

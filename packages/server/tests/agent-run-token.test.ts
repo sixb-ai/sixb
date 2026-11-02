@@ -698,6 +698,55 @@ describe("run tokens", () => {
     expect(await response.text()).toBe("agent attachment")
   })
 
+  test("reads its own conversation's messages, and no other thread", async () => {
+    // Reproduce by dropping the run's own-thread check from the messages route: the run then
+    // reads its requester's other conversation.
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime()
+    await storage.agents.threads.create({
+      id: "thread-2",
+      projectId: PROJECT_ID,
+      ownerPrincipal: { type: "user", id: "usr_requester" },
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    for (const thread of ["thread-1", "thread-2"]) {
+      await storage.agents.messages.append({
+        id: `msg-${thread}`,
+        projectId: PROJECT_ID,
+        threadId: thread,
+        runId: null,
+        role: "user",
+        parts: [{ type: "text", text: `Said in ${thread}` }],
+        authorPrincipal: { type: "user", id: "usr_requester" },
+        createdAt: NOW,
+      })
+    }
+    const read = (thread: string) =>
+      app.fetch(new Request(`${apiBaseUrl}/api/agent-threads/${thread}/messages?order=asc`))
+
+    const own = await read("thread-1")
+    expect(own.status).toBe(200)
+    expect(await own.json()).toMatchObject({
+      messages: [{ seq: 1, parts: [{ type: "text", text: "Said in thread-1" }] }],
+      total: 1,
+    })
+    expect((await read("thread-2")).status).toBe(404)
+  })
+
+  test("gives a child agent no conversation's messages", async () => {
+    // Reproduce by dropping the child's check from the messages route: the child, unrestricted
+    // with auth disabled, then reads the whole conversation its parent works for.
+    const { app, apiBaseUrl } = await createRunTokenRuntime({
+      executionKind: "subagent",
+      auth: false,
+    })
+
+    const response = await app.fetch(
+      new Request(`${apiBaseUrl}/api/agent-threads/thread-1/messages`)
+    )
+    expect(response.status).toBe(404)
+  })
+
   // Removal proof: bind run-token requests with `bindRequestExecution` again in server.ts; the
   // inherited user holds no can.run(project.models), so the call is refused.
   // Removal proof: drop the own-execution check from models/calls.ts; the workflow step's service

@@ -66,6 +66,27 @@ describe("liveRunReducer", () => {
     ).toEqual(["text:Before tool.", "tool:bash", "text:After tool."])
   })
 
+  // Reproduce: let liveRunReducer handle a retried start-step as any other; the first call's text
+  // and tool card then stay above the answer.
+  test("drops what a step's first call streamed when the step is asked again", () => {
+    const state = reduceChunks([
+      { type: "start-step" },
+      { type: "text-delta", id: "text", delta: "Reading." },
+      { type: "tool-output-available", toolCallId: "call-1", toolName: "read", output: "a" },
+      { type: "start-step" },
+      { type: "text-delta", id: "text", delta: "Half an ans" },
+      { type: "tool-input-start", toolCallId: "call-2", toolName: "read" },
+      { type: "start-step", retry: true },
+      { type: "text-delta", id: "text", delta: "The answer." },
+    ])
+
+    expect(state.parts.map((part) => (part.kind === "text" ? part.text : part.kind))).toEqual([
+      "Reading.",
+      "tool",
+      "The answer.",
+    ])
+  })
+
   test("materializes whitespace only after visible text has started", () => {
     const empty = reduceChunks([
       { type: "text-start", id: "empty" },
@@ -125,6 +146,32 @@ describe("liveRunReducer", () => {
       }),
     })
     expect(failed.compacting).toBe(false)
+  })
+
+  // Reproduce: leave `contextFull` false on `agent.compaction.started`; a turn the provider
+  // refused condenses with the ordinary marker.
+  test("a compaction after the provider refused a request is the context being full", () => {
+    const full = liveRunReducer(createLiveRunState("run"), {
+      type: "event",
+      event: event({
+        type: "agent.compaction.started",
+        reason: "overflow",
+        estimatedInputTokensBefore: 131_000,
+      }),
+    })
+    expect(full).toMatchObject({ compacting: true, contextFull: true })
+
+    const completed = liveRunReducer(full, {
+      type: "event",
+      event: event({
+        type: "agent.compaction.completed",
+        reason: "overflow",
+        checkpointId: "agt_ctx_run",
+        estimatedInputTokensBefore: 131_000,
+        estimatedInputTokensAfter: 41_000,
+      }),
+    })
+    expect(completed).toMatchObject({ compacting: false, contextFull: false })
   })
 
   test("reasoning streams until it ends", () => {

@@ -4,6 +4,7 @@ export {
   selectLanguageModel,
 } from "../catalog"
 export { reportModelCalls } from "../language-call"
+export { modelCacheLifetimeMs } from "../language-model"
 export { resolveLanguageModel } from "../resolve"
 export { isModelCallAccountingFailure, ModelUsageRecordingError } from "./errors"
 export type {

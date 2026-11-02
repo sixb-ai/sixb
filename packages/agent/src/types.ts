@@ -1,5 +1,10 @@
 import type { AuthorizablePrincipal } from "@sixb/core"
-import type { AgentRunFileStore, RunModelLoopInput } from "@sixb/core/internal/agents"
+import type {
+  AgentRunFileStore,
+  AgentSystemPromptSize,
+  AgentToolCallFile,
+  RunModelLoopInput,
+} from "@sixb/core/internal/agents"
 import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
@@ -47,11 +52,18 @@ export interface AgentTurnContext {
   /** The Sixb API the run's commands call, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
   readonly tools: readonly ModelTool[]
+  /** The stored file of a call whose output was too large for the context, for its message. */
+  readonly outputFileOf?: (toolCallId: string) => AgentToolCallFile | undefined
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
   /** Complete worker-owned system prompt, derived from the mode and provisioned runtime. */
   readonly systemPrompt: string
-  /** Time zone of runs that captured none, used to date their user messages. */
+  /** The same prompt with each section's bytes, for each step to record what its request sent. */
+  readonly systemPromptSize?: AgentSystemPromptSize
+  /** Where the run's context files are, as the agent names them: its reads of them are named. */
+  readonly contextDirectory?: string
+  /** Time zone and locale of runs that captured none, used to date their user messages. */
   readonly projectTimeZone: string
+  readonly projectLocale: string
   /** Prepared by the run's environment, which materializes the files in its context directory. */
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**

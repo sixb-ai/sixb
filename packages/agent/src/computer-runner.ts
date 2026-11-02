@@ -15,6 +15,7 @@ import { ChildRunner } from "./run-child"
 import { runConversationTurn } from "./run-conversation-turn"
 import { runApiCredential, runnerTokenFor, runTokenFor } from "./run-credential"
 import type { OpenRunSandbox } from "./run-environment"
+import { holdRunFiles } from "./run-files-lock"
 import { type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import type { AgentRunSettings } from "./types"
 
@@ -44,7 +45,11 @@ export interface ComputerRunnerOptions {
   computer(): Promise<{ readonly id: string; readonly name: string }>
   /** The folder the user's turns work in: its real path. */
   readonly folder: string
-  /** Where each run's own files go, a directory per run, removed when the run ends. */
+  /**
+   * Where each run's own files go: a directory per thread, so every turn's prompt names the same
+   * paths, emptied when a run starts and removed when it ends. Shared by every runner on the
+   * computer, which hold a thread's directory one run at a time.
+   */
   readonly runFilesRoot: string
   readonly openSandbox: OpenComputerSandbox
   /** How many children of one turn run at once. Defaults to 4. */
@@ -117,6 +122,7 @@ export class ComputerRunner {
           openSandbox: () =>
             this.sandbox({
               runId: run.id,
+              threadId: run.threadId,
               executionToken: session.executionToken,
               projectId: run.projectId,
               folder: this.options.folder,
@@ -217,6 +223,7 @@ export class ComputerRunner {
       openSandbox: ({ session }) =>
         this.sandbox({
           runId: session.run.id,
+          threadId: session.run.threadId,
           executionToken: session.executionToken,
           projectId: session.run.projectId,
         }),
@@ -227,10 +234,12 @@ export class ComputerRunner {
 
   /**
    * A run's sandbox: the user's folder for a turn, which the prompt describes, or a blank folder
-   * of its own for a child. Its own files go in a directory of their own, outside the folder.
+   * of its own for a child. Its own files go in its thread's directory, outside the folder: the
+   * prompt names them, so each run of the thread names the same paths.
    */
   private sandbox(input: {
     readonly runId: string
+    readonly threadId: string
     readonly executionToken: string
     readonly projectId: string
     readonly folder?: string
@@ -238,29 +247,52 @@ export class ComputerRunner {
     const { apiUrl } = this.options
     const credential = runApiCredential(apiUrl, runTokenFor(input))
     return async ({ signal }) => {
-      // Named as a cloud sandbox names them, so a path reads as the run's files wherever it ran.
-      const runDirectory = join(this.options.runFilesRoot, input.runId)
-      await mkdir(join(runDirectory, SANDBOX_CONTEXT_DIRECTORY), { recursive: true })
       // Real paths: the OS sandbox compares them, and the agent names files by them.
-      const runFiles = await realpath(join(runDirectory, SANDBOX_CONTEXT_DIRECTORY))
+      await mkdir(this.options.runFilesRoot, { recursive: true })
+      const runDirectory = join(await realpath(this.options.runFilesRoot), threadDirectory(input))
+      // Named as a cloud sandbox names them, so a path reads as the run's files wherever it ran.
+      const runFiles = join(runDirectory, SANDBOX_CONTEXT_DIRECTORY)
       const folder = input.folder === undefined ? undefined : await realpath(input.folder)
+      let held: (() => Promise<void>) | undefined
+
       const sandbox: RunSandbox = {
         waitBeforeModel: folder !== undefined,
         contextDirectory: runFiles,
-        acquire: async () => ({
-          sandbox: await this.options.openSandbox({
-            ...(folder === undefined ? {} : { workingDirectory: folder }),
-            runFiles,
-            credential,
+        acquire: async () => {
+          const giveBack = await holdRunFiles({
+            directory: runDirectory,
+            runId: input.runId,
             signal,
-          }),
-          ...(folder === undefined
-            ? {}
-            : { promptContext: { workingDirectory: folder, retention: "computer" as const } }),
-        }),
+          })
+          held = giveBack
+          try {
+            // Each run starts empty, as with a directory of its own: nothing an earlier run, or
+            // one that crashed, left there.
+            await rm(runDirectory, { recursive: true, force: true })
+            await mkdir(runFiles, { recursive: true })
+            return {
+              sandbox: await this.options.openSandbox({
+                ...(folder === undefined ? {} : { workingDirectory: folder }),
+                runFiles,
+                credential,
+                signal,
+              }),
+              ...(folder === undefined
+                ? {}
+                : { promptContext: { workingDirectory: folder, retention: "computer" as const } }),
+            }
+          } catch (error) {
+            await giveBack()
+            throw error
+          }
+        },
         release: async ({ sandbox }) => {
-          await sandbox.destroy()
-          await rm(runDirectory, { recursive: true, force: true })
+          try {
+            await sandbox.destroy()
+            await rm(runDirectory, { recursive: true, force: true })
+          } finally {
+            await held?.()
+          }
         },
       }
       return { sandbox }
@@ -271,6 +303,19 @@ export class ComputerRunner {
     this.teardowns.add(teardown)
     void teardown.finally(() => this.teardowns.delete(teardown))
   }
+}
+
+/**
+ * A thread's files directory, by its id: one thread runs one run at a time, and its children have
+ * threads of their own.
+ */
+function threadDirectory(input: { readonly runId: string; readonly threadId: string }): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(input.threadId)) {
+    throw new Error(
+      `[SixbAgent] Run '${input.runId}' names thread '${input.threadId}', which cannot name a directory.`
+    )
+  }
+  return input.threadId
 }
 
 function lease(): string {

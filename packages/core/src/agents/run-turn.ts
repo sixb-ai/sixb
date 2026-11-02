@@ -45,8 +45,14 @@ export interface AgentTurnHistory {
   /** The time zone of the run that answered each retained user message, by message id. */
   readonly sentTimeZones: Readonly<Record<string, string>>
   /**
+   * The locale of the run that answered each retained user message, by message id. Absent from a
+   * project that predates it.
+   */
+  readonly sentLocales?: Readonly<Record<string, string>>
+  /**
    * The model call that ended the latest assistant message after the checkpoint: what a token
-   * estimate anchors on, as the provider counted it.
+   * estimate anchors on, as the provider counted it. None when that message's run compacted the
+   * thread and did not succeed.
    */
   readonly usageAnchor?: {
     readonly messageId: string
@@ -63,8 +69,13 @@ export interface AgentChildContext {
   readonly thread: AgentThreadRecord | null
   /** The thread of the conversation the child works for. */
   readonly conversation: AgentThreadRecord | null
-  /** The child's thread, oldest first. */
-  readonly messages: readonly AgentMessageRecord[]
+  /** The child's thread as a run reads it: its latest checkpoint and what follows it. */
+  readonly history: AgentTurnHistory
+  /**
+   * The message that started the thread, its task, when a checkpoint summarized it: a child's
+   * requests keep it as it is, ahead of the summary.
+   */
+  readonly task?: AgentMessageRecord
   /** The run of the thread that paused on its held calls, when this run continues it. */
   readonly paused?: SubagentRunRecord
   /** The display name of whoever asked for the parent turn, by `type:id`, when they have one. */
@@ -85,11 +96,39 @@ export async function readAgentRunContext(
     : readChildContext(host, run, execution)
 }
 
+/** What reading a thread's history needs: its messages, checkpoints, runs and calls. */
+export interface AgentTurnHistoryHost {
+  readonly projectId: string
+  readonly storage: Pick<AgentRunSessionHost["storage"], "agents" | "aiUsage">
+}
+
 /** A conversation's history: its latest checkpoint and the messages after it. */
 export async function readAgentTurnHistory(
-  host: AgentRunSessionHost,
+  host: AgentTurnHistoryHost,
   threadId: string
 ): Promise<AgentTurnHistory> {
+  const { checkpoint, messages } = await readRetainedHistory(host, threadId)
+  const [sent, usageAnchor] = await Promise.all([
+    readSentSettings(host, threadId, messages),
+    readUsageAnchor(host, messages, checkpoint),
+  ])
+  return { checkpoint, messages, ...sent, ...(usageAnchor ? { usageAnchor } : {}) }
+}
+
+/**
+ * What a turn reads of a thread's history, without the settings each message was sent with: its
+ * latest checkpoint, the messages after it, and the call they end with.
+ */
+export async function readAgentThreadHistory(
+  host: AgentTurnHistoryHost,
+  threadId: string
+): Promise<Pick<AgentTurnHistory, "checkpoint" | "messages" | "usageAnchor">> {
+  const { checkpoint, messages } = await readRetainedHistory(host, threadId)
+  const usageAnchor = await readUsageAnchor(host, messages, checkpoint)
+  return { checkpoint, messages, ...(usageAnchor ? { usageAnchor } : {}) }
+}
+
+async function readRetainedHistory(host: AgentTurnHistoryHost, threadId: string) {
   const { projectId } = host
   const agents = host.storage.agents
   const checkpoint = await agents.checkpoints.getLatest({ projectId, threadId })
@@ -99,11 +138,7 @@ export async function readAgentTurnHistory(
     ...(checkpoint ? { afterSeq: checkpoint.summarizedThroughSeq } : {}),
     order: "asc",
   })
-  const [sentTimeZones, usageAnchor] = await Promise.all([
-    readSentTimeZones(host, threadId, messages),
-    readUsageAnchor(host, messages, checkpoint?.observedHeadSeq ?? 0),
-  ])
-  return { checkpoint, messages, sentTimeZones, ...(usageAnchor ? { usageAnchor } : {}) }
+  return { checkpoint, messages }
 }
 
 async function readTurnContext(
@@ -144,15 +179,20 @@ async function readChildContext(
 ): Promise<AgentChildContext> {
   const { projectId } = host
   const agents = host.storage.agents
-  const [parent, thread, { messages }, runs] = await Promise.all([
+  const [parent, thread, history, runs] = await Promise.all([
     agents.runs.getById({ projectId, id: run.parentRunId }),
     agents.threads.getById({ projectId, id: run.threadId }),
-    agents.messages.list({ projectId, threadId: run.threadId, order: "asc" }),
+    readAgentTurnHistory(host, run.threadId),
     listSubagentThreadRuns(agents, { projectId, threadId: run.threadId }),
   ])
-  const conversation = thread
-    ? await agents.threads.getById({ projectId, id: conversationThreadId(thread) })
-    : null
+  const [conversation, task] = await Promise.all([
+    thread ? agents.threads.getById({ projectId, id: conversationThreadId(thread) }) : null,
+    history.checkpoint
+      ? agents.messages
+          .list({ projectId, threadId: run.threadId, order: "asc", limit: 1 })
+          .then(({ messages }) => messages[0])
+      : undefined,
+  ])
   // A continuation goes on from the latest run that succeeded: only a child paused on its calls
   // succeeds without ending its thread.
   const previous = runs.filter((each) => each.status === "succeeded").at(-1)
@@ -163,7 +203,8 @@ async function readChildContext(
     execution,
     thread,
     conversation,
-    messages,
+    history,
+    ...(task ? { task } : {}),
     ...(paused ? { paused } : {}),
     names: await readNames(host, execution?.requestedBy ? [execution.requestedBy] : []),
   }
@@ -216,15 +257,18 @@ function readUser(host: AgentRunSessionHost, id: string) {
   return host.storage.auth.users.getById({ projectId: host.projectId, id })
 }
 
-/** The time zone each retained user message was sent in: the zone of the run that answered it. */
-async function readSentTimeZones(
-  host: AgentRunSessionHost,
+/**
+ * The time zone and locale each retained user message was sent in: those of the run that answered
+ * it, as its requester's settings froze them.
+ */
+async function readSentSettings(
+  host: AgentTurnHistoryHost,
   threadId: string,
   messages: readonly AgentMessageRecord[]
-): Promise<Readonly<Record<string, string>>> {
+): Promise<Pick<AgentTurnHistory, "sentTimeZones" | "sentLocales">> {
   const userMessages = messages.filter((message) => message.role === "user")
   const oldest = userMessages[0]
-  if (!oldest) return {}
+  if (!oldest) return { sentTimeZones: {}, sentLocales: {} }
 
   // A run starts after its trigger message, so this window holds every run that answered one.
   const { runs } = await host.storage.agents.runs.list({
@@ -235,19 +279,60 @@ async function readSentTimeZones(
   })
   const retained = new Set(userMessages.map((message) => message.id))
   const zones: Record<string, string> = {}
+  const locales: Record<string, string> = {}
   for (const run of runs) {
-    if (run.kind === "conversation" && run.spec?.timeZone && retained.has(run.triggerMessageId)) {
-      zones[run.triggerMessageId] = run.spec.timeZone
-    }
+    if (run.kind !== "conversation" || !retained.has(run.triggerMessageId)) continue
+
+    if (run.spec?.timeZone) zones[run.triggerMessageId] = run.spec.timeZone
+    if (run.spec?.locale) locales[run.triggerMessageId] = run.spec.locale
   }
-  return zones
+  return { sentTimeZones: zones, sentLocales: locales }
+}
+
+/**
+ * The history's anchoring call, when its counts say what the next request to `model` weighs: the
+ * call is that model's, counted both input and output, and read its stored steps whole. A call
+ * whose request the turn reduced read less than those steps replay, so it says nothing of what
+ * the next request weighs, nor of the thread's own rate. `index` is its message's in `messages`.
+ */
+export function matchingAgentUsageAnchor(
+  history: Pick<AgentTurnHistory, "usageAnchor" | "messages">,
+  model: { readonly providerId: string; readonly modelId: string }
+):
+  | { readonly index: number; readonly inputTokens: number; readonly outputTokens: number }
+  | undefined {
+  const anchor = history.usageAnchor
+  const index = anchor
+    ? history.messages.findIndex((message) => message.id === anchor.messageId)
+    : -1
+  const call = anchor?.modelCall
+  const inputTokens = call?.usage.inputTokens
+  const outputTokens = call?.usage.outputTokens
+
+  const lastStep = [...(history.messages[index]?.parts ?? [])]
+    .reverse()
+    .find((part) => part.type === "step-start")
+  if (lastStep?.type === "step-start" && lastStep.reducedRequest) return undefined
+  if (
+    index < 0 ||
+    call?.providerId !== model.providerId ||
+    call.requestedModelId !== model.modelId ||
+    inputTokens === undefined ||
+    inputTokens <= 0 ||
+    outputTokens === undefined ||
+    outputTokens <= 0
+  ) {
+    return undefined
+  }
+  return { index, inputTokens, outputTokens }
 }
 
 async function readUsageAnchor(
-  host: AgentRunSessionHost,
+  host: AgentTurnHistoryHost,
   messages: readonly AgentMessageRecord[],
-  afterSeq: number
+  checkpoint: AgentContextCheckpointRecord | null
 ): Promise<AgentTurnHistory["usageAnchor"]> {
+  const afterSeq = checkpoint?.observedHeadSeq ?? 0
   const anchor = [...messages]
     .reverse()
     .find((message) => message.role === "assistant" && message.seq > afterSeq && message.runId)
@@ -257,6 +342,11 @@ async function readUsageAnchor(
     id: anchor.runId,
   })
   if (!run) return undefined
+
+  // A run that compacted the thread and did not finish may have ended on its summary's call, which
+  // read the history the summary replaced: it anchors nothing.
+  if (run.id === checkpoint?.createdByRunId && run.status !== "succeeded") return undefined
+
   const modelCall = await host.storage.aiUsage.getLatestForExecution({
     projectId: host.projectId,
     executionId: run.executionId,

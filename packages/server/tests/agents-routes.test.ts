@@ -753,6 +753,7 @@ describe("agent routes", () => {
         annotations: diagnostics,
         compaction: {
           checkpointId: checkpoint.id,
+          reason: "threshold",
           summary: checkpoint.summary,
           createdAt: checkpoint.createdAt.toISOString(),
         },
@@ -771,6 +772,40 @@ describe("agent routes", () => {
     )
     expect(runResponse.status).toBe(200)
     expect(await runResponse.json()).toMatchObject({ diagnostics })
+  })
+
+  // Removal proof: add `modelOutput` to AgentToolCallOutputSchema, or let it pass through; the
+  // runtime's replay bytes, sandbox paths included, reach API clients.
+  test("leaves out what the model read of a tool's output", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thr-model-output",
+      projectId: sixb.id,
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    const call = {
+      type: "tool-call" as const,
+      toolCallId: "call-publish",
+      toolName: "publish_artifact",
+      input: {},
+      state: "output-available" as const,
+      output: { artifactId: "art_1", version: 1 },
+    }
+    await storage.agents.messages.append({
+      id: "msg-model-output",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: null,
+      role: "assistant",
+      parts: [{ ...call, modelOutput: { type: "text", value: "Published as art_1." } }],
+    })
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${thread.id}/messages`)
+    )
+    const body = (await response.json()) as { messages: { parts: unknown[] }[] }
+
+    expect(body.messages[0]?.parts).toEqual([call])
   })
 
   test("returns 409 when posting to a thread with an active run", async () => {
@@ -1486,6 +1521,62 @@ describe("agent routes", () => {
     )
     expect(ownerFileContent.status).toBe(200)
     expect(await ownerFileContent.text()).toBe("owner attachment")
+  })
+
+  // Reproduce: leave outputFile out of AgentToolCallOutputSchema; the message then lists no
+  // file, and its route finds nothing at the pointer.
+  test("serves a call's saved output to who reads its thread, and to no one else", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const owner = await seedSession(storage, "usr_owner")
+    const other = await seedSession(storage, "usr_other")
+    const fileRef = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("the whole build log\n"),
+      fileName: "call_1.txt",
+      mediaType: "text/plain",
+    })
+    await storage.agents.threads.create({
+      id: "builds",
+      projectId: sixb.id,
+      ownerPrincipal: { type: "user", id: "usr_owner" },
+    })
+    await storage.agents.messages.append({
+      id: "work",
+      projectId: sixb.id,
+      threadId: "builds",
+      runId: null,
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "bash",
+          input: { command: "cat build.log" },
+          state: "output-available",
+          output: { exitCode: 0, stdout: "the whole…", stderr: "" },
+          modelOutput: { type: "text", value: "<tool_output_file …>" },
+          outputFile: { fileRef, path: "tool-outputs/call_1.txt" },
+        },
+      ],
+    })
+
+    const listed = await app.fetch(
+      new Request("http://localhost/api/agent-threads/builds/messages", { headers: owner.headers })
+    )
+    const { messages } = (await listed.json()) as {
+      messages: { parts: Record<string, unknown>[] }[]
+    }
+    expect(messages[0]?.parts[1]).toMatchObject({
+      outputFile: { fileRef: { blobId: fileRef.blobId }, path: "tool-outputs/call_1.txt" },
+    })
+    expect(messages[0]?.parts[1]).not.toHaveProperty("modelOutput")
+
+    const url = `http://localhost/api/agent-threads/builds/messages/work/files/content?path=${encodeURIComponent("/parts/1/outputFile/fileRef")}`
+    const hidden = await app.fetch(new Request(url, { headers: other.headers }))
+    expect(hidden.status).toBe(404)
+    const served = await app.fetch(new Request(url, { headers: owner.headers }))
+    expect(served.status).toBe(200)
+    expect(await served.text()).toBe("the whole build log\n")
   })
 
   test("forks a readable thread into the caller's own, files and diagnostics included", async () => {

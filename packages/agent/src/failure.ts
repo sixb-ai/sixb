@@ -7,6 +7,7 @@ import {
 } from "@sixb/core/internal/errors"
 import { AGENT_RUN_FAILURE_CODES, type AgentRunFailureCode } from "@sixb/core/storage"
 import { AgentRuntimeProfileError } from "./agent-runtime/errors"
+import { AgentContextCompactionError } from "./errors"
 
 export type AgentRunFailure = SixbFailure<AgentRunFailureCode>
 
@@ -53,10 +54,20 @@ function translateAgentExecutionError(
     })
   }
 
+  // Compaction found no way to fit the conversation in the model's window: a retry would fail the
+  // same way, so the failure says what gets past it.
+  if (error instanceof AgentContextCompactionError && error.code === "context_limit_exceeded") {
+    return createSixbError("agent.context_limit_exceeded", error.message, {
+      cause: error,
+      details,
+    })
+  }
+
   if (
     isSixbError(error) &&
     (error.code === "internal.unexpected" ||
       error.code === "agent.execution_failed" ||
+      error.code === "agent.step_limit_reached" ||
       error.code === "ai.usage_limit_exceeded" ||
       error.code === "ai.usage_limit_unavailable")
   ) {

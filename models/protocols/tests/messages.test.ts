@@ -315,6 +315,55 @@ test.each([
   })
 })
 
+// Reproduce: drop contextWindowExceeded from the message_stop finish; a turn then takes an answer
+// the window cut for one the output limit cut, and never compacts and asks again.
+test("says the context window, not the output limit, stopped a message", async () => {
+  const events = await collect(
+    messagesEvents(
+      stream([
+        { type: "message_start", message: { id: "msg" } },
+        {
+          type: "message_delta",
+          delta: { stop_reason: "model_context_window_exceeded" },
+          usage: { input_tokens: 199_000, output_tokens: 1_000 },
+        },
+        { type: "message_stop" },
+      ]),
+      new AbortController().signal,
+      options
+    )
+  )
+  expect(events.at(-1)).toMatchObject({
+    type: "finish",
+    finishReason: "length",
+    rawFinishReason: "model_context_window_exceeded",
+    contextWindowExceeded: true,
+    usage: { inputTokens: 199_000, outputTokens: 1_000 },
+  })
+})
+
+test("names a stream error about the context window as one", async () => {
+  const events = await collect(
+    messagesEvents(
+      stream([
+        {
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            message: "prompt is too long: 215000 tokens > 200000 maximum",
+          },
+        },
+      ]),
+      new AbortController().signal,
+      options
+    )
+  )
+  const overflow = events.find((event) => event.type === "error")
+  expect(overflow?.type === "error" ? overflow.error : undefined).toMatchObject({
+    reason: "context-window-exceeded",
+  })
+})
+
 const malformedStreams: [JsonObject[], string][] = [
   [[], "Provider stream ended without a terminal message event."],
   [
@@ -458,4 +507,53 @@ test("closes the text and thinking a max_tokens stop left open, never an unfinis
     { type: "finish", finishReason: "length" },
   ])
   expect(events.some((event) => event.type === "tool-input-end")).toBe(false)
+})
+
+// Removal proof: push raw blocks as stored, or the synthesized input and JSON tool outputs as
+// given, in messages/input.ts; the replay from Postgres `jsonb` key order prints other bytes.
+test("serializes tool inputs and JSON tool outputs the same whatever their key order", () => {
+  const turn = (input: JsonObject, value: JsonObject, raw: boolean): ModelMessage[] => [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "call",
+          toolName: "read",
+          input,
+          ...(raw
+            ? {
+                providerData: {
+                  [options.providerId]: {
+                    block: { type: "tool_use", id: "call", name: "read", input },
+                  },
+                },
+              }
+            : {}),
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call",
+          toolName: "read",
+          output: { type: "json", value },
+        },
+      ],
+    },
+  ]
+  const serialize = (messages: ModelMessage[]) =>
+    JSON.stringify(messagesInput(messages, options.providerId, options.errorPrefix).messages)
+
+  for (const raw of [true, false]) {
+    const live = turn({ path: "a.ts", offset: 1, limit: 2 }, { startLine: 1, endLine: 2 }, raw)
+    const fromJsonb = turn({ path: "a.ts", limit: 2, offset: 1 }, { endLine: 2, startLine: 1 }, raw)
+
+    expect(serialize(fromJsonb)).toBe(serialize(live))
+    expect(serialize(live)).toContain('"input":{"limit":2,"offset":1,"path":"a.ts"}')
+    expect(serialize(live)).toContain('"content":"{\\"endLine\\":2,\\"startLine\\":1}"')
+  }
 })

@@ -12,11 +12,13 @@ import { type RenderedOntologyDocs, renderOntologyDocs } from "../ontology/docs-
 import type { SixbDefinitions } from "../runtime/definitions"
 import type { Sixb } from "../runtime/sixb"
 import type { AgentRunRecord } from "../storage/agents"
+import type { AgentContextTokenRateSample } from "./context-token-rate"
 import { AgentMemoryError } from "./errors"
 import type { AgentMemoryRepoName } from "./memory"
 import type { AgentMemoryRepoView } from "./memory-execution"
 import { type AgentToolSpec, agentToolSpec } from "./run-tools"
 import type { AgentSkillDefinition } from "./skills"
+import { UNATTENDED_AGENT_MAX_STEPS } from "./step-limits"
 import type { AgentReasoning } from "./types"
 
 // What a run is set up with, as plain data: the project sends it, and the runner's harness, which
@@ -42,8 +44,15 @@ export interface AgentRunPlan {
   readonly locale?: string
   /** Reference docs for the object types its requester can see, from their own view. */
   readonly ontologyDocs: RenderedOntologyDocs
+  /** At most this many model calls. Absent: it runs until its model answers. */
+  readonly maxSteps?: number
   /** The models a turn can hand a child; a child spawns none. */
   readonly delegation?: AgentRunDelegation
+  /**
+   * What the project's runs measured of its model's tokenizer lately, newest first, which its
+   * context estimate starts from (see readAgentContextTokenRates).
+   */
+  readonly tokenRates: readonly AgentContextTokenRateSample[]
 }
 
 /** The project's language models, as a turn chooses one for a child it spawns. */
@@ -54,6 +63,8 @@ export interface AgentRunDelegation {
   readonly defaultModel: LanguageModelRef
   /** The tiers the project configures; empty when `models.language` is a list. */
   readonly tiers: readonly LanguageModelTier[]
+  /** The most steps one run of a child takes: a spawn may ask for fewer. */
+  readonly maxSteps: number
 }
 
 export interface AgentRunDelegationModel extends LanguageModelRef {
@@ -99,7 +110,7 @@ export function readAgentRunPlan(
   definitions: AgentRunPlanDefinitions,
   run: AgentRunRecord,
   view: AgentRunView
-): AgentRunPlan {
+): Omit<AgentRunPlan, "tokenRates"> {
   const { agent, models, tools } = definitions
   const shared = {
     ...(agent.instructions === undefined ? {} : { instructions: agent.instructions }),
@@ -108,6 +119,7 @@ export function readAgentRunPlan(
     ontologyDocs: renderAgentRunOntologyDocs({ ...view, catalog: agent.ontologyDocs }),
   }
 
+  const subagentMaxSteps = agent.subagentMaxSteps ?? UNATTENDED_AGENT_MAX_STEPS
   if (run.kind === "subagent") {
     const { model, reasoning, timeZone, locale } = run.spec
     if (!models?.language?.getByRef(model)) {
@@ -121,6 +133,8 @@ export function readAgentRunPlan(
       ...shared,
       model: { provider: model.provider, modelId: model.modelId },
       tools: toolSpecs(definitions, run.spec.toolNames),
+      // What its spawn asked for, within what the project allows now.
+      maxSteps: Math.min(run.spec.maxSteps ?? subagentMaxSteps, subagentMaxSteps),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(timeZone === undefined ? {} : { timeZone }),
       ...(locale === undefined ? {} : { locale }),
@@ -143,7 +157,8 @@ export function readAgentRunPlan(
   return Object.freeze({
     ...shared,
     model: { provider: entry.provider, modelId: entry.modelId },
-    ...(language ? { delegation: readAgentRunDelegation(language) } : {}),
+    ...(agent.maxSteps === undefined ? {} : { maxSteps: agent.maxSteps }),
+    ...(language ? { delegation: readAgentRunDelegation(language, subagentMaxSteps) } : {}),
     tools: toolSpecs(
       definitions,
       tools.list().map((tool) => tool.name)
@@ -278,7 +293,10 @@ export function renderAgentRunOntologyDocs(input: {
 }
 
 /** The project's language models, as a turn offers them to the children it spawns. */
-export function readAgentRunDelegation(language: LanguageModelCatalog): AgentRunDelegation {
+export function readAgentRunDelegation(
+  language: LanguageModelCatalog,
+  maxSteps = UNATTENDED_AGENT_MAX_STEPS
+): AgentRunDelegation {
   return {
     models: language.list().map(
       ({ provider, modelId, tier, model }): AgentRunDelegationModel => ({
@@ -293,6 +311,7 @@ export function readAgentRunDelegation(language: LanguageModelCatalog): AgentRun
     ),
     defaultModel: { provider: language.default.provider, modelId: language.default.modelId },
     tiers: language.tiers,
+    maxSteps,
   }
 }
 

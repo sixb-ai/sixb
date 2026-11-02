@@ -923,6 +923,10 @@ describe("a paused child, once its requester decides", () => {
       // Its history is the paused child's last request, then how its call ended, as its own.
       const [last] = harness.childRequests("pay").slice(-1)
       const [first] = harness.childRequests("pay'")
+      // Its calls can wait on the user's decision, so both runs cache for the long lifetime.
+      // Guard proof: give every child `lifetime: "default"` in runSubagent.
+      expect(last?.caching).toMatchObject({ lifetime: "long" })
+      expect(first?.caching).toMatchObject({ lifetime: "long" })
       const lastMessages = last?.messages ?? []
       expect(first?.messages.slice(0, lastMessages.length + 2)).toEqual([
         ...lastMessages,
@@ -933,7 +937,11 @@ describe("a paused child, once its requester decides", () => {
       expect(outcome).toContain(`<sixb_approval id=\\"${held.id}\\" status=\\"approved\\">`)
       expect(outcome).toContain("Your sandbox restarted")
       // It is told when it continues, not only when its task was first given.
-      expect(outcome).toContain(renderCurrentTime(continued.createdAt, "UTC"))
+      expect(outcome).toContain(
+        JSON.stringify(
+          renderCurrentTime(continued.createdAt, { timeZone: "UTC", locale: "en" })
+        ).slice(1, -1)
+      )
       expect(outcome).not.toContain("Your sub-agent")
 
       // The parent reads which child asked, that it continues, and gets its answer by the old id.
@@ -1144,9 +1152,10 @@ describe("a paused child, once its requester decides", () => {
     }
   })
 
-  // Removal proofs: drop the projections from runSubagent's replay, and the file view_file showed
-  // the paused child comes back as its bare reference; leave the history out of
-  // createSubagentEnvironment, and the continuation's sandbox lacks the file.
+  // Removal proofs: drop the stored modelOutput from the replay, and the file view_file showed the
+  // paused child comes back as metadata instead of what it read; leave the history out of
+  // createSubagentEnvironment, or materialize it at its attachment path, and the continuation's
+  // sandbox lacks the file at the path the output names.
   test("replays the files a tool showed the paused child, as a turn replays its own", async () => {
     const harness = setup({
       parent: pausingParent((request, call) =>
@@ -1172,13 +1181,15 @@ describe("a paused child, once its requester decides", () => {
       const [replayed] = harness.childRequests("pay'")
       const viewed = String(toolOutput(replayed, "view"))
       const sandboxPath = /sandboxPath="([^"]+)"/.exec(viewed)?.[1] ?? ""
+      const paused = harness.childRequests("pay").at(-1)
 
-      // As a later turn reads a file it viewed: kept as metadata, in its sandbox at that path.
-      expect(viewed).toContain('<attachment key="')
-      expect(viewed).toContain('name="summary.md"')
-      expect(harness.sandboxes.some((sandbox) => sandboxPath && sandbox.has(sandboxPath))).toBe(
-        true
-      )
+      // As a later turn reads a file it viewed: as the paused child read it, and in the
+      // continuation's sandbox at the path it named.
+      expect(viewed).toBe(String(toolOutput(paused, "view")))
+      expect(viewed).toContain('<tool_file name="summary.md"')
+      expect(sandboxPath).toStartWith(".sixb/agent/tool-files/")
+      // The paused child's sandbox held it there, and the continuation's holds it there again.
+      expect(harness.sandboxes.filter((sandbox) => sandbox.has(sandboxPath))).toHaveLength(2)
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }

@@ -1,6 +1,7 @@
 import type {
   GetAgentResponse,
   GetAgentRunResponse,
+  GetAgentThreadContextResponse,
   ListAgentThreadMessagesResponse,
   ListAgentThreadsResponse,
   ListModelsResponse,
@@ -26,6 +27,9 @@ export type AgentFileRef = Extract<AgentMessagePart, { type: "file" }>["fileRef"
 export type AgentContextPart = Extract<AgentMessagePart, { type: "context" }>
 
 export type AgentRun = GetAgentRunResponse
+
+/** A conversation's context against its model's limits: what the context meter shows. */
+export type AgentThreadContext = GetAgentThreadContextResponse
 
 export type AgentRunStatus = AgentRun["status"]
 

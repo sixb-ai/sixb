@@ -10,6 +10,11 @@ export interface ProjectAgentThreadModelContextInput {
   readonly checkpoint: AgentContextCheckpointRecord | null
   /** Complete retained tail, ordered by ascending per-thread sequence. */
   readonly messages: readonly AgentMessageRecord[]
+  /**
+   * Whether the run reading the thread can print its stored messages with `sixb history`, as a
+   * conversation's turn can, for its summary to say so. A child's run cannot. True when left out.
+   */
+  readonly historyReadable?: boolean
 }
 
 /**
@@ -25,13 +30,8 @@ export function projectAgentThreadModelContext(
   if (!checkpoint) return messages
 
   assertConsistentCheckpointProjection(checkpoint, messages)
-  return [
-    {
-      role: "user",
-      parts: [{ type: "text", text: serializeThreadSummary(checkpoint.summary) }],
-    },
-    ...messages,
-  ]
+  const summary = serializeThreadSummary(checkpoint.summary, input.historyReadable ?? true)
+  return [{ role: "user", parts: [{ type: "text", text: summary }] }, ...messages]
 }
 
 function assertConsistentCheckpointProjection(
@@ -67,12 +67,24 @@ function assertConsistentCheckpointProjection(
   }
 }
 
-function serializeThreadSummary(summary: string): string {
+const SUMMARY_INTRO = "The earlier conversation was compacted into this continuation summary."
+
+/**
+ * Whether a user message's text is the summary this projection writes, for a context meter to
+ * name it: a message a user typed the same way would count as one there, and nowhere else.
+ */
+export function isAgentThreadSummaryText(text: string): boolean {
+  return text.startsWith(SUMMARY_INTRO) && text.includes("\n<sixb_thread_summary>\n")
+}
+
+function serializeThreadSummary(summary: string, historyReadable: boolean): string {
   return [
-    "The earlier conversation was compacted into this continuation summary.",
+    historyReadable
+      ? `${SUMMARY_INTRO} Its messages are still stored: \`sixb history\` prints them.`
+      : SUMMARY_INTRO,
     "",
     "<sixb_thread_summary>",
-    escapeXml(summary),
+    escapeXmlText(summary),
     "</sixb_thread_summary>",
   ].join("\n")
 }
@@ -83,11 +95,7 @@ function projectionError(checkpoint: AgentContextCheckpointRecord, detail: strin
   )
 }
 
-function escapeXml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;")
+/** Text inside a tag: quotes stay as written, so the summary reads as the model wrote it. */
+function escapeXmlText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 }

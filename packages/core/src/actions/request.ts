@@ -9,6 +9,7 @@ import {
   ensureExecutionRecord,
   executionRecordInputFromRuntime,
 } from "../execution/durable"
+import { getRequestClient } from "../execution/request-client"
 import type { ExecutionContext } from "../execution/types"
 import type { ObjectRef } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
@@ -138,6 +139,10 @@ export async function requestAction(
     subject.kind === "object" &&
     objectReader.viewsThroughCondition(subject.objectTypeId)
 
+  // Only an HTTP request's own execution has a client: a run that a workflow, the agent or another
+  // run requests has none.
+  const client = getRequestClient(execution)
+
   const run = await executor.request({
     runId,
     payload,
@@ -145,6 +150,7 @@ export async function requestAction(
     assertCanReuse,
     signal: request.signal,
     onRequested: request.onRequested,
+    ...(client === undefined ? {} : { client }),
     ...(conditioned
       ? {
           readSubjectAsRequester: ({ objectTypeId, primaryId }) =>

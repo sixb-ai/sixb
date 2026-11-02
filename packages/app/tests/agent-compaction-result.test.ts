@@ -10,6 +10,7 @@ test("only durable compacted responses expose their continuation summary", () =>
     createElement(MessageView, {
       message: assistantMessage({
         checkpointId: "checkpoint-1",
+        reason: "threshold",
         summary: "The user asked for organization research.",
         createdAt: "2026-08-28T10:00:00.000Z",
       }),
@@ -24,6 +25,24 @@ test("only durable compacted responses expose their continuation summary", () =>
 
   const ordinary = renderToStaticMarkup(createElement(MessageView, { message: assistantMessage() }))
   expect(ordinary).not.toContain("Condensed conversation")
+})
+
+// Reproduce: render `messages.condensed` whatever the reason; a turn the provider refused as too
+// long then reads like any other condensing.
+test("a response condensed after the provider refused a request says the context was full", () => {
+  const html = renderToStaticMarkup(
+    createElement(MessageView, {
+      message: assistantMessage({
+        checkpointId: "checkpoint-1",
+        reason: "overflow",
+        summary: "The user asked for organization research.",
+        createdAt: "2026-08-28T10:00:00.000Z",
+      }),
+    })
+  )
+
+  expect(html).toContain("Context was full — condensed and continued")
+  expect(html).not.toContain("Condensed conversation")
 })
 
 function assistantMessage(compaction?: AgentMessage["compaction"]): AgentConversationMessage {

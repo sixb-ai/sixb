@@ -8,6 +8,7 @@ import type { SubagentRunFile } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { readBlob } from "./artifacts/materialize"
 import {
+  CHILD_FILES_DIRECTORY,
   formatBytes,
   type PreparedAgentAttachmentContext,
   SANDBOX_ATTACHMENT_LIMITS,
@@ -32,12 +33,6 @@ import type { AgentRunFiles } from "./types"
 
 /** Where a child writes the files its parent gets back, relative to its working directory. */
 const CHILD_OUTPUT_DIRECTORY = "out"
-
-/**
- * Where a parent finds them, a directory per spawn key, in the context directory. They last for
- * the turn, like the run's attachments and artifacts.
- */
-export const CHILD_FILES_DIRECTORY = "children"
 
 /** What a run installs in its context directory that holds files worth handing over. */
 const HANDED_RUN_DIRECTORIES = ["attachments", "artifacts", "tool-files", CHILD_FILES_DIRECTORY]

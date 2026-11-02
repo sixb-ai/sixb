@@ -1,6 +1,7 @@
 import type { AgentMessagePart } from "@sixb/core"
+import type { AgentTurnHistory } from "@sixb/core/internal/agents"
 import type { AgentMessageRecord, SubagentRunRecord } from "@sixb/core/storage"
-import { renderCurrentTime } from "./agent-prompt"
+import { renderCurrentTime, type SentSettings } from "./agent-prompt"
 import { mailPart } from "./subagent-inbox"
 
 // A child that paused continues as the next run of its thread under a later turn: once its held
@@ -8,9 +9,13 @@ import { mailPart } from "./subagent-inbox"
 // on, in the turn the parent answers it. The same key, model and task. Its history is its thread,
 // and what it goes on with is the message that starts the run.
 
-/** What a child run reads of its thread: its messages, and the paused run it continues (`AgentChildContext`). */
-export interface SubagentHistory {
-  readonly messages: readonly AgentMessageRecord[]
+/**
+ * What a child run reads of its thread (`AgentChildContext`): its latest checkpoint and the
+ * messages after it, its task when the checkpoint summarized it, and the paused run it continues.
+ */
+export interface SubagentHistory extends AgentTurnHistory {
+  /** The thread's first message, when a checkpoint summarized it: its requests keep it as it is. */
+  readonly task?: AgentMessageRecord
   /** The run of the thread that paused on its held calls, when this run continues it. */
   readonly paused?: SubagentRunRecord
 }
@@ -31,7 +36,7 @@ export function continuationTrigger(input: {
   /** Whether the sandbox provider keeps the child's workspace while it pauses. */
   readonly keepsWorkspace: boolean
   readonly createdAt: Date
-  readonly timeZone: string
+  readonly settings: SentSettings
 }): readonly AgentMessagePart[] {
   return [
     ...input.goesOnWith,
@@ -39,7 +44,7 @@ export function continuationTrigger(input: {
     ...(input.keepsWorkspace
       ? []
       : [{ type: "text" as const, text: sandboxRestarted(input.paused) }]),
-    { type: "text", text: `\n\n${renderCurrentTime(input.createdAt, input.timeZone)}` },
+    { type: "text", text: `\n\n${renderCurrentTime(input.createdAt, input.settings)}` },
   ]
 }
 

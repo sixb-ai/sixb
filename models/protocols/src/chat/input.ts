@@ -1,5 +1,5 @@
 import type { JsonObject, ModelMessage, ModelToolOutput } from "@sixb/core/models"
-import { object } from "../json"
+import { canonicalJsonStringify, object } from "../json"
 
 export interface ChatInputOptions {
   readonly providerId: string
@@ -47,7 +47,7 @@ export function chatInput(
           tools.push({
             id: part.toolCallId,
             type: "function",
-            function: { name: part.toolName, arguments: JSON.stringify(part.input) },
+            function: { name: part.toolName, arguments: canonicalJsonStringify(part.input) },
           })
         } else if (part.type === "reasoning") {
           const raw = object(part.providerData?.[options.providerId])?.reasoning_content
@@ -79,5 +79,5 @@ export function chatInput(
 function output(value: ModelToolOutput): string {
   return value.type === "text" || value.type === "error-text"
     ? value.value
-    : JSON.stringify(value.value)
+    : canonicalJsonStringify(value.value)
 }

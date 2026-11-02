@@ -17,7 +17,8 @@ import {
 } from "./streams/protocol"
 
 export interface CompactionStartedInput {
-  readonly run: ConversationAgentRunRecord
+  /** A conversation's turn, or a child compacting its own thread. */
+  readonly run: AgentRunRecord
   readonly reason: AgentContextCheckpointReason
   readonly estimatedInputTokensBefore: number
 }
@@ -28,7 +29,7 @@ export interface CompactionCompletedInput extends CompactionStartedInput {
 }
 
 export interface CompactionFailedInput {
-  readonly run: ConversationAgentRunRecord
+  readonly run: AgentRunRecord
   readonly reason: AgentContextCheckpointReason
   readonly errorCode: AgentCompactionFailureCode
 }

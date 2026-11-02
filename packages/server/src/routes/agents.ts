@@ -4,11 +4,16 @@ import {
   type AgentRunView,
   type AgentThreadView,
   type FileRef,
+  type LanguageModelEntry,
   principalsEqual,
   type SixbHostView,
 } from "@sixb/core"
 import { sameComputerPlace } from "@sixb/core/internal/agent-run-storage-provider"
-import { assertConversationThread, isRetryableAgentRun } from "@sixb/core/internal/agents"
+import {
+  assertConversationThread,
+  isRetryableAgentRun,
+  readAgentThreadContextUse,
+} from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { resolveFileRefAtPath } from "@sixb/core/internal/blob-storage"
 import {
@@ -35,6 +40,7 @@ import {
   fileContentGetResponses,
   fileContentHeadResponses,
 } from "../files/content"
+import { resolvedForDisplay } from "../models/display"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
@@ -49,6 +55,8 @@ import {
   AgentRunListResponseSchema,
   AgentRunParamsSchema,
   AgentRunSchema,
+  AgentThreadContextQuerySchema,
+  AgentThreadContextSchema,
   AgentThreadListQuerySchema,
   AgentThreadListResponseSchema,
   AgentThreadParamsSchema,
@@ -187,6 +195,7 @@ function serializeMessage(
     compaction: checkpoint
       ? {
           checkpointId: checkpoint.id,
+          reason: checkpoint.reason,
           summary: checkpoint.summary,
           createdAt: toIsoString(checkpoint.createdAt),
         }
@@ -395,7 +404,7 @@ export async function agentMessageFileContentResponse(
 export async function readThreadMessages(
   host: SixbHostView,
   storage: AgentStorage,
-  thread: AgentThreadRecord,
+  thread: Pick<AgentThreadRecord, "id">,
   query: z.infer<typeof AgentMessagesQuerySchema>
 ) {
   const projectId = host.id
@@ -795,14 +804,24 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
       "/api/agent-threads/:threadId/messages",
       async (context) => {
         const { params, query, set } = context
-        const sixb = requireRequestSixb(context)
+        const authState = requestAuthState(context)
         try {
           const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agent.threads.getById(params.threadId)
+          // A run reads its own conversation alone, as it reads that conversation's files; a
+          // child or a workflow step reads none.
+          const thread =
+            authState.agentExecution && !authState.agentRun
+              ? null
+              : await getAgentMessageFileContentThread({
+                  authState,
+                  storage,
+                  projectId: host.id,
+                  threadId: params.threadId,
+                })
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -829,6 +848,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "List agent thread messages",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "listAgentThreadMessages",
+          security: accessTokenSecurityRequirement("listAgentThreadMessages"),
         },
       }
     )
@@ -1034,6 +1054,97 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "retryAgentRun",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/agent-threads/:threadId/context",
+      async (context) => {
+        const { params, query, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          const storage = host.storage.agents
+          const aiUsage = host.storage.aiUsage
+          const language = host.definitions.models?.language
+          if (!storage || !aiUsage) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const parsed = AgentThreadContextQuerySchema.parse(query)
+          if ((parsed.provider === undefined) !== (parsed.modelId === undefined)) {
+            set.status = 400
+            return { error: "Name the model with both 'provider' and 'modelId', or neither." }
+          }
+
+          const thread = await sixb.agent.threads.getById(params.threadId)
+          if (!thread) {
+            set.status = 404
+            return { error: "Agent thread not found" }
+          }
+          // A sub-agent's thread is measured through its conversation's turns.
+          assertConversationThread(thread)
+
+          // The model asked for, else the one the latest turn ran on, else the default.
+          const latest = await sixb.agent.runs.listForThread(thread.id, { limit: 1, order: "desc" })
+          const latestSpec = latest?.runs[0]?.spec
+          const latestModel = latestSpec?.model
+          const entry: LanguageModelEntry | null | undefined =
+            parsed.provider !== undefined && parsed.modelId !== undefined
+              ? language?.getByRef({ provider: parsed.provider, modelId: parsed.modelId })
+              : ((latestModel && language?.getByRef(latestModel)) ?? language?.default)
+          if (!entry) {
+            set.status = 404
+            return { error: "Language model not found" }
+          }
+
+          // The reasoning the latest turn ran with, on its model; the model's default on another.
+          const latestRunsOn =
+            latestModel?.provider === entry.provider && latestModel.modelId === entry.modelId
+          const reasoning = latestRunsOn ? latestSpec?.reasoning : entry.model.defaultReasoning
+
+          const use = await readAgentThreadContextUse(
+            { projectId: host.id, storage: { agents: storage, aiUsage } },
+            {
+              threadId: thread.id,
+              model: await resolvedForDisplay(entry),
+              ...(reasoning === undefined ? {} : { reasoning }),
+            }
+          )
+          return AgentThreadContextSchema.parse({
+            ...use,
+            model: { provider: entry.provider, modelId: entry.modelId },
+            ...(use.lastCall
+              ? { lastCall: { ...use.lastCall, occurredAt: toIsoString(use.lastCall.occurredAt) } }
+              : {}),
+            ...(use.lastCompaction
+              ? {
+                  lastCompaction: {
+                    ...use.lastCompaction,
+                    createdAt: toIsoString(use.lastCompaction.createdAt),
+                  },
+                }
+              : {}),
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        query: AgentThreadContextQuerySchema,
+        response: {
+          200: AgentThreadContextSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Measure an agent thread's context against a model's limits",
+          description:
+            "What the conversation's next request starts from, the model's limit, and the latest compaction. Read by the context meter after each turn.",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "getAgentThreadContext",
         },
       }
     )

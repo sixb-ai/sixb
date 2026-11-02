@@ -52,6 +52,23 @@ With [tiers](./configuration.md#tiers), the chat starts on **Auto**, where a
 it in that conversation until the person goes back to Auto.
 Each model can carry a [default reasoning](./configuration.md#default-reasoning).
 
+### Limit its steps
+
+A step is one model call. Cap how many a run may take:
+
+```ts
+export const sixb = createSixb({
+  // ...
+  agent: { maxSteps: 200, subagentMaxSteps: 100 },
+})
+```
+
+| Run | Default | At the limit |
+| --- | --- | --- |
+| Conversation turn (`maxSteps`) | No limit: someone watches it and can stop it. | It ends with its work kept, says it reached the step limit, and offers **Continue**. |
+| [Sub-agent](#it-delegates) (`subagentMaxSteps`) | 500 | It fails with `agent.step_limit_reached`. |
+| [Workflow AI task](../workflows/overview.md#add-an-ai-task) (its own `maxSteps`) | 500 | It fails with `agent.step_limit_reached`. |
+
 ## Give it project instructions
 
 Write guidance that applies to every conversation, such as your team's vocabulary, tone, or
@@ -176,6 +193,10 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   to its question), or why it will not continue (`ended`). Observers read them through
   `/api/observed-agent-threads`, by polling. Whoever asked for the turn, or the conversation's
   owner, can stop one at work: `POST /api/agent-runs/:runId/cancel` with its `activeRunId`.
+- **It stops at its [step limit](#limit-its-steps)**, 500 model calls unless you set one. The agent
+  can ask a sub-agent for fewer when it spawns it. One that stops there fails with
+  `agent.step_limit_reached`, and the agent gets the last text it wrote as `partialAnswer`, to
+  decide what to do next.
 - It cannot delegate again or start a workflow. Its model calls count toward the user's
   [AI usage](./usage-and-limits.md), and toward the `usage` and `cost` of the turn that started
   it. So does a workflow the agent's tools started, even for what it spends after the turn ends, as
@@ -411,7 +432,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
-| `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, and the [dictation](#dictation) microphone |
+| `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, the [dictation](#dictation) microphone, and the context meter: how much of the model's limit the conversation uses (`contextMeter`, which `useAgentConversation` fills) |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |

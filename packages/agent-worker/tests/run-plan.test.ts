@@ -83,6 +83,7 @@ describe("resolveRunPlan", () => {
     tools: [agentToolSpec(lookup, new Map())],
     sandboxModels: [],
     ontologyDocs: { files: [], index: [] },
+    tokenRates: [{ bytes: 24_000, tokens: 10_000 }],
   }
 
   test("takes the session's model and the plan's tool specs, and adds the harness's skills", () => {
@@ -91,6 +92,7 @@ describe("resolveRunPlan", () => {
     expect(resolved).toEqual({
       model,
       ontologyDocs: { files: [], index: [] },
+      tokenRates: [{ bytes: 24_000, tokens: 10_000 }],
       reasoning: "high",
       instructions: "Answer in French.",
       tools: [agentToolSpec(lookup, new Map())],
@@ -152,6 +154,30 @@ describe("resolveWorkflowAgentStepPlan", () => {
 
     expect(plan({ instructions: "Review." }).reasoning).toBe("medium")
     expect(plan({ instructions: "Review.", reasoning: "high" }).reasoning).toBe("high")
+  })
+
+  test("stops after 500 steps unless the step sets its own maxSteps", () => {
+    // Proven by removal: drop `maxSteps` from the workflow step plan; nothing bounds its loop.
+    const model = new WorkerTestModel({ modelId: "default-model" })
+    const entry: LanguageModelEntry = { provider: model.providerId, modelId: model.modelId, model }
+    const models: LanguageModelCatalog = {
+      default: entry,
+      list: () => [entry],
+      getByRef: () => entry,
+      tiers: [],
+      getByTier: () => entry,
+    }
+    const plan = (config: Parameters<typeof defineAgentStep>[1]) =>
+      stepPlan({
+        workflowId: "triage",
+        step: workflowStep(config),
+        models,
+        tools: toolCatalog([]),
+        skills: skillCatalog([]),
+      })
+
+    expect(plan({ instructions: "Review." }).maxSteps).toBe(500)
+    expect(plan({ instructions: "Review.", maxSteps: 40 }).maxSteps).toBe(40)
   })
 
   test("runs the step's own model as given, whether or not the catalog lists it", () => {

@@ -1,5 +1,5 @@
 import type { AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
-import { runModelLoop } from "@sixb/core/internal/agents"
+import { type AgentContextBudget, runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
@@ -9,9 +9,14 @@ import {
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
 import type { ModelMessage, ModelStep } from "@sixb/core/models"
-import { StructuredOutputError, UnsupportedModelFeatureError } from "@sixb/core/models"
+import {
+  ModelProviderError,
+  StructuredOutputError,
+  UnsupportedModelFeatureError,
+} from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
-import { renderWorkflowOutputFinalizerPrompt, withCurrentTime } from "./agent-prompt"
+import { renderWorkflowOutputFinalizerPrompt, sentSettings, withCurrentTime } from "./agent-prompt"
+import { createAgentContextGuard } from "./context-guard"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -23,6 +28,10 @@ export interface RunWorkflowAgentNodeInput {
   readonly context: AgentTurnContext
   readonly agentStepId: string
   readonly plan: ResolvedAgentExecutionPlan
+  /** The limits of the step's model, which every call of its research keeps under. */
+  readonly budget: AgentContextBudget
+  /** What the step's latest counted call measured (see prepareAgentModel). */
+  readonly measuredBytesPerToken?: () => number | undefined
   readonly agentStep: AgentStepDefinition
   readonly workflowId: string
   readonly workflowRunId: string
@@ -119,6 +128,22 @@ export async function runWorkflowAgentNode(
       schema: outputSchema,
     })
     phase = "agent-loop"
+    // A step's history is its own run, which starts from its prompt: nothing comes before it to
+    // summarize, so its calls stay under the model's limit by clearing what it read (see
+    // createAgentContextGuard), and past it by cutting what it has not.
+    const { tools } = input.context
+    const guard = createAgentContextGuard({
+      budget: input.budget,
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+      ...(input.measuredBytesPerToken === undefined
+        ? {}
+        : { measuredBytesPerToken: input.measuredBytesPerToken }),
+    })
+    const { prepareStep } = input.context
     const research = await runModelLoop({
       model: input.plan.model,
       messages: [
@@ -129,18 +154,31 @@ export async function runWorkflowAgentNode(
         withCurrentTime(
           { role: "user", content: [{ type: "text", text: input.prompt }] },
           input.createdAt,
-          input.context.projectTimeZone
+          sentSettings(input.plan, {
+            timeZone: input.context.projectTimeZone,
+            locale: input.context.projectLocale,
+          })
         ),
       ],
-      tools: input.context.tools,
+      tools,
       ...(input.plan.reasoning === undefined ? {} : { reasoning: input.plan.reasoning }),
-      ...(input.context.prepareStep === undefined
-        ? {}
-        : { prepareStep: input.context.prepareStep }),
+      ...(input.plan.maxSteps === undefined ? {} : { maxSteps: input.plan.maxSteps }),
+      prepareStep: async (step) => {
+        const prepared = await prepareStep?.(step)
+        const guarded = await guard.prepareStep({
+          ...step,
+          messages: prepared?.messages ?? step.messages,
+        })
+        // The guard's request, when it reduced the one prepared, and the room its answer has.
+        return { ...prepared, ...guarded }
+      },
+      recoverStep: guard.recoverStep,
       signal: abortSignal,
       onStepEnd: (step) => {
         completedSteps.push(step)
       },
+    }).catch((error: unknown) => {
+      throw workflowContextFailure(error, input.agentStepId, traceDetails) ?? error
     })
     throwIfEnvironmentFailed()
     if (research.status === "aborted") {
@@ -149,6 +187,18 @@ export async function runWorkflowAgentNode(
 
     const researchText = research.output
     finishReason = coerceAgentRunFinishReason(research.finishReason) ?? "unknown"
+    // Its last step ran tools, so its text is no answer to structure.
+    if (research.stepLimitReached) {
+      const remedy = "Narrow the step's prompt, or raise its maxSteps."
+      throw withFailureMessage(
+        createSixbError(
+          "agent.step_limit_reached",
+          `[SixbAgent] Workflow agent step '${input.agentStepId}' stopped after ${research.steps.length} steps before finishing its answer. ${remedy}`,
+          { details: traceDetails }
+        ),
+        `The agent stopped after ${research.steps.length} steps before finishing its answer. ${remedy}`
+      )
+    }
     // A cut-short answer would be structured as if it were complete; its text is never passed on.
     if (finishReason === "length") {
       const remedy =
@@ -256,15 +306,39 @@ export async function runWorkflowAgentNode(
       }),
       modelId: input.plan.model.modelId,
       finishReason,
-      trace: agentTraceFromModelSteps(completedSteps, traceDetails),
+      trace: agentTraceFromModelSteps(completedSteps, traceDetails, input.context.outputFileOf),
     }
   } catch (cause) {
     throwIfEnvironmentFailed()
     throw new WorkflowAgentNodeExecutionError({
       phase,
       finishReason,
-      trace: agentTraceFromModelSteps(completedSteps, traceDetails),
+      trace: agentTraceFromModelSteps(completedSteps, traceDetails, input.context.outputFileOf),
       cause,
     })
   }
+}
+
+/**
+ * The failure of a step whose call its guard reduced and the provider still refused as too long
+ * for the window. Undefined for any other error.
+ */
+function workflowContextFailure(
+  error: unknown,
+  agentStepId: string,
+  details: Readonly<Record<string, string>>
+): Error | undefined {
+  if (!(error instanceof ModelProviderError) || error.reason !== "context-window-exceeded") {
+    return undefined
+  }
+
+  const remedy = "Narrow the step's prompt, or bind a model with a larger context window."
+  return withFailureMessage(
+    createSixbError(
+      "agent.execution_failed",
+      `[SixbAgent] Workflow agent step '${agentStepId}' still exceeds its model's context window after its context was reduced. ${remedy}`,
+      { cause: error, details }
+    ),
+    `The step's context exceeds its model's context window, even reduced. ${remedy}`
+  )
 }
