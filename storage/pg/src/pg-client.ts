@@ -81,6 +81,10 @@ export function createPgClient(options: CreatePgClientOptions): SQL {
   // GUCs applied to every connection at startup.
   const connection: Record<string, string | number | boolean> = {
     search_path: options.schemaName,
+    // PostgreSQL costs an incremental sort as if its presorted key had many values. Over a sort
+    // index the first key is a null rank with one value, so a query with a sparse filter reads
+    // every row of the type where the planner expected a few.
+    enable_incremental_sort: "off",
   }
   if (options.statementTimeoutMillis !== undefined) {
     connection.statement_timeout = options.statementTimeoutMillis
