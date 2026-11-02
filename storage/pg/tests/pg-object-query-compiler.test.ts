@@ -143,6 +143,30 @@ test("count aggregate SQL supports scoped text defaults", () => {
   ])
 })
 
+// Removal proof: select the document a second time for cursors. Every row then crosses the network
+// twice, which is half of what a page of large objects transfers.
+test("each row carries its document once, unless a projection replaces it", () => {
+  const sorted: ObjectQuery = {
+    kind: "sort",
+    input: { kind: "start", objectTypeId: "Task" },
+    fields: [{ kind: "property", propertyId: "dueOn", direction: "desc" }],
+  }
+  const page: ObjectQuery = { kind: "page", input: sorted, pageSize: 10 }
+
+  expect(compilePgObjectQuery("project-a", page).sql).not.toContain("_cursor_properties")
+  expect(
+    compilePgObjectQuery("project-a", {
+      kind: "expand",
+      input: page,
+      expansions: [{ linkId: "owner", direction: "outgoing", cardinality: "one" }],
+    }).sql
+  ).not.toContain("_cursor_properties")
+
+  expect(
+    compilePgObjectQuery("project-a", { kind: "project", input: page, properties: ["title"] }).sql
+  ).toContain("_cursor_properties")
+})
+
 test("facet aggregate SQL projects scalar values without sorting object rows", () => {
   const compiled = compilePgObjectFacetQuery("project-a", sitePointQuery, "objectType", 100)
 

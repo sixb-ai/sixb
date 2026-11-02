@@ -497,7 +497,7 @@ function compileStart(
   const order = compileOrder(identityOrderFields())
   const objects = pgObjectsOfType(ctx.source, query.objectTypeId)
   const sql = `
-    SELECT *, properties AS _cursor_properties
+    SELECT *
     FROM ${objects.table}
     WHERE project_id = ? AND object_type_id = ? ${objects.filter}
     ${ctx.startPredicate ? `AND (${ctx.startPredicate})` : ""}
@@ -543,7 +543,7 @@ function compileRefs(
     FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
   `
   const sql = `
-    SELECT selected.*, selected.properties AS _cursor_properties
+    SELECT selected.*
     FROM (${requested}) AS requested
     JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
@@ -655,7 +655,6 @@ function compileSort(
         input.object_type_id,
         input.primary_id,
         input.properties,
-        input.properties AS _cursor_properties,
         input.created_at,
         input.updated_at,
         input.version,
@@ -808,7 +807,7 @@ function compileTraversal(
   )
   const order = compileOrder(identityOrderFields())
   return {
-    sql: `SELECT selected.*, selected.properties AS _cursor_properties ${relation.sql} ${ctx.unordered ? "" : `ORDER BY ${order.sql}`} ${ctx.isolateSortOverflow ? "OFFSET 0" : ""}`,
+    sql: `SELECT selected.* ${relation.sql} ${ctx.unordered ? "" : `ORDER BY ${order.sql}`} ${ctx.isolateSortOverflow ? "OFFSET 0" : ""}`,
     args: [...relation.args, ...(ctx.unordered ? [] : order.args)],
     totalSql: `SELECT COUNT(*)::bigint AS total ${relation.sql}`,
     totalArgs: relation.args,
@@ -964,7 +963,11 @@ function expandRows(
     "",
     ctx
   )
-  const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
+  const inputOrder = compileOrder(
+    input.order.fields,
+    "input",
+    `input.${input.order.propertyColumn}`
+  )
   return {
     sql: `
     SELECT input.*, ${expand.sql} AS _expand
@@ -1145,7 +1148,7 @@ function compileSet(
     const order = compileOrder(identityOrderFields())
     return {
       sql: `
-        SELECT *, properties AS _cursor_properties
+        SELECT *
         FROM ${ctx.source.objectsTable}
         WHERE 1 = 0
         ORDER BY ${order.sql}
@@ -1167,7 +1170,7 @@ function compileSet(
   const order = compileOrder(identityOrderFields())
   const selectedOrder = compileOrder(identityOrderFields(), "selected")
   const sql = `
-    SELECT selected.*, selected.properties AS _cursor_properties
+    SELECT selected.*
     FROM (${identities.sql}) AS ids
     JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
@@ -1198,7 +1201,9 @@ function compileProject(
   if (!properties) return input
 
   const projection = compileProjectionExpression(properties)
-  const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
+  // Only a projection replaces the document, so only it keeps the original for ordering and cursors.
+  const original = `input.${input.order.propertyColumn}`
+  const inputOrder = compileOrder(input.order.fields, "input", original)
   const outputOrder = compileOrder(input.order.fields, undefined, "_cursor_properties")
 
   return {
@@ -1208,7 +1213,7 @@ function compileProject(
         input.object_type_id,
         input.primary_id,
         ${projection.sql} AS properties,
-        input._cursor_properties AS _cursor_properties,
+        ${original} AS _cursor_properties,
         input.created_at,
         input.updated_at,
         input.version,
