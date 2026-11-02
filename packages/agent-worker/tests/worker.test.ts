@@ -2627,6 +2627,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
@@ -2675,6 +2676,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
@@ -2720,6 +2722,7 @@ function withObservedAgentMessageAppendStorage(
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     tokenRates: agents.tokenRates,
     messages: {
       getById: (params) => agents.messages.getById(params),
@@ -14264,7 +14267,11 @@ describe("agent tools act as the requester", () => {
       new RecordingSandboxFactory(),
       { projectTools: [summarizeInvoice] }
     )
-    const request = await requestAgent(sixb, { text: "Summarize inv-1.", runsOn: "computer" })
+    const request = await requestAgent(sixb, {
+      text: "Summarize inv-1.",
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
+    })
     const { workerHost, recorded } = recordUsage(sixb)
     const api = createSixbApi(
       new SixbServer({ host: workerHost as never, quiet: true, browser: createTestBrowserPolicy() })
@@ -14276,7 +14283,7 @@ describe("agent tools act as the requester", () => {
       apiUrl,
       runId: request.run.id,
       authorization: "",
-      computerId: "laptop",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
       leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       fetch: send,
     })
@@ -14367,18 +14374,22 @@ describe("agent tools act as the requester", () => {
     const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [parentModel, childModel] },
     })
-    const request = await requestAgent(sixb, { text: "Delegate this.", runsOn: "computer" })
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const request = await requestAgent(sixb, {
+      text: "Delegate this.",
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder },
+    })
     childRunId = createSubagentRunId(request.run.id, "research")
     const api = createSixbApi(
       new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
     )
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
     const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
     const opened: { workingDirectory?: string; runFiles: string }[] = []
     const runner = new ComputerRunner({
       apiUrl: "http://api.localhost",
       authorization: async () => "",
-      computerId: async () => "laptop",
+      computer: async () => ({ id: "laptop", name: "Laptop" }),
       folder,
       runFilesRoot,
       fetch: async (outgoing) => api.fetch(outgoing),
@@ -14402,11 +14413,19 @@ describe("agent tools act as the requester", () => {
         await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
       ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
       // The turn in the user's folder, the child in one of its own; each thread's files
-      // elsewhere, and gone once its run ended.
+      // elsewhere, named as a cloud sandbox names them, and gone once its run ended.
       expect(opened).toEqual([
-        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.threadId) },
         {
-          runFiles: join(runFilesRoot, createSubagentThreadId(request.run.id, "research")),
+          workingDirectory: folder,
+          runFiles: join(runFilesRoot, request.run.threadId, ".sixb", "agent"),
+        },
+        {
+          runFiles: join(
+            runFilesRoot,
+            createSubagentThreadId(request.run.id, "research"),
+            ".sixb",
+            "agent"
+          ),
         },
       ])
       expect(readdirSync(runFilesRoot)).toEqual([])
@@ -14448,7 +14467,7 @@ describe("agent tools act as the requester", () => {
       new ComputerRunner({
         apiUrl: "http://api.localhost",
         authorization: async () => "",
-        computerId: async () => "laptop",
+        computer: async () => ({ id: "laptop", name: "Laptop" }),
         folder,
         runFilesRoot,
         fetch: async (outgoing) => api.fetch(outgoing),
@@ -14478,7 +14497,11 @@ describe("agent tools act as the requester", () => {
 
     jest.useFakeTimers()
     try {
-      const one = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const one = await requestAgent(sixb, {
+        text: "First.",
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
       const ranOne = first.runTurn(one.run.id, new AbortController().signal)
       // Its end is written before its sandbox is given back.
       await underFakeTime(
@@ -14547,7 +14570,7 @@ describe("agent tools act as the requester", () => {
     const runner = new ComputerRunner({
       apiUrl: "http://api.localhost",
       authorization: async () => "",
-      computerId: async () => "laptop",
+      computer: async () => ({ id: "laptop", name: "Laptop" }),
       folder,
       runFilesRoot,
       fetch: async (outgoing) => api.fetch(outgoing),
@@ -14559,14 +14582,23 @@ describe("agent tools act as the requester", () => {
     })
 
     try {
-      const first = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const first = await requestAgent(sixb, {
+        text: "First.",
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
       const { threadId } = first.run
       // What a crashed run left behind is gone before the next one starts.
       mkdirSync(join(runFilesRoot, threadId, "attachments"), { recursive: true })
       writeFileSync(join(runFilesRoot, threadId, "attachments", "stale.txt"), "stale")
       expect(await runner.runTurn(first.run.id, new AbortController().signal)).toBe(true)
 
-      const second = await requestAgent(sixb, { text: "Second.", threadId, runsOn: "computer" })
+      const second = await requestAgent(sixb, {
+        text: "Second.",
+        threadId,
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
       expect(await runner.runTurn(second.run.id, new AbortController().signal)).toBe(true)
       await runner.drain()
 
@@ -14575,13 +14607,14 @@ describe("agent tools act as the requester", () => {
           status: "succeeded",
         })
       }
-      expect(opened).toEqual([join(runFilesRoot, threadId), join(runFilesRoot, threadId)])
+      const runFiles = join(runFilesRoot, threadId, ".sixb", "agent")
+      expect(opened).toEqual([runFiles, runFiles])
       expect(leftovers).toEqual([[], []])
       expect(readdirSync(runFilesRoot)).toEqual([])
 
       const [one, two] = requests
       if (!one || !two) throw new Error("Expected two model requests.")
-      expect(systemPromptOf(one.messages)).toContain(join(runFilesRoot, threadId, "skills"))
+      expect(systemPromptOf(one.messages)).toContain(join(runFiles, "skills"))
       expect(two.messages[0]).toEqual(one.messages[0])
       expect(two.messages.slice(0, one.messages.length)).toEqual([...one.messages])
     } finally {

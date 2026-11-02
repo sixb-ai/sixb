@@ -9,6 +9,7 @@ import {
 import { InMemoryAuthStorage } from "../src/storage/auth"
 import { InMemoryStorage } from "../src/storage/in-memory"
 import {
+  createAgentOperationScope,
   createAuthOperationScope,
   createObjectOperationScope,
   createOperationScopedFacade,
@@ -67,6 +68,26 @@ describe("storage operation scope", () => {
     )
 
     expect(stores.map(([name]) => name)).toContain("deviceAuthorizations")
+    for (const [name, store] of stores) {
+      expect(Reflect.get(scoped, name), name).not.toBe(store)
+    }
+  })
+
+  // Same hazard. Reproduce: drop `computers` from createAgentOperationScope.
+  test("scopes every agent store", () => {
+    const target = new InMemoryStorage().agents
+    const scoped = createAgentOperationScope(
+      target,
+      createStorageOperationScope(async (run) => run())
+    )
+    const stores = Object.entries(target).filter(
+      ([, value]) =>
+        typeof value === "object" &&
+        value !== null &&
+        Object.getPrototypeOf(value) !== Object.prototype
+    )
+
+    expect(stores.map(([name]) => name)).toContain("computers")
     for (const [name, store] of stores) {
       expect(Reflect.get(scoped, name), name).not.toBe(store)
     }

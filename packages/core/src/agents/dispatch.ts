@@ -59,6 +59,8 @@ export async function dispatchQueuedAgentRuns(
           statuses: ["queued"],
           order: "asc",
           limit,
+          // Left out here, not below: those waiting for a closed sixb would fill the limit.
+          excludeComputerTurns: true,
         })
       ).runs
 
