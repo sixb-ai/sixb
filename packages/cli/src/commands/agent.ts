@@ -5,6 +5,7 @@ import {
   createAgentRunSocket,
   createAgentThread,
   decideAgentApproval,
+  getAgentRun,
   getAgentThread,
   listAgentThreadApprovals,
   listAgentThreadMessages,
@@ -29,11 +30,16 @@ import { glyph, paint, palette, tone } from "../ui/theme"
 
 /** Exit status when the turn stopped on calls only the person can decide, and nobody could ask. */
 const EXIT_WAITING = 4
+/** Exit status when the turn waits for a computer that isn't connected. */
+const EXIT_OFFLINE = 5
+/** How long a connected sixb has to take a turn before this one runs it. */
+const CLAIM_GRACE_MS = 3_000
 
 /**
  * `sixb agent "<message>"`: one message to the agent, answered in the terminal. The turn runs on
  * this computer in the current folder, or in the cloud with `--cloud`; its steps go to stderr and
- * its answer to stdout, so the answer can be piped.
+ * its answer to stdout, so the answer can be piped. A conversation elsewhere, or a folder a
+ * connected sixb holds, runs there, and this follows it.
  */
 export async function runAgent(options: {
   readonly text: readonly string[]
@@ -42,6 +48,8 @@ export async function runAgent(options: {
   /** The turn's mode; without it, the person's in the thread applies, as for a message in the web. */
   readonly approvalMode?: string
   readonly json: boolean
+  /** Send it and exit, without following the turn. */
+  readonly detach: boolean
   readonly apiUrl?: string
   readonly profile?: string
 }): Promise<void> {
@@ -80,20 +88,14 @@ export async function runAgent(options: {
   // Read as the person: it says the mode their turns run in there.
   const { data: thread } = await getAgentThread({ client, path: { threadId }, throwOnError: true })
   const onComputer = thread.runsOn === "computer"
-  if (onComputer) {
-    const place = thread.computer
-    const computerId = await thisComputerId()
-    if (place?.id !== computerId || place.folder !== folder) {
-      throw new Error(
-        !place
-          ? "[SixbCLI] This conversation has no folder yet: open it with sixb in its folder, and press ctrl+f."
-          : place.id === computerId
-            ? `[SixbCLI] This conversation works in ${place.folder}: run sixb agent there.`
-            : `[SixbCLI] This conversation runs on ${place.name}: run sixb agent there.`
-      )
-    }
+  const place = thread.computer
+  if (onComputer && !place) {
+    throw new Error(
+      "[SixbCLI] This conversation has no folder yet: open it with sixb in its folder, and press ctrl+f."
+    )
   }
-  const runner = onComputer
+  const here = onComputer && place?.id === (await thisComputerId()) && place.folder === folder
+  const runner = here
     ? new LocalRunner(connection, folder, (error) => step(tone.fail(errorText(error))))
     : null
   if (!options.json) {
@@ -120,16 +122,30 @@ export async function runAgent(options: {
       throwOnError: true,
     })
     let runId: string | null = posted.run.id
+    if (options.detach) {
+      if (onComputer && !thread.computer?.online) step(tone.faint(waitingNote(thread.computer)))
+      printSent(thread.id, runId, options.json)
+      return
+    }
+
     let followed: Awaited<ReturnType<typeof follow>> = "finished"
     while (runId) {
-      // A turn this computer could not claim would wait here for nobody.
-      const unclaimed = runner?.claim(runId).then((claimed) => !claimed)
-      followed = await follow(connection, runId, options.json, stop.signal, unclaimed)
+      // Read again each turn: a sixb may have opened, or closed, since the last.
+      const { data } = await getAgentThread({ client, path: { threadId: thread.id } })
+      const current = data ?? thread
+      const online = current.computer?.online === true
+      if (onComputer && !runner && !online) {
+        step(tone.faint(waitingNote(current.computer)))
+        printSent(thread.id, runId, options.json)
+        process.exitCode = EXIT_OFFLINE
+        return
+      }
+      // A turn nothing could claim would wait here for nobody.
+      const unclaimed = runner && claimUnlessTaken(connection, runner, runId, online, stop.signal)
+      followed = await follow(connection, runId, options.json, stop.signal, unclaimed ?? undefined)
       if (followed === "unclaimed") {
         process.exitCode = 1
-        step(
-          tone.fail("This computer couldn't claim the turn: another runner holds it, or it ended.")
-        )
+        step(tone.fail("This computer couldn't claim the turn."))
         return
       }
       if (followed !== "finished") break
@@ -146,6 +162,44 @@ export async function runAgent(options: {
   } finally {
     await runner?.stop()
   }
+}
+
+/**
+ * Run the turn here, unless a sixb connected to this folder takes it first: only when none does in
+ * a moment, because a session can outlive the sixb that held it. Resolves to whether it stayed
+ * unclaimed: a turn another runner holds isn't, and is followed like any other.
+ */
+async function claimUnlessTaken(
+  connection: Connection,
+  runner: LocalRunner,
+  runId: string,
+  online: boolean,
+  signal: AbortSignal
+): Promise<boolean> {
+  const { client } = connection
+  const isQueued = async () => {
+    const { data: run } = await getAgentRun({ client, path: { runId } })
+    return !run || run.status === "queued"
+  }
+  if (online) {
+    await Bun.sleep(CLAIM_GRACE_MS)
+    if (signal.aborted || !(await isQueued())) return false
+  }
+  return (await runner.claim(runId)) ? false : isQueued()
+}
+
+/** Where a turn waits, for a person reading why nothing is happening yet. */
+function waitingNote(computer: { readonly name: string; readonly folder: string } | undefined) {
+  return computer
+    ? `It waits until sixb is open in ${computer.folder} on ${computer.name}, with messages from the web on.`
+    : "It waits for its computer."
+}
+
+/** A turn asked for and not followed: what a script needs to find it again. */
+function printSent(threadId: string, runId: string, json: boolean): void {
+  process.stdout.write(
+    json ? `${JSON.stringify({ threadId, runId, status: "queued" })}\n` : `${threadId}\n`
+  )
 }
 
 /**
