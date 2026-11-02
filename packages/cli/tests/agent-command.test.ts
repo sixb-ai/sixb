@@ -46,7 +46,7 @@ async function fakeApi(script: Script) {
 
       if (path === `/api/agent-threads/${THREAD}`) {
         return (
-          script.thread ??
+          script.thread?.clone() ??
           Response.json({
             id: THREAD,
             runsOn: "cloud",
@@ -106,9 +106,28 @@ function snapshot(status: string) {
   })
 }
 
+/** A thread that runs on a computer: `id` names this one when it has kept `computer.json`. */
+function computerThread(computer: { id: string; folder: string; online: boolean }) {
+  return Response.json({
+    id: THREAD,
+    runsOn: "computer",
+    computer: { name: "Ava's iMac", ...computer },
+  })
+}
+
 function runAgent(env: Record<string, string | undefined>, ...args: string[]) {
   return runCliToCompletion({
     cmd: ["bun", CLI, "agent", "--cloud", "--thread", THREAD, ...args, "Count the open cases."],
+    cwd: resolve(import.meta.dir, "..", "..", ".."),
+    env,
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
+  })
+}
+
+/** A message to the conversation, with no opinion on where it runs. */
+function sendTo(env: Record<string, string | undefined>, ...args: string[]) {
+  return runCliToCompletion({
+    cmd: ["bun", CLI, "agent", "--thread", THREAD, ...args, "Tidy the notes"],
     cwd: resolve(import.meta.dir, "..", "..", ".."),
     env,
     timeoutMs: FAST_CLI_TIMEOUT_MS,
@@ -208,5 +227,45 @@ describe("sixb agent", () => {
     expect(JSON.parse(result.stderr)).toMatchObject({
       error: { code: "api_error", status: 403 },
     })
+  })
+
+  // Guard proof: drop the offline check from runAgent; the command follows a turn nothing will run,
+  // until someone stops it.
+  test("says a turn waits for a computer that isn't connected, and exits 5", async () => {
+    const { env, posted } = await fakeApi({
+      thread: computerThread({ id: "cmp_other", folder: "/work/q3", online: false }),
+    })
+    const result = await sendTo(env, "--json")
+
+    expect(result.exitCode).toBe(5)
+    expect(JSON.parse(result.stdout)).toEqual({ threadId: THREAD, runId: RUN, status: "queued" })
+    expect(result.stderr).toContain("It waits until sixb is open in /work/q3 on Ava's iMac")
+    expect(posted).toHaveLength(1)
+  })
+
+  // Guard proof: refuse a conversation from another folder before posting, as the command first did;
+  // a connected computer can't be reached from anywhere but its own folder.
+  test("follows a turn a connected computer runs elsewhere", async () => {
+    const { env } = await fakeApi({
+      thread: computerThread({ id: "cmp_other", folder: "/work/q3", online: true }),
+      stream: (socket) => socket.send(snapshot("succeeded")),
+      run: { status: "succeeded" },
+    })
+    const result = await sendTo(env)
+
+    expect(result.exitCode).toBe(0)
+  })
+
+  // Guard proof: drop the detach branch from runAgent; a script that only wants to send waits for
+  // the turn, or for a computer nobody opens.
+  test("with --detach, sends and exits with the ids, whoever runs it", async () => {
+    const { env, posted } = await fakeApi({
+      thread: computerThread({ id: "cmp_other", folder: "/work/q3", online: false }),
+    })
+    const result = await sendTo(env, "--detach", "--json")
+
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual({ threadId: THREAD, runId: RUN, status: "queued" })
+    expect(posted).toHaveLength(1)
   })
 })

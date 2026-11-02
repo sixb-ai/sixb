@@ -87,11 +87,16 @@ sixb agent --cloud --json "How many cases are open?" | jq -r .text
 ```
 
 The answer goes to standard output and the agent's steps to standard error. `--thread <id>`
-continues a conversation. The turn runs in your mode in the conversation, unless
+continues a conversation, from any folder. The turn runs in your mode in the conversation, unless
 `--approval-mode <manual|accept-edits|auto>` names one for it. When the agent waits for your
 approval, `sixb agent` asks in a terminal; with `--json` or anywhere else it exits with code `4`.
 A turn that fails or is stopped, or that `sixb agent` stops following before it ends, exits with
 `1`. With `--json`, an error is written to standard error as JSON.
+
+In its own folder, with nothing else connected there, `sixb agent` runs the turn itself. Where `sixb`
+or `sixb connect` is holding the conversation's folder, that runs it, and `sixb agent` follows along.
+If nothing is holding it, the message waits and `sixb agent` exits with code `5`. `--detach` sends the
+message and exits at once, printing the conversation's id.
 
 ## Project commands
 
@@ -269,3 +274,4 @@ Use `--json` for machine-readable output from profile and credential commands. S
 | `2` | Invalid arguments. |
 | `3` | API failure. |
 | `4` | The request waits for the user's approval and did not run (Agent sandbox, or `sixb agent` outside a terminal). |
+| `5` | `sixb agent` sent the message, and it waits for a computer nothing is holding. |

@@ -226,6 +226,7 @@ async function main(): Promise<void> {
         cloud: hasFlag("cloud"),
         approvalMode: getFlag("approval-mode"),
         json: hasFlag("json"),
+        detach: hasFlag("detach"),
         apiUrl: getFlag("api-url"),
         profile: getFlag("profile"),
       })
