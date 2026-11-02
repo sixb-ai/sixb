@@ -20,6 +20,7 @@ import {
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
 import { emptyGrantIndex } from "../src/authorization/types"
+import type { LanguageModel, ModelMessage } from "../src/models"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
@@ -50,6 +51,44 @@ const answeringModel = new MockLanguageModel({
     ]),
 })
 
+/**
+ * A model whose provider counts a request's text at 2.4 bytes per token, and the request's and
+ * each message's 8 overhead tokens, as the estimator weighs them.
+ */
+const countingModel = new MockLanguageModel({
+  providerId: "test",
+  modelId: "counting-model",
+  stream: async (request) => {
+    const text = request.messages.flatMap((message) =>
+      message.role === "system"
+        ? []
+        : message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+    )
+    const bytes = text.reduce((total, part) => total + part.length, 0)
+    const inputTokens = Math.ceil(bytes / 2.4) + 8 + 8 * request.messages.length
+    return streamFromArray([
+      { type: "stream-start" },
+      { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 3 } },
+    ])
+  },
+})
+
+/** One call of `model` with one user message, read to its end as a runner reads it. */
+async function streamAll(
+  model: LanguageModel,
+  content: Extract<ModelMessage, { role: "user" }>["content"]
+): Promise<void> {
+  const stream = await model.stream({
+    callId: crypto.randomUUID(),
+    messages: [{ role: "user", content }],
+    tools: [],
+    signal: new AbortController().signal,
+  })
+  for await (const _event of stream.events) {
+    // Each event is read.
+  }
+}
+
 /** A project tool that answers what run it ran in, and stores a file for the run's sandbox. */
 const chartTool = defineAgentTool("chart")
   .description("Draw a chart.")
@@ -77,7 +116,7 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const sdk = new SixbHost({
     id: PROJECT_ID,
     ontology: [],
-    models: { language: [answeringModel] },
+    models: { language: [answeringModel, countingModel] },
     tools: [chartTool, readTool, otherTool],
     storage,
     blobStorage: blobs,
@@ -194,7 +233,7 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       parts: [{ type: "text", text: id }],
     })
   /** A turn of the thread, answering `trigger`; claimed, it opens its session. */
-  const turn = async (id: string, trigger: string, timeZone?: string) => {
+  const turn = async (id: string, trigger: string, timeZone?: string, locale?: string) => {
     const executionId = await createTestAgentExecution(storage, {
       projectId: PROJECT_ID,
       runId: id,
@@ -208,6 +247,7 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       spec: {
         model: { provider: "test", modelId: "test-model" },
         ...(timeZone ? { timeZone } : {}),
+        ...(locale ? { locale } : {}),
       },
     })
   }
@@ -339,6 +379,50 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       })
       expect(messages.messages.map((message) => message.id)).toContain("message-answer")
       session.close()
+    })
+
+    // Guard proof: return the recorded model from AgentRunSession.models without
+    // measuringAgentContextTokenRates; the next run on the model starts from the default again.
+    test("records what each call measured of its model, for the next run's plan", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const ref = { provider: "test", modelId: "counting-model" }
+      const stored = () =>
+        storage.agents.tokenRates.listLatest({
+          projectId: PROJECT_ID,
+          providerId: ref.provider,
+          modelId: ref.modelId,
+        })
+      const session = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!session) throw new Error("Expected the run to be claimed.")
+      const model = await session.models.language(ref)
+
+      await streamAll(model, [{ type: "text", text: "a".repeat(30_000) }])
+      expect(await stored()).toMatchObject([{ runId: run.id, bytes: 30_000, tokens: 12_500 }])
+      // The run's latest call stands for it; one that read an image measures nothing.
+      await streamAll(model, [{ type: "text", text: "b".repeat(36_000) }])
+      await streamAll(model, [
+        { type: "text", text: "c".repeat(30_000) },
+        { type: "file", mediaType: "image/png", data: new URL("data:image/png;base64,AAAA") },
+      ])
+      expect(await stored()).toMatchObject([{ runId: run.id, bytes: 36_000, tokens: 15_000 }])
+      await session.finish({ status: "succeeded", finishReason: "stop" })
+      session.close()
+
+      const next = await storage.agents.runs.create({
+        id: "run-2",
+        projectId: PROJECT_ID,
+        executionId: await createTestAgentExecution(storage, {
+          projectId: PROJECT_ID,
+          runId: "run-2",
+        }),
+        threadId: run.threadId,
+        triggerMessageId: "message-run-2",
+        spec: { model: ref },
+      })
+      const nextSession = await claim(host, { run: next, leaseExpiresAt: LEASE })
+      if (!nextSession) throw new Error("Expected the next run to be claimed.")
+      expect((await nextSession.plan()).tokenRates).toEqual([{ bytes: 36_000, tokens: 15_000 }])
+      nextSession.close()
     })
   })
 
@@ -484,6 +568,65 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       ).toBeInstanceOf(AgentExecutionLostError)
       first.close()
       second.close()
+    })
+
+    // Guard proof: read every message of the child's thread in readChildContext; its history then
+    // starts with the messages its checkpoint summarized, and no task is kept beside it.
+    test("gives a child its thread from its latest checkpoint, with the task it summarized", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const parent = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!parent) throw new Error("Expected the run to be claimed.")
+      const child = await claim(host, {
+        run: await spawnChild(storage, parent),
+        leaseExpiresAt: LEASE,
+      })
+      if (!child) throw new Error("Expected the child to be claimed.")
+      const { threadId } = child.run
+      for (const [id, role] of [
+        ["child-work", "assistant"],
+        ["child-mail", "user"],
+      ] as const) {
+        await storage.agents.messages.append({
+          id,
+          projectId: PROJECT_ID,
+          threadId,
+          runId: child.run.id,
+          role,
+          parts: [{ type: "text", text: id }],
+        })
+      }
+      const before = await child.context()
+      await child.checkpoint({
+        id: "ckpt-child",
+        threadId,
+        expectedPreviousCheckpointId: null,
+        expectedHeadSeq: 3,
+        reason: "threshold",
+        summary: "The child read the west.",
+        summaryFormatVersion: 1,
+        summarizedThroughSeq: 2,
+        observedHeadSeq: 3,
+        estimatedInputTokensBefore: 10,
+        estimatedInputTokensAfter: 5,
+        summaryModelId: "test-model",
+      })
+
+      const after = await child.context()
+
+      if (before.kind !== "subagent" || after.kind !== "subagent") {
+        throw new Error("Expected a child's context.")
+      }
+      expect(before.history.messages.map((message) => message.id)).toEqual([
+        `${child.run.id}-task`,
+        "child-work",
+        "child-mail",
+      ])
+      expect(before.task).toBeUndefined()
+      expect(after.history.checkpoint?.id).toBe("ckpt-child")
+      expect(after.history.messages.map((message) => message.id)).toEqual(["child-mail"])
+      expect(after.task).toMatchObject({ id: `${child.run.id}-task`, seq: 1 })
+      parent.close()
+      child.close()
     })
 
     // Guard proof: drop the scope checks from agentRunThreads and agentRunChildren; the turn reads
@@ -981,10 +1124,10 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
     // Guard proof: drop the `seq > afterSeq` test from readUsageAnchor; the answer the checkpoint
     // already summarized anchors the estimate.
-    test("anchors its history on the latest answer after the checkpoint, with its zone", async () => {
+    test("anchors its history on the latest answer after the checkpoint, with its settings", async () => {
       const { storage, thread, say, turn, open } = await seedConversation(claim)
       await say("msg_1", "user")
-      const first = await open(await turn("run_1", "msg_1", "Europe/Paris"))
+      const first = await open(await turn("run_1", "msg_1", "Europe/Paris", "fr-FR"))
       await say("msg_2", "assistant", "run_1")
       await storage.aiUsage.recordModelCall({
         id: "usage_1",
@@ -1008,6 +1151,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
       expect(history.messages.map((message) => message.id)).toEqual(["msg_1", "msg_2", "msg_3"])
       expect(history.sentTimeZones).toEqual({ msg_1: "Europe/Paris" })
+      expect(history.sentLocales).toEqual({ msg_1: "fr-FR" })
       expect(history.usageAnchor).toMatchObject({
         messageId: "msg_2",
         modelCall: { id: "usage_1", usage: { inputTokens: 100, outputTokens: 20 } },
@@ -1034,6 +1178,58 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(after.messages.map((message) => message.id)).toEqual(["msg_3", "msg_4"])
       expect(after.usageAnchor).toBeUndefined()
       second.close()
+    })
+
+    // Guard proof: drop the createdByRunId check from readUsageAnchor; the run that failed after
+    // compacting anchors the next turn on its last call, the summary's, which read the history the
+    // summary replaced.
+    test.each([
+      "succeeded",
+      "failed",
+    ] as const)("anchors on a run that compacted the thread only once it %s", async (status) => {
+      const { thread, say, turn, open, storage } = await seedConversation(claim)
+      await say("msg_1", "user")
+      await say("msg_2", "assistant")
+      await say("msg_3", "user")
+      const compacting = await open(await turn("run_1", "msg_3"))
+      await compacting.checkpoint({
+        id: "ckpt_1",
+        threadId: thread.id,
+        expectedPreviousCheckpointId: null,
+        expectedHeadSeq: 3,
+        reason: "threshold",
+        summary: "Earlier turns.",
+        summaryFormatVersion: 1,
+        summarizedThroughSeq: 2,
+        observedHeadSeq: 3,
+        estimatedInputTokensBefore: 10,
+        estimatedInputTokensAfter: 5,
+        summaryModelId: "test-model",
+      })
+      // The steps it completed, then its last call: the summary, or a step after it.
+      await say("msg_4", "assistant", "run_1")
+      await storage.aiUsage.recordModelCall({
+        id: "usage_1",
+        projectId: PROJECT_ID,
+        executionId: compacting.run.executionId,
+        attempt: 1,
+        callId: "call_1",
+        requesterGroupIds: [],
+        providerId: "test",
+        requestedModelId: "test-model",
+        responseId: "response_1",
+        usage: { inputTokens: 100, outputTokens: 20 },
+        occurredAt: new Date("2026-08-27T12:01:00.000Z"),
+      })
+      await compacting.finish({ status })
+      compacting.close()
+      await say("msg_5", "user")
+      const next = await open(await turn("run_2", "msg_5"))
+
+      const { history } = await next.context()
+
+      expect(history.usageAnchor?.modelCall.id).toBe(status === "succeeded" ? "usage_1" : undefined)
+      next.close()
     })
   })
 }

@@ -1,12 +1,22 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import { createHash } from "node:crypto"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { type ChildRunner, ComputerRunner, runApiCredential } from "@sixb/agent"
 import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
 import {
   AgentDefinitionError,
   type AgentMessagePart,
+  type AgentOptions,
   type AgentRuntime,
   type AgentSkillDefinition,
   type AgentToolDefinition,
@@ -30,6 +40,7 @@ import {
   defineObjectType,
   defineRole,
   defineWorkflow,
+  type FileRef,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -62,6 +73,7 @@ import {
   type AgentRunSession,
   agentRunQueueJobId,
   agentRunTokenRunId,
+  agentToolOutputPath,
   claimAgentRunOverHttp,
   claimWorkflowAgentNode,
   createAgentRunExecutionToken,
@@ -95,6 +107,7 @@ import type {
   LanguageModelRequest,
   LanguageModelStreamEvent,
   ModelFinishReason,
+  ModelRateCard,
   ModelTool,
   ModelUsage,
 } from "@sixb/core/models"
@@ -135,9 +148,12 @@ import {
 } from "../../agent/src/artifacts/materialize"
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
+import { estimateAgentRequestTokens, prepareAgentModel } from "../../agent/src/context-budget"
 import * as conversationPreparation from "../../agent/src/context-compaction"
+import { clearedToolResultText } from "../../agent/src/context-guard"
 import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
+import { conversationPromptCaching } from "../../agent/src/prompt-cache"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import { runConversationTurn } from "../../agent/src/run-conversation-turn"
 import {
@@ -145,9 +161,15 @@ import {
   createSubagentEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "../../agent/src/run-environment"
-import { SANDBOX_CONTEXT_DIRECTORY } from "../../agent/src/run-sandbox"
+import {
+  type AcquiredRunSandbox,
+  type RunSandbox,
+  SANDBOX_CONTEXT_DIRECTORY,
+} from "../../agent/src/run-sandbox"
 import { SubagentCoordinator } from "../../agent/src/subagent-tools"
+import * as toolResultMedia from "../../agent/src/tools/result-media"
 import { AgentFileBudget } from "../../agent/src/tools/tool-files"
+import { TOOL_OUTPUTS_DIRECTORY } from "../../agent/src/tools/tool-outputs"
 import { createAgentTurnRuntime } from "../../agent/src/turn-runtime"
 import type { AgentRunFiles } from "../../agent/src/types"
 import { waitFor as pollFor, runTurnInSession } from "../../agent/tests/helpers"
@@ -156,6 +178,7 @@ import {
   WorkerTestModel,
   type WorkerTestStreamEvent,
 } from "../../agent/tests/worker-model-fixture"
+import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "../../core/src/agents/context-token-rate"
 import { createSixbApi, SixbServer } from "../../server/src/server"
 import { createTestBrowserPolicy } from "../../server/tests/helpers"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
@@ -176,6 +199,7 @@ import type {
 import { workflowStepTools } from "../src/workflow-node-execution"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
+import { expectReplayedPrefix, withJsonbKeyOrder } from "./replay-bytes"
 
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
@@ -477,6 +501,36 @@ function answerModel(
   })
 }
 
+/**
+ * A model that never answers: each call writes where it is, then calls a tool nobody offers, whose
+ * error result sends it on to its next step.
+ */
+function neverAnsweringModel(
+  calls: { count: number },
+  identity: { readonly providerId?: string; readonly modelId?: string } = {}
+): WorkerTestModel {
+  return new WorkerTestModel({
+    modelId: "mock-model",
+    ...identity,
+    stream: async () => {
+      calls.count += 1
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "progress" },
+        { type: "text-delta", id: "progress", delta: `Checked ${calls.count} files.` },
+        { type: "text-end", id: "progress" },
+        {
+          type: "tool-call",
+          toolCallId: `read-${calls.count}`,
+          toolName: "read_missing",
+          input: "{}",
+        },
+        finish("tool-calls"),
+      ])
+    },
+  })
+}
+
 function delegatingParentModel(input: {
   readonly childRunId: () => string
   readonly childModel: { readonly provider: string; readonly modelId: string } | "heavy"
@@ -529,6 +583,27 @@ function delegatingParentModel(input: {
   })
 }
 
+/** A model whose provider counts 6 bytes of the request's messages per input token. */
+function sixBytesPerTokenModel(): WorkerTestModel {
+  return new WorkerTestModel({
+    modelId: "mock-model",
+    stream: async (request) => {
+      const bytes = new TextEncoder().encode(JSON.stringify(request.messages)).byteLength
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Done" },
+        { type: "text-end", id: "answer" },
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: { inputTokens: Math.ceil(bytes / 6), outputTokens: 10 },
+        },
+      ])
+    },
+  })
+}
+
 function compactingAnswerModel(input: {
   readonly provider?: string
   readonly modelId?: string
@@ -541,7 +616,7 @@ function compactingAnswerModel(input: {
     ...(input.provider === undefined ? {} : { providerId: input.provider }),
     modelId: input.modelId ?? "mock-model",
     stream: async (options) => {
-      if (options.tools.length > 0) {
+      if (!isSummaryRequest(options)) {
         input.captureAnswerPrompt(options.messages)
         input.captureAnswerReasoning?.(options.reasoning)
         return stream([
@@ -552,7 +627,6 @@ function compactingAnswerModel(input: {
           { type: "finish", finishReason: "stop", usage: COMPACTION_USAGE },
         ])
       }
-      expect(options.tools).toEqual([])
       expect(options.maxOutputTokens).toBeGreaterThan(0)
       input.captureSummaryPrompt(options.messages)
       input.captureSummaryReasoning?.(options.reasoning)
@@ -585,17 +659,99 @@ function compactingAnswerModel(input: {
           ].join("\n"),
         },
         { type: "text-end", id: "summary" },
-        { type: "finish", finishReason: "stop", usage: COMPACTION_USAGE },
+        // What the summary request weighs, as a provider would count it: a run measures its rate
+        // on every call, and the guard weighs the turn's next calls at it.
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: { ...COMPACTION_USAGE, inputTokens: estimateAgentRequestTokens(options, 3) },
+        },
       ])
     },
   })
+}
+
+/**
+ * A conversation model with a small window that counts its input at 3 bytes per token, as the
+ * estimator does for it, and keeps every request. It answers each turn with `answer` and writes
+ * `summary(request)` when asked to compact.
+ */
+function measuredConversationModel(input: {
+  readonly contextWindow: number
+  readonly maxOutputTokens: number
+  readonly answer: string
+  readonly summary: (request: LanguageModelRequest) => string
+  readonly requests: LanguageModelRequest[]
+}): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: "mock",
+      modelId: "mock-model",
+      capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+      contextWindow: input.contextWindow,
+      maxOutputTokens: input.maxOutputTokens,
+    },
+    stream: async (request) => {
+      input.requests.push(request)
+      const text = isSummaryRequest(request) ? input.summary(request) : input.answer
+      // What it reads: the texts, as the estimator weighs them, and the tool catalog.
+      const read = request.messages.flatMap((message) =>
+        message.role === "system"
+          ? [message.content]
+          : message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+      )
+      const bytes = new TextEncoder().encode(JSON.stringify([read, request.tools]))
+      return stream([
+        { type: "stream-start" },
+        { type: "text-start", id: "text" },
+        { type: "text-delta", id: "text", delta: text },
+        { type: "text-end", id: "text" },
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: {
+            inputTokens: Math.ceil(bytes.byteLength / 3),
+            outputTokens: Math.ceil(text.length / 3),
+          },
+        },
+      ])
+    },
+  })
+}
+
+/** The summary a request carries from the thread's latest checkpoint. */
+function previousSummary(request: LanguageModelRequest): string | undefined {
+  for (const message of request.messages) {
+    if (message.role !== "user") continue
+
+    for (const part of message.content) {
+      const match =
+        part.type === "text"
+          ? /<sixb_thread_summary>\n([\s\S]*)\n<\/sixb_thread_summary>/.exec(part.text)
+          : null
+      if (match) return match[1]
+    }
+  }
+  return undefined
+}
+
+/** The call that compacts a conversation: its last message asks for the summary. */
+function isSummaryRequest(request: LanguageModelRequest): boolean {
+  const last = request.messages.at(-1)
+  return (
+    last?.role === "user" &&
+    last.content.some(
+      (part) => part.type === "text" && part.text.startsWith("<sixb_summary_request>")
+    )
+  )
 }
 
 function lengthLimitedSummaryModel(onAnswerCall: () => void): WorkerTestModel {
   return new WorkerTestModel({
     modelId: "mock-model",
     stream: async (request) => {
-      if (request.maxOutputTokens !== undefined)
+      if (isSummaryRequest(request))
         return stream([
           { type: "stream-start" },
           { type: "text-start", id: "summary" },
@@ -604,7 +760,13 @@ function lengthLimitedSummaryModel(onAnswerCall: () => void): WorkerTestModel {
           finish("length"),
         ])
       onAnswerCall()
-      return stream([finish("stop")])
+      return stream([
+        { type: "stream-start" },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Went on." },
+        { type: "text-end", id: "answer" },
+        finish("stop"),
+      ])
     },
   })
 }
@@ -1561,6 +1723,7 @@ function buildSixb(
     readonly connectors?: readonly ConnectorDefinition[]
     readonly models?: ModelCatalogInput
     readonly security?: TestSecurity
+    readonly agentOptions?: AgentOptions
   } = {}
 ): TestSixb {
   return new SixbHost({
@@ -1593,6 +1756,7 @@ function buildSixb(
     },
     models: options.models ?? { language: [model] },
     agent: {
+      ...options.agentOptions,
       ...(options.skills === undefined ? {} : { skills: options.skills }),
       ...(options.projectInstructions === undefined
         ? {}
@@ -1723,9 +1887,11 @@ async function queueWorkflowAgentNode(input: {
   readonly requesterGroupIds?: readonly string[]
   /** Declared groups double as the step's groups. */
   readonly security?: TestSecurity
+  readonly maxSteps?: number
 }) {
   const agentStep = defineAgentStep("workflow-usage-step", {
     model: input.model,
+    ...(input.maxSteps === undefined ? {} : { maxSteps: input.maxSteps }),
     instructions: "Resolve the best project.",
     groups: input.security?.groups ?? [AGENT_RUNTIME_GROUP],
     ...(input.tools === undefined ? {} : { tools: input.tools }),
@@ -1985,7 +2151,7 @@ async function coordinatorFor(
   const language = sixb.definitions.models?.language
   if (!language) throw new Error("Expected a language model catalog.")
   const delegation = {
-    models: readAgentRunDelegation(language),
+    models: readAgentRunDelegation(language, sixb.definitions.agent.subagentMaxSteps),
     toolNames: sixb.definitions.tools.list().map((tool) => tool.name),
   }
   return new SubagentCoordinator(delegation, context, parent, session, () => {})
@@ -2112,7 +2278,8 @@ function executionPlanFor(sixb: TestSixb) {
   })
   const model = sixb.definitions.models?.language?.default.model
   if (!model) throw new Error("Expected a default language model.")
-  return resolveRunPlan({ ...plan, sandboxModels: [] }, { model })
+  // A project none of whose runs measured the model yet.
+  return resolveRunPlan({ ...plan, sandboxModels: [], tokenRates: [] }, { model })
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
@@ -2461,6 +2628,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
     computers: agents.computers,
+    tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2509,6 +2677,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
     computers: agents.computers,
+    tokenRates: agents.tokenRates,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2554,6 +2723,7 @@ function withObservedAgentMessageAppendStorage(
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
     computers: agents.computers,
+    tokenRates: agents.tokenRates,
     messages: {
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
@@ -4136,7 +4306,7 @@ describe("AgentWorker", () => {
         return {
           providerId: answeringModel.providerId,
           modelId: answeringModel.modelId,
-          definition: { ...definition, contextWindow: 32_768 },
+          definition: { ...definition, contextWindow: 49_152 },
           stream: (request: LanguageModelRequest) => answeringModel.stream(request),
         }
       },
@@ -4180,7 +4350,266 @@ describe("AgentWorker", () => {
         createdByRunId: run.id,
         summaryModelId: modelId,
       })
-      expect(summaryPrompts).toHaveLength(1)
+      // About 40,000 tokens of history, past the 32,768-token window: read in several steps.
+      expect(summaryPrompts.length).toBeGreaterThan(1)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("lets a thread past a price tier grow to its model's limit", async () => {
+    // Reproduce: in prepareAgentConversationContext, compare the estimate with 100,000 (the tier)
+    // instead of budget.inputBudgetTokens; the thread is then summarized far below its limit.
+    const summaryPrompts: LanguageModelRequest["messages"][] = []
+    const answerPrompts: LanguageModelRequest["messages"][] = []
+    const haiku = (base: number) => ({
+      default: String(base),
+      tiers: [{ minTokens: 100_001, price: String(base * 5) }],
+    })
+    const answering = compactingAnswerModel({
+      captureSummaryPrompt: (prompt) => summaryPrompts.push(prompt),
+      captureAnswerPrompt: (prompt) => answerPrompts.push(prompt),
+    })
+    const model = Object.assign(answering, {
+      definition: { ...answering.definition, contextWindow: 200_000 },
+      rateCard: {
+        currency: "USD",
+        input: haiku(1),
+        output: haiku(5),
+        cacheReadInput: haiku(0.1),
+        cacheWriteInput: haiku(1.25),
+      } satisfies ModelRateCard,
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
+    const storage = agentStorageOf(sixb)
+    const threadId = "tiered_price_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    // About 128,000 estimated tokens: past the tier, far below the hard limit.
+    for (let index = 0; index < 5; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `tier-turn-${index}-${"x".repeat(24_000)}`,
+      })
+    }
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Continue." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(summaryPrompts).toHaveLength(0)
+      // 200,000 bytes are 100,000 tokens at the 2 bytes per token of a model no run measured yet.
+      expect(JSON.stringify(answerPrompts[0]).length).toBeGreaterThan(200_000)
+      expect(await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })).toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  /** A conversation's second turn, sent `idleMinutes` after its first answered. */
+  async function idleConversationTurn(input: {
+    readonly first: string
+    readonly next: string
+    readonly idleMinutes: number
+    readonly summary?: (request: LanguageModelRequest) => string
+  }) {
+    const requests: LanguageModelRequest[] = []
+    // A 383,616-token limit, so that 200,000 tokens fit well.
+    const model = measuredConversationModel({
+      contextWindow: 400_000,
+      maxOutputTokens: 16_384,
+      answer: "Done.",
+      summary: input.summary ?? (() => "## Goal\nGo on with the work."),
+      requests,
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: input.first })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+
+      setSystemTime(new Date(Date.now() + input.idleMinutes * 60_000))
+      const threadId = first.run.threadId
+      const next = await requestAgent(sixb, { threadId, text: input.next })
+      const run = await waitForTerminalRun(storage, next.run.id)
+
+      return {
+        run,
+        checkpoint: await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId }),
+        records: await listRunStreamRecords(sixb.broker, run.id),
+        summaries: requests.filter(isSummaryRequest),
+      }
+    } finally {
+      setSystemTime()
+      await worker.stop()
+    }
+  }
+
+  // Reproduce: leave out `idle` in prepareAgentConversationContext and the first row goes on
+  // uncompacted; drop its 200,000-token floor and the second compacts; compare the idle time with
+  // a default cache's five minutes, not the conversation's hour, and the third does; drop the
+  // check that compacting brings it under the floor (shouldCompactIdleContext) and the last
+  // summarizes a turn for nothing.
+  test.each([
+    {
+      thread: "an hour idle at about 210,000 tokens",
+      first: "x".repeat(630_000),
+      next: "Continue.",
+      idleMinutes: 61,
+      compacts: true,
+    },
+    {
+      thread: "an hour idle at about 50,000 tokens",
+      first: "x".repeat(150_000),
+      next: "Continue.",
+      idleMinutes: 61,
+      compacts: false,
+    },
+    {
+      thread: "ten minutes idle at about 210,000 tokens",
+      first: "x".repeat(630_000),
+      next: "Continue.",
+      idleMinutes: 10,
+      compacts: false,
+    },
+    {
+      thread: "an hour idle whose newest message alone passes 200,000 tokens",
+      first: "Hello.",
+      next: "y".repeat(630_000),
+      idleMinutes: 61,
+      compacts: false,
+    },
+  ])("compacts a conversation below its limit only when idle and large: $thread", async (input) => {
+    const { run, checkpoint, summaries } = await idleConversationTurn(input)
+
+    expect(run.status).toBe("succeeded")
+    expect(summaries).toHaveLength(input.compacts ? 1 : 0)
+    if (!input.compacts) {
+      expect(checkpoint).toBeNull()
+      return
+    }
+
+    // Its cache has gone cold: the summary reads the history without writing it to a cache the
+    // next request, which starts from the summary, would never read.
+    // Reproduce: send the summary with the conversation's caching whatever the path, in summarize.
+    expect(summaries[0]?.caching).toBe("off")
+    expect(checkpoint?.reason).toBe("threshold")
+    expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThanOrEqual(200_000)
+    expect(checkpoint?.estimatedInputTokensBefore).toBeLessThan(383_616)
+  })
+
+  test("goes on uncompacted when an idle compaction fails", async () => {
+    // Reproduce: throw compactionError whatever the estimate at the end of
+    // prepareAgentConversationContext; a failed summary then fails a turn that fits its limit.
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const { run, checkpoint, records, summaries } = await idleConversationTurn({
+        first: "x".repeat(630_000),
+        next: "Continue.",
+        idleMinutes: 61,
+        summary: () => {
+          throw new Error("[test] The provider is down.")
+        },
+      })
+
+      expect(run.status).toBe("succeeded")
+      expect(summaries).toHaveLength(1)
+      expect(checkpoint).toBeNull()
+      expect(
+        records.find((record) => record.name === "agent.compaction.failed")?.payload
+      ).toMatchObject({ errorCode: "summary_failed" })
+      expect(String(warn.mock.calls[0]?.[0])).toContain("goes on uncompacted")
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test("counts a thread at the bytes per token its own calls measured", async () => {
+    // Reproduce: estimate prepareAgentConversationContext at budget.bytesPerToken instead of
+    // agentConversationBytesPerToken; the second turn then compacts at the project's rate.
+    const sixb = buildSixb(
+      sixBytesPerTokenModel(),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {}
+    )
+    const storage = agentStorageOf(sixb)
+    // The model's earlier runs in this project measured 3 bytes per token: this thread's text
+    // tokenizes at twice that.
+    for (let index = 0; index < 20; index += 1) {
+      await storage.tokenRates.record({
+        projectId: PROJECT_ID,
+        providerId: "mock",
+        modelId: "mock-model",
+        runId: `earlier_run_${index}`,
+        bytes: 30_000,
+        tokens: 10_000,
+        measuredAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000),
+      })
+    }
+    const threadId = "measured_rate_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      // About 88,000 tokens at 3 bytes per token, then 30,000 more: past the 111,616 hard limit
+      // at the project's rate, about 60,000 tokens at the thread's own.
+      for (const text of ["x".repeat(240_000), "y".repeat(90_000)]) {
+        const request = await requestAgentAs(sixb, REQUESTER, { threadId, text })
+        const run = await waitForTerminalRun(storage, request.run.id)
+        expect(run.status).toBe("succeeded")
+        expect(
+          (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
+        ).not.toContain("agent.compaction.started")
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("starts a run at the bytes per token its model's earlier runs measured", async () => {
+    // Reproduce: return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN from readAgentContextBytesPerToken;
+    // the new thread's 300,000 bytes then count as 150,000 tokens, past its model's limit.
+    const sixb = buildSixb(
+      sixBytesPerTokenModel(),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {}
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      // One turn measures the model; the next starts a thread of its own, with no call to anchor on.
+      for (const [threadId, text] of [
+        ["first_thread", "x".repeat(60_000)],
+        ["second_thread", "z".repeat(300_000)],
+      ] as const) {
+        await storage.threads.create({
+          id: threadId,
+          projectId: PROJECT_ID,
+          ownerPrincipal: REQUESTER,
+        })
+        const request = await requestAgentAs(sixb, REQUESTER, { threadId, text })
+        const run = await waitForTerminalRun(storage, request.run.id)
+        expect(run.status).toBe("succeeded")
+        expect(
+          (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
+        ).not.toContain("agent.compaction.started")
+      }
+
+      const measured = await storage.tokenRates.listLatest({
+        projectId: PROJECT_ID,
+        providerId: "mock",
+        modelId: "mock-model",
+      })
+      expect(measured).toHaveLength(2)
+      for (const { bytes, tokens } of measured) expect(bytes / tokens).toBeGreaterThan(5)
     } finally {
       await worker.stop()
     }
@@ -4224,7 +4653,7 @@ describe("AgentWorker", () => {
         threadId,
         index,
         // Over the continuation budget, but the serialized removable turns fit the summary call.
-        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 44_000)}`,
+        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 29_000)}`,
         includeAttachment: index === 0,
       })
     }
@@ -4271,7 +4700,9 @@ describe("AgentWorker", () => {
         undefined,
         checkpoint?.summarizedThroughSeq,
       ])
-      expect(blobStats).toEqual([])
+      // The summary reads the attachment the turns before sent; the continuation, which no longer
+      // holds its message, does not.
+      expect(blobStats).toEqual([`blob_${"0".repeat(64)}`])
 
       const summaryPrompt = summaryPrompts[0]
       const answerPrompt = answerPrompts[0]
@@ -4300,7 +4731,7 @@ describe("AgentWorker", () => {
           projectId: PROJECT_ID,
           executionId: run.executionId,
         })
-      ).resolves.toMatchObject({ modelCallCount: 2 })
+      ).resolves.toMatchObject({ modelCallCount: 3 })
       // Regression proof: omit onModelCallEnd in generateCheckpointSummary and this row disappears.
       const accounting = await sixb.storage.aiCosts?.listModelCalls({
         projectId: PROJECT_ID,
@@ -4315,7 +4746,8 @@ describe("AgentWorker", () => {
         usage: {
           responseId: "compaction-summary-response",
           responseModelId: "served-summary-model",
-          requestedReasoning: "none",
+          // As the turn reasons: thinking is part of the prefix the provider caches.
+          requestedReasoning: "high",
           rawUsage: COMPACTION_USAGE.raw,
         },
         cost: { status: "unpriceable", reason: "missingRateCard" },
@@ -4355,10 +4787,12 @@ describe("AgentWorker", () => {
       expect(secondCheckpoint?.summarizedThroughSeq).toBeGreaterThan(
         checkpoint?.summarizedThroughSeq ?? Number.POSITIVE_INFINITY
       )
-      expect(summaryPrompts).toHaveLength(2)
-      expect(JSON.stringify(summaryPrompts[1])).toContain("<sixb_previous_summary>")
-      expect(JSON.stringify(summaryPrompts[1])).toContain("Continue the durable test conversation")
-      expect(summaryReasoning).toEqual(["none", "none"])
+      // About 148,000 tokens of history, past the 128,000-token window: the first compaction
+      // reads it in two steps, the second in one, from the summary the first wrote.
+      expect(summaryPrompts).toHaveLength(3)
+      expect(JSON.stringify(summaryPrompts[2])).toContain("<sixb_thread_summary>")
+      expect(JSON.stringify(summaryPrompts[2])).toContain("Continue the durable test conversation")
+      expect(summaryReasoning).toEqual(["high", "high", undefined])
       expect(answerPrompts).toHaveLength(2)
       expect(answerReasoning).toEqual(["high", undefined])
       expect(await listMessages(storage, threadId)).toHaveLength(16)
@@ -4494,7 +4928,7 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 44_000)}`,
+        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 29_000)}`,
       })
     }
 
@@ -4544,7 +4978,7 @@ describe("AgentWorker", () => {
       threadId,
       index: 0,
       text: "Research this organization.",
-      assistantText: "x".repeat(460_000),
+      assistantText: "x".repeat(230_000),
     })
     const request = await requestAgentAs(sixb, REQUESTER, {
       threadId,
@@ -4578,10 +5012,67 @@ describe("AgentWorker", () => {
     }
   })
 
-  // Regression proof: remove the summary-request budget check; the smaller model gets called.
   test.each([
-    ["summary input budget", { contextWindow: 32_768 }, "Continue."],
-    ["summary input budget", { contextWindow: 128_000, maxInputTokens: 20_000 }, "Continue."],
+    ["its window", { contextWindow: 32_768 }],
+    ["its input limit", { contextWindow: 128_000, maxInputTokens: 20_000 }],
+  ] as const)("summarizes a history past a smaller model's %s, cut to what it reads", async (_limit, limits) => {
+    // Reproduce: return undefined from planSummary instead of shrunkStep; the switch then fails
+    // the turn with agent.context_limit_exceeded although the new request fits.
+    const summaryPrompts: LanguageModelRequest["messages"][] = []
+    const large = answerModel()
+    const smallAnswer = compactingAnswerModel({
+      provider: "mock",
+      modelId: "small",
+      captureSummaryPrompt: (prompt) => summaryPrompts.push(prompt),
+      captureAnswerPrompt: () => {},
+    })
+    const small: LanguageModel = {
+      providerId: "mock",
+      modelId: "small",
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "small",
+        capabilities: {},
+        ...limits,
+      },
+      stream: (request) => smallAnswer.stream(request),
+    }
+    const sixb = buildSixb(large, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [large, small] },
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, {
+        text: `Long historical input. ${"x".repeat(160_000)}`,
+      })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+
+      const next = await requestAgent(sixb, {
+        threadId: first.run.threadId,
+        text: "Continue.",
+        model: { provider: small.providerId, modelId: small.modelId },
+      })
+      expect((await waitForTerminalRun(storage, next.run.id)).status).toBe("succeeded")
+      expect(
+        await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId: first.run.threadId })
+      ).toMatchObject({ createdByRunId: next.run.id, summaryModelId: "small" })
+
+      // The first turn read whole would not fit: the summary read its start and where the rest is.
+      const read = JSON.stringify(summaryPrompts)
+      expect(summaryPrompts).toHaveLength(1)
+      expect(read).toContain("Long historical input.")
+      expect(read).not.toContain("x".repeat(100_000))
+      expect(read).toContain("prints it whole")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: remove the pre-billing continuation check; the smaller model gets called.
+  test.each([
     ["retained turn and tools", { contextWindow: 32_768 }, "x".repeat(160_000)],
   ] as const)("rejects an unsafe model switch exceeding %s", async (reason, limits, continuation) => {
     const large = answerModel()
@@ -4640,6 +5131,14 @@ describe("AgentWorker", () => {
       )
       expect(failed.spec?.model).toEqual({ provider: small.providerId, modelId: small.modelId })
       expect(smallCalls).toBe(0)
+      // Reproduce: drop the context_limit_exceeded case from translateAgentExecutionError; the
+      // run then fails as "Agent execution failed.", which a retry repeats as it is.
+      expect(failed.error).toMatchObject({
+        code: "agent.context_limit_exceeded",
+        message:
+          "This conversation is too long for the model's context window. Start a new conversation, or switch to a model with a larger context window.",
+        retryable: false,
+      })
       await reporter.flush()
       expect(reportedErrors).toHaveLength(1)
       expect(reportedErrors[0]?.message).toContain(reason)
@@ -4696,7 +5195,7 @@ describe("AgentWorker", () => {
       threadId,
       index: 0,
       text: "Research this organization.",
-      assistantText: `oversized-result-marker ${"x".repeat(460_000)}`,
+      assistantText: `oversized-result-marker ${"x".repeat(230_000)}`,
     })
 
     const worker = new AgentWorker(sixb, workerOptions())
@@ -4725,7 +5224,330 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("rejects a length-limited summary without creating a checkpoint or calling the agent", async () => {
+  test("compacts a small window once, then grows into the room it left", async () => {
+    // Reproduce: select the boundary with budget.keepRecentTokens alone in
+    // prepareAgentConversationContext, with no aim under the limit; each compaction then keeps
+    // half the limit as it is, and the turns after it compact again one after another.
+    const requests: LanguageModelRequest[] = []
+    const model = measuredConversationModel({
+      contextWindow: 20_000,
+      maxOutputTokens: 2_048,
+      answer: `Answered. ${"a".repeat(300)}`,
+      // Each summary repeats the last one and adds to it, as a chained summary grew.
+      summary: (request) => `${previousSummary(request) ?? "## Goal"}\n${"s".repeat(2_000)}`,
+      requests,
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+    await worker.start()
+    try {
+      let threadId: string | undefined
+      const runIds: string[] = []
+      const compacted: boolean[] = []
+      for (let turn = 0; turn < 18; turn += 1) {
+        const requested = await requestAgent(sixb, {
+          ...(threadId === undefined ? {} : { threadId }),
+          text: `Turn ${turn}. ${"u".repeat(3_000)}`,
+          reasoning: "high",
+        })
+        threadId = requested.run.threadId
+        runIds.push(requested.run.id)
+        expect((await waitForTerminalRun(storage, requested.run.id)).status).toBe("succeeded")
+        const names = (await listRunStreamRecords(sixb.broker, requested.run.id)).map(
+          (record) => record.name
+        )
+        compacted.push(names.includes("agent.compaction.completed"))
+      }
+
+      // A 17,952-token limit: compaction leaves at most 60 % of it, room for the next turn and
+      // more, so no turn compacts right after the one that did.
+      expect(compacted.filter(Boolean)).toHaveLength(2)
+      expect(compacted.some((now, turn) => now && compacted[turn - 1])).toBe(false)
+      const checkpoints = await storage.checkpoints.getByRunIds({
+        projectId: PROJECT_ID,
+        threadId: threadId!,
+        runIds,
+      })
+      expect(checkpoints).toHaveLength(compacted.filter(Boolean).length)
+      for (const checkpoint of checkpoints) {
+        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(17_952 * 0.6))
+        // Written anew within its allowance of 1,024 tokens, never grown from the last.
+        expect(new TextEncoder().encode(checkpoint.summary).byteLength).toBeLessThanOrEqual(3_072)
+      }
+      expect(checkpoints.at(-1)?.summary).toContain("The summary was cut short here.")
+      expect(checkpoints.at(-1)?.summary).not.toContain("s".repeat(4_000))
+
+      // Each summary continues the request the turn before sent, byte for byte, with its tools,
+      // reasoning and cache intent, then asks for the summary.
+      const summaries = requests.flatMap((request, index) =>
+        isSummaryRequest(request) ? [index] : []
+      )
+      expect(summaries).toHaveLength(checkpoints.length)
+      for (const index of summaries) {
+        const previous = requests[index - 1]!
+        const summary = requests[index]!
+        expectReplayedPrefix(previous, summary, model.providerId)
+        expect(summary.messages).toHaveLength(previous.messages.length + 2)
+        expect(summary.tools).toEqual(previous.tools)
+        expect([summary.reasoning, summary.caching]).toEqual(["high", previous.caching])
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("keeps a summary from the model that answered with a tool call", async () => {
+    // Reproduce: return the answer's text in summarize() whatever its tool calls; the preamble
+    // then becomes the whole summary of the conversation.
+    let answerCalls = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        if (isSummaryRequest(request)) {
+          return stream([
+            { type: "stream-start" },
+            { type: "text-start", id: "preamble" },
+            { type: "text-delta", id: "preamble", delta: "I'll read the history first." },
+            { type: "text-end", id: "preamble" },
+            {
+              type: "tool-call",
+              toolCallId: "history",
+              toolName: "bash",
+              input: JSON.stringify({ command: "sixb history" }),
+            },
+            finish("tool-calls"),
+          ])
+        }
+        answerCalls += 1
+        return answerStream("Went on.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
+    const storage = agentStorageOf(sixb)
+    const threadId = "tool_call_summary_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    for (let index = 0; index < 2; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`tool-turn-${index}-`}${"x".repeat(84_000)}`,
+      })
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Go on." })
+      expect((await waitForTerminalRun(storage, request.run.id)).status).toBe("succeeded")
+      expect(answerCalls).toBe(1)
+
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      expect(checkpoint?.summary).toStartWith("The summary could not be written.")
+      expect(checkpoint?.summary).toContain("> historical user 1: tool-turn-1-")
+      expect(checkpoint?.summary).not.toContain("I'll read the history first.")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("leaves a reasoning budget its room beside a summary near the window", async () => {
+    // Reproduce: subtract the summary alone from the window for planSummary's input limit; the
+    // summary of the whole conversation then asks for fewer output tokens than its thinking
+    // budget, which providers reject, and the turn fails above its hard limit.
+    const budgetTokens = 6_000
+    const summaries: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "mock-model",
+        capabilities: {
+          inputMediaTypes: [],
+          localTools: true,
+          parallelToolCalls: true,
+          reasoning: { canDisable: true, budgetTokens: {} },
+        },
+        contextWindow: 40_000,
+        maxOutputTokens: 8_192,
+      },
+      stream: async (request) => {
+        if (!isSummaryRequest(request)) return answerStream("Went on.")
+
+        summaries.push(request)
+        if ((request.maxOutputTokens ?? 0) <= budgetTokens) {
+          throw new Error("[test] max_tokens must be greater than thinking.budget_tokens.")
+        }
+        return answerStream("## Goal\nGo on.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
+    const storage = agentStorageOf(sixb)
+    const threadId = "reasoning_room_thread"
+    // About 34,500 tokens, past the 31,808-token hard limit: the whole conversation fits the
+    // window beside the summary, not beside its thinking budget too.
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    for (let index = 0; index < 4; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`room-turn-${index}-`}${"x".repeat(10_300)}`,
+      })
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        threadId,
+        text: "Go on.",
+        reasoning: { budgetTokens },
+      })
+      const run = await waitForTerminalRun(storage, request.run.id)
+      expect(run.status).toBe("succeeded")
+      expect(summaries.every((summary) => (summary.maxOutputTokens ?? 0) > budgetTokens)).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  describe("a workspace the summary acquires", () => {
+    /**
+     * A folder the prompt describes, as on a computer: the summary acquires it, and the
+     * environment's provisioning takes that acquisition over.
+     */
+    function folder(acquire?: () => Promise<AcquiredRunSandbox>) {
+      const sandbox = new RecordingSandbox("folder")
+      const released: AcquiredRunSandbox[] = []
+      let acquisitions = 0
+      const runSandbox: RunSandbox = {
+        waitBeforeModel: true,
+        contextDirectory: "/run-files",
+        acquire: async () => {
+          acquisitions += 1
+          return acquire
+            ? acquire()
+            : { sandbox, promptContext: { workingDirectory: "/work", retention: "computer" } }
+        },
+        release: async (acquired) => {
+          released.push(acquired)
+        },
+      }
+      return { sandbox, runSandbox, released, acquisitions: () => acquisitions }
+    }
+
+    /** A conversation past its 17,952-token hard limit, whose environment compacts it. */
+    async function compactingEnvironment(input: {
+      readonly summary: () => Promise<ReturnType<typeof stream>>
+      readonly runSandbox: RunSandbox
+    }) {
+      const model = new WorkerTestModel({
+        definition: {
+          kind: "language",
+          providerId: "mock",
+          modelId: "mock-model",
+          capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+          contextWindow: 20_000,
+          maxOutputTokens: 2_048,
+        },
+        stream: (request) =>
+          isSummaryRequest(request) ? input.summary() : Promise.resolve(answerStream("Done")),
+      })
+      const host = buildSixb(model)
+      const storage = agentStorageOf(host)
+      const threadId = "folder_compaction_thread"
+      await storage.threads.create({
+        id: threadId,
+        projectId: PROJECT_ID,
+        ownerPrincipal: REQUESTER,
+      })
+      for (let index = 0; index < 3; index += 1) {
+        await seedCompletedConversationTurn({
+          sixb: host,
+          threadId,
+          index,
+          text: `${`folder-turn-${index}-`}${"x".repeat(12_000)}`,
+        })
+      }
+      const requested = await requestAgentAs(host, REQUESTER, { threadId, text: "Go on." })
+      const run = await reserveRequestedRun(host, requested)
+      const prepared = prepareAgentModel(executionPlanFor(host))
+      const runtime = createAgentTurnRuntime({ signal: new AbortController().signal })
+      try {
+        return await createConversationAgentEnvironment({
+          ...(await withConversationSandbox({
+            session: await runSessionOf(host, run),
+            context: await buildAgentWorkerContext(host),
+            plan: { ...executionPlanFor(host), model: prepared.model },
+            run,
+          })),
+          openSandbox: async () => ({ sandbox: input.runSandbox }),
+          preflight: { budget: prepared.budget, runtime },
+        }).catch((error: unknown) => error)
+      } finally {
+        runtime.dispose()
+      }
+    }
+
+    test("goes back when the summary fails", async () => {
+      // Reproduce: drop releaseAcquisition from createConversationAgentEnvironment's catch; the
+      // folder then stays held by a run that ended, and the thread's next turn waits on it.
+      const workspace = folder()
+      const error = await compactingEnvironment({
+        summary: async () => {
+          throw new Error("[test] The provider is down.")
+        },
+        runSandbox: workspace.runSandbox,
+      })
+
+      expect(error).toMatchObject({ code: "summary_failed" })
+      expect(workspace.acquisitions()).toBe(1)
+      expect(workspace.released.map((acquired) => acquired.sandbox)).toEqual([workspace.sandbox])
+    })
+
+    test("goes back once when its provisioning fails", async () => {
+      // Reproduce: drop `!provisioning` from releaseAcquisition's guard in
+      // createConversationAgentEnvironment; the folder provisioning already gave back is
+      // released a second time.
+      const workspace = folder()
+      workspace.sandbox.writeFiles = async () => {
+        throw new Error("[test] file transport failed")
+      }
+      const error = await compactingEnvironment({
+        summary: async () => answerStream("## Goal\nGo on."),
+        runSandbox: workspace.runSandbox,
+      })
+
+      expect(error).toMatchObject({ message: "[test] file transport failed" })
+      expect(workspace.acquisitions()).toBe(1)
+      expect(workspace.released).toHaveLength(1)
+    })
+
+    test("fails as the workspace failed when it cannot be acquired", async () => {
+      // Reproduce: let normalizeCompactionError wrap ConversationRequestFailure as any other
+      // error; the held folder then reads as a checkpoint_failed compaction.
+      const held = new Error("[test] Another run of this thread holds its files.")
+      const workspace = folder(async () => {
+        throw held
+      })
+      const error = await compactingEnvironment({
+        summary: async () => answerStream("## Goal\nGo on."),
+        runSandbox: workspace.runSandbox,
+      })
+
+      expect(error).toBe(held)
+      expect(workspace.released).toEqual([])
+    })
+  })
+
+  test("keeps a summary its output limit cut short, and the thread goes on", async () => {
+    // Reproduce: throw summary_failed when the summary call finishes with "length", as compaction
+    // once did; the turn then fails, and so does every later one, on the same summary.
     let answerCalls = 0
     const sixb = buildSixb(
       lengthLimitedSummaryModel(() => {
@@ -4736,7 +5558,7 @@ describe("AgentWorker", () => {
       {}
     )
     const storage = agentStorageOf(sixb)
-    const threadId = "failed_compaction_thread"
+    const threadId = "cut_summary_thread"
     await storage.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
@@ -4747,46 +5569,28 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `${`failed-turn-${index}-`}${"x".repeat(112_000)}`,
+        text: `${`cut-turn-${index}-`}${"x".repeat(56_000)}`,
       })
     }
 
     const worker = new AgentWorker(sixb, workerOptions())
-    const originalConsoleError = console.error
-    console.error = () => {}
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
         threadId,
-        text: "This should not run after a partial summary.",
+        text: "Go on from a summary cut short.",
       })
       const run = await waitForTerminalRun(storage, request.run.id)
-      expect(run.status).toBe("failed")
-      expect(answerCalls).toBe(0)
-      await expect(
-        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
-      ).resolves.toBeNull()
-      expect(await listMessages(storage, threadId)).toHaveLength(5)
-      await expect(
-        aiUsageStorageOf(sixb).summarizeExecution({
-          projectId: PROJECT_ID,
-          executionId: run.executionId,
-        })
-      ).resolves.toMatchObject({ modelCallCount: 1 })
+      expect(run.status).toBe("succeeded")
+      expect(answerCalls).toBe(1)
 
-      const records = await listRunStreamRecords(sixb.broker, run.id)
-      expect(records.map((record) => record.name)).toEqual([
-        "agent.run.started",
-        "agent.compaction.started",
-        "agent.compaction.failed",
-        "agent.run.finished",
-      ])
-      expect(
-        records.find((record) => record.name === "agent.compaction.failed")?.payload
-      ).toMatchObject({ errorCode: "summary_failed", reason: "threshold" })
+      // Its unfinished last line goes, and the summary says where the rest is.
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      expect(checkpoint?.summary).toBe(
+        "## Goal\n\n[The summary was cut short here. `sixb history` prints the earlier conversation.]"
+      )
     } finally {
       await worker.stop()
-      console.error = originalConsoleError
     }
   })
 
@@ -6207,6 +7011,40 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("fails a workflow agent step that reached its maxSteps before answering", async () => {
+    // Removal proof: drop the `stepLimitReached` check from runWorkflowAgentNode; the step's last
+    // narration is structured as its answer.
+    const calls = { count: 0 }
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: neverAnsweringModel(calls),
+      runId: "workflow-step-limit",
+      maxSteps: 3,
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "step-limited workflow agent step" }
+      )
+      expect(execution).toMatchObject({
+        status: "failed",
+        error: {
+          code: "agent.step_limit_reached",
+          message:
+            "The agent reached its step limit before finishing. The agent stopped after 3 steps before finishing its answer. Narrow the step's prompt, or raise its maxSteps.",
+        },
+      })
+      expect(calls.count).toBe(3)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("keeps workflow usage when structured output validation fails", async () => {
     const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
       model: invalidStructuredAnswerModel(),
@@ -7081,10 +7919,10 @@ describe("AgentWorker", () => {
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
 
-    // The locale is read only to build the system prompt, after provisioning has started.
-    const failing: AgentRunnerContext = Object.defineProperty({ ...context }, "locale", {
+    // The requester is read only to build the system prompt, after provisioning has started.
+    const failing: AgentRunnerContext = Object.defineProperty({ ...context }, "requester", {
       get: () => {
-        throw new Error("locale unavailable")
+        throw new Error("requester unavailable")
       },
     })
 
@@ -7097,7 +7935,7 @@ describe("AgentWorker", () => {
           run,
         })
       )
-    ).rejects.toThrow("locale unavailable")
+    ).rejects.toThrow("requester unavailable")
 
     await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, { label: "sandbox released" })
   })
@@ -7380,7 +8218,6 @@ describe("AgentWorker", () => {
       const durableJson = JSON.stringify(messages)
       expect(durableJson).not.toContain("data:image")
       expect(durableJson).not.toContain("iVBORw0KGgo")
-      expect(durableJson).not.toContain(published.sandboxPath)
 
       const livePromptJson = JSON.stringify(livePrompt)
       expect(livePromptJson).toContain("generated.png")
@@ -7409,6 +8246,13 @@ describe("AgentWorker", () => {
       // The native contract retains originalOutput for durable tracing, separately from model output.
       const modelOutputs = liveToolResults.map((part: { output: unknown }) => part.output)
       expect(JSON.stringify(modelOutputs)).not.toContain('"type":"file"')
+      // The trace keeps what the model read, which names the file where later turns find it.
+      expect(
+        firstAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === createImage.name
+        )
+      ).toMatchObject({ modelOutput: modelOutputs[0] })
+      expect(JSON.stringify(modelOutputs[0])).toContain(published.sandboxPath)
       if (typeof Bun.Image === "function") {
         expect(
           livePromptMessages.some(
@@ -7438,19 +8282,17 @@ describe("AgentWorker", () => {
       const replayRun = await waitForTerminalRun(storage, followup.run.id)
       expect(replayRun.status).toBe("succeeded")
 
+      // The next turn reads the call as the first did, the image after it included, and finds the
+      // file at the path it named.
       const replayPromptJson = JSON.stringify(replayPrompt)
-      expect(replayPromptJson).toContain("generated.png")
-      expect(replayPromptJson).toContain(
-        encodeURIComponent(`/parts/${richToolPartIndex}/output/content/1/fileRef`)
-      )
+      expect(replayPromptJson).toContain(JSON.stringify(modelOutputs[0]))
       if (typeof Bun.Image === "function") {
-        expect(replayPromptJson).not.toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+        expect(replayPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
       }
       expect(
         sandboxes.sandboxes[1]?.writtenFiles.some(
           (file) =>
-            file.path.includes(".sixb/agent/attachments/") &&
-            file.path.endsWith(`tool-${richToolPartIndex}-1-generated.png`) &&
+            file.path.endsWith(published?.sandboxPath ?? "-") &&
             Buffer.from(file.contents).equals(Buffer.from(TEST_PNG_BYTES))
         )
       ).toBe(true)
@@ -7477,11 +8319,12 @@ describe("AgentWorker", () => {
           content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
         },
       })
+      // Viewing it again reuses the file the turn materialized: it stores no copy.
       expect(
         sandboxes.sandboxes[1]?.writtenFiles.filter((file) =>
           file.path.includes(".sixb/agent/tool-files/")
         )
-      ).toHaveLength(0)
+      ).toHaveLength(1)
     } finally {
       await worker.stop()
     }
@@ -7890,13 +8733,23 @@ describe("AgentWorker", () => {
           parts: [{ type: "step-start" }, { type: "text", text: "The delegated fact is 42." }],
         },
       ])
+      // Its calls share its conversation's key, with the default lifetime: it runs every call
+      // without asking and continues no paused run, so its next read is its own next step.
+      // Guard proof: drop `caching` from runSubagent's model loop.
+      expect(childCalls[0]?.caching).toEqual(
+        conversationPromptCaching({
+          projectId: PROJECT_ID,
+          threadId: requested.run.threadId,
+          lifetime: "default",
+        })
+      )
       // Its model read its thread: the task, closed by when the thread was created.
       expect(childCalls[0]?.messages.slice(1)).toEqual([
         {
           role: "user",
           content: [
             { type: "text", text: "Research the exact delegated fact." },
-            { type: "text", text: expect.stringMatching(/^\n\n<sixb_current_time>/) },
+            { type: "text", text: expect.stringMatching(/^\n\n<sixb_current_time [^>]*>/) },
           ],
         },
       ])
@@ -8060,16 +8913,18 @@ describe("AgentWorker", () => {
     expect(system).toContain(
       ["└── rooms/", "    └── meeting-room.md  MeetingRoom: A bookable meeting room."].join("\n")
     )
-    expect(system).toContain("Time zone: Europe/Paris. Locale: fr-FR.")
+    expect(system).not.toContain("Europe/Paris")
     expect(system).toContain(
       '<memory repo="project">\n# Ours\n- Quarters start in February\n</memory>'
     )
     expect(system).toContain("It is read-only for you: only the parent Agent saves to it.")
     expect(system).not.toContain("Speak like a helpful teammate")
     expect(system).not.toContain("sixb memory save")
-    // The task is dated as its requester reads the time.
+    // The task is dated as its requester reads the time, in their settings.
     expect(JSON.stringify(request?.messages.at(-1))).toContain(
-      renderCurrentTime(run.createdAt, "Europe/Paris")
+      JSON.stringify(
+        renderCurrentTime(run.createdAt, { timeZone: "Europe/Paris", locale: "fr-FR" })
+      ).slice(1, -1)
     )
   })
 
@@ -8346,7 +9201,8 @@ describe("AgentWorker", () => {
         ],
       })
 
-      // A later turn finds them in $SIXB_ATTACHMENTS, as files of that result.
+      // A later turn finds them in $SIXB_ATTACHMENTS, as files of that result, at the path the
+      // result named: the turn replays it as the model read it.
       const next = await requestAgent(sixb, {
         threadId: requested.run.threadId,
         text: "Show the chart.",
@@ -8371,7 +9227,7 @@ describe("AgentWorker", () => {
         (entry) => entry.logicalPath === "acme-review/margins.png"
       )
       expect(chart?.fileName).toBe("acme-review-margins.png")
-      expect(chart?.sandboxPath).toStartWith(".sixb/agent/attachments/")
+      expect(chart?.sandboxPath).toBe(".sixb/agent/children/acme-review/margins.png")
       expect(
         nextSandbox.files.get(join(nextSandbox.workingDirectory, chart?.sandboxPath ?? ""))
       ).toEqual(TEST_PNG_BYTES)
@@ -9609,6 +10465,105 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("stops a subagent at the project's step limit and tells its parent what it got", async () => {
+    // Removal proof: drop the `stepLimitReached` check from runSubagent; the child succeeds and the
+    // parent reads its last narration as its answer. Drop `partialAnswerOf` from the wait and the
+    // parent gets none of it.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childCalls = { count: 0 }
+    const childModel = neverAnsweringModel(childCalls, {
+      providerId: "gateway",
+      modelId: "zai/glm-5.3-flash",
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+      onCall: (options) => parentCalls.push(options),
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      agentOptions: { subagentMaxSteps: 3 },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate this research task." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await waitFor(
+        async () =>
+          (await storage.runs.getById({ projectId: PROJECT_ID, id: requested.run.id }))?.status ===
+          "succeeded",
+        { label: "delegating parent run terminal" }
+      )
+      const message =
+        "The agent reached its step limit before finishing. The subagent stopped after 3 steps before finishing its task. Spawn it again with a narrower task, or do the rest yourself."
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toMatchObject({
+        status: "failed",
+        error: { code: "agent.step_limit_reached", message },
+      })
+      expect(childCalls.count).toBe(3)
+
+      const waited = parentCalls[2]?.messages.at(-1)
+      const output = waited?.role === "tool" ? waited.content[0]?.output : undefined
+      expect(JSON.parse(output?.type === "text" ? output.value : "{}")).toMatchObject({
+        results: [
+          {
+            status: "failed",
+            error: { code: "agent.step_limit_reached", message },
+            partialAnswer: "Checked 3 files.",
+          },
+        ],
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("lets a spawn ask for fewer steps than the project allows, never more", async () => {
+    // Removal proof: drop `resolveMaxSteps`'s check and the spawn above the limit is admitted;
+    // drop `maxSteps` from `childSpec` and the child runs to the project's limit.
+    const calls = { count: 0 }
+    const model = neverAnsweringModel(calls)
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      agentOptions: { subagentMaxSteps: 3 },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate." })
+    const parent = requireConversationRun(
+      await storage.runs.start({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+        execution: freshTestExecution(),
+      })
+    )
+    const coordinator = await coordinatorFor(sixb, parent)
+    const signal = new AbortController().signal
+
+    const refused = await coordinator
+      .spawn({ key: "wide", task: "Read everything.", maxSteps: 4 }, signal)
+      .catch((error) => error)
+    expect(refused).toBeInstanceOf(AgentToolPublicError)
+    expect(refused.message).toBe(
+      "[SixbAgent] spawn_agent maxSteps must be at most 3, the project's limit. Omit it to use that limit."
+    )
+
+    const child = await coordinator.spawn(
+      { key: "narrow", task: "Read two files.", maxSteps: 2 },
+      signal
+    )
+    await runChildren(sixb, [child.runId])
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })).toMatchObject({
+      status: "failed",
+      spec: { maxSteps: 2 },
+      error: { code: "agent.step_limit_reached" },
+    })
+    expect(calls.count).toBe(2)
+  })
+
   test("tells the parent what to do about a subagent that gave no answer", async () => {
     // Removal proof: fail an empty answer with a bare `createSixbError` again; the parent then
     // reads "Agent execution failed." and nothing it can act on.
@@ -10391,6 +11346,41 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("ends a turn at the project's maxSteps with its work and a step-limit diagnostic", async () => {
+    // Removal proof: drop `stepLimitDiagnostic` from runAgentTurn; the turn ends without saying
+    // why it stopped, so the chat offers no Continue.
+    const calls = { count: 0 }
+    const sixb = buildSixb(neverAnsweringModel(calls), new InMemoryBroker(), undefined, {
+      agentOptions: { maxSteps: 2 },
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const requested = await requestAgent(sixb, { text: "Read every file." })
+      expect(await waitForTerminalRun(storage, requested.run.id)).toMatchObject({
+        status: "succeeded",
+        finishReason: "tool-calls",
+        diagnostics: [
+          {
+            code: "step_limit_reached",
+            severity: "warning",
+            scope: "run",
+            message: "The agent reached its step limit before producing a final answer.",
+          },
+        ],
+      })
+      expect(calls.count).toBe(2)
+
+      const [, assistant] = await listMessages(storage, requested.run.threadId)
+      expect(assistant?.parts.flatMap((part) => (part.type === "text" ? [part.text] : []))).toEqual(
+        ["Checked 1 files.", "Checked 2 files."]
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("runs the built-in bash tool in a per-run sandbox", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(bashThenAnswerModel(), new InMemoryBroker(), sandboxes)
@@ -10972,9 +11962,13 @@ describe("AgentWorker", () => {
             reserveTokens: 2_000,
             keepRecentTokens: 1_000,
             source: "model",
+            bytesPerToken: 4,
           },
           run,
           runtime,
+          conversationRequest: () => {
+            throw new Error("[test] The estimate alone decides.")
+          },
         })
       } finally {
         session.close()
@@ -11175,7 +12169,8 @@ describe("AgentWorker", () => {
   test("replays a byte-identical prefix and dates every user message from storage", async () => {
     // Proven by removal: date messages with `new Date()` in loadUserMessageTimes; the replayed
     // first message then differs between the two runs. The clock jumps an hour between them,
-    // since the rendered time is minute-precise.
+    // since the rendered time is minute-precise. Render the time zone or locale in the system
+    // prompt again, and the third run, sent from other settings, rewrites the whole prefix.
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
       modelId: "mock-model",
@@ -11205,7 +12200,7 @@ describe("AgentWorker", () => {
         timeZone: "Asia/Kolkata",
       })
       await waitForTerminalRun(storage, second.run.id)
-      const third = await requestAgent(sixb, { text: "third", threadId })
+      const third = await requestAgent(sixb, { text: "third", threadId, locale: "fr-FR" })
       await waitForTerminalRun(storage, third.run.id)
 
       const [firstRequest, secondRequest, thirdRequest] = requests
@@ -11215,24 +12210,24 @@ describe("AgentWorker", () => {
       expect(secondRequest.messages.slice(0, firstRequest.messages.length)).toEqual([
         ...firstRequest.messages,
       ])
-      // The third run uses the project time zone, so only its system prompt differs.
-      expect(thirdRequest.messages.slice(1, secondRequest.messages.length)).toEqual(
-        secondRequest.messages.slice(1)
-      )
+      // The third run is sent in other settings, which only its own message carries.
+      expect(thirdRequest.messages.slice(0, secondRequest.messages.length)).toEqual([
+        ...secondRequest.messages,
+      ])
 
       // Each message keeps the zone of the run that answered it.
       const sent = (await listMessages(storage, threadId)).filter(
         (message) => message.role === "user"
       )
       const users = thirdRequest.messages.filter((message) => message.role === "user")
-      const sentAt = (index: number, timeZone: string) => ({
+      const sentAt = (index: number, timeZone: string, locale: string) => ({
         type: "text" as const,
-        text: `\n\n${renderCurrentTime(sent[index]!.createdAt, timeZone)}`,
+        text: `\n\n${renderCurrentTime(sent[index]!.createdAt, { timeZone, locale })}`,
       })
       expect(users.map((message) => message.content.at(-1))).toEqual([
-        sentAt(0, "Asia/Kolkata"),
-        sentAt(1, "Asia/Kolkata"),
-        sentAt(2, "UTC"),
+        sentAt(0, "Asia/Kolkata", "en"),
+        sentAt(1, "Asia/Kolkata", "en"),
+        sentAt(2, "UTC", "fr-FR"),
       ])
     } finally {
       setSystemTime()
@@ -11240,8 +12235,10 @@ describe("AgentWorker", () => {
     }
   })
 
-  // Guard proof: drop the section or the authors from userMessageSuffix in runAgentTurn; the
-  // shared turn then cannot tell who takes part or who wrote what.
+  // Guard proof: drop the section from the conversation's system prompt, or the authors from
+  // userMessageSuffix in runAgentTurn; the shared turn then cannot tell who takes part or who
+  // wrote what. Put the section back on the newest user message, or the sender's settings in the
+  // system prompt, and the next turn no longer replays the bytes this one sent.
   test("tells the model who wrote each message of a shared thread, and stores none of it", async () => {
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
@@ -11323,7 +12320,12 @@ describe("AgentWorker", () => {
         addedBy: alice,
         maxParticipants: 50,
       })
-      const second = await requestAgentAs(sixb, bob, { text: "Why did Acme slip?", threadId })
+      const second = await requestAgentAs(sixb, bob, {
+        text: "Why did Acme slip?",
+        threadId,
+        timeZone: "America/New_York",
+        locale: "en-US",
+      })
       await terminal(second.run.id)
 
       const alone = requests[0]
@@ -11338,10 +12340,26 @@ describe("AgentWorker", () => {
 
       // Names are data: a shared thread's system prompt is the same whoever sends the turn.
       // Guard proof: drop `shared` from createAgentExecutionContext; each prompt names its sender.
-      const third = await requestAgentAs(sixb, alice, { text: "And Globex?", threadId })
+      const third = await requestAgentAs(sixb, alice, {
+        text: "And Globex?",
+        threadId,
+        timeZone: "Europe/Paris",
+        locale: "fr-FR",
+      })
       await terminal(third.run.id)
-      expect(requests.at(-1)?.messages[0]).toEqual(shared.messages[0])
-      expect(JSON.stringify(shared.messages[0])).not.toContain("usr_bob")
+      const next = requests.at(-1)
+      if (!next) throw new Error("Expected the third turn's request.")
+      // Alice's turn replays Bob's request byte for byte: its system prompt, and every message.
+      expect(next.messages.slice(0, shared.messages.length)).toEqual([...shared.messages])
+      // Each turn is read again after a pause, and names its conversation by an opaque key.
+      // Guard proof: drop `caching` from runAgentTurn's model loop.
+      expect(shared.caching).toEqual({
+        lifetime: "long",
+        key: expect.stringMatching(/^sixb_[0-9a-f]{32}$/),
+      })
+      expect(next.caching).toEqual(shared.caching)
+      expect(alone.caching).toEqual(shared.caching)
+      expect(JSON.stringify(shared.messages[0])).not.toContain("This request comes from")
 
       // So is its memory: the project's alone, never the sender's own.
       // Guard proof: pass `shared: false` to loadConversationMemory; Bob's turn shows his memory.
@@ -11368,9 +12386,12 @@ describe("AgentWorker", () => {
       expect(closings[0]).not.toContain("sixb_conversation")
       expect(closings[0]).toEndWith('<sixb_author id="usr_alice">usr_alice</sixb_author>')
 
-      // The newest message carries who takes part, then when it was sent, then who sent it.
+      // The system prompt says who takes part; each message when it was sent, then who sent it.
+      expect(system).toMatch(
+        /<\/sixb_runtime_facts>\n\n<sixb_conversation>\nThis conversation is shared\. Its owner: usr_alice\.\nAlso taking part: usr_bob\.[\s\S]*<\/sixb_conversation>/
+      )
       expect(closings[1]).toMatch(
-        /^\n\n<sixb_conversation>\nThis conversation is shared\. Its owner: usr_alice\.\nAlso taking part: usr_bob\.[\s\S]*<\/sixb_conversation>\n<sixb_current_time>[^<]*<\/sixb_current_time>\n<sixb_author id="usr_bob">usr_bob<\/sixb_author>$/
+        /^\n\n<sixb_current_time time_zone="America\/New_York" locale="en-US">[^<]*<\/sixb_current_time>\n<sixb_author id="usr_bob">usr_bob<\/sixb_author>$/
       )
 
       const stored = JSON.stringify(await listMessages(storage, threadId))
@@ -11407,9 +12428,8 @@ describe("AgentWorker", () => {
       const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
-      // The requester's settings, frozen on the run, win over the project's (UTC, en).
-      // Proven by removal: drop timeZone/locale from resolveAgentExecutionPlan.
-      expect(capturedSystem).toContain("Time zone: Asia/Kolkata. Locale: fr-FR.")
+      // The requester's settings are their message's, never the prompt's (see the replay test).
+      expect(capturedSystem).not.toContain("Asia/Kolkata")
       expect(capturedSystem).toContain("<sixb_mode_rules>")
       expect(capturedSystem).toContain("<sixb_runtime_context>")
       expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
@@ -11721,6 +12741,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
+        projectLocale: "en",
         prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
           if (stepIndex !== 1) return
           abort.abort()
@@ -12328,6 +13349,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
+        projectLocale: "en",
       },
       plan: executionPlanFor(sixb),
       run: staleRun,
@@ -12588,6 +13610,7 @@ describe("AgentWorker", () => {
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
           projectTimeZone: "UTC",
+          projectLocale: "en",
         },
         plan: executionPlanFor(sixb),
         run,
@@ -12636,6 +13659,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
+        projectLocale: "en",
       },
       plan: executionPlanFor(sixb),
       run: reclaimed,
@@ -13187,7 +14211,7 @@ describe("agent tools act as the requester", () => {
         plan,
         run: childRun,
         thread: childThread,
-        history: { messages: [] },
+        history: { checkpoint: null, messages: [], sentTimeZones: {} },
       })
     )
     const openQuote = (environment: typeof task, key: string) => {
@@ -13388,18 +14412,212 @@ describe("agent tools act as the requester", () => {
       expect(
         await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
       ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
-      // The turn in the user's folder, the child in one of its own; each run's files elsewhere,
-      // named as a cloud sandbox names them, and gone once it ended.
+      // The turn in the user's folder, the child in one of its own; each thread's files
+      // elsewhere, named as a cloud sandbox names them, and gone once its run ended.
       expect(opened).toEqual([
         {
           workingDirectory: folder,
-          runFiles: join(runFilesRoot, request.run.id, ".sixb", "agent"),
+          runFiles: join(runFilesRoot, request.run.threadId, ".sixb", "agent"),
         },
-        { runFiles: join(runFilesRoot, childRunId, ".sixb", "agent") },
+        {
+          runFiles: join(
+            runFilesRoot,
+            createSubagentThreadId(request.run.id, "research"),
+            ".sixb",
+            "agent"
+          ),
+        },
       ])
       expect(readdirSync(runFilesRoot)).toEqual([])
     } finally {
       jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
+  // Every sixb opened in a folder shares the computer's files directories: a thread's next turn
+  // can start in one while the last turn's release, in another, still removes the directory.
+  // Regression proof: resolve holdRunFiles without its lock; the next turn opens while the last
+  // one is torn down, whose removal then takes the next turn's files with it.
+  test("two sixb on one computer hold a thread's files directory one run at a time", async () => {
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ]),
+    })
+    const sixb = buildSixb(model)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const events: string[] = []
+    let releaseTeardown = () => {}
+    const teardown = new Promise<void>((resolve) => {
+      releaseTeardown = resolve
+    })
+    const runner = (name: string, opened: (runFiles: string) => Sandbox) =>
+      new ComputerRunner({
+        apiUrl: "http://api.localhost",
+        authorization: async () => "",
+        computer: async () => ({ id: "laptop", name: "Laptop" }),
+        folder,
+        runFilesRoot,
+        fetch: async (outgoing) => api.fetch(outgoing),
+        openSandbox: async ({ runFiles }) => {
+          events.push(`${name} opened`)
+          return opened(runFiles)
+        },
+      })
+    // The first sixb's teardown is slow; the second leaves a file in the thread's directory.
+    const first = runner("first", () => {
+      const sandbox = new RecordingSandbox("first")
+      sandbox.destroy = async () => {
+        events.push("first tearing down")
+        await teardown
+        events.push("first torn down")
+      }
+      return sandbox
+    })
+    const second = runner("second", (runFiles) => {
+      writeFileSync(join(runFiles, "provisioned.txt"), "for the second turn")
+      const sandbox = new RecordingSandbox("second")
+      sandbox.destroy = async () => {
+        events.push(existsSync(join(runFiles, "provisioned.txt")) ? "files kept" : "files lost")
+      }
+      return sandbox
+    })
+
+    jest.useFakeTimers()
+    try {
+      const one = await requestAgent(sixb, {
+        text: "First.",
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
+      const ranOne = first.runTurn(one.run.id, new AbortController().signal)
+      // Its end is written before its sandbox is given back.
+      await underFakeTime(
+        async () =>
+          events.includes("first tearing down") && terminalRun(agentStorageOf(sixb), one.run.id),
+        "the first turn's end"
+      )
+
+      const two = await requestAgent(sixb, {
+        text: "Second.",
+        threadId: one.run.threadId,
+        runsOn: "computer",
+      })
+      const ranTwo = second.runTurn(two.run.id, new AbortController().signal)
+      // The second turn gets this long to open where it would, while the first one is torn down.
+      for (let step = 0; step < 400 && !events.includes("second opened"); step += 1) {
+        await realLoopTurn()
+        jest.advanceTimersByTime(100)
+      }
+      releaseTeardown()
+      expect(await ranOne).toBe(true)
+      await underFakeTime(() => terminalRun(agentStorageOf(sixb), two.run.id), "the second turn")
+      expect(await ranTwo).toBe(true)
+
+      expect(events).toEqual([
+        "first opened",
+        "first tearing down",
+        "first torn down",
+        "second opened",
+        "files kept",
+      ])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+    } finally {
+      releaseTeardown()
+      jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
+  // Regression proof: key the runner's files directory by run id again; the second turn's system
+  // prompt names other skill, ontology and memory paths, so its first call reads no cache.
+  test("a computer's turns of one thread name the same files, so their prompt stays cached", async () => {
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        requests.push(request)
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const opened: string[] = []
+    const leftovers: string[][] = []
+    const runner = new ComputerRunner({
+      apiUrl: "http://api.localhost",
+      authorization: async () => "",
+      computer: async () => ({ id: "laptop", name: "Laptop" }),
+      folder,
+      runFilesRoot,
+      fetch: async (outgoing) => api.fetch(outgoing),
+      openSandbox: async ({ runFiles }) => {
+        opened.push(runFiles)
+        leftovers.push(readdirSync(runFiles))
+        return new RecordingSandbox(`computer-${opened.length}`)
+      },
+    })
+
+    try {
+      const first = await requestAgent(sixb, {
+        text: "First.",
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
+      const { threadId } = first.run
+      // What a crashed run left behind is gone before the next one starts.
+      mkdirSync(join(runFilesRoot, threadId, "attachments"), { recursive: true })
+      writeFileSync(join(runFilesRoot, threadId, "attachments", "stale.txt"), "stale")
+      expect(await runner.runTurn(first.run.id, new AbortController().signal)).toBe(true)
+
+      const second = await requestAgent(sixb, {
+        text: "Second.",
+        threadId,
+        runsOn: "computer",
+        computer: { id: "laptop", name: "Laptop", folder },
+      })
+      expect(await runner.runTurn(second.run.id, new AbortController().signal)).toBe(true)
+      await runner.drain()
+
+      for (const runId of [first.run.id, second.run.id]) {
+        expect(await terminalRun(agentStorageOf(sixb), runId)).toMatchObject({
+          status: "succeeded",
+        })
+      }
+      const runFiles = join(runFilesRoot, threadId, ".sixb", "agent")
+      expect(opened).toEqual([runFiles, runFiles])
+      expect(leftovers).toEqual([[], []])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+
+      const [one, two] = requests
+      if (!one || !two) throw new Error("Expected two model requests.")
+      expect(systemPromptOf(one.messages)).toContain(join(runFiles, "skills"))
+      expect(two.messages[0]).toEqual(one.messages[0])
+      expect(two.messages.slice(0, one.messages.length)).toEqual([...one.messages])
+    } finally {
       rmSync(folder, { recursive: true, force: true })
       rmSync(runFilesRoot, { recursive: true, force: true })
     }
@@ -13521,6 +14739,2142 @@ describe("agent tools act as the requester", () => {
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
+    }
+  })
+})
+
+/** A recording sandbox whose `read` finds the same two lines in any file. */
+class ReadingSandboxFactory extends RecordingSandboxFactory {
+  override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const sandbox = (await super.create(options)) as RecordingSandbox
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = async (command, args = [], commandOptions = {}) =>
+      command === "bash" && args.includes("sixb-read")
+        ? {
+            exitCode: 0,
+            stdout: Buffer.from("quarter,revenue\nQ3,1100\n").toString("base64"),
+            stderr: "",
+            durationMs: 1,
+          }
+        : runCommand(command, args, commandOptions)
+    return sandbox
+  }
+}
+
+function toolCallsStream(calls: readonly [string, string, Record<string, unknown>][]) {
+  return stream([
+    { type: "stream-start", warnings: [] },
+    ...calls.map(([toolCallId, toolName, input]) => ({
+      type: "tool-call" as const,
+      toolCallId,
+      toolName,
+      input: JSON.stringify(input),
+    })),
+    finish("tool-calls"),
+  ])
+}
+
+describe("a later turn's request", () => {
+  // How each guard is proven, by removing it and watching this test fail:
+  // - serialize tool JSON with JSON.stringify in models/protocols (responses, messages): the bash
+  //   and read outputs, reordered by the jsonb double, print other bytes;
+  // - drop the stored modelOutput branch from toModelMessages' toolResultOutput: view_file,
+  //   create_image, publish_artifact and wait_agent replay another text;
+  // - return no images from replayToolFiles: the images after a step vanish;
+  // - inline only the newest user message's files in fileWorkItems: the attachments turn into
+  //   metadata on the next turn.
+  test("starts with every byte the turn before it sent last, on a storage that reorders keys", async () => {
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "child-model",
+      stream: async (options) =>
+        options.messages.some((message) => message.role === "tool")
+          ? answerStream("Acme's margin fell to 12%; the chart is in out/.")
+          : toolCallStream("chart", "bash", { command: "write-child-outputs" }),
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      capabilities: { inputMediaTypes: ["image/png"], localTools: true, parallelToolCalls: true },
+      stream: async (options) => {
+        parentCalls.push(options)
+        switch (parentCalls.length) {
+          case 1:
+            return toolCallsStream([
+              ["draft", "bash", { command: "write-q3-review" }],
+              ["image", "bash", { command: "create-view-image" }],
+              ["read", "read", { path: "reports/q3.csv", offset: 1, limit: 20 }],
+            ])
+          case 2:
+            return toolCallsStream([
+              ["view-doc", "view_file", { path: "work/q3-review/document.md" }],
+              ["view-image", "view_file", { path: "scratch/bash-image.png" }],
+              ["create", "create_image", {}],
+            ])
+          case 3:
+            return toolCallStream("publish", "publish_artifact", {
+              path: "work/q3-review",
+              kind: "document",
+              title: "Q3 review",
+            })
+          case 4:
+            return toolCallStream("spawn", "spawn_agent", {
+              key: "acme-review",
+              task: "Chart Acme's margins.",
+              model: { provider: childModel.providerId, modelId: childModel.modelId },
+            })
+          case 5:
+            return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+          case 7:
+            return toolCallStream("again", "bash", { command: "echo again" })
+          default:
+            return answerStream(`Answer ${parentCalls.length}.`)
+        }
+      },
+    })
+    const createImage = defineAgentTool("create_image")
+      .description("Create a test image.")
+      .input({})
+      .run(async ({ files }) => {
+        const image = await files.put({
+          body: TEST_PNG_BYTES,
+          fileName: "generated.png",
+          mediaType: "image/png",
+        })
+        return {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: "Created an image." },
+            { type: "file", fileRef: image.fileRef },
+          ],
+        } satisfies AgentToolResult
+      })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new ReadingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      agentTools: [createImage],
+    })
+    const storage = agentStorageOf(sixb)
+    const csv = await sixb.blobStorage.put({
+      body: new TextEncoder().encode(ACME_CSV),
+      fileName: "acme.csv",
+      mediaType: "text/csv",
+    })
+    const png = await sixb.blobStorage.put({
+      body: TEST_PNG_BYTES,
+      fileName: "logo.png",
+      mediaType: "image/png",
+    })
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      let threadId: string | undefined
+      const turn = async (text: string, attachments: FileRef[] = []) => {
+        const requested = await requestAgent(sixb, {
+          ...(threadId === undefined ? {} : { threadId }),
+          text,
+          ...(attachments.length === 0 ? {} : { attachments }),
+        })
+        threadId = requested.run.threadId
+        childRunId ||= createSubagentRunId(requested.run.id, "acme-review")
+
+        const run = await underFakeTime(() => terminalRun(storage, requested.run.id), text)
+        expect(run.status).toBe("succeeded")
+      }
+      await turn("Review Q3 with these.", [csv, png])
+      await turn("Thanks.")
+      await turn("No.")
+
+      expect(parentCalls).toHaveLength(9)
+      expectReplayedPrefix(parentCalls[5], parentCalls[6], parentModel.providerId)
+      expectReplayedPrefix(parentCalls[7], parentCalls[8], parentModel.providerId)
+
+      // What the replayed prefix holds, so the comparison covers each case.
+      const replayed = JSON.stringify(parentCalls[6]?.messages)
+      for (const text of [
+        "quarter,revenue,margin",
+        '"startLine":1',
+        '<tool_file name=\\"document.md\\"',
+        "<sixb_tool_files",
+        "Created an image.",
+        'Published \\"Q3 review\\"',
+        "children/acme-review/margins.png",
+      ]) {
+        expect(replayed).toContain(text)
+      }
+      if (typeof Bun.Image === "function") {
+        expect(replayed).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+
+      // The double did reorder what the turn stored, as Postgres would.
+      const stored = (await listMessages(storage, threadId ?? "")).flatMap(
+        (message) => message.parts
+      )
+      const bash = stored.find((part) => part.type === "tool-call" && part.toolCallId === "draft")
+      if (bash?.type !== "tool-call" || bash.state !== "output-available" || !bash.output) {
+        throw new Error("Expected the stored bash output.")
+      }
+      expect(Object.keys(bash.output)[0]).toBe("stderr")
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+})
+
+/**
+ * Test double: a recording sandbox that refuses every write under `tool-outputs/`, so saving a
+ * tool output fails and a chapter too large for the context reaches the model whole, as the run
+ * falls back when saving fails. The context guard tests use it: they are about what the guard does
+ * with results that large, which outside such a failure only `read` and `view_file` return.
+ */
+class ToolOutputWritesFailingSandboxFactory extends RecordingSandboxFactory {
+  override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const sandbox = (await super.create(options)) as RecordingSandbox
+    const writeFiles = sandbox.writeFiles.bind(sandbox)
+    sandbox.writeFiles = async (files) => {
+      if (files.some((file) => file.path.includes(`/${TOOL_OUTPUTS_DIRECTORY}/`))) {
+        throw new Error("[test] No room for tool outputs.")
+      }
+      return writeFiles(files)
+    }
+    return sandbox
+  }
+}
+
+/** A tool whose results take `bytes` each: a chapter the model asks for by its number. */
+function chapterTool(bytes: number) {
+  return defineAgentTool("chapter")
+    .description("Read one chapter of the book.")
+    .input({ number: "string" })
+    .run(({ input }) => ({ chapter: input.number, text: `${"x".repeat(bytes - 1)}\n` }))
+}
+
+/** The chapter results a request carries, in order: what the model has read this turn. */
+function chapterResults(request: LanguageModelRequest) {
+  return request.messages.flatMap((message) =>
+    message.role === "tool"
+      ? message.content.filter((part) => part.toolName === "chapter").map((part) => part.output)
+      : []
+  )
+}
+
+/**
+ * A model with a 100,000-token window (83,616 tokens of input at most) that reads `chapters`
+ * chapters, one per call, then answers. It counts each request as the estimator does at its
+ * `bytesPerToken`, 3 unless set, keeps every request, and calls `reject` before answering one: what it
+ * throws, the provider rejected.
+ */
+/**
+ * What the project's earlier runs measured of the mock model: `bytesPerToken`, as
+ * chapterReadingModel counts.
+ */
+async function seedMeasuredTokenRate(storage: AgentStorage, bytesPerToken: number): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await storage.tokenRates.record({
+      projectId: PROJECT_ID,
+      providerId: "mock",
+      modelId: "mock-model",
+      runId: `earlier_run_${index}`,
+      bytes: Math.round(bytesPerToken * 10_000),
+      tokens: 10_000,
+      measuredAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000),
+    })
+  }
+}
+
+function chapterReadingModel(input: {
+  readonly chapters: number
+  readonly requests: LanguageModelRequest[]
+  readonly bytesPerToken?: number
+  readonly reject?: (request: LanguageModelRequest) => Error | undefined
+}): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: "mock",
+      modelId: "mock-model",
+      capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+      contextWindow: 100_000,
+      maxOutputTokens: 16_384,
+    },
+    stream: async (request) => {
+      input.requests.push(request)
+      const rejection = isSummaryRequest(request) ? undefined : input.reject?.(request)
+      if (rejection) throw rejection
+
+      const usage = {
+        inputTokens: estimateAgentRequestTokens(request, input.bytesPerToken ?? 3),
+        outputTokens: 20,
+      }
+      // It reads the book when asked to, and answers anything else at once.
+      const read = chapterResults(request).length
+      const lastUser = [...request.messages].reverse().find((message) => message.role === "user")
+      const asked =
+        lastUser?.role === "user" &&
+        lastUser.content.some((part) => part.type === "text" && part.text.includes("Read the book"))
+      if (!isSummaryRequest(request) && asked && read < input.chapters) {
+        return stream([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: `chapter_${read}`,
+            toolName: "chapter",
+            input: JSON.stringify({ number: String(read) }),
+          },
+          { type: "finish", finishReason: "tool-calls", usage },
+        ])
+      }
+      const text = isSummaryRequest(request) ? "## Goal\nRead the book." : "Read them all."
+      return stream([
+        { type: "stream-start" },
+        { type: "text-start", id: "text" },
+        { type: "text-delta", id: "text", delta: text },
+        { type: "text-end", id: "text" },
+        { type: "finish", finishReason: "stop", usage },
+      ])
+    },
+  })
+}
+
+function contextWindowRejection(): ModelProviderError {
+  return new ModelProviderError(
+    "[test] Your input exceeds the context window of this model",
+    "mock",
+    "mock-model",
+    { status: 400, reason: "context-window-exceeded" }
+  )
+}
+
+/** How many dumps denseDumpModel asks for before it answers. */
+const DENSE_DUMPS = 5
+
+/**
+ * What a provider counts of a request whose tool results are base64: prose at 3 bytes per token,
+ * as the run measured, and base64 at about 1.33, as most tokenizers read it.
+ */
+function denseCount(request: LanguageModelRequest): number {
+  const dense = (JSON.stringify(request.messages).match(/[A-Za-z0-9+/]{1000,}/g) ?? []).reduce(
+    (total, run) => total + run.length,
+    0
+  )
+  return estimateAgentRequestTokens(request, 3) - Math.floor(dense / 3) + Math.ceil(dense / 1.33)
+}
+
+/** Base64 of 6,000 random bytes, as `head -c 6000 /dev/urandom | base64` prints it, by number. */
+const dumpTool = defineAgentTool("dump")
+  .description("Dump random bytes.")
+  .input({ number: "string" })
+  .run(({ input }) => {
+    const raw = new Uint8Array(6_000)
+    let state = Number(input.number) * 2_654_435_761
+    for (let index = 0; index < raw.length; index++) {
+      state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0
+      raw[index] = state >>> 24
+    }
+    return { dump: Buffer.from(raw).toString("base64") }
+  })
+
+/**
+ * A model with a 65,536-token window that may write up to 60,000 tokens, counting as denseCount
+ * does: it dumps DENSE_DUMPS times, then answers, as text or as the step's structured output.
+ */
+function denseDumpModel(requests: LanguageModelRequest[]): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: "mock",
+      modelId: "mock-model",
+      capabilities: {
+        inputMediaTypes: [],
+        localTools: true,
+        parallelToolCalls: true,
+        nativeStructuredOutput: true,
+      },
+      contextWindow: 65_536,
+      maxOutputTokens: 60_000,
+    },
+    stream: async (request) => {
+      requests.push(request)
+      const usage = { inputTokens: denseCount(request), outputTokens: 20 }
+      const dumps = requests.filter((sent) => !sent.responseFormat).length
+      if (request.responseFormat || dumps > DENSE_DUMPS) {
+        const text = request.responseFormat
+          ? JSON.stringify({ answer: "Dumped", confidence: 0.9 })
+          : "Dumped them all."
+        return stream([
+          { type: "stream-start" },
+          { type: "text-start", id: "text" },
+          { type: "text-delta", id: "text", delta: text },
+          { type: "text-end", id: "text" },
+          { type: "finish", finishReason: "stop", usage },
+        ])
+      }
+      return stream([
+        { type: "stream-start" },
+        {
+          type: "tool-call",
+          toolCallId: `dump_${dumps}`,
+          toolName: "dump",
+          input: JSON.stringify({ number: String(dumps) }),
+        },
+        { type: "finish", finishReason: "tool-calls", usage },
+      ])
+    },
+  })
+}
+
+describe("context within a turn", () => {
+  const HARD_LIMIT_TOKENS = 83_616
+
+  test("clears what the model read before a call would cross the limit", async () => {
+    // Reproduce: leave out contextLimits where runConversationTurn calls runAgentTurn; the
+    // ninth call then carries eight chapters of about 10,000 tokens, past the 83,616-token limit.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 10, requests })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(30_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(requests).toHaveLength(11)
+      for (const sent of requests) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      // The oldest chapters were cleared in one batch; the most recent ones stay.
+      const cleared = { type: "text", value: clearedToolResultText("chapter") }
+      const first = requests.findIndex((sent) =>
+        chapterResults(sent).some((output) => output.value === cleared.value)
+      )
+      expect(first).toBeGreaterThan(0)
+      // Oldest first; the three most recent it read stay, and so does the one it has not read.
+      const results = chapterResults(requests[first]!)
+      const kept = results.findIndex((output) => output.type === "json")
+      expect(kept).toBeGreaterThan(0)
+      expect(results.slice(0, kept)).toEqual(Array(kept).fill(cleared))
+      expect(results.slice(kept).every((output) => output.type === "json")).toBe(true)
+      expect(results.length - kept).toBeGreaterThanOrEqual(4)
+      // The call after a clearing reads its request through: only the step it adds is new.
+      // Reproduce: aim the clearing at the limit instead of 60 % of it in ContextGuard.reduce; the
+      // call after the clearing then clears one more result, and rewrites the cache from it.
+      const clearedRequest = [...requests[first]!.messages]
+      expect(requests[first + 1]!.messages.slice(0, clearedRequest.length)).toEqual(clearedRequest)
+      // The transcript keeps every result whole.
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId: run.threadId,
+        roles: ["assistant"],
+      })
+      const calls = messages[0]?.parts.filter((part) => part.type === "tool-call") ?? []
+      expect(calls).toHaveLength(10)
+      expect(JSON.stringify(calls)).not.toContain("was cleared")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("weighs each call of an unmeasured model at the rate its first call measured", async () => {
+    // Reproduce: leave measuredBytesPerToken out of the contextLimits runConversationTurn hands
+    // the turn; the guard weighs the second chapter at the default 2 bytes per token, past the
+    // limit, and reduces a request that fits.
+    const requests: LanguageModelRequest[] = []
+    // A sparse tokenizer, as OpenAI's measures about 4.4, in a project no run measured it in.
+    const model = chapterReadingModel({ chapters: 2, requests, bytesPerToken: 4 })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(120_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      // Two chapters are about 60,000 tokens at 4 bytes per token: under the 83,616 limit.
+      expect(chapterResults(requests.at(-1)!).map((output) => output.type)).toEqual([
+        "json",
+        "json",
+      ])
+      expect(
+        (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
+      ).not.toContain("agent.compaction.started")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("records on each step what its request sent: the prompt by section, the tools, the history", async () => {
+    // Reproduce: leave systemPromptSize out of the turn context runEnvironment builds; the steps
+    // then count the whole prompt as Sixb's own, without the project's instructions. Drop the
+    // recordStepRequests calls from runAgentTurn instead, and no step records anything.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 1, requests })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(2_000)],
+      projectInstructions: "Answer in euros.",
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+      expect(run.status).toBe("succeeded")
+
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId: run.threadId,
+        order: "asc",
+      })
+      const steps = messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts)
+        .flatMap((part) => (part.type === "step-start" ? [part.request] : []))
+      expect(steps).toHaveLength(2)
+
+      const bytes = (text: string) => new TextEncoder().encode(text).byteLength
+      const sent = requests[0]!
+      const prompt = sent.messages[0]?.role === "system" ? sent.messages[0].content : ""
+      const system = steps[0]?.system ?? {}
+      expect(system.instructions).toBe(
+        bytes("<agent_instructions>\nAnswer in euros.\n</agent_instructions>")
+      )
+      expect(Object.values(system).reduce((sum, part) => sum + (part ?? 0), 0)).toBe(bytes(prompt))
+      expect(steps[0]?.tools.count).toBe(sent.tools.length)
+      // The second call carries the chapter the first one asked for.
+      expect(steps[0]?.history.toolResults).toBeUndefined()
+      expect(steps[1]?.history.toolResults).toBeGreaterThan(2_000)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("clears in batches that land at 60 % of the limit, so the cache breaks once per batch", async () => {
+    // Reproduce: keep the three most recent results whatever the aim (candidates.slice(0, -3) in
+    // ContextGuard.clear); chapters of about 15,000 tokens then leave one to clear at each step
+    // past the first clearing, and every one of those calls rewrites the cache.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 12, requests })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(45_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      expect((await waitForTerminalRun(storage, request.run.id)).status).toBe("succeeded")
+
+      // A call that does not extend the one before it rewrites the cache from where they differ.
+      const breaks = requests.flatMap((sent, index) => {
+        const before = requests[index - 1]?.messages ?? []
+        return index > 0 && !Bun.deepEquals(sent.messages.slice(0, before.length), [...before])
+          ? [index]
+          : []
+      })
+      expect(breaks.length).toBeGreaterThan(0)
+      // Never two calls in a row: each batch frees room for the calls after it.
+      expect(breaks.some((index) => breaks.includes(index - 1))).toBe(false)
+      // Each batch lands at 60 % of the 83,616-token limit at most.
+      for (const index of breaks) {
+        expect(estimateAgentRequestTokens(requests[index]!, 3)).toBeLessThanOrEqual(
+          Math.floor(HARD_LIMIT_TOKENS * 0.6)
+        )
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("weighs the next turn by what it replays after a turn cleared results", async () => {
+    // Reproduce: drop the reducedRequest check in matchingAgentUsageAnchor; the next turn then goes by
+    // the cleared call and a rate measured on it, and its first call replays every chapter, past
+    // the 83,616-token limit. Drop `replaysReduced` from the summary's input limit instead; the
+    // summary then reads that whole replay at once, past the limit too.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 6, requests })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(42_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Read the book." })
+      const read = await waitForTerminalRun(storage, first.run.id)
+      expect(read.status).toBe("succeeded")
+      // The turn cleared chapters before its last calls, which its stored steps keep whole.
+      expect(
+        requests.some((sent) => chapterResults(sent).some((output) => output.type === "text"))
+      ).toBe(true)
+      const replayed = requests.length
+
+      const second = await requestAgent(sixb, { threadId: read.threadId, text: "Thanks." })
+      const run = await waitForTerminalRun(storage, second.run.id)
+
+      expect(run.status).toBe("succeeded")
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId: read.threadId })
+      ).resolves.toMatchObject({ createdByRunId: run.id })
+      const turn = requests.slice(replayed)
+      expect(turn.some(isSummaryRequest)).toBe(true)
+      for (const sent of turn) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("compacts the turns before it when clearing cannot bring a call under the limit", async () => {
+    // Reproduce: leave out compactInTurn where runConversationTurn builds contextLimits; the turn
+    // then cuts its newest chapter to fit, and writes no checkpoint.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 2, requests })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(105_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const threadId = "in_turn_compaction_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    // About 48,000 tokens of earlier turns: under the limit when the turn starts. With its first
+    // chapter of 35,000 tokens, which the model has not read, the second call would cross it.
+    for (let index = 0; index < 6; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `in-turn-${index}-${"x".repeat(12_000)}`,
+      })
+    }
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      const trigger = await storage.messages.getById({
+        projectId: PROJECT_ID,
+        id: run.triggerMessageId,
+      })
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({
+        createdByRunId: run.id,
+        reason: "threshold",
+        summarizedThroughSeq: (trigger?.seq ?? 0) - 1,
+      })
+      // The calls after the summary read it, then the turn's chapters as they were.
+      const summaryIndex = requests.findIndex(isSummaryRequest)
+      expect(summaryIndex).toBeGreaterThan(0)
+      const after = requests[summaryIndex + 1]!
+      expect(previousSummary(after)).toBe("## Goal\nRead the book.")
+      expect(chapterResults(after).map((output) => output.type)).toEqual(["json"])
+      for (const sent of requests.filter((sent) => !isSummaryRequest(sent))) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      const started = (await listRunStreamRecords(sixb.broker, run.id)).find(
+        (record) => record.name === "agent.compaction.started"
+      )
+      expect(started?.payload).toMatchObject({ reason: "threshold" })
+
+      // Before and after weigh the same request, the history and the turn's message, as the
+      // turn's first call sent it: not the chapter it had read, which stays as it was.
+      // Reproduce: give compactAgentConversation the request the guard measured as its estimate
+      // before; it then counts that chapter, which after leaves out.
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      const opening = estimateAgentRequestTokens(requests[0]!, 3)
+      expect(Math.abs(checkpoint!.estimatedInputTokensBefore - opening)).toBeLessThan(2_000)
+      expect(checkpoint!.estimatedInputTokensAfter).toBeLessThan(opening)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("compacts and asks again when the provider rejects a call as too long", async () => {
+    // Reproduce: leave out recoverStep where runAgentTurn calls runModelLoop; the rejection then
+    // fails the turn.
+    const requests: LanguageModelRequest[] = []
+    let rejected = 0
+    const model = chapterReadingModel({
+      chapters: 2,
+      requests,
+      // The estimate missed what the provider counted: the second call, before any summary.
+      reject: (request) => {
+        if (chapterResults(request).length !== 1 || previousSummary(request) !== undefined) {
+          return undefined
+        }
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(3_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const threadId = "overflow_resume_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    for (let index = 0; index < 3; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `overflow-${index}-${"x".repeat(6_000)}`,
+      })
+    }
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(rejected).toBe(1)
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({ createdByRunId: run.id, reason: "overflow" })
+      const records = await listRunStreamRecords(sixb.broker, run.id)
+      expect(
+        records.find((record) => record.name === "agent.compaction.started")?.payload
+      ).toMatchObject({ reason: "overflow" })
+      // The call asked again starts from the summary, and the next one reads it through.
+      const retried = requests.findIndex(isSummaryRequest) + 1
+      expect(previousSummary(requests[retried]!)).toBe("## Goal\nRead the book.")
+      const retriedRequest = [...requests[retried]!.messages]
+      expect(requests[retried + 1]!.messages.slice(0, retriedRequest.length)).toEqual(
+        retriedRequest
+      )
+
+      // The same turn went on: the chapter read before the rejection, the one after, the answer.
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId,
+        roles: ["assistant"],
+        order: "desc",
+        limit: 1,
+      })
+      const parts = messages[0]?.parts ?? []
+      expect(messages[0]?.runId).toBe(run.id)
+      expect(parts.flatMap((part) => (part.type === "tool-call" ? [part.toolCallId] : []))).toEqual(
+        ["chapter_0", "chapter_1"]
+      )
+      expect(parts.at(-1)).toMatchObject({ type: "text", text: "Read them all." })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("ends a turn whose working set does not fit rather than clear and read it again", async () => {
+    // Reproduce: drop the needed() checks in ContextGuard.clear and cutUnread; the model then
+    // reads each chapter cleared or cut again, the guard reduces another, and the turn goes round
+    // until the model gives up after 40 calls.
+    const requests: LanguageModelRequest[] = []
+    const NEEDED = 4
+    const model = new WorkerTestModel({
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "mock-model",
+        capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+        contextWindow: 60_000,
+        maxOutputTokens: 16_384,
+      },
+      stream: async (request) => {
+        requests.push(request)
+        const inputTokens = estimateAgentRequestTokens(request, 3)
+        if (inputTokens > 60_000) throw contextWindowRejection()
+
+        const usage = { inputTokens, outputTokens: 20 }
+        // It needs every chapter whole at once: a cleared or missing one, it reads again.
+        const whole = new Set(
+          request.messages.flatMap((message) =>
+            message.role === "tool"
+              ? message.content.flatMap((part) =>
+                  part.toolName === "chapter" && part.output.type === "json"
+                    ? [String((part.output.value as { chapter?: string }).chapter)]
+                    : []
+                )
+              : []
+          )
+        )
+        const missing = Array.from({ length: NEEDED }, (_, i) => String(i)).find(
+          (number) => !whole.has(number)
+        )
+        if (missing === undefined || requests.length > 40) {
+          return stream([
+            { type: "stream-start" },
+            { type: "text-start", id: "text" },
+            { type: "text-delta", id: "text", delta: "Compared them all." },
+            { type: "text-end", id: "text" },
+            { type: "finish", finishReason: "stop", usage },
+          ])
+        }
+        return stream([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: `chapter_${requests.length}`,
+            toolName: "chapter",
+            input: JSON.stringify({ number: missing }),
+          },
+          { type: "finish", finishReason: "tool-calls", usage },
+        ])
+      },
+    })
+    // Four chapters of about 14,000 tokens each: more than the 45,000-token limit together.
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(42_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Compare the four chapters, read whole." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("failed")
+      expect(run.error?.code).toBe("agent.context_limit_exceeded")
+      expect(requests.length).toBeLessThan(15)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("leaves a dense turn under its limit room for an answer within the window, call after call", async () => {
+    // Reproduce: return the room only past the limit from ContextGuard.sending; each call's answer
+    // is then sized from the output ceiling's own estimate, at the 3 bytes per token the run reads
+    // prose at, and input and answer pass the 65,536-token window.
+    const requests: LanguageModelRequest[] = []
+    const sixb = buildSixb(
+      denseDumpModel(requests),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [dumpTool] }
+    )
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Dump five times." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(requests).toHaveLength(DENSE_DUMPS + 1)
+      for (const sent of requests) {
+        expect(denseCount(sent) + (sent.maxOutputTokens ?? 0)).toBeLessThanOrEqual(65_536)
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("ends a turn whose working set leaves no room for an answer, sending nothing past it", async () => {
+    // Reproduce: send the request past the limit whatever the room (drop the throw from
+    // ContextGuard.sending, or the step's maxOutputTokens from runModelLoop's callModel); this
+    // provider, which refuses nothing, then reads requests whose answer passes its window.
+    const requests: LanguageModelRequest[] = []
+    const NEEDED = 4
+    const model = new WorkerTestModel({
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "mock-model",
+        capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+        contextWindow: 60_000,
+        maxOutputTokens: 16_384,
+      },
+      stream: async (request) => {
+        requests.push(request)
+        const usage = { inputTokens: estimateAgentRequestTokens(request, 3), outputTokens: 20 }
+        // It needs every chapter whole at once: a cleared or missing one, it reads again.
+        const whole = new Set(
+          request.messages.flatMap((message) =>
+            message.role === "tool"
+              ? message.content.flatMap((part) =>
+                  part.toolName === "chapter" && part.output.type === "json"
+                    ? [String((part.output.value as { chapter?: string }).chapter)]
+                    : []
+                )
+              : []
+          )
+        )
+        const missing = Array.from({ length: NEEDED }, (_, i) => String(i)).find(
+          (number) => !whole.has(number)
+        )
+        if (missing === undefined || requests.length > 40) {
+          return stream([
+            { type: "stream-start" },
+            { type: "text-start", id: "text" },
+            { type: "text-delta", id: "text", delta: "Compared them all." },
+            { type: "text-end", id: "text" },
+            { type: "finish", finishReason: "stop", usage },
+          ])
+        }
+        return stream([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: `chapter_${requests.length}`,
+            toolName: "chapter",
+            input: JSON.stringify({ number: missing }),
+          },
+          { type: "finish", finishReason: "tool-calls", usage },
+        ])
+      },
+    })
+    // Four chapters of about 14,000 tokens each: more than the 45,000-token limit together.
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(42_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Compare the four chapters, read whole." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("failed")
+      expect(run.error?.code).toBe("agent.context_limit_exceeded")
+      // Every request it sent left its answer room within the 60,000-token window.
+      for (const sent of requests) {
+        expect(
+          estimateAgentRequestTokens(sent, 3) + (sent.maxOutputTokens ?? 0)
+        ).toBeLessThanOrEqual(60_000)
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails a call rejected again, keeping the steps the turn completed", async () => {
+    // Reproduce: drop the messages recordFate takes in runConversationTurn; the failed turn then
+    // leaves no answer, and the chapter it read is lost.
+    const requests: LanguageModelRequest[] = []
+    let rejected = 0
+    const model = chapterReadingModel({
+      chapters: 2,
+      requests,
+      reject: (request) => {
+        if (chapterResults(request).length === 0) return undefined
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(3_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("failed")
+      // Reproduce: drop the context-window case in runAgentTurn's catch; the run then fails as
+      // agent.execution_failed, which offers a Retry that fails the same way.
+      expect(run.error?.code).toBe("agent.context_limit_exceeded")
+      // Asked once again, never more.
+      expect(rejected).toBe(2)
+
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId: run.threadId,
+        roles: ["assistant"],
+      })
+      expect(messages).toHaveLength(1)
+      expect(messages[0]?.runId).toBe(run.id)
+      expect(messages[0]?.parts).toContainEqual(
+        expect.objectContaining({
+          type: "tool-call",
+          toolCallId: "chapter_0",
+          state: "output-available",
+        })
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("anchors the next turn on no call of a run that failed after compacting", async () => {
+    // Reproduce: drop the createdByRunId check in readUsageAnchor; the turn after a run that
+    // failed right after compacting then anchors on the summary's own call, which read the history
+    // before compaction (about 55,800 tokens for a request of about 42,000), and compacts again.
+    const requests: LanguageModelRequest[] = []
+    let refused = false
+    const model = chapterReadingModel({
+      chapters: 2,
+      requests,
+      // The call right after the summary is refused once, as an overloaded provider would.
+      reject: (request) => {
+        if (refused || previousSummary(request) === undefined) return undefined
+
+        refused = true
+        return new ModelProviderError("[test] Overloaded.", "mock", "mock-model", { status: 529 })
+      },
+    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(105_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const threadId = "failed_after_compaction_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    // As in the turn that compacts before its second call: about 48,000 tokens before it.
+    for (let index = 0; index < 6; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `failed-in-turn-${index}-${"x".repeat(12_000)}`,
+      })
+    }
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const reading = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Read the book." })
+      const read = await waitForTerminalRun(storage, reading.run.id)
+      expect(read.status).toBe("failed")
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      expect(checkpoint?.createdByRunId).toBe(read.id)
+
+      const sent = requests.length
+      const next = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Thanks." })
+      const run = await waitForTerminalRun(storage, next.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(requests.slice(sent).some(isSummaryRequest)).toBe(false)
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({ id: checkpoint?.id })
+    } finally {
+      await worker.stop()
+    }
+  })
+})
+
+/**
+ * A 100,000-token window (83,616 tokens of input at most) as `chapterReadingModel` has, or
+ * `contextWindow`, under other ids, answering each call as `script` says. It reports each request as the estimator counts
+ * it at 3 bytes per token, keeps every request, and calls `reject` first: what it throws, the
+ * provider rejected. A summary request is answered with a summary.
+ */
+function scriptedWindowModel(input: {
+  readonly providerId: string
+  readonly modelId: string
+  readonly requests: LanguageModelRequest[]
+  readonly script: (request: LanguageModelRequest) => readonly WorkerTestStreamEvent[]
+  readonly reject?: (request: LanguageModelRequest) => Error | undefined
+  readonly contextWindow?: number
+  /** The bytes per token it counts requests at, 3 unless set. */
+  readonly bytesPerToken?: number
+  /** What it answers a summary request with. */
+  readonly summary?: string
+  /**
+   * Each call a second after the one before it: under fake time, calls would share a timestamp,
+   * and the latest of a run, which a later run's estimate anchors on, would be any of them.
+   */
+  readonly tick?: boolean
+}): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: input.providerId,
+      modelId: input.modelId,
+      capabilities: {
+        inputMediaTypes: [],
+        localTools: true,
+        parallelToolCalls: true,
+        nativeStructuredOutput: true,
+      },
+      contextWindow: input.contextWindow ?? 100_000,
+      maxOutputTokens: 16_384,
+    },
+    stream: async (request) => {
+      input.requests.push(request)
+      if (input.tick) setSystemTime(new Date(Date.now() + 1_000))
+      const rejection = isSummaryRequest(request) ? undefined : input.reject?.(request)
+      if (rejection) throw rejection
+
+      const usage = {
+        inputTokens: estimateAgentRequestTokens(request, input.bytesPerToken ?? 3),
+        outputTokens: 20,
+      }
+      const events = isSummaryRequest(request)
+        ? textEvents(input.summary ?? "## Goal\nRead the book.")
+        : input.script(request)
+      const finishReason = events.some((event) => event.type === "tool-call")
+        ? "tool-calls"
+        : "stop"
+      return stream([
+        { type: "stream-start", warnings: [] },
+        ...events,
+        { type: "finish", finishReason, usage },
+      ])
+    },
+  })
+}
+
+function textEvents(text: string): WorkerTestStreamEvent[] {
+  return [
+    { type: "text-start", id: "text" },
+    { type: "text-delta", id: "text", delta: text },
+    { type: "text-end", id: "text" },
+  ]
+}
+
+function toolCallEvent(
+  toolCallId: string,
+  toolName: string,
+  input: unknown
+): WorkerTestStreamEvent {
+  return { type: "tool-call", toolCallId, toolName, input: JSON.stringify(input) }
+}
+
+/** The next chapter a request has not read yet, then `then` once it read `chapters`. */
+function readChapters(chapters: number, then: () => readonly WorkerTestStreamEvent[]) {
+  return (request: LanguageModelRequest): readonly WorkerTestStreamEvent[] => {
+    const read = chapterResults(request).length
+    return read < chapters
+      ? [toolCallEvent(`chapter_${read}`, "chapter", { number: String(read) })]
+      : then()
+  }
+}
+
+/** What a tool answered the model, by its call id, from the model's next request. */
+function toolAnswer(request: LanguageModelRequest | undefined, toolCallId: string): unknown {
+  for (const message of request?.messages ?? []) {
+    if (message.role !== "tool") continue
+
+    for (const part of message.content) {
+      if (part.toolCallId !== toolCallId) continue
+      if (part.output.type === "json") return part.output.value
+      if (part.output.type === "text") {
+        try {
+          return JSON.parse(part.output.value)
+        } catch {
+          return part.output.value
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+function spawnedRunId(request: LanguageModelRequest | undefined): string {
+  const spawned = toolAnswer(request, "spawn") as { readonly runId?: string } | undefined
+  if (!spawned?.runId) throw new Error("[test] Expected the spawned child's run id.")
+  return spawned.runId
+}
+
+describe("context of a child and of a workflow step", () => {
+  const HARD_LIMIT_TOKENS = 83_616
+  const CHILD = { provider: "child-provider", modelId: "child-model" }
+  const spawnReader = { key: "reader", task: "Read the book.", model: CHILD }
+
+  /** A parent that spawns the reader, waits for it, and answers with what it got. */
+  function readerParent(calls: LanguageModelRequest[]) {
+    return new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (request) => {
+        calls.push(request)
+        if (calls.length === 1) return toolCallStream("spawn", "spawn_agent", spawnReader)
+        if (calls.length === 2) {
+          return toolCallStream("wait", "wait_agent", { runIds: [spawnedRunId(request)] })
+        }
+        return answerStream("The reader is done.")
+      },
+    })
+  }
+
+  test("a child clears what it read before a call would cross its limit, and answers", async () => {
+    // Reproduce: install no guard in runSubagent's model loop; the child's seventh call then
+    // carries six chapters of about 15,000 tokens, past the 83,616-token limit. Leave out its
+    // recoverStep, and the rejected second call fails the child.
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    let rejected = 0
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      script: readChapters(6, () => textEvents("Read them all.")),
+      // The estimate missed what the provider counted on the second call, once.
+      reject: (request) => {
+        if (chapterResults(request).length !== 1 || rejected > 0) return undefined
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const parentModel = readerParent(parentCalls)
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(45_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    // wait_agent polls the child: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const requested = await requestAgent(sixb, { text: "Have the book read." })
+      const run = await underFakeTime(() => terminalRun(storage, requested.run.id), "parent")
+
+      expect(run.status).toBe("succeeded")
+      expect(rejected).toBe(1)
+      expect(toolAnswer(parentCalls[2], "wait")).toMatchObject({
+        results: [{ status: "succeeded", text: "Read them all." }],
+      })
+      for (const sent of childRequests) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      // The oldest chapters were cleared; the most recent it read stays, and the one it has not.
+      const cleared = { type: "text" as const, value: clearedToolResultText("chapter") }
+      const last = chapterResults(childRequests.at(-1)!)
+      expect(last).toHaveLength(6)
+      expect(last.slice(0, 2)).toEqual([cleared, cleared])
+      expect(last.slice(-2)).not.toContainEqual(cleared)
+    } finally {
+      await stopUnderFakeTime(worker)
+    }
+  })
+
+  test("a child weighs its calls at the rate its first call measured", async () => {
+    // Reproduce: leave measuredBytesPerToken out of the contextLimits ChildRunner hands
+    // runSubagent; its guard weighs the second chapter at the default 2 bytes per token, past the
+    // limit, and reduces a request that fits.
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    // A sparse tokenizer, as OpenAI's measures about 4.4, in a project no run measured it in.
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      script: readChapters(2, () => textEvents("Read them all.")),
+      bytesPerToken: 4,
+    })
+    const parentModel = readerParent(parentCalls)
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(120_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const requested = await requestAgent(sixb, { text: "Have the book read." })
+      const run = await underFakeTime(() => terminalRun(storage, requested.run.id), "parent")
+
+      expect(run.status).toBe("succeeded")
+      // Two chapters are about 60,000 tokens at 4 bytes per token: under the 83,616 limit.
+      expect(chapterResults(childRequests.at(-1)!).map((output) => output.type)).toEqual([
+        "json",
+        "json",
+      ])
+    } finally {
+      await stopUnderFakeTime(worker)
+    }
+  })
+
+  test("a child the provider still refuses fails with what its parent can do about it", async () => {
+    // Reproduce: drop the subagentContextFailure catch in runSubagent; the parent then reads the
+    // provider's own words, which say nothing of what to do.
+    const parentCalls: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: [],
+      script: readChapters(2, () => textEvents("Read them all.")),
+      reject: (request) =>
+        chapterResults(request).length > 0 ? contextWindowRejection() : undefined,
+    })
+    const parentModel = readerParent(parentCalls)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(3_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const requested = await requestAgent(sixb, { text: "Have the book read." })
+      await underFakeTime(() => terminalRun(storage, requested.run.id), "parent")
+
+      expect(toolAnswer(parentCalls[2], "wait")).toMatchObject({
+        results: [
+          {
+            status: "failed",
+            error: {
+              code: "agent.execution_failed",
+              message: expect.stringContaining(
+                "Spawn it again with a narrower task, or a model with a larger context window."
+              ),
+            },
+          },
+        ],
+      })
+    } finally {
+      await stopUnderFakeTime(worker)
+    }
+  })
+
+  /**
+   * A parent that spawns the reader, then relays the user's answers: its first turn asks the user
+   * the reader's question, and each later one messages the reader the next of `answers`.
+   */
+  function relayingParent(
+    calls: LanguageModelRequest[],
+    spawn: typeof spawnReader,
+    answers: readonly string[],
+    contextWindow = 128_000
+  ) {
+    return new WorkerTestModel({
+      definition: {
+        kind: "language",
+        providerId: "parent-provider",
+        modelId: "parent-model",
+        capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+        contextWindow,
+      },
+      stream: async (request) => {
+        calls.push(request)
+        const call = calls.length
+        // Three calls a turn: spawn or answer, wait, then the turn's answer.
+        const turn = Math.floor((call - 1) / 3)
+        if (call === 1) return toolCallStream("spawn", "spawn_agent", spawn)
+        if (call % 3 === 1) {
+          return toolCallStream("answer", "message_agent", {
+            key: spawn.key,
+            text: answers[turn - 1] ?? "",
+          })
+        }
+        if (call % 3 === 2) {
+          return toolCallStream("wait", "wait_agent", { runIds: [spawnedRunId(calls[1])] })
+        }
+        return answerStream("The reader asks something.")
+      },
+    })
+  }
+
+  /** Run one turn of the parent's thread to its end, and the child run it left. */
+  async function parentTurn(
+    sixb: TestSixb,
+    text: string,
+    threadId: string | undefined,
+    childRunOf: (runId: string) => string
+  ) {
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { ...(threadId ? { threadId } : {}), text })
+    const run = await underFakeTime(() => terminalRun(storage, requested.run.id), text)
+    expect(run.status).toBe("succeeded")
+    const child = await storage.runs.getById({
+      projectId: PROJECT_ID,
+      id: childRunOf(requested.run.id),
+    })
+    if (child?.kind !== "subagent") throw new Error("[test] Expected the turn's child run.")
+    return { run, child }
+  }
+
+  test("a child that continues its thread compacts it there, and replays it from the summary on", async () => {
+    // Reproduce: skip the compaction in preflightSubagentContext; the continuation's first call
+    // then replays the whole earlier run past its limit, and no checkpoint is written. Leave the
+    // task out of subagentModelMessages, and the continuation reads no task; leave its `head` out
+    // of the child's estimate shape, and the checkpoint counts the continuation without its task;
+    // summarize with the conversation's caching, and the summary is not read as the child's
+    // continuation; read the thread's files before the compaction in startSubagentEnvironment, and
+    // the run spends its inline image budget on a history it does not send.
+    const ANSWERS = ["The second edition.", "In English."]
+    const spawn = { ...spawnReader, task: `Read the book. ${"t".repeat(30_000)}` }
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      tick: true,
+      script: (request) => {
+        const text = JSON.stringify(request.messages)
+        if (text.includes(ANSWERS[1]!)) return textEvents("Read the second edition, in English.")
+        // The continuation reads one more chapter, after the summary, then asks again.
+        if (text.includes(ANSWERS[0]!)) {
+          return chapterResults(request).length === 0
+            ? [toolCallEvent("chapter_extra", "chapter", { number: "extra" })]
+            : [toolCallEvent("ask_again", "ask_parent", { question: "Which language?" })]
+        }
+        // The first run reads nine chapters, then asks, its notes before the question.
+        return readChapters(9, () => [
+          ...textEvents(`Notes so far: ${"n".repeat(30_000)}`),
+          toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+        ])(request)
+      },
+    })
+    const parentModel = relayingParent(parentCalls, spawn, ANSWERS)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(21_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawn.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      // The first run stayed under its limit: nothing was cleared, nothing compacted.
+      const firstRun = childRequests.splice(0)
+      expect(JSON.stringify(firstRun)).not.toContain("was cleared")
+      for (const sent of firstRun) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+
+      const { threadId } = first.run
+      // Which histories the run's files are read for: the summary's, and the environment's.
+      const allocate = toolResultMedia.allocateInlineImages
+      const allocated: string[][] = []
+      spyOn(toolResultMedia, "allocateInlineImages").mockImplementation((input) => {
+        allocated.push(input.messages.map((message) => message.id))
+        return allocate(input)
+      })
+      const second = await parentTurn(sixb, ANSWERS[0]!, threadId, childRunOf)
+      const continued = second.child
+      expect(continued).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+
+      // The checkpoint is the child's, on its own thread, through the run's trigger.
+      const trigger = await storage.messages.getById({
+        projectId: PROJECT_ID,
+        id: continued.triggerMessageId,
+      })
+      const checkpoint = await storage.checkpoints.getLatest({
+        projectId: PROJECT_ID,
+        threadId: continued.threadId,
+      })
+      expect(checkpoint).toMatchObject({
+        createdByRunId: continued.id,
+        reason: "threshold",
+        summarizedThroughSeq: (trigger?.seq ?? 0) - 1,
+      })
+      const started = (await listRunStreamRecords(sixb.broker, continued.id)).find(
+        (record) => record.name === "agent.compaction.started"
+      )
+      expect(started?.payload).toMatchObject({ reason: "threshold" })
+      // The environment spent the inline image budget on what the run sends, from the trigger on,
+      // as a later run reading the checkpoint does.
+      expect(allocated.at(-1)).toEqual([continued.triggerMessageId])
+
+      // The summary continues what the paused run last sent, as the continuation caches it.
+      const secondRun = childRequests.splice(0)
+      const [summary, resumed, after] = secondRun
+      expect(summary && isSummaryRequest(summary)).toBe(true)
+      expectReplayedPrefix(firstRun.at(-1), summary, CHILD.provider)
+      expect(summary?.caching).toEqual(resumed?.caching)
+      expect(resumed?.caching).toEqual({ lifetime: "long", key: expect.stringMatching(/^sixb_/) })
+
+      // It goes on from the task, the summary and the answer, and its next call extends that.
+      const text = (index: number) => JSON.stringify(resumed?.messages[index] ?? null)
+      expect(text(1)).toContain(spawn.task)
+      expect(previousSummary(resumed!)).toBe("## Goal\nRead the book.")
+      expect(text(3)).toContain(ANSWERS[0])
+      expect(chapterResults(resumed!)).toHaveLength(0)
+      expectReplayedPrefix(resumed, after, CHILD.provider)
+      // The summary reads the cached prefix whole, within the window less its own output.
+      for (const sent of secondRun.filter((sent) => !isSummaryRequest(sent))) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      // The checkpoint weighed what the continuation sends, its task of 10,000 tokens included.
+      expect(checkpoint?.estimatedInputTokensAfter).toBeGreaterThan(
+        estimateAgentRequestTokens(resumed!, 3) - 2_000
+      )
+
+      // The run after it reads the thread from the checkpoint: it replays what the last one sent.
+      const third = await parentTurn(sixb, ANSWERS[1]!, threadId, childRunOf)
+      expect(third.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition, in English." },
+      })
+      const [replayed] = childRequests.splice(0)
+      expect(replayed && isSummaryRequest(replayed)).toBe(false)
+      expectReplayedPrefix(secondRun.at(-1), replayed, CHILD.provider)
+      // Its summary sends it to no `sixb history`, which does not answer a child.
+      // Reproduce: read the child's thread as a conversation's in subagentThreadContext.
+      expect(JSON.stringify(replayed?.messages)).not.toContain("sixb history")
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
+      jest.restoreAllMocks()
+    }
+  })
+
+  test("a child that comes back idle goes on uncompacted when what it is sent alone is large", async () => {
+    // Reproduce: give shouldCompactIdleContext `compactedTokens: 0` in preflightSubagentContext;
+    // the child then summarizes its 30,000-token run for nothing, since the 210,000 tokens it is
+    // sent stay as they are.
+    const ANSWER = `The second edition. ${"a".repeat(630_000)}`
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      contextWindow: 400_000,
+      requests: childRequests,
+      script: (request) =>
+        JSON.stringify(request.messages).includes("The second edition.")
+          ? textEvents("Read the second edition.")
+          : readChapters(2, () => [
+              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+            ])(request),
+    })
+    // The parent relays the long answer: its own window holds it.
+    const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER], 1_000_000)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(45_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      childRequests.splice(0)
+
+      jest.setSystemTime(new Date(Date.now() + 61 * 60_000))
+      const second = await parentTurn(sixb, "Answer it.", first.run.threadId, childRunOf)
+
+      expect(second.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition." },
+      })
+      // Idle and past 200,000 tokens, but what it is sent alone stays past them once compacted.
+      expect(estimateAgentRequestTokens(childRequests[0]!, 3)).toBeGreaterThan(200_000)
+      expect(childRequests.some(isSummaryRequest)).toBe(false)
+      expect(
+        await storage.checkpoints.getLatest({
+          projectId: PROJECT_ID,
+          threadId: second.child.threadId,
+        })
+      ).toBeNull()
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
+    }
+  })
+
+  // Reproduce: leave `idle` out of preflightSubagentContext; the continuation then replays the
+  // whole earlier run, about 225,000 tokens its cache no longer holds, and writes no checkpoint.
+  // Write its summary as a conversation's (historyReadable in compactAgentConversation), and the
+  // child is told to run `sixb history`, which does not answer a child.
+  test.each([
+    {
+      summary: "longer than its room",
+      text: `## Goal\n${"Read the book.\n".repeat(3_000)}`,
+      kept: "[The summary was cut short here.]",
+    },
+    {
+      summary: "left empty",
+      text: "",
+      kept: "The summary could not be written.",
+    },
+  ])("a child that comes back idle and large compacts its thread first, its summary $summary", async (input) => {
+    const ANSWER = "The second edition."
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    // A 383,616-token limit, so that 225,000 tokens fit well.
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      contextWindow: 400_000,
+      summary: input.text,
+      requests: childRequests,
+      script: (request) =>
+        JSON.stringify(request.messages).includes(ANSWER)
+          ? textEvents("Read the second edition.")
+          : readChapters(9, () => [
+              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+            ])(request),
+    })
+    const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(75_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      expect(childRequests.splice(0).some(isSummaryRequest)).toBe(false)
+
+      // Its calls can wait on its parent, so they asked for the hour-long cache: it went cold.
+      jest.setSystemTime(new Date(Date.now() + 61 * 60_000))
+      const second = await parentTurn(sixb, ANSWER, first.run.threadId, childRunOf)
+
+      expect(second.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition." },
+      })
+      expect(childRequests[0] && isSummaryRequest(childRequests[0])).toBe(true)
+      // Its cache has gone cold: the summary writes none for a history no call reads again.
+      // Reproduce: pass `coldCache: false` from preflightSubagentContext.
+      expect(childRequests[0]?.caching).toBe("off")
+      const checkpoint = await storage.checkpoints.getLatest({
+        projectId: PROJECT_ID,
+        threadId: second.child.threadId,
+      })
+      expect(checkpoint).toMatchObject({ createdByRunId: second.child.id, reason: "threshold" })
+      expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThanOrEqual(200_000)
+      expect(checkpoint?.estimatedInputTokensBefore).toBeLessThan(383_616)
+
+      // It goes on from what its summary kept, which sends it nowhere it cannot read.
+      const resumed = JSON.stringify(childRequests[1]?.messages)
+      expect(resumed).toContain(input.kept)
+      expect(resumed).not.toContain("sixb history")
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
+    }
+  })
+
+  test("a child weighs its continuation by what it replays after its run cleared results", async () => {
+    // Reproduce: drop the markReducedSteps call from subagentWorkMessages; the continuation then
+    // goes by the cleared call and a rate measured on it, and its first call replays every
+    // chapter, past the 83,616-token limit. Drop `replaysReduced` from the summary's input limit
+    // instead; its summary then reads that whole replay at once, past the limit too.
+    const ANSWER = "The second edition."
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      tick: true,
+      script: (request) =>
+        JSON.stringify(request.messages).includes(ANSWER)
+          ? textEvents("Read the second edition.")
+          : readChapters(6, () => [
+              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+            ])(request),
+    })
+    const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(42_000)],
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      // The run cleared chapters before its last calls, which its stored steps keep whole.
+      expect(JSON.stringify(childRequests.splice(0))).toContain("was cleared")
+
+      const second = await parentTurn(sixb, ANSWER, first.run.threadId, childRunOf)
+
+      expect(second.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition." },
+      })
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId: second.child.threadId })
+      ).resolves.toMatchObject({ createdByRunId: second.child.id })
+      expect(childRequests.some(isSummaryRequest)).toBe(true)
+      for (const sent of childRequests) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
+    }
+  })
+
+  test("a workflow step leaves its answer room within the window on a dense turn", async () => {
+    // Reproduce: keep only the guard's messages in runWorkflowAgentNode's prepareStep, as before
+    // the guard sized answers; each call's answer is then sized from the output ceiling's own
+    // estimate, and input and answer pass the 65,536-token window.
+    const requests: LanguageModelRequest[] = []
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: denseDumpModel(requests),
+      tools: [dumpTool],
+      runId: "workflow-dense-run",
+    })
+    await seedMeasuredTokenRate(agentStorageOf(sixb), 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), { label: "node" })
+
+      expect(node.status).toBe("succeeded")
+      for (const sent of requests.filter((request) => !request.responseFormat)) {
+        expect(denseCount(sent) + (sent.maxOutputTokens ?? 0)).toBeLessThanOrEqual(65_536)
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("a workflow step weighs its calls at the rate its first call measured", async () => {
+    // Reproduce: leave measuredBytesPerToken out of what executeWorkflowAgentNode hands
+    // runWorkflowAgentNode; its guard weighs the second chapter at the default 2 bytes per token,
+    // past the limit, and reduces a request that fits.
+    const requests: LanguageModelRequest[] = []
+    // A sparse tokenizer, as OpenAI's measures about 4.4, in a project no run measured it in.
+    const model = scriptedWindowModel({
+      providerId: "mock",
+      modelId: "mock-model",
+      requests,
+      script: (request) =>
+        request.responseFormat
+          ? textEvents(JSON.stringify({ answer: "Project Alpha", confidence: 0.9 }))
+          : readChapters(2, () => textEvents("Project Alpha, from the book."))(request),
+      bytesPerToken: 4,
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      tools: [chapterTool(120_000)],
+      runId: "workflow-rate-run",
+      sandboxes: new ToolOutputWritesFailingSandboxFactory(),
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), { label: "node" })
+
+      expect(node.status).toBe("succeeded")
+      const research = requests.filter((request) => !request.responseFormat)
+      // Two chapters are about 60,000 tokens at 4 bytes per token: under the 83,616 limit.
+      expect(chapterResults(research.at(-1)!).map((output) => output.type)).toEqual([
+        "json",
+        "json",
+      ])
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Reproduce: pass no toolOutputs to startAgentEnvironment in startSubagentEnvironment, or no
+  // outputFileOf to subagentWorkMessages; the continuation's new sandbox then lacks the file the
+  // child's preview names.
+  test("a child saves a large output in its own sandbox, and its continuation's has it again", async () => {
+    const ANSWERS = ["The second edition."]
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      script: (request) => {
+        const text = JSON.stringify(request.messages)
+        const ran = (toolCallId: string) => text.includes(`"toolCallId":"${toolCallId}"`)
+        // The continuation runs one more command, so its sandbox is ready before it answers.
+        if (text.includes(ANSWERS[0]!)) {
+          return ran("again")
+            ? textEvents("Printed it.")
+            : [toolCallEvent("again", "bash", { command: "echo again" })]
+        }
+        return ran("child_report")
+          ? [toolCallEvent("ask", "ask_parent", { question: "Which edition?" })]
+          : [toolCallEvent("child_report", "bash", { command: "print-report" })]
+      },
+    })
+    const parentModel = relayingParent(parentCalls, spawnReader, ANSWERS)
+    const sandboxes = new LargeOutputSandboxFactory()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
+      models: { language: [parentModel, childModel] },
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
+    // Each child run has a sandbox of its own, which its run's token names.
+    const holding = () =>
+      sandboxes.sandboxes.flatMap((sandbox, index) =>
+        sandbox.writtenFiles.some((file) => file.path === savedOutputPath(sandbox, "child_report"))
+          ? [runTokenRunId(sandboxes.createOptions[index])]
+          : []
+      )
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the report printed.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ finishReason: "awaiting_answer" })
+      expect(textReadOf(childRequests[1], "child_report")).toStartWith(
+        `<tool_output_file sandboxPath=".sixb/agent/${reportPath("child_report")}"`
+      )
+      expect(holding()).toEqual([first.child.id])
+
+      const second = await parentTurn(sixb, ANSWERS[0]!, first.run.threadId, childRunOf)
+      expect(second.child.status).toBe("succeeded")
+      expect(holding()).toEqual([first.child.id, second.child.id])
+    } finally {
+      await stopUnderFakeTime(worker)
+    }
+  })
+
+  test("a workflow step clears what it read and asks a rejected call again, then answers", async () => {
+    // Reproduce: install no guard in runWorkflowAgentNode's research loop; its seventh call then
+    // carries six chapters past the 83,616-token limit. Leave out its recoverStep, and the
+    // rejected second call fails the step.
+    const requests: LanguageModelRequest[] = []
+    let rejected = 0
+    const model = scriptedWindowModel({
+      providerId: "mock",
+      modelId: "mock-model",
+      requests,
+      script: (request) =>
+        request.responseFormat
+          ? textEvents(JSON.stringify({ answer: "Project Alpha", confidence: 0.9 }))
+          : readChapters(6, () => textEvents("Project Alpha, from the book."))(request),
+      reject: (request) => {
+        if (chapterResults(request).length !== 1 || rejected > 0) return undefined
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      tools: [chapterTool(45_000)],
+      sandboxes: new ToolOutputWritesFailingSandboxFactory(),
+      runId: "workflow-context-run",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), { label: "node" })
+
+      expect(node.status).toBe("succeeded")
+      expect(rejected).toBe(1)
+      const research = requests.filter((request) => !request.responseFormat)
+      expect(research).toHaveLength(8)
+      for (const sent of research) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      const last = chapterResults(research.at(-1)!)
+      expect(last.slice(0, 2)).toEqual([
+        { type: "text", value: clearedToolResultText("chapter") },
+        { type: "text", value: clearedToolResultText("chapter") },
+      ])
+    } finally {
+      await worker.stop()
+    }
+  })
+})
+
+/** A recording sandbox whose `print-report` prints about 200 KB, a line per row. */
+class LargeOutputSandboxFactory extends RecordingSandboxFactory {
+  static readonly REPORT = Array.from(
+    { length: 10_000 },
+    (_, index) => `row ${index}, ${"value ".repeat(2)}\n`
+  ).join("")
+
+  override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const sandbox = (await super.create(options)) as RecordingSandbox
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = async (command, args = [], commandOptions = {}) =>
+      command === "bash" && args.at(-1) === "print-report"
+        ? { exitCode: 0, stdout: LargeOutputSandboxFactory.REPORT, stderr: "", durationMs: 1 }
+        : runCommand(command, args, commandOptions)
+    return sandbox
+  }
+}
+
+/** Where a call saved the report, relative to the context directory. */
+function reportPath(toolCallId: string): string {
+  const sha256 = createHash("sha256").update(LargeOutputSandboxFactory.REPORT).digest("hex")
+  return agentToolOutputPath(toolCallId, sha256)
+}
+
+/** Where a sandbox holds the report a call saved. */
+function savedOutputPath(sandbox: RecordingSandbox | undefined, toolCallId: string): string {
+  return join(sandbox?.workingDirectory ?? "", ".sixb/agent", reportPath(toolCallId))
+}
+
+/** What the model read of a call: its tool result's text, in the request that carried it. */
+function textReadOf(request: LanguageModelRequest | undefined, toolCallId: string): string {
+  for (const message of request?.messages ?? []) {
+    if (message.role !== "tool") continue
+    const part = message.content.find((part) => part.toolCallId === toolCallId)
+    if (part?.output.type === "text") return part.output.value
+  }
+  throw new Error(`[test] Expected a text result for ${toolCallId}.`)
+}
+
+describe("tool outputs too large for the context", () => {
+  // Reproduce: return `tools` as they are from ToolOutputFiles.wrap; the model then reads the
+  // whole report. Pass no toolOutputs to startAgentEnvironment in createConversationAgentEnvironment;
+  // the next turn's sandbox then lacks the file its preview names. Pass no outputFileOf to
+  // agentTraceFromModelSteps in runAgentTurn; the part then names no stored file.
+  test("reach the model as a preview, in a file every later turn's sandbox has again", async () => {
+    const calls: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      stream: async (request) => {
+        calls.push(request)
+        if (calls.length === 1) return toolCallStream("report", "bash", { command: "print-report" })
+        if (calls.length === 3) return toolCallStream("again", "bash", { command: "echo again" })
+        return answerStream(`Answer ${calls.length}.`)
+      },
+    })
+    const sandboxes = new LargeOutputSandboxFactory()
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Print the report." })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+      const second = await requestAgent(sixb, { threadId: first.run.threadId, text: "Again." })
+      expect((await waitForTerminalRun(storage, second.run.id)).status).toBe("succeeded")
+
+      const report = LargeOutputSandboxFactory.REPORT
+      const read = textReadOf(calls[1], "report")
+      expect(read).toStartWith(
+        `<tool_output_file sandboxPath=".sixb/agent/${reportPath("report")}" sizeBytes="${report.length}" lines="10000">`
+      )
+      expect(read).toContain("Exit code: 0.")
+      expect(Buffer.byteLength(read)).toBeLessThan(2_600)
+      // Every byte is in the file, in the turn's sandbox and in the next one's, a new one.
+      const [turnSandbox, nextSandbox] = sandboxes.sandboxes
+      expect(turnSandbox?.readFileContents(savedOutputPath(turnSandbox, "report"))).toBe(report)
+      expect(nextSandbox?.readFileContents(savedOutputPath(nextSandbox, "report"))).toBe(report)
+      const again = nextSandbox?.commands.find((command) => command.args.at(-1) === "echo again")
+      expect(again?.options.env?.SIXB_TOOL_OUTPUTS_DIR).toBe(
+        dirname(savedOutputPath(nextSandbox, "report"))
+      )
+      // The next turn replays the preview byte for byte.
+      expectReplayedPrefix(calls[1], calls[2], model.providerId)
+      // The part keeps a bounded copy, and names the stored file that holds the whole output.
+      const stored = (await listMessages(storage, first.run.threadId)).flatMap(
+        (message) => message.parts
+      )
+      const call = stored.find((part) => part.type === "tool-call" && part.toolCallId === "report")
+      if (call?.type !== "tool-call" || call.state !== "output-available" || !call.outputFile) {
+        throw new Error("[test] Expected the report's saved output.")
+      }
+      expect(call.output).toMatchObject({ exitCode: 0, stdoutTruncated: true })
+      expect(JSON.stringify(call.output).length).toBeLessThan(21_000)
+      expect(call.outputFile.path).toBe(reportPath("report"))
+      const blob = await sixb.blobStorage.open(call.outputFile.fileRef.blobId)
+      expect(await new Response(blob).text()).toBe(report)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Reproduce: read the saved outputs before startAgentEnvironment, as createConversationAgentEnvironment
+  // once did in its Promise.all; the next turn's first call then waits on a read only it releases,
+  // and the turn never ends.
+  test("the next turn's model starts while its saved outputs are still read", async () => {
+    const calls: LanguageModelRequest[] = []
+    const read = Promise.withResolvers<void>()
+    let reading = false
+    let readingAtNextTurn = false
+    const model = new WorkerTestModel({
+      stream: async (request) => {
+        calls.push(request)
+        if (calls.length === 1) return toolCallStream("report", "bash", { command: "print-report" })
+        if (calls.length === 3) {
+          readingAtNextTurn = reading
+          read.resolve()
+          return toolCallStream("again", "bash", { command: "echo again" })
+        }
+        return answerStream(`Answer ${calls.length}.`)
+      },
+    })
+    const sandboxes = new LargeOutputSandboxFactory()
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Print the report." })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+      // From here, a stored output is read only once the next turn's first call has started.
+      const open = sixb.blobStorage.open.bind(sixb.blobStorage)
+      sixb.blobStorage.open = async (blobId) => {
+        reading = true
+        await read.promise
+        return open(blobId)
+      }
+
+      const second = await requestAgent(sixb, { threadId: first.run.threadId, text: "Again." })
+      expect((await waitForTerminalRun(storage, second.run.id)).status).toBe("succeeded")
+
+      expect(readingAtNextTurn).toBe(true)
+      const nextSandbox = sandboxes.sandboxes[1]
+      expect(nextSandbox?.readFileContents(savedOutputPath(nextSandbox, "report"))).toBe(
+        LargeOutputSandboxFactory.REPORT
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Reproduce: give ToolOutputFiles the run's fileBudget in startAgentEnvironment; the saved
+  // report then takes the bytes publish_artifact and file-returning tools count against.
+  test("never take the run's file budget, which published artifacts need", async () => {
+    const sandboxes = new LargeOutputSandboxFactory()
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const request = await requestAgent(sixb, { text: "Print the report." })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = await buildAgentWorkerContext(sixb, {
+      apiBaseUrl: "http://sixb-api.local/api/",
+    })
+    const environment = await createConversationAgentEnvironment(
+      await withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context,
+        plan: executionPlanFor(sixb),
+        run,
+      })
+    )
+    try {
+      const bash = environment.turnContext.tools.find((tool) => tool.name === "bash")
+      if (!bash) throw new Error("[test] Expected the bash tool.")
+      const call = { signal: new AbortController().signal, callId: "call", toolCallId: "report" }
+      await bash.execute(bash.parseInput({ command: "print-report" }), call)
+
+      expect(environment.turnContext.outputFileOf?.("report")?.path).toBe(reportPath("report"))
+      expect(environment.runFiles.budget.reservedBytes).toBe(0)
+    } finally {
+      await environment.dispose()
+    }
+  })
+
+  // Reproduce: return `tools` as they are from ToolOutputFiles.wrap; the step then reads the
+  // whole report. Pass no outputFileOf in runWorkflowAgentNode; its trace names no file.
+  test("of a workflow step are saved in the step's sandbox", async () => {
+    const requests: LanguageModelRequest[] = []
+    const model = scriptedWindowModel({
+      providerId: "mock",
+      modelId: "mock-model",
+      requests,
+      script: (request) =>
+        request.responseFormat
+          ? textEvents(JSON.stringify({ answer: "Project Alpha", confidence: 0.9 }))
+          : request.messages.some((message) => message.role === "tool")
+            ? textEvents("Project Alpha, from the report.")
+            : [toolCallEvent("step_report", "bash", { command: "print-report" })],
+    })
+    const sandboxes = new LargeOutputSandboxFactory()
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      sandboxes,
+      runId: "workflow-output-run",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), { label: "node" })
+
+      expect(node.status).toBe("succeeded")
+      expect(textReadOf(requests[1], "step_report")).toStartWith(
+        `<tool_output_file sandboxPath=".sixb/agent/${reportPath("step_report")}"`
+      )
+      const [sandbox] = sandboxes.sandboxes
+      expect(sandbox?.readFileContents(savedOutputPath(sandbox, "step_report"))).toBe(
+        LargeOutputSandboxFactory.REPORT
+      )
+      // The step's trace names the stored file, as a conversation's message does.
+      expect(node.trace).toContainEqual(
+        expect.objectContaining({
+          toolCallId: "step_report",
+          outputFile: expect.objectContaining({ path: reportPath("step_report") }),
+        })
+      )
+    } finally {
+      await worker.stop()
     }
   })
 })

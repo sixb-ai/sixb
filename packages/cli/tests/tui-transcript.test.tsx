@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
 import { afterEach, describe, expect, test } from "bun:test"
-import { RGBA, SyntaxStyle } from "@opentui/core"
+import { CodeRenderable, type Renderable, RGBA, SyntaxStyle } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { useRenderer } from "@opentui/react"
 import { testRender } from "@opentui/react/test-utils"
@@ -215,11 +215,22 @@ function StreamedTurn() {
   )
 }
 
-/** The screen's rows once `turn` is drawn, after highlighting that is ready has landed. */
+async function highlighted(node: Renderable): Promise<void> {
+  if (node instanceof CodeRenderable) await node.highlightingDone
+  for (const child of node.getChildren()) await highlighted(child)
+}
+
+/**
+ * The screen's rows once `turn` is drawn and highlighted. A block keeps its last text until its
+ * highlighting lands, on a worker that takes as long as it takes.
+ *
+ * Guard proof: wait a `setImmediate` here instead, and delay `TreeSitterClient.highlightOnce` by
+ * 20ms from a preload, and the finished answer's lists are drawn cut short.
+ */
 async function draw(screen: TestRendererSetup, turn: Turn): Promise<string[]> {
   showTurn(turn)
   await screen.renderOnce()
-  await new Promise((resolve) => setImmediate(resolve))
+  await highlighted(screen.renderer.root)
   await screen.renderOnce()
   return rowsOf(screen)
 }

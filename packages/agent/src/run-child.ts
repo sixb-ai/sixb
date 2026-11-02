@@ -195,13 +195,14 @@ export class ChildRunner {
       const prepared = await (this.host.prepare
         ? this.host.prepare(prepare, turnSignal)
         : prepare())
-      const { context, execution, thread, conversation, plan, history } = prepared
+      const { context, execution, thread, conversation, plan, budget, history } = prepared
+      const { measuredBytesPerToken } = prepared
       await session.events.publishStarted(run)
       runtime = createAgentTurnRuntime({ signal: turnSignal })
       // A message its parent sent while it was queued is read at its first step. What a paused run
       // it continues never read is in its trigger already.
       const inbox = new SubagentInbox(parent.family.child(run.id), run)
-      environment = await createSubagentEnvironment({
+      const childEnvironment = await createSubagentEnvironment({
         session,
         openSandbox: this.host.openSandbox({ session, context, execution, thread }),
         context,
@@ -214,12 +215,22 @@ export class ChildRunner {
         history,
         signal: runtime.signal,
         onDetachedTeardown: (teardown) => this.host.onDetachedTeardown(teardown),
+        preflight: { budget, runtime },
       })
+      environment = childEnvironment
+      const { compactInRun, bytesPerToken } = childEnvironment
       await runSubagent({
         history,
         inbox,
         context: environment.turnContext,
         plan,
+        contextLimits: {
+          budget,
+          measuredBytesPerToken,
+          thread: childEnvironment.thread,
+          ...(compactInRun ? { compactInRun } : {}),
+          ...(bytesPerToken === undefined ? {} : { bytesPerToken }),
+        },
         run,
         session,
         thread,
@@ -302,15 +313,29 @@ export class ChildRunner {
     const configured = resolveRunPlan(runPlan, {
       model: await session.models.language(runPlan.model),
     })
-    const plan = Object.freeze({ ...configured, model: prepareAgentModel(configured).model })
+    const { model, budget, measuredBytesPerToken } = prepareAgentModel(configured)
+    const plan = Object.freeze({ ...configured, model })
     const requester = agentRequester(execution.requestedBy, child.names)
     const context: AgentExecutionContext = {
       ...this.host.settings,
       ...(requester === undefined ? {} : { requester }),
       blobStorage: session.files,
     }
-    const history = { messages: child.messages, ...(child.paused ? { paused: child.paused } : {}) }
-    return { context, execution, thread, conversation: child.conversation, plan, history }
+    const history = {
+      ...child.history,
+      ...(child.task ? { task: child.task } : {}),
+      ...(child.paused ? { paused: child.paused } : {}),
+    }
+    return {
+      context,
+      execution,
+      thread,
+      conversation: child.conversation,
+      plan,
+      budget,
+      measuredBytesPerToken,
+      history,
+    }
   }
 }
 

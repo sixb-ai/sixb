@@ -18,6 +18,7 @@ import type {
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
+import { TOOL_OUTPUTS_DIRECTORY } from "./tools/tool-outputs"
 
 /**
  * Where a conversation's artifacts are installed, and their manifest, relative to the context
@@ -68,6 +69,7 @@ export async function prepareAgentSandboxApiContext(
   const artifactsDir = join(contextDir, AGENT_ARTIFACTS_DIRECTORY)
   const artifactsManifestPath = join(contextDir, AGENT_ARTIFACTS_MANIFEST)
   const memoryDir = join(contextDir, "memory")
+  const toolOutputsDir = join(contextDir, TOOL_OUTPUTS_DIRECTORY)
   const cli = await loadSandboxCliAssets()
   // The run's commands reach the API through the sandbox's credentialed address, which adds the
   // run token on the way out: no command holds it.
@@ -172,6 +174,7 @@ export async function prepareAgentSandboxApiContext(
       SIXB_RUN_CONTEXT: runContextPath,
       SIXB_ATTACHMENTS: attachmentsManifestPath,
       SIXB_ATTACHMENT_DIR: attachmentsDir,
+      SIXB_TOOL_OUTPUTS_DIR: toolOutputsDir,
       ...(input.artifacts
         ? { SIXB_ARTIFACTS: artifactsManifestPath, SIXB_ARTIFACTS_DIR: artifactsDir }
         : {}),

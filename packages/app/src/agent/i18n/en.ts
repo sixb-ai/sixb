@@ -209,10 +209,44 @@ export const en = {
     hours: (hours: number) => `${hours}h`,
     days: (days: number) => `${days}d`,
   },
+  /** The meter beside the model: how much of its limit the conversation uses. */
+  contextMeter: {
+    title: "Context",
+    label: (used: string, limit: string) => `Context: ${used} of ${limit} tokens`,
+    condensing: "Condensing…",
+    condensingLabel: "Condensing the conversation",
+    limit: (limit: string) => `Earlier messages are condensed as it nears ${limit}\u00a0tokens.`,
+    near: "Almost full: earlier messages will be condensed soon.",
+    over: "Full: earlier messages are condensed before the next answer.",
+    /** What the meter calls a model it cannot name. */
+    thisModel: "This model",
+    breakdown: "What the conversation uses",
+    parts: {
+      system: "Sixb instructions",
+      instructions: "Project instructions",
+      memory: "Memory",
+      skills: "Skills",
+      ontology: "Ontology",
+      tools: "Tools",
+      summary: "Summary of earlier messages",
+      messages: "Messages",
+      toolResults: "Tool results",
+      files: "Files and images",
+    },
+    free: "Free space",
+    reserved: "Kept for the answer",
+    cached: "Read from cache",
+    lastCondensed: "Last condensed",
+    justNow: "just now",
+    ago: (time: string) => `${time} ago`,
+  },
   transcript: {
     condensed: "Condensed conversation",
     condensing: "Condensing earlier conversation…",
     condensingLabel: "Agent is condensing earlier conversation",
+    /** The provider refused a request as too long: the turn condensed the conversation, then went on. */
+    condensedFull: "Context was full — condensed and continued",
+    condensingFull: "Context is full — condensing to continue…",
     working: "Agent is working",
     thinking: "Thinking",
     takingLonger: "Taking a little longer",
@@ -229,6 +263,8 @@ export const en = {
     retry: "Retry",
     retrying: "Retrying…",
     notStarted: "I couldn’t get a response started.",
+    contextFull:
+      "This conversation is too long for this model. Start a new thread, or pick a model with a larger context.",
     notFinished: "I couldn’t finish that response.",
     interrupted: "The response was interrupted before it finished.",
     reconnecting: "Connection lost — reconnecting…",
@@ -243,6 +279,10 @@ export const en = {
     unknown: "Something went wrong during this response.",
   } satisfies Record<AgentRunDiagnosticCode | "unknown", string>,
   activity: {
+    /** Under a call whose output was saved as a file: it opens the whole output. */
+    fullOutput: "Full output",
+    /** The saved output's name in the viewer: `bash output.txt`. */
+    savedOutputName: (tool: string, extension: string) => `${tool} output${extension}`,
     thinking: "Thinking",
     working: "Working",
     workingThroughIt: "Working through it",
@@ -502,6 +542,14 @@ export const en = {
     version: { title: "Checked the Sixb version", running: "Checking the Sixb version" },
     doctor: { title: "Checked the agent runtime", running: "Checking the agent runtime" },
     runContext: { title: "Read the run context", running: "Reading the run context" },
+    history: {
+      title: "Read the earlier conversation",
+      running: "Reading the earlier conversation",
+    },
+    historyMessage: {
+      title: (seq: string) => `Read message ${seq}`,
+      running: (seq: string) => `Reading message ${seq}`,
+    },
     ontology: { title: "Explored the ontology", running: "Exploring the ontology" },
     objectType: {
       title: (type: string) => `Inspected the ${type || "object"} type`,

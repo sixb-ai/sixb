@@ -109,6 +109,7 @@ async function runTurn(
       tools: [],
       systemPrompt: "Test system prompt.",
       projectTimeZone: "UTC",
+      projectLocale: "en",
     },
     plan: {
       instructions: "Answer clearly.",
@@ -175,7 +176,7 @@ test("a turn stopped after its model's last step keeps its answer over HTTP, as 
     status: "cancelled",
     answer: [
       [
-        { type: "step-start" },
+        expect.objectContaining({ type: "step-start" }),
         expect.objectContaining({ type: "text", text: "Three invoices are open." }),
       ],
     ],

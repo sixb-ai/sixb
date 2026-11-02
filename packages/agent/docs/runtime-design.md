@@ -90,6 +90,75 @@ internal fallback response IDs are separate.
 This is a call-level ledger: requests that fail before returning a stream and process crashes before
 recording are outside its guarantee.
 
+## Replaying history
+
+A turn rebuilds its request from stored messages, and the provider's prompt cache reads only the
+longest prefix identical to an earlier request. So what turn N+1 sends for turn N must be the bytes
+turn N's last request sent, on every storage:
+
+- **JSON prints with sorted keys** (`models/protocols`), live and on replay: Postgres `jsonb` hands
+  stored objects back in its own key order. Tool outputs, synthesized call arguments and Anthropic
+  `tool_use` inputs; opaque provider items replay as stored, since the provider parses them.
+- **A projected tool output replays as the model read it.** When a tool's `toModelOutput` differs
+  from its output (`view_file`, `publish_artifact`, `wait_agent`, project tools returning files), the
+  tool-call part keeps it as `modelOutput`, and `toModelMessages` sends it verbatim. The HTTP API
+  leaves it out. Its files are materialized again where that output named them: `tool-files/` of
+  the call that stored one, `children/<key>/` for `wait_agent`, or the path a file it showed already
+  had. The 50-file window and the sandbox budget bound what is materialized, never what is replayed;
+  a user's files take the budget first.
+- **Runtime input is derived again.** The `<sixb_tool_files>` message after a step's results is
+  rebuilt from the stored trace by the same functions (`replayToolFiles`).
+- **An output too large for the context is saved to a file** ([tool-outputs.ts](../src/tools/tool-outputs.ts)).
+  Past `TOOL_OUTPUT_FILE_MIN_BYTES`, the whole output is stored as a file of the run (its blob
+  store, within `TOOL_OUTPUTS_MAX_BYTES` of its own, identical content counted once: saving gives
+  way before published artifacts and tool files do) and copied to
+  `tool-outputs/<call id>-<digest>.txt` of the context directory; the model reads a preview with
+  that path, the call's `modelOutput`. The tool-call part names the stored file as `outputFile`,
+  which the message's file route serves to the thread's readers, and keeps a bounded copy as
+  `output`: a command's streams cut to 20,000 characters, any other tool's output as it returned
+  it. A runner's `outputFile` is kept only at exactly that path for its own content
+  (`isAgentToolOutputFile`), checked again before a run writes it back. Provisioning writes the
+  history's saved files back while the model starts: those the sandbox lacks, newest within a
+  budget, read a few at a time and no further than their declared size, written oldest first.
+  `read` and `view_file` page by themselves and are never saved; a sandbox or store that cannot
+  take the file leaves the model the part's copy. A cleared preview points at the file.
+- **Attachments stay inline until compaction**, each user message with its own text budget.
+- **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
+  spent in thread order, oldest first: attachments, then the images after each step, then the
+  run's own steps (`allocateInlineImages`). The first image that does not fit closes the budget:
+  nothing after it is projected, and projections run a few at a time, decided in order. An image
+  that fitted stays inline; one past the budget reads as metadata from its own turn on, until
+  compaction frees the budget. Estimates count each inline image as `AGENT_IMAGE_INPUT_TOKENS`.
+
+## Compacting a conversation
+
+A turn's preflight (`context-compaction.ts`) compacts once the estimate crosses the model's limit,
+its window less the output reserve (see `context-budget.ts`):
+
+- **It aims at 60 % of the limit**: the system prompt and tools, the summary at its longest, and
+  the recent turns that fit the rest stay; the next turns grow into the room left. A context that
+  does not fit even compacted fails the turn as `agent.context_limit_exceeded`, which the app and
+  the TUI show without a retry.
+- **An idle thread compacts below the limit** when its last model call is older than the cache its
+  calls ask for (`modelCacheLifetimeMs`: an hour for a conversation) and it weighs at least
+  `AGENT_IDLE_COMPACTION_TOKENS`, when compacting brings it under that size
+  (`shouldCompactIdleContext`): the next call rewrites the cache anyway. Its summary is sent without
+  caching, as the next request starts from the summary. One whose compaction fails goes on as it
+  is.
+- **The summary continues the cached request.** The environment builds it as the turn would
+  (`BuildConversationRequest`): the previous turn's request, with the same system prompt, tools,
+  reasoning and cache intent, then one `<sixb_summary_request>` message. Changing thinking, effort
+  or tools would make the provider read the conversation again at full price; `summaryReasoning`
+  is where to change that choice. Its output allows the summary plus the reasoning.
+- **It is rewritten, not chained**: the earlier summary is part of what the model reads, and the
+  instruction states the length. A summary the output limit cut short, or past its allowance, keeps
+  its complete lines and says so; an empty answer leaves the user's messages instead. Nothing the
+  summary writes fails the thread.
+- **A history too long to read at once** is summarized in steps, oldest first, each from the summary
+  so far; a turn too large alone is read with its longest texts and results cut.
+- The whole conversation stays stored: `sixb history` reads it in the sandbox, through the run's
+  own thread only.
+
 ## How agents use a sandbox
 
 You rarely call `runCommand` yourself. The agent worker does it, and every run kind goes through
@@ -106,8 +175,8 @@ one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one
   does, through `beforeFinalize({ discard: true })`.
 
 A `RunSandbox` also names the run's **context directory** (`$SIXB_CONTEXT_DIR`), where the run's
-files go: skills, ontology docs, memory, attachments, artifacts, tool files, children's files and
-the agent's `sixb`. Both behaviors keep it at `.sixb/agent` in the working directory, which a
+files go: skills, ontology docs, memory, attachments, artifacts, tool files, saved tool outputs,
+children's files and the agent's `sixb`. Both behaviors keep it at `.sixb/agent` in the working directory, which a
 checkout excludes from Git. Every path the worker writes, checks or names in the prompt comes from
 it, as the agent names it: relative to the working directory, or absolute.
 
@@ -208,9 +277,10 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   then their messages leave the thread (`deleteByRunId`), as a retried turn's leave its own.
 - **Its history is its thread.** A continuation reads its thread's messages: the task and handed
   files, dated by the thread's creation, each run's work and each trigger, in order, so its request
-  starts like the paused run's last one. Files its tools showed the earlier runs are projected as a
-  turn projects its history's (`prepareAgentAttachments` over the thread's messages): kept as
-  metadata, at a path in its sandbox, so a request that replays one differs from the live one there.
+  starts like the paused run's last one. A call whose tool projected its output replays the stored
+  `modelOutput`, what the model read, and the files those calls returned are materialized again at
+  the paths that output named (`prepareAgentAttachments` over the thread's messages), with the
+  images that followed their step (`replayToolFiles`), as a turn replays its history.
   At its finish everything under `out/` returns, the inherited files included.
 - **Its workspace is kept on a provider that resumes.** The child's thread holds its own
   `sandbox_state` (a random name), through the conversation's state machine: the fence is the
@@ -372,11 +442,11 @@ Files travel through blob storage, never through the model (`src/child-files.ts`
   returns none, as it returns no answer.
 - **In the parent.** `wait_agent` returns a rich tool result (`{ kind: "agentToolResult" }`): the
   children's results as JSON text, then each file as a file part. The JSON lists each child's files
-  by their path in `out/` and their `sandboxPath` this turn, under `.sixb/agent/children/<key>/`
-  (a key that is not a safe path segment gets a hash suffix), where `wait_agent` copies them, one
-  at a time, since the result's files reach `$SIXB_ATTACHMENTS` only in later turns. Each file part
-  names its child: its `logicalPath` is `<key>/<path>` and its `fileName` is unique, so later
-  turns and the app pair them without their order. A child's files are in the first result that
+  by their path in `out/` and their `sandboxPath`, under `.sixb/agent/children/<key>/` (a key that
+  is not a safe path segment gets a hash suffix), where `wait_agent` copies them, one at a time, and
+  where later turns materialize them again, since the result's files reach `$SIXB_ATTACHMENTS` only
+  then. Each file part names its child: its `logicalPath` is `<key>/<path>` and its `fileName` is
+  unique, so later turns and the app pair them without their order. A child's files are in the first result that
   lists them, and a result holds at most the attachment limits of them, whole children only: one
   that does not fit, or whose files cannot be copied, says so in `filesNote` and comes with the
   next wait. It also installs the latest version of each artifact the waited children published a

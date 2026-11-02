@@ -45,6 +45,7 @@ export {
   type ComposerSettingsProps,
 } from "./agent/components/composer-settings"
 export { ContextChips, type ContextChipsProps } from "./agent/components/context-chips"
+export type { ContextMeterProps } from "./agent/components/context-meter"
 export {
   ContextPicker,
   type ContextPickerProps,
@@ -93,6 +94,7 @@ export type {
   AgentMessage,
   AgentRun,
   AgentThread,
+  AgentThreadContext,
   LanguageModel,
 } from "./agent/types"
 export type { ArtifactTarget } from "./artifacts/target"
@@ -107,6 +109,7 @@ export {
   useSections,
 } from "./sections/sections"
 export { type CurrentUser, useCurrentUser, useSignOut } from "./session"
+export type { SharedUnavailableProps } from "./shared-unavailable"
 export { AgentDock } from "./shell/agent-dock"
 export {
   AppShell,

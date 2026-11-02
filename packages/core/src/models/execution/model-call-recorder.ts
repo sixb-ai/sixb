@@ -59,6 +59,8 @@ export class AiModelCallRecorder {
   private readonly reservations = new Set<string>()
   private admissionError: unknown
   private recordingError: ModelUsageRecordingError | undefined
+  /** When the last call it recorded ended, in milliseconds. */
+  private lastOccurredAt = Number.NEGATIVE_INFINITY
 
   constructor(
     private readonly input: AiModelCallRecorderInput,
@@ -163,7 +165,11 @@ export class AiModelCallRecorder {
     // Calls already in flight still need their own accounting after another call fails.
     // Only admission is gated by the execution's sticky failure.
     try {
-      const occurredAt = this.now()
+      // Each call ends after the one recorded before it, by a millisecond at least: the latest
+      // call of an execution, which an agent's next turn anchors its estimate on, is the one that
+      // ended last, even when two end within the same millisecond.
+      const occurredAt = new Date(Math.max(this.now().getTime(), this.lastOccurredAt + 1))
+      this.lastOccurredAt = occurredAt.getTime()
       const record: RecordAiModelCallInput = {
         id: this.generateId(),
         projectId: this.input.projectId,

@@ -184,6 +184,22 @@ describe("defineAgentStep", () => {
     ).toContain("txn_1")
     expect(isAgentStepDefinition(resolveInvoice)).toBe(true)
   })
+
+  test("keeps its maxSteps, and rejects one that is not a positive integer", () => {
+    // Proven by removal: drop the maxSteps check from defineAgentStep.
+    const step = (maxSteps: number) =>
+      defineAgentStep("bounded", { instructions: "Resolve invoices.", maxSteps })
+        .input({})
+        .output({})
+        .prompt(() => "Resolve.")
+
+    expect(step(40).maxSteps).toBe(40)
+    for (const maxSteps of [0, 1.5]) {
+      expect(() => step(maxSteps)).toThrow(
+        'Agent step "bounded" maxSteps must be a positive integer.'
+      )
+    }
+  })
 })
 
 describe("agent step sandboxes", () => {

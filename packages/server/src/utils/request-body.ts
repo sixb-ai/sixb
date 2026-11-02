@@ -55,6 +55,15 @@ export function limitRequestBody(request: Request): Request {
 }
 
 /**
+ * Lifts the server's cap for a request whose handler reads the body itself, within its own limit,
+ * once it has authenticated the caller: a runner's run session (see serveAgentRunSession).
+ */
+export function liftRequestBodyCap(request: Request): void {
+  const cap = requestBodyCaps.get(request)
+  if (cap) cap.lifted = true
+}
+
+/**
  * Reads a request body fully into memory, failing once it passes `limitBytes`. That limit
  * replaces the server's default cap for this request, so a route reading more than the default
  * must authenticate the caller first. The `content-length` header, when present, only provides an
@@ -66,10 +75,7 @@ export async function readRequestBodyWithLimit(
   tooLargeMessage?: string
 ): Promise<Uint8Array<ArrayBuffer>> {
   // The loop below enforces `limitBytes` in place of the server's cap.
-  const cap = requestBodyCaps.get(request)
-  if (cap) {
-    cap.lifted = true
-  }
+  liftRequestBodyCap(request)
 
   const contentLength = request.headers.get("content-length")
   if (contentLength !== null) {

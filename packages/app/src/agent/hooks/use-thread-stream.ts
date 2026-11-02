@@ -1,6 +1,7 @@
 import type { AgentRunSnapshot } from "@sixb/client"
 import {
   getAgentRunQueryKey,
+  getAgentThreadContextQueryKey,
   getAgentThreadQueryKey,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsQueryKey,
@@ -87,6 +88,9 @@ export function useThreadStream(options: UseThreadStreamOptions): UseThreadStrea
             queryClient.invalidateQueries({
               queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
             }),
+            queryClient.invalidateQueries({
+              queryKey: getAgentThreadContextQueryKey({ path: { threadId } }),
+            }),
           ]
         : []),
     ])
@@ -111,6 +115,9 @@ export function useThreadStream(options: UseThreadStreamOptions): UseThreadStrea
             }),
             queryClient.invalidateQueries({
               queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: getAgentThreadContextQueryKey({ path: { threadId } }),
             }),
           ]
         : []),

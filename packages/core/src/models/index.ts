@@ -92,6 +92,7 @@ export type {
   EmbeddingModelResult,
 } from "./embedding-model"
 export { EmbeddingModelResponseError } from "./embedding-model"
+export type { ModelProviderErrorReason } from "./errors"
 export {
   ModelCatalogUnavailableError,
   ModelProviderError,
@@ -139,6 +140,8 @@ export type {
   LanguageModelProvider,
   LanguageModelRequest,
   LanguageModelStream,
+  ModelCaching,
+  ModelCachingIntent,
   ModelCapabilities,
   ModelProvider,
   ModelReasoning,

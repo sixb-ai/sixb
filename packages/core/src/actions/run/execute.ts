@@ -4,6 +4,7 @@ import {
   bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "../../execution/primitive"
+import type { RequestClient } from "../../execution/request-client"
 import type { LoggingService } from "../../logging/service"
 import type { SixbDefinitions } from "../../runtime/definitions"
 import type { ActionRunStorage, Storage } from "../../storage"
@@ -31,6 +32,8 @@ export interface ExecuteActionRunInput {
   /** Cancels the run before its irreversible boundary. */
   readonly signal?: AbortSignal
   readonly readSubjectAsRequester?: ReadSubjectAsRequester
+  /** The client of the HTTP request that requested the run directly. */
+  readonly client?: RequestClient
 }
 
 /**
@@ -70,7 +73,7 @@ export async function executeActionRun(
       primitive: { kind: "action", id: run.actionId, runId: run.id },
     })
     return await runAction({
-      runtime: buildActionContext(host, actionRuns, bound, input.readSubjectAsRequester),
+      runtime: buildActionContext(host, actionRuns, bound, input),
       run,
       signals,
     })
@@ -95,8 +98,9 @@ function buildActionContext(
   host: ActionRunHost,
   actionRunsStorage: ActionRunStorage,
   execution: BoundPrimitiveExecution,
-  readSubjectAsRequester: ReadSubjectAsRequester | undefined
+  input: Pick<ExecuteActionRunInput, "readSubjectAsRequester" | "client">
 ): ActionRunContext {
+  const { readSubjectAsRequester } = input
   const sixb = {
     models: execution.sixb.models,
     objects: execution.sixb.objects,
@@ -104,6 +108,7 @@ function buildActionContext(
     connector: execution.sixb.connector,
     blobs: execution.sixb.blobs,
     users: execution.sixb.users,
+    shares: execution.sixb.shares,
   }
   return {
     id: host.id,
@@ -115,6 +120,7 @@ function buildActionContext(
     sixb,
     actions: host.definitions.actions,
     requestedBy: execution.sixb.execution.requestedBy,
+    client: input.client,
     ...(readSubjectAsRequester === undefined ? {} : { readSubjectAsRequester }),
   }
 }

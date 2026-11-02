@@ -43,6 +43,58 @@ export interface AgentReasoningPart {
 /** A step boundary between assistant loop iterations. */
 export interface AgentStepStartPart {
   readonly type: "step-start"
+  /**
+   * The step answered a request whose tool results the turn cleared or cut to fit its context:
+   * the provider counted less for it than replaying the stored steps sends.
+   */
+  readonly reducedRequest?: true
+  /** What the step's request carried, part by part, as the turn sent it. */
+  readonly request?: AgentStepRequestSize
+}
+
+/**
+ * The parts a request is made of, as a context meter shows them: Sixb's own prompt, the project's
+ * `SIXB.md`, memory, skills and ontology (their index in the prompt and the files the agent read),
+ * the tool definitions, the summary of a condensed conversation, its messages, the other tool
+ * results, and attachments and images.
+ */
+export type AgentContextPartName =
+  | "system"
+  | "instructions"
+  | "memory"
+  | "skills"
+  | "ontology"
+  | "tools"
+  | "summary"
+  | "messages"
+  | "toolResults"
+  | "files"
+
+/** The parts of the system prompt. */
+export type AgentSystemPromptPartName = Extract<
+  AgentContextPartName,
+  "system" | "instructions" | "memory" | "skills" | "ontology"
+>
+
+/** The parts of the history: a file the agent read counts with what it is. */
+export type AgentHistoryPartName = Extract<
+  AgentContextPartName,
+  "summary" | "messages" | "toolResults" | "files" | "memory" | "skills" | "ontology"
+>
+
+/** UTF-8 bytes by part; a part the request did not carry is left out. */
+export type AgentContextPartBytes<TPart extends AgentContextPartName> = {
+  readonly [Part in TPart]?: number
+}
+
+/** A step's request as sent: UTF-8 bytes by part, and the images apart, which count by the image. */
+export interface AgentStepRequestSize {
+  readonly system: AgentContextPartBytes<AgentSystemPromptPartName>
+  readonly tools: { readonly count: number; readonly bytes: number }
+  readonly history: AgentContextPartBytes<AgentHistoryPartName>
+  readonly images?: number
+  /** Where the run's context files were, which its reads were attributed by. */
+  readonly contextDirectory?: string
 }
 
 /** A blob-backed file attached to a user message or produced by an agent/tool. */
@@ -137,7 +189,24 @@ export interface AgentProviderStatePart {
  */
 export type AgentToolCallPart = AgentToolCallBase &
   (
-    | { readonly state: "output-available"; readonly output: JsonValue }
+    | {
+        readonly state: "output-available"
+        readonly output: JsonValue
+        /**
+         * What the model read of `output`, when its tool projected it into something else (a
+         * summary, a file's excerpt): later turns replay these bytes instead of projecting `output`
+         * again. Internal to the runtime; the HTTP API leaves it out.
+         */
+        readonly modelOutput?:
+          | { readonly type: "text"; readonly value: string }
+          | { readonly type: "json"; readonly value: JsonValue }
+        /**
+         * The whole output, when it was too large for the model's context: a stored file, and
+         * where the run's sandbox holds it, relative to its context directory. `output` then keeps
+         * a bounded copy, and the model read a preview with that path.
+         */
+        readonly outputFile?: { readonly fileRef: FileRef; readonly path: string }
+      }
     | { readonly state: "output-error"; readonly errorText: string }
   )
 

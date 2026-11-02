@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Clock3,
   type LucideIcon,
+  Plus,
   RotateCcw,
   Unplug,
 } from "lucide-react"
@@ -114,7 +115,12 @@ function AssistantMessage({
   const messages = useAgentMessages()
   return (
     <div className="flex flex-col gap-2">
-      {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
+      {message.compaction ? (
+        <CompactionResult
+          summary={message.compaction.summary}
+          contextFull={message.compaction.reason === "overflow"}
+        />
+      ) : null}
       <AgentMessageBody message={message} />
       {message.diagnostics.map((annotation, index) => (
         // Laid out like the timeout and interrupted markers: notice, then its action.
@@ -163,12 +169,19 @@ export function AuthorLine({ author }: { readonly author: AuthorLabel | undefine
   return <p className="mt-2 px-1 text-xs text-muted-foreground">{author.label}</p>
 }
 
-function CompactionResult({ summary }: { summary: string }) {
+/** The summary the run condensed the conversation into; why, when the context was full. */
+function CompactionResult({
+  summary,
+  contextFull,
+}: {
+  readonly summary: string
+  readonly contextFull: boolean
+}) {
   const messages = useAgentMessages().transcript
   return (
     <Collapsible className="max-w-full">
       <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-        <span>{messages.condensed}</span>
+        <span>{contextFull ? messages.condensedFull : messages.condensed}</span>
         <ChevronRight className="size-4 shrink-0 opacity-0 transition-[transform,opacity] group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -182,11 +195,14 @@ function CompactionResult({ summary }: { summary: string }) {
   )
 }
 
-export function CompactionMarker() {
+/** Condensing under way; to let the turn go on when the provider refused a request as too long. */
+export function CompactionMarker({ contextFull = false }: { readonly contextFull?: boolean }) {
   const messages = useAgentMessages().transcript
   return (
     <Marker role="status" aria-label={messages.condensingLabel}>
-      <MarkerContent className="shimmer">{messages.condensing}</MarkerContent>
+      <MarkerContent className="shimmer">
+        {contextFull ? messages.condensingFull : messages.condensing}
+      </MarkerContent>
     </Marker>
   )
 }
@@ -242,12 +258,13 @@ function TurnNotice({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2" role="status">
-      <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+      {/* The icon sits on the first line of a notice that wraps: 2px centers 16px on 20px. */}
+      <p className="flex min-w-0 items-start gap-2 text-sm leading-5 text-muted-foreground">
         {Icon ? (
           <Icon
             aria-hidden="true"
             className={cn(
-              "size-4 shrink-0",
+              "mt-0.5 size-4 shrink-0",
               tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400"
             )}
           />
@@ -398,17 +415,35 @@ export function RunInterruptedMarker({
 export function RunFailureMarker({
   onRetry,
   retrying = false,
+  contextFull = false,
+  onNewThread,
 }: {
   onRetry?: () => void
   retrying?: boolean
+  /**
+   * The conversation is too long for its model: running it again would fail the same way, so the
+   * way on is a new thread.
+   */
+  contextFull?: boolean
+  onNewThread?: () => void
 }) {
-  const messages = useAgentMessages().transcript
+  const labels = useAgentMessages()
+  const messages = labels.transcript
   return (
     <TurnNotice
       icon={AlertTriangle}
       tone="error"
       action={
-        onRetry ? (
+        contextFull ? (
+          onNewThread ? (
+            <TurnAction
+              icon={Plus}
+              label={labels.threads.new}
+              onClick={onNewThread}
+              disabled={false}
+            />
+          ) : null
+        ) : onRetry ? (
           <TurnAction
             icon={RotateCcw}
             label={retrying ? messages.retrying : messages.retry}
@@ -418,7 +453,7 @@ export function RunFailureMarker({
         ) : null
       }
     >
-      {messages.notStarted}
+      {contextFull ? messages.contextFull : messages.notStarted}
     </TurnNotice>
   )
 }

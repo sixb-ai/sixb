@@ -4,13 +4,18 @@ export {
   sandboxCredentialIssue,
   staticSandboxRecipe,
 } from "../sandboxes/configuration"
+export {
+  AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
+  AGENT_TOKEN_RATE_SAMPLES,
+} from "../storage/agents/types"
 export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
+  AgentMessageStep,
   AgentToolResultFileResolverInput,
   ToModelMessagesOptions,
 } from "./adapters"
-export { toModelMessages } from "./adapters"
+export { agentMessageSteps, toModelMessages } from "./adapters"
 export type { AgentApprovalResume } from "./approval-continuation"
 export { resumeDecidedAgentTurn } from "./approval-continuation"
 export { getAgentApprovalExecutor } from "./approval-executor"
@@ -71,22 +76,48 @@ export {
   MAX_AGENT_CONTEXT_ENTRIES,
   normalizeAgentContextEntries,
 } from "./context/entries"
+export type { AgentContextBudget, AgentModelSelection } from "./context-budget"
+export {
+  AGENT_CONTEXT_COMPACTED_SHARE,
+  AGENT_IDLE_COMPACTION_TOKENS,
+  agentOutputCapTokens,
+  contextSummaryOutputTokens,
+  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
+  resolveAgentContextBudget,
+} from "./context-budget"
 export type {
   AgentContextCompactionBoundary,
   AgentContextEstimateTool,
+  AgentContextSize,
   AgentContextTokenEstimate,
   EstimateAgentContextRequestTokensInput,
 } from "./context-compaction"
 export {
   AGENT_CONTEXT_ESTIMATOR_VERSION,
+  agentContextSizeTokens,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
+  measureAgentModelRequest,
+  measureModelRequest,
   selectAgentContextCompactionBoundary,
-  serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
+export type { AgentSystemPromptSize } from "./context-parts"
+export { measureAgentStepRequest } from "./context-parts"
+export type { AgentThreadRequestEstimateInput } from "./context-request"
+export { estimateAgentThreadRequest } from "./context-request"
 export { resolveAgentContextParts } from "./context-resolution"
+export type { AgentContextTokenRateSample } from "./context-token-rate"
+export {
+  calibrateAgentContextBytesPerToken,
+  learnedAgentContextBytesPerToken,
+  measureAgentContextTokenRate,
+  measuringAgentContextTokenRates,
+  readAgentContextTokenRates,
+} from "./context-token-rate"
+export type { AgentThreadContextUse } from "./context-use"
+export { readAgentThreadContextUse } from "./context-use"
 export type {
   AgentRunDispatchFailure,
   DispatchedAgentRun,
@@ -116,13 +147,17 @@ export {
   createSubagentRunId,
   createSubagentThreadId,
 } from "./ids"
+export { AGENT_IMAGE_INPUT_TOKENS, AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
   type AgentApprovalCaller,
   type AgentApprovalCallSummary,
   type AgentApprovalOutcomePart,
+  type AgentContextPartBytes,
+  type AgentContextPartName,
   type AgentContinuationPart,
   type AgentFilePart,
+  type AgentHistoryPartName,
   type AgentMailPart,
   type AgentMessage,
   type AgentMessagePart,
@@ -130,7 +165,9 @@ export {
   type AgentMessageRole,
   type AgentProviderStatePart,
   type AgentReasoningPart,
+  type AgentStepRequestSize,
   type AgentStepStartPart,
+  type AgentSystemPromptPartName,
   type AgentTextPart,
   type AgentToolCallPart,
   type AgentToolCallState,
@@ -140,6 +177,7 @@ export type {
   PausableModelLoopResult,
   PrepareModelStepInput,
   PrepareModelStepResult,
+  RecoverModelStepInput,
   RunModelLoopInput,
 } from "./model-loop"
 export { runModelLoop } from "./model-loop"
@@ -267,6 +305,8 @@ export type {
   AgentSkillCatalog,
   AgentSkillDefinition,
 } from "./skills"
+export type { AgentOptions } from "./step-limits"
+export { UNATTENDED_AGENT_MAX_STEPS } from "./step-limits"
 export type {
   AgentCompactionFailureCode,
   AgentRunControlStreamId,
@@ -302,6 +342,10 @@ export type { AgentToolCatalog } from "./tool-catalog"
 export type { AgentToolCallFile, StoredAgentToolFile } from "./tool-files"
 export {
   AGENT_FILE_MAX_BYTES,
+  AGENT_TOOL_OUTPUTS_DIRECTORY,
+  agentToolFilePath,
+  agentToolOutputPath,
+  isAgentToolOutputFile,
   SANDBOX_CONTEXT_DIRECTORY,
   storeAgentToolFile,
 } from "./tool-files"

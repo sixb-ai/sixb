@@ -159,10 +159,76 @@ retry runs with the same setting.
 Chat answers and AI workflow steps can use the model's full output limit, reasoning included, as
 long as the conversation leaves room for it in the context window. However long the conversation
 gets, they keep at least 16,384 tokens (or a quarter of the window): older turns are summarized
-before the conversation takes that room. A conversation with an attached file keeps to that minimum,
-since Sixb cannot tell how much of the window a file takes. To spend less per answer, cap it with
-`maxOutputTokens` on the binding, such as `vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`.
+before the conversation takes that room. An attached image counts as about 5,400 tokens and other
+files by their size, so a conversation with files keeps the same room for the answer. To spend less
+per answer, cap it with `maxOutputTokens` on the binding, such as
+`vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`.
 A chat answer cut short by this limit says so and can be continued; an AI workflow step fails.
+
+A conversation is summarized near its model's limit, whatever the provider's price tiers; to
+summarize earlier, set a smaller `contextWindow` on the model definition. It is also summarized
+when it resumes after an hour idle with 200,000 tokens or more, if summarizing brings it under
+200,000: its prompt cache has expired, and the summary is far cheaper to read again than the whole
+conversation.
+
+A summary brings the conversation well under that limit, so the next turns do not summarize again.
+The latest turns stay as they are, and the agent can still read the whole conversation with
+`sixb history`. A conversation that does not fit even summarized fails with
+[`agent.context_limit_exceeded`](../errors/overview.md): start a new one, or switch to a model with a
+larger window.
+
+A tool result over 30 KB reaches the agent as a short preview, and the whole of it as a file in
+its sandbox, which it reads in pieces or searches; later turns find the file at the same path. The
+file is stored with the conversation, which keeps a command's output cut to 20,000 characters per
+stream: `sixb history` names the file, and whoever reads the conversation can download it.
+
+The same limit holds within a turn, before each model call, as tool results pile up:
+
+- right before the limit, the oldest tool results the agent has read are cleared in one batch
+  that brings the conversation down to 60% of it, when that frees at least a tenth of the limit:
+  the three most recent stay when that is enough, the newest always does. A short note in their
+  place tells the agent to run the tool again if it needs one back, and a result it reads again is
+  never cleared or cut again;
+- if that is not enough, the turns before the current one are summarized, and the turn goes on;
+- results too large to fit the window at all are cut, each saying how much was left out.
+
+A turn whose results do not fit together ends with `agent.context_limit_exceeded` rather than read
+and clear them in turn.
+
+The conversation shown to users and `sixb history` keep every result whole. A provider that
+rejects a call as too long for the window gets it again once, summarized, and the turn goes on. A
+turn that fails keeps the steps it completed, and can be continued.
+
+Subagents and AI workflow steps keep each call under their own model's limit the same way:
+
+| Run | Clears old results | Summarizes |
+|---|---|---|
+| Subagent | yes | what came before, when it continues after a question or an approval |
+| AI workflow step | yes | nothing: its history starts with its prompt |
+
+One still too long for its model fails with what to do: a narrower task or prompt, or a model with
+a larger window.
+
+Chat shows how much of its model's limit a conversation uses in a disc beside the model; it turns
+amber from 80% and red past the limit. It opens on what the conversation uses, part by part, then
+the free space and the room kept for the answer, which add up to the model's window:
+
+| Part | What it counts |
+|---|---|
+| Sixb instructions | Sixb's own prompt |
+| Project instructions | `SIXB.md` |
+| Memory, Skills, Ontology | their index in the prompt, and the files the agent read with `read` or `view_file` |
+| Tools | the tool definitions |
+| Summary | what a condensed conversation keeps of its earlier messages |
+| Messages, Tool results, Files and images | the conversation itself |
+
+The total is the provider's count of the latest call plus an estimate of what came after it; the
+split by part is an estimate by size. `sixb agent` shows the total at the end of its status line,
+as `ctx 38k/184k · 92% cached`, and the parts with `/context`.
+
+A custom chat reads it from `GET /api/agent-threads/:threadId/context`, against the model the next
+message goes to with `?provider=…&modelId=…`, else the latest turn's. A tool result saved as a file
+shows a **Full output** link under its call.
 
 ## Generate a response
 

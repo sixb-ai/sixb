@@ -25,6 +25,7 @@ import {
 import { heldInCard } from "../delegation/model"
 import { useAgentMessages } from "../i18n"
 import { principalKey } from "../message-authors"
+import { CONTEXT_LIMIT_EXCEEDED } from "../run-presentation"
 import { ApprovalCards } from "./approval-card"
 import {
   CompactionMarker,
@@ -49,6 +50,8 @@ export interface TranscriptProps {
   readonly anchorCurrentTurn?: boolean
   readonly onRetry?: () => void
   readonly onContinue?: () => void
+  /** Start a new thread: the way on from a conversation too long for its model. */
+  readonly onNewThread?: () => void
   /**
    * The thread's calls held for approval. Each shows as a card under the work that made it, which
    * its requester answers; without them, as for an observer, the cards show only what the messages
@@ -105,6 +108,7 @@ function TranscriptView({
   anchorCurrentTurn,
   onRetry,
   onContinue,
+  onNewThread,
   approvals,
   moved,
 }: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
@@ -243,10 +247,17 @@ function TranscriptView({
               )
             })}
             {trailingAt === messages.length ? trailingCards : null}
-            {liveReply ? null : showThinking && turn.kind === "responding" ? (
+            {liveReply ? (
+              // A turn that compacts from within says so under what it has streamed.
+              turn.kind === "responding" && turn.compacting ? (
+                <MessageScrollerItem messageId="compacting">
+                  <CompactionMarker contextFull={turn.contextFull} />
+                </MessageScrollerItem>
+              ) : null
+            ) : showThinking && turn.kind === "responding" ? (
               <MessageScrollerItem messageId="thinking" scrollAnchor={anchoredKey === THINKING}>
                 {turn.compacting ? (
-                  <CompactionMarker />
+                  <CompactionMarker contextFull={turn.contextFull} />
                 ) : (
                   <ThinkingMarker takingLonger={turn.waitingLonger} waitingFor={turn.waitingFor} />
                 )}
@@ -274,7 +285,12 @@ function TranscriptView({
               </MessageScrollerItem>
             ) : turn.kind === "failed" ? (
               <MessageScrollerItem messageId="run-failed">
-                <RunFailureMarker onRetry={onRetry} retrying={turn.retrying} />
+                <RunFailureMarker
+                  onRetry={onRetry}
+                  retrying={turn.retrying}
+                  contextFull={turn.errorCode === CONTEXT_LIMIT_EXCEEDED}
+                  {...(onNewThread ? { onNewThread } : {})}
+                />
               </MessageScrollerItem>
             ) : turn.kind === "cancelled" ? (
               <MessageScrollerItem messageId="run-cancelled">

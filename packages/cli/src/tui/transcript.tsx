@@ -3,7 +3,7 @@ import { CodeRenderable, type MarkdownOptions, type SyntaxStyle } from "@opentui
 import { useRenderer } from "@opentui/react"
 import type { ListAgentThreadApprovalsResponses, ListAgentThreadRunsResponses } from "@sixb/client"
 import { useEffect, useState } from "react"
-import { duration, friendlyPath, plural, type ToolLine, toolLine } from "./format"
+import { duration, friendlyPath, plural, runFailureText, type ToolLine, toolLine } from "./format"
 import { steadyMarkdown } from "./markdown"
 import {
   type ApprovalOutcome,
@@ -72,6 +72,9 @@ export function Transcript({
         const run = message.runId ? runsById.get(message.runId) : undefined
         return (
           <box key={message.id} flexDirection="column" gap={1}>
+            {message.compaction ? (
+              <CompactionLine colors={colors} contextFull={message.compaction.contextFull} />
+            ) : null}
             <AgentParts
               colors={colors}
               syntax={syntax}
@@ -113,6 +116,21 @@ export function Transcript({
         />
       ))}
     </box>
+  )
+}
+
+/** Its run condensed the conversation before answering, or to go on when the context was full. */
+function CompactionLine({
+  colors,
+  contextFull,
+}: {
+  readonly colors: TuiColors
+  readonly contextFull: boolean
+}) {
+  return (
+    <text fg={contextFull ? colors.amber : colors.faint}>
+      {contextFull ? "◇ Context was full — condensed and continued" : "◇ Condensed conversation"}
+    </text>
   )
 }
 
@@ -483,7 +501,7 @@ function RunMeta({
         <span fg={run.status === "failed" ? colors.red : colors.amber}>{` · ${ended}`}</span>
       ) : null}
       {run.status === "failed" && run.error ? (
-        <span fg={colors.faint}>{`  ${run.error.message}`}</span>
+        <span fg={colors.faint}>{`  ${runFailureText(run.error)}`}</span>
       ) : null}
     </text>
   )

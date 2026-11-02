@@ -11,7 +11,9 @@ export async function agentToolResultToModelOutput(input: {
   readonly output: JsonValue
   readonly blobStorage: AgentRunFileStore
   readonly signal?: AbortSignal
-  readonly sandboxPathForFileRef?: (fileRef: FileRef) => string | undefined
+  readonly sandboxPathForFileRef?: (
+    fileRef: FileRef
+  ) => string | undefined | Promise<string | undefined>
   readonly imageOmissionNote?: string
 }): Promise<AgentToolModelOutput> {
   if (!isAgentToolResult(input.output)) {
@@ -27,7 +29,7 @@ export async function agentToolResultToModelOutput(input: {
       continue
     }
 
-    const sandboxPath = input.sandboxPathForFileRef?.(contentPart.fileRef)
+    const sandboxPath = await input.sandboxPathForFileRef?.(contentPart.fileRef)
     const projection = await prepareAgentToolFileProjection({
       fileRef: contentPart.fileRef,
       blobStorage: input.blobStorage,
