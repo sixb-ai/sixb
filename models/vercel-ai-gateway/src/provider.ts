@@ -12,7 +12,6 @@ import {
   isJsonObject,
   isModelReasoning,
   type JsonObject,
-  type JsonValue,
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelDefinitionCatalog,
@@ -24,6 +23,7 @@ import {
   type ModelCapabilities,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
+  type ModelMoney,
   ModelProviderError,
   type ModelRateCard,
   type ModelReasoningCapabilities,
@@ -473,30 +473,34 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
         "[SixbVercelGateway] Image catalog unavailable; using the image endpoint without local pricing."
       )
     }
-    // Routing overrides may change the model or tariff; price only a known fixed route.
-    const card = hasFixedTokenPricing({ providerOptions }) ? entry?.rateCard : undefined
-    const fixed = (responseModelId?: string, routedModelId?: string) =>
-      (!responseModelId || responseModelId === modelId) &&
-      (!routedModelId || routedModelId === modelId)
+    const card = entry?.rateCard
+    const candidates = gatewayCandidates(modelId, providerOptions)
+    // Each call keeps the cards it resolved with, its fallbacks' included.
+    const cards = candidates.map((candidate) =>
+      candidate === undefined ? undefined : this.imageModels.get(candidate)?.rateCard
+    )
     const estimator: ImageCostEstimator = {
-      estimateReservation: ({ n, promptTokens, inputImages, dimensions }) => {
-        if (!card) return undefined
-        const tokens = card.input !== undefined
-        // Token-priced images and reference images have no token bound before the call.
-        if (tokens && (card.images === undefined || inputImages > 0)) return undefined
-        return estimateModelReservation({
-          ...(tokens
-            ? { inputTokens: promptTokens, outputTokens: IMAGE_TEXT_OUTPUT_ALLOWANCE }
-            : {}),
-          outputImages: n,
-          dimensions,
-          rateCard: card,
-        })
-      },
+      estimateReservation: ({ n, promptTokens, inputImages, dimensions }) =>
+        highestReservation(
+          cards.map((candidate) => {
+            if (!candidate) return undefined
+            const tokens = candidate.input !== undefined
+            // Token-priced images and reference images have no token bound before the call.
+            if (tokens && (candidate.images === undefined || inputImages > 0)) return undefined
+            return estimateModelReservation({
+              ...(tokens
+                ? { inputTokens: promptTokens, outputTokens: IMAGE_TEXT_OUTPUT_ALLOWANCE }
+                : {}),
+              outputImages: n,
+              dimensions,
+              rateCard: candidate,
+            })
+          })
+        ),
       estimate: ({ usage, responseModelId, route, dimensions }) =>
         rateModelCall({
           usage,
-          rateCard: fixed(responseModelId, route?.modelId) ? card : undefined,
+          rateCard: answeredBy(candidates, { route, responseModelId }) ? card : undefined,
           ...(dimensions === undefined ? {} : { dimensions }),
         }),
     }
@@ -522,21 +526,25 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     } catch {
       console.warn("[SixbVercelGateway] Speech pricing unavailable; cost limits will fail closed.")
     }
-    const card = hasFixedTokenPricing({ providerOptions }) ? entry?.rateCard : undefined
+    const card = entry?.rateCard
+    const candidates = gatewayCandidates(modelId, providerOptions)
+    const cards = candidates.map((candidate) =>
+      candidate === undefined ? undefined : this.speechModels.get(candidate)?.rateCard
+    )
     const estimator: SpeechCostEstimator = {
       // Token-priced speech has no output bound before the call, so only characters reserve.
       estimateReservation: ({ text }) =>
-        card?.characters === undefined
-          ? undefined
-          : estimateModelReservation({ inputCharacters: text.length, rateCard: card }),
+        highestReservation(
+          cards.map((candidate) =>
+            candidate?.characters === undefined
+              ? undefined
+              : estimateModelReservation({ inputCharacters: text.length, rateCard: candidate })
+          )
+        ),
       estimate: ({ usage, responseModelId, route, dimensions }) =>
         rateModelCall({
           usage,
-          rateCard:
-            (!responseModelId || responseModelId === modelId) &&
-            (!route?.modelId || route.modelId === modelId)
-              ? card
-              : undefined,
+          rateCard: answeredBy(candidates, { route, responseModelId }) ? card : undefined,
           ...(dimensions === undefined ? {} : { dimensions }),
         }),
     }
@@ -556,25 +564,20 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     try {
       await this.load()
       const rate = this.transcriptionRates.get(modelId)
-      if (rate && hasFixedTokenPricing({ providerOptions })) {
-        card = defineModelRateCard({ currency: "USD", audioInputSeconds: rate })
-      }
+      if (rate) card = defineModelRateCard({ currency: "USD", audioInputSeconds: rate })
     } catch {
       console.warn(
         "[SixbVercelGateway] Transcription pricing unavailable; preserving provider-reported costs."
       )
     }
+    const candidates = gatewayCandidates(modelId, providerOptions)
     // Content duration gives an estimate, never a bill: the Gateway reports what it charged.
     return {
       estimator: {
         estimate: ({ usage, responseModelId, route }) =>
           rateModelCall({
             usage,
-            rateCard:
-              (!responseModelId || responseModelId === modelId) &&
-              (!route?.modelId || route.modelId === modelId)
-                ? card
-                : undefined,
+            rateCard: answeredBy(candidates, { route, responseModelId }) ? card : undefined,
           }),
       },
       ...(card ? { rateCard: card } : {}),
@@ -587,14 +590,17 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
   ): Promise<GatewayDecisionResolution> {
     let definition: DecisionModelDefinition | undefined
     let card: ModelRateCard | undefined
+    let cards: readonly (ModelRateCard | undefined)[] = []
+    const candidates = gatewayCandidates(modelId, providerOptions)
     try {
       await this.load()
       definition = this.decisionDefinitions.get(modelId)
       const available = definition && this.rateCards.get(modelId)
-      // Routing overrides may change the model or tariff; reserve only a known fixed route.
-      if (available && hasFixedTokenPricing({ providerOptions })) {
-        card = defineModelRateCard(available)
-      }
+      if (available) card = defineModelRateCard(available)
+      cards = candidates.map((candidate) => {
+        const fallback = candidate === undefined ? undefined : this.rateCards.get(candidate)
+        return fallback && defineModelRateCard(fallback)
+      })
     } catch {
       console.warn(
         "[SixbVercelGateway] Decision pricing unavailable; cost limits will fail closed."
@@ -604,15 +610,15 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     return {
       definition,
       estimator: {
-        estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard: card }),
+        estimateReservation: (tokens) =>
+          card &&
+          highestReservation(
+            cards.map((candidate) => estimateModelReservation({ ...tokens, rateCard: candidate }))
+          ),
         estimate: ({ usage, responseModelId, route }) =>
           rateModelCall({
             usage,
-            rateCard:
-              (!responseModelId || responseModelId === modelId) &&
-              (!route?.modelId || route.modelId === modelId)
-                ? card
-                : undefined,
+            rateCard: answeredBy(candidates, { route, responseModelId }) ? card : undefined,
           }),
       },
     }
@@ -1037,50 +1043,45 @@ function fallbackDefinition(modelId: string): LanguageModelDefinition {
 }
 
 /**
- * Provider options that change how a model works, not what its tokens cost: thinking is billed as
- * output at the model's own rate. A thinking token budget is not here, as the provider may add it
- * to the call's output limit, past what a cost reservation covers. Routing, service tiers, speed
- * and residency are not here either.
+ * The models the Gateway may answer a call with: the one asked for, then the fallbacks
+ * `gateway.models` lists. A fallback that is not a model id comes back undefined: nothing prices it.
  */
-const TOKEN_NEUTRAL_PROVIDER_OPTIONS: ReadonlyMap<
-  string,
-  (key: string, value: JsonValue) => boolean
-> = new Map([
-  ["gateway", (key) => key === "caching"],
-  [
-    "anthropic",
-    (key, value) =>
-      key === "sendReasoning" ||
-      (key === "thinking" &&
-        isJsonObject(value) &&
-        Object.keys(value).every((field) => field === "type" || field === "display")),
-  ],
-  ["openai", (key) => key === "reasoningEffort" || key === "reasoningSummary"],
-  [
-    "google",
-    (key, value) =>
-      key === "thinkingConfig" &&
-      isJsonObject(value) &&
-      Object.keys(value).every((field) => field === "includeThoughts" || field === "thinkingLevel"),
-  ],
-])
+function gatewayCandidates(
+  modelId: string,
+  providerOptions: JsonObject | undefined
+): readonly (string | undefined)[] {
+  const models = isJsonObject(providerOptions?.gateway) ? providerOptions.gateway.models : undefined
+  const fallbacks = models === undefined ? [] : Array.isArray(models) ? models : [models]
+  return [modelId, ...fallbacks.map((fallback) => string(fallback) || undefined)]
+}
 
-/** Unknown native options may affect billing; only known token-neutral controls are safe. */
-function hasFixedTokenPricing(options: VercelGatewayModelOptions): boolean {
-  if (
-    Object.keys(options.request ?? {}).some(
-      (key) => !["temperature", "top_p", "max_output_tokens", "metadata", "store"].includes(key)
-    )
-  )
-    return false
-  return Object.entries(options.providerOptions ?? {}).every(([provider, value]) => {
-    const neutral = TOKEN_NEUTRAL_PROVIDER_OPTIONS.get(provider)
-    return (
-      neutral !== undefined &&
-      isJsonObject(value) &&
-      Object.entries(value).every(([key, field]) => neutral(key, field))
-    )
-  })
+/**
+ * Whether the model asked for answered, so its card prices the call: the Gateway names the model
+ * that did, and when it names none, only a binding without fallbacks can be sure.
+ */
+function answeredBy(
+  candidates: readonly (string | undefined)[],
+  answer: { readonly route?: { readonly modelId?: string }; readonly responseModelId?: string }
+): boolean {
+  const named = [answer.route?.modelId, answer.responseModelId].filter(Boolean)
+  return named.length === 0 ? candidates.length === 1 : named.every((id) => id === candidates[0])
+}
+
+/**
+ * A call reserves what its dearest candidate would cost, and nothing when one of them has no
+ * price. Options are not priced: what a call really cost is what the Gateway reports it billed.
+ */
+function highestReservation(
+  reservations: readonly (ModelMoney | undefined)[]
+): ModelMoney | undefined {
+  let highest: ModelMoney | undefined
+  for (const reservation of reservations) {
+    if (!reservation) return undefined
+    if (!highest || BigInt(reservation.amountNanos) > BigInt(highest.amountNanos)) {
+      highest = reservation
+    }
+  }
+  return highest
 }
 
 class VercelGatewayLanguageModel implements LanguageModel {
@@ -1101,25 +1102,24 @@ class VercelGatewayLanguageModel implements LanguageModel {
     private readonly metadataResolved = false
   ) {
     this.modelId = modelId
+    const candidates = gatewayCandidates(modelId, options.providerOptions)
     this.costEstimator = {
+      // Provider tools charge per use, past the tokens: the Gateway's bill counts them.
       estimateReservation: (tokens) =>
-        !hasFixedTokenPricing(options) || options.providerTools?.length
-          ? undefined
-          : catalog.estimateReservation(modelId, tokens),
-      // A model-only card cannot price routing overrides or provider-native tool charges.
+        highestReservation(
+          candidates.map((candidate) =>
+            candidate === undefined ? undefined : catalog.estimateReservation(candidate, tokens)
+          )
+        ),
+      // A model-only card cannot price another model's answer or provider-native tool charges.
       estimate: ({ usage, route, responseModelId }) =>
-        !hasFixedTokenPricing(options) ||
-        options.providerTools?.length ||
-        (route?.modelId !== undefined && route.modelId !== modelId) ||
-        (responseModelId !== undefined && responseModelId !== modelId)
+        options.providerTools?.length || !answeredBy(candidates, { route, responseModelId })
           ? { status: "unpriceable", reason: "missing-rate-card" }
           : catalog.estimate(modelId, usage),
     }
     // Known once the catalog has loaded, and only where the estimator would price the call.
     const card =
-      metadataResolved && hasFixedTokenPricing(options) && !options.providerTools?.length
-        ? catalog.rateCard(modelId)
-        : undefined
+      metadataResolved && !options.providerTools?.length ? catalog.rateCard(modelId) : undefined
     if (card) this.rateCard = card
     if (options.request !== undefined) {
       assertJsonObject(options.request, "model request options")

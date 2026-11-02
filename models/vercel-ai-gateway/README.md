@@ -98,9 +98,12 @@ to override catalog definitions.
 
 Sixb records Gateway-reported costs, usage, routing, and request IDs. Local cost estimates are
 retained separately when available; calls without reliable pricing are marked unpriceable.
-Thinking and reasoning options (`anthropic.thinking`, `openai.reasoningEffort`,
-`google.thinkingConfig`) keep a model priced; routing, service tier, speed and other provider
-options leave it unpriceable.
+
+A cost limit reserves a call at its model's catalog rates before it starts, whatever its provider
+options: no list of options is kept, as the Gateway's reported charge is what the call counts for.
+With fallbacks (`gateway.models`), the reservation is the dearest candidate's, and a candidate
+without catalog pricing leaves none. A local estimate prices the requested model only when the
+Gateway names it as the one that answered, or when the binding has no fallbacks.
 
 ## Embedding models
 
@@ -191,7 +194,7 @@ the language-model retry settings do not apply. Context limits are enforced by G
 client-side truncation. `typesafe-ai/jev` is a Gateway alias, not a pinned TypeSafe version.
 
 The runtime resolves cached catalog pricing before admission and retains one pricing snapshot per
-call. Missing pricing or routing options that may change the tariff leave estimates unavailable;
+call. Missing pricing, for the model or one of its fallbacks, leaves estimates unavailable;
 enforced cost limits then fail closed. Gateway-reported charges take precedence over estimates.
 Output token usage is retained even when the output tariff is zero. Invalid answers retain available
 usage and billing metadata. Calling `jev.evaluate()` directly bypasses Sixb admission and accounting.

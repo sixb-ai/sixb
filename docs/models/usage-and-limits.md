@@ -50,6 +50,12 @@ Limits control whether calls can start. They are not hard caps on a provider's b
 call's actual usage can exceed its estimate. Use
 [`maxOutputTokens`](./configuration.md#model-and-response-controls) to bound the output of an individual call.
 
+Through the Vercel AI Gateway, a call is estimated at its model's catalog price, whatever provider
+options it sets, then counted at what the Gateway billed: a service tier, a thinking budget or a
+provider tool such as web search shows up there. With fallback models (`gateway.models`), the
+estimate is the dearest of them, and a fallback the catalog does not price blocks the call while a
+cost limit applies.
+
 ## Embeddings
 
 [Vector indexing and semantic search](../objects/querying.md#search-by-meaning) use the same
