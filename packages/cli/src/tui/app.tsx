@@ -27,6 +27,7 @@ import {
 } from "@sixb/client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Connection } from "../lib/connection"
+import { setFoldersAllowed } from "../runner/allowed-folders"
 import { thisComputer } from "../runner/computer"
 import { type LocalRunner, owns } from "../runner/local-runner"
 import { Logo } from "./brand"
@@ -53,7 +54,6 @@ import {
   modelLabel,
   placeLabel,
   type ReasoningLevel,
-  rememberWebMessages,
   type Settings,
   saveSettings,
 } from "./settings"
@@ -405,7 +405,7 @@ export function Workspace(props: WorkspaceProps) {
                       ? "Messages from the web run in this folder"
                       : "Messages from the web wait, in this folder, until you turn this back on"
                   )
-                  void rememberWebMessages(runner.folder, continueFromWeb).catch(() =>
+                  void setFoldersAllowed([runner.folder], continueFromWeb).catch(() =>
                     say("Could not keep this choice for next time", "error")
                   )
                   return { ...current, continueFromWeb }
