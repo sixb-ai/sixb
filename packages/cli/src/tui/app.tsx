@@ -26,9 +26,10 @@ import {
   setAgentThreadApprovalMode,
 } from "@sixb/client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { Connection } from "../lib/connection"
+import { thisComputer } from "../runner/computer"
+import { type LocalRunner, owns } from "../runner/local-runner"
 import { Logo } from "./brand"
-import { thisComputer } from "./computer"
-import type { Connection } from "./connection"
 import { ContextPanel } from "./context"
 import {
   type BackgroundCommand,
@@ -43,7 +44,6 @@ import {
 } from "./format"
 import { Palette, type PaletteItem } from "./palette"
 import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } from "./parts"
-import { type LocalRunner, owns } from "./runner"
 import {
   APPROVAL_MODES,
   type ApprovalMode,

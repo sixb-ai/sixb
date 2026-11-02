@@ -8,13 +8,8 @@ import {
   type SixbSessionTokens,
   startSixbDeviceLogin,
 } from "@sixb/client"
-import { normalizeApiUrl } from "../lib/api-client"
-import {
-  profileSessionStore,
-  type ResolvedProfile,
-  resolveProfile,
-  updateConfig,
-} from "../lib/profiles"
+import { normalizeApiUrl } from "./api-client"
+import { profileSessionStore, type ResolvedProfile, resolveProfile, updateConfig } from "./profiles"
 
 /** A project the app talks to, as the person signed in to it. */
 export interface Connection {

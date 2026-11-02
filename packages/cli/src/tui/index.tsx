@@ -7,18 +7,18 @@ import { format } from "node:util"
 import { createCliRenderer, type KeyEvent, RGBA, SyntaxStyle } from "@opentui/core"
 import { createRoot, useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useState } from "react"
-import { glyph } from "../ui/theme"
-import { Workspace } from "./app"
-import { Logo } from "./brand"
-import { thisComputerId } from "./computer"
 import {
   type Connection,
   connect,
   type PendingSignIn,
   type SignedOut,
   startSignIn,
-} from "./connection"
-import { LocalRunner, stopOnHangUp, stopOnQuit } from "./runner"
+} from "../lib/connection"
+import { thisComputerId } from "../runner/computer"
+import { LocalRunner, stopOnHangUp, stopOnQuit } from "../runner/local-runner"
+import { glyph } from "../ui/theme"
+import { Workspace } from "./app"
+import { Logo } from "./brand"
 import { loadSettings, type Settings } from "./settings"
 import { type TuiColors, tuiColors } from "./theme"
 import { BOLD, Composer, useSpinner } from "./ui"
