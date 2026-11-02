@@ -34,6 +34,9 @@ export interface AgentThreadRow {
   sandbox_state: AgentThreadSandboxState | string | null
   runs_on: "computer" | null
   computer_id: string | null
+  computer_name: string | null
+  computer_folder: string | null
+  moved_at: Date | string | null
   status: AgentThreadRecord["status"]
   active_run_id: string | null
   last_message_at: Date | string | null
@@ -146,7 +149,12 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
           ),
         }),
     ...(row.runs_on == null ? {} : { runsOn: row.runs_on }),
-    ...(row.computer_id == null ? {} : { computerId: row.computer_id }),
+    ...(row.computer_id == null || row.computer_name == null || row.computer_folder == null
+      ? {}
+      : {
+          computer: { id: row.computer_id, name: row.computer_name, folder: row.computer_folder },
+        }),
+    ...(row.moved_at == null ? {} : { movedAt: new Date(row.moved_at) }),
     status: row.status,
     activeRunId: row.active_run_id,
     lastMessageAt: row.last_message_at ? new Date(row.last_message_at) : undefined,

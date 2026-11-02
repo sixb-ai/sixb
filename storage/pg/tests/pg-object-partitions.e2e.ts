@@ -9,7 +9,7 @@ import { createTestStorage, disposeTestStorage, type TestStorage, waitForLockWai
 
 const projectId = "partitions"
 const partitionMigration = postgresStorageMigrations.steps.findIndex(
-  (step) => step.id === "085-partition-objects"
+  (step) => step.id === "086-partition-objects"
 )
 
 let created: TestStorage | undefined

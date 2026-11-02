@@ -1,0 +1,119 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+  Badge,
+  Button,
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
+import { Laptop } from "lucide-react"
+import { useAgentMessages } from "../i18n"
+import type { AgentThread } from "../types"
+
+/** Where a conversation runs on its owner's computer, as its owner reads it. */
+export type ThreadComputer = NonNullable<AgentThread["computer"]>
+
+/** A folder as its owner reads it: their home folder as `~`. */
+export function shownFolder(folder: string): string {
+  return folder.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~")
+}
+
+/** A folder short enough for the badge beside its computer's name: its last name is what tells. */
+function shortFolder(folder: string): string {
+  const parts = shownFolder(folder).split("/")
+  return parts.length > 2 ? `${parts[0]}/…/${parts.at(-1)}` : parts.join("/")
+}
+
+/** The computer a conversation runs on, its folder there, and whether `sixb` is open in it. */
+export function ComputerBadge({ computer }: { readonly computer: ThreadComputer }) {
+  const messages = useAgentMessages().computer
+  return (
+    <Badge
+      variant="outline"
+      className="h-7 max-w-72 gap-1.5 px-2.5 font-normal text-muted-foreground"
+      title={`${computer.name} · ${computer.folder}`}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "size-2 shrink-0 rounded-full",
+          computer.online ? "bg-emerald-500" : "border border-muted-foreground"
+        )}
+      />
+      <span className="max-w-full shrink-0 truncate text-foreground">{computer.name}</span>
+      <span className="hidden min-w-0 truncate sm:inline">· {shortFolder(computer.folder)}</span>
+      <span className="sr-only">{computer.online ? messages.online : messages.offline}</span>
+    </Badge>
+  )
+}
+
+export interface ComputerOfflineNoticeProps {
+  /** Null for a conversation from before folders were kept, until it moves. */
+  readonly computer: ThreadComputer | null
+  readonly pending: boolean
+  /** Why the last move failed: a turn it must wait for, or anything else. */
+  readonly error: "busy" | "failed" | null
+  readonly onContinueInCloud: () => void
+}
+
+/**
+ * Above the composer while the conversation's computer is offline: a message waits for it, or the
+ * conversation moves to the cloud, for good.
+ */
+export function ComputerOfflineNotice({
+  computer,
+  pending,
+  error,
+  onContinueInCloud,
+}: ComputerOfflineNoticeProps) {
+  const messages = useAgentMessages().computer
+  return (
+    <div
+      className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-1 text-xs text-muted-foreground"
+      role="status"
+    >
+      <Laptop aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 flex-1">
+        {computer
+          ? messages.offlineNotice(computer.name, shownFolder(computer.folder))
+          : messages.noFolder}
+      </span>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={pending}
+            className="h-7 rounded-full"
+          >
+            {pending ? messages.moving : messages.continueInCloud}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{messages.confirmTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{messages.confirmDescription}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{messages.cancel}</AlertDialogCancel>
+            <AlertDialogAction onClick={onContinueInCloud}>
+              {messages.continueInCloud}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {error ? (
+        <span role="alert" className="w-full pl-6.5 text-destructive">
+          {error === "busy" ? messages.moveBusy : messages.moveFailed}
+        </span>
+      ) : null}
+    </div>
+  )
+}

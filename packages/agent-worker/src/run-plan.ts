@@ -1,6 +1,10 @@
 import type { ResolvedAgentExecutionPlan } from "@sixb/agent"
 import type { AgentStepDefinition, SixbDefinitions } from "@sixb/core"
-import { agentToolSpec, listSandboxModels } from "@sixb/core/internal/agents"
+import {
+  agentToolSpec,
+  listSandboxModels,
+  UNATTENDED_AGENT_MAX_STEPS,
+} from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { selectLanguageModel } from "@sixb/core/internal/model-execution"
 
@@ -65,5 +69,6 @@ export function resolveWorkflowAgentStepPlan(
     skills: Object.freeze(skills),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(sandboxModels.length ? { sandboxModels } : {}),
+    maxSteps: step.maxSteps ?? UNATTENDED_AGENT_MAX_STEPS,
   })
 }

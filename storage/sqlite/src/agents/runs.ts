@@ -7,7 +7,9 @@ import {
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateSubagentRunInput,
+  assertStartsOnComputer,
   assertSubagentThreadTakesRun,
+  assertTurnInThreadPlace,
   newSubagentThreadRecord,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
@@ -63,10 +65,12 @@ export class SqliteAgentRunStore implements AgentRunStore {
 
     return this.db.transaction(() => {
       const thread = this.db
-        .query("SELECT id, kind, active_run_id FROM agent_threads WHERE project_id = ? AND id = ?")
+        .query(
+          "SELECT id, kind, active_run_id, runs_on FROM agent_threads WHERE project_id = ? AND id = ?"
+        )
         .get(input.projectId, input.threadId) as Pick<
         AgentThreadRow,
-        "id" | "kind" | "active_run_id"
+        "id" | "kind" | "active_run_id" | "runs_on"
       > | null
 
       if (!thread) {
@@ -82,6 +86,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Agent thread '${input.threadId}' already has an active run '${thread.active_run_id}'.`
         )
       }
+      assertTurnInThreadPlace(thread.runs_on, input.spec, input.threadId, "SixbSqlite")
 
       try {
         this.db
@@ -271,7 +276,20 @@ export class SqliteAgentRunStore implements AgentRunStore {
   async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
     const startedAt = input.startedAt ?? new Date()
     return this.db.transaction(() => {
-      this.requireStatus(input.projectId, input.id, "queued")
+      const run = this.requireStatus(input.projectId, input.id, "queued")
+      if (input.onComputer) {
+        const thread = this.db
+          .query(
+            "SELECT computer_id AS id, computer_folder AS folder FROM agent_threads WHERE project_id = ? AND id = ?"
+          )
+          .get(input.projectId, run.thread_id) as { id: string; folder: string } | null
+        assertStartsOnComputer(
+          rowToRunRecord(run),
+          thread?.id ? thread : undefined,
+          input.onComputer,
+          "SixbSqlite"
+        )
+      }
       this.db
         .query(
           `
@@ -584,6 +602,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
     if (input.parentRunId) {
       whereClauses.push("parent_run_id = ?")
       args.push(input.parentRunId)
+    }
+
+    if (input.excludeComputerTurns) {
+      whereClauses.push("json_extract(spec, '$.runsOn') IS NOT 'computer'")
     }
 
     appendRunListFilters(whereClauses, args, input, "COALESCE(started_at, created_at)")

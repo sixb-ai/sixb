@@ -2,6 +2,7 @@ import type { AgentStorage, ExecutionStorage } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import { PgAgentApprovalStore } from "./approvals"
 import { PgAgentContextCheckpointStore } from "./checkpoints"
+import { PgAgentComputerSessionStore } from "./computers"
 import { PgAgentMemoryStore } from "./memory"
 import { PgAgentMessageStore } from "./messages"
 import { PgAgentRunStore } from "./runs"
@@ -16,8 +17,9 @@ export interface PgAgentStorageOptions {
 
 /**
  * PostgreSQL-backed agent persistence: thread, run, message, context-checkpoint, memory, approval,
- * approval-mode and token-rate sub-stores sharing one connection. Cross-table writes run inside `runPgTransaction` with `SELECT ... FOR
- * UPDATE` row locks for single-flight and checkpoint compare-and-swap safety.
+ * approval-mode, computer-session and token-rate sub-stores sharing one connection. Cross-table writes run
+ * inside `runPgTransaction` with `SELECT ... FOR UPDATE` row locks for single-flight and checkpoint
+ * compare-and-swap safety.
  */
 export class PgAgentStorage implements AgentStorage {
   readonly threads: PgAgentThreadStore
@@ -27,6 +29,7 @@ export class PgAgentStorage implements AgentStorage {
   readonly memory: PgAgentMemoryStore
   readonly approvals: PgAgentApprovalStore
   readonly approvalModes: PgAgentApprovalModeStore
+  readonly computers: PgAgentComputerSessionStore
   readonly tokenRates: PgAgentTokenRateStore
 
   constructor(options: PgAgentStorageOptions) {
@@ -37,6 +40,7 @@ export class PgAgentStorage implements AgentStorage {
     this.memory = new PgAgentMemoryStore(options.sql)
     this.approvals = new PgAgentApprovalStore(options.sql)
     this.approvalModes = new PgAgentApprovalModeStore(options.sql)
+    this.computers = new PgAgentComputerSessionStore(options.sql)
     this.tokenRates = new PgAgentTokenRateStore(options.sql)
   }
 }

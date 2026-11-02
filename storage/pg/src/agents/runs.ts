@@ -6,7 +6,9 @@ import {
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateSubagentRunInput,
+  assertStartsOnComputer,
   assertSubagentThreadTakesRun,
+  assertTurnInThreadPlace,
   newSubagentThreadRecord,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
@@ -59,8 +61,10 @@ export class PgAgentRunStore implements AgentRunStore {
 
     try {
       return await runPgTransaction(this.sql, async (tx) => {
-        const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind" | "active_run_id">[]>`
-          SELECT id, kind, active_run_id FROM agent_threads
+        const [thread] = await tx<
+          Pick<AgentThreadRow, "id" | "kind" | "active_run_id" | "runs_on">[]
+        >`
+          SELECT id, kind, active_run_id, runs_on FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
           FOR UPDATE
         `
@@ -78,6 +82,7 @@ export class PgAgentRunStore implements AgentRunStore {
             `[SixbPg] Agent thread '${input.threadId}' already has an active run '${thread.active_run_id}'.`
           )
         }
+        assertTurnInThreadPlace(thread.runs_on, input.spec, input.threadId, "SixbPg")
 
         const [row] = await tx<AgentRunRow[]>`
           INSERT INTO agent_runs (
@@ -247,7 +252,20 @@ export class PgAgentRunStore implements AgentRunStore {
   async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
     const startedAt = input.startedAt ?? new Date()
     return runPgTransaction(this.sql, async (tx) => {
-      await this.lockStatus(tx, input.projectId, input.id, "queued")
+      const run = await this.lockStatus(tx, input.projectId, input.id, "queued")
+      if (input.onComputer) {
+        // A move locks this run first, so it landed already or waits for this start.
+        const [thread] = await tx<{ id: string | null; folder: string }[]>`
+          SELECT computer_id AS id, computer_folder AS folder FROM agent_threads
+          WHERE project_id = ${input.projectId} AND id = ${run.thread_id}
+        `
+        assertStartsOnComputer(
+          rowToRunRecord(run),
+          thread?.id ? { id: thread.id, folder: thread.folder } : undefined,
+          input.onComputer,
+          "SixbPg"
+        )
+      }
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
         SET
@@ -486,6 +504,10 @@ export class PgAgentRunStore implements AgentRunStore {
     if (input.parentRunId) {
       whereClauses.push(`parent_run_id = $${index++}`)
       params.push(input.parentRunId)
+    }
+
+    if (input.excludeComputerTurns) {
+      whereClauses.push("spec->>'runsOn' IS DISTINCT FROM 'computer'")
     }
 
     index = appendRunListFilters(

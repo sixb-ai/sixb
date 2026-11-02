@@ -1,10 +1,13 @@
 import {
+  assertAgentThreadComputer,
   assertAssignableComputer,
-  assertComputerId,
+  assertComputerPlace,
   assertConversationThreadRow,
-  assertRunsOn,
+  assertMovableToCloud,
+  movesComputerPlace,
   participantsToAdd,
   planAgentThreadFork,
+  queuedTurnInCloud,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
@@ -12,6 +15,7 @@ import {
 import {
   type AddAgentThreadParticipantsInput,
   type AgentContextCheckpointRecord,
+  type AgentRunRecord,
   AgentStorageError,
   type AgentThreadParticipantRecord,
   type AgentThreadRecord,
@@ -24,6 +28,8 @@ import {
   type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
+  type MoveAgentThreadToCloudInput,
+  type MoveAgentThreadToCloudResult,
   type RemoveAgentThreadParticipantInput,
   type TransitionAgentThreadSandboxInput,
 } from "@sixb/core/storage"
@@ -74,7 +80,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
-    assertRunsOn(input.runsOn, "Agent thread", "SixbPg")
+    assertComputerPlace(input.runsOn, input.computer, "SixbPg")
     const sandboxParams =
       input.sandboxParams === undefined
         ? null
@@ -85,7 +91,11 @@ export class PgAgentThreadStore implements AgentThreadStore {
     const runsOn =
       input.runsOn === undefined
         ? { column: this.sql``, value: this.sql`` }
-        : { column: this.sql`runs_on,`, value: this.sql`${input.runsOn},` }
+        : {
+            column: this.sql`runs_on, computer_id, computer_name, computer_folder,`,
+            value: this
+              .sql`${input.runsOn}, ${input.computer?.id ?? null}, ${input.computer?.name ?? null}, ${input.computer?.folder ?? null},`,
+          }
 
     try {
       const [row] = await this.sql<AgentThreadRow[]>`
@@ -133,8 +143,10 @@ export class PgAgentThreadStore implements AgentThreadStore {
       return await runPgTransaction(this.sql, async (tx) => {
         // A share lock holds back the writes that take the thread for update: an admitted request
         // or a finalized answer lands before the copy or after it, never inside it.
-        const [source] = await tx<Pick<AgentThreadRow, "id" | "kind" | "active_run_id">[]>`
-          SELECT id, kind, active_run_id FROM agent_threads
+        const [source] = await tx<
+          Pick<AgentThreadRow, "id" | "kind" | "active_run_id" | "runs_on" | "moved_at">[]
+        >`
+          SELECT id, kind, active_run_id, runs_on, moved_at FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.sourceThreadId}
           FOR SHARE
         `
@@ -178,6 +190,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
         const plan = planAgentThreadFork(
           input,
           {
+            workspace: { runsOn: source.runs_on, movedAt: source.moved_at },
             ...(activeRun?.trigger_message_id
               ? { triggerMessageId: activeRun.trigger_message_id }
               : {}),
@@ -204,6 +217,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
             status,
             last_message_at,
             message_count,
+            moved_at,
             created_at,
             updated_at
           ) VALUES (
@@ -217,6 +231,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
             ${thread.status},
             ${thread.lastMessageAt ?? null},
             ${thread.messageCount},
+            ${thread.movedAt ?? null},
             ${thread.createdAt},
             ${thread.updatedAt}
           )
@@ -366,6 +381,13 @@ export class PgAgentThreadStore implements AgentThreadStore {
       params.push(input.participantPrincipal.type, input.participantPrincipal.id)
     }
 
+    if (input.activeOnComputer) {
+      whereClauses.push(
+        `computer_id = $${index++} AND computer_folder = $${index++} AND active_run_id IS NOT NULL`
+      )
+      params.push(input.activeOnComputer.id, input.activeOnComputer.folder)
+    }
+
     const dir = input.order === "asc" ? "ASC" : "DESC"
     const { rows, total, hasMore } = await queryAgentList<AgentThreadRow>({
       sql: this.sql,
@@ -445,27 +467,96 @@ export class PgAgentThreadStore implements AgentThreadStore {
   }
 
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
-    assertComputerId(input.computerId, "SixbPg")
-    const [row] = await this.sql<AgentThreadRow[]>`
-      UPDATE agent_threads SET computer_id = ${input.computerId}
-      WHERE project_id = ${input.projectId}
-        AND id = ${input.id}
-        AND runs_on = 'computer'
-        ${input.ifUnassigned ? this.sql`AND computer_id IS NULL` : this.sql``}
-      RETURNING *
-    `
-    if (row) return rowToThreadRecord(row)
+    assertAgentThreadComputer(input.computer, "SixbPg")
+    return runPgTransaction(this.sql, async (tx) => {
+      const { thread, active } = await lockThreadAndActiveRun(tx, input)
+      assertAssignableComputer(thread, active, input.computer, input.id, "SixbPg")
+      const movedAt = movesComputerPlace(thread, input.computer)
+        ? (input.movedAt ?? new Date())
+        : null
+      const [assigned] = await tx<AgentThreadRow[]>`
+        UPDATE agent_threads
+        SET computer_id = ${input.computer.id},
+          computer_name = ${input.computer.name},
+          computer_folder = ${input.computer.folder},
+          moved_at = COALESCE(${movedAt}::timestamptz, moved_at)
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return rowToThreadRecord(assigned as AgentThreadRow)
+    })
+  }
 
-    // Nothing changed: a cloud thread, none at all, or one a computer runs already.
-    const thread = await this.getById(input)
-    assertAssignableComputer(thread, input.id, "SixbPg")
-    return thread
+  async moveToCloud(input: MoveAgentThreadToCloudInput): Promise<MoveAgentThreadToCloudResult> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const { thread, active } = await lockThreadAndActiveRun(tx, input)
+      assertMovableToCloud(thread, active, input.id, "SixbPg")
+
+      const queued = queuedTurnInCloud(active)
+      if (queued) {
+        await tx`
+          UPDATE agent_runs SET spec = ${JSON.stringify(queued.spec)}::text::jsonb
+          WHERE project_id = ${input.projectId} AND id = ${queued.id}
+        `
+      }
+      const [movedThread] = await tx<AgentThreadRow[]>`
+        UPDATE agent_threads
+        SET runs_on = NULL, computer_id = NULL, computer_name = NULL, computer_folder = NULL,
+          moved_at = ${input.movedAt ?? new Date()}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return {
+        thread: rowToThreadRecord(movedThread as AgentThreadRow),
+        ...(queued ? { queued } : {}),
+      }
+    })
   }
 
   async listParticipants(
     input: ListAgentThreadParticipantsInput
   ): Promise<readonly AgentThreadParticipantRecord[]> {
     return selectParticipants(this.sql, input.projectId, [...new Set(input.threadIds)])
+  }
+}
+
+/**
+ * Lock a thread that is about to move, with its active turn. Same lock order as run finalization:
+ * run, then thread. The thread names the run to lock, so it is read again once both are held, in
+ * case its turn changed in between.
+ */
+async function lockThreadAndActiveRun(
+  tx: PgStoreClient,
+  input: { readonly projectId: string; readonly id: string }
+): Promise<{ readonly thread: AgentThreadRecord | null; readonly active: AgentRunRecord | null }> {
+  for (let attempt = 0; ; attempt += 1) {
+    const [peek] = await tx<Pick<AgentThreadRow, "active_run_id">[]>`
+      SELECT active_run_id FROM agent_threads
+      WHERE project_id = ${input.projectId} AND id = ${input.id}
+    `
+    const runId = peek?.active_run_id ?? null
+    const runs = runId
+      ? await tx<AgentRunRow[]>`
+          SELECT * FROM agent_runs WHERE project_id = ${input.projectId} AND id = ${runId}
+          FOR UPDATE
+        `
+      : []
+    const [row] = await tx<AgentThreadRow[]>`
+      SELECT * FROM agent_threads WHERE project_id = ${input.projectId} AND id = ${input.id}
+      FOR UPDATE
+    `
+    if ((row?.active_run_id ?? null) === runId) {
+      return {
+        thread: row ? rowToThreadRecord(row) : null,
+        active: runs[0] ? rowToRunRecord(runs[0]) : null,
+      }
+    }
+    if (attempt >= 3) {
+      throw new AgentStorageError(
+        "invalid_state",
+        `[SixbPg] Agent thread '${input.id}' kept changing turns while it moved: try again.`
+      )
+    }
   }
 }
 

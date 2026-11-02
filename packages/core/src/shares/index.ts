@@ -12,6 +12,7 @@ export type {
   SharedAccessInvitation,
   ShareErrorReason,
   SharesRuntime,
+  TrustedSharesRuntime,
 } from "./execution"
 export { ShareError } from "./execution"
 export { intersectShareAccessPlans } from "./intersection"

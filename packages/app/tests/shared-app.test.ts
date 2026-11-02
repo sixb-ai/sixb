@@ -282,6 +282,56 @@ describe("generated shared application bootstrap", () => {
     expect(runtime).toContain('console.error("[SixbApp] A shared page failed to render.")')
   })
 
+  // Reproduce: render `renderUnavailable` in place of Sixb's screen once `established` is set, or
+  // import the screen statically, and the ordering checks below fail.
+  test("loads the project's unavailable screen only once a link opens nothing", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const withoutScreen = await generateAppEntry(fixture.root, fixture.generatedDir)
+    const defaultMain = await readFile(withoutScreen.sharedMainPath, "utf-8")
+    expect(defaultMain).toContain(
+      "const loadUnavailableScreen: (() => Promise<UnavailableScreenModule>) | null = null"
+    )
+    expect(await Bun.file(join(fixture.generatedDir, "shared-unavailable.tsx")).exists()).toBe(
+      false
+    )
+
+    await writeFile(
+      join(fixture.appDir, "shared-unavailable.tsx"),
+      "export default function Unavailable({ title }) { return <h1>{title}</h1> }\n"
+    )
+    const { sharedMainPath } = await generateAppEntry(fixture.root, fixture.generatedDir)
+    const sharedMain = await readFile(sharedMainPath, "utf-8")
+    const screen = await readFile(join(fixture.generatedDir, "shared-unavailable.tsx"), "utf-8")
+
+    expect(sharedMain).toContain('() => import("./shared-unavailable")')
+    expect(sharedMain).not.toContain('from "./shared-unavailable"')
+    // Before a session exists the controller is retired and the project's screen shows; after,
+    // the live session keeps Sixb's own screen.
+    const established = sharedMain.indexOf("} else if (established) {")
+    const builtIn = sharedMain.indexOf('renderSharedFallback("unavailable")', established)
+    const dispose = sharedMain.indexOf("controller.dispose()", established)
+    const custom = sharedMain.indexOf("renderUnavailable(loadAppStyles)", established)
+    expect(established).toBeGreaterThan(-1)
+    expect(builtIn).toBeGreaterThan(established)
+    expect(dispose).toBeGreaterThan(builtIn)
+    expect(custom).toBeGreaterThan(dispose)
+    expect(sharedMain).toContain("title: messages.unavailableTitle")
+
+    expect(screen).toContain('import SharedUnavailable from "../../app/shared-unavailable.tsx"')
+    expect(screen).toContain('import "../../app/globals.css"')
+    expect(screen).not.toContain("QueryClientProvider")
+    expect(screen).not.toContain("SixbEventsProvider")
+    expect(screen).toContain("<Boundary onError={fail}>")
+
+    // Removing the file removes the generated screen with it.
+    await rm(join(fixture.appDir, "shared-unavailable.tsx"))
+    await generateAppEntry(fixture.root, fixture.generatedDir)
+    expect(await Bun.file(join(fixture.generatedDir, "shared-unavailable.tsx")).exists()).toBe(
+      false
+    )
+  })
+
   test("rejects app/shared pages because shared links reuse ordinary pages", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)

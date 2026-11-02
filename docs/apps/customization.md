@@ -1,7 +1,7 @@
 # Customization
 
-Customize your app's environment, metadata, icons, and sign-in screen with these optional files
-and exports.
+Customize your app's environment, metadata, icons, sign-in screen, and shared-link screen with these
+optional files and exports.
 
 ## Public environment variables
 
@@ -178,3 +178,38 @@ name that is not valid, or one given for an account that already exists.
 The sign-in screen uses `app/globals.css` and your app metadata, but is not wrapped in
 `app/layout.tsx`. Sixb handles the credentials and session. See
 [Authentication](../auth/authentication.md) for setup.
+
+## Shared-link unavailable screen
+
+A [shared link](../auth/shared-access.md) that is invalid, expired, or revoked shows a generic
+screen, translated into English and French. Add `app/shared-unavailable.tsx` to show your own, with
+your logo and your words:
+
+File: `app/shared-unavailable.tsx`
+
+```tsx
+import type { SharedUnavailableProps } from "@sixb/app"
+
+export default function SharedUnavailable({ locale, title }: SharedUnavailableProps) {
+  return (
+    <main className="unavailable">
+      <img src="/logo.svg" alt="Acme" width={48} height={48} />
+      <h1>{title}</h1>
+      <p>
+        {locale === "fr"
+          ? "Demandez un nouveau lien à votre contact chez Acme."
+          : "Ask your Acme contact for a new link."}
+      </p>
+    </main>
+  )
+}
+```
+
+The screen receives the reader's `locale` (`"en"` or `"fr"`, from their browser), and Sixb's own
+`title` and `description` in that language. It uses `app/globals.css` and files from `app/public/`,
+but is not wrapped in `app/layout.tsx`.
+
+It renders without a session: the link opened nothing, so the screen has no data client, router, or
+project settings, and an API request it makes is not authenticated. Sixb shows it only when the link
+could not be opened. Its own generic screen stays for a temporary failure that the reader can retry,
+for a page that fails once the link is open, and in place of yours if yours fails to load or throws.

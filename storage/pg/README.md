@@ -149,7 +149,7 @@ moves across at that type's first preparation.
 
 ### Upgrading to the partitioned layout
 
-Migration `085-partition-objects` holds `objects` exclusively while it copies the rows, and
+Migration `086-partition-objects` holds `objects` exclusively while it copies the rows, and
 preparation then rebuilds every query index. **Stop every service first**: a repeatable-read
 transaction already waiting on that lock when it commits reads the new table with an older snapshot,
 and sees no rows instead of an error. Services also read without query indexes until preparation

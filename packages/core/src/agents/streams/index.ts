@@ -4,12 +4,14 @@ export type {
   AgentActivityEvent,
   AgentApprovalActivityEvent,
   AgentCompactionFailureCode,
+  AgentComputerActivityEvent,
   AgentRunActivityEvent,
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
+  AgentThreadMovedEvent,
 } from "./protocol"
 export {
   AGENT_ACTIVITY_STREAM_ID,

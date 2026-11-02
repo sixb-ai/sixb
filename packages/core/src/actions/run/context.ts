@@ -40,6 +40,11 @@ export function toActionRuntimeFacade(runtime: ActionRunContext): ActionRuntimeF
     connector: runtime.sixb.connector,
     models: runtime.sixb.models,
     users: runtime.sixb.users,
+    shares: {
+      revoke(grantId) {
+        return runtime.sixb.shares.revoke(grantId)
+      },
+    },
     objects(objectType) {
       return {
         appendTelemetryBatch(items) {
@@ -115,6 +120,7 @@ export function createBasePhaseContext(input: {
     ),
     subject: run.subject,
     requestedBy: input.runtime.requestedBy,
+    client: input.runtime.client,
   }
 }
 

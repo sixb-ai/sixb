@@ -376,6 +376,9 @@ export async function createConversationAgentEnvironment(
       plan,
       runId: run.id,
       threadId: run.threadId,
+      ...(input.thread?.movedAt
+        ? { workspaceMovedAt: new Date(input.thread.movedAt).toISOString() }
+        : {}),
       callTool: (call, options) => input.session.callTool(call, options),
       ...(publishing ? { publishing } : {}),
       apiBaseUrl,
@@ -779,6 +782,8 @@ interface AgentEnvironmentSetup
   }
   /** A conversation's memory, or a child's to read: installed in the sandbox and in the prompt. */
   readonly memory?: ConversationMemory
+  /** When the conversation's turns last moved to where they run now: see its `movedAt`. */
+  readonly workspaceMovedAt?: string
   /** Who takes part in a conversation several people write in, for its prompt. */
   readonly conversation?: string
 }
@@ -931,6 +936,7 @@ async function startAgentEnvironment(
       plan,
       ...(input.ontologyDocs ? { ontologyDocs: input.ontologyDocs } : {}),
       ...(workspace ? { workspace } : {}),
+      ...(input.workspaceMovedAt ? { workspaceMovedAt: input.workspaceMovedAt } : {}),
       ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
       ...(input.memory ? { memory: input.memory } : {}),
     })
@@ -1009,6 +1015,7 @@ function measureEnvironmentSystemPrompt(input: {
   readonly ontologyDocs?: RenderedOntologyDocs
   /** The acquired workspace, when the prompt describes it. */
   readonly workspace?: Pick<AcquiredRunSandbox, "promptContext" | "resetAt">
+  readonly workspaceMovedAt?: string
   readonly conversation?: string
   readonly memory?: ConversationMemory
 }): AgentSystemPromptSize {
@@ -1025,6 +1032,7 @@ function measureEnvironmentSystemPrompt(input: {
       ? { ontologyIndex: input.ontologyDocs.index }
       : {}),
     sandboxResetAt: workspace?.resetAt,
+    ...(input.workspaceMovedAt ? { workspaceMovedAt: input.workspaceMovedAt } : {}),
     workspace: workspace?.promptContext,
     facts: requester === undefined ? {} : { requester },
     ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
