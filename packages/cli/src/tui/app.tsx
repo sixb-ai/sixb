@@ -147,14 +147,16 @@ export function Workspace(props: WorkspaceProps) {
     runner.openSession()
     return () => void runner.closeSession()
   }, [settings.continueFromWeb, runner])
-  // Another sixb may forget this folder, or choose it: that holds here too, with no restart.
+  // The choice is per project, so it can first be read now that this one is known. Another sixb may
+  // forget this folder, or choose it: that holds here too, with no restart.
   useEffect(() => {
     let stop: (() => void) | null = null
     let unmounted = false
     const follow = () =>
-      void isFolderAllowed(runner.folder).then((continueFromWeb) =>
+      void isFolderAllowed(connection, runner.folder).then((continueFromWeb) =>
         setSettingsState((current) => ({ ...current, continueFromWeb }))
       )
+    follow()
     void watchAllowedFolders(follow).then(
       (unwatch) => {
         if (unmounted) unwatch()
@@ -166,7 +168,7 @@ export function Workspace(props: WorkspaceProps) {
       unmounted = true
       stop?.()
     }
-  }, [runner])
+  }, [connection, runner])
   useEffect(
     () => runner.onElsewhere(() => say("A message sent from elsewhere runs here")),
     [runner, say]
@@ -436,7 +438,7 @@ export function Workspace(props: WorkspaceProps) {
                       ? "Messages from the web run in this folder"
                       : "Messages from the web wait, in this folder, until you turn this back on"
                   )
-                  void setFoldersAllowed([runner.folder], continueFromWeb).catch(() =>
+                  void setFoldersAllowed(connection, [runner.folder], continueFromWeb).catch(() =>
                     say("Could not keep this choice for next time", "error")
                   )
                   return { ...current, continueFromWeb }

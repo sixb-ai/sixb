@@ -11,6 +11,7 @@ import { ComputerConnection, type ComputerEvent } from "../src/runner/computer-c
 // a session for, and how those follow the list of allowed folders.
 
 const API = "http://api.localhost"
+const THIS_PROJECT = { apiUrl: API, project: { id: "p", timeZone: "UTC", locale: "en" } }
 
 let home: string
 let previousConfigHome: string | undefined
@@ -55,9 +56,8 @@ function connected(respond: (status: number) => number = () => 200) {
     fetch: Object.assign(answer, { preconnect: fetch.preconnect }),
   })
   const connection: Connection = {
-    apiUrl: API,
+    ...THIS_PROJECT,
     client,
-    project: { id: "p", timeZone: "UTC", locale: "en" },
     user: { id: "usr_ava", email: "ava@example.test", name: "Ava" },
     authorization: async () => "",
   }
@@ -96,7 +96,7 @@ describe("a connected computer", () => {
   test("holds a session for each allowed folder, and for no other", async () => {
     const [a, b] = await Promise.all([folder("a"), folder("b")])
     await folder("not-allowed")
-    await setFoldersAllowed([a, b], true)
+    await setFoldersAllowed(THIS_PROJECT, [a, b], true)
 
     const { computer, held, until } = connected()
     await computer.start()
@@ -107,21 +107,35 @@ describe("a connected computer", () => {
     await holding(held, [])
   })
 
+  // Guard proof: read the list without the connection's project, in readAllowed; a sign-in stolen for
+  // one project runs turns in the folders chosen for another.
+  test("holds none for a folder allowed for another project", async () => {
+    const [a, b] = await Promise.all([folder("a"), folder("b")])
+    await setFoldersAllowed({ ...THIS_PROJECT, apiUrl: "https://another.test" }, [a], true)
+    await setFoldersAllowed(THIS_PROJECT, [b], true)
+
+    const { computer, held, until } = connected()
+    await computer.start()
+    await until((event) => event.type === "folders")
+    await holding(held, [b])
+    await computer.stop()
+  })
+
   // Guard proof: drop watchAllowedFolders from start; choosing a folder needs a restart, and
   // forgetting one leaves it running messages from the web until then.
   test("follows the list with no restart", async () => {
     const [a, b] = await Promise.all([folder("a"), folder("b")])
-    await setFoldersAllowed([a], true)
+    await setFoldersAllowed(THIS_PROJECT, [a], true)
 
     const { computer, held, until } = connected()
     await computer.start()
     await holding(held, [a])
 
-    await setFoldersAllowed([b], true)
+    await setFoldersAllowed(THIS_PROJECT, [b], true)
     await until((event) => event.type === "folders" && event.folders.length === 2)
     await holding(held, [a, b])
 
-    await setFoldersAllowed([a], false)
+    await setFoldersAllowed(THIS_PROJECT, [a], false)
     await holding(held, [b])
     await computer.stop()
   })
@@ -130,7 +144,7 @@ describe("a connected computer", () => {
   // every message sent to it fails.
   test("holds no session for an allowed folder that's gone", async () => {
     const a = await folder("a")
-    await setFoldersAllowed([a, join(home, "deleted")], true)
+    await setFoldersAllowed(THIS_PROJECT, [a, join(home, "deleted")], true)
 
     const { computer, held } = connected()
     await computer.start()
@@ -142,7 +156,7 @@ describe("a connected computer", () => {
   // deleted while connected reads as online, and every message sent to it fails.
   test("closes the session of a folder that goes away while connected", async () => {
     const a = await folder("a")
-    await setFoldersAllowed([a], true)
+    await setFoldersAllowed(THIS_PROJECT, [a], true)
     // macOS can report that write late, and more than once: a report after the folder goes would read
     // the folders again, and the guard proof above would pass. This test passes either way. Real
     // time because there's no event to wait for, and before the fake timers, which would stop it.
@@ -165,7 +179,7 @@ describe("a connected computer", () => {
   // never come back retries for as long as nobody notices.
   test("says when its sign-in ended, rather than retrying", async () => {
     const a = await folder("a")
-    await setFoldersAllowed([a], true)
+    await setFoldersAllowed(THIS_PROJECT, [a], true)
 
     const { computer, until } = connected(() => 401)
     await computer.start()
@@ -177,7 +191,7 @@ describe("a connected computer", () => {
   // during an outage is never told apart from it, and this keeps retrying for good.
   test("says its sign-in ended when that follows a network failure", async () => {
     const a = await folder("a")
-    await setFoldersAllowed([a], true)
+    await setFoldersAllowed(THIS_PROJECT, [a], true)
     let status = 503
 
     jest.useFakeTimers()
@@ -196,7 +210,7 @@ describe("a connected computer", () => {
   // again, every twenty seconds, for as long as the network is out.
   test("says once that a session was lost", async () => {
     const a = await folder("a")
-    await setFoldersAllowed([a], true)
+    await setFoldersAllowed(THIS_PROJECT, [a], true)
     let renewals = 0
     let reachedSecond = () => {}
     const second = new Promise<void>((resolve) => {

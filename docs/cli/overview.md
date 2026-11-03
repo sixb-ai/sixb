@@ -64,11 +64,12 @@ To keep a computer available without `sixb` open, such as a machine that stays o
 sixb connect ~/projects/notes
 ```
 
-It asks once before allowing each folder, runs turns sent to conversations in your allowed folders,
-one at a time per folder, and stops on `ctrl+c`, ending a running turn as interrupted. Whatever keeps
-it running decides how long it stays connected. With no folder it uses the ones you've allowed;
-`--yes` allows those named without asking, and `--json` prints status as JSON lines. Keep to one of
-`sixb` or `sixb connect` holding a folder: each runs its own turns one at a time, not each other's.
+It asks once before allowing each folder for the project you're connected to, runs turns sent to
+conversations in your allowed folders, one at a time per folder, and stops on `ctrl+c`, ending a
+running turn as interrupted. Whatever keeps it running decides how long it stays connected. With no
+folder it uses the ones you've allowed for that project; `--yes` allows those named without asking,
+and `--json` prints status as JSON lines. Keep to one of `sixb` or `sixb connect` holding a folder:
+each runs its own turns one at a time, not each other's.
 
 ```json
 {"type":"folders","folders":["/Users/you/projects/notes"]}

@@ -7,6 +7,8 @@ import type { SyntaxStyle } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/react/test-utils"
 import { createSixbClient } from "@sixb/client"
+import type { Connection } from "../src/lib/connection"
+import { setFoldersAllowed } from "../src/runner/allowed-folders"
 import type { LocalRunner } from "../src/runner/local-runner"
 import { activityLabel, Workspace } from "../src/tui/app"
 import { tuiColors } from "../src/tui/theme"
@@ -92,7 +94,14 @@ describe("the composer", () => {
 })
 
 /** The home screen, against an API that answers its models and nothing else. */
-async function workspace(onExit: () => void): Promise<TestRendererSetup> {
+async function workspace(
+  onExit: () => void,
+  connected?: {
+    /** What this computer chose before `sixb` connected, with the folder it opens in. */
+    readonly chosen: (connection: Connection, folder: string) => Promise<void>
+    readonly openSession: () => void
+  }
+): Promise<TestRendererSetup> {
   const api = Bun.serve({
     port: 0,
     fetch: (request) =>
@@ -111,17 +120,21 @@ async function workspace(onExit: () => void): Promise<TestRendererSetup> {
   })
 
   const url = `http://127.0.0.1:${api.port}`
+  const connection: Connection = {
+    apiUrl: url,
+    client: createSixbClient({ baseUrl: url, auth: { kind: "none" } }),
+    project: { id: "acme", timeZone: "UTC", locale: "en" },
+    authorization: async () => "",
+  }
+  await connected?.chosen(connection, config)
   setup = await testRender(
     <Workspace
-      connection={{
-        apiUrl: url,
-        client: createSixbClient({ baseUrl: url, auth: { kind: "none" } }),
-        project: { id: "acme", timeZone: "UTC", locale: "en" },
-        authorization: async () => "",
-      }}
+      connection={connection}
       runner={
         {
           folder: config,
+          openSession: connected?.openSession ?? (() => {}),
+          closeSession: async () => {},
           claimIfHere: async () => {},
           onElsewhere: () => () => {},
           onBackground: () => () => {},
@@ -170,6 +183,23 @@ describe("ctrl+c", () => {
     expect(await frame(screen)).toContain("Press ctrl+c again to quit")
     screen.mockInput.pressCtrlC()
     expect(exits).toBe(1)
+  })
+})
+
+describe("messages from the web", () => {
+  // Guard proof: drop the first `follow()` from Workspace's effect (src/tui/app.tsx); which project
+  // this is isn't known until it connects, so a folder already chosen reads as off until restarted.
+  test("run in a folder chosen for this project, as soon as sixb connects to it", async () => {
+    let opened = 0
+    const screen = await workspace(() => {}, {
+      chosen: (connection, folder) => setFoldersAllowed(connection, [folder], true),
+      openSession: () => {
+        opened += 1
+      },
+    })
+    for (let turn = 0; turn < 2_000 && opened === 0; turn += 1) await screen.renderOnce()
+
+    expect(opened).toBe(1)
   })
 })
 
