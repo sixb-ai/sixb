@@ -64,6 +64,7 @@
       "@sixb/core/blob-storage/server": ["./packages/core/src/blob-storage/index.ts"],
       "@sixb/core/broker": ["./packages/core/src/broker/index.ts"],
       "@sixb/core/deploy": ["./packages/core/src/deploy/index.ts"],
+      "@sixb/core/env": ["./packages/core/src/env/index.ts"],
       "@sixb/core/events/selectors": ["./packages/core/src/events/selectors/index.ts"],
       "@sixb/core/internal/action-run-storage": [
         "./packages/core/src/storage/action-runs/failure.ts"
