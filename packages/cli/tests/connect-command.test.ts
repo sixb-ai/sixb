@@ -74,9 +74,28 @@ describe("sixb connect", () => {
     })
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("isn't allowed yet")
+    expect(result.stdout).toContain("isn't allowed for acme yet")
     expect(sessions).toEqual([])
     expect(await Bun.file(allowedFile).exists()).toBe(false)
+  })
+
+  // Guard proof: read every project's folders in allowFolders; connecting to a new project goes
+  // straight to running messages from it in a folder chosen for another.
+  test("asks again for a folder allowed only for another project", async () => {
+    const { notes, env, root, sessions, allowedFile } = await project()
+    await mkdir(join(root, "sixb"), { recursive: true })
+    await Bun.write(allowedFile, JSON.stringify({ "acme at https://another.test": [notes] }))
+    const result = await runCliToCompletion({
+      cmd: [process.execPath, CLI, "connect", notes],
+      cwd: root,
+      env,
+      stdin: "",
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("isn't allowed for acme yet")
+    expect(sessions).toEqual([])
   })
 
   // Guard proof: offer this folder under --yes as well, in allowFolders; a service started with --yes
@@ -129,7 +148,9 @@ describe("sixb connect", () => {
       type: "folders",
       folders: [notes],
     })
-    expect(JSON.parse(await readFile(allowedFile, "utf-8"))).toEqual([notes])
+    expect(JSON.parse(await readFile(allowedFile, "utf-8"))).toEqual({
+      [`acme at ${env.SIXB_API_URL}`]: [notes],
+    })
 
     child.kill("SIGTERM")
     expect(await child.exited).toBe(143)

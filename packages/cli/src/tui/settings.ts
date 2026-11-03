@@ -3,7 +3,6 @@ import { type as osType } from "node:os"
 import { dirname, join } from "node:path"
 import type { ListModelsResponses } from "@sixb/client"
 import { resolveConfigPath } from "../lib/profiles"
-import { isFolderAllowed } from "../runner/allowed-folders"
 
 export type ApprovalMode = "manual" | "accept-edits" | "auto"
 export type Place = "computer" | "cloud"
@@ -22,7 +21,8 @@ export interface Settings {
   /**
    * Whether your messages from the web, or another device, run in this folder: while it is on,
    * `sixb` tells the project it is open here, and runs the turns sent to its conversations here.
-   * Kept per folder, apart from the settings every `sixb` rewrites: `runner/allowed-folders.ts`.
+   * Kept per folder and project, apart from the settings every `sixb` rewrites, and read once
+   * connected, so it is off until then: `runner/allowed-folders.ts`.
    */
   readonly continueFromWeb: boolean
   /** Whether a turn running on this computer keeps it from going to sleep. */
@@ -74,8 +74,7 @@ export function placeLabel(place: Place): string {
 
 const SETTINGS_FILE = () => join(dirname(resolveConfigPath()), "tui.json")
 
-export async function loadSettings(folder: string): Promise<Settings> {
-  const continueFromWeb = await isFolderAllowed(folder)
+export async function loadSettings(): Promise<Settings> {
   try {
     const stored = JSON.parse(await readFile(SETTINGS_FILE(), "utf8")) as Partial<Settings>
     return {
@@ -85,16 +84,16 @@ export async function loadSettings(folder: string): Promise<Settings> {
         : DEFAULT_SETTINGS.approvalMode,
       ...(stored.model?.provider && stored.model.modelId ? { model: stored.model } : {}),
       ...(stored.reasoning ? { reasoning: stored.reasoning } : {}),
-      continueFromWeb,
+      continueFromWeb: false,
       keepAwake: stored.keepAwake !== false,
     }
   } catch {
-    return { ...DEFAULT_SETTINGS, continueFromWeb }
+    return DEFAULT_SETTINGS
   }
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  const { continueFromWeb: _perFolder, ...shared } = settings
+  const { continueFromWeb: _perProject, ...shared } = settings
   await writeFile(SETTINGS_FILE(), `${JSON.stringify(shared, null, 2)}\n`, { mode: 0o600 }).catch(
     () => {}
   )

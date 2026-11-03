@@ -66,7 +66,7 @@ export async function runAgent(options: {
     )
   }
   const { client } = connection
-  const settings = await loadSettings(process.cwd())
+  const settings = await loadSettings()
   // As the project keeps it, and the local sandbox compares it: its real path.
   const folder = await realpath(process.cwd())
   const models = (await listModels({ client })).data?.language ?? []

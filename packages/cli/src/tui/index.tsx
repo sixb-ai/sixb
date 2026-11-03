@@ -74,7 +74,7 @@ export async function runTui(options: {
   const root = createRoot(renderer)
   // As the project keeps it, and the local sandbox compares it: its real path.
   const folder = await realpath(process.cwd())
-  const settings = await loadSettings(folder)
+  const settings = await loadSettings()
   let runner: LocalRunner | null = null
   // The renderer gives its screen back on these signals; sixb then ends its turns and exits.
   const unhook = stopOnHangUp(

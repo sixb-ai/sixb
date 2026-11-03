@@ -34,8 +34,8 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * This computer, connected: one session per allowed folder, and the turns sent to their
- * conversations run in their folders. The list of folders is read again whenever it changes, so
+ * This computer, connected to a project: one session per folder allowed for it, and the turns sent
+ * to their conversations run in their folders. The list of folders is read again whenever it changes, so
  * choosing one needs no restart.
  */
 export class ComputerConnection {
@@ -106,7 +106,7 @@ export class ComputerConnection {
   /** A list that can't be read allows nothing, and says so. */
   private async readAllowed(): Promise<readonly string[]> {
     try {
-      return await readAllowedFolders()
+      return await readAllowedFolders(this.connection)
     } catch (error) {
       this.onEvent({ type: "error", message: messageOf(error) })
       return []

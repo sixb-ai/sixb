@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
 import { CliError } from "@sixb/cli-core"
-import { connect } from "../lib/connection"
+import { type Connection, connect } from "../lib/connection"
 import { readAllowedFolders, setFoldersAllowed } from "../runner/allowed-folders"
 import { thisComputer } from "../runner/computer"
 import { ComputerConnection, type ComputerEvent } from "../runner/computer-connection"
@@ -39,9 +39,9 @@ export async function runConnect(options: {
         )
   }
 
-  await allowFolders(options)
+  await allowFolders(connection, options)
 
-  const settings = await loadSettings(process.cwd())
+  const settings = await loadSettings()
   const report = options.json ? printJson : printLine
   let finish: (code: number) => void = () => {}
   const finished = new Promise<number>((resolve) => {
@@ -86,13 +86,20 @@ export async function runConnect(options: {
   process.exit(code)
 }
 
-/** Add what was named to the allowed folders, asking first, or offer this one if there are none. */
-async function allowFolders(options: {
-  readonly folders: readonly string[]
-  readonly yes: boolean
-  readonly json: boolean
-}): Promise<void> {
-  const allowed = await readAllowedFolders().catch((error: unknown) => {
+/**
+ * Add what was named to the folders allowed for this project, asking first, or offer this one if
+ * there are none.
+ */
+async function allowFolders(
+  connection: Connection,
+  options: {
+    readonly folders: readonly string[]
+    readonly yes: boolean
+    readonly json: boolean
+  }
+): Promise<void> {
+  const project = connection.project.id
+  const allowed = await readAllowedFolders(connection).catch((error: unknown) => {
     throw refusal(
       `[SixbCLI] Could not read your allowed folders. ${error instanceof Error ? error.message : ""}`
     )
@@ -103,34 +110,36 @@ async function allowFolders(options: {
 
   if (newlyNamed.length > 0 && !options.yes && !interactive) {
     throw refusal(
-      `[SixbCLI] ${newlyNamed.join(", ")} isn't allowed yet: run sixb connect in a terminal to choose it, or pass --yes.`
+      `[SixbCLI] ${newlyNamed.join(", ")} isn't allowed for ${project} yet: run sixb connect in a terminal to choose it, or pass --yes.`
     )
   }
-  const chosen: string[] = options.yes ? [...newlyNamed] : [...(await askEach(newlyNamed))]
+  const chosen: string[] = options.yes ? [...newlyNamed] : [...(await askEach(newlyNamed, project))]
   // Nothing named and nothing allowed: this folder is the one to offer, to a person, never by --yes.
   if (named.length === 0 && allowed.length === 0 && interactive) {
-    chosen.push(...(await askEach([await realFolder(".")])))
+    chosen.push(...(await askEach([await realFolder(".")], project)))
   }
-  if (chosen.length > 0) await setFoldersAllowed(chosen, true)
+  if (chosen.length > 0) await setFoldersAllowed(connection, chosen, true)
   if (allowed.length + chosen.length === 0) {
     throw refusal(
-      "[SixbCLI] No folders are allowed, so nothing would run here. Choose one: sixb connect <folder>."
+      `[SixbCLI] No folders are allowed for ${project}, so nothing would run here. Choose one: sixb connect <folder>.`
     )
   }
 }
 
-async function askEach(folders: readonly string[]): Promise<readonly string[]> {
+async function askEach(folders: readonly string[], project: string): Promise<readonly string[]> {
   if (folders.length === 0) return []
   const prompt = createInterface({ input: process.stdin, output: process.stderr })
   const chosen: string[] = []
   try {
     say(
       tone.muted(
-        "Messages from the web and your other devices will run in a folder you allow, on this computer, as you. The agent's commands run there without asking."
+        `Messages sent to ${project} from the web and your other devices will run in a folder you allow, on this computer, as you. The agent's commands run there without asking.`
       )
     )
     for (const folder of folders) {
-      const answer = await prompt.question(`Allow ${tone.strong(shown(folder))}? [y/N] `)
+      const answer = await prompt.question(
+        `Allow ${tone.strong(shown(folder))} for ${project}? [y/N] `
+      )
       if (answer.trim().toLowerCase() === "y") chosen.push(folder)
     }
   } finally {
