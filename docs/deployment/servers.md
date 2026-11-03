@@ -134,14 +134,16 @@ It checks the server's tools, the deploy account, the routes, the project's `.en
 
 ## Add the project's settings
 
-Secrets and connection strings, such as `DATABASE_URL`, API keys, and anything else you keep out of the repository, go in a `.env` file in the project's directory on the server. Create it readable only by the deploy account, then edit it:
+To keep them in one place across your team and servers, use [environment variables from Doppler](environment-variables.md#deploy). A deploy then writes the server's `.env` for you, and you can skip the rest of this section.
+
+Otherwise, secrets and connection strings, such as `DATABASE_URL`, API keys, and anything else you keep out of the repository, go in a `.env` file in the project's directory on the server. Create it readable only by the deploy account, then edit it:
 
 ```bash
 ssh sixb@203.0.113.10 'install -m 600 /dev/null ~/shop/code/.env'
 ssh -t sixb@203.0.113.10 'nano ~/shop/code/.env'
 ```
 
-For a project inside a monorepo, the directory is `~/<name>/code/<path>`; `sixb deploy check` prints the exact path. A deploy never replaces the server's `.env`, even when the repository has one.
+For a project inside a monorepo, the directory is `~/<name>/code/<path>`; `sixb deploy check` prints the exact path. Without a [source](environment-variables.md), a deploy never replaces the server's `.env`, even when the repository has one.
 
 ## Deploy
 
@@ -157,7 +159,7 @@ A deploy:
 
 1. Checks the server.
 2. Sends the commit and updates the project's files. The server's `.env`, `.sixb/`, and `node_modules/` stay.
-3. Installs the pinned Bun and the dependencies, and runs `sixb build`.
+3. Installs the pinned Bun and the dependencies, [writes `.env`](environment-variables.md#deploy) if the project has a source, and runs `sixb build`.
 4. Updates the routes. Caddy must accept them first; otherwise the deploy stops and the previous routes keep working.
 5. Stops the services, runs `sixb db migrate`, `sixb check`, and `sixb lake check`, and starts the services again.
 6. Waits for the API's `/ready`, and fails if a process exits in its first seconds.

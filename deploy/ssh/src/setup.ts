@@ -1,5 +1,7 @@
 import { access } from "node:fs/promises"
+import { ENV_TOKEN_FILE } from "./layout"
 import { shellQuote } from "./shell"
+import { RemoteScriptError, type RemoteShell } from "./transport"
 
 /** The first line of the Caddyfile the Debian and Ubuntu packages install. */
 const PACKAGED_CADDYFILE = "The Caddyfile is an easy way to configure your Caddy web server."
@@ -163,4 +165,39 @@ export async function pickPublicKey(input: {
   throw new Error(
     "[SshTarget] No public key to authorize. Pass one with `--key ~/.ssh/id_ed25519.pub`."
   )
+}
+
+/**
+ * Creates the deploy's token when the server doesn't have one. This asks the server rather than
+ * going by the checks setup started with: on a fresh server those stop at SSH, before they reach
+ * the token. Returns whether it installed one.
+ */
+export async function ensureEnvToken(
+  shell: RemoteShell,
+  name: string,
+  createToken: () => Promise<string>
+): Promise<boolean> {
+  const path = `"$HOME"/${shellQuote(`${name}/${ENV_TOKEN_FILE}`)}`
+
+  const installed = await shell.run(`[ -s ${path} ]`).then(
+    () => true,
+    (error: unknown) => {
+      if (error instanceof RemoteScriptError && error.exitCode === 1) return false
+      throw error
+    }
+  )
+  if (installed) return false
+
+  // On standard input, because a script is an argument any process on the server can read.
+  await shell.run(
+    [
+      "set -e",
+      "umask 077",
+      `mkdir -p "$HOME"/${shellQuote(name)}`,
+      `cat > ${path}.new`,
+      `mv ${path}.new ${path}`,
+    ].join("\n"),
+    { stdin: new Blob([`${await createToken()}\n`]).stream() }
+  )
+  return true
 }

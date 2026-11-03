@@ -50,7 +50,9 @@ function validateEnvConfig(value: unknown): EnvConfig {
 
 function isEnvSource(value: unknown): boolean {
   const candidate = value as Record<string, unknown> | null
-  return ["names", "read", "write"].every((method) => typeof candidate?.[method] === "function")
+  return ["names", "read", "write", "createServerToken"].every(
+    (method) => typeof candidate?.[method] === "function"
+  )
 }
 
 /** The names `env` must have a value for and doesn't. An empty value counts as none. */

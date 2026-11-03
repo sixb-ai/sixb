@@ -112,6 +112,20 @@ export function doppler(options: DopplerOptions): EnvSource {
         body: { project, config: CONFIGS[env], secrets: values },
       })
     },
+
+    async createServerToken(env, label) {
+      const body = (await call(env, "/v3/configs/config/tokens", {
+        body: { name: label, access: "read" },
+      })) as { readonly token?: { readonly key?: unknown } }
+
+      const key = body.token?.key
+      if (typeof key !== "string" || key === "") {
+        throw new Error(
+          `[Doppler] Doppler did not return a token for ${project} / ${CONFIGS[env]}.`
+        )
+      }
+      return key
+    },
   }
 }
 
