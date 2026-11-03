@@ -62,6 +62,11 @@ import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
 import { limitRequestBody, RequestBodyTooLargeError } from "./utils/request-body"
+import {
+  markRequestAuthorized,
+  type SixbRequestTimingOptions,
+  timeRequest,
+} from "./utils/request-timing"
 
 // Clients send only subscription messages; Bun's default would buffer up to 16 MB for one.
 export const MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024
@@ -81,6 +86,8 @@ export interface SixbServerOptions {
    * `"private"` for loopback, private, and link-local networks. Defaults to `["private"]`.
    */
   trustedProxies?: readonly string[]
+  /** Where requests spend their time: a `Server-Timing` header and a log of slow requests. */
+  timing?: SixbRequestTimingOptions
 }
 
 export function createSixbServer(options: SixbServerOptions): SixbServer {
@@ -98,6 +105,7 @@ export class SixbServer {
   private readonly authExperience?: SixbAuthExperienceOptions
   private readonly sharedAccessOptions: SixbSharedAccessOptions
   private readonly resolveClientAddress: ClientAddressResolver
+  private readonly timing: SixbRequestTimingOptions
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private maintenance: OntologyMaintenanceHandle | null = null
@@ -108,6 +116,7 @@ export class SixbServer {
     this.port = options.port ?? 3000
     this.hostname = options.hostname ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
+    this.timing = options.timing ?? {}
     this.apiBrowserPolicy = resolveApiBrowserPolicy(options.browser)
     // URLs the API hands to third parties, such as file download URLs, name this origin.
     if (this.apiBrowserPolicy.publicOrigin) {
@@ -191,6 +200,7 @@ export class SixbServer {
         host: this.hostname,
         port: this.port,
         resolveClientAddress: this.resolveClientAddress,
+        timing: this.timing,
       })
     } catch (error) {
       this.app = null
@@ -377,7 +387,12 @@ export function createSixbApi(server: SixbServer) {
         }),
       }
     })
-    .onBeforeHandle(({ auth }) => (auth.kind === "deny" ? auth.response : undefined))
+    .onBeforeHandle(({ auth, route }) => {
+      // A share or an Agent's run token speaks for someone who has not signed in here.
+      const signedIn = auth.kind === "allow" && auth.session?.authenticated === true
+      markRequestAuthorized(route, signedIn || (auth.kind === "allow" && !guard.isAuthEnabled()))
+      return auth.kind === "deny" ? auth.response : undefined
+    })
     .mapResponse(({ auth, request, responseValue, set, sharedAccessCookies }) => {
       if (sharedAccessCookies) {
         if (sharedAccessCookies.setCookies.length > 0) {
@@ -557,6 +572,7 @@ function startApiServer(
     readonly host: string
     readonly port: number
     readonly resolveClientAddress: ClientAddressResolver
+    readonly timing: SixbRequestTimingOptions
   }
 ) {
   const bunServer = Bun.serve({
@@ -573,7 +589,7 @@ function startApiServer(
         const forwardedFor = request.headers.get("x-forwarded-for")
         setRequestClientAddress(request, options.resolveClientAddress(socketAddress, forwardedFor))
       }
-      return app.fetch(request)
+      return timeRequest(request, options.timing, () => app.fetch(request))
     },
     websocket: getElysiaWsHandler(app),
   } as Parameters<typeof Bun.serve>[0])

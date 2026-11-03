@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
-import { createSixbServer, type SixbServer } from "@sixb/server"
+import { createSixbServer, requestTimingOptionsFromEnv, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import type { LoadedSixbHost } from "../lib/loadSixb"
 import { builtAppOutdir, loadProductionSixb } from "../lib/production"
@@ -70,6 +70,7 @@ export async function runApi(options: ApiOptions = {}) {
       },
       ...(hasAuthExperience ? { authExperience: { outdir: authExperienceOutdir } } : {}),
       ...(trustedProxies.length > 0 ? { trustedProxies } : {}),
+      timing: requestTimingOptionsFromEnv(),
     })
     await server.start()
 

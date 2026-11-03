@@ -5,7 +5,7 @@ import {
   type CustomAppDevServer,
   createCustomApp,
 } from "@sixb/app/server"
-import { createSixbServer } from "@sixb/server"
+import { createSixbServer, requestTimingOptionsFromEnv } from "@sixb/server"
 import {
   apiDocsUrl,
   apiEventsUrl,
@@ -118,6 +118,8 @@ export async function runDevRuntime(options: DevOptions = {}) {
         allowedOrigins: topology.allowedBrowserOrigins,
       },
       authExperience,
+      // Always on while developing, so a slow request can be read from the Network tab.
+      timing: { ...requestTimingOptionsFromEnv(), header: true },
     })
     runtimeOwnsProviders = true
     // The runtime owns the server's lifecycle so agent turns run only while it listens.
