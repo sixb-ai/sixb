@@ -21,6 +21,7 @@
     "connectors/*/tests/**/*.ts",
     "connectors/*/tests/**/*.tsx",
     "deploy/*/tests/**/*.ts",
+    "env/*/tests/**/*.ts",
     "storage/*/tests/**/*.ts",
     "broker/*/tests/**/*.ts",
     "queues/*/tests/**/*.ts",

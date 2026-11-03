@@ -53,6 +53,7 @@ const workspaceRoots = [
   "models",
   "connectors",
   "deploy",
+  "env",
   "broker",
   "loggers",
   "queues",

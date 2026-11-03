@@ -1,11 +1,11 @@
 import { resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { EnvConfig, EnvName } from "@sixb/core/env"
+import type { EnvConfig, EnvName, EnvVarRule } from "@sixb/core/env"
 import { SixbCliError } from "./errors"
 
 export const ENV_CONFIG_FILE = "sixb.env.ts"
 
-const VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+export const VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 const VAR_RULES: ReadonlySet<unknown> = new Set(["required", "prod", "optional"])
 
 /** Loads `sixb.env.ts` from the project directory. A project without one has no declared names. */
@@ -23,7 +23,7 @@ export async function loadEnvConfig(cwd = process.cwd()): Promise<EnvConfig | nu
 }
 
 function validateEnvConfig(value: unknown): EnvConfig {
-  const vars = (value as { readonly vars?: unknown } | null)?.vars
+  const { source, vars } = (value ?? {}) as { readonly source?: unknown; readonly vars?: unknown }
   if (typeof vars !== "object" || vars === null || Array.isArray(vars)) {
     throw new SixbCliError(`[SixbEnv] ${ENV_CONFIG_FILE} must set \`vars\`.`, {
       remediation: 'Name each variable with a rule: `vars: { DATABASE_URL: "required" }`.',
@@ -40,7 +40,17 @@ function validateEnvConfig(value: unknown): EnvConfig {
       )
     }
   }
+  if (source !== undefined && !isEnvSource(source)) {
+    throw new SixbCliError(`[SixbEnv] \`source\` in ${ENV_CONFIG_FILE} is not a source.`, {
+      remediation: 'Use a source, such as `doppler({ project: "shop" })` from @sixb/env-doppler.',
+    })
+  }
   return value as EnvConfig
+}
+
+function isEnvSource(value: unknown): boolean {
+  const candidate = value as Record<string, unknown> | null
+  return ["names", "read", "write"].every((method) => typeof candidate?.[method] === "function")
 }
 
 /** The names `env` must have a value for and doesn't. An empty value counts as none. */
@@ -50,16 +60,18 @@ export function missingEnvVars(
   env: EnvName
 ): string[] {
   return Object.entries(config.vars)
-    .filter(([name, rule]) => {
-      const needed = rule === "required" || (rule === "prod" && env === "prod")
-      return needed && !values[name]
-    })
+    .filter(([name, rule]) => envVarNeeded(rule, env) && !values[name])
     .map(([name]) => name)
 }
 
+/** Whether a variable with this rule must have a value in `env`. */
+export function envVarNeeded(rule: EnvVarRule, env: EnvName): boolean {
+  return rule === "required" || (rule === "prod" && env === "prod")
+}
+
 /** The sentence every command uses to name what is missing. */
-function missingEnvMessage(names: readonly string[]): string {
-  return `[SixbEnv] Missing ${names.join(", ")}, which ${ENV_CONFIG_FILE} requires.`
+export function missingEnvSentence(names: readonly string[]): string {
+  return `Missing ${names.join(", ")}, which ${ENV_CONFIG_FILE} requires.`
 }
 
 /** Stops a command that is about to run the project without a variable it declares. */
@@ -69,9 +81,14 @@ export async function assertDeclaredEnv(cwd: string): Promise<void> {
 
   const env = process.env.NODE_ENV === "production" ? "prod" : "dev"
   const missing = missingEnvVars(config, process.env, env)
-  if (missing.length > 0) {
-    throw new SixbCliError(missingEnvMessage(missing), {
-      remediation: "Add what's missing to the project's .env.",
-    })
-  }
+  if (missing.length > 0) throw missingEnvError(config, missing)
+}
+
+/** The failure for a project about to run without these variables, and what fixes it. */
+export function missingEnvError(config: EnvConfig, names: readonly string[]): SixbCliError {
+  return new SixbCliError(`[SixbEnv] ${missingEnvSentence(names)}`, {
+    remediation: config.source
+      ? "Run `sixb env pull`. If the source doesn't have the value, set it with `sixb env set`."
+      : "Add what's missing to the project's .env.",
+  })
 }
