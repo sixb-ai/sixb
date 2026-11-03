@@ -25,6 +25,10 @@ export * from "./events-hooks"
 export * from "./events-provider"
 export * from "./generated/@tanstack/react-query.gen"
 export * from "./logs-hooks"
+export {
+  type UseObjectQueryLiveUpdatesOptions,
+  useObjectQueryLiveUpdates,
+} from "./object-query-live-updates"
 export * from "./query-hooks"
 export {
   type UseAgentActivityStreamOptions,

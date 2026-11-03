@@ -35,6 +35,7 @@ import type {
   ObjectQueryObject,
   ObjectQuery as WireObjectQuery,
 } from "./generated/types.gen"
+import { rememberObjectQueryReads } from "./object-query-reads"
 
 export type { ObjectQueryIssue }
 export type { CurrentUserRef } from "@sixb/core/ontology"
@@ -155,6 +156,7 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
         signal: options?.signal,
       })
       if (error || !data) throw toSixbQueryError(error)
+      rememberObjectQueryReads(client, query, data.plan?.readObjectTypeIds)
       return {
         objects: data.objects.map(reviveQueryRow),
         hasMore: data.hasMore,
@@ -169,6 +171,7 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
         body: { query: toWireQuery(query) },
       })
       if (error || !data) throw toSixbQueryError(error)
+      rememberObjectQueryReads(client, query, data.plan?.readObjectTypeIds)
       return data.count
     },
 
@@ -178,6 +181,7 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
         body: { query: toWireQuery(query) },
       })
       if (error || !data) throw toSixbQueryError(error)
+      rememberObjectQueryReads(client, query, data.plan?.readObjectTypeIds)
       return data.exists
     },
 
@@ -187,6 +191,7 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
         body: { query: toWireQuery(query), facets: [...facets] },
       })
       if (error || !data) throw toSixbQueryError(error)
+      rememberObjectQueryReads(client, query, data.plan?.readObjectTypeIds)
       return {
         total: data.total,
         facets: data.facets.map((facet) => ({

@@ -54,6 +54,10 @@ export type ObjectQueryIssue = {
 }
 
 export type ObjectQueryPlanSummary = {
+  /**
+   * Every object type the query reads: where it starts, and what it traverses or expands
+   */
+  readObjectTypeIds?: Array<string>
   mode: "pushdown" | "fallback" | "pipeline" | "rejected"
   providerIssues: Array<ObjectQueryIssue>
   fallbackIssues: Array<ObjectQueryIssue>
