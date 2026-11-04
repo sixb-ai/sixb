@@ -645,6 +645,36 @@ describe("a runner outside the worker", () => {
     expect((await stop()).status).toBe(202)
   })
 
+  // Guard proof: skip announceOffline's announcement whenever another session holds the folder, as
+  // it first did; the web keeps showing as running the command that stopped with its sixb.
+  test("tells the web when a sixb that ran background commands closes, another open in its folder", async () => {
+    const { person, call, host } = await setup()
+    const ava = await person("ava")
+    const running = {
+      threadId: "agt_thr_1",
+      id: "bg_3f9a1c",
+      command: "bun dev",
+      status: "running",
+      startedAt: "2026-11-04T10:00:00.000Z",
+    }
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_ava", { computer: LAPTOP })
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_dev", {
+      computer: LAPTOP,
+      backgroundCommands: [running],
+    })
+    const heard = async () => {
+      const { records } = await host.broker.read({ projectId, streamId: "agents.activity" })
+      return records
+        .map((record) => record.payload as Record<string, unknown>)
+        .filter((event) => event.type === "agent.computer.activity")
+        .map(({ folder, online }) => ({ folder, online }))
+    }
+    const before = (await heard()).length
+
+    expect((await call(ava, "DELETE", "/api/agent-computers/sessions/cs_dev")).status).toBe(204)
+    expect((await heard()).slice(before)).toEqual([{ folder: LAPTOP.folder, online: true }])
+  })
+
   // Guard proof: drop the MAX_SESSIONS check from the session route; one person holds sessions
   // without end, each a row the sweeper reads and an event every client hears.
   test("keeps a person to twenty open sixb sessions", async () => {
