@@ -40,6 +40,7 @@ import {
   UniquePropertyParamsSchema,
 } from "../schemas/objects"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import { noteRequestSubject } from "../utils/request-timing"
 
 // Only object files are served to shared sessions. The boundary reads `shareGrant` before routing;
 // declaring it here keeps it in the OpenAPI contract and through query validation.
@@ -88,11 +89,20 @@ function serializeObjectLink(link: {
   }
 }
 
+/** The type a query starts from, which names it in logs without repeating any of its values. */
+function queryStartObjectType(query: ObjectQuery): string | undefined {
+  if (query.kind === "start") return query.objectTypeId
+  if (query.kind === "refs") return query.refs[0]?.objectTypeId
+  if (query.kind === "set") return query.inputs[0] && queryStartObjectType(query.inputs[0])
+  return "input" in query ? queryStartObjectType(query.input) : undefined
+}
+
 function serializePlan(plan: {
   readonly mode: string
   readonly providerIssues: readonly unknown[]
   readonly fallbackIssues: readonly unknown[]
   readonly issues: readonly unknown[]
+  readonly readObjectTypeIds?: readonly string[]
   readonly fallback?: { readonly maxRows: number; readonly requiresExplicitBound: boolean }
 }) {
   return {
@@ -101,6 +111,7 @@ function serializePlan(plan: {
     fallbackIssues: plan.fallbackIssues,
     issues: plan.issues,
     fallback: plan.fallback,
+    readObjectTypeIds: plan.readObjectTypeIds,
   }
 }
 
@@ -374,6 +385,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
             query: ObjectQuery
             includeTotal?: boolean
           }
+          noteRequestSubject(queryStartObjectType(parsed.query))
           const result = await requireRequestSixb(context).objects.executeQuery({
             query: parsed.query,
             includeTotal: parsed.includeTotal,
@@ -540,6 +552,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           const parsed = ObjectQueryCountRequestSchema.parse(body) as {
             query: ObjectQuery
           }
+          noteRequestSubject(queryStartObjectType(parsed.query))
           const result = await requireRequestSixb(context).objects.count({ query: parsed.query })
 
           return {
@@ -623,6 +636,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           const parsed = ObjectQueryExistsRequestSchema.parse(body) as {
             query: ObjectQuery
           }
+          noteRequestSubject(queryStartObjectType(parsed.query))
           const result = await requireRequestSixb(context).objects.exists({ query: parsed.query })
 
           return {
@@ -707,6 +721,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
             query: ObjectQuery
             facets: { propertyId: string; limit: number }[]
           }
+          noteRequestSubject(queryStartObjectType(parsed.query))
           const result = await requireRequestSixb(context).objects.facet({
             query: parsed.query,
             facets: parsed.facets,

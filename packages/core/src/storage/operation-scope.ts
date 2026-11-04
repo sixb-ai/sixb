@@ -16,6 +16,42 @@ export interface StorageOperationScope {
   run<TResult>(operation: () => Promise<TResult> | TResult): Promise<TResult>
 }
 
+/** How long storage was busy during one piece of work, however many calls overlapped. */
+export class StorageTimer {
+  #active = 0
+  #activeSince = 0
+  #busyMillis = 0
+  #calls = 0
+
+  begin(): void {
+    this.#calls += 1
+    if (this.#active === 0) this.#activeSince = performance.now()
+    this.#active += 1
+  }
+
+  end(): void {
+    this.#active -= 1
+    if (this.#active === 0) this.#busyMillis += performance.now() - this.#activeSince
+  }
+
+  get calls(): number {
+    return this.#calls
+  }
+
+  get busyMillis(): number {
+    return this.#active === 0
+      ? this.#busyMillis
+      : this.#busyMillis + performance.now() - this.#activeSince
+  }
+}
+
+const storageTimers = new AsyncLocalStorage<StorageTimer>()
+
+/** Count the root storage operations `work` starts, including those it leaves running. */
+export function runWithStorageTimer<TResult>(timer: StorageTimer, work: () => TResult): TResult {
+  return storageTimers.run(timer, work)
+}
+
 export function createStorageOperationScope(
   run: StorageOperationRunner,
   assertAvailable: () => void = () => undefined
@@ -31,10 +67,13 @@ export function createStorageOperationScope(
       }
 
       const execution = { active: true }
+      const timer = storageTimers.getStore()
+      timer?.begin()
       try {
         return await executions.run(execution, () => run(operation))
       } finally {
         execution.active = false
+        timer?.end()
       }
     },
   }

@@ -18,6 +18,8 @@ export interface PipedrivePerson extends PipedriveJsonObject {
   readonly phone?: PipedriveJsonValue
   readonly emails?: PipedriveJsonValue
   readonly phones?: PipedriveJsonValue
+  /** Option ids of the built-in `label_ids` person field. */
+  readonly label_ids?: readonly number[]
   readonly custom_fields?: PipedriveJsonObject
 }
 
@@ -38,6 +40,7 @@ export interface PipedrivePersonInput extends PipedriveJsonObject {
   readonly emails?: readonly PipedrivePersonContactMethodInput[]
   readonly phones?: readonly PipedrivePersonContactMethodInput[]
   readonly visible_to?: number
+  /** Replaces the person's labels. Option ids of the built-in `label_ids` person field. */
   readonly label_ids?: readonly number[]
   readonly marketing_status?: PipedriveMarketingStatus
   readonly custom_fields?: PipedriveJsonObject

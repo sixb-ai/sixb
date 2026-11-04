@@ -92,6 +92,9 @@
       "path": "deploy/ssh/tsconfig.build.json"
     },
     {
+      "path": "env/doppler/tsconfig.build.json"
+    },
+    {
       "path": "loggers/pino/tsconfig.build.json"
     },
     {

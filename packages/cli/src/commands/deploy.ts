@@ -12,12 +12,14 @@ import type {
 import { loadDeployConfig } from "../lib/deploy-config"
 import { buildDeployRelease } from "../lib/deploy-release"
 import {
+  commitHasProjectFile,
   deployer,
   packSource,
   projectPathOf,
   repoRootOf,
   resolveBunVersion,
 } from "../lib/deploy-source"
+import { ENV_CONFIG_FILE, loadEnvConfig } from "../lib/env-config"
 import { SixbCliError } from "../lib/errors"
 import {
   bunVersionFile,
@@ -45,6 +47,7 @@ import {
   renderStatic,
   withTask,
 } from "../ui"
+import { ENV_KEPT_MESSAGE } from "../ui/env-screens"
 import { canRunLive } from "../ui/live/can-run-live"
 
 export interface DeployOptions {
@@ -57,9 +60,13 @@ export interface DeployOptions {
 export async function runDeploy(options: DeployOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd()
   const { path, config } = await loadDeployConfig(cwd)
+  const envFromSource = Boolean((await loadEnvConfig(cwd))?.source)
 
   if (options.dryRun) {
-    const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd) })
+    const release = buildDeployRelease(config, {
+      bunVersion: await resolveBunVersion(cwd),
+      envFromSource,
+    })
     if (options.json) return writeJson(release)
     await renderStatic(deployReleaseView({ release, configPath: relative(cwd, path) || path }))
     return
@@ -70,6 +77,8 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
     const source = await packSource(cwd, options.ref)
     const release = buildDeployRelease(config, {
       bunVersion: await resolveBunVersion(cwd, source),
+      // `--ref` can name a commit from before the project had one, which can't run the pull.
+      envFromSource: envFromSource && (await commitHasProjectFile(cwd, source, ENV_CONFIG_FILE)),
     })
     // Stop before uploading anything when the target already says the deploy cannot work.
     task.step(`Checking ${location(config)}`)
@@ -108,6 +117,7 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
     deployCompleteView({
       release,
       seconds: (Date.now() - deployStartedAt) / 1000,
+      keptEnv: progress.state.keptEnv,
     })
   )
 }
@@ -115,7 +125,10 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
 export async function runDeployCheck(options: { readonly json?: boolean; readonly cwd?: string }) {
   const cwd = options.cwd ?? process.cwd()
   const { config } = await loadDeployConfig(cwd)
-  const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd) })
+  const release = buildDeployRelease(config, {
+    bunVersion: await resolveBunVersion(cwd),
+    envFromSource: Boolean((await loadEnvConfig(cwd))?.source),
+  })
   const projectPath = await projectPathOf(cwd)
   const checks = await withTask("deploy check", `Checking ${location(config)}`, () =>
     config.target.check(release, { name: config.name, projectPath })
@@ -133,7 +146,11 @@ export async function runDeploySetup(options: {
 }) {
   const cwd = options.cwd ?? process.cwd()
   const { config } = await loadDeployConfig(cwd)
-  const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd) })
+  const source = (await loadEnvConfig(cwd))?.source
+  const release = buildDeployRelease(config, {
+    bunVersion: await resolveBunVersion(cwd),
+    envFromSource: Boolean(source),
+  })
   const context = { name: config.name, projectPath: await projectPathOf(cwd) }
 
   if (!config.target.setup) {
@@ -143,6 +160,12 @@ export async function runDeploySetup(options: {
       ...context,
       ...(options.admin ? { admin: options.admin } : {}),
       ...(options.key ? { key: options.key } : {}),
+      ...(source
+        ? {
+            createEnvToken: () =>
+              source.createServerToken("prod", `sixb-${config.name}-${new Date().toISOString()}`),
+          }
+        : {}),
       write: (line) => console.log(line),
     })
   }
@@ -348,6 +371,8 @@ async function createProgress(
     current: null as number | null,
     /** The latest output lines of the step running now, kept when it fails. */
     output: [] as string[],
+    /** The pull left `.env` as it was. A live view clears step output, so the result has to say. */
+    keptEnv: false,
   }
   const live = canRunLive()
     ? await (await import("../ui/live/deploy")).startLiveDeploy({
@@ -386,6 +411,7 @@ async function createProgress(
       }
       if (event.type === "output") {
         state.output = [...state.output, event.line].slice(-12)
+        if (event.line.includes(ENV_KEPT_MESSAGE)) state.keptEnv = true
         if (live) live.output(event.line)
         else console.log(`  ${event.line}`)
       }

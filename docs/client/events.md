@@ -71,6 +71,28 @@ useInvalidateOnEvent(
 )
 ```
 
+To keep every cached object query current, mount `useObjectQueryLiveUpdates` once near the root. A
+query refreshes only when a type it reads changes, through its filters, traversals or expansions.
+Changes gather for a second, and while the page is hidden, so a burst of writes refreshes each query
+at most once a second. A query already fetching finishes first, then reads again, and a reconnect
+refreshes everything:
+
+```tsx
+import { useObjectQueryLiveUpdates } from "@sixb/client/hooks"
+
+function App({ children }: { children: React.ReactNode }) {
+  useObjectQueryLiveUpdates()
+  return children
+}
+```
+
+It follows object and link events, so it can't see a member renaming themselves for a query that expands
+`users`, or a change that moves an object out of what the reader may see, which sends the reader no
+event. A write made just before the stream first connects can be missed the same way. Those refresh with
+the next change to a type the query reads. In a standalone browser app, wrap it in `SixbEventsProvider` so
+its two subscriptions share one connection; that connection uses the global client, not a `SixbProvider`
+client. Pass `onError` to hear when the stream fails, since queries then stop refreshing.
+
 ## Subscription options
 
 `useEvents` accepts an optional third argument:

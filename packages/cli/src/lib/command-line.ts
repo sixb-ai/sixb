@@ -126,6 +126,31 @@ export const CLI_OPTION_DEFINITIONS = {
     kind: "string",
   },
   follow: { syntax: "--follow", summary: "Keep printing new log lines", kind: "boolean" },
+  env: {
+    syntax: "--env <dev|prod>",
+    summary: "Environment (default for pull: dev)",
+    kind: "string",
+  },
+  dev: {
+    syntax: "--dev <file>",
+    summary: "The file holding the current dev values",
+    kind: "string",
+  },
+  prod: {
+    syntax: "--prod <file>",
+    summary: "The file holding the current prod values",
+    kind: "string",
+  },
+  "token-file": {
+    syntax: "--token-file <path>",
+    summary: "Read the source's token from this file, as a server does",
+    kind: "string",
+  },
+  force: {
+    syntax: "--force",
+    summary: "Replace a hand-written .env, losing what the source doesn't have",
+    kind: "boolean",
+  },
   admin: {
     syntax: "--admin <login>",
     summary: "Login with sudo that prepares the server (default: root)",
@@ -209,6 +234,10 @@ export type LocalCommandId =
   | "deploy:access:list"
   | "deploy:access:add"
   | "deploy:access:remove"
+  | "env:init"
+  | "env:pull"
+  | "env:set"
+  | "env:status"
   | "init"
 
 interface CommandNode {
@@ -595,6 +624,35 @@ const commandTree: readonly CommandNode[] = [
       },
     ],
   },
+  {
+    name: "env",
+    summary: "Keep the project's environment variables in one place",
+    usage: "sixb env <init|pull|set|status>",
+    rootHelpLabel: "env ...",
+    children: [
+      command("env:init", "Move a project's values to its source and write sixb.env.ts", {
+        path: ["env", "init"],
+        usage: "sixb env init <project> [--dev <file>] [--prod <file>]",
+        options: ["dev", "prod"],
+        minimumPositionals: 1,
+        maximumPositionals: 1,
+      }),
+      command("env:pull", "Write .env from the project's source", {
+        path: ["env", "pull"],
+        options: ["env", "token-file", "force"],
+      }),
+      command("env:set", "Set one value in the project's source", {
+        path: ["env", "set"],
+        usage: "sixb env set <name> --env <dev|prod>",
+        options: ["env"],
+        minimumPositionals: 1,
+        maximumPositionals: 1,
+      }),
+      command("env:status", "Show which variables have values, without showing them", {
+        path: ["env", "status"],
+      }),
+    ],
+  },
   command("init", "Create a Sixb project in a directory", {
     usage: "sixb init [dir]",
     maximumPositionals: 1,
@@ -663,7 +721,7 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
   readonly compact?: boolean
 }[] = [
   { title: "Agent", names: ["agent"] },
-  { title: "Develop", names: ["init", "dev", "check", "typegen", "build"] },
+  { title: "Develop", names: ["init", "dev", "env", "check", "typegen", "build"] },
   { title: "Deploy", names: ["deploy", "desktop"] },
   {
     title: "Run in production",

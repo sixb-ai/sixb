@@ -1,5 +1,7 @@
+import { dirname, resolve } from "node:path"
 import { runDevSupervisor } from "../lib/dev-supervisor"
 import type { DevOptions } from "./dev-runner"
+import { assertDevEnv } from "./env"
 
 export type { DevOptions } from "./dev-runner"
 
@@ -29,5 +31,6 @@ export async function runDev(options: DevOptions = {}) {
     }
     process.exit(process.exitCode ?? 0)
   }
+  await assertDevEnv(dirname(resolve(options.entry ?? "sixb.config.ts")))
   await runDevSupervisor(options)
 }

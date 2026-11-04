@@ -64,6 +64,7 @@
       "@sixb/core/blob-storage/server": ["./packages/core/src/blob-storage/index.ts"],
       "@sixb/core/broker": ["./packages/core/src/broker/index.ts"],
       "@sixb/core/deploy": ["./packages/core/src/deploy/index.ts"],
+      "@sixb/core/env": ["./packages/core/src/env/index.ts"],
       "@sixb/core/events/selectors": ["./packages/core/src/events/selectors/index.ts"],
       "@sixb/core/internal/action-run-storage": [
         "./packages/core/src/storage/action-runs/failure.ts"
@@ -173,6 +174,7 @@
       "@sixb/core/storage": ["./packages/core/src/storage/index.ts"],
       "@sixb/core/testing": ["./packages/core/src/testing/index.ts"],
       "@sixb/deploy-ssh": ["./deploy/ssh/src/index.ts"],
+      "@sixb/env-doppler": ["./env/doppler/src/index.ts"],
       "@sixb/ducklake": ["./storage/ducklake/src/index.ts"],
       "@sixb/cli-core": ["./packages/cli-core/src/index.ts"],
       "@sixb/desktop": ["./packages/desktop/src/index.ts"],

@@ -77,6 +77,12 @@
       "import": "./dist/deploy/index.js",
       "default": "./dist/deploy/index.js"
     },
+    "./env": {
+      "types": "./dist/env/index.d.ts",
+      "bun": "./src/env/index.ts",
+      "import": "./dist/env/index.js",
+      "default": "./dist/env/index.js"
+    },
     "./events/selectors": {
       "types": "./dist/events/selectors/index.d.ts",
       "bun": "./src/events/selectors/index.ts",

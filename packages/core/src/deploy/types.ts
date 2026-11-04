@@ -17,7 +17,7 @@ export interface DeployConfig {
   readonly target: DeployTarget
   /**
    * Environment for every service and release step. Committed with the project, so secrets
-   * belong in the target's `.env` instead.
+   * belong in the target's `.env` instead, or in the source `sixb.env.ts` names.
    */
   readonly env?: DeployEnv
   /** Override or disable the Sixb services. Every service runs unless set to `false`. */
@@ -160,6 +160,8 @@ export interface DeploySetupContext extends DeployCheckContext {
   readonly admin?: string
   /** A public key file to authorize for deploys, instead of the one the target would pick. */
   readonly key?: string
+  /** Creates the token `steps.env` reads with, for a target that doesn't have one yet. */
+  readonly createEnvToken?: () => Promise<string>
   /** A line of progress for the person running setup. */
   write(line: string): void
 }
@@ -223,6 +225,11 @@ export interface DeployRelease {
   /** The environment every step and service starts from. */
   readonly env: DeployEnv
   readonly steps: {
+    /**
+     * Writes the target's `.env` from the project's source, before anything is built. The target
+     * adds `--token-file` with the token it keeps. Set only for a project with a source.
+     */
+    readonly env?: DeployCommand
     /** Runs while the previous release still serves. */
     readonly build: readonly DeployCommand[]
     /** Runs after the services stop and before they start again. */

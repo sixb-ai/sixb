@@ -171,6 +171,16 @@ function archive(repo: string, commit: string): ReadableStream<Uint8Array> {
   })
 }
 
+/** Whether a commit being deployed has this file in the project's directory. */
+export async function commitHasProjectFile(
+  projectDir: string,
+  source: Pick<DeploySource, "commit" | "projectPath">,
+  file: string
+): Promise<boolean> {
+  const root = await git(projectDir, ["rev-parse", "--show-toplevel"])
+  return isFile(root, source.commit, posix.join(source.projectPath, file))
+}
+
 async function isFile(root: string, commit: string, path: string): Promise<boolean> {
   return git(root, ["cat-file", "-e", `${commit}:${path}`])
     .then(() => true)
