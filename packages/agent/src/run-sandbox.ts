@@ -1,5 +1,6 @@
 import type { Sandbox } from "@sixb/core"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
+import { readWorkspaceInstructions } from "./workspace-instructions"
 
 /**
  * Where a provider's sandbox keeps a run's files: in its working directory, which a Git checkout
@@ -60,4 +61,27 @@ export interface BeforeFinalizeOptions {
    * was stopped: destroy its workspace instead of saving it.
    */
   readonly discard?: boolean
+}
+
+/**
+ * Acquire a run's sandbox. A workspace the prompt describes comes with the instruction files it
+ * carries, read once here: every request of the run then renders the same prompt, and so does the
+ * next run while the files stay as they are.
+ */
+export async function acquireRunSandbox(
+  sandbox: RunSandbox,
+  signal?: AbortSignal
+): Promise<AcquiredRunSandbox> {
+  const acquired = await sandbox.acquire()
+  const { promptContext } = acquired
+  if (!sandbox.waitBeforeModel || !promptContext) return acquired
+
+  const instructions = await readWorkspaceInstructions(
+    acquired.sandbox,
+    promptContext.workingDirectory,
+    signal
+  )
+  if (instructions.length === 0) return acquired
+
+  return { ...acquired, promptContext: { ...promptContext, instructions } }
 }

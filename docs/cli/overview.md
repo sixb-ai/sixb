@@ -40,6 +40,10 @@ there runs its turns. Opened from another folder or another of your computers, i
 works; `ctrl+f` moves it here, and only here runs its turns from then on. Quitting, or closing the
 terminal, stops a turn running here: it ends interrupted, and runs again only if you retry it.
 
+The agent also follows the folder's `AGENTS.md` (or `CLAUDE.md`), and those of the folders above it
+up to the repository's root: see
+[project instructions](../models/overview.md#give-it-project-instructions).
+
 In the app, such a conversation shows its computer and folder, and whether `sixb` is open there.
 A message you send from the app runs on your computer as one typed in `sixb` does, in the
 permission mode the app sends it with; while `sixb` is closed, it waits for it. **Continue in the

@@ -155,6 +155,20 @@ export interface AgentWorkspacePromptContext {
     readonly url: string
     readonly authenticatedAccess?: "read" | "write"
   }
+  /**
+   * The instruction files the workspace carries, its repository's root first, as read when it was
+   * acquired (see `readWorkspaceInstructions`).
+   */
+  readonly instructions?: readonly WorkspaceInstructionsFile[]
+}
+
+/** A workspace's `AGENTS.md`, or `CLAUDE.md` where a folder has no `AGENTS.md`. */
+export interface WorkspaceInstructionsFile {
+  /** From the working directory: `AGENTS.md`, or `../AGENTS.md` for its parent folder's. */
+  readonly path: string
+  readonly text: string
+  /** Cut at the size limit: the line the rest of the file starts at. */
+  readonly continuesAtLine?: number
 }
 
 export interface RenderWorkflowOutputFinalizerPromptInput {
@@ -236,6 +250,11 @@ function renderAgentSystemPromptSections(
     promptSectionParts(
       "workspace",
       system(input.workspace && renderWorkspaceContext(input.workspace))
+    ),
+    promptSectionParts(
+      "workspace_instructions",
+      renderWorkspaceInstructions(input.workspace?.instructions ?? []),
+      "instructions"
     ),
     promptSectionParts(
       "sixb_mode_rules",
@@ -852,6 +871,46 @@ function renderWorkspaceChangeRule(
   return access === "write"
     ? "Commit and push only when the task requires it."
     : "Do not push: this task cannot publish changes to this repository."
+}
+
+/**
+ * Each instruction file as it was read, under its path: the user's or the repository's own words,
+ * kept verbatim but for the tags that would close its section or open one of Sixb's.
+ */
+function renderWorkspaceInstructions(
+  files: readonly WorkspaceInstructionsFile[]
+): readonly PromptSection[] {
+  if (files.length === 0) return []
+
+  return [
+    {
+      part: "system",
+      text: "The instruction files of the working directory and the folders above it, from its repository's root down: follow them for work in this folder. Sixb's rules and the project's agent instructions take precedence where they conflict.",
+    },
+    ...files.map((file) => {
+      const path = quoteWorkspaceValue(file.path)
+      const body = [
+        quoteWorkspaceInstructions(file.text.trimEnd()),
+        ...(file.continuesAtLine === undefined
+          ? []
+          : [
+              `[Cut here: the file continues. Read ${path} from line ${file.continuesAtLine} for the rest.]`,
+            ]),
+      ]
+        .filter(Boolean)
+        .join("\n")
+
+      return {
+        part: "instructions" as const,
+        text: `\n\n<workspace_file path=${path}>\n${body}\n</workspace_file>`,
+      }
+    }),
+  ]
+}
+
+/** Keep an instruction file from closing its section or opening one of Sixb's. */
+function quoteWorkspaceInstructions(contents: string): string {
+  return contents.replace(/<(\/?)(workspace_|sixb_)/gi, "&lt;$1$2")
 }
 
 // Quote dynamic values as data and prevent them from introducing prompt section tags.

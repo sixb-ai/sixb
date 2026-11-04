@@ -114,6 +114,7 @@ import type {
 import { ModelProviderError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
+  exec,
   initializeSandboxEnvironment,
   SandboxStateUnavailableError,
   sandboxConfig,
@@ -1460,6 +1461,14 @@ class RecordingSandbox implements Sandbox {
           }
         : { exitCode: 2, stdout: "", stderr: "file not found", durationMs: 1 }
     }
+    // A workspace without instruction files.
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("sixb-read-workspace-instructions")
+    ) {
+      return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 }
+    }
     if (command === "bash" && script === "print-sixb-env") {
       const env = options.env ?? {}
       return {
@@ -1508,6 +1517,44 @@ function runTokenRunId(options: CreateSandboxOptions | undefined): string | unde
   return agentRunTokenRunId(authorization.replace(/^Bearer /, ""))
 }
 
+/**
+ * A recording sandbox that reads the workspace's instruction files for real, from the folder the
+ * run names, as a computer's sandbox reads them from the user's folder.
+ */
+class FolderReadingSandbox extends RecordingSandbox {
+  override async runCommand(
+    command: string,
+    args: readonly string[] = [],
+    options: RunCommandOptions = {}
+  ): Promise<CommandResult> {
+    if (!readsInstructions(command, args) || !options.cwd) {
+      return super.runCommand(command, args, options)
+    }
+
+    this.commands.push({ command, args, options })
+    return readInstructionsIn(options.cwd, args, options)
+  }
+}
+
+function readsInstructions(command: string, args: readonly string[]): boolean {
+  return command === "bash" && (args.at(-1) ?? "").includes("sixb-read-workspace-instructions")
+}
+
+/** Run the instruction files' script for real, in a folder on this machine. */
+function readInstructionsIn(
+  folder: string,
+  args: readonly string[],
+  options: RunCommandOptions
+): Promise<CommandResult> {
+  return exec({
+    argv: ["bash", ...args],
+    cwd: folder,
+    env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    timeoutMs: options.timeout,
+    signal: options.signal,
+  })
+}
+
 class RecordingSandboxFactory implements SandboxFactory {
   readonly supportsRequestCredentials = true
   readonly sandboxes: RecordingSandbox[] = []
@@ -1526,7 +1573,9 @@ class LoggedSandbox extends RecordingSandbox {
   constructor(
     id: string,
     private readonly events: string[],
-    private readonly failingCommand?: string
+    private readonly failingCommand?: string,
+    /** A folder on this machine standing for the checkout: its instruction files are read there. */
+    private readonly checkout?: string
   ) {
     super(id)
   }
@@ -1546,6 +1595,10 @@ class LoggedSandbox extends RecordingSandbox {
     if (script === this.failingCommand) {
       this.commands.push({ command, args, options })
       return { exitCode: 1, stdout: "", stderr: "setup failed", durationMs: 1 }
+    }
+    if (this.checkout && readsInstructions(command, args)) {
+      this.commands.push({ command, args, options })
+      return readInstructionsIn(this.checkout, args, options)
     }
     return super.runCommand(command, args, options)
   }
@@ -1578,6 +1631,8 @@ class StepSandboxFactory implements SandboxFactory {
       readonly failingCommand?: string
       /** Runs after the session exists and before the clone, like a slow provider boot. */
       readonly beforeClone?: () => Promise<void>
+      /** A folder on this machine standing for the checkout: its instruction files are read there. */
+      readonly checkout?: string
     } = {}
   ) {
     this.configuration = sandboxConfig(recipe)
@@ -1589,7 +1644,8 @@ class StepSandboxFactory implements SandboxFactory {
     const sandbox = new LoggedSandbox(
       `step-sandbox-${this.sandboxes.length + 1}`,
       this.events,
-      this.behavior.failingCommand
+      this.behavior.failingCommand,
+      this.behavior.checkout
     )
     this.sandboxes.push(sandbox)
     try {
@@ -6023,13 +6079,21 @@ describe("AgentWorker", () => {
     // Regression proof: ignore node.agentStep.sandbox in workflow-node-execution.ts; the project
     // factory provisions a blank sandbox instead. Move prepareWorkspaceRunFiles after
     // provisioning in EphemeralWorkspace; run files are then written before they are excluded.
+    // Acquire with input.sandbox.acquire() in provisionSandbox; the checkout's AGENTS.md is then
+    // missing from the prompt.
     let system: string | undefined
     const projectSandboxes = new RecordingSandboxFactory()
-    const step = new StepSandboxFactory({
-      source: { type: "git", url: STEP_REPOSITORY },
-      setup: ["bun install"],
-      env: { NODE_ENV: "test" },
-    })
+    const checkout = realpathSync(mkdtempSync(join(tmpdir(), "sixb-step-checkout-")))
+    writeFileSync(join(checkout, "AGENTS.md"), "# Acme\n\nRun `bun test` before you finish.\n")
+    const step = new StepSandboxFactory(
+      {
+        source: { type: "git", url: STEP_REPOSITORY },
+        setup: ["bun install"],
+        env: { NODE_ENV: "test" },
+      },
+      [],
+      { checkout }
+    )
     const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
       model: promptCapturingAnswerModel((prompt) => {
         system = prompt
@@ -6073,8 +6137,20 @@ describe("AgentWorker", () => {
       expect(system).toContain("This workspace is discarded when the task ends.")
       expect(system).toContain("Do not push: this task cannot publish changes to this repository.")
       expect(system).not.toContain("Files persist")
+
+      // The checkout's own instructions, read in its working directory.
+      const reads = step.sandboxes[0]?.commands.filter((call) =>
+        readsInstructions(call.command, call.args)
+      )
+      expect(reads?.map((call) => call.options.cwd)).toEqual([
+        "/tmp/sixb-recording-sandbox/step-sandbox-1/repository",
+      ])
+      expect(system).toContain(
+        '<workspace_file path="AGENTS.md">\n# Acme\n\nRun `bun test` before you finish.\n</workspace_file>'
+      )
     } finally {
       await worker.stop()
+      rmSync(checkout, { recursive: true, force: true })
     }
   })
 
@@ -14543,7 +14619,9 @@ describe("agent tools act as the requester", () => {
   })
 
   // Regression proof: key the runner's files directory by run id again; the second turn's system
-  // prompt names other skill, ontology and memory paths, so its first call reads no cache.
+  // prompt names other skill, ontology and memory paths, so its first call reads no cache. Acquire
+  // with sandbox.acquire() in createConversationAgentEnvironment; the folder's AGENTS.md is then
+  // missing from the prompt.
   test("a computer's turns of one thread name the same files, so their prompt stays cached", async () => {
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
@@ -14564,6 +14642,7 @@ describe("agent tools act as the requester", () => {
       new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
     )
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    writeFileSync(join(folder, "AGENTS.md"), "# Acme\n\nRun `bun test` before you finish.\n")
     const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
     const opened: string[] = []
     const leftovers: string[][] = []
@@ -14577,7 +14656,7 @@ describe("agent tools act as the requester", () => {
       openSandbox: async ({ runFiles }) => {
         opened.push(runFiles)
         leftovers.push(readdirSync(runFiles))
-        return new RecordingSandbox(`computer-${opened.length}`)
+        return new FolderReadingSandbox(`computer-${opened.length}`)
       },
     })
 
@@ -14615,6 +14694,10 @@ describe("agent tools act as the requester", () => {
       const [one, two] = requests
       if (!one || !two) throw new Error("Expected two model requests.")
       expect(systemPromptOf(one.messages)).toContain(join(runFiles, "skills"))
+      // The folder's own instructions, read on the computer, as each turn starts.
+      expect(systemPromptOf(one.messages)).toContain(
+        '<workspace_file path="AGENTS.md">\n# Acme\n\nRun `bun test` before you finish.\n</workspace_file>'
+      )
       expect(two.messages[0]).toEqual(one.messages[0])
       expect(two.messages.slice(0, one.messages.length)).toEqual([...one.messages])
     } finally {
