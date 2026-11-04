@@ -11,7 +11,7 @@ import {
 } from "@sixb/core/internal/agents"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { delay } from "./abort"
-import { BACKGROUND_DIRECTORY, BackgroundCommands } from "./background-commands"
+import { BACKGROUND_DIRECTORY, BackgroundCommands, stopLeftRunning } from "./background-commands"
 import { ChildRunner } from "./run-child"
 import { runConversationTurn } from "./run-conversation-turn"
 import { runApiCredential, runnerTokenFor, runTokenFor } from "./run-credential"
@@ -293,6 +293,17 @@ export class ComputerRunner {
           })
           held = giveBack
           try {
+            // What a sixb killed, or that crashed, left running is stopped before its files go.
+            if (background && folder !== undefined) {
+              await this.stopCommandsLeftRunning({
+                runFiles,
+                background,
+                folder,
+                credential,
+                signal,
+              })
+            }
+
             // Each run starts empty, as with a directory of its own: nothing an earlier run, or
             // one that crashed, left there, but its thread's background commands.
             await emptyDirectory(runDirectory, kept())
@@ -328,6 +339,46 @@ export class ComputerRunner {
         },
       }
       return { sandbox }
+    }
+  }
+
+  /**
+   * Stop the thread's commands a `sixb` killed, or that crashed, left running: their groups run
+   * on, re-parented, and this one knows them only by the pid files its run is about to remove.
+   * Done in a sandbox of its own, opened only when there are some; a failure is reported, and the
+   * run goes on.
+   */
+  private async stopCommandsLeftRunning(input: {
+    readonly runFiles: string
+    readonly background: BackgroundCommands
+    readonly folder: string
+    readonly credential: SandboxRequestCredential
+    readonly signal: AbortSignal
+  }): Promise<void> {
+    const directory = join(input.runFiles, BACKGROUND_DIRECTORY)
+    const pidFiles = (await readdir(directory).catch(() => []))
+      .filter((name) => name.endsWith(".pid") && !input.background.has(name.slice(0, -4)))
+      .sort()
+      .map((name) => join(directory, name))
+    if (pidFiles.length === 0) return
+
+    try {
+      const sandbox = await this.options.openSandbox({
+        workingDirectory: input.folder,
+        runFiles: input.runFiles,
+        credential: input.credential,
+        signal: input.signal,
+      })
+      try {
+        await stopLeftRunning(sandbox, pidFiles, input.signal)
+      } finally {
+        await sandbox.destroy()
+      }
+    } catch (error) {
+      console.warn(
+        `[SixbAgent] Could not stop the background commands a sixb that ended left running in ${directory}:`,
+        error
+      )
     }
   }
 
