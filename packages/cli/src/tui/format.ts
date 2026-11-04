@@ -95,6 +95,22 @@ export function toolLine(
     }
     case "view_file":
       return { verb: "view", detail: text(input?.path), ...error }
+    case "web_search": {
+      const results = Array.isArray(output?.results) ? output.results.length : undefined
+      return {
+        verb: "search",
+        detail: firstLine(text(input?.query)),
+        ...(results !== undefined ? { note: plural(results, "result") } : {}),
+        ...error,
+      }
+    }
+    case "web_fetch":
+      return {
+        verb: "fetch",
+        detail: webAddress(text(input?.url)),
+        ...fetchNote(output),
+        ...(failed ? fetchFailure(part.error) : {}),
+      }
     case "publish_artifact":
     case "publish_artifact_version":
       return {
@@ -177,6 +193,58 @@ function heldApprovalIds(stdout: string): string[] {
   })
 }
 
+/** An address as host and path: the scheme, query and fragment say nothing on one line. */
+function webAddress(value: string): string {
+  try {
+    const url = new URL(value)
+    return url.pathname === "/" ? url.host : `${url.host}${url.pathname}`
+  } catch {
+    return firstLine(value)
+  }
+}
+
+function webHost(value: string): string {
+  try {
+    return new URL(value).host
+  } catch {
+    return firstLine(value)
+  }
+}
+
+/** What came of a page read: the site it pointed to instead, an answer, or the file it filled. */
+function fetchNote(output: Record<string, unknown> | undefined): Pick<ToolLine, "note"> {
+  const redirect = record(output?.redirect)
+  if (redirect) return { note: `→ ${webHost(text(redirect.url))}` }
+  if (typeof output?.answer === "string") return { note: "answered" }
+  if (typeof output?.path === "string" && typeof output.bytes === "number") {
+    return { note: `saved ${byteSize(output.bytes)}` }
+  }
+  return {}
+}
+
+/**
+ * A failed read as a short reason beside the address, which a full error would squeeze off the
+ * line, and the error itself under it, as a failed command's output.
+ */
+function fetchFailure(error: string | undefined): Pick<ToolLine, "note" | "failed" | "preview"> {
+  const detail = firstLine(error ?? "").replace(/^\[\w+\]\s*/, "")
+  const note = /^Blocked:/.test(detail)
+    ? "blocked"
+    : /\bECONNREFUSED\b/.test(detail)
+      ? "refused"
+      : /^Timed out\b/.test(detail)
+        ? "timed out"
+        : "failed"
+
+  return { note, failed: true, ...(detail ? { preview: [detail] } : {}) }
+}
+
+function byteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 /** How a background command stands, beside its line. */
 function backgroundNote(status: string, exitCode: unknown): Pick<ToolLine, "note" | "failed"> {
   if (status === "running") return { note: "running" }
@@ -238,8 +306,11 @@ function partialInput(inputText: string | undefined): Record<string, unknown> | 
   try {
     return record(JSON.parse(inputText))
   } catch {
-    const command = /"(?:command|path|task|key)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(inputText)
-    return command ? { command: command[1], path: command[1], task: command[1] } : undefined
+    const command = /"(?:command|path|task|key|query|url)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(inputText)
+    const value = command?.[1]
+    return value !== undefined
+      ? { command: value, path: value, task: value, query: value, url: value }
+      : undefined
   }
 }
 
