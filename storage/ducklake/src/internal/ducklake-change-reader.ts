@@ -33,6 +33,13 @@ export class DuckLakeChangeReader {
     const after = await this.snapshots.getVersion(input.datasetId, input.toVersionId)
     const columns = resolveDatasetChangeColumns(input, before, after)
     if (!columns) return null
+
+    // Versions that only record new provenance or source ordering hold their parent's rows: their
+    // change set is empty, whatever the keys, so it needs neither the key checks nor the join.
+    const unchanged =
+      (input.toVersionId === input.fromVersionId || !after!.rowsChanged) &&
+      (await this.snapshots.holdsRowsOf(input.datasetId, input.toVersionId, input.fromVersionId))
+
     const lease = await this.connections.acquireAttachedRuntime()
     const runtime = lease.runtime
     const temporary = quoteIdentifier(`sixb_delta_${randomUUID().replaceAll("-", "")}`)
@@ -44,6 +51,12 @@ export class DuckLakeChangeReader {
       const table = qualifiedTableName(this.options, ref.tableName)
       const oldRelation = `${table} AT (VERSION => ${parseVersionId(input.fromVersionId)})`
       const newRelation = `${table} AT (VERSION => ${parseVersionId(input.toVersionId)})`
+      if (unchanged) {
+        return noChanges(
+          after!.rowCount ?? before!.rowCount ?? (await countRows(runtime, newRelation))
+        )
+      }
+
       const previousCount = await uniqueRowCount(runtime, oldRelation, input.keyColumns)
       const nextCount = await uniqueRowCount(runtime, newRelation, input.keyColumns)
       if (previousCount === null || nextCount === null) return null
@@ -118,6 +131,23 @@ export class DuckLakeChangeReader {
       }
     }
   }
+}
+
+function noChanges(rowCount: number): DatasetChanges {
+  return {
+    fromRowCount: rowCount,
+    toRowCount: rowCount,
+    changeCount: 0,
+    changes: (async function* () {
+      yield* []
+    })(),
+    async close() {},
+  }
+}
+
+async function countRows(runtime: DuckDbQueryRuntime, relation: string): Promise<number> {
+  const [row] = await runtime.query(`SELECT count(*) AS total FROM ${relation}`)
+  return safeCount(row!, "total")
 }
 
 async function uniqueRowCount(

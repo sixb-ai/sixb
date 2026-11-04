@@ -104,7 +104,8 @@ returns `{ outcome: "unchanged", version: null }`.
 For datasets declaring `sequenceBy`, newer source revisions win; older changes are ignored and
 conflicting ties abort the merge. Deletes require `change.delete(key, { sequence })`. Each version
 manifest retains source revisions and deletion tombstones, published atomically with the version's
-rows through the dataset head pointer. New tombstones create a version even for absent keys.
+rows through the dataset head pointer. New tombstones create a version even for absent keys,
+which records `rowsChanged: false`.
 Sequenced provider writes use merge sessions; snapshot syncs convert rows to ordered upserts.
 Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empty result
 addressable. Later no-op commits reuse the current version, including after a concurrent write.
@@ -147,7 +148,7 @@ Given `path: ".sixb/lake"` and a dataset id of `raw.erp.orders`, the provider cr
 
 - `definition.json` stores the registered `DatasetDefinition`
 - `state.json` stores lightweight mutable state such as `latestVersionId`
-- `versions/ver_<uuid>.json` stores immutable version metadata including schema, producer, inputs, row counts, and parent version
+- `versions/ver_<uuid>.json` stores immutable version metadata including schema, producer, inputs, row counts, parent version, and whether the version changed rows or lineage
 
 ### Row Storage
 

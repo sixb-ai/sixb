@@ -43,7 +43,7 @@ import type {
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"
-import { hasDatasetProvenanceChanges } from "./version-inputs"
+import { hasDatasetLineageChanges, hasDatasetProvenanceChanges } from "./version-inputs"
 
 function cloneDatasetDefinition(definition: DatasetDefinition): DatasetDefinition {
   return structuredClone(definition)
@@ -555,13 +555,9 @@ export class InMemoryLakeStorage implements LakeStorage {
         }
       }
 
+      const sameRows = this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)
       const createInitialVersion = options.commit?.createInitialVersion && latestVersion === null
-      if (
-        !createInitialVersion &&
-        (ordered
-          ? ordered.accepted.size === 0
-          : this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema))
-      ) {
+      if (!createInitialVersion && (ordered ? ordered.accepted.size === 0 : sameRows)) {
         return {
           outcome: "unchanged",
           version: latestVersion ? cloneDatasetVersion(latestVersion) : null,
@@ -586,6 +582,15 @@ export class InMemoryLakeStorage implements LakeStorage {
         producer: options.merge.producer ? structuredClone(options.merge.producer) : undefined,
         inputs: options.merge.inputs ? structuredClone(options.merge.inputs) : undefined,
         ...(lineage && { lineage }),
+        // A sequenced merge can accept only changes that leave the rows as they were, such as the
+        // delete of an absent key: it still records the source ordering it advanced.
+        rowsChanged: latestVersion === null || !sameRows,
+        lineageChanged: hasDatasetLineageChanges(latestVersion, {
+          datasetId: definition.id,
+          schema: definition.schema,
+          producer: options.merge.producer,
+          lineage,
+        }),
         rowCount: visibleRows.length,
         sizeBytes: new TextEncoder().encode(
           visibleRows.map((row) => JSON.stringify(row)).join("\n")
@@ -640,18 +645,18 @@ export class InMemoryLakeStorage implements LakeStorage {
       parent: latestVersion,
     })
 
+    const provenance = {
+      ...options.write,
+      datasetId: definition.id,
+      schema: definition.schema,
+      lineage,
+    }
+    const rowsChanged =
+      !latestVersion || !this.isUnchangedWrite(mode, latestVersion, options.rows, definition.schema)
+
     // Content-identical snapshots and empty appends reuse the latest version
     // unless explicitly supplied provenance has changed.
-    if (
-      latestVersion &&
-      !hasDatasetProvenanceChanges(latestVersion, {
-        ...options.write,
-        datasetId: definition.id,
-        schema: definition.schema,
-        lineage,
-      }) &&
-      this.isUnchangedWrite(mode, latestVersion, options.rows, definition.schema)
-    ) {
+    if (latestVersion && !rowsChanged && !hasDatasetProvenanceChanges(latestVersion, provenance)) {
       return { ...latestVersion, outcome: "unchanged" }
     }
 
@@ -675,6 +680,8 @@ export class InMemoryLakeStorage implements LakeStorage {
       producer: options.write.producer ? structuredClone(options.write.producer) : undefined,
       inputs: options.write.inputs ? structuredClone(options.write.inputs) : undefined,
       ...(lineage && { lineage }),
+      rowsChanged,
+      lineageChanged: hasDatasetLineageChanges(latestVersion, provenance),
       rowCount: visibleRows.length,
       sizeBytes,
     }

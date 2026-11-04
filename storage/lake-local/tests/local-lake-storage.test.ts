@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { appendFile, mkdtemp, readdir, rm, symlink } from "node:fs/promises"
+import { appendFile, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { change, col, type DatasetRow, defineDataset } from "@sixb/core"
@@ -83,6 +83,42 @@ describe("LocalLakeStorage definition persistence", () => {
       await expect(reopened.listDatasets()).resolves.toEqual([dataset])
       await expect(reopened.createDataset(dataset)).resolves.toEqual(dataset)
       await expect(reopened.listVersions(dataset.id)).resolves.toEqual([])
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  })
+
+  test("reads a version stored before it recorded what it changed as changed", async () => {
+    // Red check: read a missing `rowsChanged` or `lineageChanged` as false in `toDatasetVersion`.
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-lake-local-older-version-"))
+    const path = join(rootDir, "lake")
+    try {
+      const dataset = defineDataset("stable.older-version", { schema: [col("id", "string")] })
+      const storage = new LocalLakeStorage({ path })
+      await storage.createDataset(dataset)
+      const write = await storage.beginWrite({ dataset })
+      await write.writeRows([{ id: "row_1" }])
+      const version = await write.commit()
+
+      const manifestPath = join(
+        path,
+        "datasets",
+        encodeURIComponent(dataset.id),
+        "versions",
+        `${encodeURIComponent(version.versionId)}.json`
+      )
+      const {
+        rowsChanged: _rows,
+        lineageChanged: _lineage,
+        ...older
+      } = JSON.parse(await readFile(manifestPath, "utf8"))
+      await writeFile(manifestPath, JSON.stringify(older))
+
+      const reopened = new LocalLakeStorage({ path })
+      expect(await reopened.getVersion(dataset.id, version.versionId)).toMatchObject({
+        rowsChanged: true,
+        lineageChanged: true,
+      })
     } finally {
       await rm(rootDir, { recursive: true, force: true })
     }

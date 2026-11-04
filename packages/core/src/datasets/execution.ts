@@ -222,6 +222,8 @@ export function createDatasetsRuntime(
                   versionId: result.version.versionId,
                   createdAt: result.version.createdAt.toISOString(),
                   producer,
+                  rowsChanged: result.version.rowsChanged,
+                  lineageChanged: result.version.lineageChanged,
                 },
               },
             ],

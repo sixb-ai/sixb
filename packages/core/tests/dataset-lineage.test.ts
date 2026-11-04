@@ -326,6 +326,8 @@ describe("dataset versions", () => {
       schema: report.schema,
       producer: { kind: "pipeline" },
       inputs: [],
+      rowsChanged: report.rowsChanged,
+      lineageChanged: report.lineageChanged,
       rowCount: report.rowCount,
       ...(report.sizeBytes === undefined ? {} : { sizeBytes: report.sizeBytes }),
     } satisfies DatasetVersion

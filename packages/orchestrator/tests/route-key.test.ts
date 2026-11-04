@@ -50,6 +50,8 @@ const cases: readonly [string, StoredDomainEvent, readonly OrchestratorRouteKey[
         versionId: "v-1",
         createdAt: base.occurredAt,
         producer: { kind: "sync", id: "sync-orders", runId: "run-1" },
+        rowsChanged: true,
+        lineageChanged: true,
       },
     },
     [

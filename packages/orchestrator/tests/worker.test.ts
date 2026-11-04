@@ -133,7 +133,10 @@ function makeInvoiceUpdatedEvent(
   }
 }
 
-function makeDatasetVersionCommittedEvent(versionId = "v-1"): EventDraft {
+function makeDatasetVersionCommittedEvent(
+  versionId = "v-1",
+  changed = { rowsChanged: true, lineageChanged: true }
+): EventDraft {
   return {
     type: "dataset.version.committed",
     payload: {
@@ -141,6 +144,7 @@ function makeDatasetVersionCommittedEvent(versionId = "v-1"): EventDraft {
       versionId,
       createdAt: "2026-04-18T02:00:00.000Z",
       producer: { kind: "sync", id: "source-sync", runId: "run-1" },
+      ...changed,
     },
   }
 }
@@ -604,6 +608,82 @@ describe("OrchestratorWorker", () => {
     })
   })
 
+  test("dataset schedules skip versions that change neither rows nor lineage", async () => {
+    // Red check: make `matchesDatasetChange` in core's selector predicate return true.
+    const datasetSchedule = defineSchedule("raw-invoices-updated").on(
+      events.dataset(rawInvoices).updated()
+    )
+    const sync = defineSync("sync-copy")
+      .when(datasetSchedule)
+      .from(connector)
+      .read(() => [])
+      .intoDataset(rawInvoices)
+    const pipeline = definePipeline("clean-invoices")
+      .when(datasetSchedule)
+      .then(
+        definePipelineStep("clean")
+          .inputs({ invoices: rawInvoices })
+          .output(cleanInvoices)
+          .run(() => {})
+      )
+    const workflow = defineWorkflow("inspect-invoices")
+      .input({})
+      .when(datasetSchedule)
+      .then(emptyStep)
+    const routes = compileRoutes({
+      schedules: [datasetSchedule],
+      syncs: [sync],
+      pipelines: [pipeline],
+      workflows: [workflow],
+      projections: [invoiceProjectionDescriptor()],
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    const projectionDispatches: ProjectionDispatchInput[] = []
+    await startWorker(eventRuntime, queues, routes, PROJECT_ID, {
+      dispatcher: createTestProjectionDispatcher(projectionDispatches),
+      reconciliation: { lakeStorage: new InMemoryLakeStorage(), projectionRuns: noProjectionRuns },
+    })
+
+    // One ordered subscription: the jobs of the later versions show the first one was judged.
+    const [, lineageOnly, rowsOnly] = await eventRuntime.append({
+      events: [
+        makeDatasetVersionCommittedEvent("v-1", { rowsChanged: false, lineageChanged: false }),
+        makeDatasetVersionCommittedEvent("v-2", { rowsChanged: false, lineageChanged: true }),
+        makeDatasetVersionCommittedEvent("v-3", { rowsChanged: true, lineageChanged: false }),
+      ],
+    })
+
+    const claimed = { sync: [] as string[], pipeline: [] as string[], workflow: [] as string[] }
+    const claim = { projectId: PROJECT_ID, workerId: "test", limit: 10 }
+    await waitFor(async () => {
+      for (const job of await queues.syncRuns.claim(claim)) claimed.sync.push(job.job.payload.runId)
+      for (const job of await queues.pipelines.claim(claim)) {
+        claimed.pipeline.push(job.job.payload.runId)
+      }
+      for (const job of await queues.workflows.claim(claim)) {
+        claimed.workflow.push(job.job.payload.runId)
+      }
+
+      return Object.values(claimed).every((runIds) => runIds.length >= 2)
+    })
+
+    for (const runIds of Object.values(claimed)) {
+      expect(runIds).toEqual([
+        expect.stringContaining(`event:${lineageOnly!.id}`),
+        expect.stringContaining(`event:${rowsOnly!.id}`),
+      ])
+    }
+
+    // Projections apply every version: their markings follow the version they applied.
+    await waitFor(() => projectionDispatches.length === 3)
+    expect(projectionDispatches.map((dispatch) => dispatch.datasetVersion.versionId)).toEqual([
+      "v-1",
+      "v-2",
+      "v-3",
+    ])
+  })
+
   test("sync outcome selectors only dispatch the selected status", async () => {
     const upstream = defineSync("upstream")
       .from(connector)
@@ -809,6 +889,8 @@ describe("OrchestratorWorker", () => {
       mode: "snapshot",
       createdAt: new Date("2026-04-18T02:00:00.000Z"),
       schema: rawInvoices.schema,
+      rowsChanged: true,
+      lineageChanged: true,
     }
     const schemaVersion: DatasetVersion = {
       datasetId: rawInvoices.id,
@@ -817,6 +899,8 @@ describe("OrchestratorWorker", () => {
       mode: "schema",
       createdAt: new Date("2026-04-19T02:00:00.000Z"),
       schema: rawInvoices.schema,
+      rowsChanged: true,
+      lineageChanged: true,
     }
     const dispatches: ProjectionDispatchInput[] = []
 
@@ -851,6 +935,8 @@ describe("OrchestratorWorker", () => {
       mode: "schema",
       createdAt: new Date("2026-04-19T02:00:00.000Z"),
       schema: rawInvoices.schema,
+      rowsChanged: true,
+      lineageChanged: true,
     }
     const errors: unknown[] = []
     const originalError = console.error

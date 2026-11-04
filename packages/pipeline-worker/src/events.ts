@@ -135,6 +135,8 @@ export async function emitDatasetVersionCommitted(
               runId: job.id,
               stepId: step.run.stepId,
             },
+            rowsChanged: step.version.rowsChanged,
+            lineageChanged: step.version.lineageChanged,
           },
         },
       ],

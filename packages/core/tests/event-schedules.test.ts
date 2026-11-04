@@ -82,6 +82,8 @@ describe("evaluateEventSchedule", () => {
             versionId: "version-1",
             createdAt: "2026-01-01T00:00:00.000Z",
             producer: { kind: "sync", id: "sync-invoices", runId: "run-1" },
+            rowsChanged: true,
+            lineageChanged: true,
           },
         },
       ],
@@ -92,6 +94,8 @@ describe("evaluateEventSchedule", () => {
       versionId: "version-1",
       createdAt: "2026-01-01T00:00:00.000Z",
       producer: { kind: "sync", id: "sync-invoices", runId: "run-1" },
+      rowsChanged: true,
+      lineageChanged: true,
     })
   })
 

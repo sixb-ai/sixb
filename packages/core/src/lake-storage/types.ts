@@ -76,6 +76,20 @@ export interface DatasetVersion {
    * (`LakeStorage.recordsLineage`), and on a pipeline version whose writer passed none.
    */
   readonly lineage?: DatasetVersionLineage
+  /**
+   * Whether this version's rows differ from those of the version it was committed on top of. False
+   * for a version that only records new provenance, such as identical rows computed from new input
+   * versions, or that only advances source ordering. A dataset's first version and a schema change
+   * count as changed, and so does a stored version that predates this field.
+   */
+  readonly rowsChanged: boolean
+  /**
+   * Whether this version's lineage classifies its rows otherwise than the lineage of the version it
+   * was committed on top of (`hasDatasetLineageChanges`), so its markings may differ. A dataset's
+   * first version and a schema change count as changed, and so does a stored version that predates
+   * this field.
+   */
+  readonly lineageChanged: boolean
   readonly rowCount?: number
   readonly sizeBytes?: number
 }
@@ -265,6 +279,10 @@ export interface LakeStorage {
    * Optional comparison of two immutable versions. Null means the snapshots, schemas or unique
    * keys cannot support a complete delta: use a full read. Operational errors must propagate.
    * Iteration releases the provider connection between bounded pages, allowing other lake work.
+   *
+   * Between versions of identical rows, such as a version and one that only records new input
+   * versions after it, a provider may return the empty delta without checking the keys: no row
+   * needs an identity to be paired.
    */
   readChanges?(input: ReadDatasetChangesInput): Promise<DatasetChanges | null>
 

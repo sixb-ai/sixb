@@ -45,9 +45,24 @@ export function buildEventSelectorPredicate(
     if (filter.runStatus !== undefined && !matchesRunStatus(event, filter.runStatus)) return false
 
     if (!matchesPropertyChange(event, filter)) return false
+    if (!matchesDatasetChange(event, filter)) return false
 
     return true
   }
+}
+
+/**
+ * A dataset selector (`events.dataset(X).updated()`) matches the versions that change what the
+ * dataset holds: its rows, or the lineage its markings are read from. A version that only records
+ * new input versions or source ordering does not. Events stored before versions recorded either
+ * count as changed.
+ */
+function matchesDatasetChange(event: DomainEvent, filter: EventSelectorSpec): boolean {
+  if (event.type !== "dataset.version.committed" || !filter.types?.includes(event.type)) {
+    return true
+  }
+
+  return event.payload.rowsChanged !== false || event.payload.lineageChanged !== false
 }
 
 function matchesRunStatus(

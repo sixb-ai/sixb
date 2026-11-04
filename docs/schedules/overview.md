@@ -86,6 +86,9 @@ You can also select link changes, rule signals, dataset updates, sync or pipelin
 [member changes](../auth/members.md#react-to-member-changes) such as `events.users().joined()`.
 Conditions are supported on object and link events only.
 
+`events.dataset(...).updated()` fires when a new version changes the dataset's rows or
+[markings](../auth/markings.md), not for one that only records new input versions.
+
 Event schedules start work when an event occurs. Use [rules](../rules/overview.md) when you need
 to track whether a condition is currently active or resolved.
 

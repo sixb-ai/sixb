@@ -371,6 +371,56 @@ describe("PipelineWorker", () => {
     })
   })
 
+  test("says whether a dataset version it announces changed rows or lineage", async () => {
+    // Red check: emit `rowsChanged: true` instead of the step version's flag.
+    const step = definePipelineStep("named-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async ({ inputs, output }) => {
+        const named: DatasetRow[] = []
+        for await (const row of inputs.rawCustomers.readRows()) {
+          if (row.name !== "") named.push(row)
+        }
+        await output.writeRows(named)
+      })
+    const pipeline = definePipeline("customers").then(step)
+    const lakeStorage = new InMemoryLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
+    const sixb = createSixbForPipeline({
+      pipeline,
+      datasets: [rawCustomersDataset, customersDataset],
+      lakeStorage,
+    })
+    const worker = new PipelineWorker(sixb)
+
+    await worker.start()
+    try {
+      await enqueuePipelineRun(sixb, { pipelineId: pipeline.id, runId: "run-rows" })
+      await waitForRunFinished(sixb, "run-rows")
+
+      // A new input version whose only new customer the step leaves out.
+      await seedDatasetVersion(lakeStorage, rawCustomersDataset, [
+        { id: "cust_1", name: "Ada" },
+        { id: "cust_2", name: "" },
+      ])
+      await enqueuePipelineRun(sixb, { pipelineId: pipeline.id, runId: "run-provenance" })
+      await waitForRunFinished(sixb, "run-provenance")
+    } finally {
+      await worker.stop()
+    }
+
+    const events = await sixb.events.read({ types: ["dataset.version.committed"] })
+    const announced = events.flatMap((event) =>
+      event.type === "dataset.version.committed"
+        ? [{ rowsChanged: event.payload.rowsChanged, lineageChanged: event.payload.lineageChanged }]
+        : []
+    )
+    expect(announced).toEqual([
+      { rowsChanged: true, lineageChanged: true },
+      { rowsChanged: false, lineageChanged: false },
+    ])
+  })
+
   test("emits committed step events and reports once before failing a later step", async () => {
     const reports: { error: Error; context: SixbErrorContext }[] = []
     const originalError = new Error("nope")
