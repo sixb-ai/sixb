@@ -29,6 +29,10 @@ By default, each agent run gets a fresh environment that is removed when the run
 [conversation continuity](#keep-files-across-conversation-runs) to retain files between runs.
 Files returned as agent attachments are saved separately.
 
+Each command the agent runs has 2 minutes, and up to 10 when the agent expects a longer build or
+test suite. The provider's session lifetime still applies: on Vercel, set `sessionTimeoutMs` to
+cover your longest run, since Vercel's default session lasts 5 minutes.
+
 ## Providers
 
 Choose a provider for your environment. Each card opens the package README for installation,

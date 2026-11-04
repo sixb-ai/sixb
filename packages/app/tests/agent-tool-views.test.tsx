@@ -4,6 +4,7 @@ import { act, fireEvent, render as mount } from "@testing-library/react"
 import { useState } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { type AgentToolView, defineAgentToolView } from "../src"
+import { BashToolView } from "../src/agent/bash/bash-tool-view"
 import { AssistantBody } from "../src/agent/components/message-parts"
 import type { NormalizedPart, NormalizedTool } from "../src/agent/parts"
 import { agentToolViews } from "../src/agent/tool-views/define"
@@ -270,5 +271,39 @@ describe("a project's tool in the chat", () => {
     )
 
     expect(view.getByTestId("quote").textContent).toBe("No carrier.")
+  })
+})
+
+describe("a command in the chat", () => {
+  // Removal proof: show description.detail alone on a failed command's line in BashToolView; the
+  // line then says nothing of the timeout, and reads as any other failure.
+  test("a timed-out command says how long it had, and keeps the model's notice to the model", () => {
+    const notice =
+      "[SixbAgent] The command was stopped after 5 minutes, its timeout. Pass a larger timeoutMs, up to 600000, to give it longer."
+    const view = mount(
+      <BashToolView
+        tool={{
+          state: "output-available",
+          input: { command: "bun run build", timeoutMs: 300_000 },
+          output: {
+            exitCode: 137,
+            stdout: "",
+            stderr: `warning: slow\n${notice}`,
+            durationMs: 300_000,
+            timedOut: true,
+          },
+        }}
+      />
+    )
+    try {
+      const line = view.getByRole("button", { name: /timed out after 5 min/ })
+      expect(line.textContent).not.toContain("137")
+
+      fireEvent.click(line)
+      expect(view.getByText("warning: slow")).toBeDefined()
+      expect(view.container.textContent).not.toContain("[SixbAgent]")
+    } finally {
+      view.unmount()
+    }
   })
 })

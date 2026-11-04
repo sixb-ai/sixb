@@ -2,13 +2,17 @@ import type { CommandResult } from "@sixb/core"
 import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
-const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
-const MAX_COMMAND_TIMEOUT_MS = 120_000
+/** Long enough for a build or a test suite; the model asks for more when it expects longer. */
+const DEFAULT_COMMAND_TIMEOUT_MS = 2 * 60_000
+const MAX_COMMAND_TIMEOUT_MS = 10 * 60_000
 const DEFAULT_MAX_OUTPUT_CHARS = 20_000
 
 export const BASH_TOOL_SPEC = {
   name: "bash",
-  description: "Run a Bash command in the agent run sandbox.",
+  description:
+    `Run a Bash command in the agent run sandbox. A command is stopped after ${durationText(DEFAULT_COMMAND_TIMEOUT_MS)} ` +
+    `(${DEFAULT_COMMAND_TIMEOUT_MS} ms); pass timeoutMs to give it up to ${durationText(MAX_COMMAND_TIMEOUT_MS)} ` +
+    `(${MAX_COMMAND_TIMEOUT_MS} ms). A stopped command returns timedOut: true with what it printed until then.`,
   inputSchema: {
     type: "object",
     properties: {
@@ -18,7 +22,12 @@ export const BASH_TOOL_SPEC = {
         description:
           "Directory to run the command in. Defaults to the sandbox workspace. Accepts absolute paths or paths relative to the workspace.",
       },
-      timeoutMs: { type: "number" },
+      timeoutMs: {
+        type: "number",
+        description:
+          `Milliseconds before the command is stopped. Defaults to ${DEFAULT_COMMAND_TIMEOUT_MS} ` +
+          `(${durationText(DEFAULT_COMMAND_TIMEOUT_MS)}); at most ${MAX_COMMAND_TIMEOUT_MS} (${durationText(MAX_COMMAND_TIMEOUT_MS)}).`,
+      },
     },
     required: ["command"],
     additionalProperties: false,
@@ -53,14 +62,17 @@ export function createBashTool(
     parseInput: parseBashToolInput,
     async execute(input, { signal }): Promise<JsonValue> {
       const { sandbox, env } = await resolveSandbox()
+      const timeout = normalizeTimeout(input.timeoutMs)
       const result = await sandbox.runCommand("bash", ["-lc", input.command], {
         cwd: input.cwd,
         env,
-        timeout: normalizeTimeout(input.timeoutMs),
+        timeout,
         signal,
       })
+
       const output: BashToolOutput = {
         ...result,
+        ...(result.timedOut ? { stderr: withTimeoutNotice(result.stderr, timeout) } : {}),
         stdoutTruncated: false,
         stderrTruncated: false,
       }
@@ -101,6 +113,30 @@ function normalizeTimeout(timeoutMs: number | undefined): number {
     return DEFAULT_COMMAND_TIMEOUT_MS
   }
   return Math.min(Math.floor(timeoutMs), MAX_COMMAND_TIMEOUT_MS)
+}
+
+/**
+ * Say why a command ended without its verdict, last, where the tail of a truncated stream keeps it:
+ * the result's `timedOut` alone does not tell the model how long it had or that it can ask for more.
+ */
+function withTimeoutNotice(stderr: string, timeoutMs: number): string {
+  const limit = durationText(timeoutMs)
+  const more =
+    timeoutMs < MAX_COMMAND_TIMEOUT_MS
+      ? ` Pass a larger timeoutMs, up to ${MAX_COMMAND_TIMEOUT_MS}, to give it longer.`
+      : " That is the most a command can have: split the work or make it faster."
+  const notice = `[SixbAgent] The command was stopped after ${limit}, its timeout.${more}`
+
+  return stderr === "" || stderr.endsWith("\n") ? `${stderr}${notice}` : `${stderr}\n${notice}`
+}
+
+/** `2 minutes`, or `90 seconds` when it is not a whole number of minutes. */
+function durationText(ms: number): string {
+  return ms % 60_000 === 0 ? plural(ms / 60_000, "minute") : plural(ms / 1000, "second")
+}
+
+function plural(count: number, unit: string): string {
+  return `${count} ${unit}${count === 1 ? "" : "s"}`
 }
 
 /**

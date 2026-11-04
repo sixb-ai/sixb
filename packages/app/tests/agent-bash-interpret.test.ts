@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test"
 import {
   type BashIntent,
   classifyCommand,
+  coerceBashInput,
   coerceBashOutput,
   commandPreview,
+  commandTimeout,
   describeBash,
   modelMedia,
 } from "../src/agent/bash/interpret"
@@ -485,6 +487,34 @@ describe("coerceBashOutput", () => {
     expect(failed?.ok).toBe(false)
     expect(failed?.json).toBeUndefined()
     expect(output("plain text output")?.json).toBeUndefined()
+  })
+
+  // Removal proof: read stderr whole in coerceBashOutput; the model's notice then shows as the
+  // command's error.
+  test("reads a timed-out command as failed, without the notice meant for the model", () => {
+    const notice =
+      "[SixbAgent] The command was stopped after 2 minutes, its timeout. Pass a larger timeoutMs, up to 600000, to give it longer."
+    const parsed = coerceBashOutput({
+      exitCode: 137,
+      stdout: "{}",
+      stderr: `warning: slow\n${notice}`,
+      durationMs: 120_000,
+      timedOut: true,
+    })
+
+    expect(parsed).toMatchObject({ ok: false, timedOut: true, stderr: "warning: slow" })
+    expect(parsed?.json).toBeUndefined()
+    expect(coerceBashOutput({ exitCode: 137, stderr: notice, timedOut: true })?.stderr).toBe("")
+  })
+
+  test("names how long a command had, as the bash tool gives it", () => {
+    const timeout = (input: Record<string, unknown>) =>
+      commandTimeout(coerceBashInput({ command: "bun test", ...input }))
+
+    expect(timeout({})).toBe("2 min")
+    expect(timeout({ timeoutMs: 300_000 })).toBe("5 min")
+    expect(timeout({ timeoutMs: 90_000 })).toBe("90 s")
+    expect(timeout({ timeoutMs: 3_600_000 })).toBe("10 min")
   })
 })
 

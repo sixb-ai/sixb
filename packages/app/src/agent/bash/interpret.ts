@@ -79,6 +79,8 @@ export interface ParsedBashOutput {
   readonly stderr: string
   readonly durationMs: number
   readonly truncated: boolean
+  /** The command was stopped at its timeout: its exit code is the signal's, not its verdict. */
+  readonly timedOut: boolean
   /** Decoded stdout when it parsed as JSON, otherwise undefined. */
   readonly json: unknown
 }
@@ -97,17 +99,33 @@ export function coerceBashInput(input: unknown): BashInput | null {
 export function coerceBashOutput(output: unknown): ParsedBashOutput | null {
   if (!isRecord(output)) return null
   const stdout = typeof output.stdout === "string" ? output.stdout : ""
-  const stderr = typeof output.stderr === "string" ? output.stderr : ""
+  const timedOut = output.timedOut === true
+  const rawStderr = typeof output.stderr === "string" ? output.stderr : ""
+  // The line the bash tool adds for the model (how long it had, how to ask for more) is not for
+  // people: the step's line says it in their words.
+  const stderr = timedOut ? rawStderr.replace(/(^|\n)\[SixbAgent\] [^\n]*$/, "") : rawStderr
   const exitCode = typeof output.exitCode === "number" ? output.exitCode : 0
   return {
-    ok: exitCode === 0,
+    ok: exitCode === 0 && !timedOut,
     exitCode,
     stdout,
     stderr,
     durationMs: typeof output.durationMs === "number" ? output.durationMs : 0,
     truncated: output.stdoutTruncated === true || output.stderrTruncated === true,
-    json: exitCode === 0 ? tryParseJson(stdout) : undefined,
+    timedOut,
+    json: exitCode === 0 && !timedOut ? tryParseJson(stdout) : undefined,
   }
+}
+
+/** How long a command had, as the bash tool gives it: 2 minutes unless it asked, 10 at most. */
+export function commandTimeout(input: BashInput | null): string {
+  const asked = input?.timeoutMs
+  const ms =
+    asked !== undefined && Number.isFinite(asked) && asked > 0
+      ? Math.min(Math.floor(asked), 10 * 60_000)
+      : 2 * 60_000
+  if (ms % 60_000 === 0) return `${ms / 60_000} min`
+  return ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`
 }
 
 // --- Command classification ------------------------------------------------

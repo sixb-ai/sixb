@@ -195,6 +195,29 @@ describe("a call as one line", () => {
     })
   })
 
+  // Guard proof: in toolLine (src/tui/format.ts), drop the `timedOut` branch of the note, or read
+  // stderr whole; the line then says `exit 137`, or previews the sentence meant for the model.
+  test("says how long a timed-out command had, not its exit code or the model's notice", () => {
+    const notice =
+      "[SixbAgent] The command was stopped after 2 minutes, its timeout. Pass a larger timeoutMs, up to 600000, to give it longer."
+    const timedOut = (input: Record<string, unknown>, stderr: string) =>
+      toolLine({
+        ...bash({ exitCode: 137, timedOut: true, stdout: "building…\n", stderr }),
+        input: { command: "bun run build", ...input },
+      })
+
+    expect(timedOut({}, notice)).toMatchObject({
+      failed: true,
+      note: "timed out after 2 min",
+      preview: ["building…"],
+    })
+    expect(timedOut({ timeoutMs: 300_000 }, `warning: slow\n${notice}`)).toMatchObject({
+      note: "timed out after 5 min",
+      preview: ["warning: slow"],
+    })
+    expect(timedOut({ timeoutMs: 90_000 }, notice).note).toBe("timed out after 90 s")
+  })
+
   // Guard proof: in toolLine (src/tui/format.ts), read `held` back as
   // `stdout.includes('"status":"awaiting_approval"')`: both outputs read as held, their lines hidden.
   test("holds only a line that names the approval, as the web chat does", () => {

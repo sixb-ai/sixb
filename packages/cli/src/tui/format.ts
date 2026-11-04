@@ -35,8 +35,9 @@ export function toolLine(
     case "bash": {
       const command = text(input?.command)
       const exitCode = typeof output?.exitCode === "number" ? output.exitCode : undefined
+      const timedOut = output?.timedOut === true
       const stdout = text(output?.stdout)
-      const stderr = text(output?.stderr)
+      const stderr = timedOut ? withoutAgentNotice(text(output?.stderr)) : text(output?.stderr)
       const shown = exitCode !== undefined && exitCode !== 0 && stderr ? stderr : stdout || stderr
       const heldIds = heldApprovalIds(stdout)
       const decided = heldIds.flatMap((id) => outcomes.get(id) ?? [])
@@ -50,9 +51,11 @@ export function toolLine(
           ? { note: "held for your approval", held }
           : heldIds.length > 0
             ? decidedLine(decided)
-            : exitCode !== undefined && exitCode !== 0
-              ? { note: `exit ${exitCode}`, failed: true }
-              : {}),
+            : timedOut
+              ? { note: `timed out after ${commandTimeoutText(input?.timeoutMs)}`, failed: true }
+              : exitCode !== undefined && exitCode !== 0
+                ? { note: `exit ${exitCode}`, failed: true }
+                : {}),
         ...error,
       }
     }
@@ -113,6 +116,24 @@ export function toolLine(
         ...error,
       }
   }
+}
+
+/** How long a command had, as the bash tool gives it: 2 minutes unless it asked, 10 at most. */
+function commandTimeoutText(timeoutMs: unknown): string {
+  const ms =
+    typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.min(Math.floor(timeoutMs), 10 * 60_000)
+      : 2 * 60_000
+  if (ms % 60_000 === 0) return `${ms / 60_000} min`
+  return ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`
+}
+
+/**
+ * A timed-out command's stderr without the line the bash tool adds for the model (how long it
+ * had, how to ask for more): the note beside the line says it for people.
+ */
+function withoutAgentNotice(stderr: string): string {
+  return stderr.replace(/(^|\n)\[SixbAgent\] [^\n]*$/, "")
 }
 
 /**
