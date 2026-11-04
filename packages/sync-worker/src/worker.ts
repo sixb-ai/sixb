@@ -241,6 +241,8 @@ async function emitSyncRunFinishedEvents(
                     id: run.syncId,
                     runId: run.id,
                   },
+                  rowsChanged: createdVersion.rowsChanged,
+                  lineageChanged: createdVersion.lineageChanged,
                 },
               },
             ]

@@ -32,6 +32,10 @@ export interface StoredDatasetVersionManifest {
   readonly inputs?: readonly DatasetVersionRef[]
   /** Returned as stored: core validates it when it reads it. */
   readonly lineage?: DatasetVersionLineage
+  /** Absent on a manifest written before versions recorded it, which counts as changed. */
+  readonly rowsChanged?: boolean
+  /** Absent on a manifest written before versions recorded it, which counts as changed. */
+  readonly lineageChanged?: boolean
   readonly rowCount?: number
   readonly sizeBytes?: number
   // Persist the row file name in metadata so the manifest stays self-describing.

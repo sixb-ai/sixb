@@ -86,4 +86,4 @@ export type {
   ReadDatasetRowsInput,
 } from "./types"
 export type { DatasetCommitProvenance } from "./version-inputs"
-export { hasDatasetProvenanceChanges } from "./version-inputs"
+export { hasDatasetLineageChanges, hasDatasetProvenanceChanges } from "./version-inputs"

@@ -121,7 +121,8 @@ export function runLakeChangesContractSuite<T extends LakeStorage>(
     })
     test("refuses blank identities and invalid column requests", async () => {
       const first = await write([row(" ", "one")])
-      expect(await read(first, first)).toBeNull()
+      const second = await write([row(" ", "two")])
+      expect(await read(first, second)).toBeNull()
       await expect(read(first, first, [])).rejects.toThrow("distinct columns")
       await expect(read(first, first, ["missing"])).rejects.toThrow("distinct columns")
     })

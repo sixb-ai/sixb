@@ -200,6 +200,8 @@ describe("lineage at commit", () => {
   const version = (fields: Partial<DatasetVersion>): DatasetVersion => ({
     datasetId: normalized.id,
     versionId: "parent",
+    rowsChanged: true,
+    lineageChanged: true,
     mode: "snapshot",
     createdAt: new Date(0),
     schema,
@@ -338,6 +340,8 @@ describe("resolving a step's lineage through its inputs", () => {
   const input = (fields: Partial<DatasetVersion>): DatasetVersion => ({
     datasetId: rawInvoices.id,
     versionId: "raw-1",
+    rowsChanged: true,
+    lineageChanged: true,
     mode: "snapshot",
     createdAt: new Date(0),
     schema: rawInvoices.schema,
@@ -528,6 +532,8 @@ function asVersion(lineage: DatasetColumnLineage): DatasetVersion {
     mode: "snapshot",
     createdAt: new Date(0),
     schema: history.schema,
+    rowsChanged: true,
+    lineageChanged: true,
     producer: pipeline,
     lineage,
   }
@@ -537,6 +543,8 @@ describe("provenance changes", () => {
   const latest = (fields: Partial<DatasetVersion>): DatasetVersion => ({
     datasetId: normalized.id,
     versionId: "latest",
+    rowsChanged: true,
+    lineageChanged: true,
     mode: "snapshot",
     createdAt: new Date(0),
     schema: normalized.schema,

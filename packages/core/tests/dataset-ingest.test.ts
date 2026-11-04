@@ -87,6 +87,27 @@ test("ingestion validates and orders source changes and only notifies for new ve
   ).toMatchObject({ outcome: "created", version: { rowCount: 0 } })
 })
 
+test("ingestion says whether a version it announces changed rows or lineage", async () => {
+  // Red check: emit `rowsChanged: true` instead of the created version's flag.
+  const { host, sixb } = setup()
+  await sixb.datasets.ingest(dataset, {
+    changes: [change.upsert({ id: "42", revision: 8, name: "Sam" })],
+  })
+
+  // The delete of a person the dataset never held only advances source ordering.
+  await sixb.datasets.ingest(dataset, { changes: [change.delete({ id: "7" }, { sequence: 3 })] })
+
+  const announced = (await host.events.read()).flatMap((event) =>
+    event.type === "dataset.version.committed"
+      ? [{ rowsChanged: event.payload.rowsChanged, lineageChanged: event.payload.lineageChanged }]
+      : []
+  )
+  expect(announced).toEqual([
+    { rowsChanged: true, lineageChanged: true },
+    { rowsChanged: false, lineageChanged: false },
+  ])
+})
+
 test("ingestion checks authority and registration before consuming input or creating a dataset", async () => {
   // Regression proof: remove assertPrivileged from ingestion; the scoped reader writes successfully.
   const { host, lakeStorage, sixb } = setup()

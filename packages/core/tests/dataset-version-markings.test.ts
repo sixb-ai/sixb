@@ -113,6 +113,8 @@ function stored(dataset: DatasetDefinition, fields: Partial<DatasetVersion>): Da
     mode: "snapshot",
     createdAt: new Date(0),
     schema: lakeDatasetDefinition(dataset).schema,
+    rowsChanged: true,
+    lineageChanged: true,
     ...fields,
   }
 }

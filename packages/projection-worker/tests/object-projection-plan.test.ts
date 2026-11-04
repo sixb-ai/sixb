@@ -124,6 +124,8 @@ describe("object projection plan", () => {
           mode: "snapshot",
           createdAt: new Date("2026-01-01T00:00:00.000Z"),
           schema: issues.schema,
+          rowsChanged: true,
+          lineageChanged: true,
         },
         ontology: new OntologyRegistry({ sources: [Issue] }),
       })

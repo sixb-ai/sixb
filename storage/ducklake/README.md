@@ -102,6 +102,10 @@ budget and PostgreSQL metadata pool. Metadata and writes remain available betwee
 Each read stays pinned to one immutable snapshot. Maintenance waits until no reads remain; it
 blocks new reads only while running, so continuous traffic can postpone it.
 
+`readChanges` compares two versions in DuckDB. When no version between them changed rows
+(`rowsChanged` in the commit metadata, read from at most 32 snapshots), it returns an empty change
+set without reading the table.
+
 `maxStreamingReads` limits native streaming readers per provider (default: `4`); extra reads use
 bounded pages on the main connection. It does not limit pipeline inputs. Raise it when memory and
 catalog capacity allow. Finish the iterator, use `for await` with `break`, or pass `signal` to cancel
@@ -190,8 +194,9 @@ Datasets declaring `sequenceBy` instead compare source revisions: older changes 
 identical ties are unchanged, and conflicting ties abort the merge. Deletes require
 `change.delete(key, { sequence })`. Source revisions and deletion tombstones are stored in a
 companion DuckLake table in the same transaction as visible rows, surviving snapshot expiration.
-New tombstone state creates a version even when the visible row count stays zero. Sequenced
-provider writes use merge sessions; snapshot syncs convert rows to ordered upserts.
+New tombstone state creates a version even when the visible rows stay the same; such a version
+records `rowsChanged: false`. Sequenced provider writes use merge sessions; snapshot syncs convert
+rows to ordered upserts.
 Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empty result
 addressable. Later no-op commits reuse the current version, including after a concurrent write.
 Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.

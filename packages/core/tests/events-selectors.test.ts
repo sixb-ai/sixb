@@ -373,4 +373,26 @@ describe("buildEventSelectorPredicate", () => {
       )
     ).toBe(false)
   })
+
+  test("matches dataset versions that change rows or lineage", () => {
+    // Red check: make `matchesDatasetChange` in the selector predicate return true.
+    const matches = buildEventSelectorPredicate(events.dataset(rawInvoices).updated())
+    const committed = (changed: { rowsChanged?: boolean; lineageChanged?: boolean }) =>
+      event({
+        type: "dataset.version.committed",
+        topic: "datasets",
+        payload: { datasetId: rawInvoices.id, versionId: "v-2", ...changed },
+      })
+    const provenanceOnly = committed({ rowsChanged: false, lineageChanged: false })
+
+    expect(matches(provenanceOnly)).toBe(false)
+    expect(matches(committed({ rowsChanged: false, lineageChanged: true }))).toBe(true)
+    expect(matches(committed({ rowsChanged: true, lineageChanged: false }))).toBe(true)
+
+    // Stored before versions recorded either.
+    expect(matches(committed({}))).toBe(true)
+
+    // A selector that does not name the event type still receives every version.
+    expect(buildEventSelectorPredicate({ topic: "datasets" })(provenanceOnly)).toBe(true)
+  })
 })

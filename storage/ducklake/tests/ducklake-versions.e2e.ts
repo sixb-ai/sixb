@@ -415,6 +415,50 @@ describe("DuckLakeStorage versions and time travel", () => {
     ])
   })
 
+  // Red check: read a missing `rowsChanged` or `lineageChanged` as false in the snapshot reader.
+  test("reads a version stored before Sixb recorded what it changed as changed", async () => {
+    const seed = await storage.beginWrite({ dataset: ordersDataset })
+    await seed.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
+    await seed.commit()
+    await storage.close()
+
+    // A version of new provenance as Sixb committed it before: a table claim and its metadata.
+    const runtime = await createDuckDbRuntime()
+    try {
+      await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
+      const tableName = encodeDatasetTableName(ordersDataset.id)
+      await runtime.run("BEGIN TRANSACTION")
+      await runtime.run(`COMMENT ON TABLE sixb_lake.main.${tableName} IS NULL`)
+      await runtime.run(
+        `CALL sixb_lake.set_commit_message('Sixb', 'new provenance', extra_info => ${quoteSqlString(
+          JSON.stringify({
+            sixb: {
+              kind: "datasetVersion",
+              datasetId: ordersDataset.id,
+              commitId: "older-commit",
+              mode: "snapshot",
+              inputs: [{ datasetId: "upstream", versionId: "ducklake:2" }],
+              rowCount: 1,
+            },
+          })
+        )})`
+      )
+      await runtime.run("COMMIT")
+    } finally {
+      await runtime.close()
+    }
+
+    storage = createLocalDuckLakeStorage(rootDir)
+
+    const [older] = await storage.listVersions(ordersDataset.id)
+    expect(older).toMatchObject({
+      inputs: [{ datasetId: "upstream", versionId: "ducklake:2" }],
+      rowsChanged: true,
+      lineageChanged: true,
+    })
+    expect(await storage.getVersion(ordersDataset.id, older!.versionId)).toEqual(older)
+  })
+
   // Regression proof: read commit metadata only for snapshots that change the dataset's own
   // table. A merge that only reordered the source sequences then drops out of the history.
   test("lists a merge that only changed a sequenced dataset's source ordering", async () => {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { randomUUID } from "node:crypto"
 import type { FileRef } from "../blob-storage"
 import { col, type DatasetDefinition, defineDataset } from "../datasets"
 import { LakeStorageError } from "../lake-storage/errors"
@@ -7,6 +8,7 @@ import type {
   DatasetColumnRef,
   DatasetProducer,
   DatasetRow,
+  DatasetVersion,
   DatasetWriteCommitResult,
   LakeStorage,
 } from "../lake-storage/types"
@@ -1176,6 +1178,116 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             rows: [source("tenant")],
             columns: { currency: [], invoiceId: [source("id")] },
           })
+        }))
+    })
+
+    describe("what a version changed", () => {
+      const changed = (version: DatasetVersion | null | undefined) => ({
+        rowsChanged: version?.rowsChanged,
+        lineageChanged: version?.lineageChanged,
+      })
+
+      test("records whether a version changed rows or lineage, across reopening", async () => {
+        // Red check: store `rowsChanged: true` on every version the provider creates.
+        let storage = await options.createStorage()
+        try {
+          await storage.createDataset(writeDataset)
+          await storage.createDataset(definitionDataset)
+
+          const inputVersion = async () => {
+            const session = await storage.beginWrite({ dataset: definitionDataset })
+            await session.writeRows([{ orderId: randomUUID(), customerName: "Input" }])
+            const version = await session.commit()
+            return { datasetId: definitionDataset.id, versionId: version.versionId }
+          }
+
+          const rows = [{ orderId: "ord_1", customerName: "Ada" }]
+          const commit = async (
+            input: Pick<BeginDatasetWriteInput, "producer" | "lineage" | "mode" | "inputs">,
+            written: readonly DatasetRow[] = rows
+          ) => {
+            const session = await storage.beginWrite({ dataset: writeDataset, ...input })
+            await session.writeRows(written)
+            const version = await session.commit()
+            expect(version.outcome).toBe("created")
+            return version
+          }
+
+          const first = await commit({ inputs: [await inputVersion()] })
+          expect(changed(first)).toEqual({ rowsChanged: true, lineageChanged: true })
+
+          // Identical rows computed from a new input version.
+          const provenanceOnly = await commit({ inputs: [await inputVersion()] })
+          expect(changed(provenanceOnly)).toEqual({ rowsChanged: false, lineageChanged: false })
+
+          // Identical rows that come from other columns.
+          const lineageOnly = await commit({ producer: pipeline, lineage: copied })
+          expect(changed(lineageOnly)).toEqual({ rowsChanged: false, lineageChanged: true })
+
+          const rowsOnly = await commit({ producer: pipeline, lineage: copied }, [
+            { orderId: "ord_2", customerName: "Grace" },
+          ])
+          expect(changed(rowsOnly)).toEqual({ rowsChanged: true, lineageChanged: false })
+
+          // An append of no rows from a new input version.
+          const emptyAppend = await commit(
+            { producer: pipeline, lineage: copied, mode: "append", inputs: [await inputVersion()] },
+            []
+          )
+          expect(changed(emptyAppend)).toEqual({ rowsChanged: false, lineageChanged: false })
+
+          const append = await commit({ producer: pipeline, lineage: copied, mode: "append" }, [
+            { orderId: "ord_3", customerName: "Lin" },
+          ])
+          expect(changed(append)).toEqual({ rowsChanged: true, lineageChanged: false })
+
+          if (options.reopen) storage = await options.reopen(storage)
+
+          const committed = [first, provenanceOnly, lineageOnly, rowsOnly, emptyAppend, append]
+          const expected = Object.fromEntries(committed.map((v) => [v.versionId, changed(v)]))
+          const listed = await storage.listVersions(writeDataset.id)
+          expect(Object.fromEntries(listed.map((v) => [v.versionId, changed(v)]))).toEqual(expected)
+
+          for (const version of committed) {
+            expect(changed(await storage.getVersion(writeDataset.id, version.versionId))).toEqual(
+              changed(version)
+            )
+          }
+          expect(changed(await storage.getLatestVersion(writeDataset.id))).toEqual(changed(append))
+        } finally {
+          await options.teardown?.(storage)
+        }
+      })
+
+      test("a dataset's first version changes rows, even empty", () =>
+        withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          const session = await storage.beginWrite({ dataset: writeDataset })
+          const first = await session.commit()
+
+          expect(changed(first)).toEqual({ rowsChanged: true, lineageChanged: true })
+        }))
+
+      test("a schema change changes rows", () =>
+        withStorage(async (storage) => {
+          if (schemaEvolution === "strict") return
+
+          const initial = defineDataset("contract.changes.schema_evolution", {
+            schema: [col("invoiceId", "string")],
+          })
+          const widened = defineDataset("contract.changes.schema_evolution", {
+            schema: [col("invoiceId", "string"), col("currency", "string", { nullable: true })],
+          })
+
+          await storage.createDataset(initial)
+          const session = await storage.beginWrite({ dataset: initial })
+          await session.writeRows([{ invoiceId: "inv_1" }])
+          await session.commit()
+
+          await storage.createDataset(widened)
+          const [schemaVersion] = await storage.listVersions(initial.id, 1)
+          expect(schemaVersion?.mode).toBe("schema")
+          expect(changed(schemaVersion)).toEqual({ rowsChanged: true, lineageChanged: true })
         }))
     })
   })

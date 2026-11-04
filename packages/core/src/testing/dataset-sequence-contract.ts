@@ -250,6 +250,39 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
         expect(await rows(storage)).toEqual([])
       }))
 
+    test("records a merge that only advances source ordering as changing no rows", () =>
+      withStorage(async (storage) => {
+        // Red check: record `rowsChanged: true` on every merge version the provider creates.
+        const changed = (result: DatasetMergeCommitResult) => ({
+          outcome: result.outcome,
+          rowsChanged: result.version?.rowsChanged,
+          lineageChanged: result.version?.lineageChanged,
+        })
+
+        expect(changed(await merge(storage, [upsert(1)]))).toEqual({
+          outcome: "created",
+          rowsChanged: true,
+          lineageChanged: true,
+        })
+
+        // The delete of a key the dataset does not hold only records its sequence.
+        const orderingOnly = await merge(storage, [change.delete({ id: "7" }, { sequence: 3 })])
+        expect(changed(orderingOnly)).toEqual({
+          outcome: "created",
+          rowsChanged: false,
+          lineageChanged: false,
+        })
+        expect(
+          (await storage.getVersion(dataset.id, orderingOnly.version!.versionId))?.rowsChanged
+        ).toBe(false)
+
+        expect(changed(await merge(storage, [upsert(2, "Ada")]))).toEqual({
+          outcome: "created",
+          rowsChanged: true,
+          lineageChanged: false,
+        })
+      }))
+
     test("compares canonical content across JSON order and nullable representations", () =>
       withStorage(async (storage) => {
         await merge(storage, [

@@ -452,6 +452,46 @@ describe("SyncWorker", () => {
     })
   })
 
+  test("says whether a dataset version it announces changed rows or lineage", async () => {
+    // Red check: emit `rowsChanged: true` instead of the created version's flag.
+    const dataset = defineDataset("raw.erp.sequenced-orders", {
+      schema: [col("orderId", "string"), col("revision", "int64")],
+      primaryKey: "orderId",
+      sequenceBy: "revision",
+    })
+    let reads = 0
+    const sync = defineSync("sync-sequenced-orders", { mode: "merge" })
+      .from(erpDb)
+      .read(() => {
+        reads += 1
+
+        // The second run only deletes an order the dataset never held: it advances ordering.
+        return reads === 1
+          ? [change.upsert({ orderId: "ord_1", revision: 1 })]
+          : [change.delete({ orderId: "ord_9" }, { sequence: 2 })]
+      })
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
+
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-rows" })
+    await worker.start()
+    await waitForFinishedEvents(sixb, 1)
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-ordering" })
+    const events = await waitForFinishedEvents(sixb, 2)
+    await worker.stop()
+
+    const announced = events.flatMap((event) =>
+      event.type === "dataset.version.committed"
+        ? [{ rowsChanged: event.payload.rowsChanged, lineageChanged: event.payload.lineageChanged }]
+        : []
+    )
+    expect(announced).toEqual([
+      { rowsChanged: true, lineageChanged: true },
+      { rowsChanged: false, lineageChanged: false },
+    ])
+  })
+
   test("finishes a first empty append without emitting a dataset version", async () => {
     const dataset = defineDataset("raw.erp.orders", { schema: [col("orderId", "string")] })
     const sync = defineSync("sync-orders", { mode: "append" })

@@ -13,18 +13,34 @@ export type DatasetCommitProvenance = Pick<
  * version would keep provenance that no longer describes the newest calculation.
  *
  * `next` holds what the commit would store, after `lineageAtCommit` merged in the parent's
- * lineage. Lineages compare whatever their order and repetition; an unknown lineage, or a pipeline
- * version that records none, differs from any known one. Inputs count only when the writer passed
- * them.
+ * lineage. Lineages compare as `hasDatasetLineageChanges` compares them. Inputs count only when
+ * the writer passed them.
  */
 export function hasDatasetProvenanceChanges(
   latest: DatasetCommitProvenance & Pick<DatasetVersion, "versionId">,
   next: DatasetCommitProvenance
 ): boolean {
   return (
-    hasDatasetInputChanges(latest.inputs, next.inputs) ||
+    hasDatasetInputChanges(latest.inputs, next.inputs) || hasDatasetLineageChanges(latest, next)
+  )
+}
+
+/**
+ * Whether a version's lineage classifies its rows otherwise than its parent's, which a provider
+ * stores as `DatasetVersion.lineageChanged`. `next` holds the lineage `lineageAtCommit` returned
+ * for it, and a version without a parent changes lineage.
+ *
+ * Lineages compare whatever their order and repetition; an unknown lineage, or a pipeline version
+ * that records none, differs from any known one.
+ */
+export function hasDatasetLineageChanges(
+  parent: DatasetCommitProvenance | null | undefined,
+  next: DatasetCommitProvenance
+): boolean {
+  return (
+    !parent ||
     !sameLineage(
-      versionLineage(latest, COMMITTING_PROVIDER),
+      versionLineage(parent, COMMITTING_PROVIDER),
       versionLineage(next, COMMITTING_PROVIDER)
     )
   )
