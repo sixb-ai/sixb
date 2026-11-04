@@ -124,6 +124,8 @@ async function workspace(onExit: () => void): Promise<TestRendererSetup> {
           folder: config,
           claimIfHere: async () => {},
           onElsewhere: () => () => {},
+          onBackground: () => () => {},
+          backgroundCommands: () => [],
           runsHere: () => false,
         } as unknown as LocalRunner
       }

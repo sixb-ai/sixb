@@ -30,7 +30,17 @@ import { Logo } from "./brand"
 import { thisComputer } from "./computer"
 import type { Connection } from "./connection"
 import { ContextPanel } from "./context"
-import { type ContextUse, contextStatus, fittedContextText, shortPath } from "./format"
+import {
+  type BackgroundCommand,
+  backgroundEnded,
+  backgroundStrip,
+  type ContextUse,
+  commandLabel,
+  contextStatus,
+  elapsed,
+  fittedContextText,
+  shortPath,
+} from "./format"
 import { Palette, type PaletteItem } from "./palette"
 import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } from "./parts"
 import { type LocalRunner, owns } from "./runner"
@@ -50,7 +60,7 @@ import {
 import { pickSlash, type SlashCommand, slashMatches } from "./slash"
 import type { TuiColors } from "./theme"
 import { APPROVAL_CHOICES, type Approval, type Run, Transcript, Working } from "./transcript"
-import { BOLD, Composer, ComposerDraft, KeyHints, type StatusItem } from "./ui"
+import { BOLD, Composer, ComposerDraft, KeyHints, type StatusItem, useNow } from "./ui"
 
 type Thread = GetAgentThreadResponses[200]
 type Screen = { readonly kind: "home" } | { readonly kind: "thread"; readonly threadId: string }
@@ -149,9 +159,32 @@ export function Workspace(props: WorkspaceProps) {
           void runner.claimIfHere(event.threadId, event.runId)
         }
       },
+      // Something changed for this folder, such as a stop asked for from the web: the session's
+      // renewal answers it now rather than in twenty seconds.
+      onComputerActivity: (event) => {
+        if (event.computerId === props.computerId && event.folder === runner.folder) {
+          runner.renewSession()
+        }
+      },
     })
     return () => socket.close()
-  }, [connection, runner])
+  }, [connection, runner, props.computerId])
+
+  // A background command that ends says so, whichever conversation is open.
+  useEffect(() => {
+    const key = (command: { readonly threadId: string; readonly id: string }) =>
+      `${command.threadId}:${command.id}`
+    let known = new Map(runner.backgroundCommands().map((command) => [key(command), command]))
+    return runner.onBackground(() => {
+      const commands = runner.backgroundCommands()
+      for (const command of commands) {
+        if (known.get(key(command))?.status !== "running" || command.status === "running") continue
+        const ended = backgroundEnded(command)
+        say(ended.text, ended.failed ? "error" : "info")
+      }
+      known = new Map(commands.map((command) => [key(command), command]))
+    })
+  }, [runner, say])
 
   // In a conversation, the mode is the thread's, as the web reads it: "always" on a card raises it,
   // and a mode chosen in the app applies here too. New conversations start in the settings' mode.
@@ -700,6 +733,7 @@ function ThreadView(
   const [stopArmed, setStopArmed] = useState(false)
   const [typed, setTyped] = useState("")
   const [contextOpen, setContextOpen] = useState(false)
+  const [stopOpen, setStopOpen] = useState(false)
   // A conversation adds what only it can show: what it uses of its model's context.
   const slashCommands = useMemo(
     () => [
@@ -717,6 +751,23 @@ function ThreadView(
 
   const mine = thread !== null && owns(connection, thread)
   const onComputer = thread?.runsOn === "computer"
+
+  // The commands its turns left running here, ticking while they run.
+  const [background, setBackground] = useState<readonly BackgroundCommand[]>(() =>
+    runner.backgroundCommands(threadId)
+  )
+  useEffect(() => {
+    setBackground(runner.backgroundCommands(threadId))
+    return runner.onBackground(() => setBackground(runner.backgroundCommands(threadId)))
+  }, [runner, threadId])
+  const runningBackground = background.filter((command) => command.status === "running")
+  const now = useNow(1_000, runningBackground.length > 0)
+  const stopBackground = (command: BackgroundCommand) =>
+    void runner
+      .stopBackground({ threadId, id: command.id, startedAt: command.startedAt })
+      .then((stopped) => {
+        if (!stopped) props.say(`${commandLabel(command.command)} had ended already`)
+      })
 
   const { onThreadRead } = props
   // Measured against the model the next message goes to; without a choice, the latest turn's.
@@ -887,7 +938,7 @@ function ThreadView(
   }
 
   useKeyboard((key: KeyEvent) => {
-    if (props.dialogOpen || contextOpen) return
+    if (props.dialogOpen || contextOpen || stopOpen) return
     if (pending && !key.ctrl && !key.meta) {
       const settled = Date.now() - shownAt.current > APPROVAL_GRACE_MS
       if (key.name === "left" || key.name === "up") {
@@ -904,6 +955,7 @@ function ThreadView(
     if (key.name === "up" && slash.move(-1)) return
     if (key.name === "down" && slash.move(1)) return
     if (key.name === "escape") return void stop()
+    if (key.ctrl && key.name === "x" && runningBackground.length > 0) return setStopOpen(true)
     if (key.ctrl && key.name === "f" && onComputer && mine && !here) {
       return void moveHere()
     }
@@ -1065,10 +1117,18 @@ function ThreadView(
             <span fg={colors.muted}> moves it to this folder</span>
           </text>
         ) : null}
+        {runningBackground.length > 0 ? (
+          <BackgroundLine
+            colors={colors}
+            commands={runningBackground}
+            now={now}
+            width={width - 4}
+          />
+        ) : null}
         <SlashMenu colors={colors} menu={slash} above={8} />
         <Composer
           colors={colors}
-          focused={!props.dialogOpen && !contextOpen && !pending && !elsewhere}
+          focused={!props.dialogOpen && !contextOpen && !stopOpen && !pending && !elsewhere}
           onChange={setTyped}
           accent={pending ? colors.amber : undefined}
           placeholder={pending ? "Decide on the request above first" : "Ask anything…"}
@@ -1085,6 +1145,20 @@ function ThreadView(
           </text>
         </box>
       </box>
+      {stopOpen ? (
+        <Palette
+          colors={colors}
+          title="Stop a background command"
+          placeholder="Search"
+          onClose={() => setStopOpen(false)}
+          items={runningBackground.map((command) => ({
+            id: `${command.id}:${command.startedAt}`,
+            label: commandLabel(command.command, 48),
+            detail: `running for ${elapsed(now - Date.parse(command.startedAt))}`,
+            run: () => stopBackground(command),
+          }))}
+        />
+      ) : null}
       {contextOpen ? (
         <ContextPanel
           colors={colors}
@@ -1095,6 +1169,45 @@ function ThreadView(
           onClose={() => setContextOpen(false)}
         />
       ) : null}
+    </box>
+  )
+}
+
+/**
+ * The background commands running for the conversation, over the composer: each with how long it
+ * has run, and the key that stops one.
+ */
+function BackgroundLine({
+  colors,
+  commands,
+  now,
+  width,
+}: {
+  readonly colors: TuiColors
+  readonly commands: readonly BackgroundCommand[]
+  readonly now: number
+  readonly width: number
+}) {
+  const hint = "ctrl+x stop"
+  const { shown, more } = backgroundStrip(commands, now, width - hint.length - 3)
+
+  return (
+    <box flexDirection="row" justifyContent="space-between" paddingBottom={1} paddingLeft={1}>
+      <text wrapMode="none" flexShrink={1}>
+        {shown.map((entry, index) => (
+          <span key={`${index}:${entry.label}`}>
+            {index > 0 ? "   " : ""}
+            <span fg={colors.green}>{"● "}</span>
+            <span fg={colors.text}>{entry.label}</span>
+            <span fg={colors.muted}>{` ${entry.time}`}</span>
+          </span>
+        ))}
+        {more > 0 ? <span fg={colors.muted}>{`   +${more} more`}</span> : null}
+      </text>
+      <text flexShrink={0}>
+        <span fg={colors.text}>ctrl+x</span>
+        <span fg={colors.muted}> stop</span>
+      </text>
     </box>
   )
 }
