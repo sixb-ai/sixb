@@ -658,6 +658,25 @@ describe("Vercel AI Gateway provider", () => {
       money: { amountNanos: "6250000" },
     })
   })
+
+  // Removal proof: drop providerToolNames from the binding; Sixb's startup check then misses a
+  // provider tool that takes its web tools' names.
+  test("names the provider tools a binding declares, resolved or not", async () => {
+    const provider = createVercelGateway({
+      fetch: async () => Response.json({ data: [{ id: "test/model", type: "language" }] }),
+    })
+    const model = provider("test/model", {
+      providerTools: [
+        { type: "provider", id: "anthropic.web_search_20250305", name: "web_search" },
+        { type: "web_search_preview" },
+      ],
+    })
+
+    expect(model.providerToolNames).toEqual(["web_search"])
+    expect((await model.resolve?.())?.providerToolNames).toEqual(["web_search"])
+    expect(provider("test/model").providerToolNames).toBeUndefined()
+  })
+
   test("reserves at catalog rates whatever the options, and at the dearest fallback", async () => {
     const provider = createVercelGateway({
       fetch: async () =>
