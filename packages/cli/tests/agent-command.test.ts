@@ -27,6 +27,8 @@ interface Script {
   readonly run?: Record<string, unknown>
   /** The turn stays queued, as nothing has taken it. */
   readonly queued?: boolean
+  /** Answers a read of the turn in place of `queued`, when it returns a response. */
+  readonly runRead?: () => Response | null
 }
 
 async function fakeApi(script: Script) {
@@ -68,6 +70,8 @@ async function fakeApi(script: Script) {
         return Response.json({ error: { kind: "Error", message: "No." } }, { status: 409 })
       }
       if (path === `/api/agent-runs/${RUN}`) {
+        const scripted = script.runRead?.()
+        if (scripted) return scripted
         return Response.json({ id: RUN, status: script.queued ? "queued" : "succeeded" })
       }
       if (path === `/api/agent-threads/${THREAD}/runs`) {
@@ -324,6 +328,26 @@ describe("sixb agent", () => {
     expect(claims).toEqual([])
   })
 
+  // Guard proof: drop the refusedForGood checks from runnerUntilHeld; once the person loses access
+  // or the conversation is deleted, it polls in silence until someone stops it, and a script hangs.
+  test.each([401, 403, 404])("exits 3 when the API answers %d for good", async (status) => {
+    let reads = 0
+    const { env, claims } = await fakeApi({
+      queued: true,
+      thread: () => {
+        reads += 1
+        return reads <= 2
+          ? computerThread({ id: "cmp_other", folder: "/work/q3", online: true })
+          : Response.json({ error: "[Test] Not for you." }, { status })
+      },
+    })
+    const result = await sendTo(env)
+
+    expect(result.exitCode).toBe(3)
+    expect(result.stdout + result.stderr).toContain("Not for you.")
+    expect(claims).toEqual([])
+  })
+
   describe("in the conversation's own folder", () => {
     const here = async (online: boolean, script: Partial<Script> = {}) => {
       const api = await fakeApi({
@@ -356,6 +380,24 @@ describe("sixb agent", () => {
 
       expect(result.exitCode).toBe(0)
       expect(claims).toEqual([])
+    })
+
+    // Guard proof: read a failed status as the turn having left the queue, in runnerUntilHeld; a
+    // network blip after a claim that failed leaves it following a turn nothing will run, for good.
+    test("says it couldn't claim the turn when the read after that fails too", async () => {
+      let reads = 0
+      const { env, claims } = await here(false, {
+        queued: true,
+        runRead: () => {
+          reads += 1
+          return reads > 1 ? Response.json({ error: "[Test] Bad gateway." }, { status: 502 }) : null
+        },
+      })
+      const result = await sendTo(env)
+
+      expect(claims).toEqual([RUN])
+      expect(result.exitCode).toBe(1)
+      expect(result.stderr).toContain("couldn't claim")
     })
 
     // Guard proof: drop the claim from runnerUntilHeld; with nothing connected, the turn waits for a

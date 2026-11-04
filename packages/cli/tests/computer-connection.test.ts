@@ -157,9 +157,9 @@ describe("a connected computer", () => {
   test("closes the session of a folder that goes away while connected", async () => {
     const a = await folder("a")
     await setFoldersAllowed(THIS_PROJECT, [a], true)
-    // macOS can report that write late, and more than once: a report after the folder goes would read
-    // the folders again, and the guard proof above would pass. This test passes either way. Real
-    // time because there's no event to wait for, and before the fake timers, which would stop it.
+    // macOS can report that write late: a report after the folder goes would read the folders again,
+    // and this test would pass with the recheck gone. Real time because there's no event to wait for,
+    // and before the fake timers, which would stop it.
     await Bun.sleep(300)
 
     jest.useFakeTimers()

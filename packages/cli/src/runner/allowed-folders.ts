@@ -54,12 +54,27 @@ export async function isFolderAllowed(project: AllowedFor, folder: string): Prom
   )
 }
 
+let lastChange: Promise<unknown> = Promise.resolve()
+
 /**
- * Allow or forget folders for `project`. Reads the file first, as another `sixb` may have written
- * it, and refuses one it can't read rather than lose the choices in it. Written whole, so no reader
- * finds half.
+ * Allow or forget folders for `project`. One at a time here, so that a quick off and on can't undo
+ * each other: a folder forgotten stays forgotten.
  */
-export async function setFoldersAllowed(
+export function setFoldersAllowed(
+  project: AllowedFor,
+  changed: readonly string[],
+  allowed: boolean
+): Promise<void> {
+  const change = lastChange.then(() => writeChange(project, changed, allowed))
+  lastChange = change.catch(() => {})
+  return change
+}
+
+/**
+ * Reads the file first, as another `sixb` may have written it, and refuses one it can't read rather
+ * than lose the choices in it. Written whole, so no reader finds half.
+ */
+async function writeChange(
   project: AllowedFor,
   changed: readonly string[],
   allowed: boolean

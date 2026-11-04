@@ -173,6 +173,7 @@ export async function runAgent(options: {
  * if busy: it runs one at a time, and taking the turn would run two. Once nothing does, which a
  * crashed sixb's session reaches within a minute, this computer runs it if it's the place to, and
  * otherwise it waits for a computer nobody has open. Null when the turn left the queue by itself.
+ * Rejects with the API's answer once it refuses these reads for good.
  */
 async function runnerUntilHeld(
   connection: Connection,
@@ -182,25 +183,36 @@ async function runnerUntilHeld(
   signal: AbortSignal
 ): Promise<"unclaimed" | "offline" | null> {
   const { client } = connection
-  const statusOf = async () => (await getAgentRun({ client, path: { runId } })).data?.status
+  const readRun = () => getAgentRun({ client, path: { runId } })
   while (!signal.aborted) {
-    const [{ data: thread }, status] = await Promise.all([
+    const [threadRead, runRead] = await Promise.all([
       getAgentThread({ client, path: { threadId } }),
-      statusOf(),
+      readRun(),
     ])
     if (signal.aborted) return null
-    // A read that failed says nothing about who holds the folder: only a later one can.
+    if (refusedForGood(threadRead)) throw threadRead.error
+    if (refusedForGood(runRead)) throw runRead.error
+    const thread = threadRead.data
+    const status = runRead.data?.status
+    // Any other read that failed says nothing about who holds the folder: only a later one can.
     if (thread && status) {
       if (status !== "queued") return null
       if (!thread.computer?.online) {
         if (!runner) return "offline"
         if (await runner.claim(runId)) return null
-        return (await statusOf()) === "queued" ? "unclaimed" : null
+        // A read that fails here can't say it left the queue, and nothing else here will run it.
+        const after = (await readRun()).data?.status
+        return after === undefined || after === "queued" ? "unclaimed" : null
       }
     }
     await Bun.sleep(HOLDER_CHECK_MS)
   }
   return null
+}
+
+/** An answer that won't change by asking again: signed out, no access, or nothing there now. */
+function refusedForGood(read: { readonly response?: Response }): boolean {
+  return [401, 403, 404].includes(read.response?.status ?? 0)
 }
 
 /** Where a turn waits, for a person reading why nothing is happening yet. */
@@ -219,7 +231,7 @@ function printSent(threadId: string, runId: string, json: boolean): void {
 
 /**
  * Show a turn's steps as they finish, until it ends, the stream fails, the person stops waiting,
- * or `nobody` says nothing will run it.
+ * or `nobody` says nothing will run it. Rejects when `nobody` does.
  */
 async function follow(
   connection: Connection,
@@ -230,15 +242,17 @@ async function follow(
 ): Promise<"finished" | "stopped" | "failed" | "unclaimed" | "offline"> {
   let live = liveRun(runId)
   const shown = new Set<string>()
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false
-    const settle = (outcome: "finished" | "stopped" | "failed" | "unclaimed" | "offline") => {
+    const end = (answer: () => void) => {
       if (settled) return
       settled = true
       socket.close()
       signal.removeEventListener("abort", onAbort)
-      resolve(outcome)
+      answer()
     }
+    const settle = (outcome: "finished" | "stopped" | "failed" | "unclaimed" | "offline") =>
+      end(() => resolve(outcome))
     const onAbort = () => settle("stopped")
     const socket = createAgentRunSocket({
       client: connection.client,
@@ -272,9 +286,12 @@ async function follow(
       },
     })
     signal.addEventListener("abort", onAbort)
-    void nobody?.then((outcome) => {
-      if (outcome) settle(outcome)
-    })
+    void nobody?.then(
+      (outcome) => {
+        if (outcome) settle(outcome)
+      },
+      (error: unknown) => end(() => reject(error))
+    )
   })
 }
 
