@@ -1,4 +1,5 @@
 import { heldCallsInOutput } from "./approvals"
+import { backgroundRowLabel, isBackgroundStart } from "./background/interpret"
 import {
   classifyCommand,
   coerceBashInput,
@@ -45,6 +46,9 @@ function toolProgressLabel(
     if (tool.state === "output-error") return messages.web.continuingAfterFailure
     if (tool.state === "output-available") return messages.web.reviewingResults
     return messages.web.searching
+  }
+  if (tool.toolName === "bash_output" || tool.toolName === "bash_stop" || isBackgroundStart(tool)) {
+    return backgroundRowLabel(tool, messages)
   }
   if (tool.toolName === "bash") {
     if (tool.state === "input-streaming") return messages.bash.preparing

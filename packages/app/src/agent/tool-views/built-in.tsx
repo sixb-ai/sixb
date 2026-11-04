@@ -1,4 +1,7 @@
 import type { ReactNode } from "react"
+import { BackgroundCommandStep } from "../background/background-card"
+import { BackgroundToolRow } from "../background/background-tool-row"
+import { isBackgroundStart } from "../background/interpret"
 import { BashToolView } from "../bash/bash-tool-view"
 import { WebFetchToolView } from "../components/web-fetch-tool-view"
 import { WebSearchToolView } from "../components/web-search-tool-view"
@@ -18,17 +21,29 @@ const publishArtifact: BuiltInToolView = (tool) => <PublishArtifactToolView tool
 const BUILT_IN_TOOL_VIEWS: ReadonlyMap<string, BuiltInToolView> = new Map([
   [
     "bash",
-    (tool) => (
-      <BashToolView
-        tool={{
-          state: tool.state,
-          input: tool.input,
-          inputText: tool.inputText,
-          output: tool.output,
-          errorText: tool.errorText,
-        }}
-      />
-    ),
+    (tool) =>
+      isBackgroundStart(tool) ? (
+        <BackgroundCommandStep tool={tool} />
+      ) : (
+        <BashToolView
+          tool={{
+            state: tool.state,
+            input: tool.input,
+            inputText: tool.inputText,
+            output: tool.output,
+            errorText: tool.errorText,
+          }}
+        />
+      ),
+  ],
+  // A failed read or stop keeps the inspector, which says why.
+  [
+    "bash_output",
+    (tool) => (tool.state === "output-error" ? null : <BackgroundToolRow tool={tool} />),
+  ],
+  [
+    "bash_stop",
+    (tool) => (tool.state === "output-error" ? null : <BackgroundToolRow tool={tool} />),
   ],
   ["read", (tool) => <ReadToolView tool={tool} />],
   ["view_file", (tool) => <ViewFileToolView tool={tool} />],

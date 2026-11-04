@@ -137,6 +137,9 @@ export function ObservedConversation({
       messages={conversation}
       turn={turn}
       approvalOutcomes={approvalOutcomes}
+      background={{
+        source: { onComputer: thread.runsOn === "computer", live: null, online: false },
+      }}
     />
   )
   if (messagesQuery.isLoading) {

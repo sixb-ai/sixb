@@ -15,6 +15,8 @@ import {
   type ReportedApprovalOutcome,
   type TranscriptApprovals,
 } from "../approvals"
+import { BackgroundCardsContext, type TranscriptBackground } from "../background/context"
+import { BACKGROUND_TOOLS, readThreadBackground } from "../background/interpret"
 import type { AgentConversationMessage, AgentConversationTurn } from "../conversation"
 import { DelegationCardsContext, type TranscriptDelegation } from "../delegation/context"
 import {
@@ -67,9 +69,19 @@ export interface TranscriptProps {
   readonly delegation?: TranscriptDelegation
   /** Where the conversation moved, after which saved message: the files from before stayed. */
   readonly moved?: { readonly afterMessageId: string; readonly label: string } | null
+  /**
+   * Where its background commands run and what is known of them now, each a card under the work
+   * that started it. Without it, a command its turn no longer runs reads as last seen running.
+   */
+  readonly background?: TranscriptBackground
 }
 
 const NO_OUTCOMES: ReadonlyMap<string, ReportedApprovalOutcome> = new Map()
+
+/** Nothing said of where the commands run: no card claims how one ended that nobody saw. */
+const UNKNOWN_BACKGROUND: TranscriptBackground = {
+  source: { onComputer: true, live: null, online: false },
+}
 
 export function Transcript(props: TranscriptProps) {
   const { approvals, approvalOutcomes, messages, turn, threadId, delegation: actions } = props
@@ -91,10 +103,30 @@ export function Transcript(props: TranscriptProps) {
     [threadId, delegation, liveRunId, actions]
   )
 
+  // Its background commands change as their calls do, not with every chunk of the reply.
+  const backgroundSignature = JSON.stringify(
+    messages.flatMap((message) =>
+      message.parts.flatMap((part) =>
+        part.type === "tool" && BACKGROUND_TOOLS.has(part.toolName)
+          ? [[part.toolCallId, part.state]]
+          : []
+      )
+    )
+  )
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the signature stands for the calls
+  const thread = useMemo(() => readThreadBackground(messages), [backgroundSignature])
+  const { background = UNKNOWN_BACKGROUND } = props
+  const backgroundCards = useMemo(
+    () => ({ ...background, thread, liveRunId }),
+    [background, thread, liveRunId]
+  )
+
   return (
     <ApprovalCardsContext.Provider value={cards}>
       <DelegationCardsContext.Provider value={children}>
-        <TranscriptView {...props} threadDelegation={delegation} />
+        <BackgroundCardsContext.Provider value={backgroundCards}>
+          <TranscriptView {...props} threadDelegation={delegation} />
+        </BackgroundCardsContext.Provider>
       </DelegationCardsContext.Provider>
     </ApprovalCardsContext.Provider>
   )

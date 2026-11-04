@@ -274,7 +274,7 @@ function tierOf(value: string | undefined): "light" | "standard" | "heavy" | und
 }
 
 /** Now, every second while `ticking`: an elapsed time that moves. */
-function useNow(ticking: boolean): number {
+export function useNow(ticking: boolean): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     setNow(Date.now())
