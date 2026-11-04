@@ -85,6 +85,16 @@ The chat agent receives the file as written in every conversation, so keep it sh
 instructions for a particular task in a [skill](./tools-and-authorization.md#add-a-skill), which
 the agent reads only when relevant. AI workflow steps use their own `instructions` instead.
 
+When the agent works in a folder on [your computer](../cli/overview.md#work-with-the-agent) or in a
+repository [checkout](../sandboxes/overview.md#configure-the-environment), it also follows the
+instructions that folder carries:
+
+- In each folder from the repository's root down to the working directory, `AGENTS.md`, or
+  `CLAUDE.md` where there is no `AGENTS.md`. Outside a repository, only the folder's own.
+- They are read as each run starts, up to 32 KiB in all; past that, the agent is told where the
+  rest is.
+- `SIXB.md` and Sixb's own rules win where they conflict.
+
 ## It remembers
 
 The chat agent keeps a memory for each user: what it learned in earlier conversations, such as their

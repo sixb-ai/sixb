@@ -59,7 +59,12 @@ import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { InlineImageBudget } from "./inline-images"
 import { type ConversationReaders, conversationAuthors } from "./message-authors"
 import { type AgentErrorDetails, type AgentToolCaller, projectModelTools } from "./model-adapters"
-import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
+import {
+  type AcquiredRunSandbox,
+  acquireRunSandbox,
+  type BeforeFinalizeOptions,
+  type RunSandbox,
+} from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
   AGENT_ARTIFACTS_MANIFEST,
@@ -235,7 +240,7 @@ export async function createConversationAgentEnvironment(
   let acquisition: Promise<AcquiredRunSandbox> | undefined
   let provisioning = false
   const acquire = () => {
-    acquisition ??= sandbox.acquire()
+    acquisition ??= acquireRunSandbox(sandbox, sandboxSignal)
     return acquisition
   }
   // The prompt shows memory as of the thread's start or its latest compaction (see
@@ -450,7 +455,7 @@ export async function createSubagentEnvironment(
   let acquisition: Promise<AcquiredRunSandbox> | undefined
   let provisioning = false
   const acquire = () => {
-    acquisition ??= sandbox.acquire()
+    acquisition ??= acquireRunSandbox(sandbox, input.signal)
     return acquisition
   }
 
@@ -1133,7 +1138,7 @@ type ProvisionedRunSandbox = AcquiredRunSandbox & AgentSandboxHandle
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<ProvisionedRunSandbox> {
   const { context, actorId, run, apiBaseUrl, skills, ontologyFiles } = input
-  const acquired = await (input.acquire?.() ?? input.sandbox.acquire())
+  const acquired = await (input.acquire?.() ?? acquireRunSandbox(input.sandbox, input.signal))
   const { sandbox } = acquired
   const { contextDirectory } = input.sandbox
   try {

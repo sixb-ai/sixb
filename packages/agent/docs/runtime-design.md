@@ -31,6 +31,19 @@ relationship inspection, `actions get` before request, and JSON parameters throu
 group or command help remains available when exact arguments are unknown. `actions request` runs the
 Action and returns its terminal run in the same command.
 
+A workspace the prompt describes (a computer's folder, a thread's or a step's checkout) brings its
+own instruction files, read once when the run acquires it (`acquireRunSandbox`,
+`src/workspace-instructions.ts`):
+
+- One `runCommand` from the working directory finds the repository's root (the nearest `.git`,
+  directory or file) and prints each folder's `AGENTS.md`, else `CLAUDE.md`, from there down;
+  outside a repository, the working directory's alone. Nothing global or home-level.
+- 32 KiB of UTF-8 in all, the root's first: the file that crosses the limit is cut after a whole
+  line and says the line it goes on from.
+- `<workspace_instructions>` follows `<workspace>` and counts as `instructions` for the meter. It
+  holds no per-turn value, so unchanged files keep the prompt cached across turns.
+- A failed, timed-out or unparsable read warns and renders no section; it never fails the run.
+
 ## Reaching your data
 
 Inside the sandbox, the `sixb` CLI calls the live project API with the run's token, so the agent
