@@ -208,14 +208,24 @@ For a blank sandbox:
 4. On run teardown the worker releases it, which calls `destroy()`.
 
 `bash` with `run_in_background` starts a command that outlives its call
-([background-commands.ts](../src/background-commands.ts)). It runs in a `runCommand` held open until
-it ends, so a provider that kills what a call leaves behind (a cgroup, a PID namespace) leaves it
-alone, in a process group of its own (`set -m`: macOS has no `setsid`). Its output, pid and exit
-code are files under `background/` in the context directory. `bash_stop` sends SIGTERM to the
-group from inside the sandbox, then SIGKILL after 3 seconds, and aborts the held call where the
-group is out of reach. A run's own commands stop before `beforeFinalize` and teardown; on the
-user's computer a turn's belong to its thread instead (`RunSandbox.background`): the runner keeps
-the sandbox that runs them, and their files, until they end, and stops them as `sixb` closes.
+([background-commands.ts](../src/background-commands.ts)), under an id no other run gives
+(`bg_<hex>`). It runs in a `runCommand` held open until it ends, so a provider that kills what a
+call leaves behind (a cgroup, a PID namespace) leaves it alone, in a process group of its own
+(`set -m`: macOS has no `setsid`). Its output, pid and exit code are files under `background/` in
+the context directory; the pid file carries the start's nonce, so a file an earlier start left is
+never read. `bash_stop` waits for the group to be known, sends it SIGTERM from inside the sandbox,
+then SIGKILL after 3 seconds, and aborts the held call. Where the group is out of reach, as under
+bwrap's PID namespace on Linux, the stop is that abort at once: a kill, with no grace period. A
+command reads as stopped when a signal of its stop ended it; one that exited meanwhile, or caught
+the signal and exited, reads as exited.
+
+A run's own commands stop before `beforeFinalize` and teardown, a pause for approval included, and
+their files go with the sandbox, or with the next run's context directory. The next run reads its
+history: a command it last saw running, which its own commands do not know, is told stopped, once,
+in its first tool result ([background-notices.ts](../src/background-notices.ts)). On the user's
+computer a turn's commands belong to its thread instead (`RunSandbox.background`): the runner keeps
+the sandbox that runs them, and their files, until they end, and stops them as `sixb` quits,
+whether a turn runs or not.
 
 A cancellation or a worker shutdown cancels a workflow node's `create()`. Finishing the node never
 does: a sandbox still booting then is destroyed once it is ready.

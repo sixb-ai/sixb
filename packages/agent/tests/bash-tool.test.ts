@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { CommandResult, RunCommandOptions, Sandbox } from "@sixb/core"
+import { BackgroundCommands } from "../src/background-commands"
 import {
   BASH_TOOL_SPEC,
   type BashToolOutput,
@@ -128,7 +129,10 @@ function harness(result: Partial<CommandResult> = {}) {
       return { exitCode: 0, stdout: "", stderr: "", durationMs: 1, ...result }
     },
   } as unknown as Sandbox
-  const tool = createBashTool(async () => ({ sandbox, contextDirectory: ".sixb/agent" }))
+  const tool = createBashTool(
+    async () => ({ sandbox, contextDirectory: ".sixb/agent" }),
+    new BackgroundCommands()
+  )
 
   const bash = async (input: Record<string, unknown>) => {
     const parsed = tool.parseInput(input)

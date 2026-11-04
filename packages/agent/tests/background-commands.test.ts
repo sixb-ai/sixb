@@ -25,8 +25,8 @@ import {
   type BackgroundCommandOutput,
   type BackgroundCommandState,
   BackgroundCommands,
-  BackgroundNotices,
 } from "../src/background-commands"
+import { BackgroundNotices, backgroundCommandsLeftRunning } from "../src/background-notices"
 import { ComputerRunner, emptyDirectory } from "../src/computer-runner"
 import { agentTraceFromModelSteps } from "../src/model-adapters"
 import type { OpenRunSandbox } from "../src/run-environment"
@@ -95,18 +95,22 @@ function gone(pid: number): boolean {
 describe("background commands", () => {
   test("start, report what they wrote since the last read, and stop", async () => {
     const started = await commands.start({ handle, command: "echo serving; sleep 30" })
-    expect(started).toMatchObject({ id: "bg_1", status: "running" })
-    expect(started.outputPath).toBe(join(root, ".sixb/agent/background/bg_1.log"))
+    const { id } = started
+    expect(started).toMatchObject({
+      id: expect.stringMatching(/^bg_[0-9a-f]{6}$/),
+      status: "running",
+    })
+    expect(started.outputPath).toBe(join(root, `.sixb/agent/background/${id}.log`))
 
     await waitFor(() => readFileSync(started.outputPath, "utf8").includes("serving"))
-    expect(await commands.read("bg_1", handle, signal)).toMatchObject({
+    expect(await commands.read(id, handle, signal)).toMatchObject({
       status: "running",
       output: "serving\n",
     })
     // Read once: nothing new since.
-    expect((await commands.read("bg_1", handle, signal)).output).toBe("")
+    expect((await commands.read(id, handle, signal)).output).toBe("")
 
-    const stopped = await commands.stop("bg_1")
+    const stopped = await commands.stop(id)
     expect(stopped).toMatchObject({ status: "stopped", exitCode: 143 })
     expect(Date.parse(stopped.endedAt ?? "")).toBeGreaterThanOrEqual(Date.parse(started.startedAt))
   })
@@ -194,6 +198,51 @@ describe("background commands", () => {
     expect(await stopping).toMatchObject({ status: "stopped", exitCode: 137 })
   })
 
+  // Removal proof: drop `await entry.started` from BackgroundCommands' #stop. The stop then finds
+  // no group yet, aborts the held call, which ends the wrapper alone, and the group runs on.
+  test("stop one asked to stop as it starts, its whole group", async () => {
+    const starting = commands.start({ handle, command: "sleep 30" })
+    await commands.stopAll()
+
+    const started = await starting
+    expect(commands.get(started.id)).toMatchObject({ status: "stopped" })
+    const group = Number(
+      readFileSync(started.outputPath.replace(/\.log$/, ".pid"), "utf8").split(" ")[1]
+    )
+    await waitFor(() => gone(group), { label: "the command's group exits" })
+  })
+
+  // Removal proof: await `started` without the signal in BackgroundCommands' start; the start
+  // then returns the command running, as if nothing asked it to stop.
+  test("stop one whose start the run's signal aborted", async () => {
+    const abort = new AbortController()
+    const starting = commands.start({ handle, command: "sleep 30", signal: abort.signal })
+    abort.abort(new Error("stopped"))
+
+    expect(await starting.catch((error: unknown) => error)).toEqual(new Error("stopped"))
+    expect(commands.list()).toMatchObject([{ status: "stopped" }])
+  })
+
+  // Removal proof: label every command ended while its stop runs as stopped in #end; this one
+  // caught SIGTERM and exited by itself, with 0.
+  test("report how a command ended while its stop ran: by itself here", async () => {
+    const started = await commands.start({
+      handle,
+      command: "trap 'exit 0' TERM; echo ready; while true; do sleep 0.05; done",
+    })
+    await waitFor(() => readFileSync(started.outputPath, "utf8").includes("ready"))
+
+    expect(await commands.stop(started.id)).toMatchObject({ status: "exited", exitCode: 0 })
+  })
+
+  // Removal proof: number ids per index (`bg_1`, `bg_2`…); two runs then both start `bg_1`.
+  test("give each command an id no other run gives", async () => {
+    const first = await commands.start({ handle, command: "true" })
+    const second = await new BackgroundCommands().start({ handle, command: "true" })
+
+    expect(first.id).not.toBe(second.id)
+  })
+
   test("refuse to start in a directory that does not exist, and say why", async () => {
     const refused = await commands
       .start({ handle, command: "true", cwd: "missing" })
@@ -215,22 +264,23 @@ describe("background tools", () => {
       bash.parseInput({ command: "sleep 0.1; echo done", run_in_background: true }),
       context
     )) as unknown as BackgroundCommandState
-    expect(started).toMatchObject({ id: "bg_1", status: "running" })
+    expect(started).toMatchObject({ status: "running" })
+    const { id } = started
 
     const read = (await output.execute(
-      output.parseInput({ id: "bg_1", wait: 900_000 }),
+      output.parseInput({ id, wait: 900_000 }),
       context
     )) as unknown as BackgroundCommandOutput
     expect(read).toMatchObject({ status: "exited", exitCode: 0, output: "done\n" })
 
-    expect(await stop.execute(stop.parseInput({ id: "bg_1" }), context)).toMatchObject({
+    expect(await stop.execute(stop.parseInput({ id }), context)).toMatchObject({
       status: "exited",
       output: "",
     })
-    expect(() => output.parseInput({ id: "bg_1", tail: 3 })).toThrow("unknown property 'tail'")
-    await expect(output.execute({ id: "bg_9" }, context)).rejects.toThrow(
-      "No background command 'bg_9': the known ones are bg_1"
-    )
+    expect(() => output.parseInput({ id, tail: 3 })).toThrow("unknown property 'tail'")
+    expect(
+      String(await output.execute({ id: "bg_000000" }, context).catch((error) => error))
+    ).toContain(`No background command 'bg_000000': the known ones are ${id}`)
   })
 })
 
@@ -272,11 +322,12 @@ describe("background notices", () => {
   function awaitEnd(): ModelTool {
     return {
       name: "await_end",
-      description: "Wait for bg_1.",
+      description: "Wait for the first background command.",
       inputSchema: { type: "object" },
       parseInput: (value) => value,
       async execute() {
-        await commands.wait("bg_1", 10_000, signal)
+        const [first] = commands.list()
+        if (first) await commands.wait(first.id, 10_000, signal)
         return "waited"
       },
       errorText: () => "failed",
@@ -330,7 +381,7 @@ describe("background notices", () => {
     const [started, noticed, after] = toolResults(requests.at(-1)?.messages ?? [])
     expect(started).not.toContain("sixb_background_commands")
     expect(noticed).toMatch(
-      /^"waited\\n\\n<sixb_background_commands>\\nBackground command bg_1 \(`sleep 0\.1; echo done`\) exited with code 0 after \w+\. Output: .*\/\.sixb\/agent\/background\/bg_1\.log\\n<\/sixb_background_commands>"$/
+      /^"waited\\n\\n<sixb_background_commands>\\nBackground command (bg_[0-9a-f]{6}) \(`sleep 0\.1; echo done`\) exited with code 0 after \w+\. Output: .*\/\.sixb\/agent\/background\/\1\.log\\n<\/sixb_background_commands>"$/
     )
     expect(after).toBe('"waited"')
 
@@ -344,6 +395,48 @@ describe("background notices", () => {
       ...sent(requests.at(-1)?.messages ?? []),
       ...toModelMessages([{ role: "assistant", parts: [{ type: "text", text: "Done." }] }]),
     ])
+  })
+
+  // Removal proof: drop the scan of notices from backgroundCommandsLeftRunning; a run then hears
+  // again of a command an earlier notice said ended with its run.
+  test("tell a run once of the commands its history left running, ended with their run", () => {
+    const call = (toolName: string, output: object, modelOutput?: string) => ({
+      type: "tool-call" as const,
+      toolCallId: `call_${toolName}`,
+      toolName,
+      input: {},
+      state: "output-available" as const,
+      output: output as never,
+      ...(modelOutput === undefined
+        ? {}
+        : { modelOutput: { type: "text" as const, value: modelOutput } }),
+    })
+    const command = (id: string, status: string) => ({
+      id,
+      command: `serve ${id}`,
+      status,
+      startedAt: "2026-11-04T09:00:00.000Z",
+      outputPath: `/w/.sixb/agent/background/${id}.log`,
+    })
+    const paused: AgentMessage = {
+      role: "assistant",
+      parts: [
+        call("bash", command("bg_aaaaaa", "running")),
+        call("bash", command("bg_bbbbbb", "running")),
+        call("bash_output", { ...command("bg_bbbbbb", "exited"), exitCode: 0, output: "" }),
+      ],
+    }
+    const leftRunning = backgroundCommandsLeftRunning([paused])
+    expect(leftRunning.map(({ id }) => id)).toEqual(["bg_aaaaaa"])
+
+    const notice = new BackgroundNotices(commands, { leftRunning }).take()
+    expect(notice).toBe(
+      "<sixb_background_commands>\nBackground command bg_aaaaaa (`serve bg_aaaaaa`) was stopped when the run that started it ended; its output file is gone.\n</sixb_background_commands>"
+    )
+
+    // The run that read it keeps it in its result: the next one is not told again.
+    const told: AgentMessage = { role: "assistant", parts: [call("read", {}, `{}\n\n${notice}`)] }
+    expect(backgroundCommandsLeftRunning([paused, told])).toEqual([])
   })
 
   // Removal proof: drop the line of BackgroundCommands' read that marks an end reported; the
@@ -412,8 +505,9 @@ describe("background commands on the computer", () => {
     }
   }
 
-  // Removal proofs: destroy the sandbox at once in the runner's release (the command dies with
-  // it); empty the thread's directory whole as a run starts (its output is lost); stop nothing in
+  // Removal proofs: destroy the sandbox at once in the runner's release (its stop aborts the held
+  // call, which then reads as ended, while the command's own group runs on, out of reach); empty
+  // the thread's directory whole as a run starts (its output is lost); stop nothing in
   // stopBackgroundCommands (it runs on after sixb closed).
   test("outlive the turn, its files kept for the next, until sixb closes", async () => {
     const first = await open("agt_run_1")
@@ -439,7 +533,7 @@ describe("background commands on the computer", () => {
 
     const notices = new BackgroundNotices(background)
     expect(notices.take()).toContain(
-      "Background command bg_1 (`echo serving; sleep 30`) is still running"
+      `Background command ${started.id} (\`echo serving; sleep 30\`) is still running`
     )
     expect(notices.take()).toBeUndefined()
 

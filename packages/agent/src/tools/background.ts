@@ -10,14 +10,14 @@ const MAX_WAIT_MS = 600_000
 export const BASH_OUTPUT_TOOL_SPEC = {
   name: "bash_output",
   description:
-    "Read a background command's status (running, exited with its code, or stopped) and what it wrote since your last read: its newest 20,000 bytes, the rest in its output file. Pass wait to block until it ends, at most that many milliseconds. You are told when a background command ends, so do not poll.",
+    "A background command's status (running, exited with its code, or stopped) and its output since your last read: the newest 20,000 bytes, the rest in its file. wait blocks until it ends, at most that many ms. You are told when one ends: do not poll.",
   inputSchema: {
     type: "object",
     properties: {
       id: { type: "string", description: "The id bash returned, such as bg_1." },
       wait: {
         type: "number",
-        description: "Milliseconds to wait for it to end before answering, up to 600000.",
+        description: "Milliseconds to wait for its end, up to 600000.",
       },
     },
     required: ["id"],
@@ -28,7 +28,7 @@ export const BASH_OUTPUT_TOOL_SPEC = {
 export const BASH_STOP_TOOL_SPEC = {
   name: "bash_stop",
   description:
-    "Stop a background command and every process it started (SIGTERM, then SIGKILL after 3 seconds). Returns its final status and what it wrote since your last read.",
+    "Stop a background command and all it started: SIGTERM, then SIGKILL after 3 s. Returns its final status and output since your last read.",
   inputSchema: {
     type: "object",
     properties: {

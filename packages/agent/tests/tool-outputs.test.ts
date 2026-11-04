@@ -16,6 +16,7 @@ import { agentToolOutputPath } from "@sixb/core/internal/agents"
 import type { JsonValue, ModelTool, ModelToolOutput } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
 import type { AgentMessageRecord } from "@sixb/core/storage"
+import { BackgroundCommands } from "../src/background-commands"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import type { AgentSandboxHandle } from "../src/sandbox-handle"
 import { type BashToolOutput, createBashTool } from "../src/tools/bash"
@@ -45,7 +46,7 @@ describe("tool outputs too large for the context", () => {
   // part then holds 229 KB.
   test("reach the model as a preview, the whole output a stored file the agent reads in pieces", async () => {
     const { root, handle, blobs, files } = await harness()
-    const [bash] = files.wrap([createBashTool(async () => handle)])
+    const [bash] = files.wrap([createBashTool(async () => handle, new BackgroundCommands())])
     const read = createReadTool(async () => handle)
 
     // 40,000 lines, about 230 KB.

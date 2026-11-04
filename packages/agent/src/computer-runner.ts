@@ -174,6 +174,11 @@ export class ComputerRunner {
     this.renewals.get(runId)?.()
   }
 
+  /** Whether a background command a turn started runs now. */
+  get runsBackgroundCommands(): boolean {
+    return [...this.background.values()].some((commands) => commands.running)
+  }
+
   /**
    * Stop every background command a turn left running, as `sixb` closes: the sandboxes kept for
    * them are torn down then, which {@link drain} waits for.
@@ -274,7 +279,7 @@ export class ComputerRunner {
       // of the thread keeps; a child's end with it.
       const background = folder === undefined ? undefined : this.threadBackground(input.threadId)
       const kept = () =>
-        background?.isEmpty === false ? join(runFiles, BACKGROUND_DIRECTORY) : undefined
+        background?.hasCommands ? join(runFiles, BACKGROUND_DIRECTORY) : undefined
 
       const sandbox: RunSandbox = {
         waitBeforeModel: folder !== undefined,
