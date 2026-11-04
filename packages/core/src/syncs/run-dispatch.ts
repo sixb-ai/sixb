@@ -53,6 +53,8 @@ type PersistedSyncRun =
       readonly run: SyncRunRecord
       readonly queuedAt: Date
       readonly created: boolean
+      /** Defaults to the run id. A trigger that joins a run publishes its own job for it. */
+      readonly jobId?: string
     }
 
 /** Core-owned durable dispatch boundary used by automatic Sync triggers. */
@@ -127,7 +129,13 @@ async function persistSyncRun(
         if (input.joinQueuedRun) {
           const waiting = await findQueuedSyncRun(transactionalRuns, input)
           if (waiting) {
-            return { publish: true, run: waiting, queuedAt: waiting.queuedAt, created: false }
+            return {
+              publish: true,
+              run: waiting,
+              queuedAt: waiting.queuedAt,
+              created: false,
+              jobId: joinJobId(waiting, runId),
+            }
           }
         }
 
@@ -174,6 +182,16 @@ async function findQueuedSyncRun(
   })
   const [waiting] = runs
   return waiting && runMatchesRequest(waiting, input) ? waiting : undefined
+}
+
+/**
+ * The job a trigger publishes for the run it joins. The run's own job may be gone (a provider
+ * keeps a settled job id, and ignores a new job under it), so each joining trigger brings a job
+ * that can start the run; once it has started, the others complete without doing anything. The id
+ * derives from the trigger's run id, so a redelivered trigger publishes the same job.
+ */
+function joinJobId(waiting: SyncRunRecord, triggerRunId: string): string {
+  return `${waiting.id}:join:${triggerRunId}`
 }
 
 async function reuseSyncRun(
@@ -228,19 +246,21 @@ async function publishSyncRun(
   input: DispatchSyncRunInput,
   persisted: Extract<PersistedSyncRun, { readonly publish: true }>
 ): Promise<SyncRunRequestResult> {
+  const jobId = persisted.jobId ?? persisted.run.id
+
   try {
     const [job] = await input.queue.enqueue({
       projectId: input.projectId,
       jobs: [
         {
-          id: persisted.run.id,
+          id: jobId,
           type: "sync.run.requested",
           payload: { runId: persisted.run.id },
           ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
         },
       ],
     })
-    if (!job || job.id !== persisted.run.id) {
+    if (!job || job.id !== jobId) {
       throw new SyncRunError(`[Sixb] Queue did not acknowledge Sync run '${persisted.run.id}'.`)
     }
     return {

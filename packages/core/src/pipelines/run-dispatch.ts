@@ -61,6 +61,8 @@ type PersistedPipelineRun =
       readonly run: PipelineRunRecord
       readonly queuedAt: Date
       readonly created: boolean
+      /** Defaults to the run id. A trigger that joins a run publishes its own job for it. */
+      readonly jobId?: string
     }
 
 /** Core-owned durable dispatch boundary used by automatic Pipeline triggers. */
@@ -135,7 +137,13 @@ async function persistPipelineRun(
         if (input.joinQueuedRun) {
           const waiting = await findQueuedPipelineRun(transactionalRuns, input)
           if (waiting) {
-            return { publish: true, run: waiting, queuedAt: waiting.queuedAt, created: false }
+            return {
+              publish: true,
+              run: waiting,
+              queuedAt: waiting.queuedAt,
+              created: false,
+              jobId: joinJobId(waiting, runId),
+            }
           }
         }
 
@@ -177,6 +185,16 @@ async function findQueuedPipelineRun(
     limit: 1,
   })
   return runs[0]
+}
+
+/**
+ * The job a trigger publishes for the run it joins. The run's own job may be gone (a provider
+ * keeps a settled job id, and ignores a new job under it), so each joining trigger brings a job
+ * that can start the run; once it has started, the others complete without doing anything. The id
+ * derives from the trigger's run id, so a redelivered trigger publishes the same job.
+ */
+function joinJobId(waiting: PipelineRunRecord, triggerRunId: string): string {
+  return `${waiting.id}:join:${triggerRunId}`
 }
 
 async function reusePipelineRun(
@@ -227,19 +245,21 @@ async function publishPipelineRun(
   input: DispatchPipelineRunInput,
   persisted: Extract<PersistedPipelineRun, { readonly publish: true }>
 ): Promise<PipelineRunRequestResult> {
+  const jobId = persisted.jobId ?? persisted.run.id
+
   try {
     const [job] = await input.queue.enqueue({
       projectId: input.projectId,
       jobs: [
         {
-          id: persisted.run.id,
+          id: jobId,
           type: "pipeline.run.requested",
           payload: { runId: persisted.run.id },
           ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
         },
       ],
     })
-    if (!job || job.id !== persisted.run.id) {
+    if (!job || job.id !== jobId) {
       throw new PipelineRunError(
         `[Sixb] Queue did not acknowledge Pipeline run '${persisted.run.id}'.`
       )

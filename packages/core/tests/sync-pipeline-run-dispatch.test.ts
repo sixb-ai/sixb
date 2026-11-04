@@ -311,6 +311,12 @@ interface DispatchResult {
   readonly created: boolean
 }
 
+interface ClaimedRunJob {
+  readonly id: string
+  readonly runId: string
+  complete(): Promise<void>
+}
+
 interface AutomaticTarget {
   readonly queue: InMemoryQueues["pipelines"] | InMemoryQueues["syncRuns"]
   /** One automatic trigger, with the per-event run id the orchestrator derives. */
@@ -319,11 +325,15 @@ interface AutomaticTarget {
   request(runId: string, options?: { readonly commitMessage?: string }): Promise<DispatchResult>
   runIds(status: "queued" | "running"): Promise<readonly string[]>
   start(runId: string): Promise<void>
-  jobIds(): Promise<readonly string[]>
+  claimJobs(): Promise<readonly ClaimedRunJob[]>
 }
 
 function automaticRunId(kind: "pipeline" | "sync", eventId: string): string {
   return `${kind}:schedule:on-change:event:${eventId}`
+}
+
+function jobsOf(jobs: readonly ClaimedRunJob[]) {
+  return jobs.map(({ id, runId }) => ({ id, runId }))
 }
 
 function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
@@ -382,9 +392,13 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
       start: async (runId) => {
         await storage.pipelineRuns.start({ projectId, id: runId })
       },
-      jobIds: async () => {
+      claimJobs: async () => {
         const claimed = await queues.pipelines.claim({ projectId, workerId: "test", limit: 50 })
-        return claimed.map(({ job }) => job.id)
+        return claimed.map(({ job, leaseId }) => ({
+          id: job.id,
+          runId: job.payload.runId,
+          complete: () => queues.pipelines.complete({ projectId, jobId: job.id, leaseId }),
+        }))
       },
     }
   }
@@ -418,9 +432,13 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
     start: async (runId) => {
       await storage.syncRuns.start({ projectId, id: runId })
     },
-    jobIds: async () => {
+    claimJobs: async () => {
       const claimed = await queues.syncRuns.claim({ projectId, workerId: "test", limit: 50 })
-      return claimed.map(({ job }) => job.id)
+      return claimed.map(({ job, leaseId }) => ({
+        id: job.id,
+        runId: job.payload.runId,
+        complete: () => queues.syncRuns.complete({ projectId, jobId: job.id, leaseId }),
+      }))
     },
   }
 }
@@ -429,6 +447,7 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
 describe.each(["pipeline", "sync"] as const)("automatic %s dispatch", (kind) => {
   const firstRunId = automaticRunId(kind, "event-1")
   const secondRunId = automaticRunId(kind, "event-2")
+  const joinJobId = (eventId: string) => `${firstRunId}:join:${automaticRunId(kind, eventId)}`
 
   test.each([
     "event",
@@ -448,7 +467,13 @@ describe.each(["pipeline", "sync"] as const)("automatic %s dispatch", (kind) => 
       { runId: firstRunId, created: false },
     ])
     expect(await target.runIds("queued")).toEqual([firstRunId])
-    expect(await target.jobIds()).toEqual([firstRunId])
+
+    // Every job starts the same run; the worker completes the late ones without running it again.
+    expect(jobsOf(await target.claimJobs())).toEqual([
+      { id: firstRunId, runId: firstRunId },
+      { id: joinJobId("event-2"), runId: firstRunId },
+      { id: joinJobId("event-3"), runId: firstRunId },
+    ])
   })
 
   test("queues one more run for triggers that arrive while a run is running", async () => {
@@ -476,19 +501,44 @@ describe.each(["pipeline", "sync"] as const)("automatic %s dispatch", (kind) => 
     expect(await target.runIds("queued")).toEqual([secondRunId])
   })
 
-  // Return the joined run without publishing it to watch this fail: the lost job stays lost.
-  test("republishes the job of the run it joins", async () => {
+  // Publish the joining trigger's job under the run id again (drop `jobId` from the join) to watch
+  // this fail: the queue keeps the settled job and ignores the new one, so the run never starts.
+  test.each([
+    "was never published",
+    "settled without starting it",
+  ] as const)("gives the run it joins a job when the run's own job %s", async (loss) => {
     const target = createAutomaticTarget(kind)
-    const enqueue = target.queue.enqueue.bind(target.queue)
-    target.queue.enqueue = () => Promise.reject(new Error("queue unavailable"))
 
-    const failed = await target.dispatch("event-1").catch((error: unknown) => error)
-    expect(failed).toMatchObject({ message: "queue unavailable" })
+    if (loss === "was never published") {
+      const enqueue = target.queue.enqueue.bind(target.queue)
+      target.queue.enqueue = () => Promise.reject(new Error("queue unavailable"))
+
+      const failed = await target.dispatch("event-1").catch((error: unknown) => error)
+      expect(failed).toMatchObject({ message: "queue unavailable" })
+      target.queue.enqueue = enqueue
+    } else {
+      await target.dispatch("event-1")
+      for (const job of await target.claimJobs()) await job.complete()
+    }
     expect(await target.runIds("queued")).toEqual([firstRunId])
 
-    target.queue.enqueue = enqueue
     expect(await target.dispatch("event-2")).toMatchObject({ runId: firstRunId, created: false })
-    expect(await target.jobIds()).toEqual([firstRunId])
+    expect(jobsOf(await target.claimJobs())).toEqual([
+      { id: joinJobId("event-2"), runId: firstRunId },
+    ])
+  })
+
+  test("publishes one job for a redelivered trigger that joined a run", async () => {
+    const target = createAutomaticTarget(kind)
+
+    await target.dispatch("event-1")
+    await target.dispatch("event-2")
+    await target.dispatch("event-2")
+
+    expect(jobsOf(await target.claimJobs())).toEqual([
+      { id: firstRunId, runId: firstRunId },
+      { id: joinJobId("event-2"), runId: firstRunId },
+    ])
   })
 
   // Default `joinQueuedRun` to true in `dispatch*Run` to watch this fail.

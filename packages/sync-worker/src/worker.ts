@@ -15,7 +15,7 @@ import {
 } from "@sixb/core/internal/primitive-execution"
 import { resolveSyncConnectorSources } from "@sixb/core/internal/syncs"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
-import { QueueWorker } from "@sixb/core/internal/workers"
+import { QueueWorker, retryUnstartedRun } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
 import {
@@ -80,6 +80,10 @@ export class SyncWorker extends QueueWorker<
       throw new Error(`[SixbSyncWorker] Sync run '${job.payload.runId}' was not found.`)
     }
 
+    // Each trigger that joined this run published its own job for it. Once one of them has started
+    // the run, the others have nothing left to do.
+    if (run.status !== "queued") return
+
     const durableExecution = await this.host.storage.executions.getById({
       projectId: this.host.id,
       id: run.executionId,
@@ -138,6 +142,9 @@ export class SyncWorker extends QueueWorker<
       id: claimed.job.payload.runId,
     })
     if (run?.status === "queued") {
+      const retry = retryUnstartedRun(claimed.job.attempt)
+      if (retry) return retry
+
       return { kind: "fail", failure: await this.failUnstartedRun(claimed, run, error) }
     }
 
