@@ -638,55 +638,14 @@ describe("PipelineWorker", () => {
   test.each([
     "the run cannot start",
     "the execution cannot be read",
-  ] as const)("fails a run whose job ends before it starts when %s", async (cause) => {
-    const reports: SixbErrorContext[] = []
-    const cleanStep = definePipelineStep("clean-customers")
-      .inputs({ rawCustomers: rawCustomersDataset })
-      .output(customersDataset)
-      .run(async () => {})
-    const pipeline = definePipeline("customers").then(cleanStep)
-    const sixb = createSixbForPipeline({
-      pipeline,
-      datasets: [rawCustomersDataset, customersDataset],
-      onError(_error, context) {
-        reports.push(context)
-      },
-    })
-    const pipelineRuns = sixb.storage.pipelineRuns!
-    await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-never-starts" })
+  ] as const)("fails a run whose job runs out of attempts before it starts when %s", async (cause) => {
+    const fixture = await createUnstartedRunFixture()
+    fixture.failBeforeStart(cause)
+    await fixture.spendAttempts(2)
 
-    const unavailable = new Error("storage unavailable")
-    if (cause === "the run cannot start") {
-      pipelineRuns.start = () => Promise.reject(unavailable)
-    } else {
-      sixb.storage.executions.getById = () => Promise.reject(unavailable)
-    }
+    await fixture.runWorkerUntilSettled()
 
-    const settled: { kind: "complete" | "fail"; failure?: unknown }[] = []
-    const complete = sixb.queues.pipelines.complete.bind(sixb.queues.pipelines)
-    const fail = sixb.queues.pipelines.fail.bind(sixb.queues.pipelines)
-    sixb.queues.pipelines.complete = async (input) => {
-      settled.push({ kind: "complete" })
-      await complete(input)
-    }
-    sixb.queues.pipelines.fail = async (input) => {
-      settled.push({ kind: "fail", failure: input.failure })
-      await fail(input)
-    }
-
-    const worker = new PipelineWorker(sixb)
-    await worker.start()
-
-    try {
-      await waitFor(
-        async () => settled.length,
-        (count) => count > 0
-      )
-    } finally {
-      await worker.stop()
-    }
-
-    const run = await pipelineRuns.getById({ projectId: sixb.id, id: "run-never-starts" })
+    const run = await fixture.readRun()
     expect(run).toMatchObject({
       status: "failed",
       error: {
@@ -695,9 +654,146 @@ describe("PipelineWorker", () => {
       },
     })
     expect(run?.startedAt).toBeUndefined()
-    expect(settled).toEqual([{ kind: "fail", failure: run!.error }])
-    expect(reports).toMatchObject([
-      { type: "run.failed", runKind: "pipeline", attempt: 1, failure: run!.error },
+    expect(fixture.settled).toEqual([{ kind: "fail", failure: run!.error }])
+    expect(fixture.reports).toMatchObject([
+      { type: "run.failed", runKind: "pipeline", attempt: 3, failure: run!.error },
     ])
   })
+
+  // Fail the run on its first attempt in `onExecutionError` to watch this fail: one transient error
+  // would drop every trigger that joined the run.
+  test.each([
+    [1, 250],
+    [2, 500],
+  ])("retries attempt %i of a job that fails before starting its run after %i ms", async (attempt, delayMs) => {
+    const fixture = await createUnstartedRunFixture()
+    fixture.failBeforeStart("the run cannot start")
+    await fixture.spendAttempts(attempt - 1)
+
+    const before = Date.now()
+    await fixture.runWorkerUntilSettled()
+    const after = Date.now()
+
+    expect(fixture.settled).toEqual([{ kind: "retry", availableAt: expect.any(String) }])
+    const availableAt = Date.parse(fixture.settled[0]?.availableAt ?? "")
+    expect(availableAt).toBeGreaterThanOrEqual(before + delayMs)
+    expect(availableAt).toBeLessThanOrEqual(after + delayMs)
+    expect(await fixture.readRun()).toMatchObject({ status: "queued" })
+    expect(fixture.reports).toEqual([])
+  })
+
+  // Remove the status check at the top of `execute` to watch the late job try to start the run.
+  test("completes the job of a trigger that joined a run another job already ran", async () => {
+    const fixture = await createUnstartedRunFixture()
+    const pipelineRuns = fixture.sixb.storage.pipelineRuns!
+    const start = pipelineRuns.start.bind(pipelineRuns)
+    let starts = 0
+    pipelineRuns.start = (input) => {
+      starts += 1
+      return start(input)
+    }
+    await fixture.sixb.queues.pipelines.enqueue({
+      projectId: fixture.sixb.id,
+      jobs: [
+        {
+          id: "run-never-starts:join:event-2",
+          type: "pipeline.run.requested",
+          payload: { runId: "run-never-starts" },
+        },
+      ],
+    })
+
+    await fixture.runWorkerUntilSettled(2)
+
+    expect(await fixture.readRun()).toMatchObject({ status: "succeeded" })
+    expect(fixture.settled).toEqual([{ kind: "complete" }, { kind: "complete" }])
+    expect(starts).toBe(1)
+    expect(await fixture.sixb.events.read({ types: ["pipeline.run.started"] })).toHaveLength(1)
+    expect(fixture.reports).toEqual([])
+  })
 })
+
+/** One queued Pipeline run with its own job, and a record of how the worker settles its jobs. */
+async function createUnstartedRunFixture() {
+  const reports: SixbErrorContext[] = []
+  const cleanStep = definePipelineStep("clean-customers")
+    .inputs({ rawCustomers: rawCustomersDataset })
+    .output(customersDataset)
+    .run(async () => {})
+  const pipeline = definePipeline("customers").then(cleanStep)
+  const lakeStorage = new InMemoryLakeStorage()
+  const sixb = createSixbForPipeline({
+    pipeline,
+    datasets: [rawCustomersDataset, customersDataset],
+    lakeStorage,
+    onError(_error, context) {
+      reports.push(context)
+    },
+  })
+  const pipelineRuns = sixb.storage.pipelineRuns!
+  const queue = sixb.queues.pipelines
+  await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
+  await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-never-starts" })
+
+  const settled: SettledJob[] = []
+  const complete = queue.complete.bind(queue)
+  const retry = queue.retry.bind(queue)
+  const fail = queue.fail.bind(queue)
+  queue.complete = async (input) => {
+    settled.push({ kind: "complete" })
+    await complete(input)
+  }
+  queue.retry = async (input) => {
+    settled.push({ kind: "retry", availableAt: input.availableAt })
+    await retry(input)
+  }
+  queue.fail = async (input) => {
+    settled.push({ kind: "fail", failure: input.failure })
+    await fail(input)
+  }
+
+  return {
+    sixb,
+    reports,
+    settled,
+    readRun: () => pipelineRuns.getById({ projectId: sixb.id, id: "run-never-starts" }),
+
+    failBeforeStart(cause: "the run cannot start" | "the execution cannot be read") {
+      const unavailable = new Error("storage unavailable")
+      if (cause === "the run cannot start") {
+        pipelineRuns.start = () => Promise.reject(unavailable)
+      } else {
+        sixb.storage.executions.getById = () => Promise.reject(unavailable)
+      }
+    },
+
+    /** Claim and release the job as earlier deliveries would, so the worker sees a later attempt. */
+    async spendAttempts(count: number) {
+      for (let spent = 0; spent < count; spent += 1) {
+        const [claimed] = await queue.claim({ projectId: sixb.id, workerId: "earlier" })
+        if (!claimed) throw new Error("[Test] Expected the run's job to be claimable.")
+        await retry({ projectId: sixb.id, jobId: claimed.job.id, leaseId: claimed.leaseId })
+      }
+    },
+
+    async runWorkerUntilSettled(count = 1) {
+      const worker = new PipelineWorker(sixb)
+      await worker.start()
+
+      try {
+        await waitFor(
+          async () => settled.length,
+          (settledCount) => settledCount >= count
+        )
+      } finally {
+        await worker.stop()
+      }
+    },
+  }
+}
+
+interface SettledJob {
+  readonly kind: "complete" | "retry" | "fail"
+  readonly availableAt?: string
+  readonly failure?: unknown
+}
