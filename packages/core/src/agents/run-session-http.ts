@@ -117,6 +117,8 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
         }
         return model
       },
+      // The server searches, with the project's key, and records the call against the run.
+      webSearch: (request, signal) => call("models.webSearch", [request], signal),
     },
     events: sink.sink,
     heldCalls: {

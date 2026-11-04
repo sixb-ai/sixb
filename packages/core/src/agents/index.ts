@@ -223,6 +223,7 @@ export type {
   AgentRunPlan,
   AgentRunPlanDefinitions,
   AgentRunView,
+  AgentRunWebPlan,
   SandboxModel,
   SandboxModelKind,
 } from "./run-plan"
@@ -231,6 +232,7 @@ export {
   readAgentRunDelegation,
   readAgentRunMemory,
   readAgentRunPlan,
+  readAgentRunWebPlan,
   renderAgentRunOntologyDocs,
 } from "./run-plan"
 export type {
@@ -385,6 +387,8 @@ export {
   isAgentToolDefinition,
   validateAndNormalizeAgentToolInput,
 } from "./validation"
+export type { AgentWebOptions, WebDomainPolicy } from "./web"
+export { bindAgentWebSearch, webDomainPolicy } from "./web"
 export type {
   WorkflowAgentNodeSession,
   WorkflowAgentNodeSessionHost,

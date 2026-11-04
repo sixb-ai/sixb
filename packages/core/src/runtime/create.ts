@@ -73,7 +73,7 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   models?: ModelCatalogInput
   /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]
-  /** How the project's Agent runs: how many steps a turn or a sub-agent may take. */
+  /** How the project's Agent runs: how many steps a turn or a sub-agent may take, its web tools. */
   agent?: AgentOptions
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
@@ -124,7 +124,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   const skills = await discoverAgentSkills(projectRoot)
   const instructions = await discoverProjectInstructions(projectRoot)
   const ontologyFiles = await discoverOntologyFiles(projectRoot)
-  const { maxSteps, subagentMaxSteps } = options.agent ?? {}
+  const { maxSteps, subagentMaxSteps, web } = options.agent ?? {}
 
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
@@ -165,6 +165,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     agent: {
       ...(maxSteps === undefined ? {} : { maxSteps }),
       ...(subagentMaxSteps === undefined ? {} : { subagentMaxSteps }),
+      ...(web === undefined ? {} : { web }),
       skills,
       ...(instructions === undefined ? {} : { instructions }),
       ontologyDocs: { modules: discoveredOntology.modules, ...ontologyFiles },

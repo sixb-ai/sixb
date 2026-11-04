@@ -120,6 +120,11 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     const { providerId, modelId, definition, rateCard, defaultReasoning, maxOutputTokens } = model
     return { providerId, modelId, definition, rateCard, defaultReasoning, maxOutputTokens }
   },
+  "models.webSearch": (session, [request], signal) =>
+    session.models.webSearch(
+      request as Parameters<AgentRunSession["models"]["webSearch"]>[0],
+      signal
+    ),
   "files.stat": (session, [blobId]) => session.files.stat(blobId as string),
 }
 

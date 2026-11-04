@@ -1,6 +1,7 @@
 import type { OntologyDocsCatalog, OntologyDocsInput } from "../ontology/docs"
 import { RuntimeError } from "../runtime/errors"
 import type { AgentOptions } from "./step-limits"
+import type { AgentWebOptions } from "./web"
 
 /** A project file the Agent receives byte-for-byte in its sandbox. */
 export interface AgentProjectFile {
@@ -48,6 +49,8 @@ export interface AgentDefinitions {
   /** As the project set them, checked. Absent: a turn has no limit, a sub-agent the default. */
   readonly maxSteps?: number
   readonly subagentMaxSteps?: number
+  /** As the project set it, checked, its domains in canonical form. Absent: web tools are on. */
+  readonly web?: false | AgentWebOptions
 }
 
 /** Index skills by name. Discovery validates each skill; names must also be unique. */

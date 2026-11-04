@@ -8,7 +8,8 @@ import {
 import { defineAgentTool } from "../src/agents/builders"
 import type { AgentSkillDefinition } from "../src/agents/skills"
 import type { AgentToolDefinition } from "../src/agents/types"
-import type { LanguageModel } from "../src/models"
+import type { AgentWebOptions } from "../src/agents/web"
+import type { LanguageModel, WebSearchModel } from "../src/models"
 import { createModelCatalog } from "../src/models"
 import { createOntologyDocsCatalog } from "../src/ontology/docs"
 import type { AgentRunRecord } from "../src/storage/agents"
@@ -55,10 +56,13 @@ function definitions(
     readonly instructions?: string
     readonly maxSteps?: number
     readonly subagentMaxSteps?: number
+    readonly web?: false | AgentWebOptions
+    readonly webSearch?: readonly WebSearchModel[]
   } = {}
 ): AgentRunPlanDefinitions {
   const models = createModelCatalog({
     language: [model("default", "low"), model("selected")],
+    ...(input.webSearch === undefined ? {} : { webSearch: input.webSearch }),
   })
   return {
     agent: {
@@ -67,6 +71,7 @@ function definitions(
       ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
       ...(input.maxSteps === undefined ? {} : { maxSteps: input.maxSteps }),
       ...(input.subagentMaxSteps === undefined ? {} : { subagentMaxSteps: input.subagentMaxSteps }),
+      ...(input.web === undefined ? {} : { web: input.web }),
     },
     models,
     tools: { list: () => [lookup, exporter], getByName: (name: string) => tools.get(name) ?? null },
@@ -103,6 +108,8 @@ describe("a turn's plan", () => {
         { kind: "language", provider: "test", modelId: "selected" },
       ],
       ontologyDocs: { files: [], index: [] },
+      // Web tools are on, without a search: the project has no web search model.
+      web: {},
     })
     // What a child may run on: the project's models, each as its binding configures it.
     expect(delegation).toMatchObject({
@@ -201,5 +208,42 @@ describe("a child's plan", () => {
     expect(readAgentRunPlan(definitions({ subagentMaxSteps: 10 }), child(20), VIEW).maxSteps).toBe(
       10
     )
+  })
+})
+
+describe("a run's web tools", () => {
+  const search: WebSearchModel = {
+    providerId: "test",
+    modelId: "search",
+    definition: { kind: "web-search", providerId: "test", modelId: "search" },
+    async search() {
+      throw new Error("A plan never searches.")
+    },
+  }
+  const child = {
+    id: "run_1-child",
+    kind: "subagent",
+    parentRunId: "run_1",
+    spec: { model: { provider: "test", modelId: "selected" }, task: "Look.", toolNames: [] },
+  } as unknown as AgentRunRecord
+
+  // Proven by removal: drop `web` from readAgentRunPlan's shared part, or its `false` check.
+  test("are the same for a turn and a child, and absent once agent.web is false", () => {
+    const configured = definitions({
+      webSearch: [search],
+      web: { allowedDomains: ["example.com"], blockedDomains: ["*.ads.example.com"] },
+    })
+    const web = {
+      search: { provider: "test", modelId: "search" },
+      allowedDomains: ["example.com"],
+      blockedDomains: ["*.ads.example.com"],
+    }
+
+    expect(readAgentRunPlan(configured, turn(), VIEW).web).toEqual(web)
+    expect(readAgentRunPlan(configured, child, VIEW).web).toEqual(web)
+
+    const off = definitions({ webSearch: [search], web: false })
+    expect(readAgentRunPlan(off, turn(), VIEW)).not.toHaveProperty("web")
+    expect(readAgentRunPlan(off, child, VIEW)).not.toHaveProperty("web")
   })
 })

@@ -1,4 +1,5 @@
 import { RuntimeError } from "../runtime/errors"
+import type { AgentWebOptions } from "./web"
 
 /**
  * The most model calls a run nobody watches takes when nothing sets its own limit: a sub-agent's or
@@ -15,6 +16,11 @@ export interface AgentOptions {
   readonly maxSteps?: number
   /** At most this many steps in one run of a sub-agent. Defaults to 500. */
   readonly subagentMaxSteps?: number
+  /**
+   * The web tools: `web_search` when the project has a web search model, and `web_fetch`. On by
+   * default; `false` turns both off, and domain lists narrow both.
+   */
+  readonly web?: false | AgentWebOptions
 }
 
 /** Reject a step limit that is not a positive integer, naming where it was set. */

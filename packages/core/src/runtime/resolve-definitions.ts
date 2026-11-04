@@ -6,6 +6,7 @@ import { assertNoAgentDefinitions } from "../agents/retired-config"
 import { createAgentSkillCatalog } from "../agents/skills"
 import { assertMaxSteps } from "../agents/step-limits"
 import { createAgentToolCatalog } from "../agents/tool-catalog"
+import { assertNoProviderWebTools, resolveAgentWebOptions } from "../agents/web"
 import type { ConnectorDefinition } from "../connectors"
 import { isDatasetPick } from "../datasets/builders"
 import { columnsByName } from "../datasets/column-index"
@@ -105,6 +106,8 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   const subagentMaxSteps = options.agent?.subagentMaxSteps
   assertMaxSteps(maxSteps, "agent.maxSteps")
   assertMaxSteps(subagentMaxSteps, "agent.subagentMaxSteps")
+  const web = resolveAgentWebOptions(options.agent?.web)
+  if (web !== false) assertNoProviderWebTools(models)
   const ontologyDocs = createOntologyDocsCatalog({
     objectTypes: ontology.listObjectTypes(),
     ...(options.agent?.ontologyDocs === undefined ? {} : { docs: options.agent.ontologyDocs }),
@@ -226,6 +229,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
       ontologyDocs,
       ...(maxSteps === undefined ? {} : { maxSteps }),
       ...(subagentMaxSteps === undefined ? {} : { subagentMaxSteps }),
+      ...(web === undefined ? {} : { web }),
     }),
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),
