@@ -107,6 +107,22 @@ the controls. Another layout can read `html[data-sixb-desktop]` and the
 `--sixb-desktop-controls-height` variable. A clickable element in the strip other than a link,
 button or form control needs `-webkit-app-region: no-drag`.
 
+## Run the agent on this computer
+
+In the desktop app, a new conversation runs on the person's computer by default, with nothing to install
+or configure. A line under the composer picks the folder or **Cloud**, and the first message asks for a
+folder. While the app is closed, messages wait for it.
+
+The agent works only in folders the person chose on that computer, for that project. Once one is allowed,
+whoever is signed in as them can send it messages from the web, and the agent's commands run there without
+asking.
+
+The first folder signs the computer in with one approval in the browser, or uses a `sixb login` for that
+project, and conversations run as that account. Sign it out in **Settings**: signing out of the window
+doesn't end it.
+
+On Windows, which has no local sandbox yet, conversations run in the cloud.
+
 ## Check for the desktop app in your code
 
 `useDesktop` tells your app where it is running, from the first render:
@@ -126,6 +142,14 @@ your code can run inside a desktop app older than itself.
 
 Use it to decide what to show, not what to allow: a page can set the value it reads. Enforce
 permissions on your API, as you do for the browser.
+
+`desktop.computer` is missing from a desktop app older than your code. A page can't allow a folder on its
+own: `pickFolder` returns what the person chose, and `allowFolder(folder)` asks them first.
+
+```ts
+const about = await desktop?.computer?.about() // { id, name }, or null where it can't run the agent
+const folder = await desktop?.computer?.pickFolder() // the system's dialog; null if they cancel
+```
 
 ## Limitations
 
