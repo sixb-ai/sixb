@@ -600,6 +600,45 @@ describe("a runner outside the worker", () => {
     expect(heard).toHaveLength(3)
   })
 
+  // Guard proofs: drop the thread filter from computerPlaces (each of Ava's threads shows the
+  // other's commands); list the live sessions by the thread's owner without the owner check (Bob,
+  // who shares the conversation, reads what runs on Ava's laptop).
+  test("shows each thread its own background commands, to its owner alone", async () => {
+    const { person, ask, call, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const threadOf = async (text: string) =>
+      (await storage.agents.runs.getById({ projectId, id: await ask(ava, text) }))?.threadId ?? ""
+    const docs = await threadOf("Serve the docs while you edit them.")
+    const api = await threadOf("Run the API while you test it.")
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: docs,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    const command = (threadId: string, id: string) => ({
+      threadId,
+      id,
+      command: "bun dev",
+      status: "running",
+      startedAt: "2026-11-04T10:00:00.000Z",
+    })
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_ava", {
+      computer: LAPTOP,
+      backgroundCommands: [command(docs, "bg_3f9a1c"), command(api, "bg_7d02e4")],
+    })
+    const read = async (as: typeof ava, threadId: string) =>
+      (await call(as, "GET", `/api/agent-threads/${threadId}`)).json()
+
+    expect(await read(ava, docs)).toMatchObject({
+      backgroundCommands: [command(docs, "bg_3f9a1c")],
+    })
+    expect(await read(ava, api)).toMatchObject({ backgroundCommands: [command(api, "bg_7d02e4")] })
+    expect(await read(bob, docs)).not.toHaveProperty("backgroundCommands")
+  })
+
   // Guard proof: match the sessions to the thread's current folder again, in computerPlaces or in
   // the stop route; the command still running in the folder it left reads as gone, and its Stop
   // answers 404.
