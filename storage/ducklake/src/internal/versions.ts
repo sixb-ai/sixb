@@ -97,9 +97,23 @@ export function changesTouchTables(changesMade: string, tableIds: readonly bigin
 }
 
 /**
+ * What DuckLake records for its own maintenance of a table: flushing inlined rows to a file,
+ * rewriting files that carry deletes, merging small files. These move rows between files without
+ * changing which rows the table holds at any snapshot, whoever ran them.
+ */
+const MAINTENANCE_CHANGE_KINDS: ReadonlySet<string> = new Set([
+  "inline_flush",
+  "rewrite_delete",
+  "merge_adjacent",
+])
+
+/**
  * Whether a DuckLake snapshot changed a table's rows, and whether it removed any. DuckLake records
  * every row change in `changes_made`, for inlined rows (`inlined_insert:<id>`) as for files
  * (`inserted_into_table:<id>`, `deleted_from_table:<id>`); altering a table changes none.
+ *
+ * A maintenance commit changes no rows, like Iceberg's replace snapshots: it is never a version.
+ * A flush also records `deleted_from_table` for the table, for the inlined rows it moved.
  */
 export function parseTableDataChange(
   changesMade: string,
@@ -108,6 +122,7 @@ export function parseTableDataChange(
   const tableIdText = tableId.toString()
   let hasDataChange = false
   let hasDeleteChange = false
+  let maintenance = false
 
   for (const change of changesMade.split(",")) {
     const [kind, changedTableId] = change.split(":")
@@ -116,6 +131,10 @@ export function parseTableDataChange(
     }
 
     const normalizedKind = kind.toLowerCase()
+    if (MAINTENANCE_CHANGE_KINDS.has(normalizedKind)) {
+      maintenance = true
+    }
+
     if (normalizedKind.includes("insert") || normalizedKind.includes("delete")) {
       hasDataChange = true
     }
@@ -123,6 +142,10 @@ export function parseTableDataChange(
     if (normalizedKind.includes("delete")) {
       hasDeleteChange = true
     }
+  }
+
+  if (maintenance) {
+    return { hasDataChange: false, hasDeleteChange: false }
   }
 
   return { hasDataChange, hasDeleteChange }

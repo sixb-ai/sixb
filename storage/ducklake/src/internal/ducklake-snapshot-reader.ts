@@ -141,6 +141,8 @@ const CATALOG_SNAPSHOT_SCAN_LIMIT = 512
  *
  * DuckLake names a table in `changes_made` for every change to its rows, inlined
  * or written to files, so version reads never scan the catalog's file tables.
+ * Maintenance commits, which only move rows between files, name the table too and
+ * are never versions (see `parseTableDataChange`).
  */
 export class DuckLakeSnapshotReader {
   constructor(
