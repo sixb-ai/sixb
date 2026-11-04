@@ -88,6 +88,10 @@ export function createPgClient(options: CreatePgClientOptions): SQL {
     // index the first key is a null rank with one value, so a query with a sparse filter reads
     // every row of the type where the planner expected a few.
     enable_incremental_sort: "off",
+    // Reads are page-sized, so compiling a plan never pays for itself. A plan over many partitions
+    // crosses the JIT cost threshold anyway, and compiling it took seconds and enough memory for
+    // the server to kill the backend, which drops every connection.
+    jit: "off",
   }
   if (options.statementTimeoutMillis !== undefined) {
     connection.statement_timeout = options.statementTimeoutMillis

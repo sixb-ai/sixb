@@ -83,6 +83,10 @@ export function compilePgConditionalObjectReadSource(
 
   return Object.freeze({
     ...scopedQuerySource(compileConditionalReadScopeCte(projectId, filters)),
+    // A link is visible while both endpoints are, so a statement that reads both through
+    // `_sixb_scope_objects` reads stored links. Checking each endpoint again plans every partition
+    // of objects: the endpoint's type comes from the link row, so PostgreSQL cannot prune them.
+    linksBetweenVisibleObjectsTable: "links",
     // One type's visible objects are the stored ones its own condition matches.
     objectsOfType: (objectTypeId: string) => {
       const filter = filters.get(objectTypeId)

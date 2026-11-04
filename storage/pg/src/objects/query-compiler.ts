@@ -194,6 +194,13 @@ export function compilePgObjectQuery(
 export interface PgObjectQuerySource {
   readonly objectsTable: string
   readonly linksTable: string
+  /**
+   * The links a statement reads where it already joins both endpoints through `objectsTable`, or
+   * only sizes a traversal, when a link's visibility and contents follow from its endpoints alone.
+   * Unset, it reads `linksTable`: a selected scope reaches links by path and redacts their
+   * properties.
+   */
+  readonly linksBetweenVisibleObjectsTable?: string
   readonly objectPropertyPermissionsTable?: string
   /**
    * Where to read one concrete type's objects, when the source can say it more precisely than
@@ -215,6 +222,11 @@ export interface PgObjectQuerySource {
 export interface PgTypedObjects {
   readonly table: string
   readonly filter?: { readonly sql: string; readonly args: readonly unknown[] }
+}
+
+/** The links a statement reads once it joins both of their endpoints through `objectsTable`. */
+function linksBetweenVisibleObjects(source: PgObjectQuerySource): string {
+  return source.linksBetweenVisibleObjectsTable ?? source.linksTable
 }
 
 /** The table and `AND ...` filter a statement reads one type's objects with. */
@@ -834,6 +846,9 @@ function compileTraversalRelation(
   const parent = incoming ? "target" : "source"
   const endpoint = incoming ? "source" : "target"
   const endpointType = compileEndpointTypes("selected", linkEndpointObjectTypeIds(traversal))
+
+  // The input rows were read through the source and `selected` is too, so both ends of every
+  // edge read here are visible.
   return {
     sql: `FROM ${source.objectsTable} AS selected
       WHERE selected.project_id = ?
@@ -841,7 +856,7 @@ function compileTraversalRelation(
       ${endpointPredicate ? `AND (${endpointPredicate})` : ""}
       AND EXISTS (
         SELECT 1 FROM (${input.sql}) AS input
-        JOIN ${source.linksTable} AS edge
+        JOIN ${linksBetweenVisibleObjects(source)} AS edge
           ON edge.project_id = input.project_id
           AND edge.${parent}_type_id = input.object_type_id
           AND edge.${parent}_id = input.primary_id
@@ -900,9 +915,12 @@ function compileTraversalProbe(
   const input = compileAggregateSource(projectId, traversal.input, source)
   const parent = traversal.direction === "incoming" ? "target" : "source"
   const limit = 1000
+
+  // The probe only sizes the traversal and returns no row, so it counts every edge the traversal
+  // walks from visible inputs, including those its far-end join will then drop.
   const statement = compilePgObjectStatement(
     `SELECT 1 FROM (${input.sql}) AS input
-    JOIN ${source.linksTable} AS edge ON edge.project_id = input.project_id
+    JOIN ${linksBetweenVisibleObjects(source)} AS edge ON edge.project_id = input.project_id
       AND edge.${parent}_type_id = input.object_type_id AND edge.${parent}_id = input.primary_id
     WHERE edge.link_id = ? ${traversal.direction === "incoming" && traversal.sourceObjectTypeId ? "AND edge.source_type_id = ?" : ""}
     LIMIT ?`,
@@ -1037,8 +1055,10 @@ function compileExpansionValue(
     whereArgs.push(expansion.sourceObjectTypeId)
   }
 
+  // The parent is a row read through the source and the neighbour is joined from its objects, so
+  // both ends of every edge read here are visible.
   const from = `
-    FROM ${ctx.source.linksTable} AS ${edge}
+    FROM ${linksBetweenVisibleObjects(ctx.source)} AS ${edge}
     JOIN ${ctx.source.objectsTable} AS ${target}
       ON ${target}.project_id = ${edge}.project_id
      AND ${target}.object_type_id = ${neighborType}
@@ -1365,6 +1385,8 @@ function compileAggregateTraversal(
     // Deduplicate endpoint identities before fetching objects. Bounded arrays let PostgreSQL
     // visit primary keys in groups instead of doing one random B-tree descent per edge.
     // Each array contains at most 1024 IDs; larger traversals can spill their sort/group work.
+    // Both ends of each edge are visible: the input was read through the source, and the sources
+    // are joined from its objects.
     return {
       sql: `SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
         FROM (
@@ -1373,7 +1395,7 @@ function compileAggregateTraversal(
             FROM (
               SELECT DISTINCT edge.source_id AS primary_id
               FROM (${input.sql}) AS input
-              JOIN ${source.linksTable} AS edge ON edge.project_id = input.project_id
+              JOIN ${linksBetweenVisibleObjects(source)} AS edge ON edge.project_id = input.project_id
                 AND edge.target_type_id = input.object_type_id AND edge.target_id = input.primary_id
               WHERE edge.link_id = ? AND edge.source_type_id = ?
             ) AS endpoints
