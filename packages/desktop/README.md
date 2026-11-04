@@ -73,6 +73,26 @@ The session is an ordinary browser session, kept in the window's persistent cook
 launches open straight into the app. `src/shell/navigation.ts` holds those two decisions as a pure
 function; `src/shell/main.ts` wires them to the window.
 
+### Running the agent on this computer
+
+`writeDesktopApp` compiles the runner the CLI names into `.sixb/desktop/runner`, and packaging copies it
+to `Resources/runner`, outside the archive, because a program has to be a file of its own to run.
+
+```
+page ── useDesktop().computer ──▶ main.ts (isAppUrl, native dialogs) ──▶ src/shell/runner.ts
+                                                                          │ JSON lines, stdin/stdout
+project API ◀── sessions, turns, device sign-in ── sixb-runner ◀──────────┘
+```
+
+- **The runner holds the sign-in**, where `sixb login` keeps its own, which the agent's sandbox denies.
+  The keychain wouldn't do: `security find-generic-password` answers from inside the sandbox. The main
+  process only opens the approval page, if `isApiPage` accepts it.
+- **It can't outlive the app.** It ends with its stdin, and `before-quit` lets a running turn record its
+  end, within a limit. While the app is open it restarts after a wait that grows.
+- **The agent needs a runtime** for its own `sixb`. A `bun` script beside the runner stands in, last on
+  the PATH so that a person's own wins. The PATH comes from their login shell, as an app opened from the
+  Dock is given a bare one.
+
 ### Title bar
 
 On macOS the window has no title bar: the app draws to the top edge and the window controls float
