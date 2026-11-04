@@ -4,7 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, defineDataset } from "@sixb/core"
 import { DuckLakeStorage } from "../src"
-import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
+import {
+  createDuckDbRuntime,
+  type DuckDbRuntime,
+  setupDuckLake,
+} from "../src/internal/duckdb-runtime"
 import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
 
 const ordersDataset = defineDataset("raw.erp.orders", {
@@ -56,6 +60,44 @@ describe("DuckLakeStorage catalog options", () => {
 
       const [row] = await runtime.query("SELECT sixb_setup_value() AS value")
       expect(row?.value).toBe(42)
+    } finally {
+      await runtime.close()
+    }
+  })
+
+  // Regression proof: remove assertDuckLakeExtensionVersion from setupDuckLake. The lake then
+  // attaches with whatever DuckLake build the runtime reports.
+  test("refuses a DuckLake extension build it is not pinned to, before attaching", async () => {
+    const runtime = await createDuckDbRuntime()
+    const statements: string[] = []
+
+    // The real runtime, except that it reports another DuckLake build, as DuckDB would after its
+    // extension repository replaced the build a deploy downloads.
+    const otherBuild: DuckDbRuntime = Object.create(runtime, {
+      run: {
+        value: (sql: string) => {
+          statements.push(sql)
+          return runtime.run(sql)
+        },
+      },
+      query: {
+        value: async (sql: string) =>
+          sql.includes("duckdb_extensions()")
+            ? [{ extension_version: "0123abcd" }]
+            : runtime.query(sql),
+      },
+    })
+
+    try {
+      const setup = setupDuckLake(otherBuild, {
+        catalog: { type: "duckdb", path: join(rootDir, "metadata.ducklake") },
+        dataPath: join(rootDir, "data"),
+      })
+
+      expect(String(await setup.catch((error) => error))).toContain(
+        "DuckLake extension build '0123abcd' is loaded, but this provider requires build"
+      )
+      expect(statements.some((sql) => sql.startsWith("ATTACH"))).toBe(false)
     } finally {
       await runtime.close()
     }
