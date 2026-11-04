@@ -368,6 +368,7 @@ class AnthropicLanguageModel implements LanguageModel {
   readonly rateCard?: ModelRateCard
   readonly defaultReasoning?: ModelReasoningLevel
   readonly maxOutputTokens?: number
+  readonly providerToolNames?: readonly string[]
   /** Messages requires `max_tokens` on every request: the binding's limit, else the model's. */
   private readonly outputCeiling: number
 
@@ -412,6 +413,10 @@ class AnthropicLanguageModel implements LanguageModel {
     for (const [index, tool] of (options.providerTools ?? []).entries()) {
       assertJsonObject(tool, `providerTools[${index}]`)
     }
+    const providerToolNames = (options.providerTools ?? []).flatMap((tool) =>
+      typeof tool.name === "string" ? [tool.name] : []
+    )
+    if (providerToolNames.length > 0) this.providerToolNames = providerToolNames
     // Server tools may add request- or duration-based charges that token rates cannot represent.
     const rateCard =
       options.rateCard !== undefined

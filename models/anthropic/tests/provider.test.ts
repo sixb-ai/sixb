@@ -100,6 +100,20 @@ describe("Anthropic provider", () => {
     ).toBeUndefined()
   })
 
+  test("names its server tools, which Sixb keeps off its own tool names", async () => {
+    const provider = createAnthropic({
+      fetch: async () => Response.json({ data: [], has_more: false }),
+    })
+
+    const model = provider("claude-opus-5", {
+      providerTools: [{ type: "web_search_20260209", name: "web_search" }],
+    })
+
+    expect(model.providerToolNames).toEqual(["web_search"])
+    expect((await model.resolve?.())?.providerToolNames).toEqual(["web_search"])
+    expect(provider("claude-opus-5").providerToolNames).toBeUndefined()
+  })
+
   test.each([
     "$defs",
     "definitions",
