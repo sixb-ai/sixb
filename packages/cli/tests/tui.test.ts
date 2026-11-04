@@ -358,6 +358,107 @@ describe("a call as one line", () => {
   })
 })
 
+describe("a web call as one line", () => {
+  const web = (
+    name: "web_search" | "web_fetch",
+    input: Record<string, unknown>,
+    output?: Record<string, unknown>
+  ): Extract<Part, { kind: "tool" }> => ({
+    kind: "tool",
+    id: "w",
+    name,
+    state: output ? "done" : "running",
+    input,
+    output,
+  })
+
+  test("names a search by its query and how many results came back", () => {
+    const query = { query: "bun 1.4 release notes" }
+    const hit = { url: "https://bun.sh/blog", title: "Bun", snippet: "…" }
+
+    expect(toolLine(web("web_search", query))).toEqual({
+      verb: "search",
+      detail: "bun 1.4 release notes",
+    })
+    expect(toolLine(web("web_search", query, { query: query.query, results: [hit, hit] }))).toEqual(
+      {
+        verb: "search",
+        detail: "bun 1.4 release notes",
+        note: "2 results",
+      }
+    )
+    expect(toolLine(web("web_search", query, { results: [{ ...hit, text: "Exa" }] })).note).toBe(
+      "1 result"
+    )
+  })
+
+  test("names a page by host and path, then says what came of it", () => {
+    const input = { url: "https://docs.example.com/guide/start?ref=nav#install" }
+    const page = {
+      source: { url: input.url, title: "Start" },
+      status: 200,
+      contentType: "text/html",
+      bytes: 122_880,
+    }
+
+    expect(toolLine(web("web_fetch", input))).toEqual({
+      verb: "fetch",
+      detail: "docs.example.com/guide/start",
+    })
+    expect(toolLine(web("web_fetch", { url: "https://example.com/" }, page)).detail).toBe(
+      "example.com"
+    )
+    expect(toolLine(web("web_fetch", input, { ...page, preview: "# Start" })).note).toBeUndefined()
+    expect(
+      toolLine(web("web_fetch", input, { ...page, question: "How?", answer: "Like this." })).note
+    ).toBe("answered")
+    expect(toolLine(web("web_fetch", input, { ...page, path: "/w/page.md" })).note).toBe(
+      "saved 120 KB"
+    )
+    expect(
+      toolLine(
+        web("web_fetch", input, {
+          ...page,
+          status: 301,
+          redirect: { url: "https://other.host/start", status: 301 },
+        })
+      ).note
+    ).toBe("→ other.host")
+  })
+
+  // Regression proof: spread the generic `error` into the web_fetch line instead of
+  // `fetchFailure`; the note is then the whole error, and the address has no room left.
+  test("says why a read failed in a word, and the error under the line", () => {
+    const failed = (error: string): Extract<Part, { kind: "tool" }> => ({
+      kind: "tool",
+      id: "w",
+      name: "web_fetch",
+      state: "error",
+      input: { url: "https://docs.example.com/guide/start" },
+      error,
+    })
+    const blocked =
+      "[SixbAgent] Blocked: https://docs.example.com/guide/start is outside the domains this project's agent may read."
+
+    expect(toolLine(failed(blocked))).toEqual({
+      verb: "fetch",
+      detail: "docs.example.com/guide/start",
+      note: "blocked",
+      failed: true,
+      preview: [blocked.slice("[SixbAgent] ".length)],
+    })
+    expect(
+      toolLine(failed("[SixbAgent] Could not fetch https://docs.example.com/ (ECONNREFUSED).")).note
+    ).toBe("refused")
+    expect(
+      toolLine(failed("[SixbAgent] Timed out after 30 s fetching https://docs.example.com/.")).note
+    ).toBe("timed out")
+    expect(
+      toolLine(failed("[SixbAgent] Could not resolve 'docs.example.com' (ENOTFOUND).")).note
+    ).toBe("failed")
+  })
+})
+
 describe("what a message is sent with", () => {
   const model = (modelId: string, extra: Partial<LanguageModel> = {}): LanguageModel =>
     ({
