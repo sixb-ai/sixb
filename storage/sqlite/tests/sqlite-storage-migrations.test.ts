@@ -203,6 +203,7 @@ const shippedMigrationIds = [
   "082-agent-token-rates",
   "083-agent-computer-sessions",
   "084-agent-computer-background-commands",
+  "085-web-search-model-kind",
 ]
 
 afterEach(async () => {
@@ -351,6 +352,34 @@ describe("SQLite storage migrations", () => {
       expect(db.query("SELECT id, model_kind FROM ai_model_call_usage ORDER BY id").all()).toEqual([
         { id: "reranking", model_kind: "reranking" },
         { id: "speech", model_kind: "speech" },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("keeps recorded model kinds and admits web search", async () => {
+    // Removal proof: omit 085's UPDATE; the speech kind below is lost in the swap.
+    const db = replayedDatabase("085-web-search-model-kind")
+    try {
+      const insertUsage = (id: string, modelKind: string) =>
+        db.run(
+          `INSERT INTO ai_model_call_usage (
+            project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+            response_id, reporting_status, occurred_at, recorded_at, model_kind
+          ) VALUES ('p', ?, 'execution', 1, ?, 'provider', 'model', ?, 'unavailable',
+            '2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z', ?)`,
+          [id, id, id, modelKind]
+        )
+      insertUsage("speech", "speech")
+      expect(() => insertUsage("early-web-search", "web-search")).toThrow()
+
+      await migration("085-web-search-model-kind").up(db)
+      insertUsage("web-search", "web-search")
+      expect(() => insertUsage("unknown", "unknown")).toThrow()
+      expect(db.query("SELECT id, model_kind FROM ai_model_call_usage ORDER BY id").all()).toEqual([
+        { id: "speech", model_kind: "speech" },
+        { id: "web-search", model_kind: "web-search" },
       ])
     } finally {
       db.close()

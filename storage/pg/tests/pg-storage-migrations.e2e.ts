@@ -125,6 +125,7 @@ const SHIPPED_MIGRATIONS = [
   "085-agent-computer-sessions",
   "086-partition-objects",
   "087-agent-computer-background-commands",
+  "088-web-search-model-kind",
 ]
 
 const steps = postgresStorageMigrations.steps

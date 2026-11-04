@@ -71,8 +71,9 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
 
   describe(label, () => {
     // Removal proof: omit audioDurationMs from a row codec; this round trip fails.
-    // Removal proof: omit 'reranking' from a storage migration's model_kind check; the write fails.
-    test("persists transcription and reranking usage kinds without invented token totals", async () => {
+    // Removal proof: omit 'reranking' or 'web-search' from a storage migration's model_kind check;
+    // the write fails.
+    test("persists transcription, reranking and web search usage kinds without invented token totals", async () => {
       await withStorage(async (storage) => {
         const latest = () =>
           storage.getLatestForExecution({ projectId, executionId: agentExecutionId })
@@ -102,6 +103,18 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           })
         )
         expect((await latest())?.modelKind).toBe("reranking")
+
+        await storage.recordModelCall(
+          modelCallInput({
+            id: "usage_web_search",
+            callId: "call_web_search",
+            responseId: "response_web_search",
+            modelKind: "web-search",
+            usage: {},
+            occurredAt: at("2026-06-23T10:02:00.000Z"),
+          })
+        )
+        expect((await latest())?.modelKind).toBe("web-search")
       })
     })
     // Removal proof: omit a media count from a row codec, or 'speech' from a storage migration's
