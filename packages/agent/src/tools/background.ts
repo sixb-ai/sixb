@@ -14,7 +14,7 @@ export const BASH_OUTPUT_TOOL_SPEC = {
   inputSchema: {
     type: "object",
     properties: {
-      id: { type: "string", description: "The id bash returned, such as bg_1." },
+      id: { type: "string", description: "The id bash returned, like bg_3f9a1c." },
       wait: {
         type: "number",
         description: "Milliseconds to wait for its end, up to 600000.",
@@ -32,7 +32,7 @@ export const BASH_STOP_TOOL_SPEC = {
   inputSchema: {
     type: "object",
     properties: {
-      id: { type: "string", description: "The id bash returned, such as bg_1." },
+      id: { type: "string", description: "The id bash returned, like bg_3f9a1c." },
     },
     required: ["id"],
     additionalProperties: false,
@@ -117,7 +117,7 @@ function parseInput(
     if (!keys.includes(key)) throw publicError(tool, `input contains unknown property '${key}'.`)
   }
   if (typeof input.id !== "string" || !input.id) {
-    throw publicError(tool, "id must be a background command's id, such as bg_1.")
+    throw publicError(tool, "id must be a background command's id, such as bg_3f9a1c.")
   }
   return input as Record<string, unknown> & { readonly id: string }
 }
