@@ -94,8 +94,9 @@ The request is snapshotted, `maxResults` clamped to 1–10, and the call bounded
 no retry. Admission reserves the binding's `estimateReservation({ maxResults })`; without one, cost
 limits refuse the search, as they do transcription. No rate card prices a search, so its cost is
 what the provider reports. The call is recorded before its hits are checked: a malformed reply, or
-a `WebSearchModelResponseError` carrying its metadata, is still accounted. Hits need an http(s) URL,
-a title and a snippet; Sixb cuts snippets to 300 characters and keeps only dates that parse.
+a `WebSearchModelResponseError` carrying its metadata, is still accounted. Results must be a list of
+hits with a title and a snippet; a hit without an http(s) URL is dropped, not the reply. Sixb cuts
+snippets to 300 characters and keeps only dates that parse.
 
 A search that fails without a reply (an HTTP error, a network failure, the timeout, an abort) is
 not recorded: whether it was billed is unknown, so its reservation is kept as unknown, as for a

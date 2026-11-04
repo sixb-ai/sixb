@@ -91,15 +91,17 @@ export function assertWebSearchModel(model: WebSearchModel): void {
 }
 
 /**
- * Check a provider's hits and keep at most `maxResults`: http(s) URLs, string titles and snippets,
- * snippets cut to 300 characters. A date that does not parse is dropped, the hit is kept.
+ * Check a provider's hits and keep at most `maxResults`: string titles and snippets, snippets cut
+ * to 300 characters. A hit without an http(s) URL is dropped, and so is a date that does not parse;
+ * the other hits are kept.
  */
 export function validateWebSearchHits(results: unknown, maxResults: number): WebSearchHit[] {
   if (!Array.isArray(results)) {
     throw new TypeError("[SixbModels] Web search must return a list of results.")
   }
 
-  return results.slice(0, maxResults).map((result: unknown) => {
+  const hits: WebSearchHit[] = []
+  for (const result of results as unknown[]) {
     if (!result || typeof result !== "object") {
       throw new TypeError("[SixbModels] Invalid web search result.")
     }
@@ -109,26 +111,29 @@ export function validateWebSearchHits(results: unknown, maxResults: number): Web
     const snippet: unknown = Reflect.get(result, "snippet")
     const publishedAt: unknown = Reflect.get(result, "publishedAt")
     if (
-      !isWebUrl(url) ||
       typeof title !== "string" ||
       typeof snippet !== "string" ||
       (publishedAt !== undefined && typeof publishedAt !== "string")
     ) {
-      throw new TypeError(
-        "[SixbModels] Web search results need an http(s) url, a title and a snippet."
-      )
+      throw new TypeError("[SixbModels] Web search results need a title and a snippet.")
     }
+
+    // One odd hit should not cost the caller the others.
+    if (!isWebUrl(url)) continue
 
     const text = snippet.trim()
     const published = publishedAt === undefined ? Number.NaN : Date.parse(publishedAt)
 
-    return {
+    hits.push({
       url,
       title: title.trim(),
       snippet: text.length > SNIPPET_CHARACTERS ? `${text.slice(0, SNIPPET_CHARACTERS)}…` : text,
       ...(Number.isNaN(published) ? {} : { publishedAt: new Date(published).toISOString() }),
-    }
-  })
+    })
+    if (hits.length === maxResults) break
+  }
+
+  return hits
 }
 
 function isWebUrl(value: unknown): value is string {
