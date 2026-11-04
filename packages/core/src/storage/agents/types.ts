@@ -273,7 +273,7 @@ export const AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX = 64
  */
 export interface AgentComputerBackgroundCommand {
   readonly threadId: string
-  /** `bg_<n>`, as the agent's tools name it. */
+  /** `bg_<hex>`, as the agent's tools name it. */
   readonly id: string
   readonly command: string
   readonly status: "running" | "exited" | "stopped"

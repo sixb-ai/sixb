@@ -128,7 +128,7 @@ export const AgentThreadComputerInputSchema = z
 export const AgentBackgroundCommandSchema = z
   .object({
     threadId: z.string().min(1).max(200),
-    /** `bg_<n>`, as the agent's tools name it: with `startedAt`, it names the command. */
+    /** `bg_<hex>`, as the agent's tools name it: with `startedAt`, it names the command. */
     id: z.string().min(1).max(200),
     /** Its first 1,000 characters. */
     command: z.string().max(1_000),
