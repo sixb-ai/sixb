@@ -18,12 +18,12 @@ import {
   type SignedOut,
   startSignIn,
 } from "./connection"
-import { LocalRunner, stopOnHangUp } from "./runner"
+import { LocalRunner, stopOnHangUp, stopOnQuit } from "./runner"
 import { loadSettings, type Settings } from "./settings"
 import { type TuiColors, tuiColors } from "./theme"
 import { BOLD, Composer, useSpinner } from "./ui"
 
-/** How long quitting waits for a turn running here to record its end. */
+/** How long quitting waits for a turn running here to record its end, and its commands to stop. */
 const STOP_WAIT_MS = 10_000
 /** How long quitting waits to tell the project this sixb closed: it lapses on its own anyway. */
 const SESSION_CLOSE_WAIT_MS = 2_000
@@ -109,13 +109,13 @@ export async function runTui(options: {
     await renderer.closed
     syntax.destroy()
     restoreConsole()
-    // A turn running here ends interrupted, its end recorded, once the terminal is back; an API
-    // that stops answering gets a bounded wait, and ctrl+c ends it.
+    // A turn running here ends interrupted, its end recorded, once the terminal is back, and the
+    // background commands its turns left stop; an API that stops answering gets a bounded wait,
+    // and ctrl+c ends it.
     const running = runner as LocalRunner | null
-    if (running?.busy) {
-      process.stderr.write("  Stopping the turn running here…\n")
+    if (running) {
       process.once("SIGINT", () => process.exit(130))
-      await Promise.race([running.stop(), Bun.sleep(STOP_WAIT_MS)])
+      await stopOnQuit(running, STOP_WAIT_MS, (text) => process.stderr.write(`  ${text}\n`))
     }
     // Its conversations read as offline at once, rather than once the session lapses.
     await Promise.race([running?.closeSession(), Bun.sleep(SESSION_CLOSE_WAIT_MS)])

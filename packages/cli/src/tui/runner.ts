@@ -191,6 +191,11 @@ export class LocalRunner {
     return this.running.size > 0
   }
 
+  /** Whether a background command a turn started here runs now. */
+  get runsBackgroundCommands(): boolean {
+    return this.runner.runsBackgroundCommands
+  }
+
   /**
    * Stop every turn this computer runs, each ending interrupted with its end recorded, and the
    * background commands they left running, and close the session.
@@ -220,6 +225,29 @@ export function owns(
   return connection.user
     ? owner.type === "user" && owner.id === connection.user.id
     : owner.type === "system"
+}
+
+/**
+ * Quitting `sixb`: the turns running here end interrupted, their end recorded, the background
+ * commands they left stop, and the session closes, within `waitMs`, whether a turn runs or not.
+ * `note` says what it waits for.
+ */
+export async function stopOnQuit(
+  runner: Pick<LocalRunner, "busy" | "runsBackgroundCommands" | "stop">,
+  waitMs: number,
+  note: (text: string) => void
+): Promise<void> {
+  if (runner.busy) note("Stopping the turn running here…")
+  else if (runner.runsBackgroundCommands) note("Stopping the background commands running here…")
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    runner.stop(),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs)
+    }),
+  ])
+  clearTimeout(timer)
 }
 
 /**

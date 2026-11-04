@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createSixbClient } from "@sixb/client"
 import { thisComputerId } from "../src/tui/computer"
 import type { Connection } from "../src/tui/connection"
-import { LocalRunner, stopOnHangUp } from "../src/tui/runner"
+import { LocalRunner, stopOnHangUp, stopOnQuit } from "../src/tui/runner"
 
 // This computer as a runner: which turns `sixb` claims while it is open, how its session tells
 // the project so, and how it lets go of the turns it runs when its terminal closes.
@@ -305,5 +305,42 @@ describe("a closed terminal", () => {
     } finally {
       unhook()
     }
+  })
+})
+
+describe("quitting sixb", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  // Guard proof: stop only a busy runner in stopOnQuit, as quitting once did; the background
+  // commands then run on after sixb exits.
+  test("stops the background commands its turns left, though no turn runs", async () => {
+    const steps: string[] = []
+    await stopOnQuit(
+      {
+        busy: false,
+        runsBackgroundCommands: true,
+        stop: async () => {
+          steps.push("stop")
+        },
+      },
+      10_000,
+      (text) => steps.push(text)
+    )
+
+    expect(steps).toEqual(["Stopping the background commands running here…", "stop"])
+  })
+
+  test("waits for them no longer than its bound", async () => {
+    jest.useFakeTimers()
+    const quitting = stopOnQuit(
+      { busy: true, runsBackgroundCommands: true, stop: () => new Promise(() => {}) },
+      10_000,
+      () => {}
+    )
+    jest.advanceTimersByTime(10_000)
+
+    await quitting
   })
 })
