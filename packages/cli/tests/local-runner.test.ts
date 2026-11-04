@@ -255,8 +255,8 @@ describe("a background command", () => {
 })
 
 describe("a session closing while its renewal is on its way", () => {
-  // Guard proof: drop the session check after the PUT in openSession; the turn runs here after the
-  // person turned Messages from the web off, or quit. Drop `this.renewal` from closeSession's
+  // Guard proof: drop the session check from claimFirst; the turn runs here after the person turned
+  // Messages from the web off, or quit. Drop `this.renewal` from closeSession's
   // release; the DELETE overtakes the PUT, which opens the session again.
   test("claims nothing the renewal lists, and releases the session after it", async () => {
     let answer = () => {}
@@ -405,6 +405,73 @@ describe("turns waiting for a folder", () => {
     runner.openSession()
     await reachedNext
     expect(claimed).toEqual(["run_stuck", "run_next"])
+    await runner.closeSession()
+  })
+
+  // Guard proof: drop the session check from claimFirst; a list read before the folder was forgotten
+  // starts its next turn there, once the one before it ends, however long that took.
+  test("stay waiting once the session closes, while one before them is tried", async () => {
+    const { runner, claimed } = await avasRunner(
+      { status: "queued" },
+      {},
+      () => Promise.resolve(),
+      ["run_first", "run_next"]
+    )
+    let endFirst = (_ran: boolean) => {}
+    let tried = () => {}
+    const triedFirst = new Promise<void>((resolve) => {
+      tried = resolve
+    })
+    runner.claim = (runId) => {
+      claimed.push(runId)
+      tried()
+      return new Promise<boolean>((resolve) => {
+        endFirst = resolve
+      })
+    }
+
+    runner.openSession()
+    await triedFirst
+    await runner.closeSession()
+    endFirst(false)
+    // The turns of the loop it would take to reach the next, whose claim would be recorded at once.
+    for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(0)
+
+    expect(claimed).toEqual(["run_first"])
+  })
+
+  // Guard proof: drop the check on `newestAnswered` from openSession; a renewal that stalled, landing
+  // after a later one, reads as the session now: a 401 from its old token ends a valid connection.
+  test("say nothing of a renewal older than one already answered", async () => {
+    let failStalled = (_reason: unknown) => {}
+    const stalled = new Promise<void>((_resolve, reject) => {
+      failStalled = reject
+    })
+    const { runner, sessions } = await avasRunner({ status: "queued" }, {}, (renewal) =>
+      renewal === 0 ? stalled : Promise.reject(new Error("The later one."))
+    )
+    const told: string[] = []
+    let heard = () => {}
+    const heardLater = new Promise<void>((resolve) => {
+      heard = resolve
+    })
+    Object.assign(runner, {
+      options: {
+        onSessionChange: (failure: Error) => {
+          told.push(failure.message)
+          heard()
+        },
+      },
+    })
+    runner.openSession()
+    while (sessions.length === 0) await Bun.sleep(0)
+    const inner = runner as unknown as { session: { renew(): void }; lastCall: Promise<void> }
+    inner.session.renew()
+    await heardLater
+
+    failStalled(new Error("The stalled one."))
+    await inner.lastCall
+    expect(told).toEqual(["The later one."])
     await runner.closeSession()
   })
 

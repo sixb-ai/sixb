@@ -167,9 +167,8 @@ export class LocalRunner {
       })
       if (error) throw error
       this.noteSession(id, null)
-      // Closed meanwhile, with the setting or by quitting: what waits keeps waiting.
+      void this.claimFirst(id, data?.waiting ?? [])
       if (this.session?.id !== id) return
-      void this.claimFirst(data?.waiting ?? [])
       for (const ref of data?.stop ?? []) void this.stopBackground(ref)
     }
 
@@ -320,9 +319,14 @@ export class LocalRunner {
     })
   }
 
-  /** The first that can be claimed, so one that keeps failing can't hold up those behind it. */
-  private async claimFirst(runIds: readonly string[]): Promise<void> {
+  /**
+   * The first that can be claimed, so one that keeps failing can't hold up those behind it. Until
+   * `sessionId` closes, with the setting or by quitting: what waits keeps waiting. Trying one can
+   * take as long as a turn, so that's asked before each.
+   */
+  private async claimFirst(sessionId: string, runIds: readonly string[]): Promise<void> {
     for (const runId of runIds) {
+      if (this.session?.id !== sessionId) return
       if (await this.claimElsewhere(runId)) return
     }
   }
@@ -332,10 +336,9 @@ export class LocalRunner {
     if (this.session?.id !== sessionId) return
     const reason = failure === null ? null : failureReason(failure)
     if (reason === this.sessionFailure) return
-    const wasFailing = this.sessionFailure !== null
     this.sessionFailure = reason
     if (this.options.onSessionChange) {
-      if (failure !== null || wasFailing) this.options.onSessionChange(failure)
+      this.options.onSessionChange(failure)
     } else if (failure !== null) {
       this.onFailure(failure)
     }
