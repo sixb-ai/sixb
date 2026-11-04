@@ -24,6 +24,10 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
   })
 ```
 
+Names of the agent's own tools, such as `bash`, `read`, `web_search` and `web_fetch`, are
+reserved. To search with another provider, set it as a
+[web search model](./configuration.md#web-search-models) instead of defining a tool.
+
 The input schema validates arguments from the model. Return JSON-compatible data, and pass
 `signal` to requests that support cancellation. Resolving a [connector](../connectors/overview.md)
 in the handler keeps its credentials on the server.

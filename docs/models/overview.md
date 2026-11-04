@@ -69,6 +69,36 @@ export const sixb = createSixb({
 | [Sub-agent](#it-delegates) (`subagentMaxSteps`) | 500 | It fails with `agent.step_limit_reached`. |
 | [Workflow AI task](../workflows/overview.md#add-an-ai-task) (its own `maxSteps`) | 500 | It fails with `agent.step_limit_reached`. |
 
+### Search the web
+
+The agent has a `web_search` tool whenever your project has a
+[web search model](./configuration.md#web-search-models): a Vercel AI Gateway project has one
+without configuration. Conversations, sub-agents and AI workflow steps all get it, and each search
+counts toward [AI usage](./usage-and-limits.md#web-search).
+
+Narrow what it reaches, or turn it off:
+
+```ts
+export const sixb = createSixb({
+  // ...
+  agent: {
+    web: { allowedDomains: ["bun.com", "*.mozilla.org"], blockedDomains: ["ads.mozilla.org"] },
+    // or web: false
+  },
+})
+```
+
+| Rule | Matches |
+| --- | --- |
+| `example.com` | That host only |
+| `*.example.com` | Its subdomains, not `example.com` itself |
+| `example.com/docs` | That host, under that path |
+
+- `blockedDomains` wins over `allowedDomains`; results outside the lists are dropped.
+- `web_search` and `web_fetch` are reserved tool names. A model's own `web_fetch` in
+  `providerTools` fails at startup unless `agent.web` is `false`; so does its own `web_search` when
+  the project has a web search model.
+
 ## Give it project instructions
 
 Write guidance that applies to every conversation, such as your team's vocabulary, tone, or

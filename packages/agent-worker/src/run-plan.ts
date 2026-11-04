@@ -3,6 +3,7 @@ import type { AgentStepDefinition, SixbDefinitions } from "@sixb/core"
 import {
   agentToolSpec,
   listSandboxModels,
+  readAgentRunWebPlan,
   UNATTENDED_AGENT_MAX_STEPS,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -62,6 +63,7 @@ export function resolveWorkflowAgentStepPlan(
 
   const reasoning = step.reasoning ?? selected.defaultReasoning
   const sandboxModels = listSandboxModels(definitions.models)
+  const web = readAgentRunWebPlan(definitions)
   return Object.freeze({
     model: selected,
     instructions: step.instructions,
@@ -70,5 +72,6 @@ export function resolveWorkflowAgentStepPlan(
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(sandboxModels.length ? { sandboxModels } : {}),
     maxSteps: step.maxSteps ?? UNATTENDED_AGENT_MAX_STEPS,
+    ...(web === undefined ? {} : { web }),
   })
 }
