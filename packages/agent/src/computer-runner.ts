@@ -170,10 +170,11 @@ export class ComputerRunner {
               projectId: run.projectId,
               folder: this.options.folder,
             }),
-          startChild: (child, family) =>
+          startChild: (child, family, networkPolicy) =>
             children.start(child, {
               signal: turnSignal,
               family,
+              ...(networkPolicy ? { networkPolicy } : {}),
               leaseExpiresAt: lease,
               holdLease: async (childSession) => {
                 held.add(childSession)
@@ -360,6 +361,8 @@ export class ComputerRunner {
       const sandbox: RunSandbox = {
         waitBeforeModel: folder !== undefined,
         contextDirectory: runFiles,
+        // The person's own machine: its pages leave from there, and its dev servers are readable.
+        webNetwork: "computer",
         ...(background ? { background } : {}),
         acquire: async () => {
           const giveBack = await holdRunFiles({

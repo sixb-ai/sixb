@@ -219,6 +219,37 @@ describe("tool outputs too large for the context", () => {
 })
 
 describe("saved tool outputs in a later run", () => {
+  // Reproduce: leave the extension out of ToolOutputFiles.write's agentToolOutputPath; the page
+  // is then a `.txt` file, and its PDF bytes read as text.
+  test("stored by their tool keep their type, and are written back as any saved output", async () => {
+    const { root, blobs, files } = await harness()
+    const pdf = new Uint8Array([...new TextEncoder().encode("%PDF-1.7\n"), 0, 255])
+    const sha256 = createHash("sha256").update(pdf).digest("hex")
+
+    const path = await files.store(
+      "web_fetch",
+      pdf,
+      { extension: "pdf", mediaType: "application/pdf" },
+      context("fetch_1")
+    )
+
+    const file = files.fileOf("fetch_1")
+    expect(path).toBe(`.sixb/agent/${agentToolOutputPath("fetch_1", sha256, "pdf")}`)
+    expect(file?.path).toBe(agentToolOutputPath("fetch_1", sha256, "pdf"))
+    expect(file?.fileRef.mediaType).toBe("application/pdf")
+    expect(new Uint8Array(await readFile(join(root, path)))).toEqual(pdf)
+
+    // A later run's blank sandbox gets it back.
+    const next = await harness()
+    await restoreSavedToolOutputs({
+      handle: next.handle,
+      files: savedToolOutputFiles([message([toolCall("fetch_1", file!.fileRef, file!.path)])]),
+      blobStorage: blobs,
+      signal: new AbortController().signal,
+    })
+    expect(new Uint8Array(await readFile(join(next.root, path)))).toEqual(pdf)
+  })
+
   // Reproduce: count every saved output in ToolOutputFiles.save with budget.reserve instead of
   // holdContent; the third identical output then runs past the budget and is not saved.
   test("count identical content once, and give way past their own budget", async () => {

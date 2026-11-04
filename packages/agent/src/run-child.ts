@@ -7,6 +7,7 @@ import {
 import { createSixbError } from "@sixb/core/internal/errors"
 import { ModelUsageRecordingError } from "@sixb/core/internal/model-execution"
 import { isAbortError } from "@sixb/core/internal/workers"
+import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type {
   AgentRunRecord,
   AgentThreadRecord,
@@ -74,6 +75,8 @@ export interface ChildParent {
   holdLease(session: AgentRunSession<SubagentRunRecord>): Promise<() => void>
   /** The turn's mailbox, through which they talk. */
   readonly family: FamilyMailbox
+  /** The network the turn's `web_fetch` follows, which the child's follows too. */
+  readonly networkPolicy?: SandboxNetworkPolicy
 }
 
 interface RunningChild {
@@ -211,6 +214,7 @@ export class ChildRunner {
         thread,
         conversation,
         frameworkTools: [createAskParentTool(inbox)],
+        ...(parent.networkPolicy ? { parentNetworkPolicy: parent.networkPolicy } : {}),
         ...(execution.requestedBy === undefined ? {} : { requestedBy: execution.requestedBy }),
         history,
         signal: runtime.signal,
@@ -312,6 +316,7 @@ export class ChildRunner {
     const runPlan = await session.plan()
     const configured = resolveRunPlan(runPlan, {
       model: await session.models.language(runPlan.model),
+      recordedModel: await session.models.language(runPlan.model, { measures: false }),
     })
     const { model, budget, measuredBytesPerToken } = prepareAgentModel(configured)
     const plan = Object.freeze({ ...configured, model })

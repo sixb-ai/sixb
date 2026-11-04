@@ -294,6 +294,7 @@ class PersistentSandboxSession {
     return {
       waitBeforeModel: true,
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      ...(this.recipe.network ? { networkPolicy: this.recipe.network } : {}),
       resumed: this.resumed,
       acquire: async () => acquired,
       beforeFinalize: (options?: BeforeFinalizeOptions) => {

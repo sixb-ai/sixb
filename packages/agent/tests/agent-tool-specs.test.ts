@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineAgentTool } from "@sixb/core"
 import { type AgentRunWebPlan, agentToolSpec } from "@sixb/core/internal/agents"
+import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import {
   PUBLISH_ARTIFACT_TOOL_SPEC,
   PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
@@ -10,6 +11,7 @@ import { BASH_TOOL_SPEC } from "../src/tools/bash"
 import { agentModelToolSpecs } from "../src/tools/model-spec"
 import { READ_TOOL_SPEC } from "../src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../src/tools/view-file"
+import { WEB_FETCH_TOOL_SPEC } from "../src/tools/web-fetch/tool"
 import { WEB_SEARCH_TOOL_SPEC } from "../src/tools/web-search"
 
 describe("agent model tool specifications", () => {
@@ -59,6 +61,24 @@ describe("agent model tool specifications", () => {
       BASH_OUTPUT_TOOL_SPEC.name,
       BASH_STOP_TOOL_SPEC.name,
       WEB_SEARCH_TOOL_SPEC.name,
+      WEB_FETCH_TOOL_SPEC.name,
     ])
+  })
+
+  // Regression proof: return true from fetchesWeb whenever web is set; a sandbox without network
+  // then describes a tool that could never reach a page.
+  test("describes web_fetch with web tools on, unless the sandbox's network is none", () => {
+    const fetches = (web?: AgentRunWebPlan, networkPolicy?: SandboxNetworkPolicy) =>
+      agentModelToolSpecs([], {
+        publishes: false,
+        ...(web ? { web } : {}),
+        ...(networkPolicy ? { networkPolicy } : {}),
+      }).some((spec) => spec.name === WEB_FETCH_TOOL_SPEC.name)
+
+    expect(fetches()).toBe(false)
+    expect(fetches({})).toBe(true)
+    expect(fetches({}, { mode: "all" })).toBe(true)
+    expect(fetches({}, { mode: "restricted", allow: [] })).toBe(true)
+    expect(fetches({}, { mode: "none" })).toBe(false)
   })
 })

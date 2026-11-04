@@ -65,7 +65,8 @@ renewLease · cancelled · assertOwned   ownership, and a cancel of the run or o
 models.language(ref)                   the run's model, pinned once: each call is admitted against
                                        the requester's AI limits and records itself, and what it
                                        measured of the tokenizer (context-token-rate.ts), so the
-                                       runner never reports what a call used
+                                       runner never reports what a call used; with
+                                       `{ measures: false }`, a tool's own call measures nothing
 callTool(call)                         one call of a project tool the run offers, for the runner
                                        that holds the run, run as the run (run-tools.ts): its input
                                        checked against the tool's schema, its model calls billed to

@@ -6,6 +6,7 @@ import {
   AGENT_TOOL_OUTPUTS_DIRECTORY,
   type AgentRunFileStore,
   type AgentToolCallFile,
+  type AgentToolOutputExtension,
   agentToolOutputPath,
   isAgentToolOutputFile,
   isAgentToolResult,
@@ -24,6 +25,7 @@ import { BASH_TOOL_SPEC, keptCommandOutput } from "./bash"
 import { READ_TOOL_SPEC } from "./read"
 import { AgentFileBudget } from "./tool-files"
 import { VIEW_FILE_TOOL_SPEC } from "./view-file"
+import { WEB_FETCH_TOOL_SPEC } from "./web-fetch/tool"
 
 /**
  * Past this, a tool's output reaches the model as a preview, and the whole of it as a file in the
@@ -62,8 +64,15 @@ const RESTORED_OUTPUTS_CONCURRENCY = 4
 const LISTED_OUTPUTS_MAX_FILES = 1_000
 const LIST_TIMEOUT_MS = 30_000
 
-/** The readers: they page through files themselves, so their output is never saved to another. */
-const FILE_READERS: ReadonlySet<string> = new Set([READ_TOOL_SPEC.name, VIEW_FILE_TOOL_SPEC.name])
+/**
+ * Never saved here: the readers page through files themselves, and `web_fetch` saves its page
+ * itself ({@link ToolOutputFiles.store}).
+ */
+const UNSAVED_TOOLS: ReadonlySet<string> = new Set([
+  READ_TOOL_SPEC.name,
+  VIEW_FILE_TOOL_SPEC.name,
+  WEB_FETCH_TOOL_SPEC.name,
+])
 
 const NOTICE_TAG = "tool_output_file"
 const NOTICE_OPENING = new RegExp(`^<${NOTICE_TAG} sandboxPath="([^"]*)"`)
@@ -98,7 +107,7 @@ export class ToolOutputFiles {
   }
 
   wrap(tools: readonly ModelTool[]): ModelTool[] {
-    return tools.map((tool) => (FILE_READERS.has(tool.name) ? tool : this.saving(tool)))
+    return tools.map((tool) => (UNSAVED_TOOLS.has(tool.name) ? tool : this.saving(tool)))
   }
 
   /** The stored file of a call whose output was saved, for its message part. */
@@ -149,12 +158,43 @@ export class ToolOutputFiles {
     }
   }
 
+  /**
+   * Save a call's output that its tool shows the model itself, such as a fetched page: stored and
+   * written back as an output saved here is, under the same budget, and its call's
+   * {@link fileOf}. Returns the path the agent reads it at.
+   */
+  async store(
+    toolName: string,
+    bytes: Uint8Array,
+    type: { readonly extension: AgentToolOutputExtension; readonly mediaType: string },
+    context: ModelToolExecutionContext
+  ): Promise<string> {
+    const saved = await this.write(toolName, bytes, type, context)
+    this.#saved.set(context.toolCallId, saved)
+    return saved.sandboxPath
+  }
+
   private async save(
     toolName: string,
     contents: string,
     context: ModelToolExecutionContext
   ): Promise<SavedCall> {
     const bytes = new TextEncoder().encode(contents)
+    const saved = await this.write(
+      toolName,
+      bytes,
+      { extension: "txt", mediaType: "text/plain" },
+      context
+    )
+    return { ...saved, contents }
+  }
+
+  private async write(
+    toolName: string,
+    bytes: Uint8Array,
+    type: { readonly extension: AgentToolOutputExtension; readonly mediaType: string },
+    context: ModelToolExecutionContext
+  ): Promise<SavedCall> {
     if (bytes.byteLength > AGENT_FILE_MAX_BYTES) {
       throw new Error(`the output exceeds the ${AGENT_FILE_MAX_BYTES}-byte file limit`)
     }
@@ -162,13 +202,13 @@ export class ToolOutputFiles {
     this.#budget.holdContent(`sha256:${sha256}`, bytes.byteLength, toolName)
 
     try {
-      const path = agentToolOutputPath(context.toolCallId, sha256)
+      const path = agentToolOutputPath(context.toolCallId, sha256, type.extension)
       const fileRef = await this.input.blobStorage.put({
         body: bytes,
         expectedSizeBytes: bytes.byteLength,
         signal: context.signal,
         fileName: posix.basename(path),
-        mediaType: "text/plain",
+        mediaType: type.mediaType,
       })
 
       const handle = await this.input.sandbox()
@@ -177,7 +217,7 @@ export class ToolOutputFiles {
       await handle.sandbox.writeFiles([
         { path: posix.resolve(handle.sandbox.workingDirectory, sandboxPath), contents: bytes },
       ])
-      return { file: { fileRef, path }, sandboxPath, contents }
+      return { file: { fileRef, path }, sandboxPath }
     } catch (error) {
       this.#budget.releaseContent(`sha256:${sha256}`)
       throw error

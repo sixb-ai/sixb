@@ -83,7 +83,7 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       })
     )
 
-  const models = new Map<string, Promise<LanguageModel>>()
+  const models = new Map<string, Promise<Omit<LanguageModel, "stream">>>()
   const sink = batchedEvents(async (batch) => {
     try {
       await result(
@@ -105,17 +105,16 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
     executionToken,
     cancelled: cancelled.signal,
     models: {
-      language(ref) {
+      async language(ref, options) {
         const key = `${ref.provider}/${ref.modelId}`
-        let model = models.get(key)
-        if (!model) {
-          model = call<Omit<LanguageModel, "stream">>("models.describe", [ref]).then((described) =>
-            httpModel(described, ref, request)
-          )
-          model.catch(() => models.delete(key))
-          models.set(key, model)
+        let described = models.get(key)
+        if (!described) {
+          described = call<Omit<LanguageModel, "stream">>("models.describe", [ref])
+          described.catch(() => models.delete(key))
+          models.set(key, described)
         }
-        return model
+
+        return httpModel(await described, ref, request, options?.measures !== false)
       },
       // The server searches, with the project's key, and records the call against the run.
       webSearch: (request, signal) => call("models.webSearch", [request], signal),
@@ -304,7 +303,9 @@ async function result<T>(response: Response): Promise<T> {
 function httpModel(
   described: Omit<LanguageModel, "stream">,
   ref: Parameters<AgentRunSession["models"]["language"]>[0],
-  request: (operation: string, init: RequestInit) => Promise<Response>
+  request: (operation: string, init: RequestInit) => Promise<Response>,
+  /** False for a tool's own call: the server then keeps no measure of the tokenizer from it. */
+  measures: boolean
 ): LanguageModel {
   return {
     ...described,
@@ -312,7 +313,7 @@ function httpModel(
       const response = await request("models.stream", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: encodeWireValue({ ref, call }),
+        body: encodeWireValue({ ref, call, ...(measures ? {} : { measures: false }) }),
         signal,
       })
       if (!response.ok || !response.body) await result(response)

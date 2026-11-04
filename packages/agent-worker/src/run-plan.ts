@@ -14,12 +14,13 @@ import { selectLanguageModel } from "@sixb/core/internal/model-execution"
 
 /**
  * Resolve a directly configured workflow task into the shared Agent execution contract: all but its
- * ontology docs, which its execution's view renders.
+ * ontology docs, which its execution's view renders, and the model its calls are recorded through,
+ * which the execution binds.
  */
 export function resolveWorkflowAgentStepPlan(
   definitions: Pick<SixbDefinitions, "agent" | "models" | "ontology" | "tools">,
   input: { readonly workflowId: string; readonly step: AgentStepDefinition }
-): Omit<ResolvedAgentExecutionPlan, "ontologyDocs"> {
+): Omit<ResolvedAgentExecutionPlan, "ontologyDocs" | "recordedModel"> {
   const { workflowId, step } = input
   const models = definitions.models?.language
   // The step's own model runs as given, listed in the catalog or not; a tier's comes from it.

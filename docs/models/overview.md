@@ -99,6 +99,28 @@ export const sixb = createSixb({
   `providerTools` fails at startup unless `agent.web` is `false`; so does its own `web_search` when
   the project has a web search model.
 
+### Read web pages
+
+The agent reads a URL with `web_fetch({ url, question? })`, without any web search model. It is on
+unless `agent.web` is `false`, and follows the same domain lists, checked on every redirect too.
+
+| Page | The agent reads |
+| --- | --- |
+| HTML or text up to 8 KB | The whole page, as markdown |
+| Larger | A 2 KB preview, and a file in its sandbox holding the page |
+| PDF or image | A file holding it as it came |
+| With a `question` | An answer from the page, by the conversation's own model, and the file |
+
+- The question's call counts toward [AI usage](./usage-and-limits.md) like the agent's other calls.
+- Pages come from Sixb's servers, which reach public addresses only. On
+  [your computer](../cli/overview.md#work-with-the-agent), they come from it, and `localhost` is readable too.
+- It follows the [sandbox's network](../sandboxes/overview.md): `restricted` limits it to the
+  listed origins, `none` takes the tool away. Without a declared `network`, it reads any URL.
+  Sub-agents follow their parent's.
+- A cross-host redirect is not followed: the agent sees where it leads and decides. One that
+  leads somewhere it may not read fails, saying why.
+- Pages served without error are kept 15 minutes, so reading one again does not fetch it again.
+
 ## Give it project instructions
 
 Write guidance that applies to every conversation, such as your team's vocabulary, tone, or

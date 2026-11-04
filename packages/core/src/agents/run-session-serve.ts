@@ -433,11 +433,12 @@ function withSavedOutputChecked(part: AgentMessagePart): AgentMessagePart {
 
 /** One model call, its events streamed back as lines of JSON as the provider sends them. */
 async function streamModelCall(session: AgentRunSession, request: Request): Promise<Response> {
-  const { ref, call } = decodeWireValue(await readBodyText(request)) as {
+  const { ref, call, measures } = decodeWireValue(await readBodyText(request)) as {
     ref: Parameters<AgentRunSession["models"]["language"]>[0]
     call: Omit<LanguageModelRequest, "signal">
+    measures?: unknown
   }
-  const model = await session.models.language(ref)
+  const model = await session.models.language(ref, { measures: measures !== false })
   const opened = await model.stream({ ...call, signal: request.signal })
   const encoder = new TextEncoder()
   const iterator = opened.events[Symbol.asyncIterator]()

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
 import { createHash } from "node:crypto"
+import { promises as dns } from "node:dns"
 import {
   existsSync,
   mkdirSync,
@@ -4374,6 +4375,281 @@ describe("AgentWorker", () => {
       expect(offered).toContain("bash")
       expect(offered).not.toContain("web_search")
     }
+  })
+
+  // Regression proof: drop the web_fetch tool from startAgentEnvironment; the model's call is
+  // then refused as unknown. Leave web_fetch out of UNSAVED_TOOLS and store no file in its
+  // execute; the part then names no file, and the next turn's sandbox lacks the page. Pass the
+  // measured model as `recordedModel` in prepareConversationTurn; the question's call then
+  // measures the run's tokenizer.
+  test("fetches a page as the run, answers about it, and the next turn has its file", async () => {
+    const page = `<title>Guide</title><main>${"<p>Run bun test to test.</p>".repeat(400)}</main>`
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(page, { headers: { "content-type": "text/html" } }),
+    })
+    // docs.example.test is a public host, which this machine's server answers for.
+    const lookup = spyOn(dns, "lookup").mockImplementation((async () => [
+      { address: "93.184.215.14", family: 4 },
+    ]) as unknown as typeof dns.lookup)
+    const realFetch = globalThis.fetch
+    const fetched = spyOn(globalThis, "fetch").mockImplementation((async (
+      input: string | URL | Request,
+      init?: BunFetchRequestInit
+    ) => {
+      const url = new URL(input instanceof Request ? input.url : input)
+      if (url.hostname !== "93.184.215.14") return realFetch(input, init)
+      return realFetch(`http://127.0.0.1:${server.port}${url.pathname}`, { ...init, proxy: false })
+    }) as typeof fetch)
+
+    const calls: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      stream: async (request) => {
+        calls.push(request)
+        if (request.messages[0]?.role === "system" && request.tools.length === 0) {
+          // Enough tokens to measure the tokenizer by, were it measured.
+          return stream([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "Run bun test." },
+            { type: "text-end", id: "t" },
+            {
+              type: "finish",
+              finishReason: "stop",
+              rawFinishReason: "stop",
+              usage: { ...USAGE, inputTokens: 5_000, uncachedInputTokens: 5_000 },
+            },
+          ])
+        }
+        if (calls.length === 1) {
+          return toolCallStream("fetch_1", "web_fetch", {
+            url: "http://docs.example.test/guide",
+            question: "How do I run the tests?",
+          })
+        }
+        return answerStream(`Answer ${calls.length}.`)
+      },
+    })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "How do I test?" })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+      const second = await requestAgent(sixb, { threadId: first.run.threadId, text: "Thanks." })
+      expect((await waitForTerminalRun(storage, second.run.id)).status).toBe("succeeded")
+
+      // The turn's call, the question's, the answer, and the next turn's.
+      expect(calls).toHaveLength(4)
+      expect(calls[1]).toMatchObject({ caching: "off", maxOutputTokens: 2_000, tools: [] })
+      expect(
+        await sixb.storage.aiUsage?.summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: first.run.executionId,
+        })
+      ).toMatchObject({ modelCallCount: 3 })
+      expect(
+        await storage.tokenRates.listLatest({
+          projectId: PROJECT_ID,
+          providerId: model.providerId,
+          modelId: model.modelId,
+        })
+      ).toEqual([])
+
+      const parts = (await listMessages(storage, first.run.threadId)).flatMap(
+        (message) => message.parts
+      )
+      const call = parts.find((part) => part.type === "tool-call" && part.toolCallId === "fetch_1")
+      if (call?.type !== "tool-call" || call.state !== "output-available" || !call.outputFile) {
+        throw new Error("[test] Expected the fetched page's saved file.")
+      }
+      expect(call.output).toMatchObject({
+        source: { url: "http://docs.example.test/guide", title: "Guide" },
+        question: "How do I run the tests?",
+        answer: "Run bun test.",
+        path: `.sixb/agent/${call.outputFile.path}`,
+      })
+      expect(call.outputFile.path).toMatch(/^tool-outputs\/fetch_1-[0-9a-f]{12}\.md$/)
+
+      // The next turn replays what the model read, byte for byte, and its sandbox has the page.
+      const modelOutput = call.modelOutput?.type === "text" ? call.modelOutput.value : ""
+      expect(modelOutput).toContain("Answer from the page:")
+      expect(textReadOf(calls[3], "fetch_1")).toBe(modelOutput)
+      const markdown = await new Response(
+        await sixb.blobStorage.open(call.outputFile.fileRef.blobId)
+      ).text()
+      expect(markdown).toStartWith("Run bun test to test.")
+      const nextSandbox = sandboxes.sandboxes[1]
+      expect(
+        nextSandbox?.readFileContents(
+          join(nextSandbox.workingDirectory, ".sixb/agent", call.outputFile.path)
+        )
+      ).toBe(markdown)
+    } finally {
+      await worker.stop()
+      await server.stop(true)
+      lookup.mockRestore()
+      fetched.mockRestore()
+    }
+  })
+
+  // Regression proof: drop `networkPolicy` from the RunSandbox persistentRunSandbox returns; the
+  // parent's fetch then reads the page. Drop `parentNetworkPolicy` from ChildRunner's
+  // createSubagentEnvironment call; the child's blank workspace then reads it.
+  test("fetches pages only from a restricted workspace's origins, in its children too", async () => {
+    let served = 0
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => {
+        served += 1
+        return new Response("<p>Off-limits.</p>", { headers: { "content-type": "text/html" } })
+      },
+    })
+    // docs.example.test is a public host, which this machine's server answers for.
+    const lookup = spyOn(dns, "lookup").mockImplementation((async () => [
+      { address: "93.184.215.14", family: 4 },
+    ]) as unknown as typeof dns.lookup)
+    const realFetch = globalThis.fetch
+    const fetched = spyOn(globalThis, "fetch").mockImplementation((async (
+      input: string | URL | Request,
+      init?: BunFetchRequestInit
+    ) => {
+      const url = new URL(input instanceof Request ? input.url : input)
+      if (url.hostname !== "93.184.215.14") return realFetch(input, init)
+      return realFetch(`http://127.0.0.1:${server.port}${url.pathname}`, { ...init, proxy: false })
+    }) as typeof fetch)
+
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "child-model",
+      stream: async (request) => {
+        childCalls.push(request)
+        if (childCalls.length === 1) {
+          return toolCallStream("child_fetch", "web_fetch", { url: "http://docs.example.test/" })
+        }
+        return answerStream("Blocked too.")
+      },
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (request) => {
+        parentCalls.push(request)
+        switch (parentCalls.length) {
+          case 1:
+            return toolCallStream("parent_fetch", "web_fetch", { url: "http://docs.example.test/" })
+          case 2:
+            return toolCallStream("spawn", "spawn_agent", {
+              key: "research",
+              task: "Read http://docs.example.test/.",
+              model: { provider: "gateway", modelId: "child-model" },
+            })
+          case 3:
+            return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+          default:
+            return answerStream("Done.")
+        }
+      },
+    })
+
+    // A provider that keeps workspaces: the child's is its own, from a blank recipe.
+    const workspaces = new Map<string, Sandbox>()
+    const sandboxes: SandboxFactory = {
+      supportsRequestCredentials: true,
+      async create(options) {
+        const sandbox = Object.assign(new RecordingSandbox(`workspace-${workspaces.size + 1}`), {
+          setRequestCredentials: async () => {},
+        })
+        workspaces.set(options?.persistence?.name ?? sandbox.id, sandbox)
+        return sandbox
+      },
+      async resume(name) {
+        const sandbox = workspaces.get(name)
+        if (!sandbox) throw new SandboxStateUnavailableError("gone")
+        return sandbox
+      },
+    }
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
+      models: { language: [parentModel, childModel] },
+      sandboxConfig: {
+        params: {},
+        resolve: () => ({
+          network: {
+            mode: "restricted",
+            allow: [{ name: "docs", origin: "https://docs.allowed.test" }],
+          },
+        }),
+      },
+    })
+    const storage = agentStorageOf(sixb)
+    const thread = await createTestSixb(sixb).agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(sixb, { threadId: thread.id, text: "Read the docs." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "restricted parent run terminal"
+      )
+      expect(parent.status).toBe("succeeded")
+      expect((await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId }))?.status).toBe(
+        "succeeded"
+      )
+
+      const blocked =
+        "[SixbAgent] Blocked: http://docs.example.test is not among the origins this sandbox's network allows: https://docs.allowed.test."
+      const errorOf = (request: LanguageModelRequest | undefined, toolCallId: string) =>
+        request?.messages
+          .flatMap((message) => (message.role === "tool" ? message.content : []))
+          .find((part) => part.toolCallId === toolCallId)?.output
+      expect(errorOf(parentCalls[1], "parent_fetch")).toEqual({
+        type: "error-text",
+        value: blocked,
+      })
+      expect(errorOf(childCalls[1], "child_fetch")).toEqual({ type: "error-text", value: blocked })
+      expect(served).toBe(0)
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+      await server.stop(true)
+      lookup.mockRestore()
+      fetched.mockRestore()
+    }
+  })
+
+  // Regression proof: drop `this.networkPolicy = workspace.recipe.network` from EphemeralWorkspace;
+  // a workflow step's web_fetch then reads any URL, beyond its workspace's network.
+  test("gives a step's fresh workspace its recipe's network, which web_fetch follows", () => {
+    const network = {
+      mode: "restricted",
+      allow: [{ name: "docs", origin: "https://docs.allowed.test" }],
+    } as const
+
+    const sandbox = ephemeralRunSandbox({
+      context: { apiBaseUrl: TEST_AGENT_API_BASE_URL },
+      signal: new AbortController().signal,
+      apiCredential: runApiCredential(TEST_AGENT_API_BASE_URL, "run-token"),
+      workspace: {
+        runId: "step-run",
+        factory: new RecordingSandboxFactory(),
+        recipe: { network },
+        assertOwner: async () => {},
+        onAuthFailure: () => {},
+      },
+    })
+
+    expect(sandbox.networkPolicy).toEqual(network)
   })
 
   test("rechecks AI limits after a queued conversation is claimed", async () => {
@@ -12243,8 +12519,9 @@ describe("AgentWorker", () => {
             actionsFor: () => [],
           }).index,
           budget: {
+            // The framework's prompt and tools take about 4,000 tokens; the index, 3,300 more.
             windowTokens: 8_000,
-            inputBudgetTokens: 4_000,
+            inputBudgetTokens: 4_500,
             reserveTokens: 2_000,
             keepRecentTokens: 1_000,
             source: "model",

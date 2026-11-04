@@ -8,6 +8,7 @@ import {
 import { createSixbError } from "@sixb/core/internal/errors"
 import { ModelUsageRecordingError } from "@sixb/core/internal/model-execution"
 import { isAbortError } from "@sixb/core/internal/workers"
+import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type {
   AgentRunRecord,
   AgentThreadParticipantRecord,
@@ -49,8 +50,15 @@ export interface ConversationTurnRunner {
     readonly execution: ExecutionRecord
     readonly thread: AgentThreadRecord | null
   }): OpenRunSandbox
-  /** Run a child the turn spawned or continues, beside the turn, on the turn's mailbox. */
-  startChild(run: SubagentRunRecord, family: FamilyMailbox): void
+  /**
+   * Run a child the turn spawned or continues, beside the turn, on the turn's mailbox, its
+   * `web_fetch` following the network the turn's sandbox declared.
+   */
+  startChild(
+    run: SubagentRunRecord,
+    family: FamilyMailbox,
+    networkPolicy: SandboxNetworkPolicy | undefined
+  ): void
   /** A sandbox teardown that outlives the turn: the runner waits for it before it stops. */
   onDetachedTeardown(teardown: Promise<void>): void
   /** A turn that failed: the runner reports it, once its end is recorded. */
@@ -96,7 +104,15 @@ export async function runConversationTurn(input: {
       runner.settings,
       run,
       session,
-      (child, family) => runner.startChild(child, family)
+      (child, family) => {
+        // Children start from the turn's tools, once its environment holds its sandbox.
+        if (!environment) {
+          throw new Error(
+            `[SixbAgent] Agent run '${run.id}' started a sub-agent before its sandbox.`
+          )
+        }
+        runner.startChild(child, family, environment.networkPolicy)
+      }
     )
     const frameworkTools = await delegation.createTools()
     environment = await createConversationAgentEnvironment({
@@ -204,7 +220,10 @@ async function prepareConversationTurn(
   const turn = await session.context()
   const { thread, execution, participants } = turn
   const runPlan = await session.plan()
-  const plan = resolveRunPlan(runPlan, { model: await session.models.language(runPlan.model) })
+  const plan = resolveRunPlan(runPlan, {
+    model: await session.models.language(runPlan.model),
+    recordedModel: await session.models.language(runPlan.model, { measures: false }),
+  })
   // A turn's plan always carries it; only a child's goes without.
   if (!runPlan.delegation) {
     throw createSixbError(

@@ -169,7 +169,8 @@ export async function executeWorkflowAgentNode(
       model,
     })
     // Each call records itself, and what it measured of the model's tokenizer, as a run's does.
-    const measured = measuringAgentContextTokenRates(usageRecorder.wrapModel(model), {
+    const recorded = usageRecorder.wrapModel(model)
+    const measured = measuringAgentContextTokenRates(recorded, {
       tokenRates: context.storage.agents.tokenRates,
       projectId: context.id,
       runId: nodeRun.id,
@@ -183,6 +184,7 @@ export async function executeWorkflowAgentNode(
     const plan = Object.freeze({
       ...configuredPlan,
       model: prepared.model,
+      recordedModel: recorded,
       ontologyDocs: renderAgentRunOntologyDocs({
         sixb: executionContext.sixb,
         catalog: input.host.definitions.agent.ontologyDocs,

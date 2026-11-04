@@ -200,8 +200,12 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
 
 /** The models a run calls, by the ref its plan names. */
 export interface AgentRunModels {
-  /** A language model of the project, resolved once for the session. */
-  language(ref: LanguageModelRef): Promise<LanguageModel>
+  /**
+   * A language model of the project, resolved once for the session. Each call is recorded, and
+   * measures the model's tokenizer for the run, unless `measures` is false: a tool's own call
+   * (`web_fetch`'s question) reads other text than the run's context, and must not stand for it.
+   */
+  language(ref: LanguageModelRef, options?: { readonly measures?: boolean }): Promise<LanguageModel>
   /**
    * Search the web with the project's web search model, the one its plan's `web.search` names.
    * It always runs where the project is: the provider's key never reaches the runner.
@@ -452,7 +456,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       pausesAfterStep: () => turnPausesOnHeldCalls(host.storage.agents, run),
     },
     models: {
-      async language(ref) {
+      async language(ref, options) {
         const key = `${ref.provider}/${ref.modelId}`
         let resolved = languageModels.get(key)
         if (!resolved) {
@@ -468,14 +472,14 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           resolved.catch(() => languageModels.delete(key))
         }
         // Each call records itself, and what it measured of the model's tokenizer.
-        return measuringAgentContextTokenRates(
-          (await openedModelCalls()).wrapModel(await resolved),
-          {
-            tokenRates: agents.tokenRates,
-            projectId: host.projectId,
-            runId: run.id,
-          }
-        )
+        const recorded = (await openedModelCalls()).wrapModel(await resolved)
+        if (options?.measures === false) return recorded
+
+        return measuringAgentContextTokenRates(recorded, {
+          tokenRates: agents.tokenRates,
+          projectId: host.projectId,
+          runId: run.id,
+        })
       },
       webSearch,
     },

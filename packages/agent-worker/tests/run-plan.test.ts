@@ -91,6 +91,7 @@ describe("resolveRunPlan", () => {
 
     expect(resolved).toEqual({
       model,
+      recordedModel: model,
       ontologyDocs: { files: [], index: [] },
       tokenRates: [{ bytes: 24_000, tokens: 10_000 }],
       reasoning: "high",

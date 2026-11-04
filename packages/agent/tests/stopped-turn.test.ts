@@ -114,6 +114,7 @@ async function runTurn(
     plan: {
       instructions: "Answer clearly.",
       model,
+      recordedModel: model,
       tools: [],
       skills: [],
       ontologyDocs: { files: [], index: [] },
