@@ -13,6 +13,7 @@ import {
 import { SyncRunError } from "./errors"
 import { canRequeueSyncRunAfterEnqueueFailure } from "./idempotency"
 import { assertSyncRunExecution } from "./provider"
+import { canFinishSyncRun } from "./transitions"
 import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
@@ -157,11 +158,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       )
     }
 
-    const enqueueFailure = input.status === "failed" && input.error.code === "queue.enqueue_failed"
-    if (
-      (enqueueFailure && existing.status !== "queued") ||
-      (!enqueueFailure && existing.status !== "running")
-    ) {
+    if (!canFinishSyncRun(existing.status, input)) {
       throw new SyncRunError(
         `[Sixb] Sync run '${input.id}' cannot finish from status '${existing.status}'.`
       )

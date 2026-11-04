@@ -14,6 +14,7 @@ import {
 import { PipelineRunError } from "./errors"
 import { canRequeuePipelineRunAfterEnqueueFailure } from "./idempotency"
 import { assertPipelineRunExecution } from "./provider"
+import { canFinishPipelineRun } from "./transitions"
 import type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
@@ -152,11 +153,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
 
   async finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
     const existing = this.requireExistingPipelineRun(input.projectId, input.id)
-    const enqueueFailure = input.status === "failed" && input.error.code === "queue.enqueue_failed"
-    if (
-      (enqueueFailure && existing.status !== "queued") ||
-      (!enqueueFailure && existing.status !== "running")
-    ) {
+    if (!canFinishPipelineRun(existing.status, input)) {
       throw new PipelineRunError(
         `[Sixb] Pipeline run '${input.id}' cannot finish from status '${existing.status}'.`
       )

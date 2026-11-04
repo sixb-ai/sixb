@@ -42,6 +42,8 @@ interface DispatchSyncRunInput extends SyncRunRequestOptions {
   readonly metadata?: Readonly<Record<string, string>>
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
   readonly validateExistingRun?: (run: SyncRunRecord, storage: Storage) => Promise<void>
+  /** Return a matching run of this Sync that has not started yet instead of queueing another one. */
+  readonly joinQueuedRun?: boolean
 }
 
 type PersistedSyncRun =
@@ -49,7 +51,6 @@ type PersistedSyncRun =
   | {
       readonly publish: true
       readonly run: SyncRunRecord
-      readonly execution: CreateExecutionInput
       readonly queuedAt: Date
       readonly created: boolean
     }
@@ -75,6 +76,7 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
       metadata: input.metadata,
       validateExistingRun: (run, storage) =>
         assertAutomaticExecutionIdentity(storage, this.dependencies.id, input, run),
+      joinQueuedRun: true,
       createExecution: async (executionId, runId) =>
         createPrimitiveExecutionRecord({
           id: executionId,
@@ -122,6 +124,13 @@ async function persistSyncRun(
           return { publish: false, run: raced }
         }
 
+        if (input.joinQueuedRun) {
+          const waiting = await findQueuedSyncRun(transactionalRuns, input)
+          if (waiting) {
+            return { publish: true, run: waiting, queuedAt: waiting.queuedAt, created: false }
+          }
+        }
+
         await tx.executions.create(execution)
         const run = await transactionalRuns.queue({
           projectId: input.projectId,
@@ -134,7 +143,7 @@ async function persistSyncRun(
           expectedLatestVersionId: input.expectedLatestVersionId,
           commitMessage: input.commitMessage,
         })
-        return { publish: true, run, execution, queuedAt, created: true }
+        return { publish: true, run, queuedAt, created: true }
       },
       { isolation: "serializable" }
     )
@@ -146,6 +155,25 @@ async function persistSyncRun(
     await input.validateExistingRun?.(raced, input.storage)
     return { publish: false, run: raced }
   }
+}
+
+/**
+ * A run that has not started reads its source when it starts, so it already covers a trigger that
+ * arrives now. The oldest one starts first; one queued with another request payload is not joined.
+ */
+async function findQueuedSyncRun(
+  syncRuns: NonNullable<Storage["syncRuns"]>,
+  input: DispatchSyncRunInput
+): Promise<SyncRunRecord | undefined> {
+  const { runs } = await syncRuns.list({
+    projectId: input.projectId,
+    syncId: input.sync.id,
+    statuses: ["queued"],
+    order: "asc",
+    limit: 1,
+  })
+  const [waiting] = runs
+  return waiting && runMatchesRequest(waiting, input) ? waiting : undefined
 }
 
 async function reuseSyncRun(
@@ -161,7 +189,7 @@ async function reuseSyncRun(
     })
     if (!execution)
       throw new SyncRunError(`[Sixb] Execution '${existing.executionId}' was not found.`)
-    return { publish: true, run: existing, execution, queuedAt: existing.queuedAt, created: false }
+    return { publish: true, run: existing, queuedAt: existing.queuedAt, created: false }
   }
   if (
     existing.status !== "failed" ||
@@ -193,7 +221,7 @@ async function reuseSyncRun(
     expectedLatestVersionId: existing.expectedLatestVersionId,
     commitMessage: existing.commitMessage,
   })
-  return { publish: true, run, execution, queuedAt, created: false }
+  return { publish: true, run, queuedAt, created: false }
 }
 
 async function publishSyncRun(
@@ -249,17 +277,24 @@ function assertExistingRunMatchesRequest(
   existing: SyncRunRecord,
   input: Pick<DispatchSyncRunInput, "sync" | "expectedLatestVersionId" | "commitMessage">
 ): void {
-  if (
-    existing.syncId !== input.sync.id ||
-    existing.datasetId !== input.sync.target.dataset.id ||
-    existing.mode !== input.sync.config.mode ||
-    existing.expectedLatestVersionId !== input.expectedLatestVersionId ||
-    existing.commitMessage !== input.commitMessage
-  ) {
+  if (!runMatchesRequest(existing, input)) {
     throw new SyncRunError(
       `[Sixb] Sync run '${existing.id}' already exists with a different request payload.`
     )
   }
+}
+
+function runMatchesRequest(
+  existing: SyncRunRecord,
+  input: Pick<DispatchSyncRunInput, "sync" | "expectedLatestVersionId" | "commitMessage">
+): boolean {
+  return (
+    existing.syncId === input.sync.id &&
+    existing.datasetId === input.sync.target.dataset.id &&
+    existing.mode === input.sync.config.mode &&
+    existing.expectedLatestVersionId === input.expectedLatestVersionId &&
+    existing.commitMessage === input.commitMessage
+  )
 }
 
 function existingSyncRunResult(existing: SyncRunRecord): SyncRunRequestResult {

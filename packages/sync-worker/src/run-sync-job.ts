@@ -146,7 +146,12 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     })
   } catch (error) {
     const existing = await syncRunsStorage.getById({ projectId: runtime.id, id: job.id })
-    if (existing?.syncId === run.syncId && existing.executionId === run.executionId) {
+    // A run still queued did not start elsewhere: the start itself failed.
+    if (
+      existing?.syncId === run.syncId &&
+      existing.executionId === run.executionId &&
+      existing.status !== "queued"
+    ) {
       throw new SyncRunAlreadyStartedError(existing)
     }
     throw error
