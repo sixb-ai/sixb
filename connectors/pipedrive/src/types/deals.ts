@@ -13,6 +13,8 @@ export interface PipedriveDeal extends PipedriveJsonObject {
   readonly value?: number
   readonly currency?: string
   readonly status?: PipedriveDealStatus | string
+  /** Option ids of the built-in `label_ids` deal field. */
+  readonly label_ids?: readonly number[]
   readonly add_time?: string
   readonly update_time?: string
   readonly expected_close_date?: string | null

@@ -23,6 +23,12 @@ export interface PipedriveHttp {
     body?: unknown,
     query?: QueryParams
   ): Promise<T>
+  delete<T>(
+    version: PipedriveApiVersion,
+    path: string,
+    body?: unknown,
+    query?: QueryParams
+  ): Promise<T>
 }
 
 export function createPipedriveHttp(clients: PipedriveHttpClients): PipedriveHttp {
@@ -45,6 +51,14 @@ export function createPipedriveHttp(clients: PipedriveHttpClients): PipedriveHtt
       query?: QueryParams
     ): Promise<T> {
       return readJson<T>(await requestWithBody(clients[version], "PATCH", path, body, query))
+    },
+    async delete<T>(
+      version: PipedriveApiVersion,
+      path: string,
+      body?: unknown,
+      query?: QueryParams
+    ): Promise<T> {
+      return readJson<T>(await requestWithBody(clients[version], "DELETE", path, body, query))
     },
   }
 }
@@ -81,7 +95,7 @@ export function pathPart(value: string | number, field: string): string {
 
 async function requestWithBody(
   rest: RestClient,
-  method: "PATCH",
+  method: "PATCH" | "DELETE",
   path: string,
   body: unknown,
   query?: QueryParams

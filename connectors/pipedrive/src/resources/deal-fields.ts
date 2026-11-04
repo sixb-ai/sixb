@@ -1,7 +1,9 @@
 import type { PipedriveHttp } from "../http"
-import type { PipedriveDealField } from "../types"
-import { type FieldsResource, fieldsResource } from "./fields"
+import type { PipedriveDealField, PipedriveDealFieldUpdateInput } from "../types"
+import { type EditableFieldsResource, editableFieldsResource } from "./fields"
 
-export function dealFieldsResource(http: PipedriveHttp): FieldsResource<PipedriveDealField> {
-  return fieldsResource(http, "dealFields", "deal field code")
+export function dealFieldsResource(
+  http: PipedriveHttp
+): EditableFieldsResource<PipedriveDealField, PipedriveDealFieldUpdateInput> {
+  return editableFieldsResource(http, "dealFields", "deal field code")
 }

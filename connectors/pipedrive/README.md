@@ -6,7 +6,8 @@ This connector covers high-payback CRM sync surface:
 
 - Deals, persons, organizations, products
 - Activities
-- Pipelines, stages, and field definitions
+- Pipelines and stages
+- Field definitions and their options, including labels
 - Leads
 - Notes
 - File metadata
@@ -15,8 +16,9 @@ This connector covers high-payback CRM sync surface:
 - Inbound Pipedrive general webhook v2 deliveries
 
 The connector uses personal API tokens only. OAuth, most writes, Projects/Tasks, file upload/download,
-and webhook management API calls are intentionally deferred. Person create/update writes are supported
-for CRM contact writeback flows.
+and webhook management API calls are intentionally deferred. Person and organization create/update
+are supported for CRM contact writeback flows, and person, organization, deal and product fields can
+be managed in full.
 
 ## Register
 
@@ -67,7 +69,13 @@ const pd = await sixb.connector(pipedriveConnector)
 | `pd.products.list(opts?)` / `get` / `search` | `GET /api/v2/products*` |
 | `pd.pipelines.list(opts?)` / `get` | `GET /api/v2/pipelines*` |
 | `pd.stages.list(opts?)` / `get` | `GET /api/v2/stages*` |
-| `pd.*Fields.list(opts?)` / `get(fieldCode)` | `GET /api/v2/*Fields*` |
+| `pd.*Fields.list(opts?)` / `listAll` / `get(fieldCode, opts?)` | `GET /api/v2/*Fields*`, on all five field resources |
+| `pd.{person,organization,deal,product}Fields.create(input)` | `POST /api/v2/*Fields` |
+| `pd.{person,organization,deal,product}Fields.update(fieldCode, input)` | `PATCH /api/v2/*Fields/{field_code}` |
+| `pd.{person,organization,deal,product}Fields.delete(fieldCode)` | `DELETE /api/v2/*Fields/{field_code}` |
+| `pd.{person,organization,deal,product}Fields.addOptions(fieldCode, options)` | `POST /api/v2/*Fields/{field_code}/options` |
+| `pd.{person,organization,deal,product}Fields.updateOptions(fieldCode, options)` | `PATCH /api/v2/*Fields/{field_code}/options` |
+| `pd.{person,organization,deal,product}Fields.deleteOptions(fieldCode, options)` | `DELETE /api/v2/*Fields/{field_code}/options` |
 | `pd.itemSearch.search(opts)` | `GET /api/v2/itemSearch` |
 | `pd.itemSearch.searchByField(opts)` | `GET /api/v2/itemSearch/field` |
 | `pd.leads.list(opts?)` | `GET /v1/leads` |
@@ -102,6 +110,33 @@ Pipedrive v1 list endpoints in this connector use offset pagination. `listAll(..
 Pipedrive custom fields are account-specific. v2 commonly nests them in `custom_fields`; v1 may
 return account-specific keys directly. The connector types include common fields and preserve
 unknown Pipedrive fields rather than normalizing them.
+
+## Field options and labels
+
+Options are the choices on an `enum` or `set` field. The three option calls are atomic, and each
+returns only the options it changed. `activityFields` is read-only because Pipedrive offers no
+activity field writes.
+
+The labels on persons, organizations and deals are the options of a built-in field whose code is
+`label_ids`:
+
+```ts
+const { data: field } = await pd.personFields.get("label_ids")
+// field.options: [{ id: 27, label: "Customer", color: "pink" }, ...]
+
+const { data: added } = await pd.personFields.addOptions("label_ids", [{ label: "Broker" }])
+await pd.personFields.updateOptions("label_ids", [{ id: added[0].id, label: "Brokers" }])
+await pd.personFields.deleteOptions("label_ids", [{ id: added[0].id }])
+
+// Replaces the person's labels, so include the ones to keep.
+await pd.persons.update(123, { label_ids: [27, added[0].id] })
+```
+
+- Label ids differ between Pipedrive accounts, so read them from the field instead of hardcoding them.
+- The option calls take only a label, so they cannot set a label's color.
+- Pipedrive's API reference describes the option calls for custom fields. Its
+  [developer forum](https://devcommunity.pipedrive.com/t/how-to-create-a-new-person-label-via-api/20000)
+  points person labels at the same calls.
 
 ## Webhooks
 
@@ -152,7 +187,8 @@ try {
 ## Not covered yet
 
 - OAuth
-- Most creates, updates, and deletes beyond Pipedrive persons
+- Most creates, updates, and deletes beyond persons, organizations, and fields
+- Lead labels (`/v1/leadLabels`)
 - Projects, project boards, project phases, project templates, project fields, and tasks
 - File upload, remote file linking, file updates/deletes, and file download
 - Webhook management API calls

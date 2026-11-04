@@ -1,6 +1,6 @@
 import type { ActivitiesResource } from "../resources/activities"
 import type { DealsResource } from "../resources/deals"
-import type { FieldsResource } from "../resources/fields"
+import type { EditableFieldsResource, FieldsResource } from "../resources/fields"
 import type { FilesResource } from "../resources/files"
 import type { ItemSearchResource } from "../resources/item-search"
 import type { LeadsResource } from "../resources/leads"
@@ -15,23 +15,36 @@ import type { PipedriveConnectorOptions } from "./common"
 import type {
   PipedriveActivityField,
   PipedriveDealField,
+  PipedriveDealFieldUpdateInput,
   PipedriveOrganizationField,
+  PipedriveOrganizationFieldUpdateInput,
   PipedrivePersonField,
+  PipedrivePersonFieldUpdateInput,
   PipedriveProductField,
+  PipedriveProductFieldUpdateInput,
 } from "./fields"
 
 export interface PipedriveClient {
   readonly activities: ActivitiesResource
   readonly activityFields: FieldsResource<PipedriveActivityField>
   readonly deals: DealsResource
-  readonly dealFields: FieldsResource<PipedriveDealField>
+  readonly dealFields: EditableFieldsResource<PipedriveDealField, PipedriveDealFieldUpdateInput>
   readonly leads: LeadsResource
   readonly organizations: OrganizationsResource
-  readonly organizationFields: FieldsResource<PipedriveOrganizationField>
+  readonly organizationFields: EditableFieldsResource<
+    PipedriveOrganizationField,
+    PipedriveOrganizationFieldUpdateInput
+  >
   readonly persons: PersonsResource
-  readonly personFields: FieldsResource<PipedrivePersonField>
+  readonly personFields: EditableFieldsResource<
+    PipedrivePersonField,
+    PipedrivePersonFieldUpdateInput
+  >
   readonly products: ProductsResource
-  readonly productFields: FieldsResource<PipedriveProductField>
+  readonly productFields: EditableFieldsResource<
+    PipedriveProductField,
+    PipedriveProductFieldUpdateInput
+  >
   readonly pipelines: PipelinesResource
   readonly stages: StagesResource
   readonly notes: NotesResource
