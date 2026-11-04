@@ -645,6 +645,43 @@ describe("a runner outside the worker", () => {
     expect((await stop()).status).toBe(202)
   })
 
+  // Guard proof: answer 202 whatever requestStop returns; the stop asked of a sixb that just closed
+  // reads as on its way, and nothing ever stops the command.
+  test("answers a stop 404 when its sixb closed just as it was asked", async () => {
+    const { person, ask, call, storage, host } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Serve the docs while you edit them.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const running = {
+      threadId,
+      id: "bg_3f9a1c",
+      command: "bun dev",
+      status: "running",
+      startedAt: "2026-11-04T10:00:00.000Z",
+    }
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_ava", {
+      computer: LAPTOP,
+      backgroundCommands: [running],
+    })
+
+    // sixb quits between the route finding its session and writing the stop to it.
+    const computers = host.storage.agents?.computers
+    if (!computers) throw new Error("The host keeps Agent storage.")
+    const requestStop = computers.requestStop.bind(computers)
+    computers.requestStop = async (input) => {
+      await computers.release(input)
+      return requestStop(input)
+    }
+
+    const stop = await call(
+      ava,
+      "POST",
+      `/api/agent-threads/${threadId}/background-commands/${running.id}/stop`,
+      { startedAt: running.startedAt }
+    )
+    expect(stop.status).toBe(404)
+  })
+
   // Guard proof: skip announceOffline's announcement whenever another session holds the folder, as
   // it first did; the web keeps showing as running the command that stopped with its sixb.
   test("tells the web when a sixb that ran background commands closes, another open in its folder", async () => {
