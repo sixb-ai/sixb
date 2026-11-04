@@ -74,7 +74,7 @@ export interface ComputerRunnerOptions {
 /** A thread's background command, as the computer reports it to the web. */
 export interface ComputerBackgroundCommand {
   readonly threadId: string
-  /** `bg_<n>`: unique in its thread while `sixb` stays open, with `startedAt` beyond. */
+  /** `bg_<hex>`: unique in its thread while `sixb` stays open, with `startedAt` beyond. */
   readonly id: string
   /** Cut to {@link REPORTED_COMMAND_CHARS}. */
   readonly command: string
