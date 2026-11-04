@@ -50,6 +50,8 @@ export type {
   ModelRef,
   RerankingModelCatalog,
   RerankingModelEntry,
+  WebSearchModelCatalog,
+  WebSearchModelEntry,
 } from "./catalog"
 export { createModelCatalog, LANGUAGE_MODEL_TIERS } from "./catalog"
 export type { DecisionModelCatalog, DecisionModelEntry } from "./decision/catalog"
@@ -202,3 +204,13 @@ export type {
 } from "./reranking-model"
 export { RerankingModelResponseError } from "./reranking-model"
 export type { ModelOutput, ModelTool, ModelToolExecutionContext } from "./tools"
+export type {
+  WebSearchCostEstimator,
+  WebSearchHit,
+  WebSearchModel,
+  WebSearchModelDefinition,
+  WebSearchModelRequest,
+  WebSearchModelResponseMetadata,
+  WebSearchModelResult,
+} from "./web-search-model"
+export { WebSearchModelResponseError } from "./web-search-model"

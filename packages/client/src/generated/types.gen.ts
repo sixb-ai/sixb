@@ -2323,6 +2323,7 @@ export type GetAiAccountingOverviewData = {
       | "transcription"
       | "speech"
       | "reranking"
+      | "web-search"
     bucket: "hour" | "day" | "week"
   }
   url: "/api/ai/accounting/overview"
@@ -2797,6 +2798,7 @@ export type GetAiAccountingOverviewResponses = {
         | "transcription"
         | "speech"
         | "reranking"
+        | "web-search"
     }>
     agents: Array<
       | {
@@ -3037,6 +3039,7 @@ export type ListAiModelCallsData = {
       | "transcription"
       | "speech"
       | "reranking"
+      | "web-search"
     executionId?: string
     valuationStatus?: "rated" | "unpriceable" | "unvalued"
     limit?: string
@@ -3090,6 +3093,7 @@ export type ListAiModelCallsResponses = {
           | "transcription"
           | "speech"
           | "reranking"
+          | "web-search"
         requestedReasoning?:
           | "provider-default"
           | "none"
@@ -3964,6 +3968,7 @@ export type ListAiModelCallGroupsData = {
       | "transcription"
       | "speech"
       | "reranking"
+      | "web-search"
     valuationStatus?: "rated" | "unpriceable" | "unvalued"
     limit?: string
     offset?: string

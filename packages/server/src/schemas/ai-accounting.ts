@@ -23,6 +23,7 @@ const ModelKindSchema = z.enum([
   "transcription",
   "speech",
   "reranking",
+  "web-search",
 ])
 
 export const AiAccountingRangeQuerySchema = z.object({

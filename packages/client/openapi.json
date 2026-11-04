@@ -6580,7 +6580,8 @@
                 "decision",
                 "transcription",
                 "speech",
-                "reranking"
+                "reranking",
+                "web-search"
               ],
               "description": "Calls to one kind of model"
             }
@@ -7937,7 +7938,8 @@
                               "decision",
                               "transcription",
                               "speech",
-                              "reranking"
+                              "reranking",
+                              "web-search"
                             ],
                             "description": "Absent for calls recorded before their kind was captured."
                           }
@@ -8755,7 +8757,8 @@
                 "decision",
                 "transcription",
                 "speech",
-                "reranking"
+                "reranking",
+                "web-search"
               ],
               "description": "Calls to one kind of model"
             }
@@ -8843,7 +8846,8 @@
                                   "decision",
                                   "transcription",
                                   "speech",
-                                  "reranking"
+                                  "reranking",
+                                  "web-search"
                                 ]
                               },
                               "requestedReasoning": {
@@ -11809,7 +11813,8 @@
                 "decision",
                 "transcription",
                 "speech",
-                "reranking"
+                "reranking",
+                "web-search"
               ],
               "description": "Calls to one kind of model"
             }

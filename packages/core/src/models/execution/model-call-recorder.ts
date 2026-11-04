@@ -151,7 +151,7 @@ export class AiModelCallRecorder {
   }
 
   /** Keep an unresolved reservation when an attempted call's billable outcome is unknown. */
-  private async markCallUnknown(callId: string): Promise<void> {
+  async markCallUnknown(callId: string): Promise<void> {
     if (!this.reservations.has(callId)) return
     await this.input.limits.markModelCallUnknown({
       projectId: this.input.projectId,

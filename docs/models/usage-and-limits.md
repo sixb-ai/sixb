@@ -1,6 +1,6 @@
 # Usage and limits
 
-Sixb records model usage across generation, conversations, AI workflow steps, embeddings, decisions, transcription, and reranking.
+Sixb records model usage across generation, conversations, AI workflow steps, embeddings, decisions, transcription, reranking, and web search.
 View consumption in your app and set monthly limits for your project or specific users and groups.
 
 ## View usage
@@ -43,8 +43,8 @@ Every applicable limit must allow a call before it starts. Once a limit is reach
 are blocked.
 
 Token limits count calls billed by tokens: generation, embeddings, and decisions. Transcription,
-reranking, image generation, and speech are billed by audio duration, search, image, or character,
-so only cost limits apply to them.
+reranking, web search, image generation, and speech are billed by audio duration, search, image, or
+character, so only cost limits apply to them.
 
 Limits control whether calls can start. They are not hard caps on a provider's bill, because a
 call's actual usage can exceed its estimate. Use
@@ -96,6 +96,14 @@ Queries using `.rerank()` add one accounted model call for their candidates. Dir
 
 Gateway rerankers report a cost without token usage. Reranking counts toward cost limits only;
 a model without catalog pricing cannot run while a cost limit applies.
+
+## Web search
+
+Each search is one accounted call, shown as **Web search** in **AI usage** with the cost its
+provider reports. Under a cost limit, a search runs only when its model can price it beforehand,
+usually by the number of results asked for; otherwise it is blocked.
+A search that fails before its provider replies still counts its reserved amount toward cost
+limits, since it may have been billed.
 
 ## Permissions
 

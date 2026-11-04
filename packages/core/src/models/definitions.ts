@@ -15,6 +15,7 @@ export const MODEL_KINDS = [
   "transcription",
   "speech",
   "reranking",
+  "web-search",
 ] as const
 
 export type ModelKind = (typeof MODEL_KINDS)[number]
@@ -26,6 +27,7 @@ export type ModelKind = (typeof MODEL_KINDS)[number]
 export const TOKENLESS_MODEL_KINDS: readonly ModelKind[] = [
   "transcription",
   "reranking",
+  "web-search",
   "image",
   "speech",
 ]
