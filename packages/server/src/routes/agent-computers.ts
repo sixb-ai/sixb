@@ -294,17 +294,15 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
             )
           }
 
+          // Whichever of their sixb runs it: one started in a folder runs on there once the thread
+          // moved to another, or to the cloud.
           const ref = { threadId: thread.id, id: params.commandId, startedAt }
-          const place = thread.computer
-          const live = place
-            ? await agents.computers.listLive({
-                projectId: host.id,
-                ownerPrincipal,
-                now: new Date(),
-              })
-            : []
+          const live = await agents.computers.listLive({
+            projectId: host.id,
+            ownerPrincipal,
+            now: new Date(),
+          })
           const running = live
-            .filter((session) => place && sameComputerPlace(session.computer, place))
             .flatMap((session) =>
               (session.backgroundCommands ?? []).map((command) => ({ session, command }))
             )

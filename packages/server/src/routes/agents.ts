@@ -128,7 +128,7 @@ export async function serializeThreads(
       title: thread.title,
       sandboxParams: thread.sandboxParams,
       runsOn: thread.runsOn,
-      computer: placeOf(thread),
+      ...placeOf(thread),
       movedAt: thread.movedAt ? toIsoString(thread.movedAt) : undefined,
       sandboxState: thread.sandboxState && {
         name: thread.sandboxState.name,
@@ -155,14 +155,19 @@ export async function serializeThread(
   return serialized
 }
 
-/** Where each of the viewer's own computer threads runs, and whether its folder is open now. */
+/**
+ * Where each of the viewer's own computer threads runs, whether its folder is open now, and the
+ * background commands their `sixb` runs for it.
+ */
 async function computerPlaces(
   host: SixbHostView,
   threads: readonly AgentThreadView[],
   viewer: Principal
-): Promise<(thread: AgentThreadView) => ThreadComputerView | undefined> {
+): Promise<(thread: AgentThreadView) => ThreadComputerView> {
+  // A thread that moved may still have commands running where it was.
   const owned = (thread: AgentThreadView) =>
-    thread.computer !== undefined && principalsEqual(thread.ownerPrincipal, viewer)
+    (thread.computer !== undefined || thread.movedAt !== undefined) &&
+    principalsEqual(thread.ownerPrincipal, viewer)
   const live =
     host.storage.agents && threads.some(owned)
       ? await host.storage.agents.computers.listLive({
@@ -172,12 +177,11 @@ async function computerPlaces(
         })
       : []
   return (thread) => {
-    const computer = thread.computer
-    if (!computer || !owned(thread)) return undefined
+    if (!owned(thread)) return {}
 
-    // The background commands its folder's sixb runs for it, and which of them a stop is on.
-    const here = live.filter((session) => sameComputerPlace(session.computer, computer))
-    const backgroundCommands = here.flatMap((session) =>
+    // Its background commands, from any of its owner's sixb: a command started in one folder runs
+    // on there once the thread moved to another, or to the cloud. And which of them a stop is on.
+    const backgroundCommands = live.flatMap((session) =>
       (session.backgroundCommands ?? [])
         .filter((command) => command.threadId === thread.id)
         .map((command) => {
@@ -187,16 +191,20 @@ async function computerPlaces(
           return stopping ? { ...command, stopping } : command
         })
     )
+
+    const computer = thread.computer
+    const online =
+      computer !== undefined &&
+      live.some((session) => sameComputerPlace(session.computer, computer))
     return {
-      ...computer,
-      online: here.length > 0,
+      ...(computer ? { computer: { ...computer, online } } : {}),
       ...(backgroundCommands.length > 0 ? { backgroundCommands } : {}),
     }
   }
 }
 
-type ThreadComputerView = AgentThreadComputer & {
-  readonly online: boolean
+interface ThreadComputerView {
+  readonly computer?: AgentThreadComputer & { readonly online: boolean }
   readonly backgroundCommands?: readonly (AgentComputerBackgroundCommand & {
     readonly stopping?: boolean
   })[]

@@ -203,14 +203,15 @@ export const AgentThreadSchema = z.object({
       name: z.string(),
       folder: z.string(),
       online: z.boolean(),
-      /**
-       * Its background commands, as `sixb` there reported them while open: the running ones, then
-       * the latest to end. `stopping` while a stop you asked for is on its way.
-       */
-      backgroundCommands: z
-        .array(AgentBackgroundCommandSchema.extend({ stopping: z.boolean().optional() }))
-        .optional(),
     })
+    .optional(),
+  /**
+   * Its background commands on its owner's computer, as `sixb` reported them while open: the
+   * running ones, then the latest to end, wherever the thread runs now. `stopping` while a stop
+   * you asked for is on its way. Shown to its owner alone.
+   */
+  backgroundCommands: z
+    .array(AgentBackgroundCommandSchema.extend({ stopping: z.boolean().optional() }))
     .optional(),
   /** When its turns last moved to where they run now: the files earlier turns used are not here. */
   movedAt: z.string().optional(),

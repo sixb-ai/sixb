@@ -36292,53 +36292,53 @@
                               },
                               "online": {
                                 "type": "boolean"
-                              },
-                              "backgroundCommands": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "threadId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "id": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "command": {
-                                      "type": "string",
-                                      "maxLength": 1000
-                                    },
-                                    "status": {
-                                      "type": "string",
-                                      "enum": ["running", "exited", "stopped"]
-                                    },
-                                    "exitCode": {
-                                      "type": "integer"
-                                    },
-                                    "startedAt": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "endedAt": {
-                                      "type": "string",
-                                      "maxLength": 200
-                                    },
-                                    "stopping": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": ["threadId", "id", "command", "status", "startedAt"],
-                                  "additionalProperties": false
-                                }
                               }
                             },
                             "required": ["id", "name", "folder", "online"],
                             "additionalProperties": false
+                          },
+                          "backgroundCommands": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "threadId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "command": {
+                                  "type": "string",
+                                  "maxLength": 1000
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": ["running", "exited", "stopped"]
+                                },
+                                "exitCode": {
+                                  "type": "integer"
+                                },
+                                "startedAt": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "endedAt": {
+                                  "type": "string",
+                                  "maxLength": 200
+                                },
+                                "stopping": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": ["threadId", "id", "command", "status", "startedAt"],
+                              "additionalProperties": false
+                            }
                           },
                           "movedAt": {
                             "type": "string"
@@ -36838,53 +36838,53 @@
                             },
                             "online": {
                               "type": "boolean"
-                            },
-                            "backgroundCommands": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "threadId": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 200
-                                  },
-                                  "id": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 200
-                                  },
-                                  "command": {
-                                    "type": "string",
-                                    "maxLength": 1000
-                                  },
-                                  "status": {
-                                    "type": "string",
-                                    "enum": ["running", "exited", "stopped"]
-                                  },
-                                  "exitCode": {
-                                    "type": "integer"
-                                  },
-                                  "startedAt": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 200
-                                  },
-                                  "endedAt": {
-                                    "type": "string",
-                                    "maxLength": 200
-                                  },
-                                  "stopping": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": ["threadId", "id", "command", "status", "startedAt"],
-                                "additionalProperties": false
-                              }
                             }
                           },
                           "required": ["id", "name", "folder", "online"],
                           "additionalProperties": false
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         },
                         "movedAt": {
                           "type": "string"
@@ -37204,53 +37204,53 @@
                         },
                         "online": {
                           "type": "boolean"
-                        },
-                        "backgroundCommands": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "threadId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "command": {
-                                "type": "string",
-                                "maxLength": 1000
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "exited", "stopped"]
-                              },
-                              "exitCode": {
-                                "type": "integer"
-                              },
-                              "startedAt": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "endedAt": {
-                                "type": "string",
-                                "maxLength": 200
-                              },
-                              "stopping": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["threadId", "id", "command", "status", "startedAt"],
-                            "additionalProperties": false
-                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
                       "additionalProperties": false
+                    },
+                    "backgroundCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "exited", "stopped"]
+                          },
+                          "exitCode": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "endedAt": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "stopping": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["threadId", "id", "command", "status", "startedAt"],
+                        "additionalProperties": false
+                      }
                     },
                     "movedAt": {
                       "type": "string"
@@ -37695,53 +37695,53 @@
                         },
                         "online": {
                           "type": "boolean"
-                        },
-                        "backgroundCommands": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "threadId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "command": {
-                                "type": "string",
-                                "maxLength": 1000
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "exited", "stopped"]
-                              },
-                              "exitCode": {
-                                "type": "integer"
-                              },
-                              "startedAt": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "endedAt": {
-                                "type": "string",
-                                "maxLength": 200
-                              },
-                              "stopping": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["threadId", "id", "command", "status", "startedAt"],
-                            "additionalProperties": false
-                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
                       "additionalProperties": false
+                    },
+                    "backgroundCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "exited", "stopped"]
+                          },
+                          "exitCode": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "endedAt": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "stopping": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["threadId", "id", "command", "status", "startedAt"],
+                        "additionalProperties": false
+                      }
                     },
                     "movedAt": {
                       "type": "string"
@@ -38234,53 +38234,53 @@
                             },
                             "online": {
                               "type": "boolean"
-                            },
-                            "backgroundCommands": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "threadId": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 200
-                                  },
-                                  "id": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 200
-                                  },
-                                  "command": {
-                                    "type": "string",
-                                    "maxLength": 1000
-                                  },
-                                  "status": {
-                                    "type": "string",
-                                    "enum": ["running", "exited", "stopped"]
-                                  },
-                                  "exitCode": {
-                                    "type": "integer"
-                                  },
-                                  "startedAt": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 200
-                                  },
-                                  "endedAt": {
-                                    "type": "string",
-                                    "maxLength": 200
-                                  },
-                                  "stopping": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": ["threadId", "id", "command", "status", "startedAt"],
-                                "additionalProperties": false
-                              }
                             }
                           },
                           "required": ["id", "name", "folder", "online"],
                           "additionalProperties": false
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         },
                         "movedAt": {
                           "type": "string"
@@ -38658,53 +38658,53 @@
                         },
                         "online": {
                           "type": "boolean"
-                        },
-                        "backgroundCommands": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "threadId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "command": {
-                                "type": "string",
-                                "maxLength": 1000
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "exited", "stopped"]
-                              },
-                              "exitCode": {
-                                "type": "integer"
-                              },
-                              "startedAt": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "endedAt": {
-                                "type": "string",
-                                "maxLength": 200
-                              },
-                              "stopping": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["threadId", "id", "command", "status", "startedAt"],
-                            "additionalProperties": false
-                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
                       "additionalProperties": false
+                    },
+                    "backgroundCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "exited", "stopped"]
+                          },
+                          "exitCode": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "endedAt": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "stopping": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["threadId", "id", "command", "status", "startedAt"],
+                        "additionalProperties": false
+                      }
                     },
                     "movedAt": {
                       "type": "string"
@@ -44688,53 +44688,53 @@
                         },
                         "online": {
                           "type": "boolean"
-                        },
-                        "backgroundCommands": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "threadId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "command": {
-                                "type": "string",
-                                "maxLength": 1000
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "exited", "stopped"]
-                              },
-                              "exitCode": {
-                                "type": "integer"
-                              },
-                              "startedAt": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "endedAt": {
-                                "type": "string",
-                                "maxLength": 200
-                              },
-                              "stopping": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["threadId", "id", "command", "status", "startedAt"],
-                            "additionalProperties": false
-                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
                       "additionalProperties": false
+                    },
+                    "backgroundCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "exited", "stopped"]
+                          },
+                          "exitCode": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "endedAt": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "stopping": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["threadId", "id", "command", "status", "startedAt"],
+                        "additionalProperties": false
+                      }
                     },
                     "movedAt": {
                       "type": "string"
@@ -45086,53 +45086,53 @@
                         },
                         "online": {
                           "type": "boolean"
-                        },
-                        "backgroundCommands": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "threadId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "command": {
-                                "type": "string",
-                                "maxLength": 1000
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "exited", "stopped"]
-                              },
-                              "exitCode": {
-                                "type": "integer"
-                              },
-                              "startedAt": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "endedAt": {
-                                "type": "string",
-                                "maxLength": 200
-                              },
-                              "stopping": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["threadId", "id", "command", "status", "startedAt"],
-                            "additionalProperties": false
-                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
                       "additionalProperties": false
+                    },
+                    "backgroundCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "exited", "stopped"]
+                          },
+                          "exitCode": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "endedAt": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "stopping": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["threadId", "id", "command", "status", "startedAt"],
+                        "additionalProperties": false
+                      }
                     },
                     "movedAt": {
                       "type": "string"
@@ -46357,53 +46357,53 @@
                         },
                         "online": {
                           "type": "boolean"
-                        },
-                        "backgroundCommands": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "threadId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "command": {
-                                "type": "string",
-                                "maxLength": 1000
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "exited", "stopped"]
-                              },
-                              "exitCode": {
-                                "type": "integer"
-                              },
-                              "startedAt": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "endedAt": {
-                                "type": "string",
-                                "maxLength": 200
-                              },
-                              "stopping": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["threadId", "id", "command", "status", "startedAt"],
-                            "additionalProperties": false
-                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
                       "additionalProperties": false
+                    },
+                    "backgroundCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "exited", "stopped"]
+                          },
+                          "exitCode": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "endedAt": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "stopping": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["threadId", "id", "command", "status", "startedAt"],
+                        "additionalProperties": false
+                      }
                     },
                     "movedAt": {
                       "type": "string"
@@ -48896,53 +48896,53 @@
                         },
                         "online": {
                           "type": "boolean"
-                        },
-                        "backgroundCommands": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "threadId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "command": {
-                                "type": "string",
-                                "maxLength": 1000
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": ["running", "exited", "stopped"]
-                              },
-                              "exitCode": {
-                                "type": "integer"
-                              },
-                              "startedAt": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              "endedAt": {
-                                "type": "string",
-                                "maxLength": 200
-                              },
-                              "stopping": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": ["threadId", "id", "command", "status", "startedAt"],
-                            "additionalProperties": false
-                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
                       "additionalProperties": false
+                    },
+                    "backgroundCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 1000
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "exited", "stopped"]
+                          },
+                          "exitCode": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "endedAt": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "stopping": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["threadId", "id", "command", "status", "startedAt"],
+                        "additionalProperties": false
+                      }
                     },
                     "movedAt": {
                       "type": "string"
