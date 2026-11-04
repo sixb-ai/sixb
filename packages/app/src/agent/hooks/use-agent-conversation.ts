@@ -24,6 +24,7 @@ import {
   recreateAgentThreadSandboxMutation,
   retryAgentRunMutation,
   setAgentThreadApprovalModeMutation,
+  stopAgentBackgroundCommandMutation,
   updateAgentPreferencesMutation,
   useAgentActivityStream,
 } from "@sixb/client/hooks"
@@ -42,6 +43,7 @@ import {
   reportedApprovalOutcomes,
   type TranscriptApprovals,
 } from "../approvals"
+import type { TranscriptBackground } from "../background/context"
 import type { ComposerProps } from "../components/composer"
 import { type ComputerOfflineNoticeProps, shownFolder } from "../components/computer-place"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
@@ -427,6 +429,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
   const moveToCloud = useMutation(moveAgentThreadToCloudMutation())
+  const stopBackgroundCommand = useMutation(stopAgentBackgroundCommandMutation())
   const decideApproval = useMutation(decideAgentApprovalMutation())
   // Each runs after the one before, so the last choice is the one the server keeps.
   const saveThreadApprovalMode = useMutation({
@@ -1018,6 +1021,33 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         }
       : null
 
+  // Its background commands: what its owner's sixb reports of them, and their Stop, to its owner
+  // alone, as the computer is theirs.
+  const computer = thread?.computer
+  const runsOnComputer = thread?.runsOn === "computer"
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the mutation and the refresh are the conversation's
+  const transcriptBackground = useMemo(
+    (): TranscriptBackground => ({
+      source: {
+        onComputer: runsOnComputer,
+        live: computer ? (computer.backgroundCommands ?? []) : null,
+        online: computer?.online ?? false,
+      },
+      ...(computer && threadId !== null
+        ? {
+            stop: async (command) => {
+              await stopBackgroundCommand.mutateAsync({
+                path: { threadId, commandId: command.id },
+                body: { startedAt: command.startedAt },
+              })
+              await refreshThread(threadId)
+            },
+          }
+        : {}),
+    }),
+    [computer, runsOnComputer, threadId]
+  )
+
   const transcriptProps: TranscriptProps = {
     threadId,
     messages,
@@ -1029,6 +1059,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     approvals: transcriptApprovals,
     approvalOutcomes,
     delegation: transcriptDelegation,
+    background: transcriptBackground,
   }
 
   const modelControlsProps = {

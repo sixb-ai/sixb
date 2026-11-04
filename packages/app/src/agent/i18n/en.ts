@@ -785,6 +785,36 @@ export const en = {
     create: "Create fresh sandbox",
     ownerOnly: (owner: string) => `Only ${owner} can start this conversation with a fresh sandbox.`,
   },
+  /** A command the agent runs in the background, as its card and its calls read. */
+  background: {
+    card: (command: string) => `Background command: ${command}`,
+    starting: "Starting in the background",
+    running: "Running",
+    waiting: "the agent waits for it",
+    reading: "the agent reads it",
+    stopping: "Stopping…",
+    exited: (code: number) => (code === 0 ? "Exited · code 0" : `Failed · exit code ${code}`),
+    stopped: "Stopped",
+    stoppedWithTurn: "Stopped as its turn ended",
+    stoppedWithSixb: "Stopped as sixb quit",
+    unknown: "Last seen running",
+    unreachable: "Last seen running · sixb is closed there",
+    stop: "Stop",
+    stopHint: "Stop it, and everything it started",
+    stopFailed: "Could not stop it: it may have ended. Try again.",
+    output: "Output",
+    lines: (lines: number) => count(lines, "line"),
+    earlierOutput: (path: string) => `Earlier output is in ${path}`,
+    rows: {
+      start: { title: "Started in the background", running: "Starting in the background" },
+      read: { title: "Checked a background command", running: "Checking a background command" },
+      wait: {
+        title: "Waited for a background command",
+        running: "Waiting for a background command",
+      },
+      stop: { title: "Stopped a background command", running: "Stopping a background command" },
+    },
+  },
   /** A conversation that runs on its owner's computer, as its owner sees it. */
   computer: {
     online: "sixb is open there",

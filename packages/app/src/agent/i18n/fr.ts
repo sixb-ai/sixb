@@ -836,6 +836,44 @@ export const fr: Translation<AgentMessages> = {
     ownerOnly: (owner) =>
       `${owner} est la seule personne à pouvoir faire repartir cette conversation d’un nouvel environnement.`,
   },
+  background: {
+    card: (command) => `Commande en arrière-plan : ${command}`,
+    starting: "Démarrage en arrière-plan",
+    running: "En cours",
+    waiting: "l’agent l’attend",
+    reading: "l’agent la lit",
+    stopping: "Arrêt…",
+    exited: (code) => (code === 0 ? "Terminée · code 0" : `Échec · code de sortie ${code}`),
+    stopped: "Arrêtée",
+    stoppedWithTurn: "Arrêtée à la fin de son tour",
+    stoppedWithSixb: "Arrêtée à la fermeture de sixb",
+    unknown: "En cours à la dernière lecture",
+    unreachable: "En cours à la dernière lecture · sixb y est fermé",
+    stop: "Arrêter",
+    stopHint: "L’arrêter, avec tout ce qu’elle a lancé",
+    stopFailed: "Impossible de l’arrêter : elle est peut-être terminée. Réessayez.",
+    output: "Sortie",
+    lines: (lines) => count(lines, "ligne"),
+    earlierOutput: (path) => `La sortie précédente est dans ${path}`,
+    rows: {
+      start: {
+        title: "Commande lancée en arrière-plan",
+        running: "Lancement d’une commande en arrière-plan",
+      },
+      read: {
+        title: "Commande en arrière-plan consultée",
+        running: "Consultation d’une commande en arrière-plan",
+      },
+      wait: {
+        title: "Commande en arrière-plan attendue",
+        running: "Attente d’une commande en arrière-plan",
+      },
+      stop: {
+        title: "Commande en arrière-plan arrêtée",
+        running: "Arrêt d’une commande en arrière-plan",
+      },
+    },
+  },
   computer: {
     online: "sixb y est ouvert",
     offline: "sixb y est fermé",
