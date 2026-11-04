@@ -316,6 +316,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("082-agent-token-rates", agentTokenRatesSql),
     sqliteSql("083-agent-computer-sessions", agentComputerSessionsSql),
     sqliteSql("084-agent-computer-background-commands", agentComputerBackgroundCommandsSql),
+    sqliteSql("085-web-search-model-kind", webSearchModelKindSql),
   ],
 })
 
@@ -725,3 +726,4 @@ import agentComputerSessionsSql from "./migrations/083-agent-computer-sessions.s
 import agentComputerBackgroundCommandsSql from "./migrations/084-agent-computer-background-commands.sql" with {
   type: "text",
 }
+import webSearchModelKindSql from "./migrations/085-web-search-model-kind.sql" with { type: "text" }

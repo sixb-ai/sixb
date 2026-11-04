@@ -570,7 +570,7 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
           meter: "cost.catalogEstimated",
           amount: { currency: "USD", amountNanos: "100" },
         }
-        for (const modelKind of ["reranking", "image", "speech"] as const) {
+        for (const modelKind of ["reranking", "web-search", "image", "speech"] as const) {
           await expect(
             storage.aiLimits.reserveModelCall(
               reservation(modelKind, 0, { estimates: [cost], modelKind })
@@ -590,6 +590,16 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
         await storage.aiLimits.recordModelCallActuals({
           projectId,
           usageRecordId: "usage-reranking",
+        })
+        await recordUsageInput(storage.aiUsage, {
+          id: "usage-web-search",
+          callId: "web-search",
+          modelKind: "web-search",
+          usage: {},
+        })
+        await storage.aiLimits.recordModelCallActuals({
+          projectId,
+          usageRecordId: "usage-web-search",
         })
         expect(await status()).toMatchObject({
           accountingStatus: "complete",
