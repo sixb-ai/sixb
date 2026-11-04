@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language, embedding, decision, reranking, image and speech calls. Application usage is
+Internal execution and accounting shared by language, embedding, decision, reranking, web search, image and speech calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -78,10 +78,29 @@ and ranking validation. A complete permutation with finite scores is required; t
 candidate order. `RerankingModelResponseError` carries metadata from malformed billable responses.
 
 Provider charges remain distinct from token usage: absent tokens stay unknown. Token limits
-neither admit nor count reranking, transcription, image or speech calls (`aiLimitMeterApplies` in
+neither admit nor count reranking, web search, transcription, image or speech calls (`aiLimitMeterApplies` in
 the limit storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
 costs reconcile monetary reservations; missing tariffs fail admission under cost limits. Recovery
 remains the existing accounting-only replay.
+
+## Web search flow
+
+`web-search.ts` binds the catalog to a session the way `reranking.ts` does; an Agent run can bind
+it to its own recorder, since it needs only a signal and accounting. The catalog's default is
+`models.webSearch[0]`, else the default language binding's `webSearch`, else the first language
+binding's.
+
+The request is snapshotted, `maxResults` clamped to 1–10, and the call bounded at 30 seconds with
+no retry. Admission reserves the binding's `estimateReservation({ maxResults })`; without one, cost
+limits refuse the search, as they do transcription. No rate card prices a search, so its cost is
+what the provider reports. The call is recorded before its hits are checked: a malformed reply, or
+a `WebSearchModelResponseError` carrying its metadata, is still accounted. Hits need an http(s) URL,
+a title and a snippet; Sixb cuts snippets to 300 characters and keeps only dates that parse.
+
+A search that fails without a reply (an HTTP error, a network failure, the timeout, an abort) is
+not recorded: whether it was billed is unknown, so its reservation is kept as unknown, as for a
+language call. An unpriced record would leave every cost limit unable to count, refusing each call
+it covers until the period ends.
 
 ## Decision flow
 

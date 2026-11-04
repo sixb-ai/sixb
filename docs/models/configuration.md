@@ -693,6 +693,28 @@ models: {
 
 Registration does not change search behavior. Each query must choose its reranking model.
 
+## Web search models
+
+A web search model searches the web and returns links with a title and a snippet. Sixb picks one:
+
+| Configured | Searches with |
+| --- | --- |
+| `models.webSearch` | Its first model |
+| Otherwise | The default language model's own web search, else the first language model's that has one |
+| Neither | Nothing: no web search |
+
+A language model only brings a web search when its provider offers one under the same key. To
+choose another, list it first:
+
+```ts
+models: {
+  language: [openaiModel],
+  webSearch: [mySearchModel],
+}
+```
+
+Each search counts toward [AI usage and limits](./usage-and-limits.md#web-search).
+
 ## Providers
 
 Each provider card opens its package README for installation, credentials, supported models,

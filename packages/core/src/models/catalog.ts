@@ -21,6 +21,7 @@ import {
   modelReasoningSupportIssue,
 } from "./language-model"
 import { assertRerankingModel, type RerankingModel } from "./reranking-model"
+import { assertWebSearchModel, type WebSearchModel } from "./web-search-model"
 
 /** Stable identity of a configured provider binding. */
 export interface ModelRef {
@@ -46,6 +47,17 @@ export interface RerankingModelEntry extends ModelRef {
 export interface RerankingModelCatalog {
   list(): readonly RerankingModelEntry[]
   getByRef(ref: ModelRef): RerankingModelEntry | null
+}
+
+export interface WebSearchModelEntry extends ModelRef {
+  readonly model: WebSearchModel
+}
+
+export interface WebSearchModelCatalog {
+  /** The one Sixb searches with. */
+  readonly default: WebSearchModelEntry
+  list(): readonly WebSearchModelEntry[]
+  getByRef(ref: ModelRef): WebSearchModelEntry | null
 }
 
 /** The cost and strength classes a project can configure language models in. */
@@ -107,6 +119,7 @@ export interface ModelCatalog {
   readonly embedding: EmbeddingModelCatalog
   readonly image?: ImageModelCatalog
   readonly reranking?: RerankingModelCatalog
+  readonly webSearch?: WebSearchModelCatalog
 }
 
 export interface ModelCatalogInput {
@@ -123,6 +136,11 @@ export interface ModelCatalogInput {
   readonly image?: readonly ImageModel[]
   /** Available rerankers; no default model and no automatic activation. */
   readonly reranking?: readonly RerankingModel[]
+  /**
+   * Ordered; the first is the one Sixb searches with. Omitted, Sixb searches with the default
+   * language model's own web search, else the first language model that offers one.
+   */
+  readonly webSearch?: readonly WebSearchModel[]
 }
 
 // Only statically required inputs make their corresponding catalogs required.
@@ -166,6 +184,7 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
   const audio = createAudioCatalog(input.audio)
   const image = createImageCatalog(input.image)
   const reranking = createRerankingCatalog(input.reranking)
+  const webSearch = createWebSearchCatalog(input.webSearch, language)
 
   if (
     !language &&
@@ -173,14 +192,15 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
     !audio &&
     !image &&
     embedding.list().length === 0 &&
-    !reranking?.list().length
+    !reranking?.list().length &&
+    !webSearch
   ) {
     throw new RuntimeError(
-      "[Sixb] Configure at least one language, embedding, decision, audio, image or reranking model."
+      "[Sixb] Configure at least one language, embedding, decision, audio, image, reranking or web search model."
     )
   }
 
-  return Object.freeze({ language, embedding, decision, audio, image, reranking })
+  return Object.freeze({ language, embedding, decision, audio, image, reranking, webSearch })
 }
 
 function createRerankingCatalog(
@@ -191,6 +211,35 @@ function createRerankingCatalog(
     throw new RuntimeError("[Sixb] models.reranking must be an array of reranking models.")
   }
   return indexModelBindings(models, "reranking", assertRerankingModel)
+}
+
+/**
+ * The project's own list, else the search its default language model offers, else the first
+ * language model's that offers one. Discovered, the catalog holds that one search alone.
+ */
+function createWebSearchCatalog(
+  models: readonly WebSearchModel[] | undefined,
+  language: LanguageModelCatalog | undefined
+): WebSearchModelCatalog | undefined {
+  if (models !== undefined && !Array.isArray(models)) {
+    throw new RuntimeError("[Sixb] models.webSearch must be an array of web search models.")
+  }
+  if (models?.length === 0) {
+    throw new RuntimeError(
+      "[Sixb] models.webSearch must contain at least one model. Omit it to search with your language models' own web search."
+    )
+  }
+
+  const discovered =
+    language?.default.model.webSearch ??
+    language?.list().find((entry) => entry.model.webSearch)?.model.webSearch
+  const configured = models ?? (discovered ? [discovered] : [])
+
+  const index = indexModelBindings(configured, "webSearch", assertWebSearchModel)
+  const [defaultEntry] = index.list()
+  if (!defaultEntry) return undefined
+
+  return Object.freeze({ ...index, default: defaultEntry })
 }
 
 function createLanguageCatalog(

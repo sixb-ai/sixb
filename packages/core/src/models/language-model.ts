@@ -5,6 +5,7 @@ import type { LanguageModelStreamEvent } from "./events"
 import type { ModelMessage } from "./messages"
 import type { ModelCostEstimator } from "./pricing"
 import type { ModelRateCard } from "./rate-card"
+import type { WebSearchModel } from "./web-search-model"
 
 export const MODEL_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -134,6 +135,11 @@ export interface LanguageModel {
    * startup.
    */
   readonly maxOutputTokens?: number
+  /**
+   * The web search its provider offers, under the same credentials. Sixb searches with it when
+   * `models.webSearch` names none.
+   */
+  readonly webSearch?: WebSearchModel
   /**
    * Return an executable model pinned to operational metadata, preserving model identity.
    * `offline` requires a local snapshot without catalog I/O. Workers retain this model
