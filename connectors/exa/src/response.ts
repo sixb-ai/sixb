@@ -10,6 +10,18 @@ import type {
 } from "./types"
 
 export function parseExaSearchResponse(value: unknown, status?: number): ExaSearchResponse {
+  try {
+    return readSearchResponse(value, status)
+  } catch (error) {
+    // Exa bills a search it answered, even when the answer is unusable: keep the charge.
+    const charged = chargedCost(value)
+    if (!(error instanceof ExaApiError) || !charged) throw error
+
+    throw new ExaApiError(error.message, { status, costDollars: charged })
+  }
+}
+
+function readSearchResponse(value: unknown, status?: number): ExaSearchResponse {
   if (!isRecord(value)) throw malformed("search", "the body must be an object", status)
   if (!Array.isArray(value.results)) throw malformed("search", "results must be an array", status)
 
@@ -85,6 +97,14 @@ function assertDocumentResult(
   assertOptionalNullableString(value, "publishedDate", `results[${index}]`, operation, status)
   assertOptionalNullableString(value, "author", `results[${index}]`, operation, status)
   assertOptionalString(value, "text", operation, status, `results[${index}]`)
+
+  const highlights = value.highlights
+  if (
+    highlights !== undefined &&
+    (!Array.isArray(highlights) || highlights.some((entry) => typeof entry !== "string"))
+  ) {
+    throw malformed(operation, `results[${index}].highlights must be a list of strings`, status)
+  }
 }
 
 function assertSearchStatus(
@@ -138,6 +158,17 @@ function assertContentsStatus(
         status
       )
     }
+  }
+}
+
+function chargedCost(value: unknown): ExaCostDollars | undefined {
+  if (!isRecord(value) || value.costDollars === undefined) return undefined
+
+  try {
+    assertCostDollars(value.costDollars, "search")
+    return value.costDollars
+  } catch {
+    return undefined
   }
 }
 

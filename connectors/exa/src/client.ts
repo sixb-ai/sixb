@@ -140,6 +140,9 @@ function assertSearchRequest(request: ExaSearchRequest): void {
   if (typeof request.query !== "string" || !request.query.trim()) {
     throw new Error("[SixbExa] search query must not be empty.")
   }
+  if (request.type !== undefined && request.type !== "auto" && request.type !== "fast") {
+    throw new Error('[SixbExa] search type must be "auto" or "fast".')
+  }
   if (request.numResults !== undefined) {
     assertIntegerInRange(request.numResults, "numResults", 1, MAX_RESULTS)
   }
@@ -149,6 +152,11 @@ function assertSearchRequest(request: ExaSearchRequest): void {
   if (request.contents !== undefined && !isRecord(request.contents)) {
     throw new Error("[SixbExa] contents must be an object.")
   }
+  const highlights = request.contents?.highlights
+  if (highlights !== undefined && highlights !== true) {
+    throw new Error("[SixbExa] contents.highlights must be true.")
+  }
+
   const text = request.contents?.text
   if (text !== undefined && text !== true) {
     if (!isRecord(text)) {

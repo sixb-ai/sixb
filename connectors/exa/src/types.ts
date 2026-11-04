@@ -18,11 +18,17 @@ export interface ExaTextContentsOptions {
 
 export interface ExaSearchContentsOptions {
   readonly text?: true | ExaTextContentsOptions
+  /** The passages of each page that best match the query. */
+  readonly highlights?: true
 }
+
+/** `auto` picks the best search; `fast` trades some quality for latency. */
+export type ExaSearchType = "auto" | "fast"
 
 /** The supported wire fields for one Exa `/search` request. */
 export interface ExaSearchRequest {
   readonly query: string
+  readonly type?: ExaSearchType
   readonly numResults?: number
   readonly includeDomains?: readonly string[]
   readonly excludeDomains?: readonly string[]
@@ -37,6 +43,7 @@ export interface ExaSearchResult {
   readonly publishedDate?: string | null
   readonly author?: string | null
   readonly text?: string
+  readonly highlights?: readonly string[]
 }
 
 /** Per-document status metadata present on some Exa responses. */

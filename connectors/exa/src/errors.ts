@@ -1,4 +1,5 @@
 import { AgentToolPublicError } from "@sixb/core"
+import type { ExaCostDollars } from "./types"
 
 /** Raised when an Exa request fails or returns an unusable response. */
 export class ExaApiError extends AgentToolPublicError {
@@ -6,6 +7,8 @@ export class ExaApiError extends AgentToolPublicError {
   readonly status?: number
   readonly tag?: string
   readonly requestId?: string
+  /** What Exa charged for a reply it sent but Sixb could not read. */
+  readonly costDollars?: ExaCostDollars
 
   constructor(
     message: string,
@@ -13,6 +16,7 @@ export class ExaApiError extends AgentToolPublicError {
       readonly status?: number
       readonly tag?: string
       readonly requestId?: string
+      readonly costDollars?: ExaCostDollars
       readonly cause?: unknown
     } = {}
   ) {
@@ -20,5 +24,6 @@ export class ExaApiError extends AgentToolPublicError {
     this.status = options.status
     this.tag = options.tag
     this.requestId = options.requestId
+    this.costDollars = options.costDollars
   }
 }
