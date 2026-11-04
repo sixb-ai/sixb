@@ -14,7 +14,9 @@ import {
   ProfileUnansweredError,
   profileSessionStore,
   type ResolvedProfile,
+  readConfig,
   resolveProfile,
+  type SixbConfigFile,
   updateConfig,
 } from "./profiles"
 
@@ -111,6 +113,15 @@ export async function connect(input: {
   }
 }
 
+/** The profiles signed in to `apiUrl`: the CLI's own sign-in there serves a program beside it. */
+export async function profilesSignedInTo(apiUrl: string): Promise<readonly string[]> {
+  const baseUrl = normalizeApiUrl(apiUrl)
+  const { profiles } = await readConfig()
+  return Object.entries(profiles)
+    .filter(([, profile]) => profile.apiUrl === baseUrl && (profile.session || profile.token))
+    .map(([name]) => name)
+}
+
 /** A sign-in in progress: show the code, open the page, then wait for the person to approve it. */
 export interface PendingSignIn {
   readonly apiUrl: string
@@ -121,11 +132,47 @@ export interface PendingSignIn {
 
 /**
  * Sign this computer in to `apiUrl` with the device flow, as `sixb login` does, and keep the
- * session on a profile named after the project.
+ * session on a profile named after the project, which `sixb` then uses.
  */
 export async function startSignIn(apiUrl: string): Promise<PendingSignIn> {
   const baseUrl = normalizeApiUrl(apiUrl)
   const login = await startSixbDeviceLogin({ baseUrl, clientName: `sixb on ${hostname()}` })
+  return pendingSignIn(baseUrl, login, (config, project, session) => ({
+    version: 1,
+    currentProfile: project,
+    profiles: {
+      ...config.profiles,
+      [project]: { apiUrl: baseUrl, projectId: project, session },
+    },
+  }))
+}
+
+/**
+ * As `startSignIn`, for a program beside `sixb` rather than `sixb` itself: what `sixb` is using stays
+ * as it was, and so does a profile of the same name for another address.
+ */
+export async function startSignInBeside(
+  apiUrl: string,
+  clientName: string
+): Promise<PendingSignIn> {
+  const baseUrl = normalizeApiUrl(apiUrl)
+  const login = await startSixbDeviceLogin({ baseUrl, clientName })
+  return pendingSignIn(baseUrl, login, (config, project, session) => {
+    const taken = config.profiles[project]
+    const name =
+      taken && taken.apiUrl !== baseUrl ? `${project}-${new URL(baseUrl).hostname}` : project
+    return {
+      ...config,
+      profiles: { ...config.profiles, [name]: { apiUrl: baseUrl, projectId: project, session } },
+    }
+  })
+}
+
+function pendingSignIn(
+  baseUrl: string,
+  login: Awaited<ReturnType<typeof startSixbDeviceLogin>>,
+  keep: (config: SixbConfigFile, project: string, session: SixbSessionTokens) => SixbConfigFile
+): PendingSignIn {
   return {
     apiUrl: baseUrl,
     userCode: login.userCode,
@@ -137,14 +184,7 @@ export async function startSignIn(apiUrl: string): Promise<PendingSignIn> {
         auth: { kind: "bearer", token: session.accessToken },
       })
       const { data: project } = await getProjectInfo({ client, throwOnError: true })
-      await updateConfig((config) => ({
-        version: 1,
-        currentProfile: project.id,
-        profiles: {
-          ...config.profiles,
-          [project.id]: { apiUrl: baseUrl, projectId: project.id, session },
-        },
-      }))
+      await updateConfig((config) => keep(config, project.id, session))
     },
   }
 }

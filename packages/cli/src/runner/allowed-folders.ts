@@ -82,14 +82,36 @@ async function writeChange(
   const stored = await readStored()
   const key = keyOf(project)
   const others = (stored[key] ?? []).filter((folder) => !changed.includes(folder))
-  const folders = allowed ? [...others, ...changed] : others
+  await writeStored({ ...stored, [key]: allowed ? [...others, ...changed] : others })
+}
+
+async function writeStored(stored: StoredFolders): Promise<void> {
   const path = ALLOWED_FOLDERS_FILE()
   const written = `${path}.${randomUUID()}`
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  await writeFile(written, `${JSON.stringify({ ...stored, [key]: folders }, null, 2)}\n`, {
-    mode: 0o600,
-  })
+  await writeFile(written, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 })
   await rename(written, path)
+}
+
+/**
+ * Forget `folder` for every project at `apiUrl`. Needs no sign-in, as a list on this computer doesn't:
+ * someone signed out can still take a folder back, and it stays taken back.
+ */
+export function forgetFolderAt(apiUrl: string, folder: string): Promise<void> {
+  const change = lastChange.then(async () => {
+    const stored = await readStored()
+    const suffix = ` at ${apiUrl}`
+    await writeStored(
+      Object.fromEntries(
+        Object.entries(stored).map(([key, folders]) => [
+          key,
+          key.endsWith(suffix) ? folders.filter((known) => known !== folder) : folders,
+        ])
+      )
+    )
+  })
+  lastChange = change.catch(() => {})
+  return change
 }
 
 /** Call `changed` whenever the list may have changed. Returns the way to stop. */
