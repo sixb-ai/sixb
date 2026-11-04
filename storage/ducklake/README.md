@@ -65,6 +65,17 @@ const lakeStorage = new DuckLakeStorage({
 Use `close()` during service shutdown so DuckDB can close its runtime and release
 catalog connections cleanly.
 
+### Extensions
+
+On first use, the provider installs DuckLake and the extensions its catalog,
+data path and secrets need. A missing extension is downloaded over HTTPS from
+`https://extensions.duckdb.org` into DuckDB's extension directory
+(`duckdb.config.extension_directory`, `~/.duckdb/extensions` by default), so a
+host that allows only that HTTPS domain, such as a restricted Vercel sandbox,
+can open a lake. DuckDB's own `INSTALL` uses plain HTTP and runs as before when
+that download fails. With `custom_extension_repository` set, DuckDB installs
+from that repository alone.
+
 ### Maintenance
 
 DuckLake keeps historical snapshots and deleted files until maintenance runs.
