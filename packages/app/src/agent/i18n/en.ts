@@ -831,7 +831,18 @@ export const en = {
       `${computer} is offline. Your message waits until ${folder} is connected there.`,
     noFolder:
       "This conversation has no folder yet. Open sixb in its folder and press ctrl+f, or continue in the cloud.",
+    /** In a desktop app, about a conversation of this computer's. */
+    offlineHere: (folder: string) =>
+      `Not running here yet. Your message waits until this computer is connected in ${folder}.`,
+    runHere: "Run on this computer",
     waitingFor: (computer: string) => `Waiting for ${computer}`,
+    /** Where a new conversation runs, in a desktop app. */
+    placeTitle: "Where this conversation runs",
+    placeChip: (place: string) => `Runs in ${place}. Change where it runs`,
+    cloud: "Cloud",
+    chooseFolder: "Choose a folder…",
+    chooseFolderShort: "Choose a folder",
+    forgetFolder: (folder: string) => `Stop running messages in ${folder}`,
     continueInCloud: "Continue in the cloud",
     moving: "Moving…",
     moveFailed: "Could not move it to the cloud. Try again.",

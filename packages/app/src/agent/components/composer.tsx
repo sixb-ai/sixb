@@ -43,6 +43,7 @@ import {
 } from "react"
 import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
+import type { NewThreadPlace } from "../hooks/use-new-thread-place"
 import { useAgentMessages } from "../i18n"
 import type { AgentFileRef, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
@@ -59,6 +60,7 @@ import {
   commandQuery,
   matchCommands,
 } from "./composer-commands"
+import { ComposerPlace } from "./composer-place"
 import { ComposerSettings } from "./composer-settings"
 import {
   COMPOSER_CHIP_CLASS_NAME,
@@ -142,6 +144,8 @@ export interface ComposerProps {
   readonly commands?: readonly ComposerCommand[]
   /** How much of its model's limit the conversation uses: a ring beside the model. */
   readonly contextMeter?: ContextMeterProps
+  /** Where a new conversation runs, where there's a choice; "waiting" until that's known. */
+  readonly newThreadPlace?: NewThreadPlace | "waiting"
 }
 
 type ComposerAttachment =
@@ -221,6 +225,7 @@ export function Composer({
   dictation,
   commands = [],
   contextMeter,
+  newThreadPlace,
 }: ComposerProps) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
@@ -1004,6 +1009,14 @@ export function Composer({
             )}
           </div>
         </div>
+        {newThreadPlace ? (
+          // Its height held from the first render: the composer doesn't move when the place arrives.
+          <div data-slot="composer-place" className="mt-1.5 flex h-7 min-w-0 items-center pl-3.5">
+            {newThreadPlace === "waiting" ? null : (
+              <ComposerPlace place={newThreadPlace} disabled={disabled || pending} />
+            )}
+          </div>
+        ) : null}
         <span className="sr-only" aria-live="polite">
           {modeAnnouncement}
         </span>

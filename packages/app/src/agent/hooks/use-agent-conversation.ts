@@ -27,6 +27,7 @@ import {
   stopAgentBackgroundCommandMutation,
   updateAgentPreferencesMutation,
   useAgentActivityStream,
+  useDesktop,
 } from "@sixb/client/hooks"
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -83,6 +84,7 @@ import {
   userPrincipal,
 } from "../sharing"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
+import { useNewThreadPlace } from "./use-new-thread-place"
 import { useAgentThreadLists } from "./use-thread-lists"
 import { useThreadStream } from "./use-thread-stream"
 
@@ -118,6 +120,7 @@ export interface UseAgentConversationInput {
 export type ConversationComposerProps = Pick<
   ComposerProps,
   | "onSend"
+  | "newThreadPlace"
   | "error"
   | "disabled"
   | "pending"
@@ -174,6 +177,19 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const agentMessages = useAgentMessages()
   const labels = agentMessages.chat
   const queryClient = useQueryClient()
+  const {
+    place: newThreadPlace,
+    waiting: newThreadPlaceWaiting,
+    resolveBody: resolvePlaceBody,
+  } = useNewThreadPlace()
+  const desktopComputer = useDesktop()?.computer
+  const [desktopComputerId, setDesktopComputerId] = useState<string | null>(null)
+  useEffect(() => {
+    void desktopComputer?.about().then(
+      (found) => setDesktopComputerId(found?.id ?? null),
+      () => {}
+    )
+  }, [desktopComputer])
   const user = useCurrentUser()
   const agentQuery = useQuery(getAgentOptions())
   const modelsQuery = useQuery(listModelsOptions())
@@ -531,9 +547,15 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       }
 
       if (!currentAgent) return
+      const place = await resolvePlaceBody()
+      if (!place) {
+        // They cancelled choosing a folder: nothing was sent, and their message goes back.
+        setDraftReseed((current) => ({ text, attachments, context, nonce: current.nonce + 1 }))
+        return
+      }
       const title = deriveTitle(text, attachments)
       const created = await createThread.mutateAsync({
-        body: title ? { title } : {},
+        body: { ...(title ? { title } : {}), ...place },
       })
       createdThreadId = created.thread.id
       setPendingUser({
@@ -1076,6 +1098,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
   const composerProps: ConversationComposerProps = {
     onSend: send,
+    ...(threadId === null && (newThreadPlace || newThreadPlaceWaiting)
+      ? { newThreadPlace: newThreadPlace ?? "waiting" }
+      : {}),
     error: currentSendError
       ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
       : undefined,
@@ -1119,6 +1144,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
               ? "busy"
               : "failed",
         onContinueInCloud: handleContinueInCloud,
+        ...(desktopComputer && thread?.computer && thread.computer.id === desktopComputerId
+          ? {
+              onRunHere: () =>
+                void desktopComputer.allowFolder(thread.computer?.folder ?? "").catch(() => {}),
+            }
+          : {}),
       }
     : null
 
