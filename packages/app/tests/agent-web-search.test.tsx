@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { latestWorkLabel } from "../src/agent/activity-label"
 import { AssistantBody } from "../src/agent/components/message-parts"
 import { WebSearchToolView } from "../src/agent/components/web-search-tool-view"
+import { fr } from "../src/agent/i18n/fr"
 import { createLiveRunState, liveRunReducer } from "../src/agent/live-run"
 import { type NormalizedPart, normalizeDurableParts } from "../src/agent/parts"
 import {
@@ -25,7 +26,77 @@ function search(output: unknown, toolName = "web_search"): NormalizedPart {
   }
 }
 
+// The shape Sixb's own `web_search` stores; `result` above is the Exa tool's, kept by older threads.
+const hit = {
+  url: "https://news.example.org/story",
+  title: "A story",
+  snippet: "What the story says.",
+  publishedAt: "2026-11-02",
+}
+
+function fetched(output: unknown, input: unknown = { url: "https://docs.example.com/guide" }) {
+  return {
+    kind: "tool",
+    tool: { toolName: "web_fetch", state: "output-available", input, output },
+  } satisfies NormalizedPart
+}
+
 describe("web search sources", () => {
+  test("reads Sixb's hits and the Exa results older threads stored alike", () => {
+    expect(coerceWebSearchOutput({ query: "story", results: [hit] })).toEqual([
+      {
+        id: hit.url,
+        url: hit.url,
+        domain: "news.example.org",
+        faviconUrl: "https://news.example.org/favicon.ico",
+        title: hit.title,
+        excerpt: hit.snippet,
+        author: undefined,
+        publishedDate: "2026-11-02",
+      },
+    ])
+
+    const stored = coerceWebSearchOutput({
+      results: [{ ...result, author: "Someone", publishedDate: "2026-09-14" }],
+    })
+    expect(stored?.[0]).toMatchObject({
+      excerpt: result.text,
+      author: "Someone",
+      publishedDate: "2026-09-14",
+    })
+
+    expect(coerceWebSearchOutput({ query: "story", results: [{ ...hit, snippet: 42 }] })).toBeNull()
+  })
+
+  test("counts a page the agent read as a source, unless it only pointed elsewhere", () => {
+    const page = {
+      source: { url: "https://docs.example.com/guide", title: "The guide" },
+      status: 200,
+      contentType: "text/html",
+      bytes: 4_096,
+      preview: "# The guide",
+    }
+    const sources = collectWebSources([
+      search({ query: "guide", results: [hit] }),
+      fetched(page),
+      fetched({ ...page, source: { url: hit.url, title: "Read again" } }),
+      fetched({
+        ...page,
+        source: { url: "https://moved.example.com/", title: "" },
+        status: 301,
+        redirect: { url: "https://elsewhere.example.net/", status: 301 },
+      }),
+      fetched({ ...page, source: { url: "https://gone.example.com/", title: "" }, status: 404 }),
+      fetched({ title: "Stored page", url: "https://old.example.com/", content: "Old text." }),
+    ])
+
+    expect(sources.map((source) => [source.domain, source.title, source.excerpt])).toEqual([
+      ["news.example.org", "A story", "What the story says."],
+      ["docs.example.com", "The guide", ""],
+      ["old.example.com", "Stored page", "Old text."],
+    ])
+  })
+
   test("normalizes metadata and bounds excerpts without requiring optional fields", () => {
     expect(coerceWebSearchOutput({ results: [result] })).toEqual([
       {
@@ -141,6 +212,30 @@ describe("web search sources", () => {
     expect(html).not.toContain("Page 3")
   })
 
+  // Regression proof: drop `fileName(parsed)` in webSource; both chips then read
+  // "localhost · localhost".
+  test("names a page without a title by its file name, else its host", () => {
+    const pdf = (url: string) => ({
+      source: { url, title: "" },
+      status: 200,
+      contentType: "application/pdf",
+      bytes: 4_096,
+      path: "/w/out.pdf",
+    })
+    const parts = [
+      fetched(pdf("http://localhost:3000/files/Q3%20report.pdf")),
+      fetched(pdf("http://localhost:3000/")),
+    ]
+
+    expect(collectWebSources(parts).map((source) => source.title)).toEqual([
+      "Q3 report.pdf",
+      "localhost",
+    ])
+    expect(renderToStaticMarkup(<AssistantBody parts={parts} />)).toContain(
+      "localhost · Q3 report.pdf"
+    )
+  })
+
   test("keeps sources from earlier successful searches when another search fails", () => {
     const html = renderToStaticMarkup(
       <AssistantBody
@@ -182,6 +277,7 @@ describe("web search sources", () => {
       },
     }
     expect(latestWorkLabel([part])).toBe("Searching the web")
+    expect(latestWorkLabel([part], fr)).toBe("Recherche sur le web")
     const html = renderToStaticMarkup(<WebSearchToolView tool={part.tool} />)
     expect(html).toContain("Searching the web")
     expect(html).toContain("&lt;script&gt;")
@@ -214,5 +310,25 @@ describe("web search sources", () => {
     ])
     expect(collectWebSources(live.parts)).toEqual(collectWebSources(durable))
     expect(collectWebSources(live.parts)).toHaveLength(1)
+  })
+})
+
+describe("web page progress", () => {
+  const reading = (input: unknown): NormalizedPart => ({
+    kind: "tool",
+    tool: { toolName: "web_fetch", state: "input-available", input },
+  })
+
+  test("reads a page, or asks it a question, by its domain", () => {
+    const url = "https://www.example.com/pricing"
+
+    expect(latestWorkLabel([reading({ url })])).toBe("Reading example.com")
+    expect(latestWorkLabel([reading({ url, question: "What does it cost?" })])).toBe(
+      "Asking example.com"
+    )
+    expect(latestWorkLabel([reading({ url, question: "  " })])).toBe("Reading example.com")
+    expect(latestWorkLabel([reading({ url, question: "Prix ?" })], fr)).toBe(
+      "Question à example.com"
+    )
   })
 })

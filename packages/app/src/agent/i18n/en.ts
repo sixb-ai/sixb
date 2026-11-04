@@ -421,10 +421,18 @@ export const en = {
     results: (results: number) => count(results, "result"),
     webPage: "web page",
     reading: (domain: string) => `Reading ${domain}`,
+    /** A page read to answer a question about it. */
+    asking: (domain: string) => `Asking ${domain}`,
     read: (domain: string) => `Read ${domain}`,
     reviewing: (domain: string) => `Reviewing ${domain}`,
     readFailed: (domain: string) => `Could not read ${domain}`,
     pageError: "The page could not be read.",
+    redirectedTo: (domain: string) => `Redirected to ${domain}`,
+    answerFailed: "No answer came back. Here is how the page begins.",
+    /** Under an answer that reached its length limit. */
+    answerTruncated: "The answer stopped at its length limit and may be incomplete.",
+    /** Beside the size of a page that was too large to read whole. */
+    truncated: "truncated",
     noPageText: "No page text was returned.",
     openPage: "Open page",
     newTab: " (opens in a new tab)",

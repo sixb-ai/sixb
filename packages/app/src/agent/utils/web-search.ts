@@ -1,4 +1,5 @@
 import type { NormalizedPart } from "../parts"
+import { webFetchSource } from "./web-fetch"
 
 export interface WebSource {
   readonly id: string
@@ -22,67 +23,105 @@ export function formatPublicationDate(value: string, locale: string): string {
   }).format(new Date(value))
 }
 
-/** Recognize the bounded Exa web_search output, without depending on the connector package. */
+/**
+ * Recognize a `web_search` output: Sixb's hits (`snippet`, `publishedAt`), and the Exa tool's
+ * that older threads stored (`text`, `author`, `publishedDate`).
+ */
 export function coerceWebSearchOutput(value: unknown): readonly WebSource[] | null {
   if (!isRecord(value) || !Array.isArray(value.results)) return null
+
   const sources: WebSource[] = []
   for (const result of value.results) {
-    if (
-      !isRecord(result) ||
-      typeof result.url !== "string" ||
-      typeof result.title !== "string" ||
-      typeof result.text !== "string"
-    ) {
+    if (!isRecord(result) || typeof result.url !== "string" || typeof result.title !== "string") {
       return null
     }
-    const url = httpUrl(result.url)
-    if (!url) continue
-    const page = new URL(url)
-    page.hash = ""
+
+    const text = typeof result.snippet === "string" ? result.snippet : result.text
+    if (typeof text !== "string") return null
+
+    const source = webSource(result.url, result.title, text)
+    if (!source) continue
+
     sources.push({
-      id: page.href,
-      url: url.href,
-      domain: url.hostname.replace(/^www\./, ""),
-      faviconUrl: new URL("/favicon.ico", url.origin).href,
-      title: compact(result.title) || url.hostname,
-      excerpt: excerpt(result.text),
+      ...source,
       author: typeof result.author === "string" ? compact(result.author) : undefined,
-      publishedDate: publicationDate(result.publishedDate),
+      publishedDate: publicationDate(result.publishedAt ?? result.publishedDate),
     })
   }
+
   // Invalid links are not evidence that a search returned zero results. Keep the inspector.
   return value.results.length > 0 && sources.length === 0 ? null : sources
+}
+
+/** A page as a source, or null when its link is not a plain web address. */
+export function webSource(url: string, title: string, text: string): WebSource | null {
+  const parsed = httpUrl(url)
+  if (!parsed) return null
+
+  const page = new URL(parsed)
+  page.hash = ""
+  return {
+    id: page.href,
+    url: parsed.href,
+    domain: displayDomain(parsed),
+    faviconUrl: new URL("/favicon.ico", parsed.origin).href,
+    title: compact(title) || fileName(parsed) || parsed.hostname,
+    excerpt: excerpt(text),
+  }
+}
+
+/** A host as people read it: without the `www.` prefix. */
+export function displayDomain(url: URL): string {
+  return url.hostname.replace(/^www\./, "")
 }
 
 export function webSearchQuery(input: unknown): string | undefined {
   return isRecord(input) && typeof input.query === "string" ? input.query.trim() : undefined
 }
 
-/** Keep provider order and the first occurrence; separate pages on one domain remain separate. */
+/**
+ * Keep provider order and the first occurrence; separate pages on one domain remain separate. A
+ * page the agent read counts too, unless it only pointed elsewhere.
+ */
 export function collectWebSources(parts: readonly NormalizedPart[]): readonly WebSource[] {
   const sources = new Map<string, WebSource>()
+  const add = (source: WebSource) => {
+    if (!sources.has(source.id)) sources.set(source.id, source)
+  }
+
   for (const part of parts) {
-    if (
-      part.kind !== "tool" ||
-      part.tool.toolName !== "web_search" ||
-      part.tool.state !== "output-available"
-    ) {
-      continue
+    if (part.kind !== "tool" || part.tool.state !== "output-available") continue
+
+    if (part.tool.toolName === "web_search") {
+      for (const source of coerceWebSearchOutput(part.tool.output) ?? []) add(source)
     }
-    for (const source of coerceWebSearchOutput(part.tool.output) ?? []) {
-      if (!sources.has(source.id)) sources.set(source.id, source)
+
+    if (part.tool.toolName === "web_fetch") {
+      const source = webFetchSource(part.tool.output)
+      if (source) add(source)
     }
   }
   return [...sources.values()]
 }
 
-function httpUrl(value: string): URL | null {
+/** A plain web address: http or https, with no credentials in it. */
+export function httpUrl(value: string): URL | null {
   try {
     const url = new URL(value)
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null
     return url
   } catch {
     return null
+  }
+}
+
+/** The last segment of a URL's path, decoded: what a PDF or an image without a title is called. */
+function fileName(url: URL): string {
+  const segment = url.pathname.slice(url.pathname.lastIndexOf("/") + 1)
+  try {
+    return compact(decodeURIComponent(segment))
+  } catch {
+    return compact(segment)
   }
 }
 

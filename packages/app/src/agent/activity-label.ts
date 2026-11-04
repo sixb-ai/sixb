@@ -13,7 +13,7 @@ import { childQuestions, describeMessageAgent } from "./message-agent/interpret"
 import type { NormalizedPart, NormalizedTool } from "./parts"
 import { isPublishTool, publishTitle } from "./publish-artifact/interpret"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./read/interpret"
-import { webFetchUrl } from "./utils/web-fetch"
+import { webFetchQuestion, webFetchUrl } from "./utils/web-fetch"
 import { describeViewFile } from "./view-file/interpret"
 
 /** A short, present-tense label for the newest visible step in a live work group. */
@@ -40,7 +40,7 @@ function toolProgressLabel(
     const domain = webFetchUrl(tool.input)?.hostname.replace(/^www\./, "") ?? messages.web.webPage
     if (tool.state === "output-error") return messages.web.readFailed(domain)
     if (tool.state === "output-available") return messages.web.reviewing(domain)
-    return messages.web.reading(domain)
+    return webFetchQuestion(tool.input) ? messages.web.asking(domain) : messages.web.reading(domain)
   }
   if (tool.toolName === "web_search") {
     if (tool.state === "output-error") return messages.web.continuingAfterFailure
