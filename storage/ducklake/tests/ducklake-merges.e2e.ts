@@ -214,17 +214,17 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLakeStorage %s keyed merges", 
     // Regression proof: commit source state outside the row transaction; the later v2/v4
     // upserts will be incorrectly ignored after the injected insert failure.
     const dataset = defineDataset("source.atomic", {
-      schema: [col("id", "string"), col("revision", "int64")],
+      schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
       primaryKey: "id",
       sequenceBy: "revision",
     })
     await storage.createDataset(dataset)
     const seed = await storage.beginMerge({ dataset })
-    await seed.writeChanges([change.upsert({ id: "42", revision: 1 })])
+    await seed.writeChanges([change.upsert({ id: "42", revision: 1, name: "Sam" })])
     await seed.commit()
     const failed = await storage.beginMerge({ dataset })
     await failed.writeChanges([
-      change.upsert({ id: "42", revision: 3 }),
+      change.upsert({ id: "42", revision: 3, name: "Ada" }),
       change.delete({ id: "gone" }, { sequence: 5 }),
     ])
     const runtime = await internals(storage).connections.runtime()
@@ -241,13 +241,13 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLakeStorage %s keyed merges", 
     }
     const next = await storage.beginMerge({ dataset })
     await next.writeChanges([
-      change.upsert({ id: "42", revision: 2 }),
-      change.upsert({ id: "gone", revision: 4 }),
+      change.upsert({ id: "42", revision: 2, name: "Lin" }),
+      change.upsert({ id: "gone", revision: 4, name: "Gone" }),
     ])
     await next.commit()
     expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
-      { id: "42", revision: "2" },
-      { id: "gone", revision: "4" },
+      { id: "42", revision: "2", name: "Lin" },
+      { id: "gone", revision: "4", name: "Gone" },
     ])
   })
 

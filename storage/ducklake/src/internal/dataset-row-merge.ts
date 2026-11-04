@@ -313,19 +313,26 @@ function primaryKeyMatchSql(
     .join(" AND ")
 }
 
+/**
+ * Whether a staged upsert changes the stored row of its key. A row that differs only in its
+ * `sequenceBy` column is the stored row delivered again (`isSequenceOnlyChange`): it stays as is,
+ * while the companion table still advances the key's ordering.
+ */
 function datasetRowDifferenceSql(
   dataset: DatasetDefinition,
   leftAlias: string,
   rightAlias: string
 ): string {
-  return dataset.schema.columns
+  const differences = dataset.schema.columns
+    .filter((column) => column.name !== dataset.sequenceBy)
     .map(
       (column) =>
         `${leftAlias}.${quoteIdentifier(column.name)} IS DISTINCT FROM ${rightAlias}.${quoteIdentifier(
           column.name
         )}`
     )
-    .join(" OR ")
+
+  return differences.length > 0 ? differences.join(" OR ") : "FALSE"
 }
 
 async function countRows(runtime: DuckDbQueryRuntime, relationSql: string): Promise<number> {

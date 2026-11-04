@@ -37,6 +37,7 @@ import {
   getDatasetPrimaryKeyColumns,
   hasDatasetLineageChanges,
   hasDatasetProvenanceChanges,
+  isSequenceOnlyChange,
   LakeConcurrencyError,
   type LakeMergeSession,
   type LakeStorage,
@@ -569,12 +570,13 @@ export class LocalLakeStorage implements LakeStorage {
         }
       }
 
+      // An upsert that only carries a newer sequence keeps the stored row: it advances ordering.
       const nextByKey = new Map(previousByKey)
       for (const [primaryKey, change] of finalChanges) {
-        if (change.kind === "upsert") {
-          nextByKey.set(primaryKey, structuredClone(change.row))
-        } else {
+        if (change.kind === "delete") {
           nextByKey.delete(primaryKey)
+        } else if (!isSequenceOnlyChange(definition, previousByKey.get(primaryKey), change.row)) {
+          nextByKey.set(primaryKey, structuredClone(change.row))
         }
       }
 
@@ -615,7 +617,8 @@ export class LocalLakeStorage implements LakeStorage {
           inputs: options.merge.inputs ? structuredClone(options.merge.inputs) : undefined,
           ...(lineage && { lineage }),
           // A sequenced merge can accept only changes that leave the rows as they were, such as
-          // the delete of an absent key: it still records the source ordering it advanced.
+          // the delete of an absent key or a stored row with a newer sequence: it still records
+          // the source ordering it advanced.
           rowsChanged: latestVersion === null || !sameRows,
           lineageChanged: hasDatasetLineageChanges(latestVersion, {
             datasetId: definition.id,

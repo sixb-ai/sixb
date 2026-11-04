@@ -105,7 +105,8 @@ For datasets declaring `sequenceBy`, newer source revisions win; older changes a
 conflicting ties abort the merge. Deletes require `change.delete(key, { sequence })`. Each version
 manifest retains source revisions and deletion tombstones, published atomically with the version's
 rows through the dataset head pointer. New tombstones create a version even for absent keys,
-which records `rowsChanged: false`.
+which records `rowsChanged: false`. So does a newer upsert that differs from the stored row only in
+its `sequenceBy` column: the row is kept and only its source revision advances.
 Sequenced provider writes use merge sessions; snapshot syncs convert rows to ordered upserts.
 Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empty result
 addressable. Later no-op commits reuse the current version, including after a concurrent write.

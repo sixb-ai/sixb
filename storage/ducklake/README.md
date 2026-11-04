@@ -195,8 +195,9 @@ identical ties are unchanged, and conflicting ties abort the merge. Deletes requ
 `change.delete(key, { sequence })`. Source revisions and deletion tombstones are stored in a
 companion DuckLake table in the same transaction as visible rows, surviving snapshot expiration.
 New tombstone state creates a version even when the visible rows stay the same; such a version
-records `rowsChanged: false`. Sequenced provider writes use merge sessions; snapshot syncs convert
-rows to ordered upserts.
+records `rowsChanged: false`. So does a newer upsert that differs from the stored row only in its
+`sequenceBy` column: the row is kept and only its source revision advances. Sequenced provider
+writes use merge sessions; snapshot syncs convert rows to ordered upserts.
 Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empty result
 addressable. Later no-op commits reuse the current version, including after a concurrent write.
 Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.

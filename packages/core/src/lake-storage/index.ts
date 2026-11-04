@@ -40,6 +40,7 @@ export type { DatasetSequenceChange, DatasetSequenceState } from "./source-order
 export {
   assertUnsequencedDatasetWrite,
   datasetSequenceChange,
+  isSequenceOnlyChange,
   reconcileDatasetSequences,
 } from "./source-ordering"
 export type {

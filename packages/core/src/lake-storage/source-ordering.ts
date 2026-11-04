@@ -57,12 +57,41 @@ export function reconcileDatasetSequences(
   return { states, accepted }
 }
 
+/**
+ * Whether an accepted upsert leaves the stored row of its key as it is. On a sequenced dataset, a
+ * row that differs from the stored one only in its `sequenceBy` column is the same row delivered
+ * again: the stored row keeps the sequence it was first seen at, while the source ordering still
+ * advances, so an older delivery stays ignored. Columns compare as content digests do.
+ */
+export function isSequenceOnlyChange(
+  dataset: DatasetDefinition,
+  stored: DatasetRow | undefined,
+  row: DatasetRow
+): boolean {
+  if (dataset.sequenceBy === undefined || stored === undefined) {
+    return false
+  }
+
+  return (
+    canonicalRowContent(dataset, stored, dataset.sequenceBy) ===
+    canonicalRowContent(dataset, row, dataset.sequenceBy)
+  )
+}
+
 function rowDigest(dataset: DatasetDefinition, row: DatasetRow): string {
+  return createHash("sha256").update(canonicalRowContent(dataset, row)).digest("hex")
+}
+
+function canonicalRowContent(
+  dataset: DatasetDefinition,
+  row: DatasetRow,
+  ignoredColumn?: string
+): string {
   const content: Record<string, unknown> = Object.create(null)
   for (const column of dataset.schema.columns) {
     const value = row[column.name]
     // Nullable additions and omitted/undefined/null values have identical content.
-    if (value == null) continue
+    if (value == null || column.name === ignoredColumn) continue
     switch (column.type) {
       case "int64":
         content[column.name] = BigInt(value as string | number).toString()
@@ -80,9 +109,7 @@ function rowDigest(dataset: DatasetDefinition, row: DatasetRow): string {
         content[column.name] = value
     }
   }
-  return createHash("sha256")
-    .update(stableJsonStringify(JSON.parse(JSON.stringify(content))))
-    .digest("hex")
+  return stableJsonStringify(JSON.parse(JSON.stringify(content)))
 }
 
 /** Until row reconciliation is supported, replacement writes must not erase source history. */

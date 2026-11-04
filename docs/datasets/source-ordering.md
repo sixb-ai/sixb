@@ -26,6 +26,7 @@ change.delete({ id: "42" }, { sequence: "2026-09-09T10:01:00.000Z" })
 | Incoming change | Result |
 | --- | --- |
 | Newer sequence | Applies |
+| Newer sequence, only the sequence column differs | Row kept; ordering advances; no row change recorded |
 | Older sequence | Ignored |
 | Equal sequence, identical content | Unchanged |
 | Equal sequence, different content or upsert/delete tie | Entire merge fails |
@@ -33,6 +34,9 @@ change.delete({ id: "42" }, { sequence: "2026-09-09T10:01:00.000Z" })
 
 Repeated keys are processed in submission order. Deletions retain durable ordering state, even for
 absent keys; new deletion state creates a version without requiring a visible row change.
+
+A row keeps the sequence value its content was first seen with, so it can be older than the last
+delivery for its key: re-reading an unchanged record does not trigger `updated()` schedules.
 
 ## Sequence values
 

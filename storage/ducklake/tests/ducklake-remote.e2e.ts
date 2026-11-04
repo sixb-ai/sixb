@@ -51,7 +51,7 @@ describe("DuckLakeStorage remote catalogs", () => {
     test(`rebases source changes across processes: ${scenario}`, async () => {
       const rootDir = await mkdtemp(join(tmpdir(), "sixb-source-processes-"))
       const dataset = defineDataset(`source.processes.${randomId()}`, {
-        schema: [col("id", "string"), col("revision", "int64")],
+        schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
         primaryKey: "id",
         sequenceBy: "revision",
       })
@@ -63,14 +63,20 @@ describe("DuckLakeStorage remote catalogs", () => {
       await storage.createDataset(dataset)
       if (scenario === "existing key" || scenario === "deletion") {
         const seed = await storage.beginMerge({ dataset })
-        await seed.writeChanges([change.upsert({ id: "42", revision: 7 })])
+        await seed.writeChanges([change.upsert({ id: "42", revision: 7, name: "Seven" })])
         await seed.commit()
       }
       const children = [
-        [change.upsert({ id: "42", revision: 8 })],
+        [change.upsert({ id: "42", revision: 8, name: "Eight" })],
         scenario === "deletion"
           ? [change.delete({ id: "42" }, { sequence: 9 })]
-          : [change.upsert({ id: scenario === "different keys" ? "other" : "42", revision: 9 })],
+          : [
+              change.upsert({
+                id: scenario === "different keys" ? "other" : "42",
+                revision: 9,
+                name: "Nine",
+              }),
+            ],
       ].map((changes) => {
         let resolveReady!: () => void
         let rejectReady!: (error: Error) => void
@@ -121,7 +127,10 @@ describe("DuckLakeStorage remote catalogs", () => {
         const rows = await collectRows(storage.readRows({ datasetId: dataset.id }))
         if (scenario === "different keys")
           expect(rows.map((row) => row.id).sort()).toEqual(["42", "other"])
-        else expect(rows).toEqual(scenario === "deletion" ? [] : [{ id: "42", revision: "9" }])
+        else
+          expect(rows).toEqual(
+            scenario === "deletion" ? [] : [{ id: "42", revision: "9", name: "Nine" }]
+          )
       } finally {
         for (const child of children) child.process.kill()
         await Promise.all(children.map((child) => child.finished))
