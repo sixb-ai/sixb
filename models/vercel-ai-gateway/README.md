@@ -163,6 +163,31 @@ tokens instead of inferring them from charges. Known input tariffs support cost 
 missing tariffs block calls under cost limits. Token limits do not apply to reranking. The adapter does not truncate documents; providers may apply their own context limits.
 Direct `.rerank()` calls bypass Sixb accounting; query reranking uses the bound execution.
 
+## Web search
+
+Every Gateway language model carries a Perplexity search, so a Gateway project searches the web
+with no other configuration. Choose another engine, or another result count, in `models.webSearch`:
+
+```ts
+const models = {
+  language: [gateway("anthropic/claude-sonnet-4.5")],
+  webSearch: [gateway.webSearch("exa", { maxResults: 5 })],
+}
+```
+
+| Engine | Measured cost per search | Reserved under a cost limit |
+| --- | --- | --- |
+| `"perplexity"` (default) | ~$0.0053 | $0.007 |
+| `"exa"` | ~$0.0075 | $0.010 |
+| `"parallel"` | ~$0.0052 | $0.007 |
+
+- A search is one call to Gateway's `/v4/ai/language-model` that forces the engine's search tool
+  on `wrapperModel` (`google/gemini-2.5-flash-lite` by default). Its cost, wrapper included, is the
+  one Gateway reports.
+- `maxResults` (1–10, default 8) caps the results of each search.
+- With another `wrapperModel`, a search has no reservation, so a cost limit blocks it.
+- A proxy whose `baseUrl` does not end in `/v1` sets `webSearchUrl`.
+
 ## Decision models
 
 ```ts
