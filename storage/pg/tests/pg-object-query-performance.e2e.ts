@@ -389,3 +389,11 @@ test("connections leave incremental sort off", async () => {
   const [row] = await sql<{ enable_incremental_sort: string }[]>`SHOW enable_incremental_sort`
   expect(row?.enable_incremental_sort).toBe("off")
 })
+
+// Reproduce: remove `jit` from createPgClient's startup parameters, and this reads the server's
+// default, "on". A member's read over many partitions then compiled for seconds, until the server
+// killed the backend for its memory.
+test("connections leave JIT off", async () => {
+  const [row] = await sql<{ jit: string }[]>`SHOW jit`
+  expect(row?.jit).toBe("off")
+})

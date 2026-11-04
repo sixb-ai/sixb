@@ -10,6 +10,7 @@ import { defineObjectType, link, OntologyRegistry, prop } from "../ontology"
 import { migrateStorage } from "../storage/migrations"
 import {
   compileConditionalObjectReadScope,
+  type ExpandedLinkValue,
   linkBatchKey,
   type ObjectReadCondition,
   type ObjectReadScopeFactory,
@@ -57,7 +58,7 @@ const Customer = defineObjectType({
   id: "ConditionCustomer",
   name: "Condition Customer",
   properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
-  links: [link("invoices", Invoice)],
+  links: [link("invoices", Invoice), link("primaryInvoice", Invoice, { cardinality: "one" })],
 })
 
 const ontology = new OntologyRegistry({ sources: [Invoice, CreditNote, Customer] })
@@ -393,6 +394,134 @@ export function runConditionalObjectReadScopeContractSuite<TStorage extends Stor
       })
     })
 
+    test("never expands through a hidden object", async () => {
+      await withHarness(async ({ harness }) => {
+        // Without conditions every edge is reached, so each expectation of the conditioned reader
+        // can only hold if the hidden draft and the links touching it stay out.
+        const unconditioned = createReader(harness.objectReadScopeFactory, [])
+        const conditioned = createReader(harness.objectReadScopeFactory, [noDrafts(Invoice.id)])
+
+        const customers = async (reader: ObjectReadStorage) => {
+          const [customer] = await queryRows(reader, {
+            kind: "expand",
+            input: {
+              kind: "limit",
+              limit: 10,
+              input: { kind: "start", objectTypeId: Customer.id },
+            },
+            expansions: [
+              { linkId: "primaryInvoice", direction: "outgoing" },
+              {
+                linkId: "invoices",
+                direction: "outgoing",
+                expand: [{ linkId: "related", direction: "outgoing" }],
+              },
+            ],
+          })
+
+          return {
+            primaryInvoice: linkedIds(customer?.links?.primaryInvoice),
+            invoices: Object.fromEntries(
+              linkedRows(customer?.links?.invoices).map((row) => [
+                row.primaryId,
+                linkedIds(row.links?.related),
+              ])
+            ),
+          }
+        }
+
+        expect(await customers(unconditioned)).toEqual({
+          primaryInvoice: ["inv-2"],
+          invoices: { "inv-1": ["inv-2", "inv-3"], "inv-2": ["inv-1"], "inv-3": [] },
+        })
+        // The hidden draft is neither a neighbour nor the middle of a nested expansion.
+        expect(await customers(conditioned)).toEqual({
+          primaryInvoice: [],
+          invoices: { "inv-1": ["inv-3"], "inv-3": [] },
+        })
+
+        const relatedFrom = async (reader: ObjectReadStorage) => {
+          const invoices = await queryRows(reader, {
+            kind: "expand",
+            input: {
+              kind: "limit",
+              limit: 10,
+              input: sorted({ kind: "start", objectTypeId: Invoice.id }, "amount"),
+            },
+            expansions: [
+              { linkId: "related", direction: "incoming", sourceObjectTypeId: Invoice.id },
+            ],
+          })
+
+          return invoices.map((row) => linkedIds(row.links?.related))
+        }
+
+        expect(await relatedFrom(unconditioned)).toEqual([["inv-2"], ["inv-1"], ["inv-1"]])
+        expect(await relatedFrom(conditioned)).toEqual([[], ["inv-1"]])
+      })
+    })
+
+    test("never traverses through a hidden object", async () => {
+      await withHarness(async ({ harness }) => {
+        // As above, the unconditioned reader shows what each traversal reaches through the draft.
+        const unconditioned = createReader(harness.objectReadScopeFactory, [])
+        const conditioned = createReader(harness.objectReadScopeFactory, [noDrafts(Invoice.id)])
+
+        const reached = async (reader: ObjectReadStorage, query: ObjectQuery) => {
+          const rows = await queryRows(reader, query)
+          return rows.map((row) => row.primaryId).sort()
+        }
+        const relatedOf = (input: ObjectQuery): ObjectQuery => ({
+          kind: "traverse",
+          direction: "outgoing",
+          linkId: "related",
+          input,
+        })
+        const refs = (...primaryIds: string[]): ObjectQuery => ({
+          kind: "refs",
+          refs: primaryIds.map((primaryId) => ({ objectTypeId: Invoice.id, primaryId })),
+        })
+
+        const twoHops = relatedOf({
+          kind: "traverse",
+          direction: "outgoing",
+          linkId: "invoices",
+          input: { kind: "start", objectTypeId: Customer.id },
+        })
+        expect(await reached(unconditioned, twoHops)).toEqual(["inv-1", "inv-2", "inv-3"])
+        expect(await reached(conditioned, twoHops)).toEqual(["inv-3"])
+
+        const fromRefs = relatedOf(refs("inv-1", "inv-2"))
+        expect(await reached(unconditioned, fromRefs)).toEqual(["inv-1", "inv-2", "inv-3"])
+        expect(await reached(conditioned, fromRefs)).toEqual(["inv-3"])
+
+        const fromSet = relatedOf({
+          kind: "set",
+          op: "union",
+          inputs: [refs("inv-2"), refs("inv-3")],
+        })
+        expect(await reached(unconditioned, fromSet)).toEqual(["inv-1"])
+        expect(await reached(conditioned, fromSet)).toEqual([])
+
+        // From the target side, the hidden draft is the source of a link to a visible invoice.
+        const sourcesOf: ObjectQuery = {
+          kind: "traverse",
+          direction: "incoming",
+          linkId: "related",
+          sourceObjectTypeId: Invoice.id,
+          input: refs("inv-1", "inv-3"),
+        }
+        expect(await reached(unconditioned, sourcesOf)).toEqual(["inv-1", "inv-2"])
+        expect(await reached(conditioned, sourcesOf)).toEqual(["inv-1"])
+        expect(await unconditioned.countObjects?.({ projectId, query: sourcesOf })).toEqual({
+          count: 2,
+        })
+        expect(await conditioned.countObjects?.({ projectId, query: sourcesOf })).toEqual({
+          count: 1,
+        })
+      })
+    })
+
     test("applies a condition to its concrete type only", async () => {
       await withHarness(async ({ harness }) => {
         const invoicesOnly = createReader(harness.objectReadScopeFactory, [noDrafts(Invoice.id)])
@@ -567,6 +696,24 @@ function noDrafts(objectTypeId: string): ObjectReadCondition {
   return { objectTypeId, predicate: query.predicate }
 }
 
+/** Run a query as the executor does, so a provider pushes down what it can. */
+async function queryRows(reader: ObjectReadStorage, query: ObjectQuery) {
+  const result = await executeObjectQuery({ projectId, query }, { ontology, storage: reader })
+  return result.objects
+}
+
+/** An expanded link's neighbours, whatever its cardinality. */
+function linkedRows(value: ExpandedLinkValue | undefined) {
+  if (Array.isArray(value)) return value
+  return value ? [value] : []
+}
+
+function linkedIds(value: ExpandedLinkValue | undefined): string[] {
+  return linkedRows(value)
+    .map((row) => row.primaryId)
+    .sort()
+}
+
 function sorted(
   input: ObjectQuery,
   propertyId: string,
@@ -595,6 +742,7 @@ async function seed(fixture: MaterializerTestFixture): Promise<void> {
       linkRow(Customer.id, "cust-1", "invoices", Invoice.id, "inv-1"),
       linkRow(Customer.id, "cust-1", "invoices", Invoice.id, "inv-2"),
       linkRow(Customer.id, "cust-1", "invoices", Invoice.id, "inv-3"),
+      linkRow(Customer.id, "cust-1", "primaryInvoice", Invoice.id, "inv-2"),
       linkRow(Invoice.id, "inv-1", "related", Invoice.id, "inv-2"),
       linkRow(Invoice.id, "inv-2", "related", Invoice.id, "inv-1"),
       linkRow(Invoice.id, "inv-1", "related", Invoice.id, "inv-3"),
