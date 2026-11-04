@@ -341,7 +341,11 @@ export type {
 } from "./thread-context-projection"
 export { projectAgentThreadModelContext } from "./thread-context-projection"
 export type { AgentToolCatalog } from "./tool-catalog"
-export type { AgentToolCallFile, StoredAgentToolFile } from "./tool-files"
+export type {
+  AgentToolCallFile,
+  AgentToolOutputExtension,
+  StoredAgentToolFile,
+} from "./tool-files"
 export {
   AGENT_FILE_MAX_BYTES,
   AGENT_TOOL_OUTPUTS_DIRECTORY,
