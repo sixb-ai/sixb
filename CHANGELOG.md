@@ -2,6 +2,14 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-11-03 — Pipedrive connector 0.1.4
+
+- `@sixb/connector-pipedrive` `0.1.4`: manage person, organization, deal and product fields with
+  `create`, `update`, `delete`, `addOptions`, `updateOptions` and `deleteOptions`, including the
+  labels on contacts through the built-in `label_ids` field. `get` and `list` accept
+  `include_fields`. `PipedriveField` now has the v2 shape, so read `field_name` instead of `name`;
+  `key`, `id`, `edit_flag` and `active_flag` are no longer typed.
+
 ## 2026-10-31 — Framework 0.1.26
 
 ### Highlights
