@@ -121,6 +121,9 @@ turn N's last request sent, on every storage:
   a user's files take the budget first.
 - **Runtime input is derived again.** The `<sixb_tool_files>` message after a step's results is
   rebuilt from the stored trace by the same functions (`replayToolFiles`).
+- **A background command's end is told in a tool result.** The `<sixb_background_commands>` notice
+  closes the `modelOutput` of the first result that returns after it, so it replays where the model
+  read it; nothing is added to the request around the history.
 - **An output too large for the context is saved to a file** ([tool-outputs.ts](../src/tools/tool-outputs.ts)).
   Past `TOOL_OUTPUT_FILE_MIN_BYTES`, the whole output is stored as a file of the run (its blob
   store, within `TOOL_OUTPUTS_MAX_BYTES` of its own, identical content counted once: saving gives
@@ -203,6 +206,16 @@ For a blank sandbox:
 3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
    `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker releases it, which calls `destroy()`.
+
+`bash` with `run_in_background` starts a command that outlives its call
+([background-commands.ts](../src/background-commands.ts)). It runs in a `runCommand` held open until
+it ends, so a provider that kills what a call leaves behind (a cgroup, a PID namespace) leaves it
+alone, in a process group of its own (`set -m`: macOS has no `setsid`). Its output, pid and exit
+code are files under `background/` in the context directory. `bash_stop` sends SIGTERM to the
+group from inside the sandbox, then SIGKILL after 3 seconds, and aborts the held call where the
+group is out of reach. A run's own commands stop before `beforeFinalize` and teardown; on the
+user's computer a turn's belong to its thread instead (`RunSandbox.background`): the runner keeps
+the sandbox that runs them, and their files, until they end, and stops them as `sixb` closes.
 
 A cancellation or a worker shutdown cancels a workflow node's `create()`. Finishing the node never
 does: a sandbox still booting then is destroyed once it is ready.

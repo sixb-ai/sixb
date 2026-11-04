@@ -9,6 +9,8 @@ import type { AgentToolDefinition, AgentToolInputSchema } from "./types"
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
 export const AGENT_RESERVED_TOOL_NAMES = [
   "bash",
+  "bash_output",
+  "bash_stop",
   "read",
   "view_file",
   "spawn_agent",

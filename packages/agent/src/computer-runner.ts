@@ -1,5 +1,5 @@
-import { mkdir, realpath, rm } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdir, readdir, realpath, rm } from "node:fs/promises"
+import { join, relative, sep } from "node:path"
 import type { Sandbox, SandboxRequestCredential } from "@sixb/core"
 import {
   AgentExecutionLostError,
@@ -11,6 +11,7 @@ import {
 } from "@sixb/core/internal/agents"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { delay } from "./abort"
+import { BACKGROUND_DIRECTORY, BackgroundCommands } from "./background-commands"
 import { ChildRunner } from "./run-child"
 import { runConversationTurn } from "./run-conversation-turn"
 import { runApiCredential, runnerTokenFor, runTokenFor } from "./run-credential"
@@ -47,8 +48,9 @@ export interface ComputerRunnerOptions {
   readonly folder: string
   /**
    * Where each run's own files go: a directory per thread, so every turn's prompt names the same
-   * paths, emptied when a run starts and removed when it ends. Shared by every runner on the
-   * computer, which hold a thread's directory one run at a time.
+   * paths, emptied when a run starts and removed when it ends, but for the files of the thread's
+   * background commands. Shared by every runner on the computer, which hold a thread's directory
+   * one run at a time.
    */
   readonly runFilesRoot: string
   readonly openSandbox: OpenComputerSandbox
@@ -68,6 +70,11 @@ export class ComputerRunner {
   private readonly teardowns = new Set<Promise<void>>()
   /** Each running turn's renewal, by run id, to renew at once. */
   private readonly renewals = new Map<string, () => void>()
+  /**
+   * Each thread's background commands, by thread id: they outlive the turn that started them,
+   * until they end, the agent stops them or {@link stopBackgroundCommands}.
+   */
+  private readonly background = new Map<string, BackgroundCommands>()
 
   constructor(private readonly options: ComputerRunnerOptions) {}
 
@@ -167,6 +174,14 @@ export class ComputerRunner {
     this.renewals.get(runId)?.()
   }
 
+  /**
+   * Stop every background command a turn left running, as `sixb` closes: the sandboxes kept for
+   * them are torn down then, which {@link drain} waits for.
+   */
+  async stopBackgroundCommands(): Promise<void> {
+    await Promise.all([...this.background.values()].map((commands) => commands.stopAll()))
+  }
+
   /** Wait for sandbox teardowns that outlived their runs. */
   async drain(): Promise<void> {
     await Promise.allSettled([...this.teardowns])
@@ -255,9 +270,16 @@ export class ComputerRunner {
       const folder = input.folder === undefined ? undefined : await realpath(input.folder)
       let held: (() => Promise<void>) | undefined
 
+      // A turn's background commands are its thread's, and so are their files, which every run
+      // of the thread keeps; a child's end with it.
+      const background = folder === undefined ? undefined : this.threadBackground(input.threadId)
+      const kept = () =>
+        background?.isEmpty === false ? join(runFiles, BACKGROUND_DIRECTORY) : undefined
+
       const sandbox: RunSandbox = {
         waitBeforeModel: folder !== undefined,
         contextDirectory: runFiles,
+        ...(background ? { background } : {}),
         acquire: async () => {
           const giveBack = await holdRunFiles({
             directory: runDirectory,
@@ -267,8 +289,8 @@ export class ComputerRunner {
           held = giveBack
           try {
             // Each run starts empty, as with a directory of its own: nothing an earlier run, or
-            // one that crashed, left there.
-            await rm(runDirectory, { recursive: true, force: true })
+            // one that crashed, left there, but its thread's background commands.
+            await emptyDirectory(runDirectory, kept())
             await mkdir(runFiles, { recursive: true })
             return {
               sandbox: await this.options.openSandbox({
@@ -288,8 +310,13 @@ export class ComputerRunner {
         },
         release: async ({ sandbox }) => {
           try {
-            await sandbox.destroy()
-            await rm(runDirectory, { recursive: true, force: true })
+            // A background command runs in the call that started it: its sandbox is torn down
+            // once the last one it runs ended.
+            const running = background?.endOf(sandbox)
+            if (running) this.track(running.then(() => sandbox.destroy()))
+            else await sandbox.destroy()
+
+            await emptyDirectory(runDirectory, kept())
           } finally {
             await held?.()
           }
@@ -297,6 +324,15 @@ export class ComputerRunner {
       }
       return { sandbox }
     }
+  }
+
+  private threadBackground(threadId: string): BackgroundCommands {
+    let commands = this.background.get(threadId)
+    if (!commands) {
+      commands = new BackgroundCommands()
+      this.background.set(threadId, commands)
+    }
+    return commands
   }
 
   private track(teardown: Promise<void>): void {
@@ -316,6 +352,27 @@ function threadDirectory(input: { readonly runId: string; readonly threadId: str
     )
   }
   return input.threadId
+}
+
+/**
+ * Remove `directory`, or, with `keep`, everything in it but `keep` and the directories that lead
+ * to it.
+ */
+export async function emptyDirectory(directory: string, keep?: string): Promise<void> {
+  const path = keep === undefined ? [] : relative(directory, keep).split(sep)
+  if (path.length === 0 || path[0] === "" || path[0] === "..") {
+    await rm(directory, { recursive: true, force: true })
+    return
+  }
+
+  let current = directory
+  for (const segment of path) {
+    const entries = await readdir(current).catch(() => [])
+    for (const entry of entries) {
+      if (entry !== segment) await rm(join(current, entry), { recursive: true, force: true })
+    }
+    current = join(current, segment)
+  }
 }
 
 function lease(): string {

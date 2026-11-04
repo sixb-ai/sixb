@@ -39,6 +39,8 @@ messages from you alone, and works on the computer and in the folder it started 
 there runs its turns. Opened from another folder or another of your computers, it says where it
 works; `ctrl+f` moves it here, and only here runs its turns from then on. Quitting, or closing the
 terminal, stops a turn running here: it ends interrupted, and runs again only if you retry it.
+A command the agent runs in the background, such as a dev server, keeps running after its turn,
+until it exits, the agent stops it, or you quit `sixb` there.
 
 The agent also follows the folder's `AGENTS.md` (or `CLAUDE.md`), and those of the folders above it
 up to the repository's root: see
