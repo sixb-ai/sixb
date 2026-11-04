@@ -1,5 +1,7 @@
 export { ExaApiError } from "./errors"
 export { exa } from "./exa"
+export type { ExaSearchOptions } from "./search"
+export { exaSearch } from "./search"
 export type {
   ExaApiKeyResolver,
   ExaClient,
@@ -19,5 +21,6 @@ export type {
   ExaSearchResponse,
   ExaSearchResult,
   ExaSearchStatus,
+  ExaSearchType,
   ExaTextContentsOptions,
 } from "./types"

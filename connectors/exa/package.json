@@ -1,7 +1,7 @@
 {
   "name": "@sixb/connector-exa",
   "version": "0.2.0",
-  "description": "Exa web search and content retrieval connector with bounded agent tools for Sixb",
+  "description": "Exa web search and content retrieval for Sixb, and a web search backend for its agent",
   "keywords": [
     "sixb",
     "bun",
@@ -30,12 +30,6 @@
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./agent-tools": {
-      "types": "./dist/agent-tools.d.ts",
-      "bun": "./src/agent-tools.ts",
-      "import": "./dist/agent-tools.js",
-      "default": "./dist/agent-tools.js"
     }
   },
   "scripts": {

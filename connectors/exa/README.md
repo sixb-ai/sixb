@@ -1,6 +1,6 @@
 # @sixb/connector-exa
 
-Typed Exa search and content retrieval with bounded `web_search` and `web_fetch` agent tools.
+Typed Exa search and content retrieval, and a web search engine for the Sixb agent.
 
 ## Install
 
@@ -27,58 +27,32 @@ export const exaConnector = defineConnector(
 exposes `search()` and `getContents()`, accepts caller cancellation, and makes single-attempt
 requests.
 
-## Agent tools
+## Agent web search
 
-Register the tools on the project:
+The agent searches the web through Gateway when its language models come from Gateway. To make
+Exa its search engine, or to give one to a project without Gateway:
 
 ```ts
 // sixb.config.ts
-import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
+import { exaSearch } from "@sixb/connector-exa"
 import { createSixb } from "@sixb/core"
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
-import { exaConnector } from "./connectors/exa"
-
-const allowedDomains = ["bun.com", "developer.mozilla.org"]
-
-const webSearch = exaWebSearch(exaConnector, {
-  maxResults: 5,
-  maxCharactersPerResult: 2_000,
-  maxTotalCharacters: 8_000,
-  timeoutMs: 20_000,
-  allowedDomains,
-})
-
-const webFetch = exaWebFetch(exaConnector, {
-  maxCharacters: 10_000,
-  timeoutMs: 20_000,
-  allowedDomains,
-})
 
 export const sixb = createSixb({
   // ...storage, broker, queues, sandboxes
-  models: { language: [vercelGateway("openai/gpt-5.5")] },
-  tools: [webSearch, webFetch],
+  models: {
+    language: [vercelGateway("openai/gpt-5.5")],
+    webSearch: [exaSearch({ apiKey: process.env.EXA_API_KEY! })],
+  },
 })
 ```
 
-The model sees only `{ query: string }` and `{ url: string }`. Credentials, limits, and domain
-policy remain on the host. The conversational Agent and its children receive both tools;
-workflow agent steps select them explicitly with `defineAgentStep({ tools })`.
+| Option | Default | |
+| --- | --- | --- |
+| `type` | `"auto"` | `"fast"` trades some quality for latency |
+| `maxResults` | `8` | 1–10 results per search |
 
-## Limits
-
-| Tool | Input limit | Default output limit | Default timeout |
-| --- | --- | --- | --- |
-| `web_search` | 2,000-character query | 5 results, 2,000 characters each, 10,000 total | 20s |
-| `web_fetch` | One 2,048-character HTTP(S) URL | 10,000 characters | 20s |
-
-- Both tools make one provider request with no automatic retry or pacing.
-- Domain policy is enforced against every returned source and, for `web_fetch`, the requested URL.
-- Filters support exact domains (`docs.example.com`), wildcard subdomains (`*.example.com`), and
-  path prefixes (`docs.example.com/guides`). Wildcards do not match the apex domain, and denied
-  filters take precedence.
-- Fetch URLs cannot contain credentials.
-- Cancellation and timeout bound connector resolution and abort the active request.
-- `web_fetch` sends one URL with `subpages: 0`; it does not crawl linked pages.
-- Per-URL crawl failures reported by Exa are surfaced as tool errors.
-- Returned web content is untrusted model input.
+- A search is one Exa `/search` request; each hit's snippet is the passages that best match the
+  query.
+- Its cost is the one Exa reports (~$0.007 measured). A cost limit reserves $0.01 per search.
+- The agent's allowed domains are sent to Exa, or its blocked domains when none are allowed.
