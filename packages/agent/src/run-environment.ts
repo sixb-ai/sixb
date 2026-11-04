@@ -41,6 +41,7 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
+import { BackgroundCommands, BackgroundNotices } from "./background-commands"
 import { prepareHandedFiles } from "./child-files"
 import {
   type AgentThreadCompactionInput,
@@ -83,6 +84,7 @@ import {
 } from "./subagent-context"
 import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
+import { createBashOutputTool, createBashStopTool } from "./tools/background"
 import { createBashTool } from "./tools/bash"
 import { agentModelToolSpecs } from "./tools/model-spec"
 import { createReadTool } from "./tools/read"
@@ -870,8 +872,19 @@ async function startAgentEnvironment(
     sandbox: resolveSandbox,
     blobStorage: context.blobStorage,
   })
+  // A computer's thread keeps its background commands across turns; a run's own stop as it ends.
+  const background = sandbox.background ?? new BackgroundCommands()
+  const stopBackground = async () => {
+    if (sandbox.background) return
+
+    await background.stopAll().catch((error: unknown) => {
+      console.error("[SixbAgent] Could not stop the run's background commands:", error)
+    })
+  }
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
-  appendBuiltInTool(tools, createBashTool(resolveSandbox))
+  appendBuiltInTool(tools, createBashTool(resolveSandbox, background))
+  appendBuiltInTool(tools, createBashOutputTool(resolveSandbox, background))
+  appendBuiltInTool(tools, createBashStopTool(resolveSandbox, background))
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
   const { publishing } = input
   if (publishing) {
@@ -926,7 +939,10 @@ async function startAgentEnvironment(
   }
   ready.then(markSettled, markSettled)
 
-  const dispose = () => disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown)
+  const dispose = async () => {
+    await stopBackground()
+    await disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown)
+  }
 
   let systemPrompt: AgentSystemPromptSize
   try {
@@ -951,8 +967,11 @@ async function startAgentEnvironment(
     throw error
   }
 
-  const beforeFinalize = (options?: BeforeFinalizeOptions) =>
-    sandbox.beforeFinalize?.(options) ?? Promise.resolve()
+  // A workspace saved as the run ends keeps no command of it running.
+  const beforeFinalize = async (options?: BeforeFinalizeOptions) => {
+    await stopBackground()
+    await sandbox.beforeFinalize?.(options)
+  }
   const artifacts =
     publishing && installedArtifacts
       ? { reader: publishing.artifacts, installed: installedArtifacts }
@@ -987,7 +1006,7 @@ async function startAgentEnvironment(
       blobStorage: context.blobStorage,
       apiBaseUrl,
       attachmentContext,
-      tools: toolOutputFiles.wrap(tools),
+      tools: new BackgroundNotices(background).wrap(toolOutputFiles.wrap(tools)),
       outputFileOf: (toolCallId) => toolOutputFiles.fileOf(toolCallId),
       prepareStep: mediaBridge.prepareStep,
       systemPrompt: systemPrompt.text,

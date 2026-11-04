@@ -1,5 +1,6 @@
 import type { Sandbox } from "@sixb/core"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
+import type { BackgroundCommands } from "./background-commands"
 import { readWorkspaceInstructions } from "./workspace-instructions"
 
 /**
@@ -43,6 +44,12 @@ export interface RunSandbox {
    * names it: relative to the working directory, or absolute.
    */
   readonly contextDirectory: string
+  /**
+   * The background commands the run's tools start and see, when they outlive the run: a
+   * computer's thread keeps them across its turns, and its runner stops them. Absent, the run has
+   * its own, stopped as it ends.
+   */
+  readonly background?: BackgroundCommands
   /** Called once, when the run environment starts. */
   acquire(): Promise<AcquiredRunSandbox>
   /**

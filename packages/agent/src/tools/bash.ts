@@ -1,5 +1,6 @@
-import type { CommandResult } from "@sixb/core"
+import { AgentToolPublicError, type CommandResult } from "@sixb/core"
 import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
+import type { BackgroundCommandState, BackgroundCommands } from "../background-commands"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
 /** Long enough for a build or a test suite; the model asks for more when it expects longer. */
@@ -28,6 +29,11 @@ export const BASH_TOOL_SPEC = {
           `Milliseconds before the command is stopped. Defaults to ${DEFAULT_COMMAND_TIMEOUT_MS} ` +
           `(${durationText(DEFAULT_COMMAND_TIMEOUT_MS)}); at most ${MAX_COMMAND_TIMEOUT_MS} (${durationText(MAX_COMMAND_TIMEOUT_MS)}).`,
       },
+      run_in_background: {
+        type: "boolean",
+        description:
+          "Run it in the background and return at once with its id and output file: for servers, watchers and long builds or test runs. Its stdout and stderr go to that file, which read reads. You are told when it ends; check it with bash_output, stop it with bash_stop. timeoutMs does not apply. It stops when the run ends, except in the user's own folder on their computer, where it keeps running after your turn until it exits, you stop it, or sixb closes there.",
+      },
     },
     required: ["command"],
     additionalProperties: false,
@@ -38,6 +44,7 @@ interface BashToolInput {
   readonly command: string
   readonly cwd?: string
   readonly timeoutMs?: number
+  readonly run_in_background?: boolean
 }
 
 export interface BashToolOutput extends CommandResult {
@@ -52,15 +59,32 @@ export interface BashToolOutput extends CommandResult {
  * of blocking the turn. A resolver rejection surfaces as a failed command.
  *
  * Its output holds the command's streams whole: the run's tools save an output too large for the
- * context to a file and keep {@link keptCommandOutput} of it (see tool-outputs.ts).
+ * context to a file and keep {@link keptCommandOutput} of it (see tool-outputs.ts). A command run
+ * in the background returns its {@link BackgroundCommandState} instead.
  */
 export function createBashTool(
-  resolveSandbox: () => Promise<AgentSandboxHandle>
+  resolveSandbox: () => Promise<AgentSandboxHandle>,
+  background?: BackgroundCommands
 ): ModelTool<BashToolInput> {
   return {
     ...BASH_TOOL_SPEC,
     parseInput: parseBashToolInput,
     async execute(input, { signal }): Promise<JsonValue> {
+      if (input.run_in_background) {
+        if (!background) {
+          throw new AgentToolPublicError(
+            "[SixbAgent] This run cannot run commands in the background."
+          )
+        }
+
+        const started: BackgroundCommandState = await background.start({
+          handle: await resolveSandbox(),
+          command: input.command,
+          ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        })
+        return started as unknown as JsonValue
+      }
+
       const { sandbox, env } = await resolveSandbox()
       const timeout = normalizeTimeout(input.timeoutMs)
       const result = await sandbox.runCommand("bash", ["-lc", input.command], {
@@ -78,7 +102,9 @@ export function createBashTool(
       }
       return output as unknown as JsonValue
     },
-    errorText: () => "The command failed.",
+    // A background start says why it refused, such as too many running already.
+    errorText: (error) =>
+      error instanceof AgentToolPublicError ? error.message : "The command failed.",
   }
 }
 
@@ -96,8 +122,11 @@ function parseBashToolInput(value: unknown): BashToolInput {
   if (input.timeoutMs !== undefined && typeof input.timeoutMs !== "number") {
     throw new TypeError("Bash tool input.timeoutMs must be a number when provided.")
   }
+  if (input.run_in_background !== undefined && typeof input.run_in_background !== "boolean") {
+    throw new TypeError("Bash tool input.run_in_background must be a boolean when provided.")
+  }
   for (const key of Object.keys(input)) {
-    if (key !== "command" && key !== "cwd" && key !== "timeoutMs") {
+    if (!BASH_INPUT_KEYS.has(key)) {
       throw new TypeError(`Bash tool input contains unknown property '${key}'.`)
     }
   }
@@ -105,8 +134,16 @@ function parseBashToolInput(value: unknown): BashToolInput {
     command: input.command,
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    ...(input.run_in_background ? { run_in_background: true } : {}),
   }
 }
+
+const BASH_INPUT_KEYS: ReadonlySet<string> = new Set([
+  "command",
+  "cwd",
+  "timeoutMs",
+  "run_in_background",
+])
 
 function normalizeTimeout(timeoutMs: number | undefined): number {
   if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {

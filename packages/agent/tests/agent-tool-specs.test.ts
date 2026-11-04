@@ -5,6 +5,7 @@ import {
   PUBLISH_ARTIFACT_TOOL_SPEC,
   PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
 } from "../src/artifacts/publish-tool"
+import { BASH_OUTPUT_TOOL_SPEC, BASH_STOP_TOOL_SPEC } from "../src/tools/background"
 import { BASH_TOOL_SPEC } from "../src/tools/bash"
 import { agentModelToolSpecs } from "../src/tools/model-spec"
 import { READ_TOOL_SPEC } from "../src/tools/read"
@@ -33,6 +34,8 @@ describe("agent model tool specifications", () => {
       VIEW_FILE_TOOL_SPEC,
       READ_TOOL_SPEC,
       BASH_TOOL_SPEC,
+      BASH_OUTPUT_TOOL_SPEC,
+      BASH_STOP_TOOL_SPEC,
       PUBLISH_ARTIFACT_TOOL_SPEC,
       PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
     ])

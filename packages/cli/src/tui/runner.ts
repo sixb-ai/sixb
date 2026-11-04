@@ -192,13 +192,14 @@ export class LocalRunner {
   }
 
   /**
-   * Stop every turn this computer runs, each ending interrupted with its end recorded, and close
-   * the session.
+   * Stop every turn this computer runs, each ending interrupted with its end recorded, and the
+   * background commands they left running, and close the session.
    */
   async stop(): Promise<void> {
     const running = [...this.running.values()]
     for (const { stop } of running) stop.abort()
     await Promise.allSettled([...running.map(({ done }) => done), this.closeSession()])
+    await this.runner.stopBackgroundCommands()
     await this.runner.drain()
   }
 

@@ -189,6 +189,8 @@ describe("defineAgentTool", () => {
     }
     for (const name of [
       "bash",
+      "bash_output",
+      "bash_stop",
       "read",
       "view_file",
       "spawn_agent",
