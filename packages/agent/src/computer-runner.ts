@@ -233,7 +233,7 @@ export class ComputerRunner {
         (command): ComputerBackgroundCommand => ({
           threadId,
           id: command.id,
-          command: command.command.slice(0, REPORTED_COMMAND_CHARS),
+          command: reportedCommand(command.command),
           status: command.status,
           ...(command.exitCode === undefined ? {} : { exitCode: command.exitCode }),
           startedAt: command.startedAt,
@@ -506,6 +506,15 @@ export async function emptyDirectory(directory: string, keep?: string): Promise<
     }
     current = join(current, segment)
   }
+}
+
+/**
+ * A command cut to {@link REPORTED_COMMAND_CHARS}, never between an emoji's two halves: a lone half
+ * is no text Postgres stores, and each renewal reporting it would fail.
+ */
+function reportedCommand(command: string): string {
+  const cut = command.slice(0, REPORTED_COMMAND_CHARS)
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut
 }
 
 function lease(): string {

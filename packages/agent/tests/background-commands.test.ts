@@ -643,6 +643,22 @@ describe("background commands on the computer", () => {
     await turn.run.release?.(turn.acquired)
   })
 
+  // Removal proof: report the command cut with a bare slice; it ends on half the emoji, which
+  // Postgres refuses, so every renewal that reports it fails.
+  test("report a long command cut between characters, never through an emoji", async () => {
+    const turn = await open("agt_run_1")
+    const background = turn.run.background
+    if (!background) throw new Error("A turn on the computer keeps its thread's commands.")
+
+    // Its 1,000th character is the emoji's first half.
+    const echoed = "a".repeat(994)
+    const started = await background.start({ handle: turn.handle, command: `echo ${echoed}🚀` })
+    await background.wait(started.id, 10_000, signal)
+
+    expect(runner.backgroundCommands()[0]?.command).toBe(`echo ${echoed}`)
+    await turn.run.release?.(turn.acquired)
+  })
+
   test("end with a child's run, which keeps none for later", async () => {
     const child = await open("agt_run_child", { child: true })
     expect(child.run.background).toBeUndefined()
