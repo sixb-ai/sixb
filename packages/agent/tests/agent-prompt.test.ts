@@ -526,6 +526,10 @@ describe("agent system prompt", () => {
       "- bfl/flux-3-image-klein: Fast illustrations\n- google/gemini-3.1-flash-lite-image: Edits photos"
     )
     expect(prompt).toContain(
+      "The command displays the output to the user, so do not call publish_artifact for it."
+    )
+    expect(prompt).toContain("Make one image unless the user asks for options.")
+    expect(prompt).toContain(
       "`sixb models transcribe <audio-file> --model <id>`.\n- openai/gpt-4o-transcribe\n"
     )
     expect(prompt).not.toContain("sixb models speech")

@@ -390,7 +390,7 @@ const MEDIA_MODEL_KINDS = ["image", "speech", "transcription"] as const
 
 const MODEL_COMMANDS: Readonly<Record<(typeof MEDIA_MODEL_KINDS)[number], string>> = {
   image:
-    'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. Look at the result with view_file before you use it.',
+    'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. The command displays the output to the user, so do not call publish_artifact for it. Make one image unless the user asks for options. Look at the result with view_file before you use it.',
   speech: 'Make speech: `sixb models speech "<text>" --model <id> --output out/speech.mp3`.',
   transcription: "Transcribe audio: `sixb models transcribe <audio-file> --model <id>`.",
 }
