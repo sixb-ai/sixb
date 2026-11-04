@@ -19,6 +19,7 @@ import {
 } from "../models/execution/index"
 import type { LanguageModel } from "../models/language-model"
 import { resolveLanguageModel } from "../models/resolve"
+import type { WebSearchModelRequest, WebSearchModelResult } from "../models/web-search-model"
 import type { Sixb } from "../runtime/sixb"
 import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
@@ -90,6 +91,7 @@ import { subscribeAgentRunCancel } from "./streams/protocol"
 import { subagentSandboxFiles } from "./subagent-runs"
 import { conversationThreadId } from "./thread-access"
 import type { AgentToolRunInfo } from "./types"
+import { bindAgentWebSearch } from "./web"
 
 /**
  * A run's session: the one way its runner reads and writes shared state for it. Claiming the run
@@ -200,6 +202,14 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
 export interface AgentRunModels {
   /** A language model of the project, resolved once for the session. */
   language(ref: LanguageModelRef): Promise<LanguageModel>
+  /**
+   * Search the web with the project's web search model, the one its plan's `web.search` names.
+   * It always runs where the project is: the provider's key never reaches the runner.
+   */
+  webSearch(
+    request: Omit<WebSearchModelRequest, "signal">,
+    signal: AbortSignal
+  ): Promise<WebSearchModelResult>
 }
 
 /** Where a run's files are stored: put one, open or stat one by its blob id. */
@@ -380,6 +390,11 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     })
     return toolsBound
   }
+  // Its searches bill to the run too, and stop with it.
+  const webSearch = bindAgentWebSearch(host.definitions, {
+    signal: AbortSignal.any([cancelled, ended.signal, ...(stop ? [stop] : [])]),
+    accounting: openedModelCalls,
+  })
   let logs: RunLogSession | undefined
   // Labeled with the conversation its run works in: a child's is its parent's.
   let toolLabels: Promise<LogFields> | undefined
@@ -462,6 +477,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           }
         )
       },
+      webSearch,
     },
     async renewLease(leaseExpiresAt) {
       try {

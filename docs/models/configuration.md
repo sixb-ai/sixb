@@ -713,7 +713,8 @@ models: {
 }
 ```
 
-Each search counts toward [AI usage and limits](./usage-and-limits.md#web-search).
+The agent searches with it through its [`web_search` tool](./overview.md#search-the-web). Each
+search counts toward [AI usage and limits](./usage-and-limits.md#web-search).
 
 ## Providers
 

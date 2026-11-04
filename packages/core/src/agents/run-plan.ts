@@ -4,6 +4,7 @@ import type {
   LanguageModelRef,
   LanguageModelTier,
   ModelCatalog,
+  ModelRef,
 } from "../models/catalog"
 import type { LanguageModelDefinition } from "../models/definitions"
 import type { PropertyClearance } from "../objects/property-clearance"
@@ -53,6 +54,16 @@ export interface AgentRunPlan {
    * context estimate starts from (see readAgentContextTokenRates).
    */
   readonly tokenRates: readonly AgentContextTokenRateSample[]
+  /** Its web tools. Absent: `agent.web: false`, so it has none. */
+  readonly web?: AgentRunWebPlan
+}
+
+/** The web tools a run offers, and the domains they reach. */
+export interface AgentRunWebPlan {
+  /** The model `web_search` calls. Absent: the project has none, so the run offers no search. */
+  readonly search?: ModelRef
+  readonly allowedDomains?: readonly string[]
+  readonly blockedDomains?: readonly string[]
 }
 
 /** The project's language models, as a turn chooses one for a child it spawns. */
@@ -112,11 +123,13 @@ export function readAgentRunPlan(
   view: AgentRunView
 ): Omit<AgentRunPlan, "tokenRates"> {
   const { agent, models, tools } = definitions
+  const web = readAgentRunWebPlan(definitions)
   const shared = {
     ...(agent.instructions === undefined ? {} : { instructions: agent.instructions }),
     skills: agent.skills.list(),
     sandboxModels: listSandboxModels(models),
     ontologyDocs: renderAgentRunOntologyDocs({ ...view, catalog: agent.ontologyDocs }),
+    ...(web === undefined ? {} : { web }),
   }
 
   const subagentMaxSteps = agent.subagentMaxSteps ?? UNATTENDED_AGENT_MAX_STEPS
@@ -166,6 +179,24 @@ export function readAgentRunPlan(
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(spec?.timeZone === undefined ? {} : { timeZone: spec.timeZone }),
     ...(spec?.locale === undefined ? {} : { locale: spec.locale }),
+  })
+}
+
+/**
+ * The web tools a run offers, read from the project's definitions so that every runner (a turn, a
+ * child, a workflow step, in the worker or on a computer) offers the same ones.
+ */
+export function readAgentRunWebPlan(
+  definitions: Pick<SixbDefinitions, "agent" | "models">
+): AgentRunWebPlan | undefined {
+  const { web } = definitions.agent
+  if (web === false) return undefined
+
+  const search = definitions.models?.webSearch?.default
+  return Object.freeze({
+    ...(search ? { search: { provider: search.provider, modelId: search.modelId } } : {}),
+    ...(web?.allowedDomains ? { allowedDomains: web.allowedDomains } : {}),
+    ...(web?.blockedDomains ? { blockedDomains: web.blockedDomains } : {}),
   })
 }
 

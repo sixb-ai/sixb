@@ -141,6 +141,12 @@ export interface LanguageModel {
    */
   readonly webSearch?: WebSearchModel
   /**
+   * The names of the tools its provider runs itself, which every request declares, such as
+   * `web_search` from `providerTools`. Sixb checks at startup that none takes a name it gives the
+   * Agent's own tools.
+   */
+  readonly providerToolNames?: readonly string[]
+  /**
    * Return an executable model pinned to operational metadata, preserving model identity.
    * `offline` requires a local snapshot without catalog I/O. Workers retain this model
    * for generation and compaction; later catalog refreshes must not change its capabilities/limits.

@@ -20,7 +20,12 @@ import {
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
 import { emptyGrantIndex } from "../src/authorization/types"
-import type { LanguageModel, ModelMessage } from "../src/models"
+import type {
+  LanguageModel,
+  ModelMessage,
+  WebSearchModel,
+  WebSearchModelRequest,
+} from "../src/models"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
@@ -89,6 +94,21 @@ async function streamAll(
   }
 }
 
+/** The project's web search: it answers each query with one hit, and reports what it cost. */
+const searchedRequests: WebSearchModelRequest[] = []
+const searchingModel: WebSearchModel = {
+  providerId: "test",
+  modelId: "test-search",
+  definition: { kind: "web-search", providerId: "test", modelId: "test-search" },
+  async search(request) {
+    searchedRequests.push(request)
+    return {
+      results: [{ url: "https://example.com/bun", title: "Bun", snippet: request.query }],
+      reportedCost: { money: { currency: "USD", amountNanos: "5000000" } },
+    }
+  },
+}
+
 /** A project tool that answers what run it ran in, and stores a file for the run's sandbox. */
 const chartTool = defineAgentTool("chart")
   .description("Draw a chart.")
@@ -116,7 +136,7 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const sdk = new SixbHost({
     id: PROJECT_ID,
     ontology: [],
-    models: { language: [answeringModel, countingModel] },
+    models: { language: [answeringModel, countingModel], webSearch: [searchingModel] },
     tools: [chartTool, readTool, otherTool],
     storage,
     blobStorage: blobs,
@@ -889,6 +909,33 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
         executionId: session.run.executionId,
       })
       expect(summary).toMatchObject({ modelCallCount: 1, usage: { inputTokens: 12 } })
+      session.close()
+    })
+
+    // Guard proof: search through the catalog's unbound model in bindAgentWebSearch; the search
+    // then reaches the provider unrecorded, and the run's summary counts no call.
+    test("search the web where the project is, recorded against the run", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      searchedRequests.length = 0
+
+      const found = await session.models.webSearch(
+        { query: "bun test", maxResults: 3, blockedDomains: ["ads.example.com"] },
+        new AbortController().signal
+      )
+
+      expect(found.results).toEqual([
+        { url: "https://example.com/bun", title: "Bun", snippet: "bun test" },
+      ])
+      expect(searchedRequests).toMatchObject([
+        { query: "bun test", maxResults: 3, blockedDomains: ["ads.example.com"] },
+      ])
+
+      const latest = await storage.aiUsage.getLatestForExecution({
+        projectId: PROJECT_ID,
+        executionId: session.run.executionId,
+      })
+      expect(latest).toMatchObject({ modelKind: "web-search", requestedModelId: "test-search" })
       session.close()
     })
 

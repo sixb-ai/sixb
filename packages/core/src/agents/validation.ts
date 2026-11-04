@@ -5,6 +5,7 @@ import { normalizeSchemaValue } from "../ontology/validation/normalize"
 import { validateSchemaValue } from "../ontology/validation/schema"
 import { AgentDefinitionError } from "./errors"
 import type { AgentToolDefinition, AgentToolInputSchema } from "./types"
+import { AGENT_WEB_TOOL_NAMES } from "./web"
 
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
 export const AGENT_RESERVED_TOOL_NAMES = [
@@ -19,6 +20,7 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "ask_parent",
   "publish_artifact",
   "publish_artifact_version",
+  ...AGENT_WEB_TOOL_NAMES,
 ] as const
 
 export function isAgentToolDefinition(value: unknown): value is AgentToolDefinition {
@@ -36,6 +38,11 @@ export function assertValidAgentToolName(name: unknown): asserts name is string 
   if (typeof name !== "string" || !AGENT_TOOL_NAME_PATTERN.test(name)) {
     throw new AgentDefinitionError(
       "[Sixb] Agent tool name must be 1-64 characters, start with a letter or underscore, and contain only letters, numbers, underscores, or hyphens."
+    )
+  }
+  if ((AGENT_WEB_TOOL_NAMES as readonly string[]).includes(name)) {
+    throw new AgentDefinitionError(
+      `[Sixb] Agent tool name '${name}' is reserved: Sixb gives the Agent its own ${name} tool. To search with Exa, set models.webSearch: [exaSearch(...)].`
     )
   }
   if ((AGENT_RESERVED_TOOL_NAMES as readonly string[]).includes(name)) {

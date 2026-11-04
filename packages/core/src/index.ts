@@ -1233,6 +1233,7 @@ export type {
   AgentToolRuntimeFacade,
   AgentToolTextContent,
   AgentUsageReference,
+  AgentWebOptions,
   InferAgentToolInput,
   InferAgentToolInputSchema,
   InferAgentToolOutput,
