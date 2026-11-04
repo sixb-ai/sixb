@@ -80,6 +80,7 @@ describe("agent conversation context estimation", () => {
     const { bytesPerToken } = budget
     const plan = {
       model,
+      recordedModel: model,
       instructions: "Answer clearly.",
       tools: [],
       skills: [],
@@ -250,6 +251,7 @@ describe("agent conversation token rate", () => {
   const model = new WorkerTestModel({ modelId: "anthropic/claude-haiku-5.5" })
   const plan = {
     model,
+    recordedModel: model,
     instructions: "Answer clearly.",
     tools: [],
     skills: [],

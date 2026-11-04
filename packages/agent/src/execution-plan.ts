@@ -18,6 +18,12 @@ import { withBuiltInSkills } from "./skills/built-in"
  */
 export interface ResolvedAgentExecutionPlan {
   readonly model: LanguageModel
+  /**
+   * The same model as the run's session records each call, without the context budget `model`
+   * may add: a tool's side call (`web_fetch`'s question) is admitted and accounted with the run's
+   * calls, but never weighs on the run's context, nor measures its tokenizer.
+   */
+  readonly recordedModel: LanguageModel
   readonly reasoning?: AgentReasoning
   readonly instructions?: string
   /** The project tools it offers, as the model is offered them; they run where the project is. */
@@ -41,11 +47,12 @@ export interface ResolvedAgentExecutionPlan {
 
 /**
  * A turn's or a child's plan, with the session's model, which records each call itself, and the
- * harness's skills added. Its project tools run through the session.
+ * harness's skills added. Its project tools run through the session. `recordedModel` is the same
+ * model, its calls kept out of the run's tokenizer measure; absent, `model`.
  */
 export function resolveRunPlan(
   plan: AgentRunPlan,
-  resolved: { readonly model: LanguageModel }
+  resolved: { readonly model: LanguageModel; readonly recordedModel?: LanguageModel }
 ): ResolvedAgentExecutionPlan {
   const {
     reasoning,
@@ -60,6 +67,7 @@ export function resolveRunPlan(
   } = plan
   return Object.freeze({
     model: resolved.model,
+    recordedModel: resolved.recordedModel ?? resolved.model,
     ontologyDocs,
     tokenRates: plan.tokenRates,
     ...(instructions === undefined ? {} : { instructions }),

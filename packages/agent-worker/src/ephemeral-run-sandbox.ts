@@ -3,6 +3,7 @@ import type {
   Sandbox,
   SandboxEnvironment,
   SandboxFactory,
+  SandboxNetworkPolicy,
   SandboxRequestCredential,
   SandboxSourceAuth,
 } from "@sixb/core"
@@ -92,6 +93,7 @@ class EphemeralWorkspace implements RunSandbox {
   // discarded, so the first model call waits for it, with or without a source.
   readonly waitBeforeModel = true
   readonly contextDirectory = SANDBOX_CONTEXT_DIRECTORY
+  readonly networkPolicy: SandboxNetworkPolicy | undefined
   private readonly workspace: EphemeralWorkspaceInput
   private readonly signal: AbortSignal
   private readonly access: WorkspaceAccess
@@ -101,6 +103,7 @@ class EphemeralWorkspace implements RunSandbox {
     const { workspace, signal, apiCredential } = input
     this.workspace = workspace
     this.signal = signal
+    this.networkPolicy = workspace.recipe.network
 
     this.access = new WorkspaceAccess({
       recipe: workspace.recipe,

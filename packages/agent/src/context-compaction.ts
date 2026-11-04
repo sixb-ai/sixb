@@ -27,6 +27,7 @@ import {
 } from "@sixb/core/internal/model-execution"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelCachingIntent, ModelMessage, ModelReasoning, ModelTool } from "@sixb/core/models"
+import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type {
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
@@ -156,6 +157,8 @@ interface ConversationCompactionInput
   readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
   /** Where the run's files go, as the prompt names them. */
   readonly contextDirectory: string
+  /** Its sandbox's declared network, which decides whether it has `web_fetch`. */
+  readonly networkPolicy?: SandboxNetworkPolicy
   /** Who can read the run's thread: in a shared one, who wrote what counts toward the estimate. */
   readonly conversation?: ConversationReaders
   readonly frameworkTools?: readonly ModelTool[]
@@ -375,7 +378,7 @@ function conversationEstimateShape(
       authors ? conversationAuthorsText(authors) : "",
     ].join("\n"),
     tools: contextEstimateTools([
-      ...agentModelToolSpecs(plan.tools, { web: plan.web }),
+      ...agentModelToolSpecs(plan.tools, { web: plan.web, networkPolicy: input.networkPolicy }),
       ...(input.frameworkTools ?? []),
     ]),
   }

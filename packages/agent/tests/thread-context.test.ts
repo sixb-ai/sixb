@@ -161,11 +161,13 @@ async function seedThread(withCheckpoint: boolean) {
 async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
   const seeded = await seedThread(withCheckpoint)
   let prompt: readonly ModelMessage[] | undefined
+  const model = captureModel((value) => {
+    prompt = value
+  })
   const plan = {
     instructions: "Answer clearly.",
-    model: captureModel((value) => {
-      prompt = value
-    }),
+    model,
+    recordedModel: model,
     tools: [],
     skills: [],
     ontologyDocs: { files: [], index: [] },

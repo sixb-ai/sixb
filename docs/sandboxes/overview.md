@@ -91,6 +91,9 @@ needs: the Sixb API, the source origin and the origins `auth` issues credentials
 package registry `setup` installs from; `all` allows everything. `none` is rejected: the agent
 cannot reach the Sixb API. Guest-readable `env` is not a safe place for credentials.
 
+The agent's [`web_fetch`](../models/overview.md#read-web-pages) follows the declared `network`
+too: a `restricted` one limits it to the origins it lists. Without `network`, it reads any URL.
+
 For direct factory use, `create()` applies static source/setup. An explicit `environment` replaces
 both, including `{}` to skip them. Dynamic recipes require execution-resolved configuration.
 

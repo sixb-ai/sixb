@@ -444,6 +444,31 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect((await nextSession.plan()).tokenRates).toEqual([{ bytes: 36_000, tokens: 15_000 }])
       nextSession.close()
     })
+
+    // Guard proof: measure every call in AgentRunSession.models.language whatever its options, or
+    // drop `measures` from the HTTP model's body; the side call then stands for the run.
+    test("keeps a tool's own call out of what the run measured of its model", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const ref = { provider: "test", modelId: "counting-model" }
+      const session = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!session) throw new Error("Expected the run to be claimed.")
+
+      await streamAll(await session.models.language(ref), [
+        { type: "text", text: "a".repeat(30_000) },
+      ])
+      await streamAll(await session.models.language(ref, { measures: false }), [
+        { type: "text", text: "b".repeat(36_000) },
+      ])
+
+      expect(
+        await storage.agents.tokenRates.listLatest({
+          projectId: PROJECT_ID,
+          providerId: ref.provider,
+          modelId: ref.modelId,
+        })
+      ).toMatchObject([{ runId: run.id, bytes: 30_000, tokens: 12_500 }])
+      session.close()
+    })
   })
 
   describe("a cancel recorded on the run", () => {

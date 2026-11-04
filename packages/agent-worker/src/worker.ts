@@ -259,10 +259,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
                 ? {}
                 : { definition: this.host.sandboxDefinition }),
             })(lifecycle),
-          startChild: (child, family) =>
+          startChild: (child, family, networkPolicy) =>
             this.requireChildren().start(child, {
               signal,
               family,
+              ...(networkPolicy ? { networkPolicy } : {}),
               leaseExpiresAt: () => delivery.leaseExpiresAt,
               // The turn's delivery holds the child's lease too: its renewals renew both. One that
               // landed while the child was claimed is recorded now.

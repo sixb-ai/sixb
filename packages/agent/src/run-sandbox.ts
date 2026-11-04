@@ -1,6 +1,8 @@
 import type { Sandbox } from "@sixb/core"
+import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
 import type { BackgroundCommands } from "./background-commands"
+import type { WebFetchNetwork } from "./tools/web-fetch/network"
 import { readWorkspaceInstructions } from "./workspace-instructions"
 
 /**
@@ -50,6 +52,14 @@ export interface RunSandbox {
    * its own, stopped as it ends.
    */
   readonly background?: BackgroundCommands
+  /**
+   * The network policy the project declared for the sandbox, which `web_fetch` follows: only the
+   * origins a `restricted` one lists, and no tool for `none`. Absent, as for a blank sandbox: any
+   * URL.
+   */
+  readonly networkPolicy?: SandboxNetworkPolicy
+  /** Where `web_fetch` reads pages from. Absent: Sixb's servers. */
+  readonly webNetwork?: WebFetchNetwork
   /** Called once, when the run environment starts. */
   acquire(): Promise<AcquiredRunSandbox>
   /**

@@ -17,6 +17,8 @@ export interface GuardedFetchInput {
   readonly maxBytes: number
   /** For the whole fetch: every redirect hop and the body. */
   readonly timeoutMs: number
+  /** Throws to refuse a URL before it is requested: the first, and each redirect followed. */
+  readonly admit?: (url: URL) => void
 }
 
 export interface GuardedPage {
@@ -126,6 +128,7 @@ export async function guardedFetch(url: URL, input: GuardedFetchInput): Promise<
     let current = url
 
     for (let hop = 0; ; hop += 1) {
+      input.admit?.(current)
       const response = await fetchPinned(current, input.network, signal)
 
       const location = redirectLocation(response, current)

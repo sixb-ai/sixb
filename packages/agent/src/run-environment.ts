@@ -14,6 +14,7 @@ import {
 import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
+import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type {
   AgentContextCheckpointReason,
   AgentMessageRecord,
@@ -88,7 +89,7 @@ import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { createBashOutputTool, createBashStopTool } from "./tools/background"
 import { createBashTool } from "./tools/bash"
-import { agentModelToolSpecs } from "./tools/model-spec"
+import { agentModelToolSpecs, fetchesWeb } from "./tools/model-spec"
 import { createReadTool } from "./tools/read"
 import {
   AgentToolResultMediaBridge,
@@ -103,6 +104,7 @@ import {
   ToolOutputFiles,
 } from "./tools/tool-outputs"
 import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
+import { createWebFetchTool } from "./tools/web-fetch/tool"
 import { createWebSearchTool } from "./tools/web-search"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
@@ -130,6 +132,8 @@ export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnv
   }) => Promise<ConversationRequest | undefined>
   /** The bytes per token the preflight measured the history at, which the turn's calls go by. */
   readonly bytesPerToken?: number
+  /** The network its sandbox declared, which `web_fetch` follows: its children's too. */
+  readonly networkPolicy?: SandboxNetworkPolicy
 }
 
 /**
@@ -198,6 +202,11 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
   readonly frameworkTools?: readonly ModelTool[]
   /** Weigh the thread before the first call, and compact it on the child's thread when needed. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
+  /**
+   * The network its parent's `web_fetch` follows, which the child's follows too: a child's blank
+   * sandbox declares none, and would otherwise read any URL.
+   */
+  readonly parentNetworkPolicy?: SandboxNetworkPolicy
 }
 
 export interface SubagentAgentExecutionEnvironment extends AgentExecutionEnvironment {
@@ -326,7 +335,11 @@ export async function createConversationAgentEnvironment(
       systemPrompt: systemPrompt.text,
       systemPromptSize: systemPrompt,
       tools: [
-        ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined, web: plan.web }),
+        ...agentModelToolSpecs(plan.tools, {
+          publishes: publishing !== undefined,
+          web: plan.web,
+          networkPolicy: sandbox.networkPolicy,
+        }),
         ...(input.frameworkTools ?? []),
       ],
       messages: conversationModelMessages({
@@ -347,6 +360,7 @@ export async function createConversationAgentEnvironment(
       plan,
       ontologyIndex: ontologyDocs.index,
       contextDirectory: sandbox.contextDirectory,
+      networkPolicy: sandbox.networkPolicy,
       run,
       ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
       budget: preflight.budget,
@@ -427,6 +441,7 @@ export async function createConversationAgentEnvironment(
       threadContext,
       ...(compactInTurn ? { compactInTurn } : {}),
       ...(prepared?.bytesPerToken === undefined ? {} : { bytesPerToken: prepared.bytesPerToken }),
+      ...(sandbox.networkPolicy ? { networkPolicy: sandbox.networkPolicy } : {}),
     }
   } catch (error) {
     // Preparation can fail before the worker receives this environment. Preserve here, before
@@ -506,6 +521,7 @@ async function startSubagentEnvironment(
 ): Promise<SubagentAgentExecutionEnvironment> {
   const { context, plan, run, conversation, sandbox, resumed, preflight } = input
   const signal = input.signal ?? NEVER_ABORTED_SIGNAL
+  const networkPolicy = input.parentNetworkPolicy ?? sandbox.networkPolicy
   // Still listed, as handed over, but never copied over what the child made of them.
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const inlineImages = modelSupportsInlineImages(plan.model)
@@ -581,7 +597,11 @@ async function startSubagentEnvironment(
     threadContext,
   })
   const tools = [
-    ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined, web: plan.web }),
+    ...agentModelToolSpecs(plan.tools, {
+      publishes: publishing !== undefined,
+      web: plan.web,
+      networkPolicy,
+    }),
     ...(input.frameworkTools ?? []),
   ]
   const childRequest: BuildConversationRequest = async ({ threadContext }) => {
@@ -652,6 +672,7 @@ async function startSubagentEnvironment(
   const environment = await startAgentEnvironment({
     mode: "subagent",
     sandbox,
+    ...(networkPolicy ? { networkPolicy } : {}),
     acquire: input.acquire,
     sandboxSignal: input.signal,
     context,
@@ -758,6 +779,8 @@ export async function createWorkflowAgentNodeEnvironment(
 interface AgentEnvironmentSetup
   extends Omit<CreateAgentEnvironmentInput, "signal" | "openSandbox"> {
   readonly sandbox: RunSandbox
+  /** The network `web_fetch` follows, when not the sandbox's own: a child's parent's. */
+  readonly networkPolicy?: SandboxNetworkPolicy
   /** How provisioning acquires the sandbox, when the run may have acquired it already. */
   readonly acquire?: () => Promise<AcquiredRunSandbox>
   /**
@@ -901,6 +924,19 @@ async function startAgentEnvironment(
   appendBuiltInTool(tools, createBashStopTool(resolveSandbox, background))
   if (plan.web?.search) {
     appendBuiltInTool(tools, createWebSearchTool({ search: input.webSearch, web: plan.web }))
+  }
+  const networkPolicy = input.networkPolicy ?? sandbox.networkPolicy
+  if (plan.web && fetchesWeb(plan.web, networkPolicy)) {
+    appendBuiltInTool(
+      tools,
+      createWebFetchTool({
+        web: plan.web,
+        network: sandbox.webNetwork ?? "server",
+        ...(networkPolicy ? { networkPolicy } : {}),
+        files: toolOutputFiles,
+        model: plan.recordedModel,
+      })
+    )
   }
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
   const { publishing } = input
