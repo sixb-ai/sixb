@@ -309,19 +309,22 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
             .find(
               ({ command }) => command.status === "running" && sameBackgroundCommand(command, ref)
             )
-          if (!running) {
+          // Its sixb may close between the two: the stop then has no session to wait in.
+          const asked =
+            running &&
+            (await agents.computers.requestStop({
+              projectId: host.id,
+              id: running.session.id,
+              ownerPrincipal,
+              command: ref,
+            }))
+          if (!running || !asked) {
             set.status = 404
             return {
               error: `[SixbServer] Background command '${params.commandId}' does not run on an open sixb: it ended, or sixb closed.`,
             }
           }
 
-          await agents.computers.requestStop({
-            projectId: host.id,
-            id: running.session.id,
-            ownerPrincipal,
-            command: ref,
-          })
           // Its sixb hears it and renews at once: the stop is in the answer.
           await announce(host, ownerPrincipal, running.session.computer, true)
 
