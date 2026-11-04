@@ -150,6 +150,8 @@ const runner = {
   runs: () => false,
   hearStop: () => {},
   onElsewhere: () => () => {},
+  onBackground: () => () => {},
+  backgroundCommands: () => [],
   runsHere: () => false,
 } as unknown as LocalRunner
 

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentRunStreamEvent } from "@sixb/client"
 import {
+  backgroundEnded,
+  backgroundStrip,
   contextBreakdown,
   contextStatus,
   duration,
+  elapsed,
   fittedContextText,
   friendlyPath,
   runFailureText,
@@ -169,6 +172,117 @@ describe("a live run", () => {
       })
     )
     expect(live.parts[0]).toMatchObject({ state: "done", output: { exitCode: 0 } })
+  })
+})
+
+describe("a background command", () => {
+  const started = "2026-11-04T10:00:00.000Z"
+  const at = (seconds: number) => Date.parse(started) + seconds * 1_000
+  const call = (
+    name: string,
+    input: Record<string, unknown>,
+    output: Record<string, unknown>
+  ): Extract<Part, { kind: "tool" }> => ({
+    kind: "tool",
+    id: "c",
+    name,
+    state: "done",
+    input,
+    output,
+  })
+
+  test("reads as started, checked and stopped, with how it stands", () => {
+    const start = toolLine(
+      call(
+        "bash",
+        { command: "bun run dev", run_in_background: true },
+        { id: "bg_1a2b3c", status: "running", startedAt: started }
+      )
+    )
+    expect(start).toMatchObject({ verb: "bash", note: "in the background · bg_1a2b3c" })
+    expect(start).not.toHaveProperty("failed")
+
+    const read = { id: "bg_1a2b3c", command: "bun test", startedAt: started }
+    expect(
+      toolLine(
+        call(
+          "bash_output",
+          { id: "bg_1a2b3c" },
+          { ...read, status: "exited", exitCode: 1, output: "1 fail\n" }
+        )
+      )
+    ).toMatchObject({
+      verb: "output",
+      detail: "bg_1a2b3c  bun test",
+      note: "exit 1",
+      failed: true,
+      preview: ["1 fail"],
+    })
+    expect(
+      toolLine(
+        call(
+          "bash_stop",
+          { id: "bg_1a2b3c" },
+          { ...read, status: "stopped", exitCode: 143, output: "" }
+        )
+      )
+    ).toEqual({ verb: "stop", detail: "bg_1a2b3c  bun test", note: "stopped" })
+  })
+
+  test("ticks by the second while it runs", () => {
+    expect([elapsed(800), elapsed(8_400), elapsed(134_000), elapsed(3_780_000)]).toEqual([
+      "0s",
+      "8s",
+      "2m 14s",
+      "1h 03m",
+    ])
+  })
+
+  // Guard proof: drop the room check from backgroundStrip; four commands overflow a phone-narrow
+  // terminal's line instead of folding into "+N more".
+  test("lists the running ones over the composer, as many as fit", () => {
+    const running = (id: string, command: string, offset: number) => ({
+      id,
+      command,
+      status: "running" as const,
+      startedAt: new Date(at(offset)).toISOString(),
+    })
+    const commands = [
+      running("bg_b", "bun test --watch", 60),
+      running("bg_a", "bun run dev --port 3000", 0),
+      { ...running("bg_c", "make docs", 10), status: "exited" as const, exitCode: 0 },
+      running("bg_d", "tail -f logs/server.log", 90),
+      running("bg_e", "python -m http.server", 100),
+    ]
+
+    expect(backgroundStrip(commands, at(134), 200)).toEqual({
+      shown: [
+        { label: "bun run dev --port 3000", time: "2m 14s" },
+        { label: "bun test --watch", time: "1m 14s" },
+        { label: "tail -f logs/server.log", time: "44s" },
+        { label: "python -m http.server", time: "34s" },
+      ],
+      more: 0,
+    })
+    const narrow = backgroundStrip(commands, at(134), 72)
+    expect(narrow.shown.map((entry) => entry.label)).toEqual([
+      "bun run dev --port 3000",
+      "bun test --watch",
+    ])
+    expect(narrow.more).toBe(2)
+  })
+
+  test("says how it ended", () => {
+    const ended = { id: "bg_a", command: "bun test", startedAt: started }
+    const endedAt = new Date(at(42)).toISOString()
+    expect(backgroundEnded({ ...ended, status: "exited", exitCode: 0, endedAt })).toEqual({
+      text: "bun test exited with code 0 after 42s",
+      failed: false,
+    })
+    expect(backgroundEnded({ ...ended, status: "exited", exitCode: 1, endedAt }).failed).toBe(true)
+    expect(backgroundEnded({ ...ended, status: "stopped", exitCode: 143, endedAt }).text).toBe(
+      "bun test stopped after 42s"
+    )
   })
 })
 

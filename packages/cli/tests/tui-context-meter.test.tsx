@@ -119,6 +119,8 @@ const runner = {
   claim: async () => false,
   claimIfHere: async () => {},
   onElsewhere: () => () => {},
+  onBackground: () => () => {},
+  backgroundCommands: () => [],
   runsHere: () => false,
   runs: () => false,
   hearStop: () => {},
