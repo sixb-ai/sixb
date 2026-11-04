@@ -41,7 +41,8 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
-import { BackgroundCommands, BackgroundNotices } from "./background-commands"
+import { BackgroundCommands } from "./background-commands"
+import { BackgroundNotices, backgroundCommandsLeftRunning } from "./background-notices"
 import { prepareHandedFiles } from "./child-files"
 import {
   type AgentThreadCompactionInput,
@@ -391,6 +392,7 @@ export async function createConversationAgentEnvironment(
       apiBaseUrl,
       attachmentContext,
       toolOutputs: savedToolOutputFiles(messages),
+      history: messages,
       imageBudget,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
@@ -657,6 +659,7 @@ async function startSubagentEnvironment(
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
     toolOutputs: savedToolOutputFiles(threadContext.retainedMessages),
+    history: threadContext.retainedMessages,
     imageBudget,
     ontologyDocs: plan.ontologyDocs,
     ...(memory ? { memory } : {}),
@@ -771,6 +774,8 @@ interface AgentEnvironmentSetup
    * name them: read from the store while the model starts, unless the sandbox holds them.
    */
   readonly toolOutputs?: readonly AgentToolCallFile[]
+  /** The history the run goes on from: the background commands it left running are told ended. */
+  readonly history?: readonly AgentMessageRecord[]
   /** What the history left of the request's inline image budget, which the run's steps take. */
   readonly imageBudget: InlineImageBudget
   /** Installed under `$SIXB_ONTOLOGY_DIR`; a workflow step's prompt does not list them. */
@@ -1006,7 +1011,10 @@ async function startAgentEnvironment(
       blobStorage: context.blobStorage,
       apiBaseUrl,
       attachmentContext,
-      tools: new BackgroundNotices(background).wrap(toolOutputFiles.wrap(tools)),
+      tools: new BackgroundNotices(background, {
+        ...(input.history ? { leftRunning: backgroundCommandsLeftRunning(input.history) } : {}),
+        endedWith: sandbox.background ? "the sixb that ran it" : "the run that started it",
+      }).wrap(toolOutputFiles.wrap(tools)),
       outputFileOf: (toolCallId) => toolOutputFiles.fileOf(toolCallId),
       prepareStep: mediaBridge.prepareStep,
       systemPrompt: systemPrompt.text,

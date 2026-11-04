@@ -1555,6 +1555,55 @@ function readInstructionsIn(
   })
 }
 
+/**
+ * Runs a background command as a held call that ends when a signal of its stop, or its abort,
+ * reaches it, and records each step of its life and the sandbox's.
+ */
+class BackgroundSandbox extends RecordingSandbox {
+  #endHeld: (code: number) => void = () => {}
+
+  constructor(
+    id: string,
+    private readonly events: string[]
+  ) {
+    super(id)
+  }
+
+  override async runCommand(
+    command: string,
+    args: readonly string[] = [],
+    options: RunCommandOptions = {}
+  ): Promise<CommandResult> {
+    if (args[2] !== "sixb-background") return super.runCommand(command, args, options)
+
+    const done = { stdout: "", stderr: "", durationMs: 1 }
+    // The held call that runs it.
+    if (args.length === 8) {
+      this.events.push("started")
+      return new Promise((resolve) => {
+        let ended = false
+        this.#endHeld = (code) => {
+          if (ended) return
+          ended = true
+          this.events.push(`ended ${code}`)
+          resolve({ ...done, exitCode: code })
+        }
+        options.signal?.addEventListener("abort", () => this.#endHeld(137))
+      })
+    }
+    // Its process group, then a signal to it.
+    if (args[3]?.endsWith(".pid")) return { ...done, exitCode: 0, stdout: "4242\n" }
+    this.events.push(String(args[3]))
+    this.#endHeld(args[3] === "TERM" ? 143 : 137)
+    return { ...done, exitCode: 0 }
+  }
+
+  override async destroy(): Promise<void> {
+    this.events.push("destroyed")
+    await super.destroy()
+  }
+}
+
 class RecordingSandboxFactory implements SandboxFactory {
   readonly supportsRequestCredentials = true
   readonly sandboxes: RecordingSandbox[] = []
@@ -7767,6 +7816,44 @@ describe("AgentWorker", () => {
       }
     }
     expect(sandboxes.sandboxes.every((sandbox) => sandbox.destroyed)).toBe(true)
+  })
+
+  // Removal proof: drop stopBackground from the environment's beforeFinalize and dispose; the held
+  // call that runs the command is then neither signalled nor aborted, and outlives its run.
+  test("stops a cloud run's background commands before it saves or gives back its sandbox", async () => {
+    const events: string[] = []
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), {
+      supportsRequestCredentials: true,
+      create: async () => new BackgroundSandbox("sandbox-1", events),
+    })
+    const plan = executionPlanFor(sixb)
+    const run = await reserveRequestedRun(sixb, await requestAgent(sixb, { text: "Serve it." }))
+    const environment = await createConversationAgentEnvironment(
+      await withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context: await buildAgentWorkerContext(sixb),
+        plan,
+        run,
+      })
+    )
+
+    try {
+      await environment.turnContext.sandboxReady
+      const bash = environment.turnContext.tools.find((tool) => tool.name === "bash")
+      if (!bash) throw new Error("Expected the bash tool.")
+
+      const started = await bash.execute(
+        bash.parseInput({ command: "bun run dev", run_in_background: true }),
+        { signal: new AbortController().signal, callId: "call-1", toolCallId: "tool-1" }
+      )
+      expect(started).toMatchObject({ status: "running" })
+
+      await environment.beforeFinalize()
+      expect(events).toEqual(["started", "TERM", "ended 143"])
+    } finally {
+      await environment.dispose()
+    }
+    expect(events).toEqual(["started", "TERM", "ended 143", "destroyed"])
   })
 
   test("materializes message attachments and manifest into the sandbox", async () => {

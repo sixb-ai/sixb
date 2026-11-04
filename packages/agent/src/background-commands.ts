@@ -1,11 +1,7 @@
+import { randomBytes } from "node:crypto"
 import { posix } from "node:path"
-import {
-  AgentToolPublicError,
-  type CommandResult,
-  type Sandbox,
-  stableJsonStringify,
-} from "@sixb/core"
-import type { ModelTool } from "@sixb/core/models"
+import { AgentToolPublicError, type CommandResult, type Sandbox } from "@sixb/core"
+import { waitForAbort } from "./abort"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
 // A background command runs in the call that starts it, held open until it ends: a provider that
@@ -36,14 +32,11 @@ const STOP_GRACE_MS = 3_000
 /** The short calls that start, signal and read a command. */
 const CONTROL_TIMEOUT_MS = 15_000
 
-/** A command's displayed form in a notice: its first line, cut. */
-const NOTICE_COMMAND_CHARS = 80
-
 export type BackgroundCommandStatus = "running" | "exited" | "stopped"
 
 /** A background command as its tools report it, and as a chat can show it. */
 export interface BackgroundCommandState {
-  /** `bg_<n>`: the id `bash_output` and `bash_stop` take. */
+  /** `bg_<hex>`: the id `bash_output` and `bash_stop` take, never the same in two runs. */
   readonly id: string
   readonly command: string
   readonly status: BackgroundCommandStatus
@@ -76,6 +69,8 @@ interface BackgroundCommand {
   readonly sandbox: Sandbox
   /** Aborts the held call: the provider kills what it ran. */
   readonly abort: AbortController
+  /** Settles once its process group is known, or it ended without one. */
+  readonly started: Promise<void>
   /** Settles once it ended, however it did. */
   readonly ended: Promise<void>
   /** Its process group, once it started. */
@@ -100,21 +95,27 @@ interface BackgroundCommand {
  */
 export class BackgroundCommands {
   readonly #commands = new Map<string, BackgroundCommand>()
-  #next = 1
 
-  /** Whether it ever started one: its files are then worth keeping for a later turn. */
-  get isEmpty(): boolean {
-    return this.#commands.size === 0
+  /** Whether it ever started one: their files are then worth keeping for a later turn. */
+  get hasCommands(): boolean {
+    return this.#commands.size > 0
+  }
+
+  /** Whether one of them runs now. */
+  get running(): boolean {
+    return [...this.#commands.values()].some((entry) => entry.status === "running")
   }
 
   /**
    * Start `command` in the background and return once it runs, its output going to its file. One
-   * the sandbox could not start, as in a directory that does not exist, throws what it said.
+   * the sandbox could not start, as in a directory that does not exist, throws what it said. A
+   * `signal` that aborts before then stops it.
    */
   async start(input: {
     readonly handle: AgentSandboxHandle
     readonly command: string
     readonly cwd?: string
+    readonly signal?: AbortSignal
   }): Promise<BackgroundCommandState> {
     const running = [...this.#commands.values()].filter((entry) => entry.status === "running")
     if (running.length >= MAX_RUNNING) {
@@ -125,18 +126,29 @@ export class BackgroundCommands {
 
     const { handle } = input
     const { sandbox } = handle
-    const id = `bg_${this.#next++}`
+    const id = this.#newId()
     const directory = contextPath(handle, BACKGROUND_DIRECTORY)
     const paths = {
       output: posix.join(directory, `${id}.log`),
       pid: posix.join(directory, `${id}.pid`),
       exit: posix.join(directory, `${id}.exit`),
     }
+    // The pid file names the start that wrote it: a file an earlier start left is never read.
+    const nonce = randomBytes(8).toString("hex")
     const abort = new AbortController()
 
     const held = sandbox.runCommand(
       "bash",
-      ["-c", START_SCRIPT, "sixb-background", paths.output, paths.pid, paths.exit, input.command],
+      [
+        "-c",
+        START_SCRIPT,
+        "sixb-background",
+        paths.output,
+        paths.pid,
+        paths.exit,
+        nonce,
+        input.command,
+      ],
       {
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
         ...(handle.env === undefined ? {} : { env: handle.env }),
@@ -144,6 +156,21 @@ export class BackgroundCommands {
         signal: abort.signal,
       }
     )
+    const ended = held.then(
+      (result) => this.#end(entry, result),
+      (error: unknown) => this.#end(entry, undefined, error)
+    )
+    // Its group is known once the wrapper wrote it, which it does first: until then nothing could
+    // signal it, so a stop and `start` itself wait for it, or for its end without one.
+    const started = Promise.race([
+      readGroup(sandbox, paths.pid, nonce, handle.env).then(
+        (group) => {
+          if (group !== undefined) entry.group = group
+        },
+        () => {}
+      ),
+      ended,
+    ])
     const entry: BackgroundCommand = {
       id,
       command: input.command,
@@ -151,23 +178,20 @@ export class BackgroundCommands {
       paths,
       sandbox,
       abort,
-      ended: held.then(
-        (result) => this.#end(entry, result),
-        (error: unknown) => this.#end(entry, undefined, error)
-      ),
+      started,
+      ended,
       status: "running",
       readBytes: 0,
       reported: false,
     }
     this.#commands.set(id, entry)
 
-    // Its group is known once the wrapper wrote it, which it does first: until then nothing could
-    // signal it, so `start` returns only then, or once it ended without starting.
-    const group = await Promise.race([
-      readGroup(sandbox, paths.pid, handle.env).catch(() => undefined),
-      entry.ended.then(() => undefined),
-    ])
-    if (group !== undefined) entry.group = group
+    try {
+      await waitForAbort(started, input.signal)
+    } catch (error) {
+      await this.stop(id)
+      throw error
+    }
 
     if (entry.failure !== undefined) {
       this.#commands.delete(id)
@@ -175,6 +199,11 @@ export class BackgroundCommands {
     }
     if (entry.status !== "running") entry.reported = true
     return state(entry)
+  }
+
+  /** Whether it knows a command by this id. */
+  has(id: string): boolean {
+    return this.#commands.has(id)
   }
 
   /** A command by id, or a public error the model can act on. */
@@ -273,25 +302,6 @@ export class BackgroundCommands {
     return state(entry)
   }
 
-  async #stop(entry: BackgroundCommand): Promise<void> {
-    if (await signalGroup(entry, "TERM")) {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      await Promise.race([
-        entry.ended,
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, STOP_GRACE_MS)
-        }),
-      ])
-      clearTimeout(timer)
-    }
-
-    if (entry.status === "running") {
-      await signalGroup(entry, "KILL")
-      entry.abort.abort()
-      await entry.ended
-    }
-  }
-
   /** Stop every command still running. */
   async stopAll(): Promise<void> {
     const running = [...this.#commands.values()].filter((entry) => entry.status === "running")
@@ -319,88 +329,68 @@ export class BackgroundCommands {
     return ended.map(state)
   }
 
+  #newId(): string {
+    for (;;) {
+      const id = `bg_${randomBytes(3).toString("hex")}`
+      if (!this.#commands.has(id)) return id
+    }
+  }
+
   #find(id: string): BackgroundCommand {
     const entry = this.#commands.get(id)
     if (!entry) {
       const known = [...this.#commands.keys()]
       throw new AgentToolPublicError(
-        `[SixbAgent] No background command '${id}'${known.length > 0 ? `: the known ones are ${known.join(", ")}` : ""}.`
+        `[SixbAgent] No background command '${id}'${known.length > 0 ? `: the known ones are ${known.join(", ")}` : ""}. One an earlier run started ended with that run, or with the sixb that ran it.`
       )
     }
     return entry
   }
 
+  async #stop(entry: BackgroundCommand): Promise<void> {
+    // A stop asked for as it starts waits for its group: the held call's abort alone would stop
+    // the wrapper and leave the group it started running.
+    await entry.started
+
+    if (await signalGroup(entry, "TERM")) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([
+        entry.ended,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, STOP_GRACE_MS)
+        }),
+      ])
+      clearTimeout(timer)
+    }
+
+    if (entry.status === "running") {
+      await signalGroup(entry, "KILL")
+      entry.abort.abort()
+      await entry.ended
+    }
+  }
+
   #end(entry: BackgroundCommand, result: CommandResult | undefined, error?: unknown): void {
-    entry.status = entry.stopping ? "stopped" : "exited"
     entry.endedAt = new Date()
-    if (result) {
-      entry.exitCode = result.exitCode
-      // The wrapper writes nothing of its own unless it, or the sandbox, could not run it.
-      if (result.stderr.trim() && entry.group === undefined) entry.failure = result.stderr.trim()
-    } else {
+    if (!result) {
       // Its sandbox went away under it, or never ran it.
       entry.status = "stopped"
       console.warn(`[SixbAgent] Background command ${entry.id} ended with its sandbox:`, error)
+      return
     }
 
+    entry.exitCode = result.exitCode
+    // Stopped when a signal of its stop ended it, as its exit code says; one that exited by itself
+    // meanwhile, or caught the signal and exited, exited.
+    entry.status =
+      entry.stopping !== undefined && (result.exitCode > 128 || entry.abort.signal.aborted)
+        ? "stopped"
+        : "exited"
+    // The wrapper writes nothing of its own unless it, or the sandbox, could not run it.
+    if (result.stderr.trim() && entry.group === undefined) entry.failure = result.stderr.trim()
+
     // Past its bound, the held call's abort stopped the wrapper, not the group it started.
-    if (result?.timedOut) void signalGroup(entry, "KILL")
-  }
-}
-
-/**
- * How a run hears of its background commands without polling: a short notice closing the result
- * of the first tool that returns after one ended, and, on its first, those of an earlier turn
- * still running. A tool's result is what its message part keeps (`modelOutput`), so a later turn
- * replays the notice where the model read it, byte for byte; no other request is touched.
- */
-export class BackgroundNotices {
-  /** The commands of earlier turns running as the run started, until its first notice. */
-  #runningAtStart: readonly string[] | undefined
-
-  constructor(private readonly commands: BackgroundCommands) {
-    this.#runningAtStart = commands
-      .list()
-      .filter((command) => command.status === "running")
-      .map((command) => command.id)
-  }
-
-  /** The notice due now, once: undefined when nothing is new. */
-  take(now = new Date()): string | undefined {
-    const earlier = this.#runningAtStart ?? []
-    this.#runningAtStart = undefined
-
-    const ended = this.commands.takeEnded()
-    const running = earlier
-      .map((id) => this.commands.get(id))
-      .filter((command) => command.status === "running")
-    const lines = [...running.map((command) => runningLine(command, now)), ...ended.map(endedLine)]
-    if (lines.length === 0) return undefined
-    return `<sixb_background_commands>\n${lines.join("\n")}\n</sixb_background_commands>`
-  }
-
-  /** The run's tools, each result closed by the notice due as it returns. */
-  wrap(tools: readonly ModelTool[]): ModelTool[] {
-    return tools.map((tool) => ({
-      ...tool,
-      toModelOutput: async (output, context) => {
-        const projected = tool.toModelOutput
-          ? await tool.toModelOutput(output, context)
-          : typeof output === "string"
-            ? { type: "text" as const, value: output }
-            : { type: "json" as const, value: output }
-        // An error result says nothing else: the notice waits for the next one.
-        if (projected.type !== "text" && projected.type !== "json") return projected
-
-        const notice = this.take()
-        if (notice === undefined) return projected
-
-        // Keys sorted, as providers print a JSON output; the bytes are kept as the model read them.
-        const text =
-          projected.type === "text" ? projected.value : stableJsonStringify(projected.value)
-        return { type: "text", value: `${text}\n\n${notice}` }
-      },
-    }))
+    if (result.timedOut) void signalGroup(entry, "KILL")
   }
 }
 
@@ -417,24 +407,26 @@ function state(entry: BackgroundCommand): BackgroundCommandState {
   }
 }
 
-/** The process group the wrapper wrote, waited for in the sandbox. */
+/** The process group the wrapper wrote with this start's nonce, waited for in the sandbox. */
 async function readGroup(
   sandbox: Sandbox,
   path: string,
+  nonce: string,
   env: Readonly<Record<string, string>> | undefined
 ): Promise<number | undefined> {
-  const result = await sandbox.runCommand("bash", ["-c", GROUP_SCRIPT, "sixb-background", path], {
-    ...(env === undefined ? {} : { env }),
-    timeout: CONTROL_TIMEOUT_MS,
-  })
+  const result = await sandbox.runCommand(
+    "bash",
+    ["-c", GROUP_SCRIPT, "sixb-background", path, nonce],
+    { ...(env === undefined ? {} : { env }), timeout: CONTROL_TIMEOUT_MS }
+  )
   const group = Number(result.stdout.trim())
   return result.exitCode === 0 && Number.isSafeInteger(group) && group > 1 ? group : undefined
 }
 
 /**
  * Signal its process group from inside the sandbox it runs in. False when nothing received it:
- * no group known yet, or one this sandbox cannot see, as a command run under a PID namespace of
- * its own.
+ * no group known, or one this sandbox cannot see, as a command run under a PID namespace of its
+ * own (bwrap): its stop is then the held call's abort, at once.
  */
 async function signalGroup(entry: BackgroundCommand, signal: "TERM" | "KILL"): Promise<boolean> {
   if (entry.group === undefined) return false
@@ -451,65 +443,31 @@ async function signalGroup(entry: BackgroundCommand, signal: "TERM" | "KILL"): P
   }
 }
 
-/** A command's display in a notice: its first line, cut. */
-function shortCommand(command: string): string {
-  const line = command.trim().split("\n")[0] ?? ""
-  const cut = line.length > NOTICE_COMMAND_CHARS ? `${line.slice(0, NOTICE_COMMAND_CHARS)}…` : line
-  return cut + (command.trim().includes("\n") ? " …" : "")
-}
-
-/** `2m14s`, `850ms`. */
-export function formatDuration(ms: number): string {
-  if (ms < 1_000) return `${Math.max(0, Math.round(ms))}ms`
-
-  const seconds = Math.round(ms / 1_000)
-  const hours = Math.floor(seconds / 3_600)
-  const minutes = Math.floor((seconds % 3_600) / 60)
-  const rest = seconds % 60
-  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}m`
-  if (minutes > 0) return `${minutes}m${String(rest).padStart(2, "0")}s`
-  return `${rest}s`
-}
-
-/** How an ended command reads in a notice. */
-export function endedLine(command: BackgroundCommandState): string {
-  const ran = formatDuration(
-    new Date(command.endedAt ?? command.startedAt).getTime() - new Date(command.startedAt).getTime()
-  )
-  const how =
-    command.status === "stopped"
-      ? "was stopped"
-      : `exited with code ${command.exitCode ?? "unknown"}`
-  return `Background command ${command.id} (\`${shortCommand(command.command)}\`) ${how} after ${ran}. Output: ${command.outputPath}`
-}
-
-/** How a command still running from an earlier turn reads in a notice. */
-export function runningLine(command: BackgroundCommandState, now: Date): string {
-  const since = formatDuration(now.getTime() - new Date(command.startedAt).getTime())
-  return `Background command ${command.id} (\`${shortCommand(command.command)}\`) is still running, started ${since} ago in an earlier turn. Output: ${command.outputPath}`
-}
-
 /**
  * Started detached from the held call's own output, in a process group of its own (`set -m`: no
- * `setsid` binary on macOS), its pid written first, then its exit code once it ended. Its exit is
- * the wrapper's. Arguments: output, pid and exit files, then the command.
+ * `setsid` binary on macOS), its pid written first with the start's nonce, then its exit code once
+ * it ended. Its exit is the wrapper's. Arguments: output, pid and exit files, nonce, command.
  */
 const START_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" || exit 1
-: > "$1" && rm -f -- "$2" "$3" || exit 1
+: > "$1" && rm -f -- "$3" || exit 1
 set -m
-bash -lc "$4" < /dev/null >> "$1" 2>&1 &
+bash -lc "$5" < /dev/null >> "$1" 2>&1 &
 pid=$!
 set +m
-echo "$pid" > "$2.tmp" && mv -f -- "$2.tmp" "$2"
+echo "$4 $pid" > "$2.tmp" && mv -f -- "$2.tmp" "$2"
 wait "$pid"
 code=$?
 echo "$code" > "$3"
 exit "$code"`
 
-/** Wait up to ten seconds for the pid file, then print it. */
+/** Wait up to ten seconds for the pid file this start's nonce names, then print the pid. */
 const GROUP_SCRIPT = `i=0
-while [ ! -s "$1" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i + 1)); done
-cat -- "$1"`
+while [ "$i" -lt 200 ]; do
+  { read -r nonce pid < "$1"; } 2>/dev/null && [ "$nonce" = "$2" ] && { echo "$pid"; exit 0; }
+  sleep 0.05
+  i=$((i + 1))
+done
+exit 1`
 
 /**
  * Print the output's size, a newline, then what follows the bytes already read: its newest

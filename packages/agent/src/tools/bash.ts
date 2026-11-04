@@ -32,7 +32,7 @@ export const BASH_TOOL_SPEC = {
       run_in_background: {
         type: "boolean",
         description:
-          "Run it in the background and return at once with its id and output file: for servers, watchers and long builds or test runs. Its stdout and stderr go to that file, which read reads. You are told when it ends; check it with bash_output, stop it with bash_stop. timeoutMs does not apply. It stops when the run ends, except in the user's own folder on their computer, where it keeps running after your turn until it exits, you stop it, or sixb closes there.",
+          "Run it in the background, returning at once with its id and output file: for servers, watchers, long builds. You are told when it ends; read it with bash_output, stop it with bash_stop. No timeout. It ends with the run, a pause for approval too, and its file with it; in the user's folder on their computer it runs until it exits, is stopped, or sixb quits.",
       },
     },
     required: ["command"],
@@ -64,23 +64,18 @@ export interface BashToolOutput extends CommandResult {
  */
 export function createBashTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>,
-  background?: BackgroundCommands
+  background: BackgroundCommands
 ): ModelTool<BashToolInput> {
   return {
     ...BASH_TOOL_SPEC,
     parseInput: parseBashToolInput,
     async execute(input, { signal }): Promise<JsonValue> {
       if (input.run_in_background) {
-        if (!background) {
-          throw new AgentToolPublicError(
-            "[SixbAgent] This run cannot run commands in the background."
-          )
-        }
-
         const started: BackgroundCommandState = await background.start({
           handle: await resolveSandbox(),
           command: input.command,
           ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+          signal,
         })
         return started as unknown as JsonValue
       }
