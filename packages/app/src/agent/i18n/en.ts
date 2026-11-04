@@ -488,6 +488,8 @@ export const en = {
   /** Headlines of the agent's shell commands: past tense when done, progressive while running. */
   bash: {
     preparing: "Preparing a command",
+    /** Beside a command stopped at its timeout, which reads otherwise as a plain failure. */
+    timedOut: (duration: string) => `timed out after ${duration}`,
     steps: {
       title: (steps: number) => `Ran ${count(steps, "step")}`,
       running: (steps: number) => `Running ${count(steps, "step")}`,

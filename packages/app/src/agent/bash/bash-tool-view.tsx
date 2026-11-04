@@ -30,6 +30,7 @@ import {
   coerceBashInput,
   coerceBashOutput,
   commandPreview,
+  commandTimeout,
   describeBash,
   humanize,
   type ModelMedia,
@@ -118,15 +119,19 @@ export function BashToolView({ tool }: { tool: BashTool }) {
   // users can still expand and debug it. (Exploratory commands often fail and the agent recovers;
   // surfacing that in red just makes a working run look broken.)
   if (isError && !running) {
+    // A timed-out command exits as its signal does (137): say what happened, not the code.
+    const detail = parsed?.timedOut
+      ? [description.detail, messages.bash.timedOut(commandTimeout(input))]
+          .filter(Boolean)
+          .join(" · ")
+      : description.detail
     return (
       <Collapsible>
         <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
           <Icon className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate font-medium">{label}</span>
-          {description.detail ? (
-            <span className="min-w-0 shrink truncate text-muted-foreground/60">
-              {description.detail}
-            </span>
+          {detail ? (
+            <span className="min-w-0 shrink truncate text-muted-foreground/60">{detail}</span>
           ) : null}
           <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
         </CollapsibleTrigger>

@@ -466,6 +466,7 @@ export const fr: Translation<AgentMessages> = {
   },
   bash: {
     preparing: "Préparation d’une commande",
+    timedOut: (duration) => `délai de ${duration} dépassé`,
     steps: {
       title: (steps) => count(steps, "étape exécutée", "étapes exécutées"),
       running: (steps) => `Exécution de ${count(steps, "étape")}`,

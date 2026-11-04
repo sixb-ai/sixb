@@ -106,6 +106,7 @@ describe("agent chat localization", () => {
         exitCode: 0,
         durationMs: 1,
         truncated: false,
+        timedOut: false,
         json: [{}, {}],
       },
       fr
