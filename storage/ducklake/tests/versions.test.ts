@@ -133,4 +133,19 @@ describe("DuckLake version metadata", () => {
       hasDeleteChange: false,
     })
   })
+
+  test("reads DuckLake's maintenance of a table as no data change", () => {
+    const none = { hasDataChange: false, hasDeleteChange: false }
+
+    expect(
+      parseTableDataChange("deleted_from_table:1,deleted_from_table:2,inline_flush:1", 1n)
+    ).toEqual(none)
+    expect(parseTableDataChange("merge_adjacent:3,rewrite_delete:3", 3n)).toEqual(none)
+
+    // Only the maintained table: another table's rows changed in the same snapshot.
+    expect(parseTableDataChange("inline_flush:1,deleted_from_table:2", 2n)).toEqual({
+      hasDataChange: true,
+      hasDeleteChange: true,
+    })
+  })
 })
