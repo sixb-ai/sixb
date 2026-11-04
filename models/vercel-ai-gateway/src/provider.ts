@@ -39,6 +39,7 @@ import {
   type SpeechModel,
   type TranscriptionModel,
   UnsupportedModelFeatureError,
+  type WebSearchModel,
 } from "@sixb/core/models"
 import {
   contextWindowRejection,
@@ -73,6 +74,11 @@ import {
   type GatewayTranscriptionPricing,
   type VercelGatewayTranscriptionOptions,
 } from "./transcription"
+import {
+  createGatewayWebSearch,
+  type VercelGatewayWebSearchEngine,
+  type VercelGatewayWebSearchOptions,
+} from "./web-search"
 
 type ValueSource<T> = T | (() => T)
 
@@ -93,6 +99,8 @@ export interface VercelGatewayOptions {
   readonly imageUrl?: string
   /** Full speech endpoint for proxies without the standard /v1 and /v4 URL layout. */
   readonly speechUrl?: string
+  /** Full language-model endpoint web search uses, for proxies without the /v1 and /v4 layout. */
+  readonly webSearchUrl?: string
   readonly apiKey?: ValueSource<string | undefined>
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
@@ -111,7 +119,11 @@ export interface VercelGatewayModelOptions extends LanguageModelLabel {
   readonly request?: JsonObject
   /** AI Gateway routing, fallback, caching, and provider-specific options. */
   readonly providerOptions?: JsonObject
-  /** Provider-native tools such as web search. Local Sixb tools are appended as functions. */
+  /**
+   * Provider-native tools, appended before Sixb's own. The Agent already searches the web with
+   * Sixb's `web_search`, through this provider's `webSearch`; declare a native search only when you
+   * need that one instead.
+   */
   readonly providerTools?: readonly JsonObject[]
   readonly capabilities?: ModelCapabilities
 }
@@ -131,6 +143,14 @@ export interface VercelGateway extends LanguageModelProvider {
   /** Image models, and language models that answer with images, such as Gemini image models. */
   image(modelId: string, options?: VercelGatewayImageOptions): ImageModel
   speech(modelId: string, options?: VercelGatewaySpeechOptions): SpeechModel
+  /**
+   * Web search through one of Gateway's search tools, Perplexity by default. Every language model
+   * of this provider carries `webSearch("perplexity")`, so a project needs no other search.
+   */
+  webSearch(
+    engine?: VercelGatewayWebSearchEngine,
+    options?: VercelGatewayWebSearchOptions
+  ): WebSearchModel
 }
 
 export function createVercelGateway(options: VercelGatewayOptions = {}): VercelGateway {
@@ -149,6 +169,28 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   }
   const configuredModels = configuredModelDefinitions(options.models ?? [])
   const catalog = new RemoteVercelGatewayCatalog(transport, configuredModels)
+  const webSearch = (
+    engine: VercelGatewayWebSearchEngine = "perplexity",
+    searchOptions: VercelGatewayWebSearchOptions = {}
+  ) =>
+    createGatewayWebSearch(engine, structuredClone(searchOptions), {
+      // Resolved per search: a proxy without the /v1 layout must not break its language models.
+      url: () => v4Endpoint(baseUrl, options.webSearchUrl, "language-model", "webSearchUrl"),
+      fetch: transport.fetch ?? fetch,
+      headers: () => gatewayHeaders(transport, "application/json"),
+      httpError: (response, modelId) => providerHttpError(response, PROVIDER_ID, modelId),
+      metadata: (payload, requestId) => {
+        // The wrapper model's tokens; the search itself is billed per call.
+        const raw = object(payload.usage)
+        return {
+          usage: raw ? { raw } : {},
+          providerIds: gatewayProviderIds(payload, requestId),
+          reportedCost: gatewayReportedCost(gatewayMetadata(payload)),
+        }
+      },
+    })
+  // One search binding for every language model, so each offers the same one.
+  const defaultWebSearch = webSearch()
   const model = (modelId: string, modelOptions: VercelGatewayModelOptions = {}) => {
     if (!modelId.trim()) throw new TypeError("[SixbVercelGateway] Model id must not be empty.")
     return new VercelGatewayLanguageModel(
@@ -156,12 +198,14 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
       catalog,
       modelId,
       structuredClone(modelOptions),
-      configuredModels.get(modelId)
+      configuredModels.get(modelId),
+      defaultWebSearch
     )
   }
   return Object.assign(model, {
     providerId: PROVIDER_ID as typeof PROVIDER_ID,
     catalog,
+    webSearch,
     image: (modelId: string, imageOptions: VercelGatewayImageOptions = {}) => {
       const snapshot = structuredClone(imageOptions)
       return createGatewayImage(modelId, snapshot, {
@@ -1099,6 +1143,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
     modelId: string,
     private readonly options: VercelGatewayModelOptions,
     configuredDefinition: LanguageModelDefinition | undefined,
+    readonly webSearch: WebSearchModel,
     private readonly metadataResolved = false
   ) {
     this.modelId = modelId
@@ -1168,6 +1213,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
       this.modelId,
       this.options,
       definition ?? this.definition,
+      this.webSearch,
       true
     )
   }

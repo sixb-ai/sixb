@@ -703,8 +703,8 @@ A web search model searches the web and returns links with a title and a snippet
 | Otherwise | The default language model's own web search, else the first language model's that has one |
 | Neither | Nothing: no web search |
 
-A language model only brings a web search when its provider offers one under the same key. To
-choose another, list it first:
+A language model only brings a web search when its provider offers one under the same key:
+Vercel AI Gateway models do. To choose another, list it first:
 
 ```ts
 models: {
