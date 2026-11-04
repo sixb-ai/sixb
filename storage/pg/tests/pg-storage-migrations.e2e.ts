@@ -124,6 +124,7 @@ const SHIPPED_MIGRATIONS = [
   "084-agent-token-rates",
   "085-agent-computer-sessions",
   "086-partition-objects",
+  "087-agent-computer-background-commands",
 ]
 
 const steps = postgresStorageMigrations.steps

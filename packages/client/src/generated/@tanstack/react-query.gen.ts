@@ -195,6 +195,7 @@ import {
   signOutAll,
   signOutSharedAccess,
   startConnectorConnectionRun,
+  stopAgentBackgroundCommand,
   submitWorkflowIntervention,
   suspendAuthMember,
   transcribeAudio,
@@ -743,6 +744,9 @@ import type {
   StartConnectorConnectionRunData,
   StartConnectorConnectionRunError,
   StartConnectorConnectionRunResponse,
+  StopAgentBackgroundCommandData,
+  StopAgentBackgroundCommandError,
+  StopAgentBackgroundCommandResponse,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionError,
   SubmitWorkflowInterventionResponse,
@@ -5202,7 +5206,7 @@ export const releaseAgentComputerSessionMutation = (
 /**
  * Open or renew a computer session
  *
- * `sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. The answer lists the turns waiting for it.
+ * `sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. It reports the background commands it runs for your threads; the answer lists the turns waiting for it, and the commands someone asked to stop.
  */
 export const holdAgentComputerSessionMutation = (
   options?: Partial<Options<HoldAgentComputerSessionData>>
@@ -5218,6 +5222,35 @@ export const holdAgentComputerSessionMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await holdAgentComputerSession({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Stop a background command on your computer
+ *
+ * A command the agent ran in the background on your computer keeps running after its turn. `sixb` there stops it, and everything it started, at its next renewal, which this asks for at once. The thread's owner alone stops it.
+ */
+export const stopAgentBackgroundCommandMutation = (
+  options?: Partial<Options<StopAgentBackgroundCommandData>>
+): UseMutationOptions<
+  StopAgentBackgroundCommandResponse,
+  StopAgentBackgroundCommandError,
+  Options<StopAgentBackgroundCommandData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    StopAgentBackgroundCommandResponse,
+    StopAgentBackgroundCommandError,
+    Options<StopAgentBackgroundCommandData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await stopAgentBackgroundCommand({
         ...options,
         ...fnOptions,
         throwOnError: true,

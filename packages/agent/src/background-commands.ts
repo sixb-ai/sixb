@@ -96,6 +96,13 @@ interface BackgroundCommand {
 export class BackgroundCommands {
   readonly #commands = new Map<string, BackgroundCommand>()
 
+  constructor(
+    private readonly options: {
+      /** Called as a command starts or ends: a computer reports its commands then. */
+      readonly onChange?: () => void
+    } = {}
+  ) {}
+
   /** Whether it ever started one: their files are then worth keeping for a later turn. */
   get hasCommands(): boolean {
     return this.#commands.size > 0
@@ -195,9 +202,12 @@ export class BackgroundCommands {
 
     if (entry.failure !== undefined) {
       this.#commands.delete(id)
+      this.options.onChange?.()
       throw new AgentToolPublicError(`[SixbAgent] The command could not start: ${entry.failure}`)
     }
     if (entry.status !== "running") entry.reported = true
+
+    this.options.onChange?.()
     return state(entry)
   }
 
@@ -376,6 +386,7 @@ export class BackgroundCommands {
       // Its sandbox went away under it, or never ran it.
       entry.status = "stopped"
       console.warn(`[SixbAgent] Background command ${entry.id} ended with its sandbox:`, error)
+      this.options.onChange?.()
       return
     }
 
@@ -391,6 +402,8 @@ export class BackgroundCommands {
 
     // Past its bound, the held call's abort stopped the wrapper, not the group it started.
     if (result.timedOut) void signalGroup(entry, "KILL")
+
+    this.options.onChange?.()
   }
 }
 

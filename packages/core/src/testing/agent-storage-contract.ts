@@ -1159,6 +1159,76 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    // Removal proofs: have a renewal write no stop requests (those asked are lost); drop the check
+    // that a request is not kept yet (a second click lists it twice).
+    test("keeps what an open sixb reports of its background commands, and the stops asked", async () => {
+      await withStorage(async (storage) => {
+        const live = at("2026-06-23T12:01:00.000Z")
+        const session = (overrides: Partial<AgentComputerSessionRecord> = {}) => ({
+          projectId,
+          id: "s_1",
+          ownerPrincipal: owner,
+          computer: laptop,
+          expiresAt: live,
+          ...overrides,
+        })
+        const running = {
+          threadId: "thr_1",
+          id: "bg_1",
+          command: "bun dev",
+          status: "running" as const,
+          startedAt: "2026-06-23T11:59:00.000Z",
+        }
+        const ref = { threadId: "thr_1", id: "bg_1", startedAt: running.startedAt }
+        const stop = (command = ref, ownerPrincipal: Principal = owner) =>
+          storage.computers.requestStop({ projectId, id: "s_1", ownerPrincipal, command })
+
+        await storage.computers.hold(session({ backgroundCommands: [running] }))
+        await expect(stop()).resolves.toEqual(
+          session({ backgroundCommands: [running], stopRequests: [ref] })
+        )
+        await expect(stop()).resolves.toEqual(
+          session({ backgroundCommands: [running], stopRequests: [ref] })
+        )
+        await expect(stop(ref, otherUser)).resolves.toBeNull()
+
+        // A renewal reports the commands anew, and keeps what was asked of them.
+        const stopped = {
+          ...running,
+          status: "stopped" as const,
+          exitCode: 143,
+          endedAt: "2026-06-23T12:00:30.000Z",
+        }
+        await storage.computers.hold(session({ backgroundCommands: [stopped] }))
+        await expect(
+          storage.computers.listLive({
+            projectId,
+            ownerPrincipal: owner,
+            now: at(running.startedAt),
+          })
+        ).resolves.toEqual([session({ backgroundCommands: [stopped], stopRequests: [ref] })])
+
+        // The newest requests are kept.
+        for (let index = 2; index <= 65; index += 1) await stop({ ...ref, id: `bg_${index}` })
+        const [kept] = await storage.computers.listLive({
+          projectId,
+          ownerPrincipal: owner,
+          now: at(running.startedAt),
+        })
+        expect(kept?.stopRequests?.length).toBe(64)
+        expect(kept?.stopRequests?.[0]?.id).toBe("bg_2")
+        expect(kept?.stopRequests?.at(-1)?.id).toBe("bg_65")
+
+        await expectAgentError(stop({ ...ref, id: "" }), "invalid_input")
+        await expectAgentError(
+          storage.computers.hold(
+            session({ backgroundCommands: [{ ...running, status: "lost" as "running" }] })
+          ),
+          "invalid_input"
+        )
+      })
+    })
+
     test("reads several threads at once, in the order asked", async () => {
       await withStorage(async (storage) => {
         const first = await storage.threads.create(threadInput())

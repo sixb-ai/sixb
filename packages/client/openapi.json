@@ -36292,6 +36292,49 @@
                               },
                               "online": {
                                 "type": "boolean"
+                              },
+                              "backgroundCommands": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "threadId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "command": {
+                                      "type": "string",
+                                      "maxLength": 1000
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": ["running", "exited", "stopped"]
+                                    },
+                                    "exitCode": {
+                                      "type": "integer"
+                                    },
+                                    "startedAt": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "endedAt": {
+                                      "type": "string",
+                                      "maxLength": 200
+                                    },
+                                    "stopping": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": ["threadId", "id", "command", "status", "startedAt"],
+                                  "additionalProperties": false
+                                }
                               }
                             },
                             "required": ["id", "name", "folder", "online"],
@@ -36795,6 +36838,49 @@
                             },
                             "online": {
                               "type": "boolean"
+                            },
+                            "backgroundCommands": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "threadId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "command": {
+                                    "type": "string",
+                                    "maxLength": 1000
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "exited", "stopped"]
+                                  },
+                                  "exitCode": {
+                                    "type": "integer"
+                                  },
+                                  "startedAt": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "endedAt": {
+                                    "type": "string",
+                                    "maxLength": 200
+                                  },
+                                  "stopping": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["threadId", "id", "command", "status", "startedAt"],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": ["id", "name", "folder", "online"],
@@ -37118,6 +37204,49 @@
                         },
                         "online": {
                           "type": "boolean"
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
@@ -37566,6 +37695,49 @@
                         },
                         "online": {
                           "type": "boolean"
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
@@ -38062,6 +38234,49 @@
                             },
                             "online": {
                               "type": "boolean"
+                            },
+                            "backgroundCommands": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "threadId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "command": {
+                                    "type": "string",
+                                    "maxLength": 1000
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["running", "exited", "stopped"]
+                                  },
+                                  "exitCode": {
+                                    "type": "integer"
+                                  },
+                                  "startedAt": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "endedAt": {
+                                    "type": "string",
+                                    "maxLength": 200
+                                  },
+                                  "stopping": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["threadId", "id", "command", "status", "startedAt"],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": ["id", "name", "folder", "online"],
@@ -38443,6 +38658,49 @@
                         },
                         "online": {
                           "type": "boolean"
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
@@ -44430,6 +44688,49 @@
                         },
                         "online": {
                           "type": "boolean"
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
@@ -44785,6 +45086,49 @@
                         },
                         "online": {
                           "type": "boolean"
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
@@ -44943,7 +45287,7 @@
     "/api/agent-computers/sessions/{sessionId}": {
       "put": {
         "summary": "Open or renew a computer session",
-        "description": "`sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. The answer lists the turns waiting for it.",
+        "description": "`sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. It reports the background commands it runs for your threads; the answer lists the turns waiting for it, and the commands someone asked to stop.",
         "tags": ["Agent Threads"],
         "operationId": "holdAgentComputerSession",
         "security": [
@@ -44994,6 +45338,47 @@
                     },
                     "required": ["id", "name", "folder"],
                     "additionalProperties": false
+                  },
+                  "backgroundCommands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "command": {
+                          "type": "string",
+                          "maxLength": 1000
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running", "exited", "stopped"]
+                        },
+                        "exitCode": {
+                          "type": "integer"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "endedAt": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "required": ["threadId", "id", "command", "status", "startedAt"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 64
                   }
                 },
                 "required": ["computer"],
@@ -45025,6 +45410,47 @@
                     },
                     "required": ["id", "name", "folder"],
                     "additionalProperties": false
+                  },
+                  "backgroundCommands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "command": {
+                          "type": "string",
+                          "maxLength": 1000
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running", "exited", "stopped"]
+                        },
+                        "exitCode": {
+                          "type": "integer"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "endedAt": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "required": ["threadId", "id", "command", "status", "startedAt"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 64
                   }
                 },
                 "required": ["computer"],
@@ -45056,6 +45482,47 @@
                     },
                     "required": ["id", "name", "folder"],
                     "additionalProperties": false
+                  },
+                  "backgroundCommands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "command": {
+                          "type": "string",
+                          "maxLength": 1000
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running", "exited", "stopped"]
+                        },
+                        "exitCode": {
+                          "type": "integer"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "endedAt": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "required": ["threadId", "id", "command", "status", "startedAt"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 64
                   }
                 },
                 "required": ["computer"],
@@ -45079,6 +45546,25 @@
                       "type": "array",
                       "items": {
                         "type": "string"
+                      }
+                    },
+                    "stop": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "threadId": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["threadId", "id", "startedAt"],
+                        "additionalProperties": false
                       }
                     }
                   },
@@ -45175,6 +45661,223 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/background-commands/{commandId}/stop": {
+      "post": {
+        "summary": "Stop a background command on your computer",
+        "description": "A command the agent ran in the background on your computer keeps running after its turn. `sixb` there stops it, and everything it started, at its next renewal, which this asks for at once. The thread's owner alone stops it.",
+        "tags": ["Agent Threads"],
+        "operationId": "stopAgentBackgroundCommand",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "startedAt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["startedAt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "startedAt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["startedAt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "startedAt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": ["startedAt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "command": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "command": {
+                          "type": "string",
+                          "maxLength": 1000
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running", "exited", "stopped"]
+                        },
+                        "exitCode": {
+                          "type": "integer"
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "endedAt": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "stopping": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["threadId", "id", "command", "status", "startedAt"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["command"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
               }
             }
           },
@@ -45654,6 +46357,49 @@
                         },
                         "online": {
                           "type": "boolean"
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],
@@ -48150,6 +48896,49 @@
                         },
                         "online": {
                           "type": "boolean"
+                        },
+                        "backgroundCommands": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 1000
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "exited", "stopped"]
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "startedAt": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "endedAt": {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              "stopping": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["threadId", "id", "command", "status", "startedAt"],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": ["id", "name", "folder", "online"],

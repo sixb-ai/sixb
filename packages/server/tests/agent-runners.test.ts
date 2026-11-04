@@ -533,6 +533,73 @@ describe("a runner outside the worker", () => {
     expect(await held.json()).toMatchObject({ waiting: [runId] })
   })
 
+  // Guard proofs: drop the owner check from the stop route (Bob stops what runs on Ava's laptop);
+  // compare no start in it (a stop meant for the bg_1 of before sixb restarted stops today's); hand
+  // back no stop in the hold answer (sixb never hears it).
+  test("shows its owner the background commands sixb reports, and hands back the stops she asks for", async () => {
+    const { person, ask, call, storage, host } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Serve the docs while you edit them.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    const running = {
+      threadId,
+      id: "bg_1",
+      command: "bun run docs",
+      status: "running",
+      startedAt: "2026-11-04T10:00:00.000Z",
+    }
+    const ref = { threadId, id: "bg_1", startedAt: running.startedAt }
+    const hold = async (backgroundCommands: readonly object[]) =>
+      (
+        await call(ava, "PUT", "/api/agent-computers/sessions/cs_ava", {
+          computer: LAPTOP,
+          backgroundCommands,
+        })
+      ).json()
+    const commands = async () =>
+      (
+        (await (await call(ava, "GET", `/api/agent-threads/${threadId}`)).json()) as {
+          computer?: { backgroundCommands?: unknown }
+        }
+      ).computer?.backgroundCommands
+    const stop = (as: typeof ava, startedAt = running.startedAt) =>
+      call(as, "POST", `/api/agent-threads/${threadId}/background-commands/bg_1/stop`, {
+        startedAt,
+      })
+
+    expect(await hold([running])).not.toHaveProperty("stop")
+    expect(await commands()).toEqual([running])
+
+    // Only Ava stops it, and only the command that started then.
+    expect((await stop(bob)).status).toBe(403)
+    expect((await stop(ava, "2026-11-04T09:00:00.000Z")).status).toBe(404)
+    const stopped = await stop(ava)
+    expect(stopped.status).toBe(202)
+    expect(await stopped.json()).toEqual({ command: { ...running, stopping: true } })
+    expect(await commands()).toEqual([{ ...running, stopping: true }])
+
+    // Her sixb hears of it at its next renewal, again until the command ended.
+    expect(await hold([running])).toMatchObject({ stop: [ref] })
+    expect(await hold([running])).toMatchObject({ stop: [ref] })
+    const ended = { ...running, status: "stopped", exitCode: 143, endedAt: "2026-11-04T10:05:00Z" }
+    expect(await hold([ended])).not.toHaveProperty("stop")
+    expect(await commands()).toEqual([ended])
+    expect((await stop(ava)).status).toBe(404)
+
+    // The web heard of each change: the folder coming online with it, the stop, and its end.
+    const { records } = await host.broker.read({ projectId, streamId: "agents.activity" })
+    const heard = records.filter((record) => record.name === "agent.computer.activity")
+    expect(heard).toHaveLength(3)
+  })
+
   // Guard proof: drop the MAX_SESSIONS check from the session route; one person holds sessions
   // without end, each a row the sweeper reads and an event every client hears.
   test("keeps a person to twenty open sixb sessions", async () => {

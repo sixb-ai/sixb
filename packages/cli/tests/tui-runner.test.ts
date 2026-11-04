@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type {
+  ComputerBackgroundCommand,
+  ComputerBackgroundCommandRef,
+  ComputerRunner,
+} from "@sixb/agent"
 import { createSixbClient } from "@sixb/client"
 import { thisComputerId } from "../src/tui/computer"
 import type { Connection } from "../src/tui/connection"
@@ -59,6 +64,8 @@ async function avasRunner(
     updatedAt: "2026-10-31T09:00:00.000Z",
   }
   const sessions: { readonly method: string; readonly body: unknown }[] = []
+  /** What a renewal's answer adds: the commands the web asked to stop. */
+  const renewals: { stop?: readonly object[] } = {}
   const answer = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
     const path = new URL(request.url).pathname
@@ -71,7 +78,11 @@ async function avasRunner(
       })
       if (request.method === "DELETE") return new Response(null, { status: 204 })
       await renewalGate
-      return Response.json({ expiresAt: "2026-10-31T09:01:00.000Z", waiting: ["run_9"] })
+      return Response.json({
+        expiresAt: "2026-10-31T09:01:00.000Z",
+        waiting: ["run_9"],
+        ...renewals,
+      })
     }
     return Response.json({ error: "Not found" }, { status: 404 })
   }
@@ -98,7 +109,21 @@ async function avasRunner(
     heard()
     return true
   }
-  return { runner, claimed, claimedOne, sessions }
+  return { runner, claimed, claimedOne, sessions, renewals }
+}
+
+/** The background commands of Ava's runner, as its ComputerRunner would report and stop them. */
+function backgroundOf(runner: LocalRunner, commands: readonly ComputerBackgroundCommand[]) {
+  const stopped: ComputerBackgroundCommandRef[] = []
+  const fake: Pick<ComputerRunner, "backgroundCommands" | "stopBackgroundCommand"> = {
+    backgroundCommands: () => commands,
+    stopBackgroundCommand: async (ref) => {
+      stopped.push(ref)
+      return true
+    },
+  }
+  Object.assign(runner, { runner: fake })
+  return { stopped }
 }
 
 describe("sixb open in a conversation's folder", () => {
@@ -173,6 +198,57 @@ describe("a session", () => {
 
     await runner.closeSession()
     expect(sessions.at(-1)?.method).toBe("DELETE")
+  })
+})
+
+describe("a background command", () => {
+  const ref = { threadId: "thr_1", id: "bg_1", startedAt: "2026-10-31T09:00:00.000Z" }
+  const running = { ...ref, command: "bun run dev", status: "running" as const }
+
+  // Guard proofs: drop the loop over `stop` from openSession; the command Ava stopped from the web
+  // runs on. Drop backgroundCommands from the session's body; the web never shows it.
+  test("is reported with the session, and stopped when the web asks", async () => {
+    const { runner, sessions, renewals } = await avasRunner({ status: "running" })
+    const { stopped } = backgroundOf(runner, [running])
+    renewals.stop = [ref]
+
+    runner.openSession()
+    try {
+      while (sessions.length === 0) await Bun.sleep(0)
+      for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(0)
+      expect(sessions[0]?.body).toMatchObject({ backgroundCommands: [running] })
+      expect(stopped).toEqual([ref])
+    } finally {
+      await runner.closeSession()
+    }
+  })
+
+  // Guard proof: drop `queued` from openSession's renew; each change sends its own renewal, and
+  // they may land out of order, an older report over a newer one.
+  test("renews the session at once as it changes, one renewal at a time", async () => {
+    let answer = () => {}
+    const gate = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    const { runner, sessions } = await avasRunner({ status: "running" }, {}, gate)
+    backgroundOf(runner, [running])
+
+    runner.openSession()
+    try {
+      while (sessions.length === 0) await Bun.sleep(0)
+      runner.renewSession()
+      runner.renewSession()
+      runner.renewSession()
+      for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(0)
+      expect(sessions).toHaveLength(1)
+
+      answer()
+      while (sessions.length < 2) await Bun.sleep(0)
+      for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(0)
+      expect(sessions).toHaveLength(2)
+    } finally {
+      await runner.closeSession()
+    }
   })
 })
 

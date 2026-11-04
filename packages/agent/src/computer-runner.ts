@@ -11,7 +11,12 @@ import {
 } from "@sixb/core/internal/agents"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { delay } from "./abort"
-import { BACKGROUND_DIRECTORY, BackgroundCommands, stopLeftRunning } from "./background-commands"
+import {
+  BACKGROUND_DIRECTORY,
+  type BackgroundCommandStatus,
+  BackgroundCommands,
+  stopLeftRunning,
+} from "./background-commands"
 import { ChildRunner } from "./run-child"
 import { runConversationTurn } from "./run-conversation-turn"
 import { runApiCredential, runnerTokenFor, runTokenFor } from "./run-credential"
@@ -58,8 +63,39 @@ export interface ComputerRunnerOptions {
   readonly childCapacity?: number
   /** A run that failed, once its end is recorded. */
   readonly onFailure?: (error: unknown) => void
+  /**
+   * A background command started or ended: the computer's session reports
+   * {@link ComputerRunner.backgroundCommands} at once, so the web shows it.
+   */
+  readonly onBackgroundChange?: () => void
   readonly fetch?: (request: Request) => Promise<Response>
 }
+
+/** A thread's background command, as the computer reports it to the web. */
+export interface ComputerBackgroundCommand {
+  readonly threadId: string
+  /** `bg_<n>`: unique in its thread while `sixb` stays open, with `startedAt` beyond. */
+  readonly id: string
+  /** Cut to {@link REPORTED_COMMAND_CHARS}. */
+  readonly command: string
+  readonly status: BackgroundCommandStatus
+  readonly exitCode?: number
+  /** ISO timestamps. */
+  readonly startedAt: string
+  readonly endedAt?: string
+}
+
+/** Which command a stop names: an id comes again once `sixb` restarts, its start does not. */
+export interface ComputerBackgroundCommandRef {
+  readonly threadId: string
+  readonly id: string
+  readonly startedAt: string
+}
+
+/** How many commands the computer reports: the running ones, then the latest to end. */
+const REPORTED_COMMANDS = 64
+/** How much of each command it reports: the web shows the rest from the call. */
+const REPORTED_COMMAND_CHARS = 1_000
 
 /** How far ahead a lease is held, and how often it is renewed: a renewal also hears a cancel. */
 const LEASE_MS = 60_000
@@ -185,6 +221,46 @@ export class ComputerRunner {
    */
   async stopBackgroundCommands(): Promise<void> {
     await Promise.all([...this.background.values()].map((commands) => commands.stopAll()))
+  }
+
+  /**
+   * Every thread's background commands while `sixb` stays open: the running ones, then the latest
+   * to end, {@link REPORTED_COMMANDS} at most.
+   */
+  backgroundCommands(): readonly ComputerBackgroundCommand[] {
+    const all = [...this.background].flatMap(([threadId, commands]) =>
+      commands.list().map(
+        (command): ComputerBackgroundCommand => ({
+          threadId,
+          id: command.id,
+          command: command.command.slice(0, REPORTED_COMMAND_CHARS),
+          status: command.status,
+          ...(command.exitCode === undefined ? {} : { exitCode: command.exitCode }),
+          startedAt: command.startedAt,
+          ...(command.endedAt === undefined ? {} : { endedAt: command.endedAt }),
+        })
+      )
+    )
+    const running = all.filter((command) => command.status === "running")
+    const ended = all
+      .filter((command) => command.status !== "running")
+      .sort((a, b) => (b.endedAt ?? "").localeCompare(a.endedAt ?? ""))
+    return [...running, ...ended].slice(0, REPORTED_COMMANDS)
+  }
+
+  /**
+   * Stop a thread's background command, as someone asked from the web. False when it is not one
+   * this `sixb` runs: it ended already, or the id names a later command, after a restart.
+   */
+  async stopBackgroundCommand(ref: ComputerBackgroundCommandRef): Promise<boolean> {
+    const commands = this.background.get(ref.threadId)
+    const command = commands?.list().find((each) => each.id === ref.id)
+    if (!commands || command?.startedAt !== ref.startedAt || command.status !== "running") {
+      return false
+    }
+
+    await commands.stop(ref.id)
+    return true
   }
 
   /** Wait for sandbox teardowns that outlived their runs. */
@@ -385,7 +461,8 @@ export class ComputerRunner {
   private threadBackground(threadId: string): BackgroundCommands {
     let commands = this.background.get(threadId)
     if (!commands) {
-      commands = new BackgroundCommands()
+      const { onBackgroundChange } = this.options
+      commands = new BackgroundCommands(onBackgroundChange ? { onChange: onBackgroundChange } : {})
       this.background.set(threadId, commands)
     }
     return commands

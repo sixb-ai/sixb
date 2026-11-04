@@ -457,6 +457,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("084-agent-token-rates", agentTokenRatesSql),
     pgSql("085-agent-computer-sessions", agentComputerSessionsSql),
     pgSql("086-partition-objects", partitionObjectsSql),
+    pgSql("087-agent-computer-background-commands", agentComputerBackgroundCommandsSql),
   ],
 })
 
@@ -529,3 +530,6 @@ import agentComputerSessionsSql from "./migrations/085-agent-computer-sessions.s
   type: "text",
 }
 import partitionObjectsSql from "./migrations/086-partition-objects.sql" with { type: "text" }
+import agentComputerBackgroundCommandsSql from "./migrations/087-agent-computer-background-commands.sql" with {
+  type: "text",
+}

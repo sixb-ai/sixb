@@ -258,6 +258,36 @@ export interface AgentComputerSessionRecord {
   readonly ownerPrincipal: Principal
   readonly computer: AgentThreadComputer
   readonly expiresAt: Date
+  /** Its threads' background commands, as its latest renewal reported them. */
+  readonly backgroundCommands?: readonly AgentComputerBackgroundCommand[]
+  /** The commands someone asked to stop: each renewal hands back those still running. */
+  readonly stopRequests?: readonly AgentBackgroundCommandRef[]
+}
+
+/** How many background commands a computer session reports, and keeps stop requests for. */
+export const AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX = 64
+
+/**
+ * A background command an open `sixb` runs for one of its threads, which outlives the turn that
+ * started it: the web shows how it stands between turns.
+ */
+export interface AgentComputerBackgroundCommand {
+  readonly threadId: string
+  /** `bg_<n>`, as the agent's tools name it. */
+  readonly id: string
+  readonly command: string
+  readonly status: "running" | "exited" | "stopped"
+  readonly exitCode?: number
+  /** ISO timestamps. */
+  readonly startedAt: string
+  readonly endedAt?: string
+}
+
+/** A background command by its start: its id comes again once `sixb` restarts. */
+export interface AgentBackgroundCommandRef {
+  readonly threadId: string
+  readonly id: string
+  readonly startedAt: string
 }
 
 export interface RemoveAgentThreadParticipantInput {
@@ -1252,8 +1282,21 @@ export const AGENT_MEMORY_HISTORY_DAYS = 90
 
 /** Each open `sixb` on its owner's computers, as a lease it renews. */
 export interface AgentComputerSessionStore {
-  /** Open the session, or renew it until `expiresAt`; its computer and folder are kept as given. */
-  hold(input: AgentComputerSessionRecord): Promise<void>
+  /**
+   * Open the session, or renew it until `expiresAt`; its computer, folder and background commands
+   * are kept as given, and its stop requests as they are.
+   */
+  hold(input: Omit<AgentComputerSessionRecord, "stopRequests">): Promise<void>
+  /**
+   * Record that someone asked to stop one of its commands, once, keeping the newest
+   * {@link AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX}. Null when the owner holds no such session.
+   */
+  requestStop(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly ownerPrincipal: Principal
+    readonly command: AgentBackgroundCommandRef
+  }): Promise<AgentComputerSessionRecord | null>
   /** End the owner's session; null when it is not open. */
   release(input: {
     readonly projectId: string

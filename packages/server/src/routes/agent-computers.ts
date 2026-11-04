@@ -1,8 +1,14 @@
-import type { SixbHostView } from "@sixb/core"
+import {
+  AgentRequestError,
+  principalsEqual,
+  type SixbHostView,
+  stableJsonStringify,
+} from "@sixb/core"
 import { sameComputerPlace } from "@sixb/core/internal/agent-run-storage-provider"
 import type { AgentRunSessionHost } from "@sixb/core/internal/agents"
 import { publishAgentComputerActivity } from "@sixb/core/internal/agents/streams"
 import type {
+  AgentComputerBackgroundCommand,
   AgentComputerSessionRecord,
   AgentStorage,
   AgentThreadComputer,
@@ -15,6 +21,7 @@ import { requestActor, requireRequestSixb } from "../auth/scope"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
+  AgentBackgroundCommandParamsSchema,
   AgentComputerSessionParamsSchema,
   AgentRequestErrorResponseSchema,
   AgentThreadComputerInputSchema,
@@ -23,10 +30,17 @@ import {
   HoldAgentComputerSessionBodySchema,
   HoldAgentComputerSessionResponseSchema,
   MoveAgentThreadToComputerBodySchema,
+  StopAgentBackgroundCommandBodySchema,
+  StopAgentBackgroundCommandResponseSchema,
 } from "../schemas/agents"
 import { ErrorResponseSchema } from "../schemas/common"
 import { unconfiguredStorageResponse } from "../utils/http"
-import { handleAgentRouteError, principalKey, serializeThreadRead } from "./agents"
+import {
+  handleAgentRouteError,
+  principalKey,
+  sameBackgroundCommand,
+  serializeThreadRead,
+} from "./agents"
 
 // A computer's thread runs on one of its owner's computers, in one folder there: only `sixb` open
 // in that folder claims its turns. Each open `sixb` holds a session, a lease it renews, so the
@@ -183,7 +197,8 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
           const agents = host.storage.agents
           if (!agents) return unconfiguredStorageResponse(set, "Agent storage")
 
-          const { computer } = HoldAgentComputerSessionBodySchema.parse(body)
+          const { computer, backgroundCommands = [] } =
+            HoldAgentComputerSessionBodySchema.parse(body)
           const ownerPrincipal = requestActor(sixb)
           const now = new Date()
           const before = await agents.computers.listLive({
@@ -207,13 +222,29 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
             ownerPrincipal,
             computer,
             expiresAt,
+            ...(backgroundCommands.length > 0 ? { backgroundCommands } : {}),
           })
-          if (!before.some((session) => sameComputerPlace(session.computer, computer))) {
+
+          // The web follows the folder coming online, and its commands starting and ending.
+          const held = before.find((session) => session.id === params.sessionId)
+          const reported = !sameCommands(held?.backgroundCommands ?? [], backgroundCommands)
+          if (
+            reported ||
+            !before.some((session) => sameComputerPlace(session.computer, computer))
+          ) {
             await announce(host, ownerPrincipal, computer, true)
           }
+
+          // What was asked to stop, as long as it runs: a lost answer leaves it for the next one.
+          const stop = (held?.stopRequests ?? []).filter((ref) =>
+            backgroundCommands.some(
+              (command) => command.status === "running" && sameBackgroundCommand(command, ref)
+            )
+          )
           return HoldAgentComputerSessionResponseSchema.parse({
             expiresAt: expiresAt.toISOString(),
             waiting: await waitingTurns(host, agents, ownerPrincipal, computer),
+            ...(stop.length > 0 ? { stop } : {}),
           })
         } catch (error) {
           return handleAgentRouteError(error, set)
@@ -231,9 +262,95 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Open or renew a computer session",
           description:
-            "`sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. The answer lists the turns waiting for it.",
+            "`sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. It reports the background commands it runs for your threads; the answer lists the turns waiting for it, and the commands someone asked to stop.",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "holdAgentComputerSession",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/agent-threads/:threadId/background-commands/:commandId/stop",
+      async (context) => {
+        const { params, body, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          const agents = host.storage.agents
+          if (!agents) return unconfiguredStorageResponse(set, "Agent storage")
+
+          const { startedAt } = StopAgentBackgroundCommandBodySchema.parse(body)
+          const thread = await sixb.agent.threads.getById(params.threadId)
+          if (!thread) {
+            throw new AgentRequestError("thread_not_found", "[SixbServer] Agent thread not found.")
+          }
+
+          // It runs on its owner's computer, under their account: as moving the thread, theirs to
+          // stop. Anyone else asks the agent, whose turn its requester can stop.
+          const ownerPrincipal = requestActor(sixb)
+          if (!principalsEqual(thread.ownerPrincipal, ownerPrincipal)) {
+            throw new AgentRequestError(
+              "not_thread_owner",
+              `[SixbServer] Only the owner of Agent thread '${thread.id}' stops its background commands, which run on their computer.`
+            )
+          }
+
+          const ref = { threadId: thread.id, id: params.commandId, startedAt }
+          const place = thread.computer
+          const live = place
+            ? await agents.computers.listLive({
+                projectId: host.id,
+                ownerPrincipal,
+                now: new Date(),
+              })
+            : []
+          const running = live
+            .filter((session) => place && sameComputerPlace(session.computer, place))
+            .flatMap((session) =>
+              (session.backgroundCommands ?? []).map((command) => ({ session, command }))
+            )
+            .find(
+              ({ command }) => command.status === "running" && sameBackgroundCommand(command, ref)
+            )
+          if (!running) {
+            set.status = 404
+            return {
+              error: `[SixbServer] Background command '${params.commandId}' does not run on an open sixb: it ended, or sixb closed.`,
+            }
+          }
+
+          await agents.computers.requestStop({
+            projectId: host.id,
+            id: running.session.id,
+            ownerPrincipal,
+            command: ref,
+          })
+          // Its sixb hears it and renews at once: the stop is in the answer.
+          await announce(host, ownerPrincipal, running.session.computer, true)
+
+          set.status = 202
+          return StopAgentBackgroundCommandResponseSchema.parse({
+            command: { ...running.command, stopping: true },
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentBackgroundCommandParamsSchema,
+        body: StopAgentBackgroundCommandBodySchema,
+        response: {
+          202: StopAgentBackgroundCommandResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: AgentRequestErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Stop a background command on your computer",
+          description:
+            "A command the agent ran in the background on your computer keeps running after its turn. `sixb` there stops it, and everything it started, at its next renewal, which this asks for at once. The thread's owner alone stops it.",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "stopAgentBackgroundCommand",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
@@ -274,6 +391,14 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
+}
+
+/** Whether two reports of a session's background commands say the same. */
+function sameCommands(
+  before: readonly AgentComputerBackgroundCommand[],
+  now: readonly AgentComputerBackgroundCommand[]
+): boolean {
+  return stableJsonStringify(before) === stableJsonStringify(now)
 }
 
 /** The owner's queued turns that wait for this computer, in this folder. */

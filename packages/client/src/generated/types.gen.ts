@@ -12400,6 +12400,16 @@ export type ListAgentThreadsResponses = {
         name: string
         folder: string
         online: boolean
+        backgroundCommands?: Array<{
+          threadId: string
+          id: string
+          command: string
+          status: "running" | "exited" | "stopped"
+          exitCode?: number
+          startedAt: string
+          endedAt?: string
+          stopping?: boolean
+        }>
       }
       movedAt?: string
       status: "active" | "archived"
@@ -12532,6 +12542,16 @@ export type CreateAgentThreadResponses = {
         name: string
         folder: string
         online: boolean
+        backgroundCommands?: Array<{
+          threadId: string
+          id: string
+          command: string
+          status: "running" | "exited" | "stopped"
+          exitCode?: number
+          startedAt: string
+          endedAt?: string
+          stopping?: boolean
+        }>
       }
       movedAt?: string
       status: "active" | "archived"
@@ -12637,6 +12657,16 @@ export type GetAgentThreadResponses = {
       name: string
       folder: string
       online: boolean
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
     }
     movedAt?: string
     status: "active" | "archived"
@@ -12767,6 +12797,16 @@ export type AddAgentThreadParticipantsResponses = {
       name: string
       folder: string
       online: boolean
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
     }
     movedAt?: string
     status: "active" | "archived"
@@ -12937,6 +12977,16 @@ export type ForkAgentThreadResponses = {
         name: string
         folder: string
         online: boolean
+        backgroundCommands?: Array<{
+          threadId: string
+          id: string
+          command: string
+          status: "running" | "exited" | "stopped"
+          exitCode?: number
+          startedAt: string
+          endedAt?: string
+          stopping?: boolean
+        }>
       }
       movedAt?: string
       status: "active" | "archived"
@@ -13053,6 +13103,16 @@ export type RecreateAgentThreadSandboxResponses = {
       name: string
       folder: string
       online: boolean
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
     }
     movedAt?: string
     status: "active" | "archived"
@@ -15137,6 +15197,16 @@ export type MoveAgentThreadToCloudResponses = {
       name: string
       folder: string
       online: boolean
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
     }
     movedAt?: string
     status: "active" | "archived"
@@ -15265,6 +15335,16 @@ export type MoveAgentThreadToComputerResponses = {
       name: string
       folder: string
       online: boolean
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
     }
     movedAt?: string
     status: "active" | "archived"
@@ -15316,6 +15396,15 @@ export type HoldAgentComputerSessionData = {
       name: string
       folder: string
     }
+    backgroundCommands?: Array<{
+      threadId: string
+      id: string
+      command: string
+      status: "running" | "exited" | "stopped"
+      exitCode?: number
+      startedAt: string
+      endedAt?: string
+    }>
   }
   path: {
     sessionId: string
@@ -15356,11 +15445,82 @@ export type HoldAgentComputerSessionResponses = {
   200: {
     expiresAt: string
     waiting: Array<string>
+    stop?: Array<{
+      threadId: string
+      id: string
+      startedAt: string
+    }>
   }
 }
 
 export type HoldAgentComputerSessionResponse =
   HoldAgentComputerSessionResponses[keyof HoldAgentComputerSessionResponses]
+
+export type StopAgentBackgroundCommandData = {
+  body: {
+    startedAt: string
+  }
+  path: {
+    threadId: string
+    commandId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/background-commands/{commandId}/stop"
+}
+
+export type StopAgentBackgroundCommandErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type StopAgentBackgroundCommandError =
+  StopAgentBackgroundCommandErrors[keyof StopAgentBackgroundCommandErrors]
+
+export type StopAgentBackgroundCommandResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    command: {
+      threadId: string
+      id: string
+      command: string
+      status: "running" | "exited" | "stopped"
+      exitCode?: number
+      startedAt: string
+      endedAt?: string
+      stopping?: boolean
+    }
+  }
+}
+
+export type StopAgentBackgroundCommandResponse =
+  StopAgentBackgroundCommandResponses[keyof StopAgentBackgroundCommandResponses]
 
 export type GetAgentPreferencesData = {
   body?: never
@@ -15549,6 +15709,16 @@ export type SetAgentThreadApprovalModeResponses = {
       name: string
       folder: string
       online: boolean
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
     }
     movedAt?: string
     status: "active" | "archived"
@@ -16458,6 +16628,16 @@ export type GetObservedAgentThreadResponses = {
       name: string
       folder: string
       online: boolean
+      backgroundCommands?: Array<{
+        threadId: string
+        id: string
+        command: string
+        status: "running" | "exited" | "stopped"
+        exitCode?: number
+        startedAt: string
+        endedAt?: string
+        stopping?: boolean
+      }>
     }
     movedAt?: string
     status: "active" | "archived"

@@ -13,6 +13,8 @@ export type {
   AgentApprovalSettledStatus,
   AgentApprovalStatus,
   AgentApprovalStore,
+  AgentBackgroundCommandRef,
+  AgentComputerBackgroundCommand,
   AgentComputerSessionRecord,
   AgentComputerSessionStore,
   AgentContextCheckpointReason,

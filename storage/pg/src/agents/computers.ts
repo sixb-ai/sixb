@@ -1,5 +1,11 @@
-import { assertAgentComputerSession } from "@sixb/core/internal/agent-run-storage-provider"
+import {
+  AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX,
+  assertAgentBackgroundCommandRef,
+  assertAgentComputerSession,
+} from "@sixb/core/internal/agent-run-storage-provider"
 import type {
+  AgentBackgroundCommandRef,
+  AgentComputerBackgroundCommand,
   AgentComputerSessionRecord,
   AgentComputerSessionStore,
   Principal,
@@ -15,28 +21,69 @@ interface AgentComputerSessionRow {
   computer_name: string
   folder: string
   expires_at: Date | string
+  background_commands: readonly AgentComputerBackgroundCommand[]
+  stop_requests: readonly AgentBackgroundCommandRef[]
 }
 
 export class PgAgentComputerSessionStore implements AgentComputerSessionStore {
   constructor(private readonly sql: PgStoreClient) {}
 
-  async hold(input: AgentComputerSessionRecord): Promise<void> {
+  async hold(input: Omit<AgentComputerSessionRecord, "stopRequests">): Promise<void> {
     assertAgentComputerSession(input, "SixbPg")
+    const background = JSON.stringify(input.backgroundCommands ?? [])
     await this.sql`
       INSERT INTO agent_computer_sessions (
         project_id, owner_principal_type, owner_principal_id, id,
-        computer_id, computer_name, folder, expires_at
+        computer_id, computer_name, folder, expires_at, background_commands
       ) VALUES (
         ${input.projectId}, ${input.ownerPrincipal.type}, ${input.ownerPrincipal.id}, ${input.id},
-        ${input.computer.id}, ${input.computer.name}, ${input.computer.folder}, ${input.expiresAt}
+        ${input.computer.id}, ${input.computer.name}, ${input.computer.folder}, ${input.expiresAt},
+        ${background}::text::jsonb
       )
       ON CONFLICT (project_id, owner_principal_type, owner_principal_id, id)
       DO UPDATE SET
         computer_id = excluded.computer_id,
         computer_name = excluded.computer_name,
         folder = excluded.folder,
-        expires_at = excluded.expires_at
+        expires_at = excluded.expires_at,
+        background_commands = excluded.background_commands
     `
+  }
+
+  async requestStop(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly ownerPrincipal: Principal
+    readonly command: AgentBackgroundCommandRef
+  }): Promise<AgentComputerSessionRecord | null> {
+    assertAgentBackgroundCommandRef(input.command, "SixbPg")
+    const { threadId, id, startedAt } = input.command
+    const ref = JSON.stringify({ threadId, id, startedAt })
+    // Added once, at the end, keeping the newest: in one statement, as two stops may race.
+    const [row] = await this.sql<AgentComputerSessionRow[]>`
+      UPDATE agent_computer_sessions AS session
+      SET stop_requests = (
+        SELECT COALESCE(jsonb_agg(kept.value ORDER BY kept.position), '[]'::jsonb)
+        FROM (
+          SELECT request.value, request.position
+          FROM jsonb_array_elements(
+            CASE
+              WHEN session.stop_requests @> jsonb_build_array(${ref}::text::jsonb)
+                THEN session.stop_requests
+              ELSE session.stop_requests || jsonb_build_array(${ref}::text::jsonb)
+            END
+          ) WITH ORDINALITY AS request(value, position)
+          ORDER BY request.position DESC
+          LIMIT ${AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX}
+        ) AS kept
+      )
+      WHERE project_id = ${input.projectId}
+        AND owner_principal_type = ${input.ownerPrincipal.type}
+        AND owner_principal_id = ${input.ownerPrincipal.id}
+        AND id = ${input.id}
+      RETURNING *
+    `
+    return row ? rowToSession(row) : null
   }
 
   async release(input: {
@@ -91,5 +138,7 @@ function rowToSession(row: AgentComputerSessionRow): AgentComputerSessionRecord 
     ownerPrincipal: { type: row.owner_principal_type, id: row.owner_principal_id },
     computer: { id: row.computer_id, name: row.computer_name, folder: row.folder },
     expiresAt: new Date(row.expires_at),
+    ...(row.background_commands.length > 0 ? { backgroundCommands: row.background_commands } : {}),
+    ...(row.stop_requests.length > 0 ? { stopRequests: row.stop_requests } : {}),
   }
 }

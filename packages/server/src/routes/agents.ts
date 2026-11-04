@@ -17,6 +17,8 @@ import {
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { resolveFileRefAtPath } from "@sixb/core/internal/blob-storage"
 import {
+  type AgentBackgroundCommandRef,
+  type AgentComputerBackgroundCommand,
   type AgentContextCheckpointRecord,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
@@ -158,7 +160,7 @@ async function computerPlaces(
   host: SixbHostView,
   threads: readonly AgentThreadView[],
   viewer: Principal
-): Promise<(thread: AgentThreadView) => (AgentThreadComputer & { online: boolean }) | undefined> {
+): Promise<(thread: AgentThreadView) => ThreadComputerView | undefined> {
   const owned = (thread: AgentThreadView) =>
     thread.computer !== undefined && principalsEqual(thread.ownerPrincipal, viewer)
   const live =
@@ -172,9 +174,44 @@ async function computerPlaces(
   return (thread) => {
     const computer = thread.computer
     if (!computer || !owned(thread)) return undefined
-    const online = live.some((session) => sameComputerPlace(session.computer, computer))
-    return { ...computer, online }
+
+    // The background commands its folder's sixb runs for it, and which of them a stop is on.
+    const here = live.filter((session) => sameComputerPlace(session.computer, computer))
+    const backgroundCommands = here.flatMap((session) =>
+      (session.backgroundCommands ?? [])
+        .filter((command) => command.threadId === thread.id)
+        .map((command) => {
+          const stopping =
+            command.status === "running" &&
+            (session.stopRequests ?? []).some((ref) => sameBackgroundCommand(command, ref))
+          return stopping ? { ...command, stopping } : command
+        })
+    )
+    return {
+      ...computer,
+      online: here.length > 0,
+      ...(backgroundCommands.length > 0 ? { backgroundCommands } : {}),
+    }
   }
+}
+
+type ThreadComputerView = AgentThreadComputer & {
+  readonly online: boolean
+  readonly backgroundCommands?: readonly (AgentComputerBackgroundCommand & {
+    readonly stopping?: boolean
+  })[]
+}
+
+/** Whether a reported background command is the one `ref` names: by its start, as ids repeat. */
+export function sameBackgroundCommand(
+  command: AgentBackgroundCommandRef,
+  ref: AgentBackgroundCommandRef
+): boolean {
+  return (
+    command.threadId === ref.threadId &&
+    command.id === ref.id &&
+    command.startedAt === ref.startedAt
+  )
 }
 
 function serializeMessage(

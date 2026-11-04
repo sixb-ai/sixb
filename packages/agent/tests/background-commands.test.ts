@@ -454,8 +454,10 @@ describe("background commands on the computer", () => {
   let folder = ""
   let runFilesRoot = ""
   let runner: ComputerRunner
+  let changes = 0
 
   beforeEach(() => {
+    changes = 0
     folder = join(root, "folder")
     runFilesRoot = join(root, "runs")
     mkdirSync(folder)
@@ -475,6 +477,9 @@ describe("background commands on the computer", () => {
       computer: async () => ({ id: "laptop", name: "Laptop" }),
       folder,
       runFilesRoot,
+      onBackgroundChange: () => {
+        changes += 1
+      },
       openSandbox: ({ workingDirectory, runFiles }) =>
         new LocalSandboxFactory({ isolation: "none", readWritePaths: [runFiles] }).create({
           ...(workingDirectory === undefined ? {} : { workingDirectory }),
@@ -593,6 +598,49 @@ describe("background commands on the computer", () => {
       await killed.stopBackgroundCommands()
       await killed.drain()
     }
+  })
+
+  // Removal proofs: compare no start in stopBackgroundCommand (a stop meant for the bg_1 of before
+  // a restart stops today's); report no change as a command ends (the web keeps it running).
+  test("report each thread's commands, and stop the one the web names", async () => {
+    const turn = await open("agt_run_1")
+    const background = turn.run.background
+    if (!background) throw new Error("A turn on the computer keeps its thread's commands.")
+
+    const quick = await background.start({ handle: turn.handle, command: "exit 3" })
+    await background.wait(quick.id, 10_000, signal)
+    const served = await background.start({ handle: turn.handle, command: "sleep 30" })
+    expect(changes).toBe(3)
+
+    const [running, ended] = runner.backgroundCommands()
+    expect(running).toEqual({
+      threadId: "agt_thr_1",
+      id: served.id,
+      command: "sleep 30",
+      status: "running",
+      startedAt: served.startedAt,
+    })
+    expect(ended).toMatchObject({ id: quick.id, status: "exited", exitCode: 3 })
+
+    const ref = { threadId: "agt_thr_1", id: served.id }
+    expect(
+      await runner.stopBackgroundCommand({ ...ref, startedAt: "2026-01-01T00:00:00.000Z" })
+    ).toBe(false)
+    expect(background.get(served.id).status).toBe("running")
+    expect(
+      await runner.stopBackgroundCommand({
+        ...ref,
+        threadId: "agt_thr_other",
+        startedAt: served.startedAt,
+      })
+    ).toBe(false)
+
+    expect(await runner.stopBackgroundCommand({ ...ref, startedAt: served.startedAt })).toBe(true)
+    expect(background.get(served.id).status).toBe("stopped")
+    expect(changes).toBe(4)
+    expect(await runner.stopBackgroundCommand({ ...ref, startedAt: served.startedAt })).toBe(false)
+
+    await turn.run.release?.(turn.acquired)
   })
 
   test("end with a child's run, which keeps none for later", async () => {
