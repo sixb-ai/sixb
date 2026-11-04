@@ -1,6 +1,6 @@
 {
   "name": "@sixb/deploy-ssh",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Deploy a Sixb project to your own server over SSH",
   "keywords": [
     "sixb",

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-monday",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Monday boards, items and editorial content connector for Sixb",
   "keywords": [
     "sixb",

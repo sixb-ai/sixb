@@ -1,6 +1,6 @@
 {
   "name": "@sixb/env-doppler",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Keep a Sixb project's environment variables in Doppler",
   "keywords": [
     "sixb",

@@ -2,6 +2,67 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-11-04 — Sixb 0.2.0
+
+0.2.0 completes secure and traceable execution
+([#360](https://github.com/sixb-ai/sixb/issues/360)): every operation runs in one execution
+context, every protected read goes through one authorization model, markings follow data from
+datasets to ontology properties, and current values can be traced to their source. Every package
+moves to `0.2.0`.
+
+### Highlights
+
+- Explain where an object's values come from with `sixb.objects(T).lineage(id)` and
+  `linkLineage(input)`: the projection, dataset version and columns behind each property, or the
+  Action or write that edited it, who asked for it and the value it replaced. Walk a dataset
+  version upstream with `sixb.datasets.lineage(dataset, { versionId, depth })`. Each step is
+  authorized on its own, and a hidden step is counted, not described. The API serves the same
+  reads, and an object page shows "Where this value comes from" for each property.
+- Reorganize the app into Settings for everyone (Personal, Developers, Memory), project settings
+  for admins (Members, Usage, Activity), and one Console for the project's developers (syncs,
+  pipelines, ontology, logs), opened with `can.observe(project.console)`.
+- Declare the variables a project needs in `sixb.env.ts`; `sixb dev` and `sixb check` stop on a
+  missing one. Keep the values in Doppler with `@sixb/env-doppler` and `sixb env init`, `pull`,
+  `set` and `status`, and let `sixb deploy` write each server's `.env` from it.
+- Budget each conversation against its model's context: the Agent measures each model's bytes per
+  token on the project's runs, saves tool outputs too large for the context to files it reads in
+  pieces, and compacts idle or long conversations toward the model's limit. A context meter beside
+  the model, `/context` in the terminal and the API show what each part of a conversation uses.
+- Continue a conversation that runs on your computer from the web, or move it to the cloud.
+- Cap agent runs at a number of model calls with `agent: { maxSteps, subagentMaxSteps }`,
+  `defineAgentStep({ maxSteps })` and `spawn_agent`; sub-agents and workflow AI tasks stop at 500
+  by default.
+- Give Actions the `client` of the request that asked for them, revoke shared links from Actions
+  and workflow steps with `sixb.shares.revoke`, and brand a dead shared link with
+  `app/shared-unavailable.tsx`. `useDesktop` tells an app it runs in the desktop app.
+- Partition PostgreSQL objects by object type, so a query plans against its own type's indexes,
+  and keep idle connections for a minute. Links are read as the ontology declares them on every
+  provider, and live object queries refresh only when a type they read changes.
+- Manage Pipedrive fields, options and labels, and price one-hour cache writes on Anthropic routes
+  through Vercel AI Gateway.
+
+### Upgrade notes
+
+- Upgrade every Sixb package to `0.2.0` together: `^0.1.x` ranges do not accept `0.2.0`. Rebuild
+  application assets.
+- Run the migrations: PostgreSQL `084-agent-token-rates` to `086-partition-objects`, SQLite
+  `082-agent-token-rates` and `083-agent-computer-sessions`. PostgreSQL `086` locks the objects
+  table while it copies every object into a partition of its type: plan for that pause, and
+  rehearse it on a copy of a large database first.
+- The routes that wrote objects, links and telemetry directly are removed: `PUT
+  /api/objects/:type/:id`, `PUT` and `DELETE …/links/:linkId`, and `POST
+  …/telemetry/:propertyId`. Change the ontology through Actions; code keeps writing in process
+  with `sixb.objects(…).upsert()`.
+- The `visibility` export in `app/layout.tsx` is removed. Grant the Console with
+  `can.observe(project.console)` in a role.
+- Core no longer exports `matchingAgentUsageAnchor`, `agentContextBytesPerToken` and
+  `measureAgentContextRequest`, and `@sixb/agent` no longer re-exports core's context budget:
+  import it from core.
+
+### Package versions
+
+- `0.2.0`: every published Sixb package, and `@sixb/env-doppler` (new).
+
 ## 2026-11-03 — Pipedrive connector 0.1.4
 
 - `@sixb/connector-pipedrive` `0.1.4`: manage person, organization, deal and product fields with
