@@ -3,7 +3,7 @@ import type { ObjectQuery, QueryScalarKind } from "@sixb/core"
 import { linkEndpointObjectTypeIds } from "@sixb/core/internal/query"
 import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
 import { isConnectionLost } from "../storage-errors"
-import { withReservedPgConnection } from "../transactions"
+import { runPgTransactionOn, withReservedPgConnection } from "../transactions"
 import { ensureObjectPartition, objectPartitionName } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
 import { hasJsonValueIndex, isTextScalarKind } from "./query-compiler"
@@ -136,6 +136,11 @@ async function createQueryIndex(
   return name
 }
 
+// PostgreSQL builds statistics on each expression whatever the kinds. Of the multivariate ones,
+// the most-common-values list estimates every combination of conditions these cover; ndistinct and
+// dependencies changed no estimate on the read benchmark and doubled the time ANALYZE took.
+const STATISTICS_KINDS = "mcv"
+
 async function ensureExpressionStatistics(
   connection: ReservedSQL,
   schema: string,
@@ -155,23 +160,46 @@ async function ensureExpressionStatistics(
 
   for (const [objectTypeId, expressions] of expressionsByType) {
     const partition = `${identifier(schema)}.${identifier(objectPartitionName(objectTypeId))}`
-    let statisticsChanged = false
-    for (const expression of expressions) {
-      const name = `sixb_query_stats_${createHash("sha256")
-        .update(`${objectTypeId}:${expression}`)
-        .digest("hex")
-        .slice(0, 24)}`
-      const [existing] = await connection`
-        SELECT 1 FROM pg_statistic_ext s JOIN pg_namespace n ON n.oid = s.stxnamespace
-        WHERE n.nspname = ${schema} AND s.stxname = ${name}`
-      if (existing) continue
-      await connection.unsafe(
-        `CREATE STATISTICS ${identifier(schema)}.${identifier(name)} ON project_id, ${expression} FROM ${partition}`
-      )
-      statisticsChanged = true
-    }
-    if (statisticsChanged) await connection.unsafe(`ANALYZE ${partition}`)
+
+    // One transaction, so queries plan with the old statistics until the new ones are built.
+    await runPgTransactionOn(connection, async () => {
+      let statisticsChanged = false
+      for (const expression of expressions) {
+        const name = statisticsName(objectTypeId, `${STATISTICS_KINDS}:${expression}`)
+        if (await statisticsExist(connection, schema, name)) continue
+
+        // Built with every kind before the kinds were part of the name.
+        const superseded = statisticsName(objectTypeId, expression)
+        if (await statisticsExist(connection, schema, superseded)) {
+          await connection.unsafe(`DROP STATISTICS ${identifier(schema)}.${identifier(superseded)}`)
+        }
+
+        await connection.unsafe(
+          `CREATE STATISTICS ${identifier(schema)}.${identifier(name)} (${STATISTICS_KINDS}) ON project_id, ${expression} FROM ${partition}`
+        )
+        statisticsChanged = true
+      }
+      if (statisticsChanged) await connection.unsafe(`ANALYZE ${partition}`)
+    })
   }
+}
+
+function statisticsName(objectTypeId: string, definition: string): string {
+  return `sixb_query_stats_${createHash("sha256")
+    .update(`${objectTypeId}:${definition}`)
+    .digest("hex")
+    .slice(0, 24)}`
+}
+
+async function statisticsExist(
+  connection: ReservedSQL,
+  schema: string,
+  name: string
+): Promise<boolean> {
+  const [existing] = await connection`
+    SELECT 1 FROM pg_statistic_ext s JOIN pg_namespace n ON n.oid = s.stxnamespace
+    WHERE n.nspname = ${schema} AND s.stxname = ${name}`
+  return existing !== undefined
 }
 
 function statisticsExpressions(

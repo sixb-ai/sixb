@@ -812,7 +812,9 @@ async function refreshMaterializedStatistics(
  * partitioned parent, and its statistics plan queries that read across types. A smaller one only
  * refreshes partitions it changed substantially, which autovacuum may not reach before the next
  * projection. A routine update must not: ANALYZE over a partition's expression statistics takes
- * seconds, and a thousand changed rows in ten thousand took five times as long with it.
+ * seconds, and a thousand changed rows in ten thousand took five times as long with it. Autovacuum
+ * analyzes a partition once 2% of it changed (see `ensureObjectPartition`), and an ANALYZE here
+ * resets that count, so the same change is never analyzed twice.
  */
 async function refreshObjectStatistics(
   sql: SQLClient,

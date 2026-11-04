@@ -11,6 +11,12 @@ const LOCK_TIMEOUT = "1s"
 const LOCK_ATTEMPTS = 120
 const LOCK_RETRY_MS = 1_000
 
+// Autovacuum analyzes a partition once 50 rows plus 2% of it changed, instead of 10%. A value the
+// statistics have never seen is estimated at a row or two: once 5% of a 30,000-row type held one,
+// a read planned on that took 6 s instead of 75 ms (at 4% it was still fine). ANALYZE samples at
+// most 30,000 rows, so on any large partition it takes about half a second to a second.
+const ANALYZE_SCALE_FACTOR = "autovacuum_analyze_scale_factor=0.02"
+
 /** Migration 086 derives the same name in SQL: `'objects_' || left(md5(type), 24)`. */
 export function objectPartitionName(objectTypeId: string): string {
   return `objects_${createHash("md5").update(objectTypeId).digest("hex").slice(0, 24)}`
@@ -28,9 +34,16 @@ export async function ensureObjectPartition(
 ): Promise<string> {
   const name = objectPartitionName(objectTypeId)
   const partition = `${identifier(schema)}.${identifier(name)}`
-  const [existing] = await connection<{ found: string | null }[]>`
-    SELECT to_regclass(${partition})::text AS found`
-  if (existing?.found) return name
+  const [existing] = await connection<{ tuned: boolean }[]>`
+    SELECT coalesce(reloptions, '{}') @> ARRAY[${ANALYZE_SCALE_FACTOR}] AS tuned
+    FROM pg_class WHERE oid = to_regclass(${partition})`
+  if (existing) {
+    // Partitions created without it, such as migration 086's, take it on their next preparation.
+    if (!existing.tuned) {
+      await connection.unsafe(`ALTER TABLE ${partition} SET (${ANALYZE_SCALE_FACTOR})`)
+    }
+    return name
+  }
 
   for (let attempt = 1; ; attempt++) {
     try {
@@ -100,7 +113,7 @@ async function createObjectPartition(
     }
 
     await connection.unsafe(
-      `CREATE TABLE ${partition} (LIKE ${parent} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS INCLUDING STORAGE)`
+      `CREATE TABLE ${partition} (LIKE ${parent} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS INCLUDING STORAGE) WITH (${ANALYZE_SCALE_FACTOR})`
     )
     if (moving) await moveRowsFromDefault(connection, parent, fallback, partition, type, references)
     await connection.unsafe(

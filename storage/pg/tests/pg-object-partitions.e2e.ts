@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { migrateStorage } from "@sixb/core"
 import { postgresStorageMigrations } from "../src/migrations"
 import { ensureObjectPartition, objectPartitionName } from "../src/objects/partitions"
@@ -222,6 +223,97 @@ describe("objects partitions", () => {
     expect(text).toContain(objectPartitionName("Read"))
     expect(text).not.toContain(objectPartitionName("Ignored"))
     expect(text).not.toContain("objects_default")
+  })
+
+  async function analyzeOptions(client: SQL, objectTypeId: string) {
+    const [row] = await client<{ options: string[] | null }[]>`
+      SELECT reloptions AS options FROM pg_class WHERE oid = ${objectPartitionName(objectTypeId)}::regclass`
+    return row?.options ?? []
+  }
+
+  // Removal proof: drop the WITH clause from the CREATE TABLE in createObjectPartition. The new
+  // partition then keeps PostgreSQL's 10%, and its options come back empty.
+  test("a new type's partition is analyzed once 2% of it changed", async () => {
+    const { sql: client } = await open()
+    await addPartition("Fresh")
+
+    expect(await analyzeOptions(client, "Fresh")).toEqual(["autovacuum_analyze_scale_factor=0.02"])
+  })
+
+  // Removal proof: drop the ALTER TABLE in ensureObjectPartition's existing-partition branch.
+  // The partitions migration 086 created then keep no options.
+  test("partitions the migration created take the setting on their next preparation", async () => {
+    const { storage, sql: client } = await open({ migrateThrough: partitionMigration })
+    await seed(client, "Migrated", ["m1"])
+    await migrateStorage(storage)
+    expect(await analyzeOptions(client, "Migrated")).toEqual([])
+
+    await storage.ensureObjectQueryIndexes([
+      { projectId, objectTypeId: "Migrated", kind: "filter", properties: ["status"] },
+    ])
+
+    expect(await analyzeOptions(client, "Migrated")).toEqual([
+      "autovacuum_analyze_scale_factor=0.02",
+    ])
+  })
+
+  async function statisticsOn(client: SQL, objectTypeId: string) {
+    return client<{ name: string; kinds: string[]; built: boolean }[]>`
+      SELECT s.stxname AS name, s.stxkind::text[] AS kinds,
+        EXISTS (SELECT 1 FROM pg_statistic_ext_data d WHERE d.stxoid = s.oid AND d.stxdmcv IS NOT NULL) AS built
+      FROM pg_statistic_ext s
+      WHERE s.stxrelid = ${objectPartitionName(objectTypeId)}::regclass
+      ORDER BY s.stxname`
+  }
+
+  // Removal proof: create the statistics without (mcv). They then carry ndistinct and
+  // dependencies too, which ANALYZE builds for no better estimate.
+  test("a type's expression statistics keep the most common values alone", async () => {
+    const { storage, sql: client } = await open()
+    await addPartition("Listed")
+    await seed(client, "Listed", ["l1", "l2"])
+
+    await storage.ensureObjectQueryIndexes([
+      { projectId, objectTypeId: "Listed", kind: "filter", properties: ["status"] },
+      { projectId, objectTypeId: "Listed", kind: "value", propertyId: "status" },
+    ])
+
+    const statistics = await statisticsOn(client, "Listed")
+    expect(statistics).toHaveLength(2)
+    for (const statistic of statistics) {
+      expect(statistic.kinds).toEqual(["m", "e"])
+      expect(statistic.built).toBe(true)
+    }
+  })
+
+  // Removal proof: skip the DROP of the superseded statistics. Both then stay on the partition,
+  // and ANALYZE keeps building every kind for the old one.
+  test("preparation replaces statistics built with every kind, and analyzes once", async () => {
+    const { storage, sql: client } = await open()
+    await addPartition("Kept")
+    await seed(client, "Kept", ["k1", "k2"])
+
+    // As earlier preparations named it: the type and the expression, without kinds.
+    const expression = "(properties -> E'status')"
+    const superseded = `sixb_query_stats_${createHash("sha256").update(`Kept:${expression}`).digest("hex").slice(0, 24)}`
+    await client.unsafe(
+      `CREATE STATISTICS ${superseded} ON project_id, ${expression} FROM ${objectPartitionName("Kept")}`
+    )
+
+    await storage.ensureObjectQueryIndexes([
+      { projectId, objectTypeId: "Kept", kind: "value", propertyId: "status" },
+    ])
+
+    const statistics = await statisticsOn(client, "Kept")
+    expect(statistics.map((statistic) => statistic.name)).not.toContain(superseded)
+    expect(statistics.map(({ kinds, built }) => ({ kinds, built }))).toEqual([
+      { kinds: ["m", "e"], built: true },
+    ])
+
+    const [analyzed] = await client<{ count: number }[]>`
+      SELECT analyze_count::int AS count FROM pg_stat_user_tables
+      WHERE relid = ${objectPartitionName("Kept")}::regclass`
+    expect(analyzed?.count).toBe(1)
   })
 
   test("an object of a type without a partition is stored, read and removed", async () => {
