@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { ComputerRunner } from "@sixb/agent"
+import {
+  type ComputerBackgroundCommand,
+  type ComputerBackgroundCommandRef,
+  ComputerRunner,
+} from "@sixb/agent"
 import {
   type GetAgentThreadResponses,
   getAgentRun,
@@ -41,8 +45,12 @@ export class LocalRunner {
     { readonly stop: AbortController; readonly done: Promise<boolean> }
   >()
   private readonly elsewhereListeners = new Set<(run: ConversationAgentRunRecord) => void>()
-  private session: { readonly id: string; readonly timer: ReturnType<typeof setInterval> } | null =
-    null
+  private readonly backgroundListeners = new Set<() => void>()
+  private session: {
+    readonly id: string
+    readonly timer: ReturnType<typeof setInterval>
+    readonly renew: () => void
+  } | null = null
   /** The session's last call: its release follows a renewal, which would open it again. */
   private lastCall: Promise<void> = Promise.resolve()
 
@@ -59,6 +67,11 @@ export class LocalRunner {
       folder,
       runFilesRoot: join(tmpdir(), "sixb-agent"),
       onFailure,
+      // The web shows a command start and end at once, and so does the screen.
+      onBackgroundChange: () => {
+        this.session?.renew()
+        for (const listener of this.backgroundListeners) listener()
+      },
       openSandbox: ({ workingDirectory, runFiles, credential, signal }) =>
         new LocalSandboxFactory({
           readWritePaths: [runFiles],
@@ -111,24 +124,72 @@ export class LocalRunner {
     if (this.session) return
     const id = `cs_${randomUUID()}`
     const hold = async () => {
+      // Read as it is sent, so a renewal that waited its turn reports the commands as they are.
+      const backgroundCommands = this.runner.backgroundCommands()
       const { data, error } = await holdAgentComputerSession({
         client: this.connection.client,
         path: { sessionId: id },
-        body: { computer: { ...(await thisComputer()), folder: this.folder } },
+        body: {
+          computer: { ...(await thisComputer()), folder: this.folder },
+          ...(backgroundCommands.length > 0 ? { backgroundCommands: [...backgroundCommands] } : {}),
+        },
       })
       if (error) throw error
       // Closed meanwhile, with the setting or by quitting: what waits keeps waiting.
       if (this.session?.id !== id) return
       for (const runId of data?.waiting ?? []) void this.claimElsewhere(runId)
+      for (const ref of data?.stop ?? []) void this.stopBackground(ref)
     }
-    // A missed renewal is retried at the next; the session lasts three of them.
+
+    // One renewal at a time, in order, so an older report never lands after a newer one; one
+    // asked for while another waits its turn is that one. A missed renewal is retried at the
+    // next; the session lasts three of them.
+    let queued = false
     const renew = () => {
-      this.lastCall = hold().catch((error: unknown) =>
-        console.error("[SixbCLI] Session renewal failed.", error)
-      )
+      if (queued) return
+      queued = true
+      this.lastCall = this.lastCall
+        .then(() => {
+          queued = false
+          return hold()
+        })
+        .catch((error: unknown) => console.error("[SixbCLI] Session renewal failed.", error))
     }
-    this.session = { id, timer: setInterval(renew, SESSION_RENEW_MS) }
+    this.session = { id, timer: setInterval(renew, SESSION_RENEW_MS), renew }
     renew()
+  }
+
+  /**
+   * Renew the session now rather than at its next renewal, when the project says something
+   * changed for this folder: a stop asked for from the web is in the answer.
+   */
+  renewSession(): void {
+    this.session?.renew()
+  }
+
+  /** This folder's background commands, by thread: the running ones, then the latest to end. */
+  backgroundCommands(threadId?: string): readonly ComputerBackgroundCommand[] {
+    const all = this.runner.backgroundCommands()
+    return threadId === undefined ? all : all.filter((command) => command.threadId === threadId)
+  }
+
+  /** Hear each background command start and end. Returns the unsubscribe. */
+  onBackground(listener: () => void): () => void {
+    this.backgroundListeners.add(listener)
+    return () => this.backgroundListeners.delete(listener)
+  }
+
+  /**
+   * Stop a background command, and everything it started, as the agent's `bash_stop` does. False
+   * when it ended already, or is not this `sixb`'s.
+   */
+  async stopBackground(ref: ComputerBackgroundCommandRef): Promise<boolean> {
+    try {
+      return await this.runner.stopBackgroundCommand(ref)
+    } catch (error) {
+      this.onFailure(error)
+      return false
+    }
   }
 
   /** Close the session: the conversations of this folder read as offline at once. */

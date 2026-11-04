@@ -315,6 +315,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("081-agent-thread-runs-on", agentThreadRunsOnSql),
     sqliteSql("082-agent-token-rates", agentTokenRatesSql),
     sqliteSql("083-agent-computer-sessions", agentComputerSessionsSql),
+    sqliteSql("084-agent-computer-background-commands", agentComputerBackgroundCommandsSql),
   ],
 })
 
@@ -719,5 +720,8 @@ import agentRunCancelRequestsSql from "./migrations/080-agent-run-cancel-request
 import agentThreadRunsOnSql from "./migrations/081-agent-thread-runs-on.sql" with { type: "text" }
 import agentTokenRatesSql from "./migrations/082-agent-token-rates.sql" with { type: "text" }
 import agentComputerSessionsSql from "./migrations/083-agent-computer-sessions.sql" with {
+  type: "text",
+}
+import agentComputerBackgroundCommandsSql from "./migrations/084-agent-computer-background-commands.sql" with {
   type: "text",
 }

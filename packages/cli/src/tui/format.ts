@@ -34,6 +34,17 @@ export function toolLine(
   switch (part.name) {
     case "bash": {
       const command = text(input?.command)
+      // Started in the background: it runs on, and its id is what later calls name.
+      if (input?.run_in_background === true) {
+        const id = text(output?.id)
+        return {
+          verb: "bash",
+          command: command.trim(),
+          detail: firstLine(command) + (command.includes("\n") ? " …" : ""),
+          note: id ? `in the background · ${id}` : "in the background",
+          ...error,
+        }
+      }
       const exitCode = typeof output?.exitCode === "number" ? output.exitCode : undefined
       const timedOut = output?.timedOut === true
       const stdout = text(output?.stdout)
@@ -56,6 +67,18 @@ export function toolLine(
               : exitCode !== undefined && exitCode !== 0
                 ? { note: `exit ${exitCode}`, failed: true }
                 : {}),
+        ...error,
+      }
+    }
+    case "bash_output":
+    case "bash_stop": {
+      const output_ = text(output?.output)
+      const status = text(output?.status)
+      return {
+        verb: part.name === "bash_stop" ? "stop" : "output",
+        detail: [text(input?.id), firstLine(text(output?.command))].filter(Boolean).join("  "),
+        ...(output_.trim() ? { preview: lines(output_) } : {}),
+        ...(status ? backgroundNote(status, output?.exitCode) : {}),
         ...error,
       }
     }
@@ -152,6 +175,14 @@ function heldApprovalIds(stdout: string): string[] {
     const approval = record(parsed.approval)
     return typeof approval?.id === "string" && approval.id ? [approval.id] : []
   })
+}
+
+/** How a background command stands, beside its line. */
+function backgroundNote(status: string, exitCode: unknown): Pick<ToolLine, "note" | "failed"> {
+  if (status === "running") return { note: "running" }
+  if (status === "stopped") return { note: "stopped" }
+  if (typeof exitCode !== "number") return { note: "exited" }
+  return exitCode === 0 ? { note: "exit 0" } : { note: `exit ${exitCode}`, failed: true }
 }
 
 /** How decided calls ended, as the web chat's approval card names it. */
@@ -462,6 +493,80 @@ export function duration(ms: number): string {
   if (ms < 59_950) return `${(ms / 1_000).toFixed(1)}s`
   const total = Math.round(ms / 1_000)
   return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`
+}
+
+/** A clock that ticks by the second: `8s`, `2m 14s`, `1h 03m`. */
+export function elapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1_000))
+  const hours = Math.floor(seconds / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`
+  if (minutes > 0) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`
+  return `${seconds}s`
+}
+
+/** A background command as `sixb` reports it. */
+export interface BackgroundCommand {
+  readonly id: string
+  readonly command: string
+  readonly status: "running" | "exited" | "stopped"
+  readonly exitCode?: number
+  readonly startedAt: string
+  readonly endedAt?: string
+}
+
+/** A command's first line, cut to `max` characters. */
+export function commandLabel(command: string, max = 40): string {
+  const line = firstLine(command)
+  const cut = line.length > max ? `${line.slice(0, max - 1)}…` : line
+  return cut + (command.trim().includes("\n") && cut === line ? " …" : "")
+}
+
+/**
+ * The running background commands as the line over the composer lists them, `● bun run dev 2m
+ * 14s`, as many as fit in `room` columns, oldest first; `more` counts the rest.
+ */
+export function backgroundStrip(
+  commands: readonly BackgroundCommand[],
+  now: number,
+  room: number
+): {
+  readonly shown: readonly { readonly label: string; readonly time: string }[]
+  readonly more: number
+} {
+  const running = commands
+    .filter((command) => command.status === "running")
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+  const shown: { label: string; time: string }[] = []
+  let used = 0
+  for (const [index, command] of running.entries()) {
+    const entry = {
+      label: commandLabel(command.command, 32),
+      time: elapsed(now - Date.parse(command.startedAt)),
+    }
+    // `● label time`, then three spaces; the rest is said as `+2 more`.
+    const width = entry.label.length + entry.time.length + 3 + (shown.length > 0 ? 3 : 0)
+    const rest = running.length - index - 1
+    const suffix = rest > 0 ? `   +${rest} more`.length : 0
+    if (shown.length > 0 && used + width + suffix > room) break
+    shown.push(entry)
+    used += width
+  }
+  return { shown, more: running.length - shown.length }
+}
+
+/** What the screen says as a background command ends: its notice, and whether it failed. */
+export function backgroundEnded(command: BackgroundCommand): {
+  readonly text: string
+  readonly failed: boolean
+} {
+  const label = commandLabel(command.command, 48)
+  const ran = command.endedAt
+    ? ` after ${elapsed(Date.parse(command.endedAt) - Date.parse(command.startedAt))}`
+    : ""
+  if (command.status === "stopped") return { text: `${label} stopped${ran}`, failed: false }
+  const code = command.exitCode ?? 0
+  return { text: `${label} exited with code ${code}${ran}`, failed: code !== 0 }
 }
 
 /** A path with the home directory as `~`, and its middle elided past `max` characters. */

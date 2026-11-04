@@ -571,6 +571,9 @@ import type {
   StartConnectorConnectionRunData,
   StartConnectorConnectionRunErrors,
   StartConnectorConnectionRunResponses,
+  StopAgentBackgroundCommandData,
+  StopAgentBackgroundCommandErrors,
+  StopAgentBackgroundCommandResponses,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionErrors,
   SubmitWorkflowInterventionResponses,
@@ -3330,7 +3333,7 @@ export const releaseAgentComputerSession = <ThrowOnError extends boolean = false
 /**
  * Open or renew a computer session
  *
- * `sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. The answer lists the turns waiting for it.
+ * `sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. It reports the background commands it runs for your threads; the answer lists the turns waiting for it, and the commands someone asked to stop.
  */
 export const holdAgentComputerSession = <ThrowOnError extends boolean = false>(
   options: Options<HoldAgentComputerSessionData, ThrowOnError>
@@ -3345,6 +3348,31 @@ export const holdAgentComputerSession = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-computers/sessions/{sessionId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Stop a background command on your computer
+ *
+ * A command the agent ran in the background on your computer keeps running after its turn. `sixb` there stops it, and everything it started, at its next renewal, which this asks for at once. The thread's owner alone stops it.
+ */
+export const stopAgentBackgroundCommand = <ThrowOnError extends boolean = false>(
+  options: Options<StopAgentBackgroundCommandData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    StopAgentBackgroundCommandResponses,
+    StopAgentBackgroundCommandErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/background-commands/{commandId}/stop",
     ...options,
     headers: {
       "Content-Type": "application/json",

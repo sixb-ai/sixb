@@ -9,12 +9,17 @@ import { isModelReasoning } from "../../models/language-model"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
+import { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX } from "./types"
+
+export { AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX }
+
 import type {
   AddAgentThreadParticipantsInput,
   AgentApprovalCall,
   AgentApprovalMode,
   AgentApprovalRecord,
   AgentApprovalStatus,
+  AgentBackgroundCommandRef,
   AgentComputerSessionRecord,
   AgentContextCheckpointRecord,
   AgentMemoryChange,
@@ -490,7 +495,7 @@ export function assertComputerPlace(runsOn: unknown, computer: unknown, prefix =
 
 /** Validate a computer session before a store keeps it. */
 export function assertAgentComputerSession(
-  session: AgentComputerSessionRecord,
+  session: Omit<AgentComputerSessionRecord, "stopRequests">,
   prefix = "Sixb"
 ): void {
   if (typeof session.id !== "string" || session.id.trim() === "" || session.id.length > 200) {
@@ -506,6 +511,57 @@ export function assertAgentComputerSession(
     )
   }
   assertAgentThreadComputer(session.computer, prefix)
+
+  const commands = session.backgroundCommands ?? []
+  if (!Array.isArray(commands) || commands.length > AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] A computer session reports at most ${AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX} background commands.`
+    )
+  }
+  for (const command of commands) {
+    assertAgentBackgroundCommandRef(command, prefix)
+    if (
+      typeof command.command !== "string" ||
+      !["running", "exited", "stopped"].includes(command.status) ||
+      (command.exitCode !== undefined && !Number.isInteger(command.exitCode)) ||
+      (command.endedAt !== undefined && typeof command.endedAt !== "string")
+    ) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] A background command names its command, its status (running, exited or stopped), and an integer exit code once it ended.`
+      )
+    }
+  }
+}
+
+/** Validate which background command a stop names. */
+export function assertAgentBackgroundCommandRef(
+  ref: AgentBackgroundCommandRef,
+  prefix = "Sixb"
+): void {
+  const fields = [ref?.threadId, ref?.id, ref?.startedAt]
+  if (fields.some((field) => typeof field !== "string" || field === "" || field.length > 200)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] A background command is named by its thread, its id and its start, each a non-empty string of at most 200 characters.`
+    )
+  }
+}
+
+/** The stop requests a session keeps with `command` added: once, the newest ones. */
+export function withStopRequest(
+  requests: readonly AgentBackgroundCommandRef[],
+  command: AgentBackgroundCommandRef
+): AgentBackgroundCommandRef[] {
+  const same = (other: AgentBackgroundCommandRef) =>
+    other.threadId === command.threadId &&
+    other.id === command.id &&
+    other.startedAt === command.startedAt
+  if (requests.some(same)) return [...requests]
+
+  const ref = { threadId: command.threadId, id: command.id, startedAt: command.startedAt }
+  return [...requests, ref].slice(-AGENT_COMPUTER_BACKGROUND_COMMANDS_MAX)
 }
 
 /** C0 and C1 controls, DEL, and the marks that reorder text where a terminal or page shows it. */

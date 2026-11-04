@@ -121,6 +121,25 @@ export const AgentThreadComputerInputSchema = z
   })
   .strict()
 
+/**
+ * A background command `sixb` runs for one of your threads on your computer: it outlives the turn
+ * that started it, until it exits, the agent or you stop it, or `sixb` closes.
+ */
+export const AgentBackgroundCommandSchema = z
+  .object({
+    threadId: z.string().min(1).max(200),
+    /** `bg_<n>`, as the agent's tools name it: with `startedAt`, it names the command. */
+    id: z.string().min(1).max(200),
+    /** Its first 1,000 characters. */
+    command: z.string().max(1_000),
+    status: z.enum(["running", "exited", "stopped"]),
+    /** Once it ended: a stopped command's is its signal's, such as 143 for SIGTERM. */
+    exitCode: z.number().int().optional(),
+    startedAt: z.string().min(1).max(200),
+    endedAt: z.string().max(200).optional(),
+  })
+  .strict()
+
 export const CreateAgentThreadBodySchema = z
   .object({
     title: z.string().trim().min(1).optional(),
@@ -184,6 +203,13 @@ export const AgentThreadSchema = z.object({
       name: z.string(),
       folder: z.string(),
       online: z.boolean(),
+      /**
+       * Its background commands, as `sixb` there reported them while open: the running ones, then
+       * the latest to end. `stopping` while a stop you asked for is on its way.
+       */
+      backgroundCommands: z
+        .array(AgentBackgroundCommandSchema.extend({ stopping: z.boolean().optional() }))
+        .optional(),
     })
     .optional(),
   /** When its turns last moved to where they run now: the files earlier turns used are not here. */
@@ -222,14 +248,46 @@ export const AgentComputerSessionParamsSchema = z.object({
 })
 
 export const HoldAgentComputerSessionBodySchema = z
-  .object({ computer: AgentThreadComputerInputSchema })
+  .object({
+    computer: AgentThreadComputerInputSchema,
+    /**
+     * Your threads' background commands this `sixb` runs or ran: the running ones, then the latest
+     * to end. Absent, none.
+     */
+    backgroundCommands: z.array(AgentBackgroundCommandSchema).max(64).optional(),
+  })
   .strict()
+
+/** A background command by its start, as its id comes again once `sixb` restarts. */
+export const AgentBackgroundCommandRefSchema = z.object({
+  threadId: z.string(),
+  id: z.string(),
+  startedAt: z.string(),
+})
 
 export const HoldAgentComputerSessionResponseSchema = z.object({
   /** Renew before then, or the session lapses and its threads read as offline. */
   expiresAt: z.string(),
   /** Queued turns of your threads on this computer, in this folder, for it to claim. */
   waiting: z.array(z.string()),
+  /** Running background commands someone asked to stop from elsewhere, for it to stop. */
+  stop: z.array(AgentBackgroundCommandRefSchema).optional(),
+})
+
+export const AgentBackgroundCommandParamsSchema = z.object({
+  threadId: z.string().trim().min(1),
+  commandId: z.string().trim().min(1).max(200),
+})
+
+export const StopAgentBackgroundCommandBodySchema = z
+  .object({
+    /** When it started, as reported: an id names another command once `sixb` restarts. */
+    startedAt: z.string().trim().min(1).max(200),
+  })
+  .strict()
+
+export const StopAgentBackgroundCommandResponseSchema = z.object({
+  command: AgentBackgroundCommandSchema.extend({ stopping: z.boolean().optional() }),
 })
 
 export const AddAgentThreadParticipantsBodySchema = z

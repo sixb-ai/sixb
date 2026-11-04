@@ -100,7 +100,9 @@ export interface AgentApprovalActivityEvent {
 
 /**
  * An open `sixb` on its owner's computer came or went: the threads that run on that computer in
- * that folder are reachable now, or not. Only its owner hears it.
+ * that folder are reachable now, or not. Also said, `online`, as the background commands it runs
+ * start or end, and as its owner asks it to stop one, which it hears and renews its session for.
+ * Only its owner hears it.
  */
 export interface AgentComputerActivityEvent {
   readonly schemaVersion: typeof AGENT_ACTIVITY_STREAM_SCHEMA_VERSION

@@ -17,6 +17,7 @@ import {
   agentRunMayHoldCalls,
   assertAgentApprovalCaller,
   assertAgentApprovalModeInput,
+  assertAgentBackgroundCommandRef,
   assertAgentComputerSession,
   assertAgentContextCheckpointAnchors,
   assertAgentContextCheckpointAuthority,
@@ -52,6 +53,7 @@ import {
   snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
   transitionAgentThreadSandbox,
+  withStopRequest,
 } from "./provider"
 import type {
   AddAgentThreadParticipantsInput,
@@ -61,6 +63,7 @@ import type {
   AgentApprovalOutcome,
   AgentApprovalRecord,
   AgentApprovalStore,
+  AgentBackgroundCommandRef,
   AgentComputerSessionRecord,
   AgentComputerSessionStore,
   AgentContextCheckpointRecord,
@@ -1595,9 +1598,33 @@ function compareApprovals(left: AgentApprovalRecord, right: AgentApprovalRecord)
 class InMemoryAgentComputerSessionStore implements AgentComputerSessionStore {
   private readonly sessions = new Map<string, AgentComputerSessionRecord>()
 
-  async hold(input: AgentComputerSessionRecord): Promise<void> {
+  async hold(input: Omit<AgentComputerSessionRecord, "stopRequests">): Promise<void> {
     assertAgentComputerSession(input)
-    this.sessions.set(sessionKey(input), clone(input))
+    const { backgroundCommands, ...session } = input
+    const stopRequests = this.sessions.get(sessionKey(input))?.stopRequests
+    this.sessions.set(
+      sessionKey(input),
+      clone({
+        ...session,
+        ...(backgroundCommands?.length ? { backgroundCommands } : {}),
+        ...(stopRequests?.length ? { stopRequests } : {}),
+      })
+    )
+  }
+
+  async requestStop(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly ownerPrincipal: Principal
+    readonly command: AgentBackgroundCommandRef
+  }): Promise<AgentComputerSessionRecord | null> {
+    assertAgentBackgroundCommandRef(input.command)
+    const held = this.sessions.get(sessionKey(input))
+    if (!held) return null
+
+    const next = { ...held, stopRequests: withStopRequest(held.stopRequests ?? [], input.command) }
+    this.sessions.set(sessionKey(input), clone(next))
+    return clone(next)
   }
 
   async release(input: {

@@ -1,7 +1,10 @@
 export { waitForAbort } from "./abort"
 export type { AgentWorkspacePromptContext } from "./agent-prompt"
 export { createAskParentTool } from "./ask-parent-tool"
+export type { BackgroundCommandStatus } from "./background-commands"
 export {
+  type ComputerBackgroundCommand,
+  type ComputerBackgroundCommandRef,
   ComputerRunner,
   type ComputerRunnerOptions,
   type OpenComputerSandbox,
