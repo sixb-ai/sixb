@@ -78,6 +78,7 @@ export function ComposerMenu({
   trigger,
   title,
   align,
+  side = "top",
   className,
   onCloseAutoFocus,
   children,
@@ -88,6 +89,8 @@ export function ComposerMenu({
   /** Names the menu to assistive technology. */
   readonly title: string
   readonly align: "start" | "end"
+  /** Which way it opens, room allowing. By default, up, over what's above the composer. */
+  readonly side?: "top" | "bottom"
   readonly className?: string
   /** Where the focus goes once the menu closes; the trigger unless prevented. */
   readonly onCloseAutoFocus?: (event: Event) => void
@@ -115,7 +118,7 @@ export function ComposerMenu({
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent
         align={align}
-        side="top"
+        side={side}
         sideOffset={10}
         collisionPadding={12}
         aria-label={title}

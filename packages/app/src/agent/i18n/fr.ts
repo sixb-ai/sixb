@@ -886,6 +886,15 @@ export const fr: Translation<AgentMessages> = {
       `${computer} est hors ligne. Votre message attendra que ${folder} y soit connecté.`,
     noFolder:
       "Cette conversation n’a pas encore de dossier. Ouvrez sixb dans son dossier et appuyez sur ctrl+f, ou continuez dans le cloud.",
+    offlineHere: (folder) =>
+      `Pas encore en cours ici. Votre message attendra que cet ordinateur soit connecté dans ${folder}.`,
+    runHere: "Exécuter sur cet ordinateur",
+    placeTitle: "Où cette conversation s'exécute",
+    placeChip: (place) => `S'exécute dans ${place}. Changer l'emplacement`,
+    cloud: "Cloud",
+    chooseFolder: "Choisir un dossier…",
+    chooseFolderShort: "Choisir un dossier",
+    forgetFolder: (folder) => `Ne plus exécuter les messages dans ${folder}`,
     waitingFor: (computer) => `En attente de ${computer}`,
     continueInCloud: "Continuer dans le cloud",
     moving: "Déplacement…",

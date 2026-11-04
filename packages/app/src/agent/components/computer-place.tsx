@@ -60,6 +60,8 @@ export interface ComputerOfflineNoticeProps {
   /** Why the last move failed: a turn it must wait for, or anything else. */
   readonly error: "busy" | "failed" | null
   readonly onContinueInCloud: () => void
+  /** In a desktop app on this conversation's own computer: ask the person to run it here. */
+  readonly onRunHere?: () => void
 }
 
 /**
@@ -71,6 +73,7 @@ export function ComputerOfflineNotice({
   pending,
   error,
   onContinueInCloud,
+  onRunHere,
 }: ComputerOfflineNoticeProps) {
   const messages = useAgentMessages().computer
   return (
@@ -81,9 +84,23 @@ export function ComputerOfflineNotice({
       <Laptop aria-hidden className="size-3.5 shrink-0" />
       <span className="min-w-0 flex-1">
         {computer
-          ? messages.offlineNotice(computer.name, shownFolder(computer.folder))
+          ? onRunHere
+            ? messages.offlineHere(shownFolder(computer.folder))
+            : messages.offlineNotice(computer.name, shownFolder(computer.folder))
           : messages.noFolder}
       </span>
+      {onRunHere ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          className="h-7 rounded-full"
+          onClick={onRunHere}
+        >
+          {messages.runHere}
+        </Button>
+      ) : null}
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button
