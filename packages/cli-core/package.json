@@ -35,18 +35,6 @@
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "sixbBuild": {
-    "assets": [
-      {
-        "from": "./src/bin",
-        "to": "./dist/bin"
-      },
-      {
-        "from": "./src/generated",
-        "to": "./dist/generated"
-      }
-    ]
-  },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.7.0"

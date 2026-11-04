@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises"
+/// <reference path="./sandbox-cli-assets.d.ts" />
+import launcher from "./bin/sixb" with { type: "text" }
+import bundle from "./generated/sixb.mjs" with { type: "text" }
 
 /** The `sixb` a sandbox installs: a shell launcher and the bundle it runs on Bun or Node. */
 export interface SandboxCliAssets {
@@ -6,13 +8,9 @@ export interface SandboxCliAssets {
   readonly artifact: Uint8Array
 }
 
-let cachedAssets: Promise<SandboxCliAssets> | undefined
+const assets: SandboxCliAssets = { launcher, artifact: new TextEncoder().encode(bundle) }
 
-/** Read from beside this module: `src/` in the workspace, `dist/` once built. */
-export function loadSandboxCliAssets(): Promise<SandboxCliAssets> {
-  cachedAssets ??= Promise.all([
-    readFile(new URL("./bin/sixb", import.meta.url), "utf8"),
-    readFile(new URL("./generated/sixb.mjs", import.meta.url)),
-  ]).then(([launcher, artifact]) => ({ launcher, artifact }))
-  return cachedAssets
+/** Part of this module, so that a program compiled to one file carries them too. */
+export async function loadSandboxCliAssets(): Promise<SandboxCliAssets> {
+  return assets
 }
