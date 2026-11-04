@@ -424,7 +424,10 @@ async function waitingTurns(
     .map((run) => run.id)
 }
 
-/** For each folder these sessions held, say it went offline when no other session holds it. */
+/**
+ * For each folder these sessions held, say it went offline when no other session holds it, and
+ * that its background commands stopped when the session that ended ran some.
+ */
 async function announceOffline(
   host: SixbHostView,
   agents: AgentStorage,
@@ -443,11 +446,15 @@ async function announceOffline(
     const { ownerPrincipal } = first
     const live = await agents.computers.listLive({ projectId: host.id, ownerPrincipal, now })
     const announced: AgentThreadComputer[] = []
-    for (const { computer } of [first, ...rest]) {
-      const stillHeld = [...live.map((other) => other.computer), ...announced]
-      if (stillHeld.some((other) => sameComputerPlace(other, computer))) continue
+    for (const { computer, backgroundCommands = [] } of [first, ...rest]) {
+      if (announced.some((other) => sameComputerPlace(other, computer))) continue
+
+      // Another sixb still holds the folder: the web reads it again for the commands that stopped.
+      const online = live.some((other) => sameComputerPlace(other.computer, computer))
+      if (online && backgroundCommands.length === 0) continue
+
       announced.push(computer)
-      await announce(host, ownerPrincipal, computer, false)
+      await announce(host, ownerPrincipal, computer, online)
     }
   }
 }
