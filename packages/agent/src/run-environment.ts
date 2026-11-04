@@ -3,6 +3,7 @@ import type { Principal } from "@sixb/core"
 import {
   type AgentContextBudget,
   type AgentRunArtifacts,
+  type AgentRunModels,
   type AgentRunSession,
   type AgentSystemPromptSize,
   type AgentToolCallFile,
@@ -102,6 +103,7 @@ import {
   ToolOutputFiles,
 } from "./tools/tool-outputs"
 import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
+import { createWebSearchTool } from "./tools/web-search"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
@@ -221,6 +223,8 @@ export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvi
   readonly errorDetails: AgentErrorDetails
   /** How the step calls a project tool: it runs in the cloud, so in the worker's process. */
   readonly callTool: AgentToolCaller
+  /** How the step searches the web, recorded with its other model calls. */
+  readonly webSearch: AgentRunModels["webSearch"]
 }
 
 /** Prepare conversation history and attachments, then start the shared agent environment. */
@@ -322,7 +326,7 @@ export async function createConversationAgentEnvironment(
       systemPrompt: systemPrompt.text,
       systemPromptSize: systemPrompt,
       tools: [
-        ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined }),
+        ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined, web: plan.web }),
         ...(input.frameworkTools ?? []),
       ],
       messages: conversationModelMessages({
@@ -388,6 +392,7 @@ export async function createConversationAgentEnvironment(
         ? { workspaceMovedAt: new Date(input.thread.movedAt).toISOString() }
         : {}),
       callTool: (call, options) => input.session.callTool(call, options),
+      webSearch: input.session.models.webSearch,
       ...(publishing ? { publishing } : {}),
       apiBaseUrl,
       attachmentContext,
@@ -576,7 +581,7 @@ async function startSubagentEnvironment(
     threadContext,
   })
   const tools = [
-    ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined }),
+    ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined, web: plan.web }),
     ...(input.frameworkTools ?? []),
   ]
   const childRequest: BuildConversationRequest = async ({ threadContext }) => {
@@ -655,6 +660,7 @@ async function startSubagentEnvironment(
     parentRunId: run.parentRunId,
     threadId: conversationThreadId(input.thread),
     callTool: (call, options) => input.session.callTool(call, options),
+    webSearch: input.session.models.webSearch,
     ...(publishing ? { publishing } : {}),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
@@ -731,6 +737,7 @@ export async function createWorkflowAgentNodeEnvironment(
       plan,
       runId: run.nodeRunId,
       callTool: input.callTool,
+      webSearch: input.webSearch,
       apiBaseUrl: context.apiBaseUrl,
       attachmentContext,
       // A step's inputs are files, never inline images: its own steps have the whole budget.
@@ -762,6 +769,8 @@ interface AgentEnvironmentSetup
   readonly failureSignal?: AbortSignal
   /** How the run calls a project tool. */
   readonly callTool: AgentToolCaller
+  /** How it searches the web, where the project is: `web_search` calls it. */
+  readonly webSearch: AgentRunModels["webSearch"]
   readonly actorId?: string
   readonly parentRunId?: string
   readonly mode: AgentExecutionMode
@@ -890,6 +899,9 @@ async function startAgentEnvironment(
   appendBuiltInTool(tools, createBashTool(resolveSandbox, background))
   appendBuiltInTool(tools, createBashOutputTool(resolveSandbox, background))
   appendBuiltInTool(tools, createBashStopTool(resolveSandbox, background))
+  if (plan.web?.search) {
+    appendBuiltInTool(tools, createWebSearchTool({ search: input.webSearch, web: plan.web }))
+  }
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
   const { publishing } = input
   if (publishing) {

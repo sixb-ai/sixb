@@ -375,7 +375,7 @@ function conversationEstimateShape(
       authors ? conversationAuthorsText(authors) : "",
     ].join("\n"),
     tools: contextEstimateTools([
-      ...agentModelToolSpecs(plan.tools),
+      ...agentModelToolSpecs(plan.tools, { web: plan.web }),
       ...(input.frameworkTools ?? []),
     ]),
   }

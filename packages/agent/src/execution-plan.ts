@@ -2,6 +2,7 @@ import type { AgentReasoning, AgentSkillDefinition } from "@sixb/core"
 import type {
   AgentContextTokenRateSample,
   AgentRunPlan,
+  AgentRunWebPlan,
   AgentToolSpec,
   SandboxModel,
 } from "@sixb/core/internal/agents"
@@ -34,6 +35,8 @@ export interface ResolvedAgentExecutionPlan {
   readonly tokenRates?: readonly AgentContextTokenRateSample[]
   /** At most this many model calls. Absent: it runs until its model answers. */
   readonly maxSteps?: number
+  /** Its web tools. Absent: it has none. */
+  readonly web?: AgentRunWebPlan
 }
 
 /**
@@ -53,6 +56,7 @@ export function resolveRunPlan(
     ontologyDocs,
     tools,
     maxSteps,
+    web,
   } = plan
   return Object.freeze({
     model: resolved.model,
@@ -66,5 +70,6 @@ export function resolveRunPlan(
     ...(locale === undefined ? {} : { locale }),
     ...(sandboxModels.length ? { sandboxModels } : {}),
     ...(maxSteps === undefined ? {} : { maxSteps }),
+    ...(web === undefined ? {} : { web }),
   })
 }

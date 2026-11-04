@@ -110,6 +110,8 @@ import type {
   ModelRateCard,
   ModelTool,
   ModelUsage,
+  WebSearchModel,
+  WebSearchModelRequest,
 } from "@sixb/core/models"
 import { ModelProviderError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
@@ -4250,6 +4252,126 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
       completion.restore()
+    }
+  })
+
+  // Regression proof: drop the web_search tool from startAgentEnvironment; the model's call is
+  // then refused as unknown. Drop the domain filter; the blocked hit reaches the model.
+  test("searches the web as the run, and offers web_search only with a search model", async () => {
+    const searches: WebSearchModelRequest[] = []
+    const search: WebSearchModel = {
+      providerId: "search",
+      modelId: "engine",
+      definition: { kind: "web-search", providerId: "search", modelId: "engine" },
+      async search(request) {
+        searches.push(request)
+        return {
+          results: [
+            {
+              url: "https://bun.com/docs/test",
+              title: "Bun test runner",
+              snippet: "Run tests\nwith bun test.",
+              publishedAt: "2026-10-01T00:00:00.000Z",
+            },
+            { url: "https://ads.example.com/x", title: "Ad", snippet: "Buy now." },
+          ],
+          reportedCost: { money: { currency: "USD", amountNanos: "5000000" } },
+        }
+      },
+    }
+    let toolNames: readonly string[] = []
+    let replayed = ""
+    let call = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        call += 1
+        if (call === 1) {
+          toolNames = (options.tools ?? []).map((tool) => tool.name)
+          return toolCallStream("s1", "web_search", { query: "bun test runner" })
+        }
+        replayed = JSON.stringify(options.messages)
+        return answerStream("Found it.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [model], webSearch: [search] },
+      agentOptions: { web: { blockedDomains: ["ads.example.com"] } },
+    })
+    const requested = await requestAgent(sixb, { text: "How do I test with Bun?" })
+    const completion = observeQueueSettlement(sixb.queues.agents)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await completion.wait()
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+
+    expect(toolNames).toContain("web_search")
+    expect(searches).toMatchObject([
+      { query: "bun test runner", maxResults: 8, blockedDomains: ["ads.example.com"] },
+    ])
+
+    const modelOutput = [
+      '<web_content source="web_search" untrusted="true">',
+      "1. Bun test runner — https://bun.com/docs/test (2026-10-01)",
+      "   Run tests with bun test.",
+      "</web_content>",
+    ].join("\n")
+    const parts = (await listMessages(agentStorageOf(sixb), requested.run.threadId)).flatMap(
+      (message) => message.parts
+    )
+    expect(parts.find((part) => part.type === "tool-call")).toMatchObject({
+      toolName: "web_search",
+      state: "output-available",
+      output: {
+        query: "bun test runner",
+        results: [
+          {
+            url: "https://bun.com/docs/test",
+            title: "Bun test runner",
+            snippet: "Run tests\nwith bun test.",
+            publishedAt: "2026-10-01T00:00:00.000Z",
+          },
+        ],
+      },
+      modelOutput: { type: "text", value: modelOutput },
+    })
+    expect(replayed).toContain(JSON.stringify(modelOutput).slice(1, -1))
+
+    // Two language calls and the search, all on the run.
+    expect(
+      await sixb.storage.aiUsage?.summarizeExecution({
+        projectId: PROJECT_ID,
+        executionId: requested.run.executionId,
+      })
+    ).toMatchObject({ modelCallCount: 3 })
+
+    // Without a search model, or with agent.web: false, the run offers no search.
+    for (const web of [undefined, false] as const) {
+      let offered: readonly string[] = []
+      const answering = answerModel((names) => {
+        offered = names
+      })
+      const host = buildSixb(answering, new InMemoryBroker(), new RecordingSandboxFactory(), {
+        ...(web === false
+          ? { models: { language: [answering], webSearch: [search] }, agentOptions: { web } }
+          : {}),
+      })
+      await requestAgent(host, { text: "Hello" })
+      const settled = observeQueueSettlement(host.queues.agents)
+      const hostWorker = new AgentWorker(host, workerOptions())
+      await hostWorker.start()
+      try {
+        await settled.wait()
+      } finally {
+        await hostWorker.stop()
+        settled.restore()
+      }
+      expect(offered).toContain("bash")
+      expect(offered).not.toContain("web_search")
     }
   })
 
@@ -14343,6 +14465,9 @@ describe("agent tools act as the requester", () => {
           },
           nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
         }),
+        webSearch: async () => {
+          throw new Error("The task does not search the web.")
+        },
       })
     )
     // The environment reads only the run's kind, identity, attempt, execution and handed files,

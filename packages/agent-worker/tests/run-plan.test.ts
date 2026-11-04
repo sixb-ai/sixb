@@ -290,4 +290,41 @@ describe("resolveWorkflowAgentStepPlan", () => {
       })
     ).toThrow("cannot resolve Agent Skill 'invoice-review'")
   })
+
+  // Proven by removal: drop `web` from resolveWorkflowAgentStepPlan, or from resolveRunPlan; a
+  // step, or a turn, then offers no web tools whatever the project configures.
+  test("offers the web tools a turn offers, and none once agent.web is false", () => {
+    const model = new WorkerTestModel({ modelId: "task-model" })
+    const definitions = (web?: false) =>
+      ({
+        agent: { skills: skillCatalog([]), ...(web === false ? { web } : {}) },
+        ontology: { getValueTypesById: () => new Map() },
+        models: {
+          webSearch: {
+            default: { provider: "search", modelId: "engine" },
+          },
+        },
+        tools: toolCatalog([]),
+      }) as unknown as Pick<SixbDefinitions, "agent" | "models" | "ontology" | "tools">
+    const step = workflowStep({ model, instructions: "Search." })
+
+    const web = { search: { provider: "search", modelId: "engine" } }
+    expect(resolveWorkflowAgentStepPlan(definitions(), { workflowId: "triage", step }).web).toEqual(
+      web
+    )
+    expect(
+      resolveWorkflowAgentStepPlan(definitions(false), { workflowId: "triage", step })
+    ).not.toHaveProperty("web")
+
+    const turn: AgentRunPlan = {
+      model: { provider: model.providerId, modelId: model.modelId },
+      skills: [],
+      tools: [],
+      sandboxModels: [],
+      ontologyDocs: { files: [], index: [] },
+      tokenRates: [],
+      web,
+    }
+    expect(resolveRunPlan(turn, { model }).web).toEqual(web)
+  })
 })

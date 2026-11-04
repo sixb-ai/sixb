@@ -22,6 +22,7 @@ import {
 } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
+  bindAgentWebSearch,
   claimWorkflowAgentNode,
   enqueueWorkflowAgentNodeResume,
   measuringAgentContextTokenRates,
@@ -220,6 +221,11 @@ export async function executeWorkflowAgentNode(
           stepId: node.agentStep.id,
         },
         nodeInput: nodeRun.input,
+      }),
+      // Its searches bill to the step, as its other model calls do.
+      webSearch: bindAgentWebSearch(input.host.definitions, {
+        signal: nodeSignal,
+        accounting: () => session.modelCalls(),
       }),
       signal: turnSignal,
       onDetachedTeardown: input.onDetachedTeardown,
