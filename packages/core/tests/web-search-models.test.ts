@@ -6,6 +6,7 @@ import {
   type LanguageModel,
   ModelProviderError,
   rateModelCall,
+  type WebSearchHit,
   type WebSearchModel,
   type WebSearchModelRequest,
   WebSearchModelResponseError,
@@ -353,7 +354,8 @@ describe("web search execution", () => {
     // Removal proof: record only after validateWebSearchHits; neither call below is accounted.
     const replies: (() => Promise<WebSearchModelResult>)[] = [
       async () => ({
-        results: [{ url: "ftp://example.com", title: "A", snippet: "" }],
+        // A reply whose results are not a list.
+        results: { ...hit } as unknown as WebSearchHit[],
         reportedCost: { money: usd("5400000") },
       }),
       async () => {
@@ -385,11 +387,15 @@ describe("web search execution", () => {
     )
   })
 
-  test("hits are trimmed, cut and dated by Sixb", async () => {
+  test("hits are trimmed, cut and dated by Sixb, and one without a web URL is dropped", async () => {
+    // Removal proof: throw on a hit without an http(s) URL in validateWebSearchHits; the search
+    // fails instead of returning the other hits.
     const f = await setup(
       pricedModel(async () => ({
         results: [
           { ...hit, title: " A ", snippet: "x".repeat(400), publishedAt: "2026-11-01" },
+          { ...hit, url: "ftp://example.com/a" },
+          { title: "No URL", snippet: "" } as unknown as WebSearchHit,
           { ...hit, publishedAt: "last week" },
           hit,
         ],
