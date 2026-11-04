@@ -1,4 +1,4 @@
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { SixbCliError } from "./errors"
 
 export interface DesktopAppOptions {
@@ -6,7 +6,14 @@ export interface DesktopAppOptions {
   /** Where the app is served. The desktop app opens it and takes its name and icon from it. */
   readonly appUrl: string
   readonly apiOrigin: string
+  /** What the app compiles to run the agent on this computer. */
+  readonly runnerEntry: string
 }
+
+/** From the CLI's `src`, which ships: `@sixb/desktop` compiles it into the app. */
+export const DESKTOP_RUNNER_ENTRY = fileURLToPath(
+  new URL("../runner/desktop-runner-main.ts", import.meta.url)
+)
 
 /**
  * What the CLI calls on `@sixb/desktop`. Declared here, not imported: the CLI does not depend on

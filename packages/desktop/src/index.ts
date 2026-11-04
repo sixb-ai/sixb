@@ -67,6 +67,8 @@ export async function buildDesktopApp(options: DesktopAppOptions): Promise<Deskt
     electronVersion: (packageRequire("electron/package.json") as { readonly version: string })
       .version,
     ...(mac && app.icon ? { icon: await macIcon(app.icon) } : {}),
+    // Beside the app's archive, not in it: a program has to be a file of its own to run.
+    ...(app.runner ? { extraResource: [app.runner] } : {}),
     // Signs with the Developer ID certificate in the keychain, which notarization requires.
     ...(notarize ? { osxSign: {}, osxNotarize: notarize } : {}),
   })
@@ -171,7 +173,7 @@ function electronBinary(): string {
     const electronDir = dirname(packageRequire.resolve("electron/package.json"))
     throw new Error(
       "[SixbDesktop] Electron's binary is missing: its install script did not run. " +
-        `Run \`bun run --cwd ${electronDir} postinstall\`, then try again.`
+        `Run \`bun ${join(electronDir, "install.js")}\`, then try again.`
     )
   }
 }

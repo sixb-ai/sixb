@@ -5,6 +5,7 @@ import { readAppIdentity } from "./identity"
 import { drawMacIcon } from "./mac-icon"
 import { run } from "./run"
 import type { ShellConfig } from "./shell/navigation"
+import { RUNNER_BINARY } from "./shell/runner"
 
 export interface DesktopAppOptions {
   /** The Sixb project. The desktop app is generated under its `.sixb/desktop`. */
@@ -13,6 +14,11 @@ export interface DesktopAppOptions {
   readonly appUrl: string
   /** The project's API. Its sign-in pages are where the window is approved. */
   readonly apiOrigin: string
+  /**
+   * What the app compiles to run the agent on this computer: the CLI names its own, as this package
+   * doesn't depend on it. Without one, the app has no way to run the agent here.
+   */
+  readonly runnerEntry?: string
 }
 
 /** The Electron app `writeDesktopApp` generated, and what it is called. */
@@ -22,13 +28,18 @@ export interface GeneratedApp {
   readonly version: string
   /** The app's icon in `dir`, when it declares one. */
   readonly icon: string | null
+  /** The directory holding what runs the agent on this computer, when it can. */
+  readonly runner: string | null
 }
 
 // Read from the package's `src`, which ships, whether this module runs from `src` or `dist`.
 const SHELL_SOURCE_DIR = fileURLToPath(new URL("../src/shell", import.meta.url))
 
-/** Where a project's desktop app is generated (`app`) and packaged (`dist`). */
-export function desktopDir(projectRoot: string, part: "app" | "dist"): string {
+/**
+ * Where a project's desktop app is generated (`app`), what runs the agent is compiled (`runner`, beside
+ * the app as everything in the app's directory ships inside its archive), and it's packaged (`dist`).
+ */
+export function desktopDir(projectRoot: string, part: "app" | "dist" | "runner"): string {
   return join(projectRoot, ".sixb", "desktop", part)
 }
 
@@ -79,7 +90,32 @@ export async function writeDesktopApp(options: DesktopAppOptions): Promise<Gener
     ],
     "Could not compile the desktop shell."
   )
-  return { dir, name: identity.name, version, icon }
+  const runner = options.runnerEntry
+    ? await writeRunner(desktopDir(options.projectRoot, "runner"), options.runnerEntry)
+    : null
+  return { dir, name: identity.name, version, icon, runner }
+}
+
+/**
+ * Compiles what runs the agent into one program, so that the app needs nothing installed, and a `bun`
+ * beside it. The agent's own `sixb` runs on Bun or Node, which a person may have neither of, and the
+ * program can stand in for Bun: last on the PATH the shell gives it, after any they have. Null on
+ * Windows, which has no local sandbox to run the agent in.
+ */
+async function writeRunner(dir: string, entry: string): Promise<string | null> {
+  if (process.platform === "win32") return null
+  await rm(dir, { recursive: true, force: true })
+  await mkdir(dir, { recursive: true })
+  await run(
+    [process.execPath, "build", "--compile", entry, `--outfile=${join(dir, RUNNER_BINARY)}`],
+    "Could not compile what runs the agent."
+  )
+  await writeFile(
+    join(dir, "bun"),
+    `#!/bin/sh\nBUN_BE_BUN=1 exec "$(dirname "$0")/${RUNNER_BINARY}" "$@"\n`,
+    { mode: 0o755 }
+  )
+  return dir
 }
 
 /** The page the window shows while the app loads, and when it cannot reach the app. */

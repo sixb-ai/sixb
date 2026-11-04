@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { basename, join, resolve } from "node:path"
 import * as desktop from "@sixb/desktop"
 import { deployedOrigins } from "../src/commands/desktop"
-import { loadDesktop, type SixbDesktop } from "../src/lib/desktop"
+import { DESKTOP_RUNNER_ENTRY, loadDesktop, type SixbDesktop } from "../src/lib/desktop"
 import { runDevSupervisor } from "../src/lib/dev-supervisor"
 
 const supervisor = resolve(import.meta.dir, "../src/lib/dev-supervisor.ts")
@@ -130,6 +130,7 @@ if (process.env.SIXB_DEV_CHILD === "1") {
         projectRoot: expect.stringMatching(new RegExp(`${basename(root)}$`)),
         appUrl: "http://localhost:4321/",
         apiOrigin: "http://localhost:4322",
+        runnerEntry: DESKTOP_RUNNER_ENTRY,
       },
     ])
     expect(stdout).toContain("closed")

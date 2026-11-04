@@ -25,6 +25,18 @@ export function isAppUrl(config: ShellConfig, url: string): boolean {
   }
 }
 
+/** Whether `url` is a web page of the project's API, the only place a sign-in is approved. */
+export function isApiPage(config: ShellConfig, url: string): boolean {
+  try {
+    const { origin, protocol } = new URL(url)
+    return (
+      (protocol === "https:" || protocol === "http:") && origin === new URL(config.apiOrigin).origin
+    )
+  } catch {
+    return false
+  }
+}
+
 /**
  * What the window paints before a page has: the loading page's own background, so the window
  * opens, and passes from that page to the app, without a flash of white.

@@ -13,6 +13,30 @@ export type DesktopPlatform = "darwin" | "win32" | "linux"
  */
 export interface SixbDesktop {
   readonly platform: DesktopPlatform
+  /** Running the agent on this computer, in folders the person chooses here. */
+  readonly computer?: DesktopComputerAccess
+}
+
+/** This computer, as a conversation that runs on it names it. */
+export interface DesktopComputer {
+  readonly id: string
+  readonly name: string
+}
+
+/**
+ * What a page can ask of this computer. It names no path it wasn't given: folders come from a native
+ * dialog the person answers, and allowing one that a conversation names asks them first.
+ */
+export interface DesktopComputerAccess {
+  /** Null where this desktop app can't run the agent. */
+  about(): Promise<DesktopComputer | null>
+  /** The folders chosen on this computer for this project. */
+  folders(): Promise<readonly string[]>
+  /** Ask the person for a folder, which allows it. Null when they cancel. */
+  pickFolder(): Promise<string | null>
+  /** Ask the person to allow `folder`. Whether they did. */
+  allowFolder(folder: string): Promise<boolean>
+  forgetFolder(folder: string): Promise<void>
 }
 
 const PLATFORMS: readonly unknown[] = ["darwin", "win32", "linux"] satisfies DesktopPlatform[]

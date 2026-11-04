@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { DEPLOY_CONFIG_FILE, loadDeployConfig } from "../lib/deploy-config"
 import { deployPublicOrigins } from "../lib/deploy-release"
-import { loadDesktop } from "../lib/desktop"
+import { DESKTOP_RUNNER_ENTRY, loadDesktop } from "../lib/desktop"
 import { SixbCliError } from "../lib/errors"
 import { configuredOrigin } from "../lib/public-origin"
 import { keyValueResultView, renderStatic } from "../ui"
@@ -20,6 +20,7 @@ export async function runDesktopBuild(options: DesktopBuildOptions = {}): Promis
     projectRoot,
     appUrl: origins.app,
     apiOrigin: origins.api,
+    runnerEntry: DESKTOP_RUNNER_ENTRY,
   })
 
   await renderStatic(
