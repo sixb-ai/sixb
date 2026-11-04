@@ -13,10 +13,10 @@ export interface DatasetVersionCommittedEvent extends EventEnvelope {
     producer: DatasetProducer
     /**
      * As `DatasetVersion.rowsChanged` and `DatasetVersion.lineageChanged`. Absent on events stored
-     * before versions recorded them, which count as changed.
+     * before versions recorded them: read a missing flag as changed (`!== false`).
      */
-    rowsChanged: boolean
-    lineageChanged: boolean
+    rowsChanged?: boolean
+    lineageChanged?: boolean
   }
 }
 
