@@ -1,10 +1,13 @@
 // Runs in every page the window shows, before the page's own scripts, in a world of its own. Electron
 // sandboxes it: of what it imports, only `electron` may remain once compiled.
-import { contextBridge } from "electron"
+import { contextBridge, ipcRenderer } from "electron"
 import { DESKTOP_BRIDGE_NAME, desktopBridge } from "./bridge"
 import { CONTROLS_HEIGHT_PX, hasHiddenTitleBar } from "./window"
 
-contextBridge.exposeInMainWorld(DESKTOP_BRIDGE_NAME, desktopBridge(process.platform))
+contextBridge.exposeInMainWorld(
+  DESKTOP_BRIDGE_NAME,
+  desktopBridge(process.platform, (channel, ...args) => ipcRenderer.invoke(channel, ...args))
+)
 
 if (hasHiddenTitleBar(process.platform)) installHiddenTitleBar()
 

@@ -5,8 +5,9 @@ import { join } from "node:path"
 import type { SixbDesktop } from "@sixb/client/hooks"
 import { renderShellPage, writeDesktopApp } from "../src/generate"
 import { bundleIdentifier, readAppIdentity } from "../src/identity"
-import { desktopBridge } from "../src/shell/bridge"
-import { pageWebPreferences } from "../src/shell/window"
+import { COMPUTER_CHANNELS, desktopBridge } from "../src/shell/bridge"
+import { RUNNER_BINARY } from "../src/shell/runner"
+import { isApiPage, isAppUrl, pageWebPreferences } from "../src/shell/window"
 
 const cleanup: (() => Promise<unknown> | undefined)[] = []
 
@@ -32,6 +33,7 @@ function pngWidth(png: Uint8Array): number {
  */
 function runPreload(code: string, platform: NodeJS.Platform) {
   const exposed: Record<string, unknown> = {}
+  const invoked: unknown[][] = []
   const root = {
     dataset: {} as Record<string, string | undefined>,
     style: { setProperty: () => {} },
@@ -52,10 +54,16 @@ function runPreload(code: string, platform: NodeJS.Platform) {
           exposed[key] = value
         },
       },
+      ipcRenderer: {
+        invoke: async (channel: string, ...args: unknown[]) => {
+          invoked.push([channel, ...args])
+          return null
+        },
+      },
     }
   }
   new Function("require", "process", "document", code)(require, { platform }, document)
-  return { exposed, mark: root.dataset.sixbDesktop, dragHandles }
+  return { exposed, invoked, mark: root.dataset.sixbDesktop, dragHandles }
 }
 
 /** Serves a web app manifest and its icons, the way `sixb dev` and a deployed app do. */
@@ -147,6 +155,7 @@ describe("generated desktop app", () => {
       name: "Acme Orders",
       version: "2.0.0",
       icon: join(app.dir, "icon.png"),
+      runner: null,
     })
     expect(JSON.parse(await readFile(join(app.dir, "shell.json"), "utf-8"))).toEqual({
       name: "Acme Orders",
@@ -185,9 +194,74 @@ describe("generated desktop app", () => {
 
     const page = runPreload(await readFile(join(app.dir, "preload.js"), "utf-8"), platform)
 
-    expect(page.exposed).toEqual({ sixbDesktop: { platform } })
+    expect(page.exposed.sixbDesktop).toMatchObject({ platform })
     expect(page.mark).toBe(mark)
     expect(page.dragHandles).toBe(mark ? 1 : 0)
+  })
+
+  // Guard proof: take the folder's path from the page in pickFolder, or add a method that runs a
+  // command; a remote page reaches the computer on its own say-so. Each method here is a channel
+  // main.ts answers, and none but allowFolder and forgetFolder takes anything from the page.
+  test("offers the page narrow ways to ask about this computer, and no more", async () => {
+    const projectRoot = await createProject({ name: "orders", version: "1.0.0" })
+    const appUrl = serveApp({ name: "Orders", icons: [] })
+    const app = await writeDesktopApp({ projectRoot, appUrl, apiOrigin: appUrl })
+    const page = runPreload(await readFile(join(app.dir, "preload.js"), "utf-8"), "darwin")
+    const { computer } = page.exposed.sixbDesktop as SixbDesktop
+    if (!computer) throw new Error("The bridge offers no computer.")
+
+    await computer.about()
+    await computer.folders()
+    await computer.pickFolder()
+    await computer.allowFolder("/work/notes")
+    await computer.forgetFolder("/work/notes")
+
+    expect(Object.keys(computer).sort()).toEqual(
+      ["about", "allowFolder", "folders", "forgetFolder", "pickFolder"].sort()
+    )
+    expect(page.invoked).toEqual([
+      [COMPUTER_CHANNELS.about],
+      [COMPUTER_CHANNELS.folders],
+      [COMPUTER_CHANNELS.pickFolder],
+      [COMPUTER_CHANNELS.allowFolder, "/work/notes"],
+      [COMPUTER_CHANNELS.forgetFolder, "/work/notes"],
+    ])
+  })
+
+  // Guard proof: open whatever the runner names, in main.ts's onSignIn, by answering true here; a
+  // compromised project's API sends the system browser, or another program, anywhere.
+  test("opens a sign-in only on the project's API, and answers only the app", () => {
+    const config = {
+      name: "Acme",
+      appUrl: "https://app.acme.test/",
+      apiOrigin: "https://api.acme.test",
+    }
+
+    expect(isApiPage(config, "https://api.acme.test/auth/device?user_code=AB")).toBe(true)
+    expect(isApiPage(config, "https://evil.test/auth/device")).toBe(false)
+    expect(isApiPage(config, "https://app.acme.test/auth/device")).toBe(false)
+    expect(isApiPage(config, "file:///Applications/Calculator.app")).toBe(false)
+    expect(isApiPage(config, "not a url")).toBe(false)
+    expect(isAppUrl(config, "https://api.acme.test/")).toBe(false)
+    expect(isAppUrl(config, "https://app.acme.test/agent")).toBe(true)
+  })
+
+  // Guard proof: leave the `bun` beside the program out of writeRunner; on a computer with neither
+  // Bun nor Node, every turn fails its sandbox's runtime check.
+  test("compiles what runs the agent, and a bun for someone with none", async () => {
+    if (process.platform === "win32") return
+    const projectRoot = await createProject({ name: "orders", version: "1.0.0" })
+    const appUrl = serveApp({ name: "Orders", icons: [] })
+    const runnerEntry = join(projectRoot, "entry.ts")
+    await writeFile(runnerEntry, 'console.log("ran as the runner")\n')
+
+    const app = await writeDesktopApp({ projectRoot, appUrl, apiOrigin: appUrl, runnerEntry })
+    if (!app.runner) throw new Error("No runner was compiled.")
+
+    const program = Bun.spawn([join(app.runner, RUNNER_BINARY)], { stdout: "pipe" })
+    expect(await new Response(program.stdout).text()).toBe("ran as the runner\n")
+    const bun = Bun.spawn([join(app.runner, "bun"), "--version"], { stdout: "pipe" })
+    expect((await new Response(bun.stdout).text()).trim()).toBe(Bun.version)
   })
 
   // Guard proof: turn any of these off in pageWebPreferences; a remote page reaches Node, or the
@@ -204,8 +278,8 @@ describe("generated desktop app", () => {
   // Guard proof: return a different shape from desktopBridge; `bun run typecheck` fails here, where
   // the shell's bridge and the page's view of it meet.
   test("offers what the hook expects", () => {
-    const bridge: SixbDesktop = desktopBridge("darwin")
-    expect(bridge).toEqual({ platform: "darwin" })
+    const bridge: SixbDesktop = desktopBridge("darwin", async () => null)
+    expect(bridge.platform).toBe("darwin")
   })
 
   test("clears what an earlier run left behind", async () => {

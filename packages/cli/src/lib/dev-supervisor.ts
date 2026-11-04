@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { dirname, resolve } from "node:path"
 import type { DevOptions } from "../commands/dev-runner"
 import { canRunLive } from "../ui/live/can-run-live"
-import { loadDesktop } from "./desktop"
+import { DESKTOP_RUNNER_ENTRY, loadDesktop } from "./desktop"
 import { DEV_UI_ENV, type DevChildMessage } from "./dev-messages"
 import { watchDevSource } from "./dev-watch"
 import { errorMessage } from "./errors"
@@ -175,7 +175,12 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
             const app = servedApp(message)
             if (desktop && app && !desktopWindow) {
               desktopWindow = desktop
-                .openDesktopApp({ projectRoot: root, appUrl: app.url, apiOrigin: app.apiOrigin })
+                .openDesktopApp({
+                  projectRoot: root,
+                  runnerEntry: DESKTOP_RUNNER_ENTRY,
+                  appUrl: app.url,
+                  apiOrigin: app.apiOrigin,
+                })
                 .catch((error: unknown) => {
                   reporter.error(`Could not open the desktop window: ${errorMessage(error)}`)
                   // The next generation to come up tries again.
