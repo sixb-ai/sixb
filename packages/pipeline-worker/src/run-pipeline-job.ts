@@ -57,9 +57,11 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
         projectId: runtime.id,
         id: job.id,
       })
+      // A run still queued did not start elsewhere: the start itself failed.
       if (
         existing?.pipelineId === durableRun.pipelineId &&
-        existing.executionId === durableRun.executionId
+        existing.executionId === durableRun.executionId &&
+        existing.status !== "queued"
       ) {
         throw new PipelineRunAlreadyStartedError(existing)
       }

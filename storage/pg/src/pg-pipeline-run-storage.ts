@@ -1,7 +1,10 @@
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import { assertPipelineRunExecution } from "@sixb/core/internal/pipeline-run-storage-provider"
-import { canRequeuePipelineRunAfterEnqueueFailure } from "@sixb/core/internal/storage"
+import {
+  canFinishPipelineRun,
+  canRequeuePipelineRunAfterEnqueueFailure,
+} from "@sixb/core/internal/storage"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
   ExecutionStorage,
@@ -137,12 +140,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
         )
       }
 
-      const enqueueFailure =
-        input.status === "failed" && input.error.code === "queue.enqueue_failed"
-      if (
-        (enqueueFailure && existing.status !== "queued") ||
-        (!enqueueFailure && existing.status !== "running")
-      ) {
+      if (!canFinishPipelineRun(existing.status, input)) {
         throw new PipelineRunError(
           `[SixbPg] Pipeline run '${input.id}' cannot finish from status '${existing.status}'.`
         )

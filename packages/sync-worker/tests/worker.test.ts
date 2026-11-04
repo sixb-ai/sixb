@@ -482,4 +482,69 @@ describe("SyncWorker", () => {
       datasetId: dataset.id,
     })
   })
+
+  // Automatic dispatch joins a queued run, so its job must not end while the run stays queued.
+  // Drop the queued branch of `onExecutionError` to watch both cases fail; drop the status check
+  // after a failed start in `runSyncJob` to watch the first one complete its job instead.
+  test.each([
+    "the run cannot start",
+    "the execution cannot be read",
+  ] as const)("fails a run whose job ends before it starts when %s", async (cause) => {
+    const reports: SixbErrorContext[] = []
+    const dataset = makeDataset("raw.erp.never-started")
+    const sync = defineSync("sync-never-started")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync, (_error, context) => {
+      reports.push(context)
+    })
+    const syncRuns = sixb.storage.syncRuns!
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-never-starts" })
+
+    const unavailable = new Error("storage unavailable")
+    if (cause === "the run cannot start") {
+      syncRuns.start = () => Promise.reject(unavailable)
+    } else {
+      sixb.storage.executions.getById = () => Promise.reject(unavailable)
+    }
+
+    const settled: { kind: "complete" | "fail"; failure?: unknown }[] = []
+    const complete = sixb.queues.syncRuns.complete.bind(sixb.queues.syncRuns)
+    const fail = sixb.queues.syncRuns.fail.bind(sixb.queues.syncRuns)
+    sixb.queues.syncRuns.complete = async (input) => {
+      settled.push({ kind: "complete" })
+      await complete(input)
+    }
+    sixb.queues.syncRuns.fail = async (input) => {
+      settled.push({ kind: "fail", failure: input.failure })
+      await fail(input)
+    }
+
+    const worker = new SyncWorker(sixb)
+    await worker.start()
+
+    try {
+      await waitFor(
+        async () => settled.length,
+        (count) => count > 0
+      )
+    } finally {
+      await worker.stop()
+    }
+
+    const run = await syncRuns.getById({ projectId: sixb.id, id: "run-never-starts" })
+    expect(run).toMatchObject({
+      status: "failed",
+      error: {
+        code: "internal.unexpected",
+        details: { syncId: sync.id, runId: "run-never-starts", datasetId: dataset.id },
+      },
+    })
+    expect(run?.startedAt).toBeUndefined()
+    expect(settled).toEqual([{ kind: "fail", failure: run!.error }])
+    expect(reports).toMatchObject([
+      { type: "run.failed", runKind: "sync", attempt: 1, failure: run!.error },
+    ])
+  })
 })

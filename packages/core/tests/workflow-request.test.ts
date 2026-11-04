@@ -367,6 +367,26 @@ describe("automatic workflow dispatch", () => {
     expect(after?.status).toBe("queued")
     expect(await claimAll(host)).toHaveLength(1)
   })
+
+  // Pipelines and Syncs join a waiting run; a workflow run carries its own trigger's input.
+  test("queues a run per trigger while an earlier run waits", async () => {
+    const { host } = createSixb()
+    const dispatcher = new WorkflowRunDispatcher(host)
+    const dispatch = (eventId: string) =>
+      dispatcher.dispatch({
+        workflowId: draftInvoice.id,
+        runId: `workflow:draft-invoice:schedule:on-update:event:${eventId}`,
+        input: validInput(),
+        scheduleId: "on-update",
+        source: { type: "event", eventId },
+        correlationId: eventId,
+      })
+
+    expect(await dispatch("event-1")).toMatchObject({ created: true })
+    expect(await dispatch("event-2")).toMatchObject({ created: true })
+    expect(await claimAll(host)).toHaveLength(2)
+  })
+
   test("persists an honest root execution before publishing the job, and deduplicates replay", async () => {
     const { host } = createSixb()
     const dispatcher = new WorkflowRunDispatcher(host)

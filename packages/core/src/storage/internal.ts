@@ -44,8 +44,10 @@ export {
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"
 export { createFileUploadId, createUploadExpiresAt } from "./file-upload-sessions/utils"
 export { canRequeuePipelineRunAfterEnqueueFailure } from "./pipeline-runs/idempotency"
+export { canFinishPipelineRun } from "./pipeline-runs/transitions"
 export { projectionRunObjectTypesVisible, zeroProjectionRunProgress } from "./projection-runs/types"
 export { canRequeueSyncRunAfterEnqueueFailure } from "./sync-runs/idempotency"
+export { canFinishSyncRun } from "./sync-runs/transitions"
 export {
   assertTransactionActive,
   createTransactionStorageProxy,

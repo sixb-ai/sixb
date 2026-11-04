@@ -631,4 +631,73 @@ describe("PipelineWorker", () => {
     expect(events[6]?.payload).toMatchObject({ error: cancelledRun?.error })
     expect(reportCount).toBe(0)
   })
+
+  // Automatic dispatch joins a queued run, so its job must not end while the run stays queued.
+  // Drop the queued branch of `onExecutionError` to watch both cases fail; drop the status check
+  // after a failed start in `runPipelineJob` to watch the first one complete its job instead.
+  test.each([
+    "the run cannot start",
+    "the execution cannot be read",
+  ] as const)("fails a run whose job ends before it starts when %s", async (cause) => {
+    const reports: SixbErrorContext[] = []
+    const cleanStep = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async () => {})
+    const pipeline = definePipeline("customers").then(cleanStep)
+    const sixb = createSixbForPipeline({
+      pipeline,
+      datasets: [rawCustomersDataset, customersDataset],
+      onError(_error, context) {
+        reports.push(context)
+      },
+    })
+    const pipelineRuns = sixb.storage.pipelineRuns!
+    await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-never-starts" })
+
+    const unavailable = new Error("storage unavailable")
+    if (cause === "the run cannot start") {
+      pipelineRuns.start = () => Promise.reject(unavailable)
+    } else {
+      sixb.storage.executions.getById = () => Promise.reject(unavailable)
+    }
+
+    const settled: { kind: "complete" | "fail"; failure?: unknown }[] = []
+    const complete = sixb.queues.pipelines.complete.bind(sixb.queues.pipelines)
+    const fail = sixb.queues.pipelines.fail.bind(sixb.queues.pipelines)
+    sixb.queues.pipelines.complete = async (input) => {
+      settled.push({ kind: "complete" })
+      await complete(input)
+    }
+    sixb.queues.pipelines.fail = async (input) => {
+      settled.push({ kind: "fail", failure: input.failure })
+      await fail(input)
+    }
+
+    const worker = new PipelineWorker(sixb)
+    await worker.start()
+
+    try {
+      await waitFor(
+        async () => settled.length,
+        (count) => count > 0
+      )
+    } finally {
+      await worker.stop()
+    }
+
+    const run = await pipelineRuns.getById({ projectId: sixb.id, id: "run-never-starts" })
+    expect(run).toMatchObject({
+      status: "failed",
+      error: {
+        code: "internal.unexpected",
+        details: { pipelineId: "customers", runId: "run-never-starts" },
+      },
+    })
+    expect(run?.startedAt).toBeUndefined()
+    expect(settled).toEqual([{ kind: "fail", failure: run!.error }])
+    expect(reports).toMatchObject([
+      { type: "run.failed", runKind: "pipeline", attempt: 1, failure: run!.error },
+    ])
+  })
 })

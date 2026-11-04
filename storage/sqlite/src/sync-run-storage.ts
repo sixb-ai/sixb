@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite"
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
-import { canRequeueSyncRunAfterEnqueueFailure } from "@sixb/core/internal/storage"
+import { canFinishSyncRun, canRequeueSyncRunAfterEnqueueFailure } from "@sixb/core/internal/storage"
 import { assertSyncRunExecution } from "@sixb/core/internal/sync-run-storage-provider"
 import type {
   ExecutionStorage,
@@ -184,12 +184,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
         )
       }
 
-      const enqueueFailure =
-        input.status === "failed" && input.error.code === "queue.enqueue_failed"
-      if (
-        (enqueueFailure && existing.status !== "queued") ||
-        (!enqueueFailure && existing.status !== "running")
-      ) {
+      if (!canFinishSyncRun(existing.status, input)) {
         throw new SyncRunError(
           `[SixbSqlite] Sync run '${input.id}' cannot finish from status '${existing.status}'.`
         )
