@@ -283,6 +283,54 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
         })
       }))
 
+    test("keeps a stored row that a newer delivery repeats with only its sequence changed", () =>
+      withStorage(async (storage) => {
+        // Red check: write every accepted upsert's row (drop `isSequenceOnlyChange` from the
+        // provider's merge, or the `sequenceBy` filter from DuckLake's row difference).
+        const stored = async () =>
+          (await rows(storage))
+            .map((row) => ({ id: row.id, revision: String(row.revision), name: row.name }))
+            .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+        const changed = (result: DatasetMergeCommitResult) => ({
+          outcome: result.outcome,
+          rowsChanged: result.version?.rowsChanged,
+        })
+
+        await merge(storage, [upsert(10), upsert(1, "Lin", "7")])
+
+        // A re-read at 12 returns the same content: the row keeps 10, the ordering moves to 12.
+        expect(changed(await merge(storage, [upsert(12)]))).toEqual({
+          outcome: "created",
+          rowsChanged: false,
+        })
+        expect(await stored()).toEqual([
+          { id: "42", revision: "10", name: "Sam" },
+          { id: "7", revision: "1", name: "Lin" },
+        ])
+
+        // A late delivery read at 11 stays ignored, and 12 compares with what was delivered at 12.
+        expect((await merge(storage, [upsert(11, "Late")])).outcome).toBe("unchanged")
+        expect((await merge(storage, [upsert(12)])).outcome).toBe("unchanged")
+        await expect(merge(storage, [upsert(12, "Tie")])).rejects.toThrow("conflicting content")
+
+        // In one batch, only the row whose content changed is rewritten.
+        expect(changed(await merge(storage, [upsert(13), upsert(2, "Grace", "7")]))).toEqual({
+          outcome: "created",
+          rowsChanged: true,
+        })
+        expect(await stored()).toEqual([
+          { id: "42", revision: "10", name: "Sam" },
+          { id: "7", revision: "2", name: "Grace" },
+        ])
+
+        // Any other difference rewrites the whole row, its sequence included.
+        expect(changed(await merge(storage, [upsert(14, "Ada")]))).toEqual({
+          outcome: "created",
+          rowsChanged: true,
+        })
+        expect((await stored())[0]).toEqual({ id: "42", revision: "14", name: "Ada" })
+      }))
+
     test("compares canonical content across JSON order and nullable representations", () =>
       withStorage(async (storage) => {
         await merge(storage, [
