@@ -88,6 +88,7 @@ const modelKinds: readonly ModelKind[] = [
   "transcription",
   "speech",
   "reranking",
+  "web-search",
 ]
 
 export function readFilters(params: URLSearchParams): SpendFilters {
