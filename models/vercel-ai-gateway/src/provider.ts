@@ -1136,6 +1136,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
   readonly rateCard?: ModelRateCard
   readonly defaultReasoning?: ModelReasoningLevel
   readonly maxOutputTokens?: number
+  readonly providerToolNames?: readonly string[]
 
   constructor(
     private readonly transport: GatewayTransport,
@@ -1183,6 +1184,10 @@ class VercelGatewayLanguageModel implements LanguageModel {
     for (const [index, tool] of (options.providerTools ?? []).entries()) {
       assertJsonObject(tool, `providerTools[${index}]`)
     }
+    const providerToolNames = (options.providerTools ?? []).flatMap((tool) =>
+      typeof tool.name === "string" ? [tool.name] : []
+    )
+    if (providerToolNames.length > 0) this.providerToolNames = providerToolNames
     this.definition = defineLanguageModel({
       ...(configuredDefinition ?? fallbackDefinition(modelId)),
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
