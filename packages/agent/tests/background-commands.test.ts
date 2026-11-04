@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import type { Sandbox } from "@sixb/core"
 import type { AgentMessage } from "@sixb/core/internal/agents"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
@@ -459,7 +459,17 @@ describe("background commands on the computer", () => {
     folder = join(root, "folder")
     runFilesRoot = join(root, "runs")
     mkdirSync(folder)
-    runner = new ComputerRunner({
+    runner = newRunner()
+  })
+
+  afterEach(async () => {
+    await runner.stopBackgroundCommands()
+    await runner.drain()
+  })
+
+  /** A sixb's runner, in the folder: each one opened over the same run files. */
+  function newRunner(): ComputerRunner {
+    return new ComputerRunner({
       apiUrl: "http://api.localhost",
       authorization: async () => "",
       computer: async () => ({ id: "laptop", name: "Laptop" }),
@@ -470,12 +480,7 @@ describe("background commands on the computer", () => {
           ...(workingDirectory === undefined ? {} : { workingDirectory }),
         }),
     })
-  })
-
-  afterEach(async () => {
-    await runner.stopBackgroundCommands()
-    await runner.drain()
-  })
+  }
 
   /** A run's sandbox as the runner opens it: a turn's, in the folder, or a child's. */
   async function open(runId: string, options: { readonly child?: boolean } = {}) {
@@ -546,6 +551,48 @@ describe("background commands on the computer", () => {
     expect(background.get(started.id).status).toBe("stopped")
     await runner.drain()
     expect(first.acquired.sandbox.status).toBe("stopped")
+  })
+
+  // Removal proofs: drop stopCommandsLeftRunning from the runner's acquire (the group a killed
+  // sixb left runs on, its output file removed under it); make `ours` return 0 in REAP_SCRIPT (the
+  // process that reused a group id dies too).
+  test("stop what a killed sixb left running, never a group that is not its command's", async () => {
+    const first = await open("agt_run_1")
+    const background = first.run.background
+    if (!background) throw new Error("A turn on the computer keeps its thread's commands.")
+
+    const started = await background.start({ handle: first.handle, command: "sleep 30" })
+    const pidFile = started.outputPath.replace(/\.log$/, ".pid")
+    const group = Number(readFileSync(pidFile, "utf8").split(" ")[1])
+    await first.run.release?.(first.acquired)
+
+    // A pid file left earlier, whose group id another process took since: a sleep in a group of
+    // its own, re-parented as its shell exits. It sorts first, so the reap meets it first.
+    const spawner = Bun.spawn(
+      ["bash", "-c", "set -m; sleep 30 < /dev/null > /dev/null 2>&1 & echo $!"],
+      { stdout: "pipe" }
+    )
+    const timer = setTimeout(() => spawner.kill(), 5_000)
+    const unrelated = Number((await new Response(spawner.stdout).text()).trim())
+    await spawner.exited
+    clearTimeout(timer)
+    const stale = join(dirname(pidFile), "bg_000000")
+    writeFileSync(`${stale}.pid`, `0123456789abcdef ${unrelated}\n`)
+    writeFileSync(`${stale}.log`, "")
+
+    // The sixb is killed: the next one opened has an index that knows no command.
+    const killed = runner
+    runner = newRunner()
+    try {
+      const second = await open("agt_run_2")
+      await waitFor(() => gone(group), { label: "the command's group exits" })
+      expect(gone(unrelated)).toBe(false)
+      await second.run.release?.(second.acquired)
+    } finally {
+      if (!gone(unrelated)) process.kill(unrelated, "SIGKILL")
+      await killed.stopBackgroundCommands()
+      await killed.drain()
+    }
   })
 
   test("end with a child's run, which keeps none for later", async () => {

@@ -434,7 +434,7 @@ async function signalGroup(entry: BackgroundCommand, signal: "TERM" | "KILL"): P
   try {
     const result = await entry.sandbox.runCommand(
       "bash",
-      ["-c", 'kill -s "$1" -- "-$2" 2>/dev/null', "sixb-background", signal, String(entry.group)],
+      ["-c", SIGNAL_SCRIPT, "sixb-background", signal, String(entry.group)],
       { timeout: CONTROL_TIMEOUT_MS }
     )
     return result.exitCode === 0
@@ -442,6 +442,29 @@ async function signalGroup(entry: BackgroundCommand, signal: "TERM" | "KILL"): P
     return false
   }
 }
+
+/**
+ * Stop the commands a `sixb` that ended without stopping them left running: one killed, or that
+ * crashed. Their pid files are all that is left of them. Each group still running its command
+ * gets SIGTERM, then SIGKILL after the grace period `bash_stop` gives, in one call.
+ */
+export async function stopLeftRunning(
+  sandbox: Sandbox,
+  pidFiles: readonly string[],
+  signal: AbortSignal
+): Promise<void> {
+  const result = await sandbox.runCommand(
+    "bash",
+    ["-c", REAP_SCRIPT, "sixb-background-reap", String(STOP_GRACE_MS / 50), ...pidFiles],
+    { timeout: CONTROL_TIMEOUT_MS, signal }
+  )
+  if (result.exitCode !== 0) {
+    throw new Error(`[SixbAgent] ${result.stderr.trim() || `exit ${result.exitCode}`}`)
+  }
+}
+
+/** Signal a process group. Arguments: the signal, the group. */
+const SIGNAL_SCRIPT = 'kill -s "$1" -- "-$2" 2>/dev/null'
 
 /**
  * Started detached from the held call's own output, in a process group of its own (`set -m`: no
@@ -480,4 +503,57 @@ start=$2
 [ $((size - start)) -gt "$3" ] && start=$((size - $3))
 echo "$size"
 [ "$size" -gt "$start" ] && tail -c +$((start + 1)) -- "$1" | head -c $((size - start))
+exit 0`
+
+/**
+ * SIGTERM to each group a pid file names that is still its command's, SIGKILL to those left after
+ * the grace period. Arguments: the grace period in 50 ms polls, then the pid files.
+ *
+ * A group is its command's only while one of its processes holds the command's output file, which
+ * the start opened for every process of it: a group id reused since, by anything else, holds no
+ * such file, and is never signalled. The start leaves nothing else to check on macOS: a command
+ * line keeps nothing of ours once bash runs the command in its own place, and `ps` shows no
+ * environment of Apple's own binaries, bash and sleep among them. Linux lists open files in
+ * `/proc`; macOS through `lsof`.
+ */
+const REAP_SCRIPT = `signal() { ${SIGNAL_SCRIPT}; }
+holds() {
+  if [ -d /proc/self/fd ]; then
+    for fd in "/proc/$1/fd/"*; do
+      [ "$(readlink "$fd" 2>/dev/null)" = "$2" ] && return 0
+    done
+    return 1
+  fi
+  lsof -a -p "$1" -- "$2" > /dev/null 2>&1
+}
+ours() {
+  case "$1" in ''|*[!0-9]*|0|1) return 1 ;; esac
+  for pid in $(ps -A -o pid= -o pgid= | awk -v group="$1" '$2 == group { print $1 }'); do
+    holds "$pid" "$2" && return 0
+  done
+  return 1
+}
+grace=$1
+shift
+termed=""
+for file in "$@"; do
+  { read -r _ group < "$file"; } 2>/dev/null || continue
+  ours "$group" "\${file%.pid}.log" && signal TERM "$group" && termed="$termed $group"
+done
+i=0
+while [ -n "$termed" ] && [ "$i" -lt "$grace" ]; do
+  left=""
+  for group in $termed; do
+    kill -0 -- "-$group" 2>/dev/null && left="$left $group"
+  done
+  termed=$left
+  [ -n "$termed" ] && sleep 0.05
+  i=$((i + 1))
+done
+for file in "$@"; do
+  { read -r _ group < "$file"; } 2>/dev/null || continue
+  case " $termed " in
+    *" $group "*) ours "$group" "\${file%.pid}.log" && signal KILL "$group" ;;
+  esac
+done
 exit 0`
