@@ -58,7 +58,8 @@ describeAgentRunSessionContract(claimOverHttp)
 
 describe("a runner's messages", () => {
   // Reproduce: return the part as it came from withSavedOutputChecked; the stored message then
-  // names a path outside the context directory, which a later run writes the blob at.
+  // names a path outside the context directory, which a later run writes the blob at. Accept any
+  // extension in TOOL_OUTPUT_PATH; the `.sh` file is then kept.
   test("keep a call's saved output only at the path the harness gives it", async () => {
     const { host, storage, run } = await seedAgentRun()
     const session = await claimOverHttp(host, { run, leaseExpiresAt: "2099-01-01T00:00:00.000Z" })
@@ -89,13 +90,15 @@ describe("a runner's messages", () => {
         role: "assistant",
         parts: [
           call("kept", agentToolOutputPath("kept", sha256)),
+          call("page", agentToolOutputPath("page", sha256, "md")),
           call("escaping", "../../../home/u/.bashrc"),
           call("other_content", agentToolOutputPath("other_content", "0".repeat(64))),
+          call("script", `tool-outputs/script-${sha256.slice(0, 12)}.sh`),
         ],
       },
     ])
 
-    expect(warn).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenCalledTimes(3)
     warn.mockRestore()
 
     const { messages } = await storage.agents.messages.list({
@@ -107,7 +110,7 @@ describe("a runner's messages", () => {
       parts.map((part) =>
         part.type === "tool-call" && "outputFile" in part ? part.toolCallId : null
       )
-    ).toEqual(["kept", null, null])
+    ).toEqual(["kept", "page", null, null, null])
     session.close()
   })
 })

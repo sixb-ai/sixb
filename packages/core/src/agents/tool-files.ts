@@ -224,23 +224,31 @@ export function agentToolFilePath(toolCallId: string, fileRef: FileRef, fileName
   return posix.join("tool-files", callKey, `${digestKey}-${fileName}`)
 }
 
+/** What a saved output may be: text, a page as markdown, or a document or image as it came. */
+export type AgentToolOutputExtension = "txt" | "md" | "pdf" | "png" | "jpg" | "gif" | "webp"
+
 /**
  * Where a call's output too large for the model's context is saved, relative to the context
  * directory: the call, and the content's digest, so a call id a provider uses again names another
  * file. `sha256` is the content's hex digest.
  */
-export function agentToolOutputPath(toolCallId: string, sha256: string): string {
+export function agentToolOutputPath(
+  toolCallId: string,
+  sha256: string,
+  extension: AgentToolOutputExtension = "txt"
+): string {
   const call = SAFE_CALL_ID.test(toolCallId)
     ? toolCallId
     : createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
-  return `${AGENT_TOOL_OUTPUTS_DIRECTORY}/${call}-${sha256.slice(0, 12)}.txt`
+  return `${AGENT_TOOL_OUTPUTS_DIRECTORY}/${call}-${sha256.slice(0, 12)}.${extension}`
 }
 
 /** Where saved outputs go, in the context directory. */
 export const AGENT_TOOL_OUTPUTS_DIRECTORY = "tool-outputs"
 
 const SAFE_CALL_ID = /^[A-Za-z0-9_-]{1,128}$/
-const TOOL_OUTPUT_PATH = /^tool-outputs\/[A-Za-z0-9_-]{1,128}-([0-9a-f]{12})\.txt$/
+const TOOL_OUTPUT_PATH =
+  /^tool-outputs\/[A-Za-z0-9_-]{1,128}-([0-9a-f]{12})\.(?:txt|md|pdf|png|jpg|gif|webp)$/
 
 /**
  * Whether a tool-call part's `outputFile` is one {@link agentToolOutputPath} names: a stored file,
