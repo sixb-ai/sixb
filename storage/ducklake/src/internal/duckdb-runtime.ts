@@ -8,6 +8,7 @@ import {
 } from "@duckdb/node-api"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
+import { prefetchDuckDbExtensions } from "./duckdb-extensions"
 import { type DuckDbReader, type DuckDbReaderOptions, NodeDuckDbReader } from "./duckdb-reader"
 import { sixbDuckDbValueConverter } from "./duckdb-value-converter"
 import {
@@ -323,9 +324,12 @@ export async function installDuckLakeExtensions(
   runtime: DuckDbRuntime,
   options: DuckLakeStorageOptions
 ): Promise<void> {
+  const extensions = requiredExtensions(options)
+  await prefetchDuckDbExtensions(runtime, ["ducklake", ...extensions])
+
   await runtime.run("INSTALL ducklake")
 
-  for (const extension of requiredExtensions(options)) {
+  for (const extension of extensions) {
     await runtime.run(`INSTALL ${quoteIdentifier(extension)}`)
   }
 }
