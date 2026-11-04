@@ -200,12 +200,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     // A held call changed: its card, and the thread list's count of what waits for the reader. Its
     // turn's runs follow from their own events.
     onApprovalActivity: (event) => void refreshApprovals(event.threadId),
-    // Its owner's sixb opened or closed where the open conversation runs: its badge follows.
+    // Its owner's sixb opened or closed where the open conversation runs: its badge follows. So do
+    // its background commands, which may run where it ran before it moved.
     onComputerActivity: (event) => {
       const place = thread?.computer
-      if (threadId && place?.id === event.computerId && place.folder === event.folder) {
-        void refreshThread(threadId)
-      }
+      const here = place?.id === event.computerId && place.folder === event.folder
+      if (threadId && (here || thread?.backgroundCommands)) void refreshThread(threadId)
     },
     // It moved from another tab or from sixb: the badge and notice follow.
     onThreadMoved: (event) => {
@@ -1022,18 +1022,17 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       : null
 
   // Its background commands: what its owner's sixb reports of them, and their Stop, to its owner
-  // alone, as the computer is theirs.
+  // alone, as the computer is theirs. A command started in a folder runs on there once the thread
+  // moved to another, or to the cloud.
   const computer = thread?.computer
+  const backgroundCommands = thread?.backgroundCommands
   const runsOnComputer = thread?.runsOn === "computer"
   // biome-ignore lint/correctness/useExhaustiveDependencies: the mutation and the refresh are the conversation's
-  const transcriptBackground = useMemo(
-    (): TranscriptBackground => ({
-      source: {
-        onComputer: runsOnComputer,
-        live: computer ? (computer.backgroundCommands ?? []) : null,
-        online: computer?.online ?? false,
-      },
-      ...(computer && threadId !== null
+  const transcriptBackground = useMemo((): TranscriptBackground => {
+    const live = backgroundCommands ?? (computer ? [] : null)
+    return {
+      source: { onComputer: runsOnComputer, live, online: computer?.online ?? false },
+      ...(live !== null && threadId !== null
         ? {
             stop: async (command) => {
               await stopBackgroundCommand.mutateAsync({
@@ -1044,9 +1043,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
             },
           }
         : {}),
-    }),
-    [computer, runsOnComputer, threadId]
-  )
+    }
+  }, [computer, backgroundCommands, runsOnComputer, threadId])
 
   const transcriptProps: TranscriptProps = {
     threadId,

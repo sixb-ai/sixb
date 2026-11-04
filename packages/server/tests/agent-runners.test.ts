@@ -567,9 +567,9 @@ describe("a runner outside the worker", () => {
     const commands = async () =>
       (
         (await (await call(ava, "GET", `/api/agent-threads/${threadId}`)).json()) as {
-          computer?: { backgroundCommands?: unknown }
+          backgroundCommands?: unknown
         }
-      ).computer?.backgroundCommands
+      ).backgroundCommands
     const stop = (as: typeof ava, startedAt = running.startedAt) =>
       call(as, "POST", `/api/agent-threads/${threadId}/background-commands/bg_1/stop`, {
         startedAt,
@@ -598,6 +598,51 @@ describe("a runner outside the worker", () => {
     const { records } = await host.broker.read({ projectId, streamId: "agents.activity" })
     const heard = records.filter((record) => record.name === "agent.computer.activity")
     expect(heard).toHaveLength(3)
+  })
+
+  // Guard proof: match the sessions to the thread's current folder again, in computerPlaces or in
+  // the stop route; the command still running in the folder it left reads as gone, and its Stop
+  // answers 404.
+  test("shows and stops a background command where it runs, after its thread moved", async () => {
+    const { person, ask, call, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Serve the docs while you edit them.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const running = {
+      threadId,
+      id: "bg_3f9a1c",
+      command: "bun dev",
+      status: "running",
+      startedAt: "2026-11-04T10:00:00.000Z",
+    }
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_ava", {
+      computer: LAPTOP,
+      backgroundCommands: [running],
+    })
+    const read = async () => (await call(ava, "GET", `/api/agent-threads/${threadId}`)).json()
+    const stop = () =>
+      call(ava, "POST", `/api/agent-threads/${threadId}/background-commands/${running.id}/stop`, {
+        startedAt: running.startedAt,
+      })
+
+    // To another folder: its command runs on in the one it left, and stops from there.
+    const elsewhere = { ...LAPTOP, folder: "/Users/ava/other" }
+    const moved = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: elsewhere,
+    })
+    expect(moved.status).toBe(200)
+    expect(await read()).toMatchObject({
+      computer: { ...elsewhere, online: false },
+      backgroundCommands: [running],
+    })
+    expect((await stop()).status).toBe(202)
+
+    // To the cloud: still.
+    expect((await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)).status).toBe(200)
+    const inCloud = await read()
+    expect(inCloud).not.toHaveProperty("computer")
+    expect(inCloud).toMatchObject({ backgroundCommands: [{ ...running, stopping: true }] })
+    expect((await stop()).status).toBe(202)
   })
 
   // Guard proof: drop the MAX_SESSIONS check from the session route; one person holds sessions
