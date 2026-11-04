@@ -65,7 +65,7 @@ function preparationFingerprint(plan: ObjectQueryPreparationPlan): string {
     .sort((a, b) => a.objectTypeId.localeCompare(b.objectTypeId))
 
   // Bump the version when physical generation changes, even if the ontology stays the same.
-  const definition = { version: 3, projectId: plan.projectId, objectTypes }
+  const definition = { version: 4, projectId: plan.projectId, objectTypes }
   return createHash("sha256").update(JSON.stringify(definition)).digest("hex")
 }
 
