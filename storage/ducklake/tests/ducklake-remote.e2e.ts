@@ -321,6 +321,71 @@ describe("DuckLakeStorage remote catalogs", () => {
     }
   })
 
+  // Regression proof: in DuckLakeMaintenance, rethrow in yieldingToConcurrentPass. The pass that
+  // loses a race fails with "could not serialize access due to concurrent update" (most rounds
+  // fail with DuckLake ac7595b0).
+  test("two retention passes at once on a PostgreSQL catalog both succeed", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-retention-race-"))
+    const dataset = defineDataset(`raw.pg.race.${randomId()}`, {
+      schema: [col("id", "string"), col("n", "int64")],
+    })
+    const options: DuckLakeStorageOptions = {
+      catalog: postgresCatalog(),
+      dataPath: join(rootDir, "data"),
+    }
+    const first = new DuckLakeStorage(options)
+    const second = new DuckLakeStorage(options)
+    const retention = { keepVersionsForMs: 60 * 60 * 1000, deleteFilesAfterMs: 60 * 60 * 1000 }
+
+    // Backdates the catalog's history and its scheduled files, instead of waiting for them.
+    const backdate = async () => {
+      const runtime = await (
+        first as unknown as { connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+      ).connections.attachedRuntime()
+      for (const [table, column] of [
+        ["ducklake_snapshot", "snapshot_time"],
+        ["ducklake_files_scheduled_for_deletion", "schedule_start"],
+      ] as const) {
+        await runtime.run(`
+          UPDATE ${duckLakeMetadataTableName(options, table)}
+          SET ${column} = ${column} - INTERVAL '3 hours'
+        `)
+      }
+    }
+
+    try {
+      await first.createDataset(dataset)
+      let latest: DatasetWriteCommitResult | undefined
+      for (let n = 0; n < 40; n++) {
+        const write = await first.beginWrite({ dataset, mode: "snapshot" })
+        await write.writeRows(Array.from({ length: 20 }, (_, i) => ({ id: `r${i}`, n })))
+        latest = await write.commit()
+      }
+
+      for (let round = 0; round < 6; round++) {
+        await backdate()
+        const passes = await Promise.allSettled([
+          first.maintenance.applyRetention({ ...retention, limit: 8 }),
+          second.maintenance.applyRetention({ ...retention, limit: 8 }),
+        ])
+        expect(passes.map((pass) => pass.status)).toEqual(["fulfilled", "fulfilled"])
+      }
+
+      await backdate()
+      await first.maintenance.applyRetention(retention)
+      await backdate()
+      expect(await first.maintenance.applyRetention(retention)).toMatchObject({ hasMore: false })
+
+      expect((await second.getLatestVersion(dataset.id))?.versionId).toBe(latest?.versionId)
+      expect(await collectRows(second.readRows({ datasetId: dataset.id }))).toHaveLength(20)
+      expect(await second.listVersions(dataset.id)).toHaveLength(1)
+    } finally {
+      await first.close()
+      await second.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
   test("uses a PostgreSQL catalog with an S3-compatible data path", async () => {
     const dataset = defineDataset(`raw.pg.s3.${randomId()}`, {
       schema: [col("orderId", "string")],
