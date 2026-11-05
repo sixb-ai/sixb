@@ -805,7 +805,7 @@ export interface FleetioVehicleServiceEntrySort {
 }
 
 /** A Vehicle Assignment */
-export interface FleetioVehicleVehicleAssignmentSummary {
+export interface FleetioVehicleAssignmentOnVehicleSummary {
   /** *Full details on working with Custom Fields here. */
   readonly custom_fields: Readonly<Record<string, unknown>> | null
   readonly id: number
@@ -832,14 +832,14 @@ export interface FleetioVehicleVehicleAssignmentSummary {
   readonly contact: FleetioContactMini | null
 }
 
-export interface FleetioVehicleVehicleAssignmentFilter {
+export interface FleetioVehicleAssignmentOnVehicleFilter {
   readonly contact_id?: FleetioEqFilter
   readonly ended_at?: FleetioRangeFilter
   readonly created_at?: FleetioRangeFilter
   readonly updated_at?: FleetioRangeFilter
 }
 
-export interface FleetioVehicleVehicleAssignmentSort {
+export interface FleetioVehicleAssignmentOnVehicleSort {
   readonly started_at?: FleetioSortDirection
   readonly ended_at?: FleetioSortDirection
   readonly created_at?: FleetioSortDirection

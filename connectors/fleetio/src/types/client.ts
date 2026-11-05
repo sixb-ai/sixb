@@ -1,5 +1,10 @@
 import type { CommentsResource } from "../resources/comments"
+import type { ContactsResource } from "../resources/contacts"
 import type { CustomFieldsResource } from "../resources/custom-fields"
+import type { EquipmentResource } from "../resources/equipment"
+import type { EquipmentStatusesResource } from "../resources/equipment-statuses"
+import type { EquipmentTypesResource } from "../resources/equipment-types"
+import type { GroupsResource } from "../resources/groups"
 import type { IssuePrioritiesResource } from "../resources/issue-priorities"
 import type { IssuesResource } from "../resources/issues"
 import type { LabelsResource } from "../resources/labels"
@@ -7,6 +12,11 @@ import type { ServiceEntriesResource } from "../resources/service-entries"
 import type { ServiceEntryLineItemsResource } from "../resources/service-entry-line-items"
 import type { ServiceRemindersResource } from "../resources/service-reminders"
 import type { ServiceTasksResource } from "../resources/service-tasks"
+import type { VehicleAssignmentsResource } from "../resources/vehicle-assignments"
+import type { VehicleStatusesResource } from "../resources/vehicle-statuses"
+import type { VehicleTypesResource } from "../resources/vehicle-types"
+import type { VehiclesResource } from "../resources/vehicles"
+import type { VendorsResource } from "../resources/vendors"
 import type { VmrsReasonsForRepairResource } from "../resources/vmrs-reasons-for-repair"
 import type { WatchersResource } from "../resources/watchers"
 import type { WorkOrderLineItemsResource } from "../resources/work-order-line-items"
@@ -32,4 +42,14 @@ export interface FleetioClient {
   readonly labels: LabelsResource
   readonly watchers: WatchersResource
   readonly customFields: CustomFieldsResource
+  readonly vehicles: VehiclesResource
+  readonly vehicleStatuses: VehicleStatusesResource
+  readonly vehicleTypes: VehicleTypesResource
+  readonly vehicleAssignments: VehicleAssignmentsResource
+  readonly contacts: ContactsResource
+  readonly vendors: VendorsResource
+  readonly groups: GroupsResource
+  readonly equipment: EquipmentResource
+  readonly equipmentStatuses: EquipmentStatusesResource
+  readonly equipmentTypes: EquipmentTypesResource
 }
