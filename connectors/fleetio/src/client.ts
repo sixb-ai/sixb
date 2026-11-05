@@ -1,4 +1,6 @@
+import type { ConnectorContext } from "@sixb/core"
 import type { FleetioHttp } from "./http"
+import { bulkJobsResource } from "./resources/bulk-jobs"
 import { commentsResource } from "./resources/comments"
 import { contactsResource } from "./resources/contacts"
 import { customFieldsResource } from "./resources/custom-fields"
@@ -29,6 +31,8 @@ import { serviceEntryLineItemsResource } from "./resources/service-entry-line-it
 import { serviceRemindersResource } from "./resources/service-reminders"
 import { serviceTasksResource } from "./resources/service-tasks"
 import { submittedInspectionFormsResource } from "./resources/submitted-inspection-forms"
+import { uploadsResource } from "./resources/uploads"
+import { usersResource } from "./resources/users"
 import { vehicleAssignmentsResource } from "./resources/vehicle-assignments"
 import { vehicleStatusesResource } from "./resources/vehicle-statuses"
 import { vehicleTypesResource } from "./resources/vehicle-types"
@@ -43,7 +47,11 @@ import { workOrderStatusesResource } from "./resources/work-order-statuses"
 import { workOrdersResource } from "./resources/work-orders"
 import type { FleetioClient } from "./types"
 
-export function createFleetioClient(http: FleetioHttp): FleetioClient {
+export function createFleetioClient(
+  http: FleetioHttp,
+  context: ConnectorContext,
+  timeoutMs: number | undefined
+): FleetioClient {
   return {
     workOrders: workOrdersResource(http),
     workOrderLineItems: workOrderLineItemsResource(http),
@@ -87,5 +95,8 @@ export function createFleetioClient(http: FleetioHttp): FleetioClient {
     inspectionSchedules: inspectionSchedulesResource(http),
     webhooks: webhooksResource(http),
     webhookEvents: webhookEventsResource(http),
+    bulkJobs: bulkJobsResource(http),
+    uploads: uploadsResource(http, context, timeoutMs),
+    users: usersResource(http),
   }
 }
