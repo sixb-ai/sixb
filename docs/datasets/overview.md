@@ -37,7 +37,7 @@ The id `erp.invoices` is the name every other part of the project references.
 | `schema` | `col(...)[]` | Required. The ordered list of column definitions. |
 | `primaryKey` | `string \| string[]` | Optional. One key column or an ordered composite key. |
 | `sequenceBy` | `string` | Optional. Non-nullable `timestamp` or `int64` column used to order source changes; requires a primary key. |
-| `partitionBy` | `string[]` | Optional. Logical partition columns; each name must exist in `schema`. |
+| `partitionBy` | `string[]` | Optional. Logical partition columns; each name must exist in `schema`. Worth it from about a million rows: below, each write adds a file per partition and the lake warns. |
 | `description` | `string` | Optional. Human-readable description. |
 
 ## Primary keys

@@ -126,6 +126,39 @@ On a SQLite catalog, DuckLake `ac7595b0` compares stored schedule times with a g
 unreliably outside UTC (west of UTC it deleted files scheduled a moment ago), so files there are
 deleted all at once, and only once every scheduled file is due.
 
+### Automatic Compaction
+
+Small writes leave small storage behind: a write of up to 10 rows is inlined in the catalog, a
+larger one writes a Parquet file, and replacing rows of a file adds a delete file. The provider
+compacts a dataset on its own, in the process that wrote, after the commits that need it. Nothing
+is configured.
+
+- **When.** After a dataset's first commit in a provider, then after every 8th, the provider reads
+  the dataset's catalog rows (three or four queries, no data). A pass runs only past a threshold:
+  1,000 inlined rows, a data file with a tenth of its rows deleted, or 16 files under 1 MiB.
+- **What.** A first maintenance commit flushes inlined rows to files. A second rewrites the files
+  with a tenth of their rows deleted, then merges files under 1 MiB, at most 256 per pass. A
+  backlog takes several passes, one after the other.
+- **Never a version.** DuckLake records these commits as `inline_flush`, `rewrite_delete` and
+  `merge_adjacent`, which change no rows: they are not versions, the change feed skips them, and
+  every retained version reads the same rows through the new files. Whoever runs them, by hand
+  included, the rule is the same.
+- **Never in a write's way.** The version is committed and returned first; the commit only
+  schedules the check. One compaction runs per dataset at a time; commits meanwhile get one more
+  pass. A failure goes to a `[SixbDuckLake]` warning, never to the write. Each maintenance commit
+  takes the catalog commit lock like a write, so writes in the same process wait for one short
+  commit at most. A compaction that conflicts with another process's write fails at once and
+  yields; the next check tries again. `close()` lets the current pass finish and starts no other.
+
+The thresholds come from measurements on DuckDB 1.5.6 with a local catalog: with 16 small files
+or 4,000 inlined rows, reads cost what they cost compacted; with 256 files a full read took half
+as long again, with 1,024 three times as long and a one-row append twice as long. One merge or
+flush took 20–70 ms. On object storage, every file is also one more request per read.
+
+A partitioned dataset holding under about a million rows gets a warning once per process, and in
+`describeStorage`: each write adds a file per partition it touches, and merges stay within a
+partition.
+
 ### Read and Write Concurrency
 
 Large reads stream through dedicated connections in the same DuckDB engine, sharing its memory
