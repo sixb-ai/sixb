@@ -5,9 +5,16 @@ import type { EquipmentResource } from "../resources/equipment"
 import type { EquipmentStatusesResource } from "../resources/equipment-statuses"
 import type { EquipmentTypesResource } from "../resources/equipment-types"
 import type { GroupsResource } from "../resources/groups"
+import type { InventoryAdjustmentReasonsResource } from "../resources/inventory-adjustment-reasons"
+import type { InventoryJournalEntriesResource } from "../resources/inventory-journal-entries"
 import type { IssuePrioritiesResource } from "../resources/issue-priorities"
 import type { IssuesResource } from "../resources/issues"
 import type { LabelsResource } from "../resources/labels"
+import type { PartLocationDetailsResource } from "../resources/part-location-details"
+import type { PartLocationsResource } from "../resources/part-locations"
+import type { PartsResource } from "../resources/parts"
+import type { PurchaseOrderLineItemsResource } from "../resources/purchase-order-line-items"
+import type { PurchaseOrdersResource } from "../resources/purchase-orders"
 import type { ServiceEntriesResource } from "../resources/service-entries"
 import type { ServiceEntryLineItemsResource } from "../resources/service-entry-line-items"
 import type { ServiceRemindersResource } from "../resources/service-reminders"
@@ -52,4 +59,12 @@ export interface FleetioClient {
   readonly equipment: EquipmentResource
   readonly equipmentStatuses: EquipmentStatusesResource
   readonly equipmentTypes: EquipmentTypesResource
+  readonly parts: PartsResource
+  readonly partLocations: PartLocationsResource
+  readonly partLocationDetails: PartLocationDetailsResource
+  readonly inventoryJournalEntries: InventoryJournalEntriesResource
+  readonly inventoryAdjustmentReasons: InventoryAdjustmentReasonsResource
+  readonly purchaseOrders: PurchaseOrdersResource
+  /** Line items of a purchase order. */
+  readonly purchaseOrderLineItems: PurchaseOrderLineItemsResource
 }
