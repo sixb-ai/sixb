@@ -167,6 +167,14 @@ export const connectorCatalog: readonly ConnectorEntry[] = [
     icon: "companycam.png",
   },
   {
+    id: "fleetio",
+    name: "Fleetio",
+    description: "Work orders, vehicles, maintenance, and parts",
+    category: "Other",
+    package: "fleetio",
+    icon: "fleetio.ico",
+  },
+  {
     id: "ace-iot",
     name: "ACE IoT",
     description: "Sites, BACnet points, gateways, and time series",
