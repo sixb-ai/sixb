@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto"
 import { posix } from "node:path"
 import { AgentToolPublicError, type CommandResult, type Sandbox } from "@sixb/core"
 import { waitForAbort } from "./abort"
+import { LOGIN_SHELL_SCRIPT } from "./login-shell"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
 // A background command runs in the call that starts it, held open until it ends: a provider that
@@ -487,7 +488,7 @@ const SIGNAL_SCRIPT = 'kill -s "$1" -- "-$2" 2>/dev/null'
 const START_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" || exit 1
 : > "$1" && rm -f -- "$3" || exit 1
 set -m
-bash -lc "$5" < /dev/null >> "$1" 2>&1 &
+bash -lc '${LOGIN_SHELL_SCRIPT}' bash "$5" < /dev/null >> "$1" 2>&1 &
 pid=$!
 set +m
 echo "$4 $pid" > "$2.tmp" && mv -f -- "$2.tmp" "$2"

@@ -5,6 +5,7 @@ import {
   type SandboxStatusReport,
 } from "@sixb/cli-core"
 import type { CommandResult, Sandbox } from "@sixb/core"
+import { loginShellArgs } from "../login-shell"
 import { AgentRuntimeProfileError } from "./errors"
 import {
   AGENT_RUNTIME_MINIMUM_VERSIONS,
@@ -83,7 +84,7 @@ async function runProbe(
   timeoutMs = PREFLIGHT_TIMEOUT_MS
 ): Promise<CommandResult> {
   try {
-    const result = await sandbox.runCommand("bash", ["-lc", script], {
+    const result = await sandbox.runCommand("bash", loginShellArgs(script), {
       env,
       timeout: timeoutMs,
     })

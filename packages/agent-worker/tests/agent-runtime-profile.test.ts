@@ -7,6 +7,7 @@ import type { CommandResult, RunCommandOptions, Sandbox } from "@sixb/core"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { AgentRuntimeProfileError } from "../../agent/src/agent-runtime/errors"
 import { assertAgentRuntimeProfile } from "../../agent/src/agent-runtime/preflight"
+import { LOGIN_SHELL_SCRIPT } from "../../agent/src/login-shell"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../../agent/src/run-sandbox"
 import { prepareAgentSandboxApiContext } from "../../agent/src/sandbox-api-context"
 
@@ -91,14 +92,14 @@ describe("sixb-agent-runtime/v1 preflight", () => {
 
     expect(sandbox.commands).toHaveLength(2)
     expect(sandbox.commands[0]).toMatchObject({ command: "bash", options: { timeout: 15_000 } })
-    expect(sandbox.commands[0]?.args[0]).toBe("-lc")
-    expect(sandbox.commands[0]?.args[1]).toContain("SIXB_BASH_ENV_READY")
-    expect(sandbox.commands[0]?.args[1]).toContain("PIPESTATUS")
-    expect(sandbox.commands[0]?.args[1]).toContain("command -v bun")
-    expect(sandbox.commands[0]?.args[1]).not.toContain(ENV.SIXB_API_BASE_URL)
+    expect(sandbox.commands[0]?.args.slice(0, 3)).toEqual(["-lc", LOGIN_SHELL_SCRIPT, "bash"])
+    expect(sandbox.commands[0]?.args[3]).toContain("SIXB_BASH_ENV_READY")
+    expect(sandbox.commands[0]?.args[3]).toContain("PIPESTATUS")
+    expect(sandbox.commands[0]?.args[3]).toContain("command -v bun")
+    expect(sandbox.commands[0]?.args[3]).not.toContain(ENV.SIXB_API_BASE_URL)
     expect(sandbox.commands[1]).toMatchObject({
       command: "bash",
-      args: ["-lc", "sixb status"],
+      args: ["-lc", LOGIN_SHELL_SCRIPT, "bash", "sixb status"],
       options: { env: ENV, timeout: 15_000 },
     })
   })
