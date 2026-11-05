@@ -170,6 +170,39 @@ describe("DuckLakeStorage compaction", () => {
     expect(await history([accounts])).toEqual(before)
   })
 
+  for (const catalogType of ["duckdb", "sqlite"] as const) {
+    // Regression proof: in readTableStorage, pass no inlined-delete tables to queryFiles. The
+    // dataset then reads 100 rows but counts 110, and compaction leaves the seed file as it is.
+    test(`${catalogType}: counts the deletes DuckLake keeps in the catalog, and rewrites the file they reach`, async () => {
+      await useCatalog(catalogType)
+      await storage.createDataset(accounts)
+      await merge(
+        accounts,
+        rows(100, (i) => ({ id: `a${i}`, score: 0 }))
+      )
+
+      // Replacing ten rows of the seed file, DuckLake marks them deleted in the catalog, not in a
+      // delete file.
+      await merge(
+        accounts,
+        rows(10, (i) => ({ id: `a${i}`, score: 1 }))
+      )
+
+      const [health] = await storage.maintenance.describeStorage([accounts.id])
+      expect(health).toMatchObject({ deleteFiles: 0, rowCount: 100 })
+      expect(await collectRows(storage.readRows({ datasetId: accounts.id }))).toHaveLength(100)
+
+      // A new provider checks its first commit: an eleventh delete, over a tenth of the file.
+      await reopen()
+      await merge(accounts, [{ id: "a10", score: 2 }])
+      const before = await history([accounts])
+
+      expect(await settled(accounts)).toMatchObject({ deleteFiles: 0, rowCount: 100 })
+      expect(await liveFileRows(accounts)).toEqual([89])
+      expect(await history([accounts])).toEqual(before)
+    }, 30_000)
+  }
+
   // Regression proof: in the write coordinator, await the compaction a commit schedules. The
   // commit then waits for the blocked check, and the test times out.
   test("returns the version before compaction looks at the dataset", async () => {
@@ -363,6 +396,21 @@ describe("DuckLakeStorage compaction", () => {
     const write = await storage.beginWrite({ dataset, mode: "append" })
     await write.writeRows(appended)
     return write.commit()
+  }
+
+  /** The rows each live data file of the dataset was written with, deleted ones included. */
+  async function liveFileRows(dataset: DatasetDefinition): Promise<number[]> {
+    const files = await internals(storage).connections.withExclusiveAttached((runtime) =>
+      runtime.query(`
+        SELECT file.record_count
+        FROM __ducklake_metadata_sixb_lake.main.ducklake_data_file file
+        JOIN __ducklake_metadata_sixb_lake.main.ducklake_table t ON t.table_id = file.table_id
+        WHERE file.end_snapshot IS NULL AND t.end_snapshot IS NULL AND t.table_name = ${table(dataset)}
+        ORDER BY file.data_file_id
+      `)
+    )
+
+    return files.map((file) => Number(file.record_count))
   }
 
   async function setInliningLimit(rowLimit: number): Promise<void> {
