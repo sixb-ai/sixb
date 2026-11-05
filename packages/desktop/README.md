@@ -87,6 +87,8 @@ project API ◀── sessions, turns, device sign-in ── sixb-runner ◀─�
 - **The runner holds the sign-in**, where `sixb login` keeps its own, which the agent's sandbox denies.
   The keychain wouldn't do: `security find-generic-password` answers from inside the sandbox. The main
   process only opens the approval page, if `isApiPage` accepts it.
+- **The window's sign-in is denied too.** It's a plain cookie in the app's data folder, so the shell names
+  that folder to the runner, whose sandboxes deny it.
 - **It can't outlive the app.** It ends with its stdin, and `before-quit` lets a running turn record its
   end, within a limit. While the app is open it restarts after a wait that grows.
 - **The agent needs a runtime** for its own `sixb`. A `bun` script beside the runner stands in, last on

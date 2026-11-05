@@ -54,8 +54,10 @@ export async function runDesktopRunner(options: {
   readonly apiUrl: string
   /** Who the person is asked to approve, in the browser. */
   readonly clientName: string
+  /** Where the app keeps its window's sign-in, as cookies a command could otherwise read. */
+  readonly windowData?: string
 }): Promise<void> {
-  const { apiUrl, clientName } = options
+  const { apiUrl, clientName, windowData } = options
   const emit = (event: DesktopRunnerEvent): void => {
     process.stdout.write(`${JSON.stringify(event)}\n`)
   }
@@ -124,7 +126,8 @@ export async function runDesktopRunner(options: {
         if (event.type === "signed-out") void stop().finally(() => finish(EXIT_SIGNED_OUT))
         emit(event)
       },
-      keepAwake
+      keepAwake,
+      windowData ? [windowData] : []
     )
     await computer.start()
   }

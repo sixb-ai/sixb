@@ -50,7 +50,9 @@ export class ComputerConnection {
   constructor(
     private readonly connection: Connection,
     private readonly onEvent: (event: ComputerEvent) => void,
-    private readonly keepsAwake: boolean
+    private readonly keepsAwake: boolean,
+    /** What the agent's commands also never read, beyond what `sixb` keeps from them. */
+    private readonly alsoDenied: readonly string[] = []
   ) {}
 
   async start(): Promise<void> {
@@ -142,7 +144,10 @@ export class ComputerConnection {
       this.connection,
       folder,
       (error) => this.onEvent({ type: "error", message: errorMessage(error) }),
-      { onSessionChange: (failure) => this.onSessionChange(folder, failure) }
+      {
+        onSessionChange: (failure) => this.onSessionChange(folder, failure),
+        alsoDenied: this.alsoDenied,
+      }
     )
     runner.keepsAwake = this.keepsAwake
     runner.onElsewhere((run, ended) => {

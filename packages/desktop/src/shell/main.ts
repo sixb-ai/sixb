@@ -111,7 +111,13 @@ const runner = existsSync(runnerProgram)
   ? new DesktopRunner({
       start: () =>
         startRunnerProcess(
-          [runnerProgram, config.apiOrigin, `${config.name} on ${hostname()}`],
+          // Its data: the window's sign-in is in there, as cookies the agent's commands mustn't read.
+          [
+            runnerProgram,
+            config.apiOrigin,
+            `${config.name} on ${hostname()}`,
+            app.getPath("userData"),
+          ],
           runnerEnv
         ),
       // The runner holds the sign-in, and only says where to approve it: on the API, as the window's.
@@ -185,7 +191,8 @@ function installComputerAccess(running: DesktopRunner): void {
         "Messages you send from here or the web, in any conversation in this folder, run on this " +
         "computer, as you. The agent's commands run there without asking.",
       buttons: ["Allow", "Cancel"],
-      defaultId: 0,
+      // A page can ask at any moment: the Return they were about to press isn't their answer.
+      defaultId: 1,
       cancelId: 1,
     })
     if (response !== 0) return false
