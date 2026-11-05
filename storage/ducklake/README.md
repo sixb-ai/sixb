@@ -123,7 +123,9 @@ is catalog-only and takes no lock on reads; only file deletion waits for this pr
 for as long as the deletion itself.
 
 Two passes may overlap, from two processes on a PostgreSQL catalog: the step that loses a race
-for the same rows or files yields, and the report says `hasMore`.
+for the same rows or files yields, and the report says `hasMore`. A provider whose passes yield
+three times in a row throws a `LakeStorageError` naming the step and its last error, since no
+race explains that.
 
 `deleteFilesAfterMs` is at least an hour, for both deletions. A write in another process puts its
 files in the data path before it commits, where no catalog row knows them yet: deleting orphans

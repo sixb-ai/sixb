@@ -86,15 +86,15 @@ describe("sixb lake cleanup", () => {
     lakeFixture.retentionHasMore = true
 
     const result = await runInProcess(() =>
-      runLakeCleanup({ entry, keepVersionsFor: "2h", deleteFilesAfter: "30m" })
+      runLakeCleanup({ entry, keepVersionsFor: "2h", deleteFilesAfter: "1h" })
     )
 
     expect(result.output).toContain("Lake cleanup complete")
     expect(result.output).toContain("more is due: run it again")
-    expect(flat(result.output)).toContain("Keep versions for 2h Delete files after 30m")
+    expect(flat(result.output)).toContain("Keep versions for 2h Delete files after 1h")
     expect(lakeFixture.events[0]).toMatchObject({
       keepVersionsForMs: 2 * 60 * 60_000,
-      deleteFilesAfterMs: 30 * 60_000,
+      deleteFilesAfterMs: 60 * 60_000,
     })
   })
 
