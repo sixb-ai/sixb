@@ -94,7 +94,7 @@ DuckLake keeps every snapshot, and every file a snapshot reads, until retention 
 ```ts
 const report = await lakeStorage.maintenance.applyRetention({
   keepVersionsForMs: 7 * 24 * 60 * 60 * 1000, // default; at least 1 hour
-  deleteFilesAfterMs: 7 * 24 * 60 * 60 * 1000, // default
+  deleteFilesAfterMs: 7 * 24 * 60 * 60 * 1000, // default; at least 1 hour
   protect: [{ datasetId: "invoices", versionId: "ducklake:42" }],
 })
 // { expiredVersions, keptVersions, deletedFiles, orphanedFiles, hasMore, ... }
@@ -121,6 +121,11 @@ together). `hasMore` says another pass has work. Orphaned files, which no catalo
 searched only on a pass with no backlog left, since the search lists the whole data path. Expiry
 is catalog-only and takes no lock on reads; only file deletion waits for this provider's reads,
 for as long as the deletion itself.
+
+`deleteFilesAfterMs` is at least an hour, for both deletions. A write in another process puts its
+files in the data path before it commits, where no catalog row knows them yet: deleting orphans
+younger than that left a committed version unreadable. Reads in other processes are not waited
+for either.
 
 On a SQLite catalog, DuckLake `ac7595b0` compares stored schedule times with a given time
 unreliably outside UTC (west of UTC it deleted files scheduled a moment ago), so files there are

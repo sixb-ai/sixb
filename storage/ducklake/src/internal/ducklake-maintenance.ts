@@ -39,6 +39,15 @@ const DEFAULT_LIMIT = 1_000
  */
 const MIN_KEEP_VERSIONS_FOR_MS = HOUR_MS
 
+/**
+ * A write in another process puts its files in the data path before it commits: until then no
+ * catalog row knows them, and orphan deletion would remove them under the commit, leaving its
+ * version unreadable (measured on DuckLake ac7595b0 with a PostgreSQL catalog). File deletion
+ * also waits for this provider's reads only, never another process's. Files younger than this
+ * are never deleted.
+ */
+const MIN_DELETE_FILES_AFTER_MS = HOUR_MS
+
 // Snapshots read per history query.
 const HISTORY_PAGE_SIZE = 512
 
@@ -398,9 +407,9 @@ function resolveRetention(options: LakeRetentionOptions): Retention {
     )
   }
 
-  if (!Number.isFinite(deleteFilesAfterMs) || deleteFilesAfterMs < 0) {
+  if (!Number.isFinite(deleteFilesAfterMs) || deleteFilesAfterMs < MIN_DELETE_FILES_AFTER_MS) {
     throw new LakeStorageError(
-      `[SixbDuckLake] deleteFilesAfterMs must be 0 or more milliseconds, got ${deleteFilesAfterMs}.`
+      `[SixbDuckLake] deleteFilesAfterMs must be at least ${MIN_DELETE_FILES_AFTER_MS} (1 hour), got ${deleteFilesAfterMs}: another process's write puts its files in the data path before it commits, and reads in other processes are not waited for.`
     )
   }
 
