@@ -11,7 +11,11 @@ import { validateObjectQuery } from "@sixb/core/internal/query"
 import { compileConditionalObjectReadScope } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { objectPartitionName } from "../src/objects/partitions"
-import { compilePgObjectCountQuery, compilePgObjectQuery } from "../src/objects/query-compiler"
+import {
+  compilePgObjectCountQuery,
+  compilePgObjectQuery,
+  compilePgObjectStatement,
+} from "../src/objects/query-compiler"
 import { compilePgConditionalObjectReadSource } from "../src/objects/read-scope"
 import { PgObjectReader } from "../src/objects/reader"
 import { createPgClient, type SQL, type SQLClient, type SqlParameter } from "../src/pg-client"
@@ -222,4 +226,26 @@ test("a member's link lists and batch lookups plan only the types they can reach
   // A link's ends are checked against the conditioned types' partitions alone.
   expect(planned[0]).toEqual([Note.id, Task.id].map(objectPartitionName).sort())
   expect(planned[1]).toEqual([Account.id, Task.id].map(objectPartitionName).sort())
+})
+
+test("a member's statement names only the scope relations it reads", async () => {
+  const objectsOnly = compilePgObjectStatement(
+    "SELECT primary_id FROM _sixb_scope_objects WHERE object_type_id = ?",
+    [Task.id],
+    memberSource
+  )
+  const typed = compilePgObjectStatement(
+    "SELECT primary_id FROM objects WHERE project_id = ? AND object_type_id = ?",
+    [projectId, Task.id],
+    memberSource
+  )
+
+  // PostgreSQL parses and analyzes every relation a WITH clause names, read or not.
+  expect(objectsOnly.sql).not.toContain("_sixb_scope_links")
+  expect(typed.sql).not.toContain("_sixb_scope_")
+
+  for (const statement of [objectsOnly, typed]) {
+    const rows = await sql.unsafe(statement.sql, statement.args as SqlParameter[])
+    expect(rows).toHaveLength(0)
+  }
 })

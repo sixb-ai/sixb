@@ -34,8 +34,9 @@ export function compilePgSelectedObjectReadSource(
     objects: scope.objects,
     steps: scope.steps,
   })
+  const relations = compileSelectedReadScopeCte(scopeJson, projectId)
   const source: PgSelectedObjectReadSource = {
-    ...scopedQuerySource(compileSelectedReadScopeCte(scopeJson, projectId)),
+    ...scopedQuerySource(() => relations),
     objectPropertyPermissionsTable: "_sixb_scope_object_permissions",
     traversalProbe: { sql: "", args: [] },
   }
@@ -81,8 +82,10 @@ export function compilePgConditionalObjectReadSource(
     ])
   )
 
+  const relations = compileConditionalReadScopeRelations(projectId, filters)
+
   return Object.freeze({
-    ...scopedQuerySource(compileConditionalReadScopeCte(projectId, filters)),
+    ...scopedQuerySource((sql) => withReadRelations(relations, sql)),
     // A link is visible while both endpoints are, so a statement that reads both through
     // `_sixb_scope_objects` reads stored links. Checking each endpoint again plans every partition
     // of objects: the endpoint's type comes from the link row, so PostgreSQL cannot prune them.
@@ -101,33 +104,68 @@ interface CompiledReadScopeCte {
 }
 
 /** Prefix every statement of a query with the scope's relations, ahead of its own arguments. */
-function scopedQuerySource(compiled: CompiledReadScopeCte): PgObjectQuerySource {
-  const wrapStatement = (sql: string, args: readonly unknown[] = []) => ({
-    sql: `${compiled.sql}\n${sql}`,
-    args: [...compiled.args, ...args],
-  })
+function scopedQuerySource(
+  withClause: (statementSql: string) => CompiledReadScopeCte
+): PgObjectQuerySource {
+  const wrapStatement = (sql: string, args: readonly unknown[] = []) => {
+    const compiled = withClause(sql)
+    return {
+      sql: `${compiled.sql}\n${sql}`,
+      args: [...compiled.args, ...args],
+    }
+  }
 
   return {
     objectsTable: "_sixb_scope_objects",
     linksTable: "_sixb_scope_links",
     wrapStatement,
-    wrapQuery: (query: CompiledPgObjectQuery): CompiledPgObjectQuery => ({
-      ...query,
-      ...wrapStatement(query.sql, query.args),
-      vectorProbe: query.vectorProbe
-        ? { ...query.vectorProbe, ...wrapStatement(query.vectorProbe.sql, query.vectorProbe.args) }
-        : undefined,
-      totalSql: `${compiled.sql}\n${query.totalSql}`,
-      totalArgs: [...compiled.args, ...query.totalArgs],
-      ...(query.hasMoreProbe
-        ? {
-            hasMoreProbe: {
-              ...query.hasMoreProbe,
-              ...wrapStatement(query.hasMoreProbe.sql, query.hasMoreProbe.args),
-            },
-          }
-        : {}),
-    }),
+    wrapQuery: (query: CompiledPgObjectQuery): CompiledPgObjectQuery => {
+      const total = wrapStatement(query.totalSql, query.totalArgs)
+
+      return {
+        ...query,
+        ...wrapStatement(query.sql, query.args),
+        vectorProbe: query.vectorProbe
+          ? {
+              ...query.vectorProbe,
+              ...wrapStatement(query.vectorProbe.sql, query.vectorProbe.args),
+            }
+          : undefined,
+        totalSql: total.sql,
+        totalArgs: total.args,
+        ...(query.hasMoreProbe
+          ? {
+              hasMoreProbe: {
+                ...query.hasMoreProbe,
+                ...wrapStatement(query.hasMoreProbe.sql, query.hasMoreProbe.args),
+              },
+            }
+          : {}),
+      }
+    },
+  }
+}
+
+interface ReadRelation extends CompiledReadScopeCte {
+  readonly name: string
+}
+
+/**
+ * The WITH clause naming the relations a statement reads. PostgreSQL parses and analyzes every
+ * relation a WITH clause names, read or not, and each one repeats every condition.
+ */
+function withReadRelations(
+  relations: readonly ReadRelation[],
+  statementSql: string
+): CompiledReadScopeCte {
+  const read = relations.filter((relation) =>
+    new RegExp(`\\b${relation.name}\\b`).test(statementSql)
+  )
+  if (read.length === 0) return { sql: "", args: [] }
+
+  return {
+    sql: `WITH ${read.map((relation) => relation.sql).join(",\n")}`,
+    args: read.flatMap((relation) => relation.args),
   }
 }
 
@@ -137,23 +175,31 @@ type ConditionFilters = ReadonlyMap<
   { readonly sql: string; readonly args: readonly unknown[] }
 >
 
-function compileConditionalReadScopeCte(
+function compileConditionalReadScopeRelations(
   projectId: string,
   filters: ConditionFilters
-): CompiledReadScopeCte {
+): readonly ReadRelation[] {
   if (filters.size === 0) {
-    return {
-      sql: `
-        WITH
-        _sixb_scope_objects AS NOT MATERIALIZED (
-          SELECT * FROM objects WHERE project_id = ?
-        ),
-        _sixb_scope_links AS NOT MATERIALIZED (
-          SELECT * FROM links WHERE project_id = ?
-        )
-      `,
-      args: [projectId, projectId],
-    }
+    return [
+      {
+        name: "_sixb_scope_objects",
+        sql: `
+          _sixb_scope_objects AS NOT MATERIALIZED (
+            SELECT * FROM objects WHERE project_id = ?
+          )
+        `,
+        args: [projectId],
+      },
+      {
+        name: "_sixb_scope_links",
+        sql: `
+          _sixb_scope_links AS NOT MATERIALIZED (
+            SELECT * FROM links WHERE project_id = ?
+          )
+        `,
+        args: [projectId],
+      },
+    ]
   }
 
   const conditionedTypeArgs = [...filters.keys()]
@@ -198,32 +244,33 @@ function compileConditionalReadScopeCte(
   const visibleSource = visibleEndpoint("source")
   const visibleTarget = visibleEndpoint("target")
 
-  return {
-    sql: `
-      WITH
-      _sixb_scope_objects AS NOT MATERIALIZED (
-        SELECT *
-        FROM objects
-        WHERE project_id = ?
-          AND (object_type_id NOT IN (${conditionedTypes}) OR ${matches.join(" OR ")})
-      ),
-      _sixb_scope_links AS NOT MATERIALIZED (
-        SELECT stored.*
-        FROM links AS stored
-        WHERE stored.project_id = ?
-          AND ${visibleSource.sql}
-          AND ${visibleTarget.sql}
-      )
-    `,
-    args: [
-      projectId,
-      ...conditionedTypeArgs,
-      ...matchArgs,
-      projectId,
-      ...visibleSource.args,
-      ...visibleTarget.args,
-    ],
-  }
+  return [
+    {
+      name: "_sixb_scope_objects",
+      sql: `
+        _sixb_scope_objects AS NOT MATERIALIZED (
+          SELECT *
+          FROM objects
+          WHERE project_id = ?
+            AND (object_type_id NOT IN (${conditionedTypes}) OR ${matches.join(" OR ")})
+        )
+      `,
+      args: [projectId, ...conditionedTypeArgs, ...matchArgs],
+    },
+    {
+      name: "_sixb_scope_links",
+      sql: `
+        _sixb_scope_links AS NOT MATERIALIZED (
+          SELECT stored.*
+          FROM links AS stored
+          WHERE stored.project_id = ?
+            AND ${visibleSource.sql}
+            AND ${visibleTarget.sql}
+        )
+      `,
+      args: [projectId, ...visibleSource.args, ...visibleTarget.args],
+    },
+  ]
 }
 
 function compileSelectedReadScopeCte(scopeJson: string, projectId: string): CompiledReadScopeCte {
