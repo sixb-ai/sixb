@@ -139,7 +139,18 @@ export class DuckLakeWriteCoordinator {
   async beginMerge(input: BeginDatasetMergeInput): Promise<LakeMergeSession> {
     this.connections.assertOpen()
 
-    const definition = await this.datasets.getDataset(input.dataset.id)
+    // One attachment for both reads: a local catalog attaches again for each one otherwise.
+    const { definition, latestVersion } = await this.connections.withAttachedRuntime(
+      async (runtime) => {
+        const definition = await this.datasets.getDatasetOnRuntime(runtime, input.dataset.id)
+        return {
+          definition,
+          latestVersion: definition
+            ? await this.snapshots.getLatestVersionForDefinition(runtime, definition)
+            : null,
+        }
+      }
+    )
     if (!definition) {
       throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.dataset.id}'.`)
     }
@@ -150,9 +161,6 @@ export class DuckLakeWriteCoordinator {
     }
 
     this.datasets.assertSchema(definition)
-    const latestVersion = await this.connections.withAttachedRuntime((runtime) =>
-      this.snapshots.getLatestVersionForDefinition(runtime, definition)
-    )
     if (
       input.expectedLatestVersionId !== undefined &&
       latestVersion?.versionId !== input.expectedLatestVersionId
@@ -171,64 +179,58 @@ export class DuckLakeWriteCoordinator {
   }
 
   private async commitWrite(input: DuckLakeCommitWriteInput): Promise<DatasetWriteCommitResult> {
-    const definition = await this.datasets.getDataset(input.write.dataset.id)
-    if (!definition) {
-      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.write.dataset.id}'.`)
-    }
-
     const mode = input.write.mode ?? "snapshot"
     assertDatasetWriteMode(mode, "write")
 
-    return this.commitDatasetVersion({
-      dataset: definition,
-      mode,
-      expectedLatestVersionId: input.commit?.expectedLatestVersionId,
-      commitMessage: input.commit?.commitMessage ?? `write dataset ${input.write.dataset.id}`,
-      producer: input.write.producer,
-      inputs: input.write.inputs,
-      lineage: input.write.lineage,
-      applyChanges: (runtime, context) =>
-        this.applyStagedRows({
-          ...input,
-          runtime,
-          previousRowCount: context.previousRowCount,
-        }),
-    })
+    // The definition is read again on the commit's own attachment, as the commit begins.
+    return this.withCommitRuntime(async (runtime) =>
+      this.commitDatasetVersionOnExclusiveRuntime(runtime, {
+        dataset: await this.currentDefinition(runtime, input.write.dataset.id),
+        mode,
+        expectedLatestVersionId: input.commit?.expectedLatestVersionId,
+        commitMessage: input.commit?.commitMessage ?? `write dataset ${input.write.dataset.id}`,
+        producer: input.write.producer,
+        inputs: input.write.inputs,
+        lineage: input.write.lineage,
+        applyChanges: (commitRuntime, context) =>
+          this.applyStagedRows({
+            ...input,
+            runtime: commitRuntime,
+            previousRowCount: context.previousRowCount,
+          }),
+      })
+    )
   }
 
   private async commitMerge(input: DuckLakeCommitMergeInput): Promise<DatasetMergeCommitResult> {
-    const definition = await this.datasets.getDataset(input.merge.dataset.id)
-    if (!definition) {
-      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.merge.dataset.id}'.`)
-    }
-    if (getDatasetPrimaryKeyColumns(definition) === null) {
-      throw new LakeStorageError(
-        `[SixbDuckLake] Dataset '${definition.id}' must define a primaryKey before it can be merged.`
-      )
-    }
+    let definition: DatasetDefinition | undefined
 
     return retryDatasetMergeCommit(input.merge, input.commit, (rebase) =>
       this.withCommitRuntime(async (runtime) => {
+        // Read on the first attempt's attachment, as the commit begins; reruns keep it.
+        definition ??= await this.currentMergeDefinition(runtime, input.merge.dataset.id)
+        const merged = definition
+
         input.commit?.signal?.throwIfAborted()
         const baseVersionId = rebase
-          ? ((await this.snapshots.getLatestVersionForDefinition(runtime, definition))?.versionId ??
+          ? ((await this.snapshots.getLatestVersionForDefinition(runtime, merged))?.versionId ??
             null)
           : input.baseVersionId
         return this.commitVersionOutcomeOnExclusiveRuntime(runtime, {
-          dataset: definition,
+          dataset: merged,
           mode: "merge",
           expectedLatestVersionId: baseVersionId,
           allowInitialNoOp: !input.commit?.createInitialVersion,
           signal: input.commit?.signal,
           optimisticOperation: "merge commit",
-          commitMessage: input.commit?.commitMessage ?? `merge dataset ${definition.id}`,
+          commitMessage: input.commit?.commitMessage ?? `merge dataset ${merged.id}`,
           producer: input.merge.producer,
           inputs: input.merge.inputs,
           applyChanges: async (commitRuntime, context) => {
             const result = await applyDatasetMergeFromRelation({
               options: this.options,
               runtime: commitRuntime,
-              dataset: definition,
+              dataset: merged,
               stagingTableName: input.stagingTableName,
               sequenceColumnName: input.sequenceColumnName,
               kindColumnName: input.kindColumnName,
@@ -237,7 +239,7 @@ export class DuckLakeWriteCoordinator {
             })
             if (result.sourceRowCount !== input.changesWritten) {
               throw new LakeStorageError(
-                `[SixbDuckLake] Staged merge for dataset '${definition.id}' accepted ${input.changesWritten} change(s), but DuckLake saw ${result.sourceRowCount} source change(s) at commit time.`
+                `[SixbDuckLake] Staged merge for dataset '${merged.id}' accepted ${input.changesWritten} change(s), but DuckLake saw ${result.sourceRowCount} source change(s) at commit time.`
               )
             }
             return result
@@ -247,12 +249,30 @@ export class DuckLakeWriteCoordinator {
     )
   }
 
-  async commitDatasetVersion(
-    input: DuckLakeCommitDatasetVersionInput
-  ): Promise<DatasetWriteCommitResult> {
-    return this.withCommitRuntime((runtime) =>
-      this.commitDatasetVersionOnExclusiveRuntime(runtime, input)
-    )
+  private async currentDefinition(
+    runtime: DuckDbQueryRuntime,
+    datasetId: string
+  ): Promise<DatasetDefinition> {
+    const definition = await this.datasets.getDatasetOnRuntime(runtime, datasetId)
+    if (!definition) {
+      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${datasetId}'.`)
+    }
+
+    return definition
+  }
+
+  private async currentMergeDefinition(
+    runtime: DuckDbQueryRuntime,
+    datasetId: string
+  ): Promise<DatasetDefinition> {
+    const definition = await this.currentDefinition(runtime, datasetId)
+    if (getDatasetPrimaryKeyColumns(definition) === null) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Dataset '${definition.id}' must define a primaryKey before it can be merged.`
+      )
+    }
+
+    return definition
   }
 
   async withCommitRuntime<T>(run: (runtime: DuckDbQueryRuntime) => Promise<T>): Promise<T> {
