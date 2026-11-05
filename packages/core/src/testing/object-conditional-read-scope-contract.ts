@@ -6,7 +6,10 @@ import {
   type ObjectQueryPredicate,
   validateObjectQuery,
 } from "../objects/query"
-import { defineObjectType, link, OntologyRegistry, prop } from "../ontology"
+import { bindCurrentUserPredicate } from "../objects/query/current-user"
+import { defineObjectType, link, OntologyRegistry, prop, ref } from "../ontology"
+import type { UserRef } from "../ontology/user-ref"
+import { viewConditionReadCondition } from "../security/visibility-keys"
 import { migrateStorage } from "../storage/migrations"
 import {
   compileConditionalObjectReadScope,
@@ -61,7 +64,27 @@ const Customer = defineObjectType({
   links: [link("invoices", Invoice), link("primaryInvoice", Invoice, { cardinality: "one" })],
 })
 
-const ontology = new OntologyRegistry({ sources: [Invoice, CreditNote, Customer] })
+/** Who sees a ticket depends on its reader: the conditions compare `currentUser()`. */
+const Ticket = defineObjectType({
+  id: "ConditionTicket",
+  name: "Condition Ticket",
+  properties: [
+    prop("id", "string", {
+      required: true,
+      primary: true,
+      query: { searchable: true, sortable: true },
+    }),
+    prop("status", "string", { query: { searchable: true, filterable: true } }),
+    prop("owner", ref.user(), { nullable: true, query: { searchable: true, filterable: true } }),
+    prop(
+      "watchers",
+      { type: "array", items: ref.user() },
+      { nullable: true, query: { searchable: true, filterable: true } }
+    ),
+  ],
+})
+
+const ontology = new OntologyRegistry({ sources: [Invoice, CreditNote, Customer, Ticket] })
 
 /**
  * Portable conditional-read contract shared by every storage provider.
@@ -574,6 +597,84 @@ export function runConditionalObjectReadScopeContractSuite<TStorage extends Stor
       })
     })
 
+    // A provider may filter a member's reads on the keys of its conditions instead of their
+    // predicate. Both must show each reader the same objects, whatever its user's id.
+    test("shows a reader through its conditions' keys exactly what their predicate shows", async () => {
+      await withHarness(async ({ harness, fixture }) => {
+        const ids = ["usr_1", 'a"b', "a\\b", 'a", "b', "*", "u:usr_1"]
+        const users = ids.map((id): UserRef => ({ type: "user", id }))
+
+        const auth = harness.storage.auth
+        if (!auth) throw new Error("The conditional read contract requires auth storage.")
+        for (const [index, id] of ids.entries()) {
+          await auth.users.create({ projectId, id, email: `reader-${index}@example.com` })
+        }
+
+        await fixture.seed({
+          objects: users.flatMap((user, index) => [
+            object(Ticket.id, `t-${index}-owned`, {
+              id: `t-${index}-owned`,
+              status: "open",
+              owner: user,
+            }),
+            object(Ticket.id, `t-${index}-watched`, {
+              id: `t-${index}-watched`,
+              status: index % 2 === 0 ? "open" : "closed",
+              owner: users[(index + 1) % users.length]!,
+              watchers: [user, users[(index + 2) % users.length]!],
+            }),
+          ]),
+          links: [],
+        })
+
+        const me = { type: "currentUser" }
+        const conditions: ObjectQueryPredicate[] = [
+          { op: "eq", propertyId: "owner", value: me },
+          { op: "contains", propertyId: "watchers", value: me },
+          {
+            op: "or",
+            items: [
+              { op: "eq", propertyId: "status", value: "closed" },
+              { op: "in", propertyId: "owner", values: [me, users[0]!] },
+            ],
+          },
+          {
+            op: "and",
+            items: [
+              { op: "eq", propertyId: "status", value: "open" },
+              { op: "contains", propertyId: "watchers", value: me },
+            ],
+          },
+          // No keys: read through its predicate beside the keys of the others.
+          { op: "neq", propertyId: "owner", value: me },
+        ]
+
+        const visible = async (condition: ObjectReadCondition) => {
+          const reader = createReader(harness.objectReadScopeFactory, [condition])
+          const rows = await queryRows(reader, {
+            kind: "limit",
+            limit: 100,
+            input: sorted({ kind: "start", objectTypeId: Ticket.id }, "id"),
+          })
+          return rows.map((row) => row.primaryId)
+        }
+
+        for (const [index, condition] of conditions.entries()) {
+          const predicates = [ticketCondition(condition), ticketCondition(conditions[0]!)]
+          for (const user of [undefined, ...users]) {
+            const keyed = viewConditionReadCondition(Ticket.id, predicates, user)
+            const bound = bindCurrentUserPredicate({ op: "or", items: predicates }, user)
+
+            expect({ index, user, ids: await visible(keyed) }).toEqual({
+              index,
+              user,
+              ids: await visible({ objectTypeId: Ticket.id, predicate: bound }),
+            })
+          }
+        }
+      })
+    })
+
     test("never reads another project's objects or links", async () => {
       await withHarness(async ({ harness }) => {
         await migrateStorage(harness.storage, { projectId: otherProjectId, ontology })
@@ -684,7 +785,10 @@ function createReader(
   })
 }
 
-/** `status neq "draft"`, validated like a grant's condition so `scalarKind` is resolved. */
+/**
+ * `status neq "draft"`, validated like a grant's condition so `scalarKind` is resolved, and read the
+ * way a member reads it: with its keys, which a provider may filter on instead of the predicate.
+ */
 function noDrafts(objectTypeId: string): ObjectReadCondition {
   const predicate: ObjectQueryPredicate = { op: "neq", propertyId: "status", value: "draft" }
   const { query } = validateObjectQuery(
@@ -693,7 +797,17 @@ function noDrafts(objectTypeId: string): ObjectReadCondition {
   )
   if (query.kind !== "filter") throw new Error("expected a validated filter")
 
-  return { objectTypeId, predicate: query.predicate }
+  return viewConditionReadCondition(objectTypeId, [query.predicate], undefined)
+}
+
+/** A ticket condition as a grant's validation returns it, `currentUser()` left unbound. */
+function ticketCondition(predicate: ObjectQueryPredicate): ObjectQueryPredicate {
+  const { query } = validateObjectQuery(
+    { kind: "filter", input: { kind: "start", objectTypeId: Ticket.id }, predicate },
+    { ontology }
+  )
+  if (query.kind !== "filter") throw new Error("expected a validated filter")
+  return query.predicate
 }
 
 /** Run a query as the executor does, so a provider pushes down what it can. */

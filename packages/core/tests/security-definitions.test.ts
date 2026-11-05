@@ -1071,16 +1071,14 @@ describe("view grant conditions", () => {
 
     startOn(grant, ({ scope }) => scopes.push(scope))
 
+    // Its keys too, which a provider compiles into the filter it reads members through.
+    const user = { type: "user" as const, id: expect.any(String) }
     expect(scopes).toHaveLength(1)
     expect(scopes[0]?.conditions).toEqual([
       {
         objectTypeId: "note",
-        predicate: {
-          propertyId: "owner",
-          op: "eq",
-          value: { type: "user", id: expect.any(String) },
-          scalarKind: "userRef",
-        },
+        predicate: { propertyId: "owner", op: "eq", value: user, scalarKind: "userRef" },
+        visibility: { keys: [{ kind: "user", propertyId: "owner" }], user },
       },
     ])
   })

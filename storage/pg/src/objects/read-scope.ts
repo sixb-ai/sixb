@@ -5,9 +5,9 @@ import type {
 import {
   type CompiledPgObjectQuery,
   compilePgObjectStatement,
-  compilePredicate,
   type PgObjectQuerySource,
 } from "./query-compiler"
+import { compilePgConditionFilter } from "./visibility"
 
 export interface PgSelectedObjectReadSource extends PgObjectQuerySource {
   readonly objectPropertyPermissionsTable: string
@@ -76,10 +76,7 @@ export function compilePgConditionalObjectReadSource(
   scope: CompiledConditionalObjectReadScope
 ): PgObjectQuerySource {
   const filters = new Map(
-    scope.conditions.map((condition) => [
-      condition.objectTypeId,
-      compilePredicate(condition.predicate),
-    ])
+    scope.conditions.map((condition) => [condition.objectTypeId, compilePgConditionFilter(condition)])
   )
 
   const relations = compileConditionalReadScopeRelations(projectId, filters)

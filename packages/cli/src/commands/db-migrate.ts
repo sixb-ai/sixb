@@ -17,6 +17,7 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
       migrateStorage(sixb.storage, {
         projectId: sixb.id,
         ontology: sixb.definitions.ontology,
+        security: sixb.definitions.security,
       })
     )
     await renderStatic(

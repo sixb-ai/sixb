@@ -1,4 +1,5 @@
 import type { OntologyDefinitionCatalog } from "../../ontology/registry"
+import type { SecurityDefinitionCatalog } from "../../security/registry"
 import type { ObjectQueryPreparationResult } from "../objects/query-preparation"
 import type { Storage } from "../types"
 
@@ -128,6 +129,11 @@ export interface MigrationCapableStorage extends Storage {
 export interface StorageMigrationOptions {
   readonly projectId: string
   readonly ontology: OntologyDefinitionCatalog
+  /**
+   * The roles' view conditions, whose keys member reads filter on. Without them, what was prepared
+   * for them is left as it is.
+   */
+  readonly security?: Pick<SecurityDefinitionCatalog, "listViewConditions">
 }
 
 export interface StorageMigrationResult {

@@ -172,10 +172,12 @@ Custom runtimes can opt into the same lifecycle with:
 await migrateStorage(storage, {
   projectId: sixb.id,
   ontology: sixb.definitions.ontology,
+  security: sixb.definitions.security,
 })
 ```
 
-Passing only `storage` retains schema-only migration. Providers without query preparation,
+`security` lets preparation index the roles' view conditions; without it, the indexes an earlier
+preparation built for them stay as they are. Passing only `storage` retains schema-only migration. Providers without query preparation,
 including SQLite and in-memory storage, continue normally; explicitly calling
 `prepareObjectQueries` or `db prepare` on them reports the unsupported capability.
 

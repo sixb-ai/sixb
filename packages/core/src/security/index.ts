@@ -61,3 +61,4 @@ export {
   isRoleDefinition,
   validateSecurityDefinitionsAtStartup,
 } from "./validation"
+export type { ViewCondition } from "./view-conditions"
