@@ -223,6 +223,18 @@ export class DuckLakeDatasetCatalog {
     )
   }
 
+  /** The stored definitions of the datasets the lake holds, by dataset id. */
+  async getDatasetsOnRuntime(
+    runtime: DuckDbQueryRuntime,
+    datasetIds: readonly string[]
+  ): Promise<ReadonlyMap<string, DatasetDefinition>> {
+    if (datasetIds.length === 0) {
+      return new Map()
+    }
+
+    return this.readCurrentDatasetDefinitionsOnRuntime(runtime, { datasetIds })
+  }
+
   async listDatasets(): Promise<readonly DatasetDefinition[]> {
     this.connections.assertOpen()
 

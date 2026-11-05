@@ -26,7 +26,7 @@ describe("DuckLake reader lifecycle", () => {
         await paused.next()
         // Red check: remove the paged reader's abort listener. Maintenance then waits forever.
         controller.abort(new Error("cancel paged read"))
-        await bounded(lake.runMaintenance({ dryRun: true }))
+        await bounded(lake.maintenance.applyRetention({ dryRun: true }))
         await expect(paused.next()).rejects.toThrow("cancel paged read")
       } finally {
         await paused.return?.()
@@ -146,7 +146,7 @@ describe("DuckLake reader lifecycle", () => {
         await first.next()
         active.abort(new Error("cancel active reader"))
         // Cancellation must finish cleanup even while the consumer retains the paused iterator.
-        await bounded(lake.runMaintenance({ dryRun: true }))
+        await bounded(lake.maintenance.applyRetention({ dryRun: true }))
         expect((await bounded(second.next())).done).toBe(false)
         expect(streams).toHaveBeenCalledTimes(2)
         await expect(first.next()).rejects.toThrow("cancel active reader")
@@ -221,7 +221,7 @@ describe("DuckLake reader lifecycle", () => {
       try {
         await rows.next()
         let finished = false
-        maintenance = lake.runMaintenance({ expireOlderThan: "0 seconds" }).then(() => {
+        maintenance = lake.maintenance.applyRetention().then(() => {
           finished = true
         })
         await Bun.sleep(20)

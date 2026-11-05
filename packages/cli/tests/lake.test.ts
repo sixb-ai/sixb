@@ -9,9 +9,15 @@ import { runInProcess } from "./shared/in-process"
 
 const entry = resolve(import.meta.dir, "fixtures", "lake-project", "sixb.config.ts")
 const closed = { type: "lake-storage:close" }
+const DAY_MS = 24 * 60 * 60_000
 
 afterEach(() => {
-  Object.assign(lakeFixture, { drift: false, maintenance: true, appliedVersion: undefined })
+  Object.assign(lakeFixture, {
+    drift: false,
+    maintenance: true,
+    retentionHasMore: false,
+    appliedVersion: undefined,
+  })
   lakeFixture.events = []
 })
 
@@ -62,49 +68,43 @@ describe("sixb lake cleanup", () => {
     expect(result.output).toContain("Lake cleanup dry run complete")
     expect(result.output).toContain("cli-lake-project")
     expect(flat(result.output)).toContain(
-      "Snapshots 2 Kept snapshots 5 Old files 3 Orphaned files 4"
+      "Expired versions 2 Kept versions 5 Deleted files 3 Orphaned files 4"
     )
     expect(lakeFixture.events).toEqual([
       {
-        type: "lake:maintenance",
+        type: "lake:retention",
         dryRun: true,
-        expireOlderThan: "7 days",
-        deleteOlderThan: "7 days",
+        keepVersionsForMs: 7 * DAY_MS,
+        deleteFilesAfterMs: 7 * DAY_MS,
         protect: [],
       },
       closed,
     ])
   })
 
-  test("passes the retention flags through, and defaults delete retention to expire retention", async () => {
-    const flags = await runInProcess(() =>
-      runLakeCleanup({ entry, expireOlderThan: "1 hour", deleteOlderThan: "30 minutes" })
-    )
-    const expireOnly = await runInProcess(() =>
-      runLakeCleanup({ entry, dryRun: true, expireOlderThan: "2 days" })
+  test("passes the retention flags through as durations", async () => {
+    lakeFixture.retentionHasMore = true
+
+    const result = await runInProcess(() =>
+      runLakeCleanup({ entry, keepVersionsFor: "2h", deleteFilesAfter: "30m" })
     )
 
-    expect(flags.output).toContain("Lake cleanup complete")
-    expect(flat(flags.output)).toContain("Expire older than 1 hour Delete older than 30 minutes")
-    expect(expireOnly.error).toBeUndefined()
-    expect(lakeFixture.events).toEqual([
-      {
-        type: "lake:maintenance",
-        dryRun: false,
-        expireOlderThan: "1 hour",
-        deleteOlderThan: "30 minutes",
-        protect: [],
-      },
-      closed,
-      {
-        type: "lake:maintenance",
-        dryRun: true,
-        expireOlderThan: "2 days",
-        deleteOlderThan: "2 days",
-        protect: [],
-      },
-      closed,
-    ])
+    expect(result.output).toContain("Lake cleanup complete")
+    expect(result.output).toContain("more is due: run it again")
+    expect(flat(result.output)).toContain("Keep versions for 2h Delete files after 30m")
+    expect(lakeFixture.events[0]).toMatchObject({
+      keepVersionsForMs: 2 * 60 * 60_000,
+      deleteFilesAfterMs: 30 * 60_000,
+    })
+  })
+
+  // Reproduce: parse the flags after loading the project in commands/lake-cleanup.ts. The project
+  // then loads and closes before the flag fails.
+  test("rejects a retention that is not a duration before loading the project", async () => {
+    const result = await runInProcess(() => runLakeCleanup({ entry, keepVersionsFor: "7 days" }))
+
+    expect(String(result.error)).toContain("Use --keep-versions-for like 30d, 12h, 4w, or 1y.")
+    expect(lakeFixture.events).toEqual([])
   })
 
   // The flags as `sixb` hands them over. The fixture reports the dry run it was asked for.
@@ -119,8 +119,8 @@ describe("sixb lake cleanup", () => {
         "--entry",
         entry,
         "--dry-run",
-        "--expire-older-than",
-        "2 days",
+        "--keep-versions-for",
+        "2d",
       ],
       cwd: resolve(import.meta.dir, "..", "..", ".."),
       timeoutMs: FAST_CLI_TIMEOUT_MS,
@@ -128,11 +128,11 @@ describe("sixb lake cleanup", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Lake cleanup dry run complete")
-    expect(flat(result.stdout)).toContain("Expire older than 2 days Delete older than 2 days")
+    expect(flat(result.stdout)).toContain("Keep versions for 2d Delete files after 7d")
     expect(result.stderr).toBe("")
   })
 
-  // Reproduce: drop `protect` from the runMaintenance call in commands/lake-cleanup.tsx.
+  // Reproduce: drop `protect` from the applyRetention call in commands/lake-cleanup.ts.
   test("keeps the dataset versions projections applied", async () => {
     lakeFixture.appliedVersion = "ducklake:42"
 
@@ -144,7 +144,7 @@ describe("sixb lake cleanup", () => {
     })
   })
 
-  // Reproduce: fall back to no protected versions when listActive fails in commands/lake-cleanup.tsx.
+  // Reproduce: fall back to no protected versions when listActive fails in commands/lake-cleanup.ts.
   test("does not clean the lake when the applied versions cannot be read", async () => {
     lakeFixture.appliedVersion = "unreadable"
 
@@ -160,7 +160,7 @@ describe("sixb lake cleanup", () => {
     const result = await runInProcess(() => runLakeCleanup({ entry, dryRun: true }))
 
     expect(String(result.error)).toContain(
-      "Configured lake storage does not support maintenance cleanup"
+      "Configured lake storage does not support retention cleanup"
     )
     expect(lakeFixture.events).toEqual([closed])
   })

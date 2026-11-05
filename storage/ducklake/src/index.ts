@@ -4,8 +4,6 @@ export type {
   DuckDbRuntimeOptions,
   DuckDbSecretOptions,
   DuckLakeCatalogOptions,
-  DuckLakeMaintenanceOptions,
-  DuckLakeMaintenanceReport,
   DuckLakePostgresPoolOptions,
   DuckLakeStorageOptions,
   GcsSecretOptions,

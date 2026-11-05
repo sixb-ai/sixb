@@ -186,14 +186,14 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Show what would change without changing it",
     kind: "boolean",
   },
-  "expire-older-than": {
-    syntax: "--expire-older-than <interval>",
-    summary: "Lake snapshot expiration window",
+  "keep-versions-for": {
+    syntax: "--keep-versions-for <duration>",
+    summary: "How long a replaced lake version stays readable (default: 7d, at least 1h)",
     kind: "string",
   },
-  "delete-older-than": {
-    syntax: "--delete-older-than <interval>",
-    summary: "Lake file deletion window",
+  "delete-files-after": {
+    syntax: "--delete-files-after <duration>",
+    summary: "How long unread lake files wait before deletion (default: 7d)",
     kind: "string",
   },
 } as const satisfies Record<string, { syntax: string; summary: string; kind: OptionKind }>
@@ -576,7 +576,7 @@ const commandTree: readonly CommandNode[] = [
       }),
       command("lake:cleanup", "Clean up old lake snapshots and files", {
         path: ["lake", "cleanup"],
-        options: ["entry", "dry-run", "expire-older-than", "delete-older-than"],
+        options: ["entry", "dry-run", "keep-versions-for", "delete-files-after"],
         rootHelpLabel: "lake cleanup",
       }),
     ],

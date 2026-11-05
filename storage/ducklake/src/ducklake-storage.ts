@@ -5,6 +5,7 @@ import type {
   DatasetCatalogState,
   DatasetChanges,
   DatasetVersion,
+  LakeMaintenance,
   LakeMergeSession,
   LakeWriteSession,
   LatestVersionsSince,
@@ -20,11 +21,7 @@ import { DuckLakeRowReader } from "./internal/ducklake-row-reader"
 import { DuckLakeSnapshotReader } from "./internal/ducklake-snapshot-reader"
 import { DuckLakeSqlExecutor } from "./internal/ducklake-sql-executor"
 import { DuckLakeWriteCoordinator } from "./internal/ducklake-write-coordinator"
-import type {
-  DuckLakeMaintenanceOptions,
-  DuckLakeMaintenanceReport,
-  DuckLakeStorageOptions,
-} from "./types"
+import type { DuckLakeStorageOptions } from "./types"
 
 /**
  * DuckLake-backed implementation of Sixb's LakeStorage API.
@@ -37,10 +34,10 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   readonly standard = { id: "ducklake", version: "1.0" } as const
   readonly recordsLineage = true
   readonly sql: DuckLakeSqlExecutor
+  readonly maintenance: LakeMaintenance
 
   private readonly connections: DuckLakeConnectionManager
   private readonly datasets: DuckLakeDatasetCatalog
-  private readonly maintenance: DuckLakeMaintenance
   private readonly rows: DuckLakeRowReader
   private readonly changes: DuckLakeChangeReader
   private readonly snapshotReader: DuckLakeSnapshotReader
@@ -67,6 +64,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
     this.maintenance = new DuckLakeMaintenance(
       normalizedOptions,
       this.connections,
+      this.datasets,
       this.snapshotReader
     )
     this.rows = new DuckLakeRowReader(normalizedOptions, this.connections, this.snapshotReader)
@@ -148,10 +146,6 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
 
   readChanges(input: ReadDatasetChangesInput): Promise<DatasetChanges | null> {
     return this.changes.readChanges(input)
-  }
-
-  async runMaintenance(options?: DuckLakeMaintenanceOptions): Promise<DuckLakeMaintenanceReport> {
-    return this.maintenance.runMaintenance(options)
   }
 
   /**
