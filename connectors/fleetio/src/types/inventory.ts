@@ -51,7 +51,7 @@ export interface FleetioInventoryJournalEntry {
   /** The ID of the `Part Location` that the `Part` was transferred to. */
   readonly transfer_part_location_id: number | null
   /** Information about the associated `Purchase Order`, if applicable. */
-  readonly purchase_order: { readonly number?: string; readonly id?: number } | null
+  readonly purchase_order: { readonly number?: number; readonly id?: number } | null
   /** The ID of the ``Purchase Order Line Item` associated with the entry. */
   readonly purchase_order_line_item_id: number | null
   /** The ID of the `Work Order` associated with the entry. */
@@ -111,6 +111,8 @@ export interface FleetioInventoryJournalEntrySummary {
   readonly user: { readonly email?: string }
   /** A Part */
   readonly part: FleetioPartMini
+  readonly created_at?: string
+  readonly updated_at?: string
 }
 
 export interface FleetioInventoryJournalEntryFilter {

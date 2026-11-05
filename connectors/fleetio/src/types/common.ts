@@ -13,12 +13,13 @@ export interface FleetioLikeFilter {
 
 export type FleetioLikeOrEqFilter = FleetioLikeFilter | FleetioEqFilter
 
-/** Fleetio documents one operator per field; datetimes are ISO 8601 strings. */
-export type FleetioRangeFilter =
-  | { readonly lt: string }
-  | { readonly lte: string }
-  | { readonly gt: string }
-  | { readonly gte: string }
+/** Datetimes are ISO 8601 strings. Bounds can be combined to select a window. */
+export interface FleetioRangeFilter {
+  readonly lt?: string
+  readonly lte?: string
+  readonly gt?: string
+  readonly gte?: string
+}
 
 export type FleetioEqOrRangeFilter = FleetioEqFilter | FleetioRangeFilter
 

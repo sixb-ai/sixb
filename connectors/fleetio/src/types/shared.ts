@@ -105,6 +105,13 @@ export interface FleetioPartCategory {
   readonly id?: number
   /** Indicates whether part is a tire or not */
   readonly tire_category?: boolean
+  readonly account_id?: number
+  readonly name?: string
+  readonly description?: string | null
+  readonly default?: boolean
+  readonly tires_count?: number
+  readonly created_at?: string
+  readonly updated_at?: string
 }
 
 /** The details of a Part at a specific Part Location. */
@@ -117,7 +124,7 @@ export interface FleetioEmbeddedPartLocationDetail {
   /** The aisle in which the Part is located. */
   readonly aisle?: string | null
   /** How many of this Part are available at this Part Location. */
-  readonly available_quantity?: number
+  readonly available_quantity?: number | null
   /** The bin in which the Part is located. */
   readonly bin?: string | null
   /** The number of Inventory Sets that this Part is included in. */
@@ -135,7 +142,7 @@ export interface FleetioEmbeddedPartLocationDetail {
   /** How many of this Part are currently on order, if any. */
   readonly quantity_on_order?: number | null
   /** The lower-threshold quantity at which this Part should be reordered. */
-  readonly reorder_point?: number
+  readonly reorder_point?: number | null
   /** Whether this Part will be reordered at the reorder point. */
   readonly reorder_point_enabled?: boolean
   /** The row in which the Part is located. */
@@ -145,6 +152,10 @@ export interface FleetioEmbeddedPartLocationDetail {
   readonly available_quantity_updated_at?: string | null
   /** The date and time at which the `Part Location` was archived, if applicable. */
   readonly part_location_archived_at?: string | null
+  readonly max_quantity?: number | null
+  readonly reorder_point_lead_time_days?: number | null
+  readonly reorder_quantity?: number | null
+  readonly reorder_quantity_lead_time_days?: number | null
 }
 
 /** One Part Location's stock for a member of a Part's cross-reference group. */
@@ -385,7 +396,7 @@ export interface FleetioVehicleMini {
   /** The Vehicle Identification Number of this Vehicle. */
   readonly vin?: string | null
   /** This Vehicle's model year. */
-  readonly year?: string | null
+  readonly year?: number | null
   /** The name of this Vehicle's manufacturer. */
   readonly make?: string | null
   /** The name of the model of this Vehicle. */
@@ -416,6 +427,7 @@ export interface FleetioVendorMini {
   readonly country: string | null
   /** The external identifier of the Vendor. */
   readonly external_id: string | null
+  readonly id?: number
 }
 
 export interface FleetioCommentsAttributes {
@@ -598,10 +610,10 @@ export type FleetioMeasurementSystem = "imperial" | "metric"
 export type FleetioMeterUnit = "km" | "hr" | "mi" | null
 
 export interface FleetioVehicleSpecs {
-  readonly id?: number
+  readonly id?: number | null
   /** The `Vehicle` ID these specs belong to. */
-  readonly vehicle_id?: number
-  readonly account_id?: number
+  readonly vehicle_id?: number | null
+  readonly account_id?: number | null
   /** The body type of the Vehicle, if available. */
   readonly body_type?: string | null
   /** The subtype of the Vehicle body, if available. */
@@ -645,15 +657,15 @@ export interface FleetioVehicleSpecs {
   /** The maximum payload capacity of the Vehicle, if available. */
   readonly max_payload?: number | null
   /** The type of rear axle used in the Vehicle. */
-  readonly rear_axle_type?: string
+  readonly rear_axle_type?: string | null
   /** The type of front tires used in the Vehicle. */
-  readonly front_tire_type?: string
+  readonly front_tire_type?: string | null
   /** The diameter of the front wheels. */
-  readonly front_wheel_diameter?: string
+  readonly front_wheel_diameter?: string | null
   /** The type of rear tires used in the Vehicle. */
-  readonly rear_tire_type?: string
+  readonly rear_tire_type?: string | null
   /** The diameter of the rear wheels. */
-  readonly rear_wheel_diameter?: string
+  readonly rear_wheel_diameter?: string | null
   /** The EPA city fuel economy rating, if available. */
   readonly epa_city?: number | null
   /** The EPA highway fuel economy rating, if available. */
@@ -661,9 +673,9 @@ export interface FleetioVehicleSpecs {
   /** The combined EPA fuel economy rating, if available. */
   readonly epa_combined?: number | null
   /** Description of the Vehicle's engine. */
-  readonly engine_description?: string
+  readonly engine_description?: string | null
   /** Brand of the Vehicle's engine. */
-  readonly engine_brand?: string
+  readonly engine_brand?: string | null
   /** Aspiration type of the engine, if available. */
   readonly engine_aspiration?: string | null
   /** Block type of the engine, if available. */
@@ -681,7 +693,7 @@ export interface FleetioVehicleSpecs {
   /** Fuel induction method, if available. */
   readonly fuel_induction?: string | null
   /** Fuel quality required for the engine. */
-  readonly fuel_quality?: string
+  readonly fuel_quality?: string | null
   /** Maximum horsepower produced by the engine, if available. */
   readonly max_hp?: number | null
   /** Maximum torque produced by the engine, if available. */
@@ -689,15 +701,15 @@ export interface FleetioVehicleSpecs {
   /** Oil capacity of the engine, if available. */
   readonly oil_capacity?: number | null
   /** Redline RPM of the engine. */
-  readonly redline_rpm?: string
+  readonly redline_rpm?: string | null
   /** Stroke length of the engine, if available. */
   readonly engine_stroke?: number | null
   /** Number of engine valves, if available. */
   readonly engine_valves?: number | null
   /** Description of the Vehicle's transmission. */
-  readonly transmission_description?: string
+  readonly transmission_description?: string | null
   /** Brand of the Vehicle's transmission. */
-  readonly transmission_brand?: string
+  readonly transmission_brand?: string | null
   /** Type of transmission, if available. */
   readonly transmission_type?: string | null
   /** Number of gears in the transmission, if available. */
@@ -707,11 +719,11 @@ export interface FleetioVehicleSpecs {
   /** Interior volume of the Vehicle, if available. */
   readonly interior_volume?: number | null
   /** Passenger volume of the Vehicle. */
-  readonly passenger_volume?: string
+  readonly passenger_volume?: string | null
   /** The date and time when the specs were created. */
-  readonly created_at?: string
+  readonly created_at?: string | null
   /** The date and time when the specs were last updated. */
-  readonly updated_at?: string
+  readonly updated_at?: string | null
   /** Type of duty the Vehicle is designed for, if available. */
   readonly duty_type?: string | null
   /** Weight class of the Vehicle, if available. */
@@ -721,7 +733,7 @@ export interface FleetioVehicleSpecs {
   /** Wheelbase of the Vehicle with units, if available. */
   readonly wheelbase_with_units?: string | null
   /** Manufacturer's Suggested Retail Price (MSRP). */
-  readonly msrp?: string | null
+  readonly msrp?: number | null
 }
 
 export interface FleetioCurrentLocationEntryAddressComponents {
@@ -748,9 +760,9 @@ export interface FleetioCurrentLocationEntry {
   /** The unique identifier for the current Location Entry. */
   readonly id?: number
   /** The type of object that this Location Entry is associated with. */
-  readonly locatable_type?: string
+  readonly locatable_type?: string | null
   /** The unique identifier of the object that this Location Entry is associated with. */
-  readonly locatable_id?: number
+  readonly locatable_id?: number | null
   /** The date and time when this Location Entry was recorded. */
   readonly date?: string
   /** The date and time when this Location Entry was created. */
@@ -758,9 +770,9 @@ export interface FleetioCurrentLocationEntry {
   /** The date and time when this Location Entry was last updated. */
   readonly updated_at?: string
   /** The unique identifier of the associated Contact. */
-  readonly contact_id?: number
+  readonly contact_id?: number | null
   /** The address associated with this Location Entry. */
-  readonly address?: string
+  readonly address?: string | null
   /** Indicates whether this Location Entry is the current location. */
   readonly is_current?: boolean
   /** The type of item associated with this Location Entry. */
@@ -771,6 +783,7 @@ export interface FleetioCurrentLocationEntry {
   readonly location?: string
   readonly address_components?: FleetioCurrentLocationEntryAddressComponents
   readonly geolocation?: { readonly latitude?: number; readonly longitude?: number }
+  readonly vehicle_id?: number | null
 }
 
 /** A Part */
@@ -853,13 +866,14 @@ export interface FleetioInspectionItem {
   /** Indicates whether a remark is required for a "Pass" result. */
   readonly require_remark_for_pass?: boolean
   /** An array of options for an `InspectionDropdownItem`. */
-  readonly dropdown_options?: readonly string[]
+  readonly dropdown_options?: readonly Readonly<Record<string, unknown>>[]
   /** The minimum value allowed for an InspectionNumericItem. */
   readonly numeric_range_min?: number | null
   /** The maximum value allowed for an InspectionNumericItem. */
   readonly numeric_range_max?: number | null
   /** Indicates whether a photo of the meter is required for verification. */
   readonly require_meter_entry_photo_verification?: boolean
+  readonly requirement_settings?: Readonly<Record<string, unknown>>
 }
 
 export interface FleetioVmrsReasonForRepairCode {
@@ -893,6 +907,7 @@ export interface FleetioVmrsSystemCode {
   readonly system_name?: string | null
   readonly type?: string
   readonly vmrs_standard_system_assembly_component?: Readonly<Record<string, unknown>> | null
+  readonly system_group_name?: string | null
 }
 
 export interface FleetioWorkOrderVmrsRepairPriorityClass {

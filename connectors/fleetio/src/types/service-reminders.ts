@@ -24,7 +24,7 @@ export interface FleetioServiceProgramLineItemServiceTaskDefaultVmrsSystemGroup 
   /** The system group code of this system group. */
   readonly system_group_code?: string
   /** The name of this system group. */
-  readonly system_group_name?: string
+  readonly system_group_name?: string | null
   /** The system code of this system group. */
   readonly system_code?: string
   /** The name of this system. */
@@ -46,7 +46,7 @@ export interface FleetioServiceProgramLineItemServiceTaskDefaultVmrsComponent {
   /** The system group code of the default VMRS component. */
   readonly system_group_code?: string
   /** The name of the default VMRS system group. */
-  readonly system_group_name?: string
+  readonly system_group_name?: string | null
   /** The system code of the default VMRS component. */
   readonly system_code?: string
   /** The name of the default VMRS system. */

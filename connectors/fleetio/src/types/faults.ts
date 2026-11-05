@@ -69,6 +69,8 @@ export interface FleetioFaultSummary {
   readonly idempotency_key?: string | null
   /** A Vehicle */
   readonly vehicle?: FleetioVehicleMini
+  readonly created_at?: string
+  readonly updated_at?: string
 }
 
 export interface FleetioFaultFilter {

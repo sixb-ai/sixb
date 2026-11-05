@@ -8,13 +8,13 @@ afterEach(() => {
 })
 
 describe("vehicles", () => {
-  test("get takes a VIN or other external ID", async () => {
+  test("get takes a key:value external ID", async () => {
     const calls = recorder([json({ id: 1 })])
     const fl = await createTestClient()
 
-    await fl.vehicles.get("1FTFW1E50NFA00001")
+    await fl.vehicles.get("vin:1FTFW1E50NFA00001")
 
-    expect(route(calls[0]!)).toBe("GET /api/vehicles/1FTFW1E50NFA00001")
+    expect(route(calls[0]!)).toBe("GET /api/vehicles/vin:1FTFW1E50NFA00001")
   })
 
   test("sub-lists are scoped to the vehicle", async () => {

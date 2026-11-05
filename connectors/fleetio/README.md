@@ -99,11 +99,12 @@ for await (const order of fl.workOrders.listAll({ filter: { vehicle_id: { eq: 12
 }
 ```
 
-To pull what changed since the last run, filter and sort on `updated_at`:
+To pull what changed since the last run, filter and sort on `updated_at`. Bounds can be combined to
+select a window:
 
 ```ts
 for await (const order of fl.workOrders.listAll({
-  filter: { updated_at: { gte: lastSyncedAt } },
+  filter: { updated_at: { gte: lastSyncedAt, lt: now } },
   sort: { updated_at: "asc" },
 })) {
   // upsert order
@@ -146,9 +147,10 @@ nothing; its type says which.
 | `fl.equipment` | Full, plus `archive`, `restore` |
 | `fl.equipmentStatuses`, `fl.equipmentTypes` | Read only |
 
-`fl.vehicles.get` also takes a VIN, license plate or other
-[external ID](https://developer.fleetio.com/docs/guides/vehicles/external-vehicle-ids). Each of
-these has a `listAll…` form and takes the vehicle's ID first: `listFuelEntries`, `listMeterEntries`,
+Where your account has
+[external IDs](https://developer.fleetio.com/docs/guides/vehicles/external-vehicle-ids) configured,
+a vehicle ID can also be `key:value`, such as `fl.vehicles.get("vin:A12B34C56D78")`. Each of these
+has a `listAll…` form and takes the vehicle's ID first: `listFuelEntries`, `listMeterEntries`,
 `listServiceEntries`, `listAssignments`, `listIssues`, `listLinkedVehicles`. `getCurrentAssignment`
 and `getPurchaseDetail` return one record.
 
@@ -283,13 +285,17 @@ A non-2xx response throws `FleetioApiError` with `status`, `responseBody`, `head
 with the connector's own configuration throws `FleetioConfigurationError`.
 
 Reads retry network errors, `429` and `5xx`. Fleetio has no idempotency keys, so writes retry only a
-`429`, where Fleetio refused the request. Retries wait for `Retry-After`. Fleetio's limits depend on
-your plan and are not published, so set `minDelayMs` if a long sync keeps hitting them.
+`429`, where Fleetio refused the request. Retries wait for `Retry-After`.
+
+Fleetio's rate limit depends on your plan. Set `minDelayMs` to stay under it: `240` allows 250 requests
+a minute. It paces this connector instance only, so leave room if anything else uses the same key.
 
 ## Notes
 
 - **Field names** are Fleetio's own, in snake_case, so its API reference applies directly.
 - **Datetimes** without an offset are read in the API user's time zone, so send UTC or an offset.
+- **Types follow real responses** where those differ from Fleetio's spec. Fields seen only in responses
+  are optional.
 - **Some modules are plan-dependent.** A call to one your account lacks fails with a `403` or `404`.
 - **Not covered:** accidents, custom objects and records, motor pool, tires and axles, warranties, EV
   charging, renewals, location history, fault rules, vehicle acquisitions, and account administration.

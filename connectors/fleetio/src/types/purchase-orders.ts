@@ -121,6 +121,9 @@ export interface FleetioPurchaseOrder {
   readonly total_amount?: number | null
   /** A list of the documents attached to this record. */
   readonly documents?: readonly FleetioDocument[]
+  readonly tax_1_percentage?: number | null
+  readonly tax_2_percentage?: number | null
+  readonly tax_2_type?: string | null
 }
 
 /** A Purchase Order */
@@ -202,6 +205,8 @@ export interface FleetioPurchaseOrderSummary {
   readonly labels: readonly { readonly id?: number; readonly name?: string }[]
   /** A Vendor */
   readonly vendor: FleetioVendorMini | null
+  readonly status_name?: string | null
+  readonly status_color?: string | null
 }
 
 export interface FleetioPurchaseOrderFilter {

@@ -58,8 +58,8 @@ export type FleetioVehicleListAll<TItem, TFilter, TSort> = (
 ) => AsyncIterable<TItem>
 
 /**
- * Vehicles. `get` and the sub-lists also accept a VIN, plate or other external ID where the account
- * has set that up.
+ * Vehicles. Where the account has external IDs configured, an ID can also be `key:value`, such as
+ * `vin:A12B34C56D78` or `accounting_id:987`.
  */
 export type VehiclesResource = FleetioReadMethods<
   FleetioVehicleSummary,
