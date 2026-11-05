@@ -76,6 +76,7 @@ export type {
   ObjectQueryProviderOperation,
 } from "./planner"
 export { planObjectQuery } from "./planner"
+export { sortTieDirection } from "./sort-ties"
 export type {
   ObjectQueryValidationIssue,
   ObjectQueryValidationOptions,

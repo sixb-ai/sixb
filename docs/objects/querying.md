@@ -209,7 +209,9 @@ const { objects } = await sixb
   .list()
 ```
 
-Null and missing values sort last in both directions.
+Null and missing values sort last in both directions. Objects that tie on every sorted property
+keep a fixed order, reversed when the last `orderBy()` is `"desc"`: a descending list is the
+ascending one backwards, null values aside.
 
 Strings sort and compare (`lt`, `gte`, …) by Unicode code point, the same in every storage and
 whatever the database's collation: uppercase before lowercase, accented letters after `z`
@@ -401,20 +403,16 @@ export const Customer = defineObjectType({
   ],
   query: {
     indexes: [
-      { kind: "sort", fields: [{ propertyId: "createdAt", direction: "desc" }] },
-      {
-        kind: "sort",
-        fields: [{ propertyId: "createdAt", direction: "desc" }],
-        filters: ["status"],
-      },
+      { kind: "sort", fields: [{ propertyId: "createdAt" }], filters: ["status"] },
       { kind: "text", propertyId: "searchText", filters: ["status"] },
     ],
   },
 })
 ```
 
-The two sort indexes serve all customers and customers filtered by status, respectively.
-`filters` accepts string equality filters. The text declaration accelerates exact counts and
+`sortable` already serves all customers by `createdAt`; the sort declaration serves customers
+filtered by status. Each serves both directions, newest or oldest first: set `direction` only to
+sort several fields in opposite directions. `filters` accepts string equality filters. The text declaration accelerates exact counts and
 facets; ordinary substring search only needs the property's `text` capability.
 
 Sixb prepares indexes automatically after startup migrations, never during requests.

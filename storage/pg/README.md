@@ -124,12 +124,7 @@ const User = defineObjectType({
   ],
   query: {
     indexes: [
-      { kind: "sort", fields: [{ propertyId: "createdAt", direction: "desc" }] },
-      {
-        kind: "sort",
-        fields: [{ propertyId: "createdAt", direction: "desc" }],
-        filters: ["status"],
-      },
+      { kind: "sort", fields: [{ propertyId: "createdAt" }], filters: ["status"] },
       { kind: "text", propertyId: "searchText", filters: ["status"] },
     ],
   },
@@ -217,7 +212,9 @@ application configuration should use ontology declarations.
 ### Pages, search and totals
 
 Use `list({ includeTotal: false })` for independently loaded pages. Existing cursor pagination
-uses ordered index ranges, including deep pages. Incoming relationship pages can choose an ordered
+uses ordered index ranges, including deep pages. A one-field sort index serves both directions: a
+descending sort breaks ties in reverse identity order, so its page is the ascending index read
+backwards, in two ranges, values then nulls, since nulls sort last either way. Incoming relationship pages can choose an ordered
 endpoint scan after a bounded fanout probe; aggregates use their own execution plan.
 
 Search remains literal, case-insensitive substring search, including `%`, `_` and `\` characters.

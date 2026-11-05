@@ -40,6 +40,7 @@ import { usePrimaryIdLookups } from "./primary-id"
 import { rerankObjectCandidates } from "./reranking-executor"
 import { findQueryReranking } from "./reranking-query"
 import { compareQueryScalarValues } from "./scalar-values"
+import { sortTieDirection } from "./sort-ties"
 import { withoutUserExpansions } from "./user-expansions"
 import {
   type AdmittedObjectQuery,
@@ -1040,10 +1041,12 @@ function compareExpansionEdges(
     const comparison = compareRowsBySortField(leftRow, rightRow, field)
     if (comparison !== 0) return comparison
   }
+
   // Identity tiebreak keeps the trim deterministic for equal sort keys.
-  return targetKey(left.neighborTypeId, left.neighborId).localeCompare(
+  const identity = targetKey(left.neighborTypeId, left.neighborId).localeCompare(
     targetKey(right.neighborTypeId, right.neighborId)
   )
+  return sortTieDirection(fields) === "desc" ? -identity : identity
 }
 
 function compareRowsBySortField(
@@ -1138,6 +1141,7 @@ function sortEntries(
   entries: readonly FallbackEntry[],
   fields: readonly ObjectQuerySortField[]
 ): FallbackEntry[] {
+  const ties = sortTieDirection(fields)
   return [...entries].sort((left, right) => {
     for (const field of fields) {
       const comparison = compareSortField(left, right, field)
@@ -1145,9 +1149,9 @@ function sortEntries(
     }
     // Preserve storage order for true ties, then use identity as a deterministic
     // final fallback so tests and page tokens stay stable.
-    return (
+    const tie =
       left.order - right.order || rowIdentityKey(left.row).localeCompare(rowIdentityKey(right.row))
-    )
+    return ties === "desc" ? -tie : tie
   })
 }
 

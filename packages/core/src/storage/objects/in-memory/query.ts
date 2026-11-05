@@ -2,6 +2,7 @@ import type { ObjectQuery, ObjectQuerySortField } from "../../../objects/query"
 import { linkEndpointObjectTypeIds } from "../../../objects/query/link-endpoints"
 import { matchesPredicate } from "../../../objects/query/matches-predicate"
 import { compareQueryScalarValues } from "../../../objects/query/scalar-values"
+import { sortTieDirection } from "../../../objects/query/sort-ties"
 import { vectorSources } from "../../../objects/vectors/profile"
 import type { LinkBatchKey } from "../keys"
 import {
@@ -443,14 +444,16 @@ function sortEntries(
   entries: readonly QueryEntry[],
   fields: readonly ObjectQuerySortField[]
 ): QueryEntry[] {
+  const ties = sortTieDirection(fields)
   return [...entries].sort((left, right) => {
     for (const field of fields) {
       const comparison = compareSortField(left, right, field)
       if (comparison !== 0) return comparison
     }
-    return (
+
+    const tie =
       left.order - right.order || rowIdentityKey(left.row).localeCompare(rowIdentityKey(right.row))
-    )
+    return ties === "desc" ? -tie : tie
   })
 }
 

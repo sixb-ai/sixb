@@ -11,6 +11,7 @@ import {
   isVectorProfileQuery,
   linkEndpointObjectTypeIds,
   normalizeVector,
+  sortTieDirection,
   vectorSearchCandidateLimit,
 } from "@sixb/core/internal/query"
 import { encodeSqliteVector } from "../vector-encoding"
@@ -855,7 +856,8 @@ function compileExpansionOrder(
     args.push(path, path, path)
   }
 
-  clauses.push(`${neighborType} ASC`, `${neighborId} ASC`)
+  const ties = sortTieDirection(expansion.orderBy ?? []).toUpperCase()
+  clauses.push(`${neighborType} ${ties}`, `${neighborId} ${ties}`)
   return { sql: clauses.join(", "), args }
 }
 
@@ -1300,14 +1302,14 @@ function sortOrderFields(fields: readonly ObjectQuerySortField[]): readonly Comp
       direction: field.direction === "desc" ? "desc" : "asc",
     })
   }
-  orderFields.push(...identityOrderFields())
+  orderFields.push(...identityOrderFields(sortTieDirection(fields)))
   return orderFields
 }
 
-function identityOrderFields(): readonly CompiledOrderField[] {
+function identityOrderFields(direction: "asc" | "desc" = "asc"): readonly CompiledOrderField[] {
   return [
-    { kind: "column", column: "object_type_id", direction: "asc" },
-    { kind: "column", column: "primary_id", direction: "asc" },
+    { kind: "column", column: "object_type_id", direction },
+    { kind: "column", column: "primary_id", direction },
   ]
 }
 
