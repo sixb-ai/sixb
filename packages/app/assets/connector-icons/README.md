@@ -20,6 +20,7 @@ The following assets were retrieved from icons linked by the services' official 
 - `companycam.png`: https://cdn.companycam.com/dist/img/site/favicon-96x96-2021.png
 - `ace-iot.ico`: https://aceiotsolutions.com/favicon.ico
 - `exa.png`: https://exa.ai/images/favicon-32x32.png
+- `fleetio.ico`: https://developer.fleetio.com/img/favicon.ico
 - `google.ico`: https://www.google.com/favicon.ico
 - `pandadoc.png`: https://files.readme.io/6ffa2ec-small-icon-192-e5478bae7f.png
 - `microsoft.ico`: https://learn.microsoft.com/favicon.ico

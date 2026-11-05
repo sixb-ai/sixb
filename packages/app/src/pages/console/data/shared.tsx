@@ -9,6 +9,7 @@ const connectorIconFiles: Readonly<Record<string, string>> = {
   "ace-iot": "ace-iot.ico",
   companycam: "companycam.png",
   exa: "exa.png",
+  fleetio: "fleetio.ico",
   github: "github.svg",
   google: "google.ico",
   "google-ads": "googleads.svg",
