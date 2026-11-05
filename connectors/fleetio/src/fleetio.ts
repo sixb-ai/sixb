@@ -56,8 +56,8 @@ export function fleetio(options: FleetioConnectorOptions): FleetioConnector {
     headers: async () => ({
       Authorization: `Token ${await resolveCredential(options.apiKey, "apiKey")}`,
       "Account-Token": await resolveCredential(options.accountToken, "accountToken"),
-      // A key is locked to the version current when it was created, and paths changed in
-      // 2025-05-05, so the version is pinned here for every key to behave the same.
+      // A key is locked to the version current when it was created, and responses differ by version
+      // (work order lists are a bare array on 2023-03-01), so every key is pinned to one here.
       "X-Api-Version": apiVersion,
       Accept: "application/json",
     }),

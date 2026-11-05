@@ -144,6 +144,9 @@ export interface FleetioServiceEntry {
   readonly images: readonly FleetioImage[]
   /** The number of images attached to this record. */
   readonly images_count: number
+  readonly warranty_credits_type?: string | null
+  readonly warranty_credits_percentage?: number | null
+  readonly warranty_credits?: number | null
 }
 
 /** A Service Entry */
@@ -214,6 +217,12 @@ export interface FleetioServiceEntrySummary {
   readonly total_amount_cents?: number
   /** The sum, in seconds, of the duration of all labor line items of the Work Order that created this Service Entry, if applicable. */
   readonly labor_time_in_seconds?: number | null
+  readonly created_at?: string
+  readonly updated_at?: string
+  readonly vendor_name?: string | null
+  readonly warranty_credits_cents?: number | null
+  readonly warranty_credits_percentage?: string | null
+  readonly warranty_credits_type?: string | null
 }
 
 export interface FleetioServiceEntryFilter {

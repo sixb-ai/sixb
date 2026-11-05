@@ -1,3 +1,4 @@
+import type { FleetioComment } from "./comments"
 import type {
   FleetioEqFilter,
   FleetioEqOrRangeFilter,
@@ -184,6 +185,12 @@ export interface FleetioVehicle {
   readonly default_image_url_large?: string | null
   /** The current location of the associated object. */
   readonly current_location_entry?: FleetioCurrentLocationEntry | null
+  readonly created_at?: string
+  readonly updated_at?: string
+  readonly comments?: readonly FleetioComment[]
+  readonly documents_including_nested_resources_count?: number
+  readonly warranties_count?: number
+  readonly warranties_active_count?: number
 }
 
 /** A Vehicle */
@@ -300,6 +307,8 @@ export interface FleetioVehicleSummary {
   /** A Contact */
   readonly driver?: FleetioContactMini | null
   readonly specs?: FleetioVehicleSpecs
+  readonly created_at?: string
+  readonly updated_at?: string
 }
 
 export interface FleetioVehicleFilter {

@@ -83,6 +83,17 @@ if (first) {
     filter: { updated_at: { gte: "2000-01-01T00:00:00Z" } },
   })
   check("a date filter is accepted", recent.records.length > 0)
+
+  const outside = await Promise.all(
+    [
+      { gte: "2000-01-01T00:00:00Z", lt: "2001-01-01T00:00:00Z" },
+      { gte: "2099-01-01T00:00:00Z", lt: "2100-01-01T00:00:00Z" },
+    ].map((updated_at) => fl.workOrders.list({ pageSize: 1, filter: { updated_at } }))
+  )
+  check(
+    "both bounds of a date window apply",
+    outside.every((result) => result.records.length === 0)
+  )
 } else {
   console.log("  - no work orders on this account")
 }

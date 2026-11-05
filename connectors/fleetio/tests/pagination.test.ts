@@ -35,6 +35,18 @@ describe("list", () => {
     expect(query?.get("sort[updated_at]")).toBe("asc")
   })
 
+  test("sends both bounds of a date window", async () => {
+    const calls = recorder([page([])])
+    const fl = await createTestClient()
+
+    await fl.workOrders.list({
+      filter: { updated_at: { gte: "2026-11-01T00:00:00Z", lt: "2026-11-02T00:00:00Z" } },
+    })
+
+    expect(calls[0]?.url.searchParams.get("filter[updated_at][gte]")).toBe("2026-11-01T00:00:00Z")
+    expect(calls[0]?.url.searchParams.get("filter[updated_at][lt]")).toBe("2026-11-02T00:00:00Z")
+  })
+
   test("sends no parameters it was not given", async () => {
     const calls = recorder([page([])])
     const fl = await createTestClient()

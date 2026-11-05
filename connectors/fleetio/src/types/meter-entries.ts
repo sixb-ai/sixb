@@ -36,7 +36,7 @@ export interface FleetioMeterEntry {
   /** Indicates if this Meter Entry was submitted by a GPS provider. */
   readonly type: "GpsMeterEntry" | null
   /** The GPS provider that submitted this Meter Entry. */
-  readonly gps_provider: Readonly<Record<string, unknown>> | null
+  readonly gps_provider: string | null
   /** The date on which this Meter Entry was recorded. */
   readonly date: string
 }
@@ -71,9 +71,11 @@ export interface FleetioMeterEntrySummary {
   /** Indicates if this Meter Entry was submitted by a GPS provider. */
   readonly type: "GpsMeterEntry" | null
   /** The GPS provider that submitted this Meter Entry. */
-  readonly gps_provider: Readonly<Record<string, unknown>> | null
+  readonly gps_provider: string | null
   /** The date on which this Meter Entry was recorded. */
   readonly date: string
+  readonly created_at?: string
+  readonly updated_at?: string
 }
 
 export interface FleetioMeterEntryFilter {
@@ -134,7 +136,7 @@ export interface FleetioMeterEntryCreated {
   /** Indicates whether or not this Meter Entry has been voided. */
   readonly void: boolean
   /** The GPS provider that submitted this Meter Entry. */
-  readonly gps_provider: Readonly<Record<string, unknown>> | null
+  readonly gps_provider: string | null
   /** The date on which this Meter Entry was recorded. */
   readonly date: string
   /** The date and time at which the `Vehicle` associated with this Meter Entry was archived, if applicable. */

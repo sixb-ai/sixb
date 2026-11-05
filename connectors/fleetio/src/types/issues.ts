@@ -113,6 +113,7 @@ export interface FleetioIssue {
     readonly name?: string
     readonly color?: string
   }[]
+  readonly is_watched?: boolean
 }
 
 export interface FleetioIssueSummaryVehicle {
@@ -126,7 +127,7 @@ export interface FleetioIssueSummaryVehicle {
   /** The Vehicle Identification Number of this Vehicle. */
   readonly vin?: string | null
   /** This Vehicle's model year. */
-  readonly year?: string | null
+  readonly year?: number | null
   /** The name of this Vehicle's manufacturer. */
   readonly make?: string | null
   /** The name of the model of this Vehicle. */
@@ -222,6 +223,8 @@ export interface FleetioIssueSummary {
   readonly assigned_contacts?: readonly (FleetioContactMini | null)[]
   /** An Issue Priority represents the priority level of an Issue. */
   readonly issue_priority?: FleetioIssuePriority
+  readonly summary?: string | null
+  readonly attachment_permissions?: FleetioAttachmentPermissions
 }
 
 export interface FleetioIssueFilter {

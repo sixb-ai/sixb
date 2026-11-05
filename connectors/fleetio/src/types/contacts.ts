@@ -109,6 +109,9 @@ export interface FleetioContact {
   /** The date and time at which this Contact was archived, if applicable. */
   readonly archived_at?: string | null
   readonly user: FleetioContactUser | null
+  readonly last_api_request?: string | null
+  readonly last_web_access?: string | null
+  readonly last_mobile_app_access?: string | null
 }
 
 /** A Contact */

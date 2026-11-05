@@ -26,5 +26,6 @@ export function pathId(value: FleetioId, field: string): string {
     throw new Error(`[SixbFleetio] ${field} must not be empty.`)
   }
 
-  return encodeURIComponent(value)
+  // Fleetio's external vehicle IDs are `key:value` path segments, written with a literal colon.
+  return encodeURIComponent(value).replaceAll("%3A", ":")
 }

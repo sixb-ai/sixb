@@ -185,6 +185,10 @@ export interface FleetioWorkOrderLineItem {
   readonly parts_cost_cents?: number | null
   /** The cost of labor units worked, in cents. */
   readonly labor_cost_cents?: number | null
+  readonly completed_at?: string | null
+  readonly complaint?: string | null
+  readonly cause?: string | null
+  readonly correction?: string | null
 }
 
 /** A Work Order */
@@ -316,6 +320,10 @@ export interface FleetioWorkOrder {
   readonly documents?: readonly FleetioDocument[]
   /** The number of documents attached to this record. */
   readonly documents_count?: number
+  readonly warranty_credits_type?: string | null
+  readonly warranty_credits_percentage?: number | null
+  readonly warranty_credits?: number | null
+  readonly selected_part_warranty_opportunities_count?: number
 }
 
 /** A Work Order */
@@ -381,6 +389,11 @@ export interface FleetioWorkOrderSummary {
   readonly vehicle: FleetioVehicleMini
   /** A Vendor */
   readonly vendor: FleetioVendorMini | null
+  readonly starting_meter_entry?: FleetioVehicleMeterEntry | null
+  readonly ending_meter_entry?: FleetioVehicleMeterEntry | null
+  readonly vmrs_repair_priority_class?: FleetioWorkOrderVmrsRepairPriorityClass | null
+  readonly labels?: readonly { readonly id?: number; readonly name?: string }[]
+  readonly issues?: readonly { readonly id?: number; readonly name?: string }[]
 }
 
 export interface FleetioWorkOrderFilter {

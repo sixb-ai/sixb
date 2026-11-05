@@ -1,3 +1,4 @@
+import type { FleetioComment } from "./comments"
 import type {
   FleetioEqFilter,
   FleetioLikeFilter,
@@ -5,7 +6,12 @@ import type {
   FleetioRangeFilter,
   FleetioSortDirection,
 } from "./common"
-import type { FleetioContactMini, FleetioInspectionItem, FleetioVehicleMini } from "./shared"
+import type {
+  FleetioContactMini,
+  FleetioImage,
+  FleetioInspectionItem,
+  FleetioVehicleMini,
+} from "./shared"
 
 /** An Inspection Form */
 export interface FleetioInspectionForm {
@@ -14,7 +20,7 @@ export interface FleetioInspectionForm {
   /** The title or name of the Inspection Form. */
   readonly title?: string
   /** A brief description or explanation of the Inspection Form's purpose or requirements. */
-  readonly description?: string
+  readonly description?: string | null
   /** The date and time when the Inspection Form was last updated. */
   readonly updated_at?: string
   /** The date and time when the Inspection Form was archived, if applicable. */
@@ -37,7 +43,7 @@ export interface FleetioInspectionFormSummary {
   /** The title or name of the Inspection Form. */
   readonly title?: string
   /** A brief description or explanation of the Inspection Form's purpose or requirements. */
-  readonly description?: string
+  readonly description?: string | null
   /** The date and time when the Inspection Form was last updated. */
   readonly updated_at?: string
   /** The date and time when the Inspection Form was last updated. */
@@ -117,6 +123,9 @@ export interface FleetioSubmittedInspectionItem {
   /** The longitude at which this Inspection Item was submitted. */
   readonly longitude?: number | null
   readonly inspection_item?: FleetioSubmittedInspectionItemDefinition
+  readonly comments?: readonly FleetioComment[]
+  readonly images?: readonly FleetioImage[]
+  readonly meter_entry_value?: string | null
 }
 
 /** A Submitted Inspection Form */
@@ -136,15 +145,15 @@ export interface FleetioSubmittedInspectionForm {
   /** The longitude at which this Inspection Form was started. */
   readonly starting_longitude: number | null
   /** The latitude at which this Inspection Form was submitted. */
-  readonly submitted_latitude: number | null
+  readonly submitted_latitude: string | null
   /** The longitude at which this Inspection Form was submitted. */
-  readonly submitted_longitude: number | null
+  readonly submitted_longitude: string | null
   /** The duration of time in words (eg; 15 minutes, about 1 hour) between when this Inspection Form was started and when it was submitted. */
   readonly duration: string | null
   readonly inspection_form: {
     readonly id?: number
     readonly title?: string
-    readonly description?: string
+    readonly description?: string | null
   }
   readonly contact_id?: number | null
   /** The full name of the User that submitted this Inspection Form. */
@@ -173,13 +182,13 @@ export interface FleetioSubmittedInspectionFormSummary {
   /** The longitude at which this Inspection Form was started. */
   readonly starting_longitude: number | null
   /** The latitude at which this Inspection Form was submitted. */
-  readonly submitted_latitude: number | null
+  readonly submitted_latitude: string | null
   /** The longitude at which this Inspection Form was submitted. */
-  readonly submitted_longitude: number | null
+  readonly submitted_longitude: string | null
   readonly inspection_form: {
     readonly id?: number
     readonly title?: string
-    readonly description?: string
+    readonly description?: string | null
   }
   /** A Contact */
   readonly user?: FleetioContactMini | null
@@ -246,7 +255,7 @@ export interface FleetioInspectionScheduleSummary {
   /** The date and time at which this Inspection Schedule's recurrence behavior began. */
   readonly recurring_schedule_start_at?: string | null
   /** The date and time at which this Inspection Schedule is next due. */
-  readonly next_due_at?: string
+  readonly next_due_at?: string | null
   /** The date and time at which this Inspection Schedule was last sent. */
   readonly last_sent_at?: string | null
   /** The date and time of the last `SubmittedInspectionForm`. */
@@ -255,6 +264,9 @@ export interface FleetioInspectionScheduleSummary {
   readonly inspection_schedule_status: "due_soon" | "overdue" | "ok"
   /** A Vehicle */
   readonly vehicle?: FleetioVehicleMini
+  readonly relative_schedule?: boolean
+  readonly reminder_days_before?: number | null
+  readonly reminder_hour?: number | null
 }
 
 export interface FleetioInspectionScheduleStatusFilter {

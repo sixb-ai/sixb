@@ -136,11 +136,12 @@ export interface FleetioPartSummaryPartManufacturer {
   readonly id?: number
   /** The name of the Part Manufacturer. */
   readonly name?: string
-  readonly description?: string
+  readonly description?: string | null
   /** The date and time at which this Part Manufacturer was created. */
   readonly created_at?: string | null
   /** The date and time at which this Part Manufacturer was last updated. */
   readonly updated_at?: string | null
+  readonly account_id?: number
 }
 
 /** A Part */
@@ -181,6 +182,7 @@ export interface FleetioPartSummary {
   readonly part_category?: FleetioPartCategory | null
   /** The cross-reference group this Part belongs to, or `null` when it belongs to none. */
   readonly cross_reference_group_id?: number | null
+  readonly updated_at?: string
 }
 
 export interface FleetioPartFilter {
