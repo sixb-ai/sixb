@@ -76,7 +76,10 @@ export function compilePgConditionalObjectReadSource(
   scope: CompiledConditionalObjectReadScope
 ): PgObjectQuerySource {
   const filters = new Map(
-    scope.conditions.map((condition) => [condition.objectTypeId, compilePgConditionFilter(condition)])
+    scope.conditions.map((condition) => [
+      condition.objectTypeId,
+      compilePgConditionFilter(condition),
+    ])
   )
 
   const relations = compileConditionalReadScopeRelations(projectId, filters)
