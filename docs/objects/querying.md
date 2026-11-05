@@ -411,8 +411,8 @@ export const Customer = defineObjectType({
 ```
 
 `sortable` already serves all customers by `createdAt`; the sort declaration serves customers
-filtered by status. Each serves both directions, newest or oldest first: set `direction` only to
-sort several fields in opposite directions. `filters` accepts string equality filters. The text declaration accelerates exact counts and
+filtered by status. Each serves both directions, newest or oldest first. An index on several fields
+serves only the directions it declares. `filters` accepts string equality filters. The text declaration accelerates exact counts and
 facets; ordinary substring search only needs the property's `text` capability.
 
 Sixb prepares indexes automatically after startup migrations, never during requests.
