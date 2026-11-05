@@ -12,7 +12,7 @@ import { buildDuckLakeMetadataQuery, quoteIdentifier, quoteSqlString } from "./s
  */
 export const SMALL_FILE_BYTES = 1024 * 1024
 
-/** Compaction rewrites a data file once the rows its delete file removes reach this share. */
+/** Compaction rewrites a data file once its deleted rows reach this share. */
 export const REWRITE_DELETED_SHARE = 0.1
 
 /**
@@ -30,7 +30,10 @@ export interface DuckLakeTableStorage {
   /** Rows the data files hold, deleted ones included. */
   readonly fileRows: number
   readonly deleteFiles: number
-  /** Rows of data files that the delete files remove. */
+  /**
+   * Rows of data files deleted since they were written: by their delete files, or in the catalog,
+   * where DuckLake keeps a small write's deletes until a flush moves them to a delete file.
+   */
   readonly deletedRows: number
   /** Data files whose deleted rows reached `REWRITE_DELETED_SHARE`. */
   readonly filesToRewrite: number
@@ -52,11 +55,12 @@ const EMPTY_TABLE_STORAGE: DuckLakeTableStorage = {
 }
 
 /**
- * How each table of the datasets is stored, by table id, from at most three catalog queries
- * whatever the number of datasets. Every table is listed, an empty one with zero counts.
+ * How each table of the datasets is stored, by table id, from at most four catalog queries
+ * whatever the number of datasets, and on a local catalog one probe per table besides (see
+ * `findInlinedDeleteTables`). Every table is listed, an empty one with zero counts.
  *
- * Reads only current catalog rows: live data and delete files, and the inlined-data tables of
- * these tables. Never a data file, never the snapshot history.
+ * Reads only current catalog rows: live data and delete files, and the inlined-data and
+ * inlined-delete tables of these tables. Never a data file, never the snapshot history.
  */
 export async function readTableStorage(
   options: DuckLakeStorageOptions,
@@ -69,7 +73,8 @@ export async function readTableStorage(
     return storage
   }
 
-  for (const row of await queryFiles(options, runtime, tableIds)) {
+  const inlinedDeletes = await findInlinedDeleteTables(options, runtime, tableIds)
+  for (const row of await queryFiles(options, runtime, tableIds, inlinedDeletes)) {
     const tableId = getBigIntLike(row, "table_id")
     storage.set(tableId, {
       ...EMPTY_TABLE_STORAGE,
@@ -96,16 +101,44 @@ export async function readTableStorage(
   return storage
 }
 
-/** Live data files of the tables, each with the delete file that marks some of its rows deleted. */
+/**
+ * Live data files of the tables, each with its deleted rows: those of the delete file that marks
+ * some of them deleted, and those deleted in the catalog. The two never overlap: a flush moves a
+ * file's deletes from the catalog into a new delete file that holds both.
+ */
 async function queryFiles(
   options: DuckLakeStorageOptions,
   runtime: DuckDbQueryRuntime,
-  tableIds: readonly bigint[]
+  tableIds: readonly bigint[],
+  inlinedDeletes: readonly bigint[]
 ): Promise<readonly DuckDbRow[]> {
+  const deleted =
+    inlinedDeletes.length === 0
+      ? "coalesce(deletes.delete_count, 0)"
+      : "coalesce(deletes.delete_count, 0) + coalesce(inlined.delete_count, 0)"
+
   return runtime.query(
-    buildDuckLakeMetadataQuery(
-      options,
-      (table) => `
+    buildDuckLakeMetadataQuery(options, (table) => {
+      // An inlined delete can name a file a rewrite has since replaced: the join leaves it out.
+      const inlined =
+        inlinedDeletes.length === 0
+          ? ""
+          : `
+            LEFT JOIN (
+              ${inlinedDeletes
+                .map(
+                  (tableId) => `
+                    SELECT ${tableId} AS table_id, file_id, count(*) AS delete_count
+                    FROM ${table(inlinedDeleteTableName(tableId))}
+                    GROUP BY file_id
+                  `
+                )
+                .join(" UNION ALL ")}
+            ) inlined
+              ON inlined.table_id = file.table_id AND inlined.file_id = file.data_file_id
+          `
+
+      return `
         SELECT
           file.table_id,
           CAST(count(*) AS BIGINT) AS data_files,
@@ -114,20 +147,78 @@ async function queryFiles(
           CAST(coalesce(sum(file.file_size_bytes), 0) AS BIGINT) AS data_bytes,
           CAST(coalesce(sum(file.record_count), 0) AS BIGINT) AS file_rows,
           CAST(count(deletes.delete_file_id) AS BIGINT) AS delete_files,
-          CAST(coalesce(sum(deletes.delete_count), 0) AS BIGINT) AS deleted_rows,
+          CAST(coalesce(sum(${deleted}), 0) AS BIGINT) AS deleted_rows,
           CAST(
             count(*) FILTER (
-              WHERE deletes.delete_count >= file.record_count * ${REWRITE_DELETED_SHARE}
+              WHERE ${deleted} > 0 AND ${deleted} >= file.record_count * ${REWRITE_DELETED_SHARE}
             ) AS BIGINT
           ) AS files_to_rewrite
         FROM ${table("ducklake_data_file")} file
         LEFT JOIN ${table("ducklake_delete_file")} deletes
           ON deletes.data_file_id = file.data_file_id AND deletes.end_snapshot IS NULL
+        ${inlined}
         WHERE file.end_snapshot IS NULL AND file.table_id IN (${tableIds.join(", ")})
         GROUP BY file.table_id
       `
-    )
+    })
   )
+}
+
+/**
+ * The tables among these that have an inlined-delete table. A write deleting few rows of a data
+ * file keeps those deletes in the catalog, in one table per table, which DuckLake creates at the
+ * table's first such delete and lists nowhere.
+ *
+ * PostgreSQL says which exist, in one query. DuckDB hides a local catalog from its table
+ * listings, so there each table is probed, as DuckLake itself does: a local lookup, no round trip.
+ */
+async function findInlinedDeleteTables(
+  options: DuckLakeStorageOptions,
+  runtime: DuckDbQueryRuntime,
+  tableIds: readonly bigint[]
+): Promise<readonly bigint[]> {
+  if (options.catalog.type === "postgres") {
+    const rows = await runtime.query(
+      buildDuckLakeMetadataQuery(options, (table) => {
+        const candidates = tableIds.map(
+          (tableId) => `(${tableId}, ${quoteSqlString(table(inlinedDeleteTableName(tableId)))})`
+        )
+
+        return `
+          SELECT CAST(table_id AS BIGINT) AS table_id
+          FROM (VALUES ${candidates.join(", ")}) AS candidate(table_id, table_name)
+          WHERE to_regclass(table_name) IS NOT NULL
+        `
+      })
+    )
+    return rows.map((row) => getBigIntLike(row, "table_id"))
+  }
+
+  const found: bigint[] = []
+  for (const tableId of tableIds) {
+    const tableName = inlinedDeleteTableName(tableId)
+
+    try {
+      await runtime.query(
+        buildDuckLakeMetadataQuery(
+          options,
+          (table) => `SELECT NULL FROM ${table(tableName)} LIMIT 1`
+        )
+      )
+      found.push(tableId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!message.includes(`${tableName} does not exist`)) {
+        throw error
+      }
+    }
+  }
+
+  return found
+}
+
+function inlinedDeleteTableName(tableId: bigint): string {
+  return `ducklake_inlined_delete_${tableId}`
 }
 
 /**

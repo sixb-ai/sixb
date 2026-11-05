@@ -1423,6 +1423,53 @@ describe("DuckLakeStorage automatic compaction on a PostgreSQL catalog", () => {
     })
   }, 60_000)
 
+  // Regression proof: in readTableStorage, pass no inlined-delete tables to queryFiles. The
+  // dataset then reads 100 rows but counts 110, and compaction leaves the seed file as it is.
+  test("counts the deletes DuckLake keeps in the catalog, and rewrites the file they reach", async () => {
+    await withLake(async (options) => {
+      const scores = defineDataset(`crm.pg.scores.${randomId()}`, {
+        schema: [col("id", "string"), col("score", "int64")],
+        primaryKey: "id",
+      })
+      const adminSql = createAdminSql()
+      let storage = new DuckLakeStorage(options)
+
+      const merge = async (rows: readonly Record<string, unknown>[]) => {
+        const session = await storage.beginMerge({ dataset: scores })
+        await session.writeChanges(rows.map((row) => change.upsert(row)))
+        await session.commit({ createInitialVersion: true })
+      }
+      const scored = (count: number, score: number) =>
+        Array.from({ length: count }, (_, i) => ({ id: `a${i}`, score }))
+
+      try {
+        await storage.createDataset(scores)
+        await merge(scored(100, 0))
+
+        // Replacing ten rows of the seed file, DuckLake marks them deleted in the catalog.
+        await merge(scored(10, 1))
+
+        const [health] = await storage.maintenance.describeStorage([scores.id])
+        expect(health).toMatchObject({ deleteFiles: 0, rowCount: 100 })
+        expect(await collectRows(storage.readRows({ datasetId: scores.id }))).toHaveLength(100)
+
+        // A new provider checks its first commit: an eleventh delete, over a tenth of the file.
+        await storage.close()
+        storage = new DuckLakeStorage(options)
+        await merge([{ id: "a10", score: 2 }])
+        await storage.close()
+
+        storage = new DuckLakeStorage(options)
+        const [settled] = await storage.maintenance.describeStorage([scores.id])
+        expect(settled).toMatchObject({ deleteFiles: 0, rowCount: 100 })
+        expect(await liveFileRows(adminSql, options, scores.id)).toEqual([89])
+      } finally {
+        await storage.close()
+        await adminSql.close()
+      }
+    })
+  }, 60_000)
+
   // Regression proof: in DuckLakeCompaction, take no lock in lockDataset. The write then commits
   // while the compaction waits to, and no write ever waits for the lock.
   test("a write in another process waits for a compaction to commit", async () => {
@@ -1805,6 +1852,27 @@ async function runBudgetStep<T>(step: string, run: () => Promise<T>): Promise<T>
       `[SixbDuckLake] Constrained connection budget test failed during ${step}: ${message}`
     )
   }
+}
+
+/** The rows each live data file of the dataset was written with, deleted ones included. */
+async function liveFileRows(
+  sql: SQL,
+  options: DuckLakeStorageOptions,
+  datasetId: string
+): Promise<number[]> {
+  const { metadataSchema } = options.catalog as { readonly metadataSchema: string }
+  const table = (name: string) => `${quotePgIdent(metadataSchema)}.${quotePgIdent(name)}`
+
+  const files = await sql.unsafe(`
+    SELECT file.record_count
+    FROM ${table("ducklake_data_file")} file
+    JOIN ${table("ducklake_table")} t ON t.table_id = file.table_id
+    WHERE file.end_snapshot IS NULL AND t.end_snapshot IS NULL
+      AND t.table_name = ${quotePgLiteral(encodeDatasetTableName(datasetId))}
+    ORDER BY file.data_file_id
+  `)
+
+  return files.map((file: { readonly record_count: unknown }) => Number(file.record_count))
 }
 
 /** Appends Sixb commits to one dataset, as inline DuckLake inserts, after the latest snapshot. */
