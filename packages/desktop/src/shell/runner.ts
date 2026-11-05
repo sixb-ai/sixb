@@ -43,7 +43,10 @@ export class DesktopRunner {
   private process: RunnerProcess | null = null
   private computer: DesktopComputer | null = null
   private folderList: readonly string[] = []
-  private waitingForComputer: ((computer: DesktopComputer | null) => void)[] = []
+  private waitingForComputer: {
+    readonly resolve: (computer: DesktopComputer) => void
+    readonly reject: (error: Error) => void
+  }[] = []
   private foldersKnown = false
   private waitingForFolders: ((folders: readonly string[]) => void)[] = []
   private unsent: RunnerCommand[] = []
@@ -75,17 +78,20 @@ export class DesktopRunner {
       if (code !== EXIT_SIGNED_OUT) {
         this.options.onProblem(`What runs the agent quit with exit code ${code}.`)
       }
-      this.answerComputer(this.computer)
+      // Told it failed, not that there's nothing to run on: a message mustn't go elsewhere on a guess.
+      for (const { reject } of this.waitingForComputer.splice(0)) {
+        reject(new Error("[SixbDesktop] What runs the agent on this computer couldn't start."))
+      }
       this.answerFolders()
       this.restart = setTimeout(() => this.start(), this.restartWait)
       this.restartWait = Math.min(this.restartWait * 2, RESTART_WAIT_MS.longest)
     })
   }
 
-  /** This computer, once the runner has said: null if it didn't get that far. */
-  about(): Promise<DesktopComputer | null> {
+  /** This computer, once the runner has said. Rejects if it quits before it does. */
+  about(): Promise<DesktopComputer> {
     if (this.computer) return Promise.resolve(this.computer)
-    return new Promise((resolve) => this.waitingForComputer.push(resolve))
+    return new Promise((resolve, reject) => this.waitingForComputer.push({ resolve, reject }))
   }
 
   /** The folders allowed, once the runner knows: a page asking early mustn't take them for none. */
@@ -125,10 +131,6 @@ export class DesktopRunner {
     else this.unsent.push(command)
   }
 
-  private answerComputer(computer: DesktopComputer | null): void {
-    for (const answer of this.waitingForComputer.splice(0)) answer(computer)
-  }
-
   private answerFolders(): void {
     this.foldersKnown = true
     for (const answer of this.waitingForFolders.splice(0)) answer(this.folderList)
@@ -144,16 +146,22 @@ export class DesktopRunner {
     switch (event.type) {
       case "computer":
         if (typeof event.id === "string" && typeof event.name === "string") {
-          this.computer = { id: event.id, name: event.name }
-          this.answerComputer(this.computer)
+          const computer = { id: event.id, name: event.name }
+          this.computer = computer
+          for (const { resolve } of this.waitingForComputer.splice(0)) resolve(computer)
         }
         return
       case "folders":
         if (Array.isArray(event.folders)) this.folderList = event.folders.map(String)
         this.answerFolders()
         return
-      // It can't say which until it's signed in, or the project answers: none, for now.
+      // Nothing runs in the list on file until it's signed in: none, so the next message asks, and
+      // answering signs in. It would otherwise wait on a sign-in nobody was asked for.
       case "signed-out-waiting":
+        this.folderList = []
+        this.answerFolders()
+        return
+      // It can't say which until the project answers: the last it said, for now.
       case "unreachable":
         this.answerFolders()
         return
@@ -161,6 +169,9 @@ export class DesktopRunner {
         if (typeof event.url === "string") this.options.onSignIn(event.url)
         return
       case "sign-in-failed":
+        this.folderList = []
+        if (typeof event.message === "string") this.options.onProblem(event.message)
+        return
       case "error":
         if (typeof event.message === "string") this.options.onProblem(event.message)
     }
@@ -206,7 +217,7 @@ export async function runnerEnvironment(
   runnerDir: string,
   base: NodeJS.ProcessEnv
 ): Promise<NodeJS.ProcessEnv> {
-  const shellPath = await loginShellPath(base.SHELL)
+  const shellPath = await loginShellPath(base.SHELL).catch(() => null)
   const env = Object.fromEntries(
     // What a terminal `sixb dev` was told about its own project is no business of this one.
     Object.entries(base).filter(([name]) => !name.startsWith("SIXB_"))

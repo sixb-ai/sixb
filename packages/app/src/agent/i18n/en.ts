@@ -51,6 +51,8 @@ export const en = {
     busy: "An answer is already in progress. Send yours when it finishes.",
     busyOther: "Someone else's message is being answered. Send yours when it finishes.",
     sandboxUnavailable: "This conversation's sandbox must be recovered before another answer.",
+    computerUnavailable:
+      "This computer can't run the agent right now. Try again, or choose Cloud below.",
     retryFailed: "Couldn't retry this answer. Try again.",
     stopFailed: "Couldn't stop this answer. Try again.",
     removed: "You no longer take part in this thread.",

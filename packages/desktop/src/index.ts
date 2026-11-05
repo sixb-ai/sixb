@@ -2,7 +2,7 @@ import { mkdir, readdir, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type DesktopAppOptions, desktopDir, writeDesktopApp } from "./generate"
+import { type DesktopAppOptions, desktopDir, writeDesktopApp, writeRunner } from "./generate"
 import { bundleIdentifier } from "./identity"
 import { run } from "./run"
 
@@ -28,6 +28,11 @@ const PACKAGER_SCRIPT = fileURLToPath(new URL("../src/packager.mjs", import.meta
 /** Opens the app in a desktop window. `sixb dev --desktop` calls this. */
 export async function openDesktopApp(options: DesktopAppOptions): Promise<DesktopWindow> {
   const app = await writeDesktopApp(options)
+  // The window is still worth opening without it, for a project not using the agent: conversations
+  // run in the cloud. A build, which people get, fails instead.
+  await writeRunner(options).catch((error: unknown) => {
+    console.error("[SixbDesktop] Conversations will run in the cloud.", error)
+  })
   // Chromium writes plenty to stderr when all is well, so it goes to a file, named if the window
   // quits on its own with an error.
   const log = join(dirname(app.dir), "electron.log")
@@ -53,6 +58,7 @@ export async function openDesktopApp(options: DesktopAppOptions): Promise<Deskto
 /** Packages the app for this machine's platform. `sixb desktop build` calls this. */
 export async function buildDesktopApp(options: DesktopAppOptions): Promise<DesktopBuild> {
   const app = await writeDesktopApp(options)
+  const runner = await writeRunner(options)
   const out = desktopDir(options.projectRoot, "dist")
   await rm(out, { recursive: true, force: true })
 
@@ -68,7 +74,7 @@ export async function buildDesktopApp(options: DesktopAppOptions): Promise<Deskt
       .version,
     ...(mac && app.icon ? { icon: await macIcon(app.icon) } : {}),
     // Beside the app's archive, not in it: a program has to be a file of its own to run.
-    ...(app.runner ? { extraResource: [app.runner] } : {}),
+    ...(runner ? { extraResource: [runner] } : {}),
     // Signs with the Developer ID certificate in the keychain, which notarization requires.
     ...(notarize ? { osxSign: {}, osxNotarize: notarize } : {}),
   })

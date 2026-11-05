@@ -28,7 +28,10 @@ export interface DesktopComputer {
  * dialog the person answers, and allowing one that a conversation names asks them first.
  */
 export interface DesktopComputerAccess {
-  /** Null where this desktop app can't run the agent. */
+  /**
+   * Null where this desktop app can't run the agent. Rejects where it can, but what runs it couldn't
+   * start: asking again tries again.
+   */
   about(): Promise<DesktopComputer | null>
   /** The folders chosen on this computer for this project. */
   folders(): Promise<readonly string[]>

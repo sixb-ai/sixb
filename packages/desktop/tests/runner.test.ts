@@ -76,6 +76,50 @@ describe("the runner, from the shell's main process", () => {
     expect(await desktop.about()).toEqual({ id: "cmp_1", name: "Ava's Mac" })
   })
 
+  // Guard proof: answer about() with null when the runner quits; a message goes to the cloud, whatever
+  // folder the person chose, whenever it crashes before naming the computer.
+  test("says it failed when the runner quits before naming the computer", async () => {
+    jest.useFakeTimers()
+    const { desktop, started } = runner()
+    desktop.start()
+    const about = desktop.about().catch((error: Error) => error)
+    started[0]?.exit(1)
+    expect(String(await about)).toContain("couldn't start")
+
+    // Asked again, it's the next one's answer.
+    const again = desktop.about()
+    jest.advanceTimersByTime(2_000)
+    started[1]?.say({ type: "computer", id: "cmp_1", name: "Ava's Mac" })
+    expect(await again).toEqual({ id: "cmp_1", name: "Ava's Mac" })
+
+    // Known once, a restart says nothing about which computer this is.
+    started[1]?.exit(1)
+    await settled()
+    expect(await desktop.about()).toEqual({ id: "cmp_1", name: "Ava's Mac" })
+  })
+
+  // Guard proof: leave the list as it was on these two; the next message takes the old list as allowed,
+  // and waits on a sign-in nobody was asked for.
+  test("offers no folders once it's signed out, so that the next message asks", async () => {
+    const { desktop, started } = runner()
+    desktop.start()
+    started[0]?.say({ type: "folders", folders: ["/work/notes"] })
+    expect(await desktop.folders()).toEqual(["/work/notes"])
+
+    started[0]?.say({ type: "signed-out-waiting" })
+    expect(await desktop.folders()).toEqual([])
+
+    desktop.allow("/work/notes")
+    expect(await desktop.folders()).toEqual(["/work/notes"])
+    started[0]?.say({ type: "sign-in-failed", message: "Device login expired." })
+    expect(await desktop.folders()).toEqual([])
+
+    // Nobody answering is no reason to forget them.
+    started[0]?.say({ type: "folders", folders: ["/work/notes"] })
+    started[0]?.say({ type: "unreachable", message: "No answer." })
+    expect(await desktop.folders()).toEqual(["/work/notes"])
+  })
+
   // Guard proof: drop `unsent` and write only to a running process; a folder picked during a restart
   // is shown as chosen and never takes a message.
   test("hands over what was chosen while it wasn't running", async () => {

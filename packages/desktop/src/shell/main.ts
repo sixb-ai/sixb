@@ -11,6 +11,7 @@ import {
   type Event,
   type IpcMainInvokeEvent,
   ipcMain,
+  type MessageBoxOptions,
   nativeTheme,
   session,
   shell,
@@ -116,6 +117,7 @@ const runner = existsSync(runnerProgram)
       // The runner holds the sign-in, and only says where to approve it: on the API, as the window's.
       onSignIn: (url) => {
         if (isApiPage(config, url)) void shell.openExternal(url)
+        else console.error(`[SixbDesktop] Refused to open a sign-in away from the API: ${url}`)
       },
       onProblem: (message) => console.error(`[SixbDesktop] ${message}`),
     })
@@ -163,10 +165,21 @@ function installComputerAccess(running: DesktopRunner): void {
     return folder
   })
   answerComputer(COMPUTER_CHANNELS.allowFolder, async (event, value) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const ask = (options: MessageBoxOptions) =>
+      owner ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options)
     const folder = await namedFolder(value)
-    if (!folder) return false
-    const options = {
-      type: "question" as const,
+    if (!folder) {
+      // Its button would otherwise do nothing, with nothing to say why.
+      await ask({
+        type: "warning",
+        message: "That folder isn't on this computer now.",
+        detail: "Put it back, or continue in the cloud.",
+      })
+      return false
+    }
+    const { response } = await ask({
+      type: "question",
       message: `Let the agent work in ${folder}?`,
       detail:
         "Messages you send from here or the web, in any conversation in this folder, run on this " +
@@ -174,11 +187,7 @@ function installComputerAccess(running: DesktopRunner): void {
       buttons: ["Allow", "Cancel"],
       defaultId: 0,
       cancelId: 1,
-    }
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    const { response } = owner
-      ? await dialog.showMessageBox(owner, options)
-      : await dialog.showMessageBox(options)
+    })
     if (response !== 0) return false
     running.allow(folder)
     return true

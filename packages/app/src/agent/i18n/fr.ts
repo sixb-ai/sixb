@@ -42,6 +42,8 @@ export const fr: Translation<AgentMessages> = {
     busy: "Une réponse est déjà en cours. Envoyez votre message quand elle sera terminée.",
     busyOther:
       "L’agent répond au message de quelqu’un d’autre. Envoyez le vôtre quand il aura fini.",
+    computerUnavailable:
+      "Cet ordinateur ne peut pas exécuter l’agent pour le moment. Réessayez, ou choisissez Cloud ci-dessous.",
     sandboxUnavailable:
       "L’environnement de cette conversation doit être récupéré avant une nouvelle réponse.",
     retryFailed: "Impossible de relancer cette réponse. Réessayez.",

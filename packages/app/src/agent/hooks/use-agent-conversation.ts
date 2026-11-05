@@ -84,7 +84,7 @@ import {
   userPrincipal,
 } from "../sharing"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
-import { useNewThreadPlace } from "./use-new-thread-place"
+import { ComputerUnavailableError, useNewThreadPlace } from "./use-new-thread-place"
 import { useAgentThreadLists } from "./use-thread-lists"
 import { useThreadStream } from "./use-thread-stream"
 
@@ -158,6 +158,8 @@ export type AgentConversationSendError =
   | { readonly code: "busy"; readonly someoneElse: boolean }
   /** The conversation's sandbox must be recovered before another answer. */
   | { readonly code: "sandbox" }
+  /** It's to run on this computer, and what runs it there can't start. */
+  | { readonly code: "computer" }
   | { readonly code: "send" | "retry" | "stop" | "approvalMode" }
 
 /** The conversation's messages could not be read. */
@@ -180,16 +182,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const {
     place: newThreadPlace,
     waiting: newThreadPlaceWaiting,
+    computerId: desktopComputerId,
     resolveBody: resolvePlaceBody,
   } = useNewThreadPlace()
   const desktopComputer = useDesktop()?.computer
-  const [desktopComputerId, setDesktopComputerId] = useState<string | null>(null)
-  useEffect(() => {
-    void desktopComputer?.about().then(
-      (found) => setDesktopComputerId(found?.id ?? null),
-      () => {}
-    )
-  }, [desktopComputer])
+  // Asking for a folder can take as long as the person does: the composer holds meanwhile.
+  const [resolvingPlace, setResolvingPlace] = useState(false)
   const user = useCurrentUser()
   const agentQuery = useQuery(getAgentOptions())
   const modelsQuery = useQuery(listModelsOptions())
@@ -547,7 +545,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       }
 
       if (!currentAgent) return
-      const place = await resolvePlaceBody()
+      setResolvingPlace(true)
+      const place = await resolvePlaceBody().finally(() => setResolvingPlace(false))
       if (!place) {
         // They cancelled choosing a folder: nothing was sent, and their message goes back.
         setDraftReseed((current) => ({ text, attachments, context, nonce: current.nonce + 1 }))
@@ -884,7 +883,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const anchorCurrentTurn = Boolean(
     (pendingUser && pendingUser.threadId === threadId) || (pendingRun && pendingSend?.anchor)
   )
-  const composerPending = postMessage.isPending || createThread.isPending
+  const composerPending = postMessage.isPending || createThread.isPending || resolvingPlace
   const currentSendError: AgentConversationSendError | null =
     sendError && sendError.threadId === threadId
       ? sendError.failure === "busy"
@@ -1264,6 +1263,7 @@ function decisionFailure(error: unknown): AgentApprovalDecisionFailure {
 
 /** A message that did not go out: another answer holds the thread, the sandbox is away, or else. */
 function sendFailure(error: unknown): TurnFailure {
+  if (error instanceof ComputerUnavailableError) return "computer"
   if (!isSixbApiError(error) || error.status !== 409) return "send"
   if (error.code === "active_run_exists") return "busy"
   if (error.code === "sandbox_execution_unavailable") return "sandbox"
@@ -1285,6 +1285,8 @@ function failureMessage(
       return failure.someoneElse ? labels.busyOther : labels.busy
     case "sandbox":
       return labels.sandboxUnavailable
+    case "computer":
+      return labels.computerUnavailable
     case "retry":
       return labels.retryFailed
     case "stop":

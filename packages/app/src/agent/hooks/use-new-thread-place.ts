@@ -18,6 +18,14 @@ function readStored(): StoredPlace {
   }
 }
 
+/** A message that's to run on this computer, and what runs it there can't start. */
+export class ComputerUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("[SixbApp] What runs the agent on this computer couldn't start.", { cause })
+    this.name = "ComputerUnavailableError"
+  }
+}
+
 /** What a new conversation is created with to run on this computer: nothing, for the cloud. */
 export type NewThreadPlaceBody =
   | { readonly runsOn?: undefined }
@@ -28,7 +36,8 @@ export type NewThreadPlaceBody =
 
 /** The composer's choice of where a new conversation runs. */
 export interface NewThreadPlace {
-  readonly computerName: string
+  /** Null while what runs the agent here can't start: the cloud is still a choice. */
+  readonly computerName: string | null
   readonly cloud: boolean
   /** Null before the person has chosen one: the first message asks. */
   readonly folder: string | null
@@ -51,6 +60,8 @@ export function useNewThreadPlace(): {
   readonly place: NewThreadPlace | null
   /** A desktop app that hasn't said yet whether it can run the agent here. */
   readonly waiting: boolean
+  /** This computer, once the desktop app has said: what tells a conversation that runs on it. */
+  readonly computerId: string | null
   /**
    * What to create the next conversation with, asking for a folder if none is chosen. Null when the
    * person cancels, so that their message stays in the composer.
@@ -60,6 +71,7 @@ export function useNewThreadPlace(): {
   const access: DesktopComputerAccess | null = useDesktop()?.computer ?? null
   // Undefined until the desktop app answers; null where it can't run the agent.
   const [computer, setComputer] = useState<DesktopComputer | null | undefined>(undefined)
+  const [cannotStart, setCannotStart] = useState(false)
   // Null until the runner has said: a folder chosen before isn't taken as gone meanwhile.
   const [folders, setFolders] = useState<readonly string[] | null>(null)
   const [stored, setStored] = useState(readStored)
@@ -83,9 +95,13 @@ export function useNewThreadPlace(): {
     const refresh = () => {
       void access.about().then(
         (found) => {
-          if (current) setComputer(found)
+          if (!current) return
+          setComputer(found)
+          setCannotStart(false)
         },
-        () => {}
+        () => {
+          if (current) setCannotStart(true)
+        }
       )
       refreshFolders()
     }
@@ -98,7 +114,9 @@ export function useNewThreadPlace(): {
     }
   }, [access, refreshFolders])
 
-  if (!access) return { place: null, waiting: false, resolveBody: async () => ({}) }
+  if (!access) {
+    return { place: null, waiting: false, computerId: null, resolveBody: async () => ({}) }
+  }
 
   const pick = async (): Promise<string | null> => {
     const folder = await access.pickFolder()
@@ -110,10 +128,13 @@ export function useNewThreadPlace(): {
   }
 
   // Asks the runner rather than reading what's shown: a message sent before it has answered goes
-  // where the person last chose, not to the cloud by default.
+  // where the person last chose, not to the cloud by default. One it can't start for says so.
   const resolveBody = async (): Promise<NewThreadPlaceBody | null> => {
-    const found = await access.about()
-    if (!found || stored.cloud) return {}
+    if (stored.cloud) return {}
+    const found = await access.about().catch((cause: unknown) => {
+      throw new ComputerUnavailableError(cause)
+    })
+    if (!found) return {}
     // A folder that's no longer allowed here, or no longer there, or a sign-in that ended: asking
     // again allows it, and signs in. Anything else would leave the message waiting on nothing.
     const allowed = await access.folders()
@@ -121,12 +142,15 @@ export function useNewThreadPlace(): {
     return folder ? { runsOn: "computer", computer: { ...found, folder } } : null
   }
 
-  if (!computer) return { place: null, waiting: computer === undefined, resolveBody }
+  if (computer === null || (computer === undefined && !cannotStart)) {
+    return { place: null, waiting: computer === undefined, computerId: null, resolveBody }
+  }
 
   return {
     waiting: false,
+    computerId: computer?.id ?? null,
     place: {
-      computerName: computer.name,
+      computerName: computer?.name ?? null,
       cloud: stored.cloud,
       folder: stored.folder && (!folders || folders.includes(stored.folder)) ? stored.folder : null,
       folders: folders ?? [],

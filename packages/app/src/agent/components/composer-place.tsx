@@ -75,7 +75,7 @@ export function ComposerPlace({
       }
     >
       <ComposerMenuScroll>
-        <ComposerMenuHeader>{place.computerName}</ComposerMenuHeader>
+        {place.computerName ? <ComposerMenuHeader>{place.computerName}</ComposerMenuHeader> : null}
         {folders.map((known) => (
           <div key={known} className="group/row relative">
             <button

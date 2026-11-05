@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SixbDesktop } from "@sixb/client/hooks"
-import { renderShellPage, writeDesktopApp } from "../src/generate"
+import { renderShellPage, writeDesktopApp, writeRunner } from "../src/generate"
 import { bundleIdentifier, readAppIdentity } from "../src/identity"
 import { COMPUTER_CHANNELS, desktopBridge } from "../src/shell/bridge"
 import { RUNNER_BINARY } from "../src/shell/runner"
@@ -155,7 +155,6 @@ describe("generated desktop app", () => {
       name: "Acme Orders",
       version: "2.0.0",
       icon: join(app.dir, "icon.png"),
-      runner: null,
     })
     expect(JSON.parse(await readFile(join(app.dir, "shell.json"), "utf-8"))).toEqual({
       name: "Acme Orders",
@@ -255,12 +254,12 @@ describe("generated desktop app", () => {
     const runnerEntry = join(projectRoot, "entry.ts")
     await writeFile(runnerEntry, 'console.log("ran as the runner")\n')
 
-    const app = await writeDesktopApp({ projectRoot, appUrl, apiOrigin: appUrl, runnerEntry })
-    if (!app.runner) throw new Error("No runner was compiled.")
+    const runner = await writeRunner({ projectRoot, appUrl, apiOrigin: appUrl, runnerEntry })
+    if (!runner) throw new Error("No runner was compiled.")
 
-    const program = Bun.spawn([join(app.runner, RUNNER_BINARY)], { stdout: "pipe" })
+    const program = Bun.spawn([join(runner, RUNNER_BINARY)], { stdout: "pipe" })
     expect(await new Response(program.stdout).text()).toBe("ran as the runner\n")
-    const bun = Bun.spawn([join(app.runner, "bun"), "--version"], { stdout: "pipe" })
+    const bun = Bun.spawn([join(runner, "bun"), "--version"], { stdout: "pipe" })
     expect((await new Response(bun.stdout).text()).trim()).toBe(Bun.version)
   })
 

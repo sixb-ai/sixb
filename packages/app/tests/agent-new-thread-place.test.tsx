@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react"
 import { Composer, type ComposerProps } from "../src/agent/components/composer"
 import { ComputerOfflineNotice } from "../src/agent/components/computer-place"
-import { useNewThreadPlace } from "../src/agent/hooks/use-new-thread-place"
+import {
+  ComputerUnavailableError,
+  useNewThreadPlace,
+} from "../src/agent/hooks/use-new-thread-place"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -192,6 +195,48 @@ describe("where a new conversation runs", () => {
       window.dispatchEvent(new Event("focus"))
     })
     await waitFor(() => expect(result.current.place).not.toBeNull())
+  })
+
+  // Guard proof: answer {} when about rejects, as an answer of null does; a message goes to the cloud
+  // past the folder the person chose. Or keep the place null until it answers: with the runner down,
+  // nothing lets them choose the cloud.
+  test("says so when what runs it can't start, with the cloud still a choice", async () => {
+    localStorage.setItem(
+      "sixb.agent.new-thread-place",
+      JSON.stringify({ cloud: false, folder: "/work/notes" })
+    )
+    let starts = false
+    const computer: DesktopComputerAccess = {
+      about: async () => {
+        if (!starts) throw new Error("It couldn't start.")
+        return COMPUTER
+      },
+      folders: async () => ["/work/notes"],
+      pickFolder: async () => null,
+      allowFolder: async () => true,
+      forgetFolder: async () => {},
+    }
+    Object.assign(globalThis, { sixbDesktop: { platform: "darwin", computer } })
+    const { result } = renderHook(() => useNewThreadPlace())
+    await waitFor(() => expect(result.current.place).not.toBeNull())
+    expect(result.current.place?.computerName).toBeNull()
+
+    const refused = await result.current.resolveBody().catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(ComputerUnavailableError)
+
+    act(() => result.current.place?.chooseCloud())
+    expect(await result.current.resolveBody()).toEqual({})
+    act(() => result.current.place?.chooseFolder("/work/notes"))
+
+    starts = true
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+    })
+    await waitFor(() => expect(result.current.place?.computerName).toBe(COMPUTER.name))
+    expect(await result.current.resolveBody()).toEqual({
+      runsOn: "computer",
+      computer: { ...COMPUTER, folder: "/work/notes" },
+    })
   })
 
   test("is the cloud once chosen, until a folder is", async () => {
