@@ -55,16 +55,14 @@ async function readCommonKeys(sql: SQLClient): Promise<ReadonlyMap<string, Reado
  * keys meet are under the share ANALYZE lists. Without statistics, or with a remainder read object
  * by object, the reader's share is unknown and PostgreSQL chooses.
  */
-export async function readsFewObjects(
-  sql: SQLClient,
-  catalog: PgVisibilityStatisticsCatalog,
-  condition: ObjectReadCondition
-): Promise<boolean> {
+export function readsFewObjects(
+  condition: ObjectReadCondition,
+  common: ReadonlyMap<string, ReadonlySet<string>>
+): boolean {
   const visibility = condition.visibility
   if (!visibility || visibility.remainder) return false
   if ((visibility.user?.id.length ?? 0) > MAX_KEYED_ID_LENGTH) return false
 
-  const common = await catalog.commonKeys(sql)
   const readerKeys = pgVisibilityReaderKeys(visibility.user)
 
   for (const keys of visibility.keys) {
