@@ -6,9 +6,16 @@ import { equipmentResource } from "./resources/equipment"
 import { equipmentStatusesResource } from "./resources/equipment-statuses"
 import { equipmentTypesResource } from "./resources/equipment-types"
 import { groupsResource } from "./resources/groups"
+import { inventoryAdjustmentReasonsResource } from "./resources/inventory-adjustment-reasons"
+import { inventoryJournalEntriesResource } from "./resources/inventory-journal-entries"
 import { issuePrioritiesResource } from "./resources/issue-priorities"
 import { issuesResource } from "./resources/issues"
 import { labelsResource } from "./resources/labels"
+import { partLocationDetailsResource } from "./resources/part-location-details"
+import { partLocationsResource } from "./resources/part-locations"
+import { partsResource } from "./resources/parts"
+import { purchaseOrderLineItemsResource } from "./resources/purchase-order-line-items"
+import { purchaseOrdersResource } from "./resources/purchase-orders"
 import { serviceEntriesResource } from "./resources/service-entries"
 import { serviceEntryLineItemsResource } from "./resources/service-entry-line-items"
 import { serviceRemindersResource } from "./resources/service-reminders"
@@ -51,5 +58,12 @@ export function createFleetioClient(http: FleetioHttp): FleetioClient {
     equipment: equipmentResource(http),
     equipmentStatuses: equipmentStatusesResource(http),
     equipmentTypes: equipmentTypesResource(http),
+    parts: partsResource(http),
+    partLocations: partLocationsResource(http),
+    partLocationDetails: partLocationDetailsResource(http),
+    inventoryJournalEntries: inventoryJournalEntriesResource(http),
+    inventoryAdjustmentReasons: inventoryAdjustmentReasonsResource(http),
+    purchaseOrders: purchaseOrdersResource(http),
+    purchaseOrderLineItems: purchaseOrderLineItemsResource(http),
   }
 }
