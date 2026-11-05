@@ -156,6 +156,7 @@ import * as conversationPreparation from "../../agent/src/context-compaction"
 import { clearedToolResultText } from "../../agent/src/context-guard"
 import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
+import { loginShellArgs } from "../../agent/src/login-shell"
 import { conversationPromptCaching } from "../../agent/src/prompt-cache"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import { runConversationTurn } from "../../agent/src/run-conversation-turn"
@@ -11705,7 +11706,7 @@ describe("AgentWorker", () => {
           record.command === "bash" && record.args.at(-1) === "echo 'Hello, world!' | grep Hello"
       )
       expect(command?.command).toBe("bash")
-      expect(command?.args).toEqual(["-lc", "echo 'Hello, world!' | grep Hello"])
+      expect(command?.args).toEqual(loginShellArgs("echo 'Hello, world!' | grep Hello"))
       expect(command?.options.cwd).toBe("/workspace")
       expect(command?.options.env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
       expect(command?.options.env).not.toHaveProperty("SIXB_TOKEN")
@@ -11730,7 +11731,7 @@ describe("AgentWorker", () => {
         },
         output: {
           exitCode: 0,
-          stdout: "ran bash -lc echo 'Hello, world!' | grep Hello",
+          stdout: `ran bash ${loginShellArgs("echo 'Hello, world!' | grep Hello").join(" ")}`,
           stderr: "",
           durationMs: 1,
           stdoutTruncated: false,
@@ -12739,7 +12740,7 @@ describe("AgentWorker", () => {
         (candidate) => candidate.args.at(-1) === "print-sixb-env"
       )
       expect(command?.command).toBe("bash")
-      expect(command?.args).toEqual(["-lc", "print-sixb-env"])
+      expect(command?.args).toEqual(loginShellArgs("print-sixb-env"))
       const env = command?.options.env
       expect(env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
       expect(env).not.toHaveProperty("SIXB_TOKEN")

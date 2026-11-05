@@ -1,5 +1,6 @@
 import { posix } from "node:path"
 import type { CommandResult } from "@sixb/core"
+import { loginShellArgs } from "./login-shell"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
 // Every read of sandbox files the worker makes goes through these two scripts. A sandbox has no
@@ -233,7 +234,7 @@ async function runScript(
   options: SandboxCommandOptions,
   env: Readonly<Record<string, string>>
 ): Promise<CommandResult> {
-  const result = await handle.sandbox.runCommand("bash", ["-lc", script], {
+  const result = await handle.sandbox.runCommand("bash", loginShellArgs(script), {
     env: { ...(handle.env ?? {}), ...env },
     timeout: options.timeoutMs,
     signal: options.signal,

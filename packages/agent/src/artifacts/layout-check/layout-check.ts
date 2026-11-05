@@ -10,6 +10,7 @@ import {
   layoutProbe,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
+import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
 
@@ -168,10 +169,9 @@ export async function checkLayout(
   const deadlineMs = Math.floor((timeoutMs * 5) / 6)
   const result = await sandbox.runCommand(
     "bash",
-    [
-      "-lc",
-      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK" "$SIXB_CHECK_DEADLINE_MS" "$SIXB_CHECK_LAYOUT"',
-    ],
+    loginShellArgs(
+      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK" "$SIXB_CHECK_DEADLINE_MS" "$SIXB_CHECK_LAYOUT"'
+    ),
     {
       env: {
         ...input.handle.env,

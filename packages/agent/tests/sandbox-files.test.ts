@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { listHandedSources } from "../src/child-files"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import {
@@ -131,6 +132,30 @@ describe("listSandboxFiles", () => {
 
     expect(listing.files).toHaveLength(2)
     expect(listing.truncated).toBe(true)
+  })
+
+  test("lists a missing directory as missing in a login shell whose logout file fails", async () => {
+    // A login shell runs ~/.bash_logout when `exit` ends it, under the script's `set -e`: Debian's
+    // and Ubuntu's runs `clear_console`, which fails without a terminal. Reproduce by passing
+    // ["-lc", script] in place of loginShellArgs(script) in sandbox-files.ts: the listing fails
+    // with "exit 1".
+    const home = join(outside, "home")
+    mkdirSync(home)
+    writeFileSync(join(home, ".bash_logout"), "false\n")
+    const sandbox = await new LocalSandboxFactory({ isolation: "none" }).create({
+      workingDirectory: root,
+    })
+
+    try {
+      const listing = await listSandboxFiles(
+        { sandbox, env: { HOME: home }, contextDirectory: SANDBOX_CONTEXT_DIRECTORY },
+        { directory: join(root, "missing"), maxFiles: 10, signal, timeoutMs: 10_000 }
+      )
+
+      expect(listing).toEqual({ directory: false, files: [], truncated: false })
+    } finally {
+      await sandbox.destroy()
+    }
   })
 })
 
