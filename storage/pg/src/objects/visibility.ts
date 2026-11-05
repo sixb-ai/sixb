@@ -15,7 +15,8 @@ import { literal } from "./sql-text"
  *
  * A GIN entry holds at most 2,712 bytes, and jsonb prints a character in up to 6 bytes, so ids
  * longer than `MAX_KEYED_ID_LENGTH` characters get no key: a reader with such an id reads the
- * predicate instead.
+ * predicate instead. A short list keeps its long ids, which no reader looks up, rather than run a
+ * regex on each of its ids.
  *
  * Reads number every `?` of a statement as a parameter, so none is written: text goes in `E''`
  * strings, where `?` is written `\x3f`.
@@ -33,12 +34,17 @@ export function compilePgVisibilityKeys(keys: ObjectVisibilityKeys): string {
 
     case "users": {
       // Strict mode keeps the elements `@>` matches: objects whose type is "user" and id a string.
-      const path = text(
-        `strict $[*] ? (@.type == "user" && @.id.type() == "string" && @.id like_regex "^.{0,${MAX_KEYED_ID_LENGTH}}$" flag "s").id`
-      )
-      const ids = `jsonb_path_query_array(${propertySql(keys.propertyId)}, ${path}, '{}', true)::text`
-      const separator = `E'\\x1f'`
-      return `coalesce(string_to_array(${text(USER_PREFIX)} || replace(NULLIF(left(substr(${ids}, 3), -2), ''), '", "', ${separator} || ${text(USER_PREFIX)}), ${separator}), ${NO_KEYS})`
+      const users = `@.type == "user" && @.id.type() == "string"`
+      const keysOf = (filter: string) => {
+        const path = text(`strict $[*] ? (${filter}).id`)
+        const ids = `jsonb_path_query_array(${propertySql(keys.propertyId)}, ${path}, '{}', true)::text`
+        const separator = `E'\\x1f'`
+        return `coalesce(string_to_array(${text(USER_PREFIX)} || replace(NULLIF(left(substr(${ids}, 3), -2), ''), '", "', ${separator} || ${text(USER_PREFIX)}), ${separator}), ${NO_KEYS})`
+      }
+
+      // No id of a short list is too long for an entry: only a longer one pays for the regex.
+      const bounded = `${users} && @.id like_regex "^.{0,${MAX_KEYED_ID_LENGTH}}$" flag "s"`
+      return `CASE WHEN octet_length(${propertySql(keys.propertyId)}::text) <= ${SHORT_LIST_BYTES} THEN ${keysOf(users)} ELSE ${keysOf(bounded)} END`
     }
 
     case "union":
@@ -82,6 +88,8 @@ export function compilePgConditionFilter(condition: ObjectReadCondition): {
 }
 
 export const MAX_KEYED_ID_LENGTH = 200
+// A list whose JSON is this short holds no id whose key would overflow an entry.
+const SHORT_LIST_BYTES = 2000
 const EVERYONE = "*"
 const USER_PREFIX = "u:"
 const NO_KEYS = "'{}'::text[]"
