@@ -135,6 +135,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/fleetio": {
+      "name": "@sixb/connector-fleetio",
+      "version": "0.2.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/fullenrich": {
       "name": "@sixb/connector-fullenrich",
       "version": "0.2.0",
@@ -1708,6 +1723,8 @@
     "@sixb/connector-companycam": ["@sixb/connector-companycam@workspace:connectors/companycam"],
 
     "@sixb/connector-exa": ["@sixb/connector-exa@workspace:connectors/exa"],
+
+    "@sixb/connector-fleetio": ["@sixb/connector-fleetio@workspace:connectors/fleetio"],
 
     "@sixb/connector-fullenrich": ["@sixb/connector-fullenrich@workspace:connectors/fullenrich"],
 
