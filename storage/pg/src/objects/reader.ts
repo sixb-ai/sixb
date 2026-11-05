@@ -55,6 +55,10 @@ export class PgObjectReader {
     private readonly sql: SQLClient,
     private readonly source: PgObjectQuerySource | PgSelectedObjectReadSource,
     private readonly aggregateAdmission?: PgAggregateAdmission,
+    /**
+     * Ordered pages walk a prepared sort index when one fits. A selected source takes none: its
+     * objects are the ones its paths reach, which no index over a type's rows orders.
+     */
     private readonly sortIndexes?: PgSortIndexCatalog
   ) {}
 
@@ -115,10 +119,9 @@ export class PgObjectReader {
   private async compilePageQuery(params: QueryObjectsInput): Promise<CompiledPgObjectQuery> {
     const sql = this.sql
     const source = this.source
-    const sortIndexBound =
-      source === DEFAULT_OBJECT_QUERY_SOURCE && this.sortIndexes
-        ? await findPgSortIndexBound(sql, this.sortIndexes, params.projectId, params.query)
-        : undefined
+    const sortIndexBound = this.sortIndexes
+      ? await findPgSortIndexBound(sql, this.sortIndexes, params.projectId, params.query)
+      : undefined
     let compiled = compilePgObjectQuery(params.projectId, params.query, {
       sortIndexBound,
       includeTotal: params.includeTotal,

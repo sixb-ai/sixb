@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import type { ObjectQuery } from "@sixb/core"
+import { compileConditionalObjectReadScope } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
+import { createPgConditionalReader } from "../src/objects/conditional-reader"
 import { compilePgObjectCountQuery, compilePgObjectQuery } from "../src/objects/query-compiler"
 import { findPgSortIndexBound, PgSortIndexCatalog } from "../src/objects/query-indexes"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
@@ -128,6 +130,53 @@ test("first and deep pages read bounded index ranges", async () => {
   })
   expect(result.objects[0]?.primaryId).toBe("00499")
   expect(result.objects).toHaveLength(40)
+})
+
+// Guard removal: create the conditional reader without `sortIndexes` (conditional-reader.ts). A
+// member's first page then reads every active user to sort them.
+test("a member's ordered page reads the same bounded index range", async () => {
+  const statements: { sql: string; args: readonly unknown[] }[] = []
+  const recorded = new Proxy(sql, {
+    get: (target, property, receiver) =>
+      property === "unsafe"
+        ? (text: string, args?: SqlParameter[]) => {
+            statements.push({ sql: text, args: args ?? [] })
+            return target.unsafe(text, args)
+          }
+        : Reflect.get(target, property, receiver),
+  })
+  const member = createPgConditionalReader(
+    recorded,
+    {
+      projectId: "bench",
+      scope: compileConditionalObjectReadScope({
+        kind: "conditional",
+        conditions: [
+          { objectTypeId: "User", predicate: { op: "eq", propertyId: "status", value: "active" } },
+        ],
+      }),
+    },
+    {
+      sortIndexes: new PgSortIndexCatalog(),
+      queryCapabilities: () => storage.objects.queryCapabilities(),
+    }
+  )
+
+  const result = await member.queryObjects!({
+    projectId: "bench",
+    query: { kind: "page", input: recent, pageSize: 40 },
+    includeTotal: false,
+  })
+  expect(result.objects[0]?.primaryId).toBe("04999")
+
+  const page = statements.find((statement) => statement.sql.includes("UNION ALL"))
+  expect(page).toBeDefined()
+  const [plan] = await sql.unsafe(
+    `EXPLAIN (ANALYZE, FORMAT JSON) ${page!.sql}`,
+    page!.args as SqlParameter[]
+  )
+  expect(visitedRows(plan?.["QUERY PLAN"][0].Plan)).toBeLessThan(500)
+  expect(JSON.stringify(plan)).toContain("sixb_query_")
 })
 
 test("a high-fanout traversal pages through indexed endpoints and preserves totals", async () => {

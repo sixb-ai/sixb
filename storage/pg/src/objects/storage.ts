@@ -151,6 +151,7 @@ export class PgObjectStorage implements ObjectStorage {
   }): ObjectReadStorage {
     return createPgConditionalReader(this.sql, params, {
       aggregateAdmission: this.aggregateAdmission,
+      sortIndexes: this.sortIndexes,
       queryCapabilities: () => this.queryCapabilities(),
     })
   }

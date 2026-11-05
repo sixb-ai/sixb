@@ -7,6 +7,7 @@ import type {
 } from "@sixb/core/storage"
 import { type PgStoreClient, runPgRepeatableReadTransaction } from "../transactions"
 import type { PgAggregateAdmission } from "./aggregate-admission"
+import type { PgSortIndexCatalog } from "./query-indexes"
 import { compilePgConditionalObjectReadSource } from "./read-scope"
 import { PgObjectReader } from "./reader"
 import { createPgScopedReader } from "./scoped-reader"
@@ -14,8 +15,9 @@ import { createPgScopedReader } from "./scoped-reader"
 /**
  * Read objects and links through relations that apply the scope's conditions as they are read.
  *
- * Reads run as unscoped ones do, under the same aggregate admission: on the pool, and a vector
- * query on one repeatable-read snapshot for its candidate probe and its rows.
+ * Reads run as unscoped ones do, under the same aggregate admission and over the same sort
+ * indexes: on the pool, and a vector query on one repeatable-read snapshot for its candidate probe
+ * and its rows.
  */
 export function createPgConditionalReader(
   sql: PgStoreClient,
@@ -25,18 +27,21 @@ export function createPgConditionalReader(
   },
   options: {
     aggregateAdmission?: PgAggregateAdmission
+    sortIndexes: PgSortIndexCatalog
     queryCapabilities: () => ObjectQueryCapabilities
   }
 ): ObjectReadStorage {
   const source = compilePgConditionalObjectReadSource(params.projectId, params.scope)
-  const reader = new PgObjectReader(sql, source, options.aggregateAdmission)
+  const reader = new PgObjectReader(sql, source, options.aggregateAdmission, options.sortIndexes)
 
   return createPgScopedReader(
     {
       projectId: params.projectId,
       read: (run, query?: ObjectQuery) =>
         query && hasVectorProfile(query)
-          ? runPgRepeatableReadTransaction(sql, (tx) => run(new PgObjectReader(tx, source)))
+          ? runPgRepeatableReadTransaction(sql, (tx) =>
+              run(new PgObjectReader(tx, source, undefined, options.sortIndexes))
+            )
           : run(reader),
     },
     options.queryCapabilities
