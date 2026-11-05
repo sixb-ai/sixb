@@ -77,6 +77,8 @@ describe("DuckLake SQLite writes", () => {
       second.versionId,
       first.versionId,
     ])
+    // Read the catalog with no provider on it, compaction checks included (see the journal tests).
+    await storage.close()
     const catalog = new Database(join(rootDir, "catalog.sqlite"), { readonly: true })
     try {
       expect(catalog.query("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" })
@@ -134,12 +136,19 @@ describe("DuckLake SQLite writes", () => {
         const seed = await storage.beginWrite({ dataset })
         await seed.writeRows([{ id: "1", value: 1 }])
         const first = await seed.commit()
+
+        // Switch the journal with no provider on the catalog. A commit schedules a compaction
+        // check, which attaches the catalog again: a second SQLite library in this process then
+        // holds the file, and the switch can fail with a disk I/O error. Closing waits for it.
+        await storage.close()
         const catalog = new Database(join(rootDir, "catalog.sqlite"))
         try {
           catalog.run(`PRAGMA journal_mode=${journal}`)
         } finally {
           catalog.close()
         }
+        storage = new DuckLakeStorage(options)
+
         const append = await storage.beginWrite({ dataset, mode: "append" })
         await append.writeRows([{ id: "local", value: 3 }])
         const external = await createDuckDbRuntime({ config: { threads: "1" } })
