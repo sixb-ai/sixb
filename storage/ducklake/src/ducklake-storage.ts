@@ -14,6 +14,7 @@ import type {
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
 import { DuckLakeChangeReader } from "./internal/ducklake-change-reader"
+import { DuckLakeCompaction } from "./internal/ducklake-compaction"
 import { DuckLakeConnectionManager } from "./internal/ducklake-connection-manager"
 import { DuckLakeDatasetCatalog } from "./internal/ducklake-dataset-catalog"
 import { DuckLakeMaintenance } from "./internal/ducklake-maintenance"
@@ -40,6 +41,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   private readonly datasets: DuckLakeDatasetCatalog
   private readonly rows: DuckLakeRowReader
   private readonly changes: DuckLakeChangeReader
+  private readonly compaction: DuckLakeCompaction
   private readonly snapshotReader: DuckLakeSnapshotReader
   private readonly writes: DuckLakeWriteCoordinator
 
@@ -77,7 +79,11 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
       normalizedOptions,
       this.connections,
       this.datasets,
-      this.snapshotReader
+      this.snapshotReader,
+      (dataset) => this.compaction.afterCommit(dataset)
+    )
+    this.compaction = new DuckLakeCompaction(normalizedOptions, this.connections, (run) =>
+      this.writes.withCommitRuntime(run)
     )
     this.sql = new DuckLakeSqlExecutor(
       normalizedOptions,
@@ -153,6 +159,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
    * LakeStorage interface.
    */
   async close(): Promise<void> {
+    await this.compaction.close()
     await this.connections.close()
   }
 }

@@ -218,7 +218,7 @@ export function partitionWarnings(
   return [
     {
       code: "partitioned-small-dataset",
-      message: `Dataset '${definition?.id}' is partitioned by ${partitionBy.join(", ")} but holds ${rowCount} rows. Below about ${PARTITIONED_DATASET_MIN_ROWS.toLocaleString("en-US")} rows, partitioning only multiplies small files: each write adds one per partition it touches, and compaction merges files within a partition only. Remove partitionBy.`,
+      message: `Dataset '${definition?.id}' is partitioned by ${partitionBy.join(", ")} but holds ${rowCount} row${rowCount === 1 ? "" : "s"}. Below about ${PARTITIONED_DATASET_MIN_ROWS.toLocaleString("en-US")} rows, partitioning only multiplies small files: each write adds one per partition it touches, and compaction merges files within a partition only. Remove partitionBy.`,
     },
   ]
 }

@@ -1298,6 +1298,130 @@ describe("DuckLakeStorage remote catalogs", () => {
   }, 60_000)
 })
 
+describe("DuckLakeStorage automatic compaction on a PostgreSQL catalog", () => {
+  const events = defineDataset(`raw.pg.events.${randomId()}`, {
+    schema: [col("id", "string"), col("batch", "int64")],
+  })
+  const batch = (n: number) =>
+    Array.from({ length: 20 }, (_, i) => ({ id: `b${n}_${i}`, batch: n }))
+
+  async function append(storage: DuckLakeStorage, rows: readonly Record<string, unknown>[]) {
+    const write = await storage.beginWrite({ dataset: events, mode: "append" })
+    await write.writeRows(rows)
+    return write.commit()
+  }
+
+  async function withLake(
+    run: (options: DuckLakeStorageOptions, rootDir: string) => Promise<void>
+  ): Promise<void> {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-compaction-"))
+    try {
+      await run({ catalog: postgresCatalog(), dataPath: join(rootDir, "data") }, rootDir)
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  }
+
+  // Regression proof: make the write coordinator's versionCreated a no-op in DuckLakeStorage.
+  // The 17 small files then stay.
+  test("merges small files, and every version reads the rows it held", async () => {
+    await withLake(async (options) => {
+      let storage = new DuckLakeStorage(options)
+      const versions: DatasetVersion[] = []
+
+      try {
+        await storage.createDataset(events)
+        for (let n = 1; n <= 16; n++) {
+          versions.push(await append(storage, batch(n)))
+        }
+
+        // A new provider checks its first commit, the 17th file; closing waits for the pass.
+        await storage.close()
+        storage = new DuckLakeStorage(options)
+        versions.push(await append(storage, batch(17)))
+        await storage.close()
+
+        storage = new DuckLakeStorage(options)
+        const [health] = await storage.maintenance.describeStorage([events.id])
+        expect(health).toMatchObject({ dataFiles: 1, rowCount: 17 * 20 })
+
+        for (const [index, version] of versions.entries()) {
+          const rows = await collectRows(
+            storage.readRows({ datasetId: events.id, versionId: version.versionId })
+          )
+          expect(rows.length).toBe((index + 1) * 20)
+        }
+      } finally {
+        await storage.close()
+      }
+    })
+  }, 60_000)
+
+  // Regression proof: in DuckLakeCompaction.run, report a CatalogMovedError like any failure. The
+  // compaction that lost to the other process's write then warns.
+  test("a compaction that conflicts with another process's write yields to it", async () => {
+    await withLake(async (options) => {
+      const writer = new DuckLakeStorage(options)
+      let compactor: DuckLakeStorage | undefined
+      const warn = spyOn(console, "warn").mockImplementation(() => {})
+
+      try {
+        await writer.createDataset(events)
+        for (let n = 1; n <= 16; n++) {
+          await append(writer, batch(n))
+        }
+
+        // The compactor's merge is ready to commit when the writer replaces every row it merges.
+        compactor = new DuckLakeStorage(options)
+        const compaction = (
+          compactor as unknown as {
+            compaction: {
+              plan(dataset: DatasetDefinition): Promise<unknown>
+              commit(runtime: unknown, dataset: DatasetDefinition): Promise<void>
+            }
+          }
+        ).compaction
+        const plan = spyOn(compaction, "plan")
+        const commit = compaction.commit.bind(compaction)
+        let ready!: () => void
+        const merged = new Promise<void>((resolve) => {
+          ready = resolve
+        })
+        let release!: () => void
+        const released = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        spyOn(compaction, "commit").mockImplementation(async (runtime, dataset) => {
+          ready()
+          await released
+          return commit(runtime, dataset)
+        })
+
+        await append(compactor, batch(17))
+        await merged
+
+        const replace = await writer.beginWrite({ dataset: events, mode: "snapshot" })
+        await replace.writeRows(batch(99))
+        const replaced = await replace.commit()
+
+        release()
+        await compactor.close()
+
+        expect(warn).not.toHaveBeenCalled()
+        expect(plan).toHaveBeenCalledTimes(1)
+        expect((await writer.getLatestVersion(events.id))?.versionId).toBe(replaced.versionId)
+        expect(await collectRows(writer.readRows({ datasetId: events.id }))).toEqual(
+          batch(99).map((row) => ({ ...row, batch: "99" }))
+        )
+      } finally {
+        warn.mockRestore()
+        await compactor?.close()
+        await writer.close()
+      }
+    })
+  }, 60_000)
+})
+
 function postgresCatalog(): Extract<DuckLakeStorageOptions["catalog"], { type: "postgres" }> {
   return {
     type: "postgres",

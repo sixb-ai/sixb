@@ -102,7 +102,9 @@ export class DuckLakeWriteCoordinator {
     private readonly options: DuckLakeStorageOptions,
     private readonly connections: DuckLakeConnectionManager,
     private readonly datasets: DuckLakeDatasetCatalog,
-    private readonly snapshots: DuckLakeSnapshotReader
+    private readonly snapshots: DuckLakeSnapshotReader,
+    /** Told about each commit that created a version, once it has. Must not wait or throw. */
+    private readonly versionCreated: (dataset: DatasetDefinition) => void
   ) {}
 
   async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
@@ -281,11 +283,17 @@ export class DuckLakeWriteCoordinator {
     input: DuckLakeCommitVersionOutcomeInput
   ): Promise<DatasetMergeCommitResult> {
     // Staged rows outlive a failed transaction, so a rerun applies exactly the same changes.
-    return rerunWhenCatalogMoves(
+    const result = await rerunWhenCatalogMoves(
       input.dataset.id,
       () => this.commitDatasetVersionUnlocked({ ...input, runtime }),
       input.signal
     )
+
+    if (result.outcome === "created") {
+      this.versionCreated(input.dataset)
+    }
+
+    return result
   }
 
   private async commitDatasetVersionUnlocked(
