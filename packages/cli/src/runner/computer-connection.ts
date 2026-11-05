@@ -6,6 +6,10 @@ import { LocalRunner } from "./local-runner"
 
 /** How often the allowed folders are checked for being there still. */
 const FOLDER_RECHECK_MS = 20_000
+/** Exit status when the person's sign-in ended: whatever restarts this should know. */
+export const EXIT_SIGNED_OUT = 3
+/** How long stopping waits for a running turn to record its end, or the project to answer. */
+export const STOP_WAIT_MS = 10_000
 
 /** What a connected computer reports, one line each with `sixb connect --json`. */
 export type ComputerEvent =
@@ -29,7 +33,7 @@ export type ComputerEvent =
   | { readonly type: "signed-out" }
   | { readonly type: "error"; readonly message: string }
 
-function messageOf(error: unknown): string {
+export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
@@ -46,6 +50,7 @@ export class ComputerConnection {
   private reconciled: Promise<void> = Promise.resolve()
   private shown: readonly string[] | null = null
   private stopped = false
+  private signedOut = false
 
   constructor(
     private readonly connection: Connection,
@@ -61,8 +66,13 @@ export class ComputerConnection {
     this.socket = createAgentActivitySocket({
       client: this.connection.client,
       onActivity: (event) => {
+        if (event.runsOn !== "computer") return
+        if (event.cancelRequested) {
+          for (const runner of this.runners.values()) runner.hearStop(event.runId)
+          return
+        }
         // Queued turns only reach here by this event for speed: each renewal lists them too.
-        if (event.status !== "queued" || event.runsOn !== "computer") return
+        if (event.status !== "queued") return
         void this.route(event.threadId, event.runId).catch((error: unknown) =>
           this.onEvent({ type: "error", message: messageOf(error) })
         )
@@ -150,6 +160,9 @@ export class ComputerConnection {
     if (failure === null) {
       this.onEvent({ type: "session.back", folder })
     } else if (isSixbApiError(failure) && failure.status === 401) {
+      // Every folder's session ends with the sign-in: once is enough to say so.
+      if (this.signedOut) return
+      this.signedOut = true
       this.onEvent({ type: "signed-out" })
     } else {
       this.onEvent({ type: "session.lost", folder, message: messageOf(failure) })

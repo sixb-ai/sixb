@@ -177,7 +177,8 @@ export function Workspace(props: WorkspaceProps) {
     const socket = createAgentActivitySocket({
       client: connection.client,
       onActivity: (event) => {
-        if (event.status === "queued" && event.runsOn === "computer") {
+        if (event.cancelRequested) runner.hearStop(event.runId)
+        else if (event.status === "queued" && event.runsOn === "computer") {
           void runner.claimIfHere(event.threadId, event.runId)
         }
       },

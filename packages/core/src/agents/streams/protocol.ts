@@ -37,6 +37,8 @@ export interface AgentRunActivityEvent {
   readonly attempt: number
   /** Set on a computer's turn: a `sixb` hearing of any other has nothing to read about it. */
   readonly runsOn?: "computer"
+  /** A stop was asked for: whatever runs it hears at its next lease renewal, or now, on this. */
+  readonly cancelRequested?: true
   readonly occurredAt: string
 }
 
@@ -288,9 +290,10 @@ export async function publishAgentApprovalActivity(
 
 export async function publishAgentRunActivity(
   broker: Broker,
-  run: ConversationAgentRunRecord
+  run: ConversationAgentRunRecord,
+  options: { readonly cancelRequested?: true } = {}
 ): Promise<void> {
-  const event = agentRunActivityEvent(run)
+  const event = { ...agentRunActivityEvent(run), ...options }
   await broker.ensureStream({
     projectId: run.projectId,
     stream: agentActivityStreamDefinition(),
@@ -304,7 +307,7 @@ export async function publishAgentRunActivity(
         key: event.threadId,
         // The event is composed only of validated JSON primitives.
         payload: event as unknown as JsonValue,
-        idempotencyKey: `${event.runId}:${event.attempt}:${event.status}`,
+        idempotencyKey: `${event.runId}:${event.attempt}:${event.status}${options.cancelRequested ? ":cancel" : ""}`,
       },
     ],
   })
