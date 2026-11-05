@@ -10,7 +10,7 @@ import {
 import { createMaterializerTestFixture } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { compilePgObjectQuery } from "../src/objects/query-compiler"
-import { findPgSortIndexBound, PgSortIndexCatalog } from "../src/objects/query-indexes"
+import { findPgSortIndexRead, PgSortIndexCatalog } from "../src/objects/query-indexes"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 
@@ -156,9 +156,8 @@ test("implicit ascending sorts discover their prepared bounded index", async () 
       fields: [{ kind: "property", propertyId: "title", scalarKind: "string" }],
     },
   }
-  expect(await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "publication", query)).toContain(
-    "octet_length"
-  )
+  const read = await findPgSortIndexRead(sql, new PgSortIndexCatalog(), "publication", query)
+  expect(read?.bound).toContain("octet_length")
 })
 
 // The bounded read merges an indexed and an overflow branch (the long title), then expands the
@@ -205,9 +204,8 @@ test("a prepared sorted page expands links of indexed and overflow rows alike", 
     input: page,
     expansions: [{ linkId: "author", direction: "outgoing", cardinality: "one", limit: 1 }],
   }
-  expect(
-    await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "publication", expanded)
-  ).toContain("octet_length")
+  const read = await findPgSortIndexRead(sql, new PgSortIndexCatalog(), "publication", expanded)
+  expect(read?.bound).toContain("octet_length")
 
   const plain = await storage.objects.queryObjects!({ projectId: "publication", query: page })
   const result = await storage.objects.queryObjects!({ projectId: "publication", query: expanded })

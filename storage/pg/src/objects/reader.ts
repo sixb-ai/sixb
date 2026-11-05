@@ -32,7 +32,7 @@ import {
   type PgObjectQuerySource,
   pgObjectsOfType,
 } from "./query-compiler"
-import { findPgSortIndexBound, type PgSortIndexCatalog } from "./query-indexes"
+import { findPgSortIndexRead, type PgSortIndexCatalog } from "./query-indexes"
 import type { PgSelectedObjectReadSource } from "./read-scope"
 import {
   type FacetDatabaseRow,
@@ -59,7 +59,9 @@ export class PgObjectReader {
      * Ordered pages walk a prepared sort index when one fits. A selected source takes none: its
      * objects are the ones its paths reach, which no index over a type's rows orders.
      */
-    private readonly sortIndexes?: PgSortIndexCatalog
+    private readonly sortIndexes?: PgSortIndexCatalog,
+    /** Whether the reader sees so few objects of a type that its pages read them before ordering. */
+    private readonly readsFewObjects?: (sql: SQLClient, objectTypeId: string) => Promise<boolean>
   ) {}
 
   private async assertVectorSearch(
@@ -119,11 +121,19 @@ export class PgObjectReader {
   private async compilePageQuery(params: QueryObjectsInput): Promise<CompiledPgObjectQuery> {
     const sql = this.sql
     const source = this.source
-    const sortIndexBound = this.sortIndexes
-      ? await findPgSortIndexBound(sql, this.sortIndexes, params.projectId, params.query)
+    let sortIndex = this.sortIndexes
+      ? await findPgSortIndexRead(sql, this.sortIndexes, params.projectId, params.query)
       : undefined
+
+    // Walking the index would check nearly every object to find the few this reader sees.
+    const unorderedStart =
+      sortIndex !== undefined &&
+      (await this.readsFewObjects?.(sql, sortIndex.objectTypeId)) === true
+    if (unorderedStart) sortIndex = undefined
+
     let compiled = compilePgObjectQuery(params.projectId, params.query, {
-      sortIndexBound,
+      sortIndex,
+      unorderedStart,
       includeTotal: params.includeTotal,
       source,
     })
@@ -135,7 +145,8 @@ export class PgObjectReader {
           includeTotal: params.includeTotal,
           source,
           correlatedTraversal: true,
-          sortIndexBound,
+          sortIndex,
+          unorderedStart,
         })
       }
     }

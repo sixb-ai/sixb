@@ -81,7 +81,7 @@ export function compilePgConditionFilter(condition: ObjectReadCondition): {
   return { sql: `(${clauses.join(" OR ")})`, args }
 }
 
-const MAX_KEYED_ID_LENGTH = 200
+export const MAX_KEYED_ID_LENGTH = 200
 const EVERYONE = "*"
 const USER_PREFIX = "u:"
 const NO_KEYS = "'{}'::text[]"

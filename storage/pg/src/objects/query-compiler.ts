@@ -15,6 +15,7 @@ import {
   normalizeVector,
   vectorSearchCandidateLimit,
 } from "@sixb/core/internal/query"
+import type { PgSortIndexRead } from "./query-indexes"
 
 export interface PgObjectQueryPageRow {
   object_type_id: string
@@ -117,7 +118,12 @@ export function compilePgObjectQuery(
     includeTotal?: boolean
     source?: PgObjectQuerySource
     correlatedTraversal?: boolean
-    sortIndexBound?: string
+    sortIndex?: PgSortIndexRead
+    /**
+     * Read the objects the query keeps before ordering them, never along an index that orders
+     * them: for a reader who sees few objects of the type, a walk would check nearly all of them.
+     */
+    unorderedStart?: boolean
   } = {}
 ): CompiledPgObjectQuery {
   if (hasVectorProfile(query) && !isVectorProfileQuery(query)) {
@@ -131,10 +137,12 @@ export function compilePgObjectQuery(
     compileObjectQueryInternal(projectId, query, {
       probeLimit: options.includeTotal === false,
       correlatedTraversal: options.correlatedTraversal,
+      // The fence that isolates a sort index's overflow rows keeps any index order out of them.
+      isolateSortOverflow: options.unorderedStart,
       source,
     })
   )
-  if (options.sortIndexBound) {
+  if (options.sortIndex) {
     let bounded = query
     const expansions: (readonly ObjectExpansion[])[] = []
     while (bounded.kind === "expand") {
@@ -142,15 +150,15 @@ export function compilePgObjectQuery(
       bounded = bounded.input
     }
     if (bounded.kind === "page" || bounded.kind === "limit") {
-      const branches = [options.sortIndexBound, `NOT (${options.sortIndexBound})`].map(
-        (startPredicate, branch) =>
-          compileObjectQueryInternal(projectId, bounded, {
-            probeLimit: options.includeTotal === false,
-            source,
-            startPredicate,
-            isolateSortOverflow: branch === 1,
-            correlatedTraversal: options.correlatedTraversal,
-          })
+      const { bound } = options.sortIndex
+      const branches = [bound, `NOT (${bound})`].map((startPredicate, branch) =>
+        compileObjectQueryInternal(projectId, bounded, {
+          probeLimit: options.includeTotal === false,
+          source,
+          startPredicate,
+          isolateSortOverflow: branch === 1,
+          correlatedTraversal: options.correlatedTraversal,
+        })
       )
       const limit =
         bounded.kind === "page"

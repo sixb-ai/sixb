@@ -3,7 +3,7 @@ import type { ObjectQuery } from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { compilePgObjectQuery } from "../src/objects/query-compiler"
 import {
-  findPgSortIndexBound,
+  findPgSortIndexRead,
   type PgObjectQueryIndex,
   PgSortIndexCatalog,
 } from "../src/objects/query-indexes"
@@ -71,7 +71,7 @@ afterAll(async () => {
 async function explain(query: ObjectQuery) {
   const compiled = compilePgObjectQuery("bench", query, {
     includeTotal: false,
-    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
+    sortIndex: await findPgSortIndexRead(sql, new PgSortIndexCatalog(), "bench", query),
   })
   const rows = await sql.unsafe(
     `EXPLAIN (ANALYZE, FORMAT JSON) ${compiled.sql}`,
