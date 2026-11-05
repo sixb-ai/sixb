@@ -13,6 +13,7 @@ import {
   isVectorProfileQuery,
   linkEndpointObjectTypeIds,
   normalizeVector,
+  sortTieDirection,
   vectorSearchCandidateLimit,
 } from "@sixb/core/internal/query"
 import type { PgSortIndexRead } from "./query-indexes"
@@ -150,13 +151,20 @@ export function compilePgObjectQuery(
       bounded = bounded.input
     }
     if (bounded.kind === "page" || bounded.kind === "limit") {
-      const { bound } = options.sortIndex
-      const branches = [bound, `NOT (${bound})`].map((startPredicate, branch) =>
+      const { bound, nullRank } = options.sortIndex
+
+      // Walked backwards, the index holds the null values first: they are read as a range of
+      // their own, so each range is one walk.
+      const indexed = nullRank
+        ? [`${bound} AND ${nullRank} = 0`, `${bound} AND ${nullRank} = 1`]
+        : [bound]
+
+      const branches = [...indexed, `NOT (${bound})`].map((startPredicate, branch) =>
         compileObjectQueryInternal(projectId, bounded, {
           probeLimit: options.includeTotal === false,
           source,
           startPredicate,
-          isolateSortOverflow: branch === 1,
+          isolateSortOverflow: branch === indexed.length,
           correlatedTraversal: options.correlatedTraversal,
         })
       )
@@ -164,11 +172,12 @@ export function compilePgObjectQuery(
         bounded.kind === "page"
           ? bounded.pageSize + 1
           : bounded.limit + (options.includeTotal === false ? 1 : 0)
+
       // Links are expanded once, for the page the branches merge into: each further reference
       // to objects costs the planner a few milliseconds over its prepared indexes.
       let rows: CompiledPredicate = {
-        sql: `SELECT * FROM ((${branches[0]!.sql}) UNION ALL (${branches[1]!.sql})) AS input ORDER BY ${compiled.order.sql} LIMIT ?`,
-        args: [...branches[0]!.args, ...branches[1]!.args, ...compiled.order.args, limit],
+        sql: `SELECT * FROM (${branches.map((branch) => `(${branch.sql})`).join(" UNION ALL ")}) AS input ORDER BY ${compiled.order.sql} LIMIT ?`,
+        args: [...branches.flatMap((branch) => branch.args), ...compiled.order.args, limit],
       }
       for (const expansion of expansions) {
         rows = expandRows({ ...rows, order: compiled.order }, expansion, {
@@ -1163,7 +1172,8 @@ function compileExpansionOrder(
     args.push(field.propertyId, field.propertyId, field.propertyId)
   }
 
-  clauses.push(`${neighborType} ASC`, `${neighborId} ASC`)
+  const ties = sortTieDirection(expansion.orderBy ?? []).toUpperCase()
+  clauses.push(`${neighborType} ${ties}`, `${neighborId} ${ties}`)
   return { sql: clauses.join(", "), args }
 }
 
@@ -1865,14 +1875,14 @@ function sortOrderFields(fields: readonly ObjectQuerySortField[]): readonly Comp
       scalarKind: field.scalarKind,
     })
   }
-  orderFields.push(...identityOrderFields())
+  orderFields.push(...identityOrderFields(sortTieDirection(fields)))
   return orderFields
 }
 
-function identityOrderFields(): readonly CompiledOrderField[] {
+function identityOrderFields(direction: "asc" | "desc" = "asc"): readonly CompiledOrderField[] {
   return [
-    { kind: "column", column: "object_type_id", direction: "asc" },
-    { kind: "column", column: "primary_id", direction: "asc" },
+    { kind: "column", column: "object_type_id", direction },
+    { kind: "column", column: "primary_id", direction },
   ]
 }
 

@@ -291,6 +291,73 @@ test("a member who sees few objects reads them before ordering them", async () =
   await sql`DELETE FROM objects WHERE object_type_id = 'Ticket'`
 })
 
+// Guard removal: let findPgSortIndexRead match forward walks only. The descending pages then sort
+// every post; reading the index backwards without its null ranges sorts them too.
+test("a descending page walks an ascending sort index backwards, null values last", async () => {
+  // Pairs of posts share a time, and every hundredth has none.
+  await sql`INSERT INTO objects
+    SELECT 'bench', 'Post', lpad(n::text, 5, '0'),
+      CASE WHEN n % 100 = 0 THEN '{}'::jsonb ELSE jsonb_build_object('at', n / 2) END,
+      now(), now(), 1, 'seed'
+    FROM generate_series(1, 5000) n`
+  await storage.ensureObjectQueryIndexes([
+    { projectId: "bench", objectTypeId: "Post", kind: "sort", fields: [{ propertyId: "at" }] },
+  ])
+  await sql.unsafe("ANALYZE objects")
+
+  const newest: ObjectQuery = {
+    kind: "sort",
+    input: { kind: "start", objectTypeId: "Post" },
+    fields: [{ kind: "property", propertyId: "at", direction: "desc" }],
+  }
+  const page = (pageToken?: string): ObjectQuery => ({
+    kind: "page",
+    input: newest,
+    pageSize: 40,
+    pageToken,
+  })
+
+  const first = await explain(page())
+  expect(visitedRows(first.Plan)).toBeLessThan(500)
+  expect(JSON.stringify(first)).toContain('"Scan Direction":"Backward"')
+
+  // Ties come newest id first, and the posts without a time last, newest id first too.
+  const at = (n: number) => (n % 100 === 0 ? undefined : Math.floor(n / 2))
+  const expected = Array.from({ length: 5000 }, (_, i) => i + 1)
+    .sort((a, b) => {
+      const [left, right] = [at(a), at(b)]
+      if (left === undefined || right === undefined) {
+        return Number(left === undefined) - Number(right === undefined) || b - a
+      }
+      return right - left || b - a
+    })
+    .map((n) => String(n).padStart(5, "0"))
+
+  const read: string[] = []
+  const tokens: string[] = []
+  let pageToken: string | undefined
+  do {
+    const result = await storage.objects.queryObjects!({
+      projectId: "bench",
+      query: page(pageToken),
+      includeTotal: false,
+    })
+    read.push(...result.objects.map((row) => row.primaryId))
+    pageToken = result.nextPageToken
+    if (pageToken) tokens.push(pageToken)
+  } while (pageToken)
+
+  expect(read).toEqual(expected)
+
+  // A page in the middle and the page that crosses into the posts without a time stay bounded.
+  const crossing = tokens[Math.floor(4950 / 40) - 1]!
+  for (const token of [tokens[60]!, crossing]) {
+    expect(visitedRows((await explain(page(token))).Plan)).toBeLessThan(1000)
+  }
+
+  await sql`DELETE FROM objects WHERE object_type_id = 'Post'`
+})
+
 test("a high-fanout traversal pages through indexed endpoints and preserves totals", async () => {
   const traversed: ObjectQuery = {
     kind: "traverse",

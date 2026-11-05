@@ -689,6 +689,81 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
       })
     })
 
+    // A guard on the tie order: break ties in identity order whatever the direction, and each
+    // descending list below stops being the ascending one backwards.
+    test("lists a descending sort as the ascending one backwards, ties included", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        const labelCodes = ["b", null, "a", "b", "a", null, "b"]
+        const deviceNames = ["dimmer", "sensor", "dimmer", "sensor"]
+        await fixture.seed({
+          objects: [
+            ...labelCodes.map((code, index) =>
+              objectSeed(Label.id, `tie-${index}`, { id: `tie-${index}`, code })
+            ),
+            objectSeed(Room.id, "room-ties", { id: "room-ties" }),
+            ...deviceNames.map((name, index) =>
+              objectSeed(Device.id, `device-tie-${index}`, { id: `device-tie-${index}`, name })
+            ),
+          ],
+          links: deviceNames.map((_, index) =>
+            linkSeed(Room.id, "room-ties", "hasDevice", Device.id, `device-tie-${index}`)
+          ),
+        })
+
+        const run = (query: ObjectQuery) =>
+          executeObjectQuery(
+            { projectId, query },
+            { ontology: objectQueryContractOntology, storage }
+          )
+        const byCode = (direction: "asc" | "desc"): ObjectQuery => ({
+          kind: "sort",
+          fields: [{ kind: "property", propertyId: "code", direction }],
+          input: { kind: "start", objectTypeId: Label.id },
+        })
+
+        const ascending = ids(await run(byCode("asc")))
+        const descending = ids(await run(byCode("desc")))
+
+        // Null values sort last in both directions, so each part is reversed on its own.
+        const valued = ascending.slice(0, 5)
+        const nulls = ascending.slice(5)
+        expect(descending).toEqual([...valued.reverse(), ...nulls.reverse()])
+
+        const paged: string[] = []
+        let pageToken: string | undefined
+        do {
+          const page = await run({ kind: "page", pageSize: 2, pageToken, input: byCode("desc") })
+          paged.push(...ids(page))
+          pageToken = page.nextPageToken
+        } while (pageToken)
+
+        expect(paged).toEqual(descending)
+
+        // A parent's linked objects tie the same way.
+        const devices = async (direction: "asc" | "desc") => {
+          const result = await run({
+            kind: "expand",
+            expansions: [
+              {
+                linkId: "hasDevice",
+                direction: "outgoing",
+                limit: deviceNames.length,
+                orderBy: [{ kind: "property", propertyId: "name", direction }],
+              },
+            ],
+            input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: Room.id } },
+          })
+          const room = result.objects.find((row) => row.primaryId === "room-ties")
+          const linked = room?.links?.hasDevice
+          return Array.isArray(linked) ? linked.map((row) => row.primaryId) : []
+        }
+
+        const ascendingDevices = await devices("asc")
+        expect(ascendingDevices).toHaveLength(deviceNames.length)
+        expect(await devices("desc")).toEqual([...ascendingDevices].reverse())
+      })
+    })
+
     test("keeps page tokens stable when projection hides sorted cursor fields", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         await seedObjectQueryContractData(fixture)
