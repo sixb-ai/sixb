@@ -4,12 +4,20 @@ import type { CustomFieldsResource } from "../resources/custom-fields"
 import type { EquipmentResource } from "../resources/equipment"
 import type { EquipmentStatusesResource } from "../resources/equipment-statuses"
 import type { EquipmentTypesResource } from "../resources/equipment-types"
+import type { ExpenseEntriesResource } from "../resources/expense-entries"
+import type { ExpenseEntryTypesResource } from "../resources/expense-entry-types"
+import type { FaultsResource } from "../resources/faults"
+import type { FuelEntriesResource } from "../resources/fuel-entries"
+import type { FuelTypesResource } from "../resources/fuel-types"
 import type { GroupsResource } from "../resources/groups"
+import type { InspectionFormsResource } from "../resources/inspection-forms"
+import type { InspectionSchedulesResource } from "../resources/inspection-schedules"
 import type { InventoryAdjustmentReasonsResource } from "../resources/inventory-adjustment-reasons"
 import type { InventoryJournalEntriesResource } from "../resources/inventory-journal-entries"
 import type { IssuePrioritiesResource } from "../resources/issue-priorities"
 import type { IssuesResource } from "../resources/issues"
 import type { LabelsResource } from "../resources/labels"
+import type { MeterEntriesResource } from "../resources/meter-entries"
 import type { PartLocationDetailsResource } from "../resources/part-location-details"
 import type { PartLocationsResource } from "../resources/part-locations"
 import type { PartsResource } from "../resources/parts"
@@ -19,6 +27,7 @@ import type { ServiceEntriesResource } from "../resources/service-entries"
 import type { ServiceEntryLineItemsResource } from "../resources/service-entry-line-items"
 import type { ServiceRemindersResource } from "../resources/service-reminders"
 import type { ServiceTasksResource } from "../resources/service-tasks"
+import type { SubmittedInspectionFormsResource } from "../resources/submitted-inspection-forms"
 import type { VehicleAssignmentsResource } from "../resources/vehicle-assignments"
 import type { VehicleStatusesResource } from "../resources/vehicle-statuses"
 import type { VehicleTypesResource } from "../resources/vehicle-types"
@@ -67,4 +76,13 @@ export interface FleetioClient {
   readonly purchaseOrders: PurchaseOrdersResource
   /** Line items of a purchase order. */
   readonly purchaseOrderLineItems: PurchaseOrderLineItemsResource
+  readonly meterEntries: MeterEntriesResource
+  readonly fuelEntries: FuelEntriesResource
+  readonly fuelTypes: FuelTypesResource
+  readonly expenseEntries: ExpenseEntriesResource
+  readonly expenseEntryTypes: ExpenseEntryTypesResource
+  readonly faults: FaultsResource
+  readonly inspectionForms: InspectionFormsResource
+  readonly submittedInspectionForms: SubmittedInspectionFormsResource
+  readonly inspectionSchedules: InspectionSchedulesResource
 }

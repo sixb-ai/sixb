@@ -5,12 +5,20 @@ import { customFieldsResource } from "./resources/custom-fields"
 import { equipmentResource } from "./resources/equipment"
 import { equipmentStatusesResource } from "./resources/equipment-statuses"
 import { equipmentTypesResource } from "./resources/equipment-types"
+import { expenseEntriesResource } from "./resources/expense-entries"
+import { expenseEntryTypesResource } from "./resources/expense-entry-types"
+import { faultsResource } from "./resources/faults"
+import { fuelEntriesResource } from "./resources/fuel-entries"
+import { fuelTypesResource } from "./resources/fuel-types"
 import { groupsResource } from "./resources/groups"
+import { inspectionFormsResource } from "./resources/inspection-forms"
+import { inspectionSchedulesResource } from "./resources/inspection-schedules"
 import { inventoryAdjustmentReasonsResource } from "./resources/inventory-adjustment-reasons"
 import { inventoryJournalEntriesResource } from "./resources/inventory-journal-entries"
 import { issuePrioritiesResource } from "./resources/issue-priorities"
 import { issuesResource } from "./resources/issues"
 import { labelsResource } from "./resources/labels"
+import { meterEntriesResource } from "./resources/meter-entries"
 import { partLocationDetailsResource } from "./resources/part-location-details"
 import { partLocationsResource } from "./resources/part-locations"
 import { partsResource } from "./resources/parts"
@@ -20,6 +28,7 @@ import { serviceEntriesResource } from "./resources/service-entries"
 import { serviceEntryLineItemsResource } from "./resources/service-entry-line-items"
 import { serviceRemindersResource } from "./resources/service-reminders"
 import { serviceTasksResource } from "./resources/service-tasks"
+import { submittedInspectionFormsResource } from "./resources/submitted-inspection-forms"
 import { vehicleAssignmentsResource } from "./resources/vehicle-assignments"
 import { vehicleStatusesResource } from "./resources/vehicle-statuses"
 import { vehicleTypesResource } from "./resources/vehicle-types"
@@ -65,5 +74,14 @@ export function createFleetioClient(http: FleetioHttp): FleetioClient {
     inventoryAdjustmentReasons: inventoryAdjustmentReasonsResource(http),
     purchaseOrders: purchaseOrdersResource(http),
     purchaseOrderLineItems: purchaseOrderLineItemsResource(http),
+    meterEntries: meterEntriesResource(http),
+    fuelEntries: fuelEntriesResource(http),
+    fuelTypes: fuelTypesResource(http),
+    expenseEntries: expenseEntriesResource(http),
+    expenseEntryTypes: expenseEntryTypesResource(http),
+    faults: faultsResource(http),
+    inspectionForms: inspectionFormsResource(http),
+    submittedInspectionForms: submittedInspectionFormsResource(http),
+    inspectionSchedules: inspectionSchedulesResource(http),
   }
 }
