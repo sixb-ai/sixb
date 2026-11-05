@@ -36,6 +36,8 @@ import { vehiclesResource } from "./resources/vehicles"
 import { vendorsResource } from "./resources/vendors"
 import { vmrsReasonsForRepairResource } from "./resources/vmrs-reasons-for-repair"
 import { watchersResource } from "./resources/watchers"
+import { webhookEventsResource } from "./resources/webhook-events"
+import { webhooksResource } from "./resources/webhooks"
 import { workOrderLineItemsResource } from "./resources/work-order-line-items"
 import { workOrderStatusesResource } from "./resources/work-order-statuses"
 import { workOrdersResource } from "./resources/work-orders"
@@ -83,5 +85,7 @@ export function createFleetioClient(http: FleetioHttp): FleetioClient {
     inspectionForms: inspectionFormsResource(http),
     submittedInspectionForms: submittedInspectionFormsResource(http),
     inspectionSchedules: inspectionSchedulesResource(http),
+    webhooks: webhooksResource(http),
+    webhookEvents: webhookEventsResource(http),
   }
 }
