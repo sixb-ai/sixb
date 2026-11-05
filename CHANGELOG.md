@@ -2,6 +2,43 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-11-05 — Sixb 0.2.1
+
+0.2.1 runs pipelines and syncs only when there is something new to read, and keeps cost limits
+working on Vercel AI Gateway bindings that set provider options.
+
+### Highlights
+
+- An automatic Pipeline or Sync trigger (event or cron schedule) joins a run of the same Pipeline
+  or Sync that is still waiting to start, instead of queueing one run per trigger: the waiting run
+  reads the latest inputs when it starts. A trigger that arrives while a run is running queues one
+  new run, which later triggers join. Workflow triggers and manual requests keep one run each.
+- A dataset version records `rowsChanged` and `lineageChanged`, and `dataset.version.committed`
+  carries both. `events.dataset(X).updated()` fires only for a version that changed rows or
+  markings, so a version that only records new input versions no longer wakes downstream
+  schedules. DuckLake `readChanges` skips the table when no version in between changed rows.
+- On a dataset with `sequenceBy`, a newer delivery that differs from the stored row only in its
+  sequence column keeps the row: a webhook that re-reads an unchanged record no longer re-runs
+  what reads the dataset.
+- A Sync or Pipeline job that fails before starting its run retries twice, then fails the run,
+  instead of leaving it queued.
+- Vercel AI Gateway reserves a call at its model's catalog rates whatever its provider options,
+  and at the dearest of its fallback models. Bindings that set `anthropic.thinking` or another
+  provider option no longer fail every call under a cost limit.
+
+### Upgrade notes
+
+- No migration. Upgrade the packages below together.
+- Fewer runs: Pipelines and Syncs triggered by schedules may now share one run, and
+  `updated()` schedules skip versions that changed no rows.
+
+### Package versions
+
+- `0.2.1`: `@sixb/core`, `@sixb/agent`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/ducklake`, `@sixb/lake-local`, `@sixb/agent-worker`,
+  `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`,
+  `@sixb/workflow-worker`, `@sixb/vercel-ai-gateway`.
+
 ## 2026-11-04 — Sixb 0.2.0
 
 0.2.0 completes secure and traceable execution
