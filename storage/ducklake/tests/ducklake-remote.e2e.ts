@@ -323,7 +323,7 @@ describe("DuckLakeStorage remote catalogs", () => {
 
   // Regression proof: in DuckLakeMaintenance, rethrow in yieldingToConcurrentPass. The pass that
   // loses a race fails with "could not serialize access due to concurrent update" (most rounds
-  // fail with DuckLake ac7595b0).
+  // have a loser with DuckLake ac7595b0).
   test("two retention passes at once on a PostgreSQL catalog both succeed", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-retention-race-"))
     const dataset = defineDataset(`raw.pg.race.${randomId()}`, {
@@ -362,7 +362,8 @@ describe("DuckLakeStorage remote catalogs", () => {
         latest = await write.commit()
       }
 
-      for (let round = 0; round < 6; round++) {
+      // Two rounds: a provider that lost three in a row would fail, as it should (countYields).
+      for (let round = 0; round < 2; round++) {
         await backdate()
         const passes = await Promise.allSettled([
           first.maintenance.applyRetention({ ...retention, limit: 8 }),

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -332,6 +332,60 @@ describe("DuckLakeStorage retention", () => {
     const due = await storage.maintenance.applyRetention(ONE_HOUR)
     expect(due.deletedFiles).toBe(4)
     expect(await scheduledFileCount()).toBe(0)
+  })
+
+  // DuckLake removes the catalog row of a scheduled file already gone from disk: no pass yields.
+  test("deletes the row of a scheduled file someone removed by hand", async () => {
+    await scheduleFiles(["2 days"])
+
+    const runtime = await internals(storage).connections.attachedRuntime()
+    const [file] = await runtime.query(`
+      SELECT path FROM ${duckLakeMetadataTableName(options, "ducklake_files_scheduled_for_deletion")}
+      ORDER BY data_file_id LIMIT 1
+    `)
+    await rm(join(rootDir, "data", String(file?.path)))
+
+    expect(await storage.maintenance.applyRetention(ONE_HOUR)).toMatchObject({
+      deletedFiles: 4,
+      hasMore: false,
+    })
+    expect(await scheduledFileCount()).toBe(0)
+  })
+
+  // Regression proof: drop countYields from DuckLakeMaintenance.applyRetention. Every pass then
+  // yields and reports more to do, and the cleanup that never runs never surfaces.
+  test("fails on the third pass in a row that a step yields, naming it", async () => {
+    await scheduleFiles(["2 days"])
+
+    // The error a pass that lost a file deletion race got, on every pass: no race explains that.
+    const lost = new Error(
+      `IO Error: Could not remove file "${join(rootDir, "data", "lost.parquet")}": No such file or directory`
+    )
+    const maintenance = storage.maintenance as unknown as {
+      deleteScheduledFiles(retention: unknown): Promise<unknown>
+    }
+    const deletion = spyOn(maintenance, "deleteScheduledFiles").mockRejectedValue(lost)
+
+    try {
+      for (let pass = 1; pass <= 2; pass++) {
+        expect(await storage.maintenance.applyRetention(ONE_HOUR)).toMatchObject({
+          deletedFiles: 0,
+          hasMore: true,
+        })
+      }
+
+      const third = await storage.maintenance.applyRetention(ONE_HOUR).catch((error) => error)
+      expect(String(third)).toContain(
+        "[SixbDuckLake] Lake retention's file deletion failed in 3 passes in a row"
+      )
+      expect(String(third)).toContain("No such file or directory")
+      expect((third as Error).cause).toBe(lost)
+    } finally {
+      deletion.mockRestore()
+    }
+
+    // A pass that yields nothing starts the count again.
+    expect(await storage.maintenance.applyRetention(ONE_HOUR)).toMatchObject({ hasMore: false })
   })
 
   // Regression proof: remove the keepVersionsForMs floor from resolveRetention. Versions replaced

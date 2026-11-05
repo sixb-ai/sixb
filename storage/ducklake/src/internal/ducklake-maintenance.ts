@@ -48,6 +48,16 @@ const MIN_KEEP_VERSIONS_FOR_MS = HOUR_MS
  */
 const MIN_DELETE_FILES_AFTER_MS = HOUR_MS
 
+/** Passes in a row in which a step may yield to a concurrent pass before retention fails. */
+const MAX_YIELDED_PASSES = 3
+
+type RetentionStep = "snapshot expiry" | "file deletion" | "orphaned file deletion"
+
+interface RetentionYield {
+  readonly step: RetentionStep
+  readonly error: unknown
+}
+
 // Snapshots read per history query.
 const HISTORY_PAGE_SIZE = 512
 
@@ -78,6 +88,9 @@ interface ExpiryPlan {
  * provider's reads out, for as long as the deletion itself.
  */
 export class DuckLakeMaintenance implements LakeMaintenance {
+  /** Passes in a row in which a step yielded, in this provider. */
+  private yieldedPasses = 0
+
   constructor(
     private readonly options: DuckLakeStorageOptions,
     private readonly connections: DuckLakeConnectionManager,
@@ -100,24 +113,32 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     // Another pass on the same catalog may run each step at the same time, from another process:
     // the step that loses the race yields, its work done by the other pass or left to the next.
     const expired = await yieldingToConcurrentPass(
+      "snapshot expiry",
       () => this.expireSnapshots(plan.expirable, retention.dryRun),
       0
     )
-    const files = await yieldingToConcurrentPass(() => this.deleteScheduledFiles(retention), {
-      deleted: 0,
-      hasMore: true,
-    })
+    const files = await yieldingToConcurrentPass(
+      "file deletion",
+      () => this.deleteScheduledFiles(retention),
+      { deleted: 0, hasMore: true }
+    )
 
     // Orphans are files no catalog row knows. Listing the whole data path is the costly part of
     // their search, so it waits for a pass that finds no backlog left.
-    const backlog = plan.hasMore || files.value.hasMore || expired.yielded
+    const backlog = plan.hasMore || files.value.hasMore || expired.yield !== undefined
     const orphaned = backlog
-      ? { value: 0, yielded: false }
-      : await yieldingToConcurrentPass(() => this.deleteOrphanedFiles(retention), 0)
+      ? { value: 0 }
+      : await yieldingToConcurrentPass(
+          "orphaned file deletion",
+          () => this.deleteOrphanedFiles(retention),
+          0
+        )
 
     if (!retention.dryRun) {
       this.connections.markLocalCatalogChanged()
     }
+
+    this.countYields([expired.yield, files.yield, orphaned.yield])
 
     return {
       dryRun: retention.dryRun,
@@ -127,8 +148,33 @@ export class DuckLakeMaintenance implements LakeMaintenance {
       keptVersions: plan.keptVersions,
       deletedFiles: files.value.deleted,
       orphanedFiles: orphaned.value,
-      hasMore: backlog || orphaned.yielded,
+      hasMore: backlog || orphaned.yield !== undefined,
     }
+  }
+
+  /**
+   * A race lost to a concurrent pass is rare and resolves by the next pass. A step that yields
+   * pass after pass is not racing: a file removed outside DuckLake, its catalog row still there,
+   * fails its deletion the same way every time. The third pass in a row with a yield throws.
+   */
+  private countYields(yields: readonly (RetentionYield | undefined)[]): void {
+    const last = yields.filter((y) => y !== undefined).at(-1)
+    if (last === undefined) {
+      this.yieldedPasses = 0
+      return
+    }
+
+    this.yieldedPasses++
+    if (this.yieldedPasses < MAX_YIELDED_PASSES) {
+      return
+    }
+
+    this.yieldedPasses = 0
+    const reason = last.error instanceof Error ? last.error.message : String(last.error)
+    throw new LakeStorageError(
+      `[SixbDuckLake] Lake retention's ${last.step} failed in ${MAX_YIELDED_PASSES} passes in a row, which no concurrent pass explains: ${reason}`,
+      { cause: last.error }
+    )
   }
 
   async describeStorage(datasetIds: readonly string[]): Promise<readonly DatasetStorageHealth[]> {
@@ -415,14 +461,15 @@ export class DuckLakeMaintenance implements LakeMaintenance {
  * finds nothing left and succeeds.
  */
 async function yieldingToConcurrentPass<T>(
-  step: () => Promise<T>,
+  step: RetentionStep,
+  run: () => Promise<T>,
   yielded: T
-): Promise<{ readonly value: T; readonly yielded: boolean }> {
+): Promise<{ readonly value: T; readonly yield?: RetentionYield }> {
   try {
-    return { value: await step(), yielded: false }
+    return { value: await run() }
   } catch (error) {
     if (lostToConcurrentPass(error)) {
-      return { value: yielded, yielded: true }
+      return { value: yielded, yield: { step, error } }
     }
 
     throw error
