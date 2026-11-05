@@ -10,9 +10,8 @@ import {
   ComputerConnection,
   type ComputerEvent,
   EXIT_SIGNED_OUT,
-  STOP_WAIT_MS,
 } from "../runner/computer-connection"
-import { stopOnHangUp } from "../runner/local-runner"
+import { stopInTime, stopOnHangUp } from "../runner/local-runner"
 import { shortPath } from "../tui/format"
 import { loadSettings } from "../tui/settings"
 import { glyph, tone } from "../ui/theme"
@@ -60,11 +59,10 @@ export async function runConnect(options: {
     () => computer,
     (signal) => finish(signal === "SIGHUP" ? 129 : 143)
   )
-  const stopInTime = () => Promise.race([computer.stop(), Bun.sleep(STOP_WAIT_MS)])
   // Ctrl+C is how this is meant to stop; a second one doesn't wait for a turn to record its end.
   process.once("SIGINT", () => {
     process.once("SIGINT", () => process.exit(130))
-    void stopInTime().finally(() => finish(0))
+    void stopInTime(computer).finally(() => finish(0))
   })
 
   if (!options.json) {
@@ -77,7 +75,7 @@ export async function runConnect(options: {
 
   const code = await finished
   unhook()
-  if (code === EXIT_SIGNED_OUT) await stopInTime()
+  if (code === EXIT_SIGNED_OUT) await stopInTime(computer)
   process.exit(code)
 }
 

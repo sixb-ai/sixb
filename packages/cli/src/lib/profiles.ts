@@ -9,6 +9,7 @@ import {
   type SixbSessionTokens,
 } from "@sixb/client"
 import { normalizeApiUrl } from "./api-client"
+import { errorMessage } from "./errors"
 
 const CONFIG_DIRECTORY_MODE = 0o700
 const CONFIG_FILE_MODE = 0o600
@@ -188,6 +189,17 @@ export function assertProfileName(name: string): void {
   }
 }
 
+/** Its sign-in couldn't be refreshed for want of an answer, which says nothing about the sign-in. */
+export class ProfileUnansweredError extends Error {
+  constructor(
+    readonly apiUrl: string,
+    cause: unknown
+  ) {
+    super(errorMessage(cause), { cause })
+    this.name = "ProfileUnansweredError"
+  }
+}
+
 async function resolvedStoredProfile(
   stored: SixbProfile,
   profile: string,
@@ -203,7 +215,9 @@ async function resolvedStoredProfile(
       baseUrl: stored.apiUrl,
       store: profileSessionStore(profile, options),
     }).catch((error: unknown) => {
-      if (!(error instanceof SixbSessionEndedError)) throw error
+      if (!(error instanceof SixbSessionEndedError)) {
+        throw new ProfileUnansweredError(stored.apiUrl, error)
+      }
       return null
     })
     if (!token) {

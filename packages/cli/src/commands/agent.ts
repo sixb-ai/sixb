@@ -14,6 +14,7 @@ import {
   postAgentThreadMessage,
 } from "@sixb/client"
 import { type Connection, connect } from "../lib/connection"
+import { errorMessage } from "../lib/errors"
 import { thisComputer, thisComputerId } from "../runner/computer"
 import { LocalRunner } from "../runner/local-runner"
 import { toolLine } from "../tui/format"
@@ -96,7 +97,7 @@ export async function runAgent(options: {
   }
   const here = onComputer && place?.id === (await thisComputerId()) && place.folder === folder
   const runner = here
-    ? new LocalRunner(connection, folder, (error) => step(tone.fail(errorText(error))))
+    ? new LocalRunner(connection, folder, (error) => step(tone.fail(errorMessage(error))))
     : null
   if (runner) runner.keepsAwake = settings.keepAwake
   if (!options.json) {
@@ -218,7 +219,7 @@ function refusedForGood(read: { readonly response?: Response }): boolean {
 /** Where a turn waits, for a person reading why nothing is happening yet. */
 function waitingNote(computer: { readonly name: string; readonly folder: string } | undefined) {
   return computer
-    ? `It waits until sixb is open in ${computer.folder} on ${computer.name}, with messages from the web on.`
+    ? `It waits until ${computer.folder} is connected on ${computer.name}: sixb connect there, or sixb with messages from the web on.`
     : "It waits for its computer."
 }
 
@@ -413,10 +414,6 @@ async function readStdin(): Promise<string> {
   let text = ""
   for await (const chunk of process.stdin) text += chunk.toString()
   return text.trim()
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**

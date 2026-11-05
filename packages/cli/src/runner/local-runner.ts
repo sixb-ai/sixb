@@ -21,8 +21,8 @@ import { resolveConfigPath } from "../lib/profiles"
 import { thisComputer, thisComputerId } from "./computer"
 import { keepAwake, type ReleaseAwake } from "./keep-awake"
 
-/** How long a closed terminal waits for a turn running here to record its end. */
-const HANG_UP_WAIT_MS = 10_000
+/** How long stopping waits for a running turn to record its end, or the project to answer. */
+const STOP_WAIT_MS = 10_000
 /** How often an open `sixb` renews its session, which lapses a minute after its last renewal. */
 const SESSION_RENEW_MS = 20_000
 
@@ -361,6 +361,16 @@ export function owns(
     : owner.type === "system"
 }
 
+/** Stop, for as long as a person or a service manager should wait for that. */
+export async function stopInTime(running: Pick<LocalRunner, "stop"> | null): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const waited = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, STOP_WAIT_MS)
+  })
+  await Promise.race([running?.stop(), waited])
+  clearTimeout(timer)
+}
+
 /**
  * Quitting `sixb`: the turns running here end interrupted, their end recorded, the background
  * commands they left stop, and the session closes, within `waitMs`, whether a turn runs or not.
@@ -395,17 +405,7 @@ export function stopOnHangUp(
   exit: (signal: "SIGHUP" | "SIGTERM") => void
 ): () => void {
   const hangUp = (signal: "SIGHUP" | "SIGTERM") => {
-    const running = runner()
-    if (!running) return exit(signal)
-
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const waited = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, HANG_UP_WAIT_MS)
-    })
-    void Promise.race([running.stop(), waited]).finally(() => {
-      clearTimeout(timer)
-      exit(signal)
-    })
+    void stopInTime(runner()).finally(() => exit(signal))
   }
 
   const onHangUp = () => hangUp("SIGHUP")

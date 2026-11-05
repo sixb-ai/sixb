@@ -61,6 +61,56 @@ async function project() {
 }
 
 describe("sixb connect", () => {
+  // Guard proof: answer "session-ended" for whatever resolveProfile throws, in connect; a service
+  // manager starting this before the network is up is told the person's sign-in ended, and stops
+  // restarting it.
+  test("says so when its sign-in couldn't be refreshed for want of an answer", async () => {
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => new Response("Bad gateway", { status: 502 }),
+    })
+    cleanups.push(() => server.stop(true))
+    const root = await realpath(await mkdtemp(join(tmpdir(), "sixb-connect-command-")))
+    cleanups.push(() => rm(root, { recursive: true, force: true }))
+    const apiUrl = `http://127.0.0.1:${server.port}`
+    await Bun.write(
+      join(root, "sixb", "config.json"),
+      JSON.stringify({
+        version: 1,
+        currentProfile: "acme",
+        profiles: {
+          acme: {
+            apiUrl,
+            projectId: "acme",
+            session: {
+              accessToken: "sixb_at_test.old",
+              refreshToken: "sixb_rt_test.old",
+              accessExpiresAt: "2020-01-01T00:00:00.000Z",
+            },
+          },
+        },
+      })
+    )
+    const result = await runCliToCompletion({
+      cmd: [process.execPath, CLI, "connect"],
+      cwd: root,
+      env: {
+        XDG_CONFIG_HOME: root,
+        SIXB_API_URL: undefined,
+        SIXB_API_TOKEN: undefined,
+        SIXB_API_PUBLIC_ORIGIN: undefined,
+        SIXB_TOKEN: undefined,
+        SIXB_PROFILE: undefined,
+      },
+      stdin: "",
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
+
+    expect(result.stdout + result.stderr).toContain(`isn't answering at ${apiUrl}`)
+    expect(result.exitCode).toBe(1)
+  })
+
   // Guard proof: drop the check on `interactive` from allowFolders; a service manager's restart
   // allows whatever folder its command line names, with nobody asked.
   test("refuses a folder nobody allowed, when nobody can be asked", async () => {

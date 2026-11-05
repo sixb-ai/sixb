@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises"
 import { createAgentActivitySocket, getAgentThread, isSixbApiError } from "@sixb/client"
 import type { Connection } from "../lib/connection"
+import { errorMessage } from "../lib/errors"
 import { readAllowedFolders, watchAllowedFolders } from "./allowed-folders"
 import { LocalRunner } from "./local-runner"
 
@@ -8,8 +9,6 @@ import { LocalRunner } from "./local-runner"
 const FOLDER_RECHECK_MS = 20_000
 /** Exit status when the person's sign-in ended: whatever restarts this should know. */
 export const EXIT_SIGNED_OUT = 3
-/** How long stopping waits for a running turn to record its end, or the project to answer. */
-export const STOP_WAIT_MS = 10_000
 
 /** What a connected computer reports, one line each with `sixb connect --json`. */
 export type ComputerEvent =
@@ -32,10 +31,6 @@ export type ComputerEvent =
   | { readonly type: "session.back"; readonly folder: string }
   | { readonly type: "signed-out" }
   | { readonly type: "error"; readonly message: string }
-
-export function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 /**
  * This computer, connected to a project: one session per folder allowed for it, and the turns sent
@@ -74,7 +69,7 @@ export class ComputerConnection {
         // Queued turns only reach here by this event for speed: each renewal lists them too.
         if (event.status !== "queued") return
         void this.route(event.threadId, event.runId).catch((error: unknown) =>
-          this.onEvent({ type: "error", message: messageOf(error) })
+          this.onEvent({ type: "error", message: errorMessage(error) })
         )
       },
     })
@@ -98,13 +93,16 @@ export class ComputerConnection {
 
   private async applyAllowedFolders(): Promise<void> {
     if (this.stopped) return
-    const folders = await this.existing(await this.readAllowed())
+    const allowed = await this.readAllowed()
+    const folders = await this.existing(allowed)
     if (this.stopped) return
 
     for (const folder of folders) this.runnerFor(folder).openSession()
     for (const [folder, runner] of this.runners) {
-      // Not awaited: a stalled call there mustn't keep the next change from being applied.
-      if (!folders.includes(folder)) void runner.closeSession()
+      if (folders.includes(folder)) continue
+      // Not awaited: a stalled call there mustn't keep the next change from being applied. Taken back,
+      // nothing more runs there. Only gone for now, a volume coming back mustn't cost a turn.
+      void (allowed.includes(folder) ? runner.closeSession() : runner.stop())
     }
 
     if (folders.join("\n") !== this.shown?.join("\n")) {
@@ -118,7 +116,7 @@ export class ComputerConnection {
     try {
       return await readAllowedFolders(this.connection)
     } catch (error) {
-      this.onEvent({ type: "error", message: messageOf(error) })
+      this.onEvent({ type: "error", message: errorMessage(error) })
       return []
     }
   }
@@ -143,7 +141,7 @@ export class ComputerConnection {
     const runner = new LocalRunner(
       this.connection,
       folder,
-      (error) => this.onEvent({ type: "error", message: messageOf(error) }),
+      (error) => this.onEvent({ type: "error", message: errorMessage(error) }),
       { onSessionChange: (failure) => this.onSessionChange(folder, failure) }
     )
     runner.keepsAwake = this.keepsAwake
@@ -165,7 +163,7 @@ export class ComputerConnection {
       this.signedOut = true
       this.onEvent({ type: "signed-out" })
     } else {
-      this.onEvent({ type: "session.lost", folder, message: messageOf(failure) })
+      this.onEvent({ type: "session.lost", folder, message: errorMessage(failure) })
     }
   }
 
