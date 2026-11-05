@@ -36,11 +36,11 @@ export function createPgConditionalReader(
 ): ObjectReadStorage {
   const source = compilePgConditionalObjectReadSource(params.projectId, params.scope)
 
-  const fewObjects = (client: SQLClient, objectTypeId: string) => {
+  const fewObjects = async (client: SQLClient, objectTypeId: string) => {
     const condition = params.scope.conditions.find((item) => item.objectTypeId === objectTypeId)
-    return condition
-      ? readsFewObjects(client, options.visibilityStatistics, condition)
-      : Promise.resolve(false)
+    if (!condition) return false
+
+    return readsFewObjects(condition, await options.visibilityStatistics.commonKeys(client))
   }
 
   const reader = new PgObjectReader(
