@@ -256,7 +256,7 @@ describe("sixb agent", () => {
 
     expect(result.exitCode).toBe(5)
     expect(JSON.parse(result.stdout)).toEqual({ threadId: THREAD, runId: RUN, status: "queued" })
-    expect(result.stderr).toContain("It waits until sixb is open in /work/q3 on Ava's iMac")
+    expect(result.stderr).toContain("It waits until /work/q3 is connected on Ava's iMac")
     expect(posted).toHaveLength(1)
   })
 

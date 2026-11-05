@@ -210,6 +210,29 @@ describe("a connected computer", () => {
     await computer.stop()
   })
 
+  // Guard proof: only close the session in applyAllowedFolders; a folder taken back goes on having
+  // commands run in it, unasked, until the turn ends.
+  test("stops what runs in a folder taken back", async () => {
+    const stopped = spyOn(LocalRunner.prototype, "stop")
+    try {
+      const [a, b] = await Promise.all([folder("a"), folder("b")])
+      await setFoldersAllowed(THIS_PROJECT, [a, b], true)
+      const { computer, held, until } = connected()
+      await computer.start()
+      await until((event) => event.type === "folders")
+      await holding(held, [a, b])
+
+      await setFoldersAllowed(THIS_PROJECT, [a], false)
+      await holding(held, [b])
+      expect(
+        stopped.mock.contexts.map((runner) => (runner as unknown as LocalRunner).folder)
+      ).toEqual([a])
+      await computer.stop()
+    } finally {
+      stopped.mockRestore()
+    }
+  })
+
   // Guard proof: leave `existing` out of applyAllowedFolders; a deleted folder reads as online and
   // every message sent to it fails.
   test("holds no session for an allowed folder that's gone", async () => {
@@ -225,6 +248,7 @@ describe("a connected computer", () => {
   // Guard proof: read the folders only when the list changes, dropping `recheck` from start; a folder
   // deleted while connected reads as online, and every message sent to it fails.
   test("closes the session of a folder that goes away while connected", async () => {
+    const stopped = spyOn(LocalRunner.prototype, "stop")
     const a = await folder("a")
     await setFoldersAllowed(THIS_PROJECT, [a], true)
     // macOS can report that write late: a report after the folder goes would read the folders again,
@@ -241,6 +265,9 @@ describe("a connected computer", () => {
     jest.advanceTimersByTime(20_000)
     await until((event) => event.type === "folders" && event.folders.length === 0)
 
+    // A volume that went away may come back: what runs there isn't stopped for that.
+    expect(stopped).not.toHaveBeenCalled()
+    stopped.mockRestore()
     jest.useRealTimers()
     await computer.stop()
   })

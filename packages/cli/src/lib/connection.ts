@@ -9,7 +9,14 @@ import {
   startSixbDeviceLogin,
 } from "@sixb/client"
 import { normalizeApiUrl } from "./api-client"
-import { profileSessionStore, type ResolvedProfile, resolveProfile, updateConfig } from "./profiles"
+import { errorMessage } from "./errors"
+import {
+  ProfileUnansweredError,
+  profileSessionStore,
+  type ResolvedProfile,
+  resolveProfile,
+  updateConfig,
+} from "./profiles"
 
 /** A project the app talks to, as the person signed in to it. */
 export interface Connection {
@@ -40,7 +47,10 @@ export async function connect(input: {
   try {
     resolved = await resolveProfile(input)
   } catch (error) {
-    return { apiUrl: input.apiUrl ?? "", reason: "session-ended", message: errorText(error) }
+    if (error instanceof ProfileUnansweredError) {
+      return { apiUrl: error.apiUrl, reason: "unreachable", message: error.message }
+    }
+    return { apiUrl: input.apiUrl ?? "", reason: "session-ended", message: errorMessage(error) }
   }
   const profile = resolved.profile
   const viaSession = resolved.tokenSource === "session" && profile !== undefined
@@ -96,7 +106,7 @@ export async function connect(input: {
       apiUrl: resolved.apiUrl,
       ...(profile === undefined ? {} : { profile }),
       reason: status === 401 || status === 403 ? "signed-out" : "unreachable",
-      message: errorText(error),
+      message: errorMessage(error),
     }
   }
 }
@@ -137,8 +147,4 @@ export async function startSignIn(apiUrl: string): Promise<PendingSignIn> {
       }))
     },
   }
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

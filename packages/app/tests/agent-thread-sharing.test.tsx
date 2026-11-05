@@ -925,7 +925,7 @@ describe("a conversation on its owner's computer", () => {
 
     expect(
       await view.findByText(
-        "Alice's MacBook Pro is offline. Your message waits until sixb is open in ~/q3 with messages from the web on."
+        "Alice's MacBook Pro is offline. Your message waits until ~/q3 is connected there."
       )
     ).toBeDefined()
     expect(await view.findByText("Waiting for Alice's MacBook Pro…")).toBeDefined()
