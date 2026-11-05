@@ -13,7 +13,8 @@ import type { PostgresStorage } from "../src"
 import { objectPartitionName } from "../src/objects/partitions"
 import { compilePgObjectCountQuery, compilePgObjectQuery } from "../src/objects/query-compiler"
 import { compilePgConditionalObjectReadSource } from "../src/objects/read-scope"
-import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
+import { PgObjectReader } from "../src/objects/reader"
+import { createPgClient, type SQL, type SQLClient, type SqlParameter } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 
 // A member whose role carries view conditions reads through the conditional scope. A statement
@@ -23,7 +24,9 @@ import { createTestStorage, disposeTestStorage } from "./helpers"
 //
 // Reproduce: remove `linksBetweenVisibleObjectsTable` from the conditional source in
 // read-scope.ts. Expansions and traversals then check both endpoints of each link again, whose
-// types come from the link row, and their plans read every type's partition.
+// types come from the link row, and their plans read every type's partition. For link lists and
+// batch lookups, match the endpoint check or the batch's join on the row's type instead of naming
+// each type.
 
 const Account = defineObjectType({
   id: "PartitionAccount",
@@ -138,6 +141,18 @@ interface PlanNode {
   readonly Plans?: readonly PlanNode[]
 }
 
+/** A member's reader whose statements are planned, not run: it records what each plan reads. */
+function planningReader(planned: string[][]): PgObjectReader {
+  const client = {
+    unsafe: async (text: string, args: readonly unknown[]) => {
+      planned.push(await plannedPartitions({ sql: text, args }))
+      return []
+    },
+  }
+
+  return new PgObjectReader(client as unknown as SQLClient, memberSource)
+}
+
 test("a member's expansions plan only the partitions of the types they read", async () => {
   const { query } = validated({
     kind: "expand",
@@ -189,4 +204,22 @@ test("a member's traversals plan only the partitions of the types they read", as
   // A count reads an incoming traversal from one source type by batches of identities.
   const count = compilePgObjectCountQuery(projectId, tasksOfNotes, { source: memberSource })
   expect(await plannedPartitions(count)).toEqual(tasksAndNotes)
+})
+
+test("a member's link lists and batch lookups plan only the types they can reach", async () => {
+  const planned: string[][] = []
+  const reader = planningReader(planned)
+
+  await reader.listLinks({ projectId, objectTypeId: Task.id, objectId: "task-1" })
+  await reader.getByPrimaryIdBatch({
+    projectId,
+    items: [
+      { objectTypeId: Account.id, primaryId: "account-1" },
+      { objectTypeId: Task.id, primaryId: "task-1" },
+    ],
+  })
+
+  // A link's ends are checked against the conditioned types' partitions alone.
+  expect(planned[0]).toEqual([Note.id, Task.id].map(objectPartitionName).sort())
+  expect(planned[1]).toEqual([Account.id, Task.id].map(objectPartitionName).sort())
 })

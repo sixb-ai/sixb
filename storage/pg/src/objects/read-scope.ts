@@ -166,18 +166,37 @@ function compileConditionalReadScopeCte(
     matchArgs.push(objectTypeId, ...filter.args)
   }
 
-  const visibleEndpoint = (end: "source" | "target") => `
-    (
-      stored.${end}_type_id NOT IN (${conditionedTypes})
-      OR EXISTS (
-        SELECT 1
-        FROM _sixb_scope_objects AS endpoint
-        WHERE endpoint.project_id = stored.project_id
-          AND endpoint.object_type_id = stored.${end}_type_id
-          AND endpoint.primary_id = stored.${end}_id
-      )
-    )
-  `
+  // An endpoint of a conditioned type is a visible object of that type. Each check names its type,
+  // so PostgreSQL plans that type's partition alone: matched on the link row's type, one check
+  // would plan every partition of objects.
+  const visibleEndpoint = (end: "source" | "target"): CompiledReadScopeCte => {
+    const checks: string[] = []
+    const args: unknown[] = [...conditionedTypeArgs]
+
+    for (const [objectTypeId, filter] of filters) {
+      checks.push(`
+        (
+          stored.${end}_type_id = ?::text
+          AND EXISTS (
+            SELECT 1
+            FROM objects AS endpoint
+            WHERE endpoint.project_id = stored.project_id
+              AND endpoint.object_type_id = ?::text
+              AND endpoint.primary_id = stored.${end}_id
+              AND (${filter.sql})
+          )
+        )
+      `)
+      args.push(objectTypeId, objectTypeId, ...filter.args)
+    }
+
+    return {
+      sql: `(stored.${end}_type_id NOT IN (${conditionedTypes}) OR ${checks.join(" OR ")})`,
+      args,
+    }
+  }
+  const visibleSource = visibleEndpoint("source")
+  const visibleTarget = visibleEndpoint("target")
 
   return {
     sql: `
@@ -192,8 +211,8 @@ function compileConditionalReadScopeCte(
         SELECT stored.*
         FROM links AS stored
         WHERE stored.project_id = ?
-          AND ${visibleEndpoint("source")}
-          AND ${visibleEndpoint("target")}
+          AND ${visibleSource.sql}
+          AND ${visibleTarget.sql}
       )
     `,
     args: [
@@ -201,8 +220,8 @@ function compileConditionalReadScopeCte(
       ...conditionedTypeArgs,
       ...matchArgs,
       projectId,
-      ...conditionedTypeArgs,
-      ...conditionedTypeArgs,
+      ...visibleSource.args,
+      ...visibleTarget.args,
     ],
   }
 }

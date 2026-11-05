@@ -402,20 +402,34 @@ export class PgObjectReader {
     const source = this.source
     const result = new Map<ObjectBatchKey, ObjectRow>()
     if (params.items.length === 0) return result
-    const items = params.items.map((item, batchIndex) => ({ ...item, batchIndex }))
-    const statement = compilePgObjectStatement(
-      `
+
+    const requestedByType = new Map<string, { primaryId: string; batchIndex: number }[]>()
+    for (const [batchIndex, item] of params.items.entries()) {
+      const requested = requestedByType.get(item.objectTypeId) ?? []
+      requested.push({ primaryId: item.primaryId, batchIndex })
+      requestedByType.set(item.objectTypeId, requested)
+    }
+
+    // One branch per type, each naming it, so PostgreSQL plans only the requested types'
+    // partitions. Matched on a requested row's type, it would plan every partition of objects.
+    const branches: string[] = []
+    const args: unknown[] = []
+    for (const [objectTypeId, requested] of requestedByType) {
+      const objects = pgObjectsOfType(source, objectTypeId)
+      branches.push(`
         SELECT object.*, requested."batchIndex" AS _batch_index
         FROM jsonb_to_recordset(?::text::jsonb)
-          AS requested("objectTypeId" text, "primaryId" text, "batchIndex" integer)
-        JOIN ${source.objectsTable} AS object
+          AS requested("primaryId" text, "batchIndex" integer)
+        JOIN ${objects.table} AS object
           ON object.project_id = ?
-         AND object.object_type_id = requested."objectTypeId"
+         AND object.object_type_id = ?::text
          AND object.primary_id = requested."primaryId"
-      `,
-      [JSON.stringify(items), params.projectId],
-      source
-    )
+         ${objects.filter}
+      `)
+      args.push(JSON.stringify(requested), params.projectId, objectTypeId, ...objects.args)
+    }
+
+    const statement = compilePgObjectStatement(branches.join(" UNION ALL "), args, source)
     const rows = await sql.unsafe<ObjectBatchDatabaseRow[]>(
       statement.sql,
       statement.args as SqlParameter[]
