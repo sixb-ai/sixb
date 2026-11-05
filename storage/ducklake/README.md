@@ -160,6 +160,14 @@ is configured.
   commit at most. A compaction that conflicts with another process's write fails at once and
   yields; the next check tries again. `close()` lets the current pass finish and starts no other.
 
+On a PostgreSQL catalog, processes also keep writes and compaction apart. DuckLake keeps a small
+write's deletes in the catalog, and would commit them on top of another process's compaction of
+their file, which loses them (duckdb/ducklake#1484). So each write takes a shared advisory lock on
+its dataset, about a millisecond, and holds it for its transaction; each maintenance commit takes
+an exclusive one. A write waits for a compaction's commit, and a compaction waits up to 500 ms for
+the writes in flight, then yields until the next check. DuckDB-file and SQLite catalogs serve one
+process.
+
 The thresholds come from measurements on DuckDB 1.5.6 with a local catalog: with 16 small files
 or 4,000 inlined rows, reads cost what they cost compacted; with 256 files a full read took half
 as long again, with 1,024 three times as long and a one-row append twice as long. One merge or

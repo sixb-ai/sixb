@@ -12,8 +12,8 @@ import {
   tableRowCount,
 } from "./ducklake-storage-stats"
 import { CatalogMovedError, commitVersionTransaction } from "./ducklake-version-transaction"
-import { encodeDatasetSequenceTableName } from "./names"
-import { duckLakeAlias, quoteIdentifier, quoteSqlString } from "./sql"
+import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "./names"
+import { buildDatasetLockSql, duckLakeAlias, quoteIdentifier, quoteSqlString } from "./sql"
 
 /**
  * A dataset's thresholds are checked after its first commit in this provider, then after every
@@ -38,6 +38,14 @@ const MERGE_MAX_FILES = 256
  * fails at once whatever the count, and the compaction yields to the write.
  */
 const COMPACTION_COMMIT_RETRIES = 3
+
+/**
+ * How long compaction waits for another process's writes to a dataset on a PostgreSQL catalog. A
+ * write holds the dataset for its transaction only, and a small merge takes about 100 ms in all,
+ * so this covers the writes in flight. It also bounds the stall compaction causes meanwhile: writes in
+ * this process wait behind its commit slot, and other processes' writes queue behind its request.
+ */
+const COMPACTION_LOCK_TIMEOUT = "500ms"
 
 interface DatasetCompactionState {
   /** Commits since the last pass began, counting from the first commit's check. */
@@ -68,8 +76,9 @@ const warnedPartitionedDatasets = new Set<string>()
  *
  * Each commit takes the catalog commit lock, as writes do, and a merge reads at most
  * `MERGE_MAX_FILES` files, so writes in this process wait one short commit at most; a backlog
- * takes several passes. A compaction that conflicts with another process's write yields: the
- * next check tries again.
+ * takes several passes. A compaction that conflicts with another process's write, or on a
+ * PostgreSQL catalog waits too long for one (see `lockDataset`), yields: the next check tries
+ * again.
  */
 export class DuckLakeCompaction {
   private readonly datasets = new Map<string, DatasetCompactionState>()
@@ -216,6 +225,7 @@ export class DuckLakeCompaction {
 
       await runtime.run("BEGIN TRANSACTION")
       try {
+        await this.lockDataset(runtime, dataset)
         await runtime.run(
           `CALL ${quoteIdentifier(duckLakeAlias(this.options))}.set_commit_message(${quoteSqlString("Sixb")}, ${quoteSqlString(`compact dataset ${dataset.id}`)})`
         )
@@ -239,6 +249,44 @@ export class DuckLakeCompaction {
 
       return moved
     })
+  }
+
+  /**
+   * On a PostgreSQL catalog, takes the dataset's lock, exclusive of writes in any process (see
+   * `beginDatasetTransaction`), as the transaction's first statement. Waiting for the writes in
+   * flight lets compaction in: later writes queue behind it, where a try-lock under steady writes
+   * almost never found the dataset free. A pass that waits `COMPACTION_LOCK_TIMEOUT` in vain
+   * yields to the writes, as to a conflict.
+   */
+  private async lockDataset(
+    runtime: DuckDbQueryRuntime,
+    dataset: DatasetDefinition
+  ): Promise<void> {
+    if (this.options.catalog.type !== "postgres") {
+      return
+    }
+
+    const tableName = encodeDatasetTableName(dataset.id)
+    try {
+      await runtime.run(
+        buildDatasetLockSql(this.options, tableName, {
+          mode: "exclusive",
+          timeout: COMPACTION_LOCK_TIMEOUT,
+        })
+      )
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("canceling statement due to lock timeout")
+      ) {
+        throw new CatalogMovedError(
+          `[SixbDuckLake] Writes to dataset '${dataset.id}' held it for ${COMPACTION_LOCK_TIMEOUT}; compaction yields.`,
+          { cause: error }
+        )
+      }
+
+      throw error
+    }
   }
 
   private async commit(runtime: DuckDbQueryRuntime, dataset: DatasetDefinition): Promise<void> {
