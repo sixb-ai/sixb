@@ -27,7 +27,10 @@ export interface LakeRetentionOptions {
    * Default: 7 days. At least 1 hour.
    */
   readonly keepVersionsForMs?: number
-  /** How long a file no kept version reads stays in storage before it is deleted. Default: 7 days. */
+  /**
+   * How long a file no kept version reads stays in storage before it is deleted.
+   * Default: 7 days. At least 1 hour.
+   */
   readonly deleteFilesAfterMs?: number
   /** Versions to keep whatever their age, such as the versions projections applied. */
   readonly protect?: readonly DatasetVersionRef[]

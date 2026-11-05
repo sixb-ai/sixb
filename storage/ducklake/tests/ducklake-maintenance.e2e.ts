@@ -344,6 +344,16 @@ describe("DuckLakeStorage retention", () => {
     )
   })
 
+  // Regression proof: remove the deleteFilesAfterMs floor from resolveRetention. Orphan deletion
+  // then removes the files another process's uncommitted write already put in the data path.
+  test("refuses to delete files less than an hour old", async () => {
+    const rejected = storage.maintenance.applyRetention({ deleteFilesAfterMs: HOUR_MS - 1 })
+
+    expect(String(await rejected.catch((error) => error))).toContain(
+      "deleteFilesAfterMs must be at least 3600000 (1 hour)"
+    )
+  })
+
   test("rejects a protected version that is not a DuckLake version", async () => {
     const rejected = storage.maintenance.applyRetention({
       dryRun: true,
