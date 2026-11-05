@@ -398,7 +398,10 @@ export class ConnectorConnectionRunService {
       await this.connectRunAccount(run, account, false)
     } catch (error) {
       if (isSixbError(error) && error.code === "connector.replacement_required") return
-      console.warn("[Sixb] Connecting the only connector account failed; the user can still select it.", error)
+      console.warn(
+        "[Sixb] Connecting the only connector account failed; the user can still select it.",
+        error
+      )
     }
   }
 
