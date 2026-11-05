@@ -1,3 +1,4 @@
+import type { BulkJobsResource } from "../resources/bulk-jobs"
 import type { CommentsResource } from "../resources/comments"
 import type { ContactsResource } from "../resources/contacts"
 import type { CustomFieldsResource } from "../resources/custom-fields"
@@ -28,6 +29,8 @@ import type { ServiceEntryLineItemsResource } from "../resources/service-entry-l
 import type { ServiceRemindersResource } from "../resources/service-reminders"
 import type { ServiceTasksResource } from "../resources/service-tasks"
 import type { SubmittedInspectionFormsResource } from "../resources/submitted-inspection-forms"
+import type { UploadsResource } from "../resources/uploads"
+import type { UsersResource } from "../resources/users"
 import type { VehicleAssignmentsResource } from "../resources/vehicle-assignments"
 import type { VehicleStatusesResource } from "../resources/vehicle-statuses"
 import type { VehicleTypesResource } from "../resources/vehicle-types"
@@ -90,4 +93,9 @@ export interface FleetioClient {
   readonly webhooks: WebhooksResource
   /** Delivery history for webhooks, kept for 30 days. */
   readonly webhookEvents: WebhookEventsResource
+  /** Fleetio's Bulk API, for creating or updating many records at once. */
+  readonly bulkJobs: BulkJobsResource
+  /** File uploads for attaching images and documents to records. */
+  readonly uploads: UploadsResource
+  readonly users: UsersResource
 }

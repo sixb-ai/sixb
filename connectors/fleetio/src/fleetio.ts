@@ -87,7 +87,7 @@ export function fleetio(options: FleetioConnectorOptions): FleetioConnector {
     async connect(context) {
       assertReliabilityOptions(options)
       const restClient = await restAdapter.connect(context)
-      return createFleetioClient(createFleetioHttp(restClient))
+      return createFleetioClient(createFleetioHttp(restClient), context, options.timeoutMs)
     },
   }
 }
