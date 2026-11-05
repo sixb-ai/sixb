@@ -279,6 +279,100 @@ describe("the runner a desktop app starts", () => {
     expect(signInsAsked()).toBe(1)
   })
 
+  // Guard proof: return at once when `signingIn`, showing nothing; a person who closed the approval page
+  // has no way back to it until the code expires, while their message waits.
+  test("shows the approval page again when asked again, with one sign-in", async () => {
+    const { apiUrl, root, notes, signInsAsked } = await project({ auth: true })
+    const runner = start(apiUrl, root)
+
+    await runner.until("signed-out-waiting")
+    runner.send({ type: "allow", folder: notes })
+    await runner.until("sign-in")
+    runner.send({ type: "allow", folder: notes })
+    while (runner.events.filter((event) => event.type === "sign-in").length < 2) {
+      await Bun.sleep(10)
+    }
+    expect(signInsAsked()).toBe(1)
+  })
+
+  // Guard proof: apply commands as they arrive, without `commands`; the allow finishes resolving its
+  // folder after the forget, and a folder taken back takes messages again.
+  test("applies quick changes in order, and what it was last told before it ends", async () => {
+    const { apiUrl, root, notes, allowed } = await project({ auth: false })
+    const runner = start(apiUrl, root)
+
+    await runner.until("connected")
+    for (let turn = 0; turn < 5; turn += 1) {
+      runner.send({ type: "forget", folder: notes })
+      runner.send({ type: "allow", folder: notes })
+    }
+    runner.send({ type: "forget", folder: notes })
+    runner.child.stdin.end()
+    expect(await runner.child.exited).toBe(0)
+
+    expect(JSON.parse(await readFile(allowed, "utf-8"))).toEqual({ [`acme at ${apiUrl}`]: [] })
+  })
+
+  // Guard proof: drop the SIGINT handler; ctrl+c in the terminal running `sixb dev --desktop` kills
+  // this at once, and a running turn renews no lease and records no end.
+  test("outlasts ctrl+c, and ends with its stdin", async () => {
+    const { apiUrl, root, notes, allowed } = await project({ auth: false })
+    const runner = start(apiUrl, root)
+
+    await runner.until("connected")
+    runner.child.kill("SIGINT")
+    runner.send({ type: "allow", folder: notes })
+    await runner.until("folders")
+    runner.child.stdin.end()
+    expect(await runner.child.exited).toBe(0)
+    expect(JSON.parse(await readFile(allowed, "utf-8"))).toEqual({ [`acme at ${apiUrl}`]: [notes] })
+  })
+
+  // Guard proof: drop the sort in profilesSignedInTo; a project with two accounts on this computer runs
+  // as whichever was added first, while `sixb` and the window are on the other.
+  test("prefers the sign-in sixb is using", async () => {
+    const { apiUrl, root, sessions, config, allowed, notes } = await project({ auth: true })
+    await writeFile(
+      config,
+      JSON.stringify({
+        version: 1,
+        currentProfile: "work",
+        profiles: {
+          old: { apiUrl, projectId: "acme", token: "sixb_pat_old" },
+          work: { apiUrl, projectId: "acme", token: "sixb_pat_work" },
+        },
+      })
+    )
+    await writeFile(allowed, JSON.stringify({ [`acme at ${apiUrl}`]: [notes] }))
+    const runner = start(apiUrl, root)
+
+    await runner.until("connected")
+    while (sessions.length === 0) await Bun.sleep(10)
+    expect(sessions[0]?.auth).toBe("Bearer sixb_pat_work")
+  })
+
+  // Guard proof: name it by hostname alone; two local apps on one host share the profile, and each
+  // sign-in overwrites the other's.
+  test("keeps a sign-in apart from another address's, port included", async () => {
+    const { apiUrl, root, notes, config, approve } = await project({ auth: true })
+    const other = { apiUrl: "http://127.0.0.1:1", projectId: "acme", token: "sixb_pat_other" }
+    await writeFile(
+      config,
+      JSON.stringify({ version: 1, currentProfile: "acme", profiles: { acme: other } })
+    )
+    const runner = start(apiUrl, root)
+
+    await runner.until("signed-out-waiting")
+    approve()
+    runner.send({ type: "allow", folder: notes })
+    await runner.until("connected")
+
+    const stored = JSON.parse(await readFile(config, "utf-8"))
+    expect(stored.profiles.acme).toEqual(other)
+    const port = new URL(apiUrl).port
+    expect(stored.profiles[`acme-127.0.0.1-${port}`]).toMatchObject({ apiUrl })
+  })
+
   // Guard proof: resolve the folder for `forget` too, or queue it until signed in; a folder on an
   // unmounted volume, or anyone signed out, can't be taken back, and it takes messages again later.
   test("forgets a folder that's gone, signed out, without asking for a sign-in", async () => {

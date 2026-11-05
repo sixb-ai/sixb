@@ -113,13 +113,17 @@ export async function connect(input: {
   }
 }
 
-/** The profiles signed in to `apiUrl`: the CLI's own sign-in there serves a program beside it. */
+/**
+ * The profiles signed in to `apiUrl`: the CLI's own sign-in there serves a program beside it. The one
+ * `sixb` is using comes first.
+ */
 export async function profilesSignedInTo(apiUrl: string): Promise<readonly string[]> {
   const baseUrl = normalizeApiUrl(apiUrl)
-  const { profiles } = await readConfig()
+  const { profiles, currentProfile } = await readConfig()
   return Object.entries(profiles)
     .filter(([, profile]) => profile.apiUrl === baseUrl && (profile.session || profile.token))
     .map(([name]) => name)
+    .sort((a, b) => Number(b === currentProfile) - Number(a === currentProfile))
 }
 
 /** A sign-in in progress: show the code, open the page, then wait for the person to approve it. */
@@ -160,7 +164,9 @@ export async function startSignInBeside(
   return pendingSignIn(baseUrl, login, (config, project, session) => {
     const taken = config.profiles[project]
     const name =
-      taken && taken.apiUrl !== baseUrl ? `${project}-${new URL(baseUrl).hostname}` : project
+      taken && taken.apiUrl !== baseUrl
+        ? `${project}-${new URL(baseUrl).host.replace(":", "-")}`
+        : project
     return {
       ...config,
       profiles: { ...config.profiles, [name]: { apiUrl: baseUrl, projectId: project, session } },
