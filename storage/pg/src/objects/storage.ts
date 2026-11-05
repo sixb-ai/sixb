@@ -41,6 +41,7 @@ import {
   rowToObject,
 } from "./rows"
 import { createPgSelectedReader } from "./selected-reader"
+import { PgVisibilityStatisticsCatalog } from "./visibility-statistics"
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
@@ -116,6 +117,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
 export class PgObjectStorage implements ObjectStorage {
   private readonly aggregateAdmission?: PgAggregateAdmission
   private readonly reader: PgObjectReader
+  private readonly visibilityStatistics = new PgVisibilityStatisticsCatalog()
 
   constructor(
     private readonly sql: PgStoreClient,
@@ -152,6 +154,7 @@ export class PgObjectStorage implements ObjectStorage {
     return createPgConditionalReader(this.sql, params, {
       aggregateAdmission: this.aggregateAdmission,
       sortIndexes: this.sortIndexes,
+      visibilityStatistics: this.visibilityStatistics,
       queryCapabilities: () => this.queryCapabilities(),
     })
   }

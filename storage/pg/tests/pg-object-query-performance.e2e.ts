@@ -1,15 +1,22 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import type { ObjectQuery } from "@sixb/core"
-import { compileConditionalObjectReadScope } from "@sixb/core/storage"
+import {
+  compileConditionalObjectReadScope,
+  type ObjectQueryPreparationPlan,
+  type ObjectVisibilityKeys,
+} from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createPgConditionalReader } from "../src/objects/conditional-reader"
 import { compilePgObjectCountQuery, compilePgObjectQuery } from "../src/objects/query-compiler"
-import { findPgSortIndexBound, PgSortIndexCatalog } from "../src/objects/query-indexes"
+import { findPgSortIndexRead, PgSortIndexCatalog } from "../src/objects/query-indexes"
+import { preparePgVisibilityIndexes } from "../src/objects/visibility-indexes"
+import { PgVisibilityStatisticsCatalog } from "../src/objects/visibility-statistics"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 
 let storage: PostgresStorage
 let sql: SQL
+let schemaName: string
 const start: ObjectQuery = { kind: "start", objectTypeId: "User" }
 const recent: ObjectQuery = {
   kind: "sort",
@@ -20,6 +27,7 @@ const recent: ObjectQuery = {
 beforeAll(async () => {
   const created = await createTestStorage()
   storage = created.storage
+  schemaName = created.schemaName
   sql = createPgClient({
     connectionString: created.connectionString,
     schemaName: created.schemaName,
@@ -63,7 +71,7 @@ afterAll(async () => {
 async function explain(query: ObjectQuery) {
   const compiled = compilePgObjectQuery("bench", query, {
     includeTotal: false,
-    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
+    sortIndex: await findPgSortIndexRead(sql, new PgSortIndexCatalog(), "bench", query),
   })
   const rows = await sql.unsafe(
     `EXPLAIN (ANALYZE, FORMAT JSON) ${compiled.sql}`,
@@ -158,6 +166,7 @@ test("a member's ordered page reads the same bounded index range", async () => {
     },
     {
       sortIndexes: new PgSortIndexCatalog(),
+      visibilityStatistics: new PgVisibilityStatisticsCatalog(),
       queryCapabilities: () => storage.objects.queryCapabilities(),
     }
   )
@@ -179,6 +188,109 @@ test("a member's ordered page reads the same bounded index range", async () => {
   expect(JSON.stringify(plan)).toContain("sixb_query_")
 })
 
+// Guard removal: have readsFewObjects (visibility-statistics.ts) return false. The outsider's page
+// then walks the sort index through all 50,000 tickets to find none.
+test("a member who sees few objects reads them before ordering them", async () => {
+  // Three owners share the tickets; nobody else owns one.
+  await sql`INSERT INTO objects
+    SELECT 'bench', 'Ticket', lpad(n::text, 5, '0'),
+      jsonb_build_object('openedAt', n, 'owner', jsonb_build_object('type', 'user', 'id', 'usr_' || (n % 3))),
+      now(), now(), 1, 'seed'
+    FROM generate_series(1, 50000) n`
+  await storage.ensureObjectQueryIndexes([
+    {
+      projectId: "bench",
+      objectTypeId: "Ticket",
+      kind: "sort",
+      fields: [{ propertyId: "openedAt" }],
+    },
+  ])
+
+  const keys: ObjectVisibilityKeys = { kind: "user", propertyId: "owner" }
+  const plan: ObjectQueryPreparationPlan = {
+    projectId: "bench",
+    objectTypes: [
+      { objectTypeId: "Ticket", properties: [], indexes: [], links: [], visibility: [keys] },
+    ],
+  }
+  const connection = await sql.reserve()
+  try {
+    await preparePgVisibilityIndexes(connection, schemaName, plan)
+  } finally {
+    connection.release()
+  }
+
+  const page = async (userId: string) => {
+    const statements: { sql: string; args: readonly unknown[] }[] = []
+    const recorded = new Proxy(sql, {
+      get: (target, property, receiver) =>
+        property === "unsafe"
+          ? (text: string, args?: SqlParameter[]) => {
+              statements.push({ sql: text, args: args ?? [] })
+              return target.unsafe(text, args)
+            }
+          : Reflect.get(target, property, receiver),
+    })
+    const user = { type: "user", id: userId } as const
+    const reader = createPgConditionalReader(
+      recorded,
+      {
+        projectId: "bench",
+        scope: compileConditionalObjectReadScope({
+          kind: "conditional",
+          conditions: [
+            {
+              objectTypeId: "Ticket",
+              predicate: { op: "eq", propertyId: "owner", value: user, scalarKind: "userRef" },
+              visibility: { keys: [keys], user },
+            },
+          ],
+        }),
+      },
+      {
+        sortIndexes: new PgSortIndexCatalog(),
+        visibilityStatistics: new PgVisibilityStatisticsCatalog(),
+        queryCapabilities: () => storage.objects.queryCapabilities(),
+      }
+    )
+
+    const result = await reader.queryObjects!({
+      projectId: "bench",
+      query: {
+        kind: "page",
+        pageSize: 10,
+        input: {
+          kind: "sort",
+          input: { kind: "start", objectTypeId: "Ticket" },
+          fields: [{ kind: "property", propertyId: "openedAt", direction: "asc" }],
+        },
+      },
+      includeTotal: false,
+    })
+
+    const statement = statements.at(-1)!
+    const [explained] = await sql.unsafe(
+      `EXPLAIN (ANALYZE, FORMAT JSON) ${statement.sql}`,
+      statement.args as SqlParameter[]
+    )
+    const queryPlan = explained?.["QUERY PLAN"][0]
+    return { ids: result.objects.map((row) => row.primaryId), plan: queryPlan }
+  }
+
+  // An owner sees a third of the tickets: the walk stops at the page's last one.
+  const owner = await page("usr_1")
+  expect(owner.ids.slice(0, 3)).toEqual(["00001", "00004", "00007"])
+  expect(JSON.stringify(owner.plan)).toContain("sixb_query_")
+  expect(visitedRows(owner.plan.Plan)).toBeLessThan(500)
+
+  // The statistics list no key of a reader who owns none: their tickets are read first.
+  const outsider = await page("usr_9")
+  expect(outsider.ids).toEqual([])
+  expect(visitedRows(outsider.plan.Plan)).toBeLessThan(500)
+
+  await sql`DELETE FROM objects WHERE object_type_id = 'Ticket'`
+})
+
 test("a high-fanout traversal pages through indexed endpoints and preserves totals", async () => {
   const traversed: ObjectQuery = {
     kind: "traverse",
@@ -190,7 +302,7 @@ test("a high-fanout traversal pages through indexed endpoints and preserves tota
   const query: ObjectQuery = { kind: "page", pageSize: 40, input: { ...recent, input: traversed } }
   const compiled = compilePgObjectQuery("bench", query, {
     includeTotal: false,
-    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
+    sortIndex: await findPgSortIndexRead(sql, new PgSortIndexCatalog(), "bench", query),
   })
   expect(compiled.traversalProbe?.limit).toBe(1000)
   const probe = compiled.traversalProbe!
@@ -214,7 +326,7 @@ test("a high-fanout traversal pages through indexed endpoints and preserves tota
   const correlated = compilePgObjectQuery("bench", query, {
     includeTotal: false,
     correlatedTraversal: true,
-    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
+    sortIndex: await findPgSortIndexRead(sql, new PgSortIndexCatalog(), "bench", query),
   })
   const rows = await sql.unsafe(
     `EXPLAIN (ANALYZE, FORMAT JSON) ${correlated.sql}`,

@@ -177,7 +177,9 @@ await migrateStorage(storage, {
 ```
 
 `security` lets preparation index the roles' view conditions; without it, the indexes an earlier
-preparation built for them stay as they are. Passing only `storage` retains schema-only migration. Providers without query preparation,
+preparation built for them stay as they are. A member's ordered page walks a sort index, unless
+the statistics on those conditions list none of the member's keys: such a member sees few objects,
+which their page reads first through the condition's index, then sorts. Passing only `storage` retains schema-only migration. Providers without query preparation,
 including SQLite and in-memory storage, continue normally; explicitly calling
 `prepareObjectQueries` or `db prepare` on them reports the unsupported capability.
 

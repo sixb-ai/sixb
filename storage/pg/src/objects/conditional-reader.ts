@@ -5,12 +5,14 @@ import type {
   ObjectQueryCapabilities,
   ObjectReadStorage,
 } from "@sixb/core/storage"
+import type { SQLClient } from "../pg-client"
 import { type PgStoreClient, runPgRepeatableReadTransaction } from "../transactions"
 import type { PgAggregateAdmission } from "./aggregate-admission"
 import type { PgSortIndexCatalog } from "./query-indexes"
 import { compilePgConditionalObjectReadSource } from "./read-scope"
 import { PgObjectReader } from "./reader"
 import { createPgScopedReader } from "./scoped-reader"
+import { type PgVisibilityStatisticsCatalog, readsFewObjects } from "./visibility-statistics"
 
 /**
  * Read objects and links through relations that apply the scope's conditions as they are read.
@@ -28,11 +30,26 @@ export function createPgConditionalReader(
   options: {
     aggregateAdmission?: PgAggregateAdmission
     sortIndexes: PgSortIndexCatalog
+    visibilityStatistics: PgVisibilityStatisticsCatalog
     queryCapabilities: () => ObjectQueryCapabilities
   }
 ): ObjectReadStorage {
   const source = compilePgConditionalObjectReadSource(params.projectId, params.scope)
-  const reader = new PgObjectReader(sql, source, options.aggregateAdmission, options.sortIndexes)
+
+  const fewObjects = (client: SQLClient, objectTypeId: string) => {
+    const condition = params.scope.conditions.find((item) => item.objectTypeId === objectTypeId)
+    return condition
+      ? readsFewObjects(client, options.visibilityStatistics, condition)
+      : Promise.resolve(false)
+  }
+
+  const reader = new PgObjectReader(
+    sql,
+    source,
+    options.aggregateAdmission,
+    options.sortIndexes,
+    fewObjects
+  )
 
   return createPgScopedReader(
     {
@@ -40,7 +57,7 @@ export function createPgConditionalReader(
       read: (run, query?: ObjectQuery) =>
         query && hasVectorProfile(query)
           ? runPgRepeatableReadTransaction(sql, (tx) =>
-              run(new PgObjectReader(tx, source, undefined, options.sortIndexes))
+              run(new PgObjectReader(tx, source, undefined, options.sortIndexes, fewObjects))
             )
           : run(reader),
     },

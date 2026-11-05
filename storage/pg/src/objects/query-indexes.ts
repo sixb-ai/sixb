@@ -365,14 +365,22 @@ async function readPgSortIndexes(sql: SQLClient): Promise<readonly PgSortIndex[]
   return indexes
 }
 
+/** How an ordered read walks a prepared sort index. */
+export interface PgSortIndexRead {
+  /** The type whose objects the index orders. */
+  readonly objectTypeId: string
+  /** The rows the index holds; the others are read through its overflow index. */
+  readonly bound: string
+}
+
 /** Only split a flat, bounded ordered read; joins, nested limits and projections keep the
  * general compiler. Its unrestricted fallback always preserves semantics. */
-export async function findPgSortIndexBound(
+export async function findPgSortIndexRead(
   sql: SQLClient,
   catalog: PgSortIndexCatalog,
   projectId: string,
   query: ObjectQuery
-): Promise<string | undefined> {
+): Promise<PgSortIndexRead | undefined> {
   while (query.kind === "expand") query = query.input
   if (query.kind !== "page" && query.kind !== "limit") return undefined
   let input = query.input
@@ -448,5 +456,5 @@ export async function findPgSortIndexBound(
     matches.push(index)
   }
   matches.sort((a, b) => (b.equality?.length ?? 0) - (a.equality?.length ?? 0))
-  return matches[0] ? sortIndexBound(matches[0]) : undefined
+  return matches[0] ? { objectTypeId, bound: sortIndexBound(matches[0]) } : undefined
 }

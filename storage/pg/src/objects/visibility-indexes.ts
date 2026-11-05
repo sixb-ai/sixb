@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import type { ObjectQueryPreparationPlan } from "@sixb/core/storage"
+import type { ObjectQueryPreparationPlan, ObjectVisibilityKeys } from "@sixb/core/storage"
 import type { ReservedSQL } from "../pg-client"
 import { runPgTransactionOn } from "../transactions"
 import { objectPartitionName } from "./partitions"
@@ -61,13 +61,20 @@ function visibilityIndexes(plan: ObjectQueryPreparationPlan): VisibilityIndex[] 
 
     return (type.visibility ?? []).map((keys) => {
       const expression = compilePgVisibilityKeys(keys)
-
-      // Statistics cannot be partial, so projects sharing a schema share those of one expression.
-      const statistics = `sixb_visibility_stats_${digest(`${partition}:${expression}`, 24)}`
+      const statistics = visibilityStatisticsName(type.objectTypeId, keys)
       const name = `sixb_visibility_${digest(`${partition}:${plan.projectId}:${expression}`, 32)}`
       return { objectTypeId: type.objectTypeId, partition, expression, name, statistics }
     })
   })
+}
+
+/**
+ * The statistics on a condition's keys. Statistics cannot be partial, so projects sharing a schema
+ * share those of one expression.
+ */
+export function visibilityStatisticsName(objectTypeId: string, keys: ObjectVisibilityKeys): string {
+  const expression = compilePgVisibilityKeys(keys)
+  return `sixb_visibility_stats_${digest(`${objectPartitionName(objectTypeId)}:${expression}`, 24)}`
 }
 
 /** Build one index; a condition PostgreSQL cannot index keeps its reads right, and is reported. */
