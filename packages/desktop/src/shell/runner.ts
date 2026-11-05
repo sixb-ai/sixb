@@ -6,6 +6,8 @@ export const RUNNER_BINARY = "sixb-runner"
 
 /** How long a person's shell gets to say what their PATH is. */
 const LOGIN_SHELL_WAIT_MS = 3_000
+/** How long a page waits to hear which folders are allowed, before asking for one instead. */
+const FOLDERS_WAIT_MS = 10_000
 /** How long the runner gets to end a running turn and close its sessions. */
 const STOP_WAIT_MS = 12_000
 const RESTART_WAIT_MS = { first: 2_000, longest: 60_000 } as const
@@ -97,7 +99,14 @@ export class DesktopRunner {
   /** The folders allowed, once the runner knows: a page asking early mustn't take them for none. */
   folders(): Promise<readonly string[]> {
     if (this.foldersKnown) return Promise.resolve(this.folderList)
-    return new Promise((resolve) => this.waitingForFolders.push(resolve))
+    return new Promise((resolve) => {
+      // A runner that can't read its config keeps trying, and a message mustn't wait on that for good.
+      const timer = setTimeout(() => this.answerFolders(), FOLDERS_WAIT_MS)
+      this.waitingForFolders.push((folders) => {
+        clearTimeout(timer)
+        resolve(folders)
+      })
+    })
   }
 
   allow(folder: string): void {
@@ -157,6 +166,7 @@ export class DesktopRunner {
         return
       // Nothing runs in the list on file until it's signed in: none, so the next message asks, and
       // answering signs in. It would otherwise wait on a sign-in nobody was asked for.
+      case "signed-out":
       case "signed-out-waiting":
         this.folderList = []
         this.answerFolders()
@@ -172,6 +182,7 @@ export class DesktopRunner {
         this.folderList = []
         if (typeof event.message === "string") this.options.onProblem(event.message)
         return
+      case "session.lost":
       case "error":
         if (typeof event.message === "string") this.options.onProblem(event.message)
     }
@@ -217,12 +228,17 @@ export async function runnerEnvironment(
   runnerDir: string,
   base: NodeJS.ProcessEnv
 ): Promise<NodeJS.ProcessEnv> {
-  const shellPath = await loginShellPath(base.SHELL).catch(() => null)
+  const shell = await readLoginShell(base.SHELL).catch(() => null)
   const env = Object.fromEntries(
     // What a terminal `sixb dev` was told about its own project is no business of this one.
     Object.entries(base).filter(([name]) => !name.startsWith("SIXB_"))
   )
-  return { ...env, PATH: [shellPath ?? base.PATH ?? "", runnerDir].join(delimiter) }
+  return {
+    ...env,
+    PATH: [shell?.path ?? base.PATH ?? "", runnerDir].join(delimiter),
+    // Where `sixb` keeps its sign-in, and so what the agent's commands are kept from.
+    ...(shell?.configHome ? { XDG_CONFIG_HOME: shell.configHome } : {}),
+  }
 }
 
 /**
@@ -236,14 +252,23 @@ export async function runnerEnvironment(
  * what it started can hold the pipe open long after it's gone. A startup file that waits on a person
  * mustn't stop the agent.
  */
-function loginShellPath(shell: string | undefined): Promise<string | null> {
+function readLoginShell(
+  shell: string | undefined
+): Promise<{ readonly path: string; readonly configHome: string } | null> {
   if (!shell) return Promise.resolve(null)
   return new Promise((resolve) => {
     // `spawn`, not `execFile`, which ignores `detached`.
-    const child = spawn(shell, ["-ilc", 'printf "__SIXB_PATH__%s__SIXB_PATH__" "$PATH"'], {
-      detached: true,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
+    const child = spawn(
+      shell,
+      ["-ilc", 'printf "__SIXB_SHELL__%s\\n%s__SIXB_SHELL__" "$PATH" "$XDG_CONFIG_HOME"'],
+      { detached: true, stdio: ["ignore", "pipe", "ignore"] }
+    )
+    let printed = ""
+    const said = () => {
+      const [path, configHome] =
+        /__SIXB_SHELL__(.*)__SIXB_SHELL__/s.exec(printed)?.[1]?.split("\n") ?? []
+      return path ? { path, configHome: configHome ?? "" } : null
+    }
     const timer = setTimeout(() => {
       // The whole group: it's alone in it, with whatever its startup files began.
       if (child.pid) {
@@ -253,9 +278,9 @@ function loginShellPath(shell: string | undefined): Promise<string | null> {
           // Gone already.
         }
       }
-      resolve(null)
+      // What it said counts, whatever it left holding the pipe.
+      resolve(said())
     }, LOGIN_SHELL_WAIT_MS)
-    let printed = ""
     child.stdout.on("data", (chunk) => {
       printed += String(chunk)
     })
@@ -265,7 +290,7 @@ function loginShellPath(shell: string | undefined): Promise<string | null> {
     })
     child.once("close", () => {
       clearTimeout(timer)
-      resolve(/__SIXB_PATH__(.*)__SIXB_PATH__/.exec(printed)?.[1] ?? null)
+      resolve(said())
     })
   })
 }

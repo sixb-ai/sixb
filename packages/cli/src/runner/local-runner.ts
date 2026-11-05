@@ -42,6 +42,8 @@ export interface LocalRunnerOptions {
   readonly onSessionChange?: (failure: unknown | null) => void
   /** How a running turn keeps the computer awake. By default, `keepAwake`. */
   readonly holdAwake?: () => ReleaseAwake
+  /** What the agent's commands also never read, beyond `deniedPaths`. */
+  readonly alsoDenied?: readonly string[]
 }
 
 /**
@@ -94,7 +96,7 @@ export class LocalRunner {
       openSandbox: ({ workingDirectory, runFiles, credential, signal }) =>
         new LocalSandboxFactory({
           readWritePaths: [runFiles],
-          denyReadPaths: deniedPaths(),
+          denyReadPaths: [...deniedPaths(), ...(options.alsoDenied ?? [])],
           network: { mode: "all" },
         }).create({
           ...(workingDirectory === undefined ? {} : { workingDirectory }),

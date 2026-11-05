@@ -147,7 +147,7 @@ permissions on your API, as you do for the browser.
 own: `pickFolder` returns what the person chose, and `allowFolder(folder)` asks them first.
 
 ```ts
-const about = await desktop?.computer?.about() // { id, name }, or null where it can't run the agent
+const about = await desktop?.computer?.about() // { id, name }, or null where it can't run the agent; rejects if it can, but couldn't start
 const folder = await desktop?.computer?.pickFolder() // the system's dialog; null if they cancel
 ```
 

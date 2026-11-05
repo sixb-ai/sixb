@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DesktopRunner, type RunnerProcess, runnerEnvironment } from "../src/shell/runner"
@@ -120,6 +120,36 @@ describe("the runner, from the shell's main process", () => {
     expect(await desktop.folders()).toEqual(["/work/notes"])
   })
 
+  // Guard proof: leave out the limit in folders(); a runner that can't read its config never says, and
+  // the first message holds the composer, with Cloud out of reach, until someone mends the file.
+  test("stops waiting to hear the folders, in the end", async () => {
+    jest.useFakeTimers()
+    const { desktop } = runner()
+    desktop.start()
+    const folders = desktop.folders()
+    jest.advanceTimersByTime(10_000)
+    expect(await folders).toEqual([])
+  })
+
+  // Guard proof: drop this case; for the seconds a runner takes to stop and start again, a message
+  // takes the old list as allowed, and waits on a sign-in nobody was asked for.
+  test("offers no folders from the moment a sign-in ends", async () => {
+    const { desktop, started } = runner()
+    desktop.start()
+    started[0]?.say({ type: "folders", folders: ["/work/notes"] })
+    started[0]?.say({ type: "signed-out" })
+    expect(await desktop.folders()).toEqual([])
+  })
+
+  // Guard proof: leave `session.lost` unhandled; a folder past the project's limit on sessions reads as
+  // offline, with nothing anywhere to say why.
+  test("reports a folder whose session it can't hold", () => {
+    const { desktop, started, problems } = runner()
+    desktop.start()
+    started[0]?.say({ type: "session.lost", folder: "/work/notes", message: "Too many." })
+    expect(problems).toEqual(["Too many."])
+  })
+
   // Guard proof: drop `unsent` and write only to a running process; a folder picked during a restart
   // is shown as chosen and never takes a message.
   test("hands over what was chosen while it wasn't running", async () => {
@@ -226,13 +256,44 @@ describe("the runner's environment", () => {
     const shell = join(root, "shell")
     await writeFile(
       shell,
-      '#!/bin/sh\n[ "$(ps -o pgid= -p $$ | tr -d " ")" = "$$" ] && printf "__SIXB_PATH__/from/shell__SIXB_PATH__"\n',
+      '#!/bin/sh\n[ "$(ps -o pgid= -p $$ | tr -d " ")" = "$$" ] && printf "__SIXB_SHELL__/from/shell\\n/from/config__SIXB_SHELL__"\n',
       { mode: 0o755 }
     )
 
     const env = await runnerEnvironment("/app/runner", { SHELL: shell, PATH: "/usr/bin" })
 
     expect(env.PATH).toBe("/from/shell:/app/runner")
+    // Guard proof: leave it out; an app opened from the Dock keeps a sign-in where `sixb login` doesn't,
+    // and the agent's commands aren't kept from the one that does.
+    expect(env.XDG_CONFIG_HOME).toBe("/from/config")
+  })
+
+  // Guard proof: answer null at the limit; a startup file that leaves something holding the pipe sends
+  // the agent out with a bare PATH, though the shell had said what it was.
+  test("keeps what the shell said, though something it started holds the pipe", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sixb-desktop-shell-"))
+    cleanups.push(() => rm(root, { recursive: true, force: true }))
+    const shell = join(root, "shell")
+    const said = join(root, "said")
+    await writeFile(
+      shell,
+      `#!/bin/sh\nprintf "__SIXB_SHELL__/from/shell\\n__SIXB_SHELL__"\ntouch "${said}"\nsleep 30\n`,
+      { mode: 0o755 }
+    )
+
+    jest.useFakeTimers()
+    const env = runnerEnvironment("/app/runner", { SHELL: shell, PATH: "/usr/bin" })
+    // Real turns of the loop, with no clock, for the shell to get that far and its output to arrive.
+    for (let turn = 0; turn < 20_000; turn += 1) {
+      const there = await stat(said).then(
+        () => true,
+        () => false
+      )
+      if (there && turn % 200 === 199) break
+    }
+    jest.advanceTimersByTime(3_000)
+
+    expect((await env).PATH).toBe("/from/shell:/app/runner")
   })
 
   // Guard proof: rely on execFile's own timeout in loginShellPath; a .zshrc that attaches tmux or waits
