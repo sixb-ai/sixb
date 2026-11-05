@@ -329,6 +329,34 @@ describe("visibility keys", () => {
     expect(await visibilityStatistics()).toEqual([])
   })
 
+  // Guard removal: drop the project filter of dropUnusedVisibilityIndexes, or its `kept.some`
+  // check. The other project's index, or the statistics it still uses, go with this project's.
+  test("a project drops only its own indexes, and statistics another one uses stay", async () => {
+    const team = viewCondition(eq("visibility", "team"))
+    const prepare = (id: string, conditions: readonly ViewCondition[]) =>
+      migrateStorage(storage, {
+        projectId: id,
+        ontology,
+        security: { listViewConditions: () => conditions },
+      })
+
+    await prepare(projectId, [team])
+    const own = await visibilityIndexes()
+    await prepare("other-project", [team])
+    const both = await visibilityIndexes()
+
+    expect(both).toHaveLength(2)
+    expect(await visibilityStatistics()).toHaveLength(1)
+
+    await prepare(projectId, [])
+    expect(await visibilityIndexes()).toEqual(both.filter((name) => !own.includes(name)))
+    expect(await visibilityStatistics()).toHaveLength(1)
+
+    await prepare("other-project", [])
+    expect(await visibilityIndexes()).toEqual([])
+    expect(await visibilityStatistics()).toEqual([])
+  })
+
   test("a condition PostgreSQL cannot index is reported, and read row by row", async () => {
     const tagged = viewCondition(contains("tags", "urgent"))
 
