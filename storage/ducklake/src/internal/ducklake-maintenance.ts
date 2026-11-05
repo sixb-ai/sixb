@@ -96,14 +96,24 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     }
 
     const plan = await this.planExpiry(retention, protect)
-    const expiredVersions = await this.expireSnapshots(plan.expirable, retention.dryRun)
 
-    const files = await this.deleteScheduledFiles(retention)
+    // Another pass on the same catalog may run each step at the same time, from another process:
+    // the step that loses the race yields, its work done by the other pass or left to the next.
+    const expired = await yieldingToConcurrentPass(
+      () => this.expireSnapshots(plan.expirable, retention.dryRun),
+      0
+    )
+    const files = await yieldingToConcurrentPass(() => this.deleteScheduledFiles(retention), {
+      deleted: 0,
+      hasMore: true,
+    })
 
     // Orphans are files no catalog row knows. Listing the whole data path is the costly part of
     // their search, so it waits for a pass that finds no backlog left.
-    const orphanedFiles =
-      plan.hasMore || files.hasMore ? 0 : await this.deleteOrphanedFiles(retention)
+    const backlog = plan.hasMore || files.value.hasMore || expired.yielded
+    const orphaned = backlog
+      ? { value: 0, yielded: false }
+      : await yieldingToConcurrentPass(() => this.deleteOrphanedFiles(retention), 0)
 
     if (!retention.dryRun) {
       this.connections.markLocalCatalogChanged()
@@ -113,11 +123,11 @@ export class DuckLakeMaintenance implements LakeMaintenance {
       dryRun: retention.dryRun,
       keepVersionsForMs: retention.keepVersionsForMs,
       deleteFilesAfterMs: retention.deleteFilesAfterMs,
-      expiredVersions,
+      expiredVersions: expired.value,
       keptVersions: plan.keptVersions,
-      deletedFiles: files.deleted,
-      orphanedFiles,
-      hasMore: plan.hasMore || files.hasMore,
+      deletedFiles: files.value.deleted,
+      orphanedFiles: orphaned.value,
+      hasMore: backlog || orphaned.yielded,
     }
   }
 
@@ -394,6 +404,42 @@ export class DuckLakeMaintenance implements LakeMaintenance {
   private aliasSql(): string {
     return quoteSqlString(duckLakeAlias(this.options))
   }
+}
+
+/**
+ * Runs one retention step, or yields if another retention pass on the same catalog won a race
+ * for it. On PostgreSQL, two passes expiring or deleting the same rows at once fail the later
+ * transaction ("could not serialize access due to concurrent update") before it changes anything.
+ * Two passes deleting the same files on a local data path also race on the files themselves: the
+ * later one fails on a file the other removed. A stale plan, run after the other pass committed,
+ * finds nothing left and succeeds.
+ */
+async function yieldingToConcurrentPass<T>(
+  step: () => Promise<T>,
+  yielded: T
+): Promise<{ readonly value: T; readonly yielded: boolean }> {
+  try {
+    return { value: await step(), yielded: false }
+  } catch (error) {
+    if (lostToConcurrentPass(error)) {
+      return { value: yielded, yielded: true }
+    }
+
+    throw error
+  }
+}
+
+function lostToConcurrentPass(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  return (
+    error.message.includes("could not serialize access due to concurrent") ||
+    error.message.includes("Transaction conflict") ||
+    (error.message.includes("Could not remove file") &&
+      error.message.includes("No such file or directory"))
+  )
 }
 
 function resolveRetention(options: LakeRetentionOptions): Retention {

@@ -122,6 +122,9 @@ searched only on a pass with no backlog left, since the search lists the whole d
 is catalog-only and takes no lock on reads; only file deletion waits for this provider's reads,
 for as long as the deletion itself.
 
+Two passes may overlap, from two processes on a PostgreSQL catalog: the step that loses a race
+for the same rows or files yields, and the report says `hasMore`.
+
 `deleteFilesAfterMs` is at least an hour, for both deletions. A write in another process puts its
 files in the data path before it commits, where no catalog row knows them yet: deleting orphans
 younger than that left a committed version unreadable. Reads in other processes are not waited
