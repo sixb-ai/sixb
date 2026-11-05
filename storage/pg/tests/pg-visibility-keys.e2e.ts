@@ -66,8 +66,22 @@ const contains = (propertyId: string, value: unknown): ObjectQueryPredicate => (
 const or = (...items: ObjectQueryPredicate[]): ObjectQueryPredicate => ({ op: "or", items })
 const and = (...items: ObjectQueryPredicate[]): ObjectQueryPredicate => ({ op: "and", items })
 
-/** Ids a key could confuse: quotes and separators as jsonb prints them, and the keys' own forms. */
-const oddIds = ["usr_1", 'a"b', "a\\b", 'a", "b', 'q", "usr_1', "x\u001fy", "é", "*", "u:usr_1"]
+/**
+ * Ids a key could confuse: quotes and separators as jsonb prints them, and the keys' own forms. In
+ * a list, `z", ` printed before `a"b` reads `z\", ", "a\"b`, whose first `", "` is inside it.
+ */
+const oddIds = [
+  "usr_1",
+  'z", ',
+  'a"b',
+  "a\\b",
+  'a", "b',
+  'q", "usr_1',
+  "x\u001fy",
+  "é",
+  "*",
+  "u:usr_1",
+]
 
 /**
  * Ids too long for a GIN entry once escaped, which keys leave out: the index would refuse them,

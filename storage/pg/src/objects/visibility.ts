@@ -10,8 +10,9 @@ import { literal } from "./sql-text"
  * The expression is IMMUTABLE and holds its values inline, so PostgreSQL can index it and match a
  * read that repeats it, whatever the reader. A user's id is written as jsonb prints it between its
  * quotes: that is how a list's ids come out of `jsonb_path_query_array` with no subquery, which an
- * index expression cannot hold. jsonb escapes every `"` and control character inside an id, so
- * `", "` only ever separates two of them, and `\x1f` never appears in one.
+ * index expression cannot hold. An escaped quote holds a `"`, so `\\` and `\"` are first written as
+ * control characters jsonb never prints raw: `", "` then only separates two ids, and `\x1f` never
+ * appears in one. A reader's key is written the same way.
  *
  * A GIN entry holds at most 2,712 bytes, and jsonb prints a character in up to 6 bytes, so ids
  * longer than `MAX_KEYED_ID_LENGTH` characters get no key: a reader with such an id reads the
@@ -29,7 +30,7 @@ export function compilePgVisibilityKeys(keys: ObjectVisibilityKeys): string {
     case "user": {
       // `eq` compares the whole reference, so the property holds exactly a type and a string id.
       const ref = propertySql(keys.propertyId)
-      return `CASE WHEN jsonb_typeof(${ref}) = 'object' AND (${ref} - 'type' - 'id') = '{}'::jsonb AND ${ref} -> 'type' = '"user"'::jsonb AND jsonb_typeof(${ref} -> 'id') = 'string' AND char_length(${ref} ->> 'id') <= ${MAX_KEYED_ID_LENGTH} THEN ARRAY[${text(USER_PREFIX)} || left(substr((${ref} -> 'id')::text, 2), -1)] ELSE ${NO_KEYS} END`
+      return `CASE WHEN jsonb_typeof(${ref}) = 'object' AND (${ref} - 'type' - 'id') = '{}'::jsonb AND ${ref} -> 'type' = '"user"'::jsonb AND jsonb_typeof(${ref} -> 'id') = 'string' AND char_length(${ref} ->> 'id') <= ${MAX_KEYED_ID_LENGTH} THEN ARRAY[${text(USER_PREFIX)} || ${withoutEscapes(`left(substr((${ref} -> 'id')::text, 2), -1)`)}] ELSE ${NO_KEYS} END`
     }
 
     case "users": {
@@ -37,7 +38,9 @@ export function compilePgVisibilityKeys(keys: ObjectVisibilityKeys): string {
       const users = `@.type == "user" && @.id.type() == "string"`
       const keysOf = (filter: string) => {
         const path = text(`strict $[*] ? (${filter}).id`)
-        const ids = `jsonb_path_query_array(${propertySql(keys.propertyId)}, ${path}, '{}', true)::text`
+        const ids = withoutEscapes(
+          `jsonb_path_query_array(${propertySql(keys.propertyId)}, ${path}, '{}', true)::text`
+        )
         const separator = `E'\\x1f'`
         return `coalesce(string_to_array(${text(USER_PREFIX)} || replace(NULLIF(left(substr(${ids}, 3), -2), ''), '", "', ${separator} || ${text(USER_PREFIX)}), ${separator}), ${NO_KEYS})`
       }
@@ -57,7 +60,14 @@ export function compilePgVisibilityKeys(keys: ObjectVisibilityKeys): string {
 
 /** The keys a reader holds: everyone's, and its user's. */
 export function pgVisibilityReaderKeys(user: UserRef | undefined): string[] {
-  return user ? [EVERYONE, `${USER_PREFIX}${JSON.stringify(user.id).slice(1, -1)}`] : [EVERYONE]
+  if (!user) return [EVERYONE]
+
+  // As `withoutEscapes` writes the ids the keys hold.
+  const id = JSON.stringify(user.id)
+    .slice(1, -1)
+    .replaceAll("\\\\", ESCAPED_BACKSLASH)
+    .replaceAll('\\"', ESCAPED_QUOTE)
+  return [EVERYONE, `${USER_PREFIX}${id}`]
 }
 
 /**
@@ -88,6 +98,8 @@ export function compilePgConditionFilter(condition: ObjectReadCondition): {
 }
 
 export const MAX_KEYED_ID_LENGTH = 200
+const ESCAPED_BACKSLASH = "\x1e"
+const ESCAPED_QUOTE = "\x1d"
 // A list whose JSON is this short holds no id whose key would overflow an entry.
 const SHORT_LIST_BYTES = 2000
 const EVERYONE = "*"
@@ -96,6 +108,11 @@ const NO_KEYS = "'{}'::text[]"
 
 function propertySql(propertyId: string): string {
   return `(properties -> ${text(propertyId)}::text)`
+}
+
+/** jsonb's `\\` and `\"` in printed ids, as control characters it never prints raw. */
+function withoutEscapes(printed: string): string {
+  return `replace(replace(${printed}, ${text("\\\\")}, E'\\x1e'), ${text('\\"')}, E'\\x1d')`
 }
 
 function text(value: string): string {
