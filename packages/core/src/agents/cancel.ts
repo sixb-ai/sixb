@@ -8,7 +8,11 @@ import {
 } from "../storage/agents"
 import { isAwaitingApprovalRun, stopAgentTurn } from "./approvals"
 import { AgentRequestError } from "./errors"
-import { publishAgentRunCancel, publishAgentRunFinished } from "./streams/protocol"
+import {
+  publishAgentRunActivity,
+  publishAgentRunCancel,
+  publishAgentRunFinished,
+} from "./streams/protocol"
 
 /**
  * Stop a turn. A queued turn ends here, before any worker starts it. A running turn receives the
@@ -58,6 +62,8 @@ export async function cancelAgentRun(
   }
 
   await requestAgentRunCancel({ ...runtime, storage }, current.id)
+  // A computer running it hears of no cancel on the broker: this brings its next renewal forward.
+  await publishAgentRunActivity(runtime.broker, current, { cancelRequested: true })
   return current
 }
 

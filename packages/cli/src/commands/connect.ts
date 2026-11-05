@@ -6,16 +6,16 @@ import { CliError } from "@sixb/cli-core"
 import { type Connection, connect } from "../lib/connection"
 import { readAllowedFolders, setFoldersAllowed } from "../runner/allowed-folders"
 import { thisComputer } from "../runner/computer"
-import { ComputerConnection, type ComputerEvent } from "../runner/computer-connection"
+import {
+  ComputerConnection,
+  type ComputerEvent,
+  EXIT_SIGNED_OUT,
+  STOP_WAIT_MS,
+} from "../runner/computer-connection"
 import { stopOnHangUp } from "../runner/local-runner"
 import { shortPath } from "../tui/format"
 import { loadSettings } from "../tui/settings"
 import { glyph, tone } from "../ui/theme"
-
-/** Exit status when the person's sign-in ended: a service manager should not just restart this. */
-const EXIT_SIGNED_OUT = 3
-/** How long stopping waits for a running turn to record its end, or the project to answer. */
-const STOP_WAIT_MS = 10_000
 
 /**
  * `sixb connect [folder...]`: keep this computer available without `sixb` open. Turns sent from
@@ -47,16 +47,10 @@ export async function runConnect(options: {
   const finished = new Promise<number>((resolve) => {
     finish = resolve
   })
-  let signedOut = false
   const computer = new ComputerConnection(
     connection,
     (event) => {
-      // Every folder's session ends with the sign-in: once is enough to say so.
-      if (event.type === "signed-out") {
-        if (signedOut) return
-        signedOut = true
-        finish(EXIT_SIGNED_OUT)
-      }
+      if (event.type === "signed-out") finish(EXIT_SIGNED_OUT)
       report(event)
     },
     settings.keepAwake
@@ -83,7 +77,7 @@ export async function runConnect(options: {
 
   const code = await finished
   unhook()
-  if (signedOut) await stopInTime()
+  if (code === EXIT_SIGNED_OUT) await stopInTime()
   process.exit(code)
 }
 

@@ -955,6 +955,16 @@ describe("agent routes", () => {
     ).resolves.toMatchObject({
       records: [{ name: "agent.run.cancel", payload: { runId: request.run.id } }],
     })
+    // A computer running it hears no broker: this is how it knows before its next lease renewal.
+    // Guard proof: drop the publish from cancelAgentRun, or the key's suffix, which the turn's own
+    // "running" would otherwise swallow when it was published first.
+    const { records } = await sixb.broker.read({
+      projectId: sixb.id,
+      streamId: "agents.activity",
+    })
+    expect(records.map((record) => record.payload)).toContainEqual(
+      expect.objectContaining({ runId: request.run.id, status: "running", cancelRequested: true })
+    )
   })
 
   test("accepts a continuation flag in place of text, and neither is rejected", async () => {

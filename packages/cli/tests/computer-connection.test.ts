@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -6,6 +6,7 @@ import { createSixbClient } from "@sixb/client"
 import type { Connection } from "../src/lib/connection"
 import { setFoldersAllowed } from "../src/runner/allowed-folders"
 import { ComputerConnection, type ComputerEvent } from "../src/runner/computer-connection"
+import { LocalRunner } from "../src/runner/local-runner"
 
 // A computer connected to a project, against an API that answers sessions: which folders it holds
 // a session for, and how those follow the list of allowed folders.
@@ -36,7 +37,7 @@ async function folder(name: string): Promise<string> {
   return path
 }
 
-function connected(respond: (status: number) => number = () => 200) {
+function connected(respond: (status: number) => number = () => 200, baseUrl = API) {
   const held = new Map<string, string>()
   const answer = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
@@ -52,7 +53,7 @@ function connected(respond: (status: number) => number = () => 200) {
     return Response.json({ expiresAt: "2026-10-31T09:01:00.000Z", waiting: [] })
   }
   const client = createSixbClient({
-    baseUrl: API,
+    baseUrl,
     fetch: Object.assign(answer, { preconnect: fetch.preconnect }),
   })
   const connection: Connection = {
@@ -91,6 +92,54 @@ async function holding(read: () => string[], folders: readonly string[]) {
 }
 
 describe("a connected computer", () => {
+  // Guard proof: drop `cancelRequested` from onActivity in start; a stop asked for in the app leaves the
+  // agent's commands running until the turn's next lease renewal, up to ten seconds away.
+  test("hears a stop asked for elsewhere at once", async () => {
+    const heard = spyOn(LocalRunner.prototype, "hearStop").mockImplementation(() => {})
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (request, serving) =>
+        serving.upgrade(request) ? undefined : new Response(null, { status: 426 }),
+      websocket: {
+        message(socket) {
+          const event = {
+            schemaVersion: 1,
+            type: "agent.run.activity",
+            projectId: "p",
+            threadId: "thr_1",
+            status: "running",
+            attempt: 1,
+            runsOn: "computer",
+            occurredAt: "2026-11-04T09:00:00.000Z",
+          }
+          // One that isn't a stop first: what it hears from the second alone proves the first passed by.
+          socket.send(JSON.stringify({ type: "activity", event: { ...event, runId: "run_1" } }))
+          socket.send(
+            JSON.stringify({
+              type: "activity",
+              event: { ...event, runId: "run_2", cancelRequested: true },
+            })
+          )
+        },
+      },
+    })
+    try {
+      const a = await folder("a")
+      await setFoldersAllowed(THIS_PROJECT, [a], true)
+      const { computer, until } = connected(undefined, `http://127.0.0.1:${server.port}`)
+      await computer.start()
+      await until((event) => event.type === "folders")
+      for (let turn = 0; turn < 400 && heard.mock.calls.length === 0; turn += 1) await Bun.sleep(5)
+
+      expect(heard.mock.calls).toEqual([["run_2"]])
+      await computer.stop()
+    } finally {
+      heard.mockRestore()
+      server.stop(true)
+    }
+  })
+
   // Guard proof: open a session for every folder a conversation names, or leave reconcile out of
   // start; the computer reads as online where nobody chose, or nowhere.
   test("holds a session for each allowed folder, and for no other", async () => {
@@ -137,6 +186,27 @@ describe("a connected computer", () => {
 
     await setFoldersAllowed(THIS_PROJECT, [a], false)
     await holding(held, [b])
+    await computer.stop()
+  })
+
+  // Guard proof: drop `signedOut` from onSessionChange; whatever stops on this runs once per folder, and
+  // says so as many times.
+  test("says once that the sign-in ended, however many folders knew", async () => {
+    const [a, b] = await Promise.all([folder("a"), folder("b")])
+    await setFoldersAllowed(THIS_PROJECT, [a, b], true)
+    let answered = 0
+    const { computer, events, until } = connected(() => {
+      answered += 1
+      return 401
+    })
+    await computer.start()
+    await until((event) => event.type === "signed-out")
+    for (let turn = 0; turn < 200 && answered < 2; turn += 1) await Bun.sleep(5)
+    // The second answer's own turn of the loop.
+    await Bun.sleep(20)
+
+    expect(answered).toBe(2)
+    expect(events.filter((event) => event.type === "signed-out")).toHaveLength(1)
     await computer.stop()
   })
 
