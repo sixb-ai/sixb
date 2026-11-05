@@ -56,18 +56,20 @@ export async function isFolderAllowed(project: AllowedFor, folder: string): Prom
 
 let lastChange: Promise<unknown> = Promise.resolve()
 
-/**
- * Allow or forget folders for `project`. One at a time here, so that a quick off and on can't undo
- * each other: a folder forgotten stays forgotten.
- */
+/** One at a time here, so that a quick off and on can't undo each other. */
+function oneAtATime(write: () => Promise<void>): Promise<void> {
+  const change = lastChange.then(write)
+  lastChange = change.catch(() => {})
+  return change
+}
+
+/** Allow or forget folders for `project`. A folder forgotten stays forgotten. */
 export function setFoldersAllowed(
   project: AllowedFor,
   changed: readonly string[],
   allowed: boolean
 ): Promise<void> {
-  const change = lastChange.then(() => writeChange(project, changed, allowed))
-  lastChange = change.catch(() => {})
-  return change
+  return oneAtATime(() => writeChange(project, changed, allowed))
 }
 
 /**
@@ -98,7 +100,7 @@ async function writeStored(stored: StoredFolders): Promise<void> {
  * someone signed out can still take a folder back, and it stays taken back.
  */
 export function forgetFolderAt(apiUrl: string, folder: string): Promise<void> {
-  const change = lastChange.then(async () => {
+  return oneAtATime(async () => {
     const stored = await readStored()
     const suffix = ` at ${apiUrl}`
     await writeStored(
@@ -110,8 +112,6 @@ export function forgetFolderAt(apiUrl: string, folder: string): Promise<void> {
       )
     )
   })
-  lastChange = change.catch(() => {})
-  return change
 }
 
 /** Call `changed` whenever the list may have changed. Returns the way to stop. */

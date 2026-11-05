@@ -7,16 +7,13 @@ import {
   type SignedOut,
   startSignInBeside,
 } from "../lib/connection"
+import { errorMessage } from "../lib/errors"
 import { loadSettings } from "../tui/settings"
 import { forgetFolderAt, setFoldersAllowed } from "./allowed-folders"
 import { thisComputer } from "./computer"
-import { ComputerConnection, type ComputerEvent } from "./computer-connection"
-import { stopOnHangUp } from "./local-runner"
+import { ComputerConnection, type ComputerEvent, EXIT_SIGNED_OUT } from "./computer-connection"
+import { stopInTime, stopOnHangUp } from "./local-runner"
 
-/** Exit status when the sign-in ended: the desktop app starts this again, which asks for a new one. */
-const EXIT_SIGNED_OUT = 3
-/** How long stopping waits for a running turn to record its end, or the project to answer. */
-const STOP_WAIT_MS = 10_000
 /** How long until connecting is tried again, after the project didn't answer or anything else. */
 const CONNECT_RETRY_MS = 10_000
 
@@ -34,10 +31,6 @@ export type DesktopRunnerEvent =
 export type DesktopRunnerCommand =
   | { readonly type: "allow"; readonly folder: string }
   | { readonly type: "forget"; readonly folder: string }
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 function parseCommand(line: string): DesktopRunnerCommand | null {
   try {
@@ -63,7 +56,9 @@ export async function runDesktopRunner(options: {
   readonly clientName: string
 }): Promise<void> {
   const { apiUrl, clientName } = options
-  const emit = (event: DesktopRunnerEvent) => process.stdout.write(`${JSON.stringify(event)}\n`)
+  const emit = (event: DesktopRunnerEvent): void => {
+    process.stdout.write(`${JSON.stringify(event)}\n`)
+  }
   const { id, name } = await thisComputer()
   emit({ type: "computer", id, name })
 
@@ -71,17 +66,18 @@ export async function runDesktopRunner(options: {
   let connection: Connection | null = null
   let computer: ComputerConnection | null = null
   let signingIn = false
+  let signInShown: DesktopRunnerEvent | null = null
   let signedOutNow = false
   let retry: ReturnType<typeof setTimeout> | null = null
   // What was allowed before there was a project to allow it for.
-  let allowedMeanwhile: readonly string[] = []
+  let allowedMeanwhile: string[] = []
   let finish: (code: number) => void = () => {}
   const finished = new Promise<number>((resolve) => {
     finish = resolve
   })
 
-  const stopInTime = () => Promise.race([computer?.stop(), Bun.sleep(STOP_WAIT_MS)])
-  const reportFailure = (error: unknown) => emit({ type: "error", message: messageOf(error) })
+  const stop = () => stopInTime(computer)
+  const reportFailure = (error: unknown) => emit({ type: "error", message: errorMessage(error) })
 
   const allow = async (signedIn: Connection, chosen: string) => {
     // As the project keeps it, and the local sandbox compares it: its real path.
@@ -102,6 +98,8 @@ export async function runDesktopRunner(options: {
   const tryConnecting = async (): Promise<void> => {
     if (connection) return
     const result = await firstThatConnects()
+    // A sign-in finishing and a retry coming due can both get here.
+    if (connection) return
     if ("reason" in result) {
       if (result.reason === "unreachable") {
         emit({ type: "unreachable", message: result.message ?? `No answer from ${apiUrl}.` })
@@ -117,20 +115,13 @@ export async function runDesktopRunner(options: {
     signedOutNow = false
     connection = result
     emit({ type: "connected" })
-    const chosen = allowedMeanwhile
-    allowedMeanwhile = []
-    for (const folder of chosen) await allow(result, folder).catch(reportFailure)
+    for (const folder of allowedMeanwhile.splice(0)) hear({ type: "allow", folder })
 
-    let signedOut = false
     computer = new ComputerConnection(
       result,
       (event) => {
-        // Every folder's session ends with the sign-in: once is enough to say so.
-        if (event.type === "signed-out") {
-          if (signedOut) return
-          signedOut = true
-          void stopInTime().finally(() => finish(EXIT_SIGNED_OUT))
-        }
+        // Started again, this asks for a new sign-in.
+        if (event.type === "signed-out") void stop().finally(() => finish(EXIT_SIGNED_OUT))
         emit(event)
       },
       keepAwake
@@ -149,32 +140,45 @@ export async function runDesktopRunner(options: {
   }
 
   const signIn = async (): Promise<void> => {
-    if (connection || signingIn) return
+    if (connection) return
+    if (signingIn) {
+      // They closed the page, or never saw it: asking again is how they get back to it.
+      if (signInShown) emit(signInShown)
+      return
+    }
     signingIn = true
     try {
       const pending = await startSignInBeside(apiUrl, clientName)
-      emit({ type: "sign-in", url: pending.url, userCode: pending.userCode })
+      signInShown = { type: "sign-in", url: pending.url, userCode: pending.userCode }
+      emit(signInShown)
       await pending.complete(new AbortController().signal)
-      signingIn = false
+      // Not to be asked again while connecting finds that out.
+      signedOutNow = false
       connectOrRetry()
     } catch (error) {
+      emit({ type: "sign-in-failed", message: errorMessage(error) })
+    } finally {
       signingIn = false
-      emit({ type: "sign-in-failed", message: messageOf(error) })
+      signInShown = null
     }
   }
 
-  const hear = (command: DesktopRunnerCommand) => {
+  const apply = async (command: DesktopRunnerCommand): Promise<void> => {
     if (command.type === "forget") {
       allowedMeanwhile = allowedMeanwhile.filter((folder) => folder !== command.folder)
-      void forgetFolderAt(normalizeApiUrl(apiUrl), command.folder).catch(reportFailure)
-      return
+      await forgetFolderAt(normalizeApiUrl(apiUrl), command.folder)
+    } else if (connection) {
+      await allow(connection, command.folder)
+    } else {
+      allowedMeanwhile.push(command.folder)
+      if (signedOutNow) void signIn()
     }
-    if (connection) {
-      void allow(connection, command.folder).catch(reportFailure)
-      return
-    }
-    allowedMeanwhile = [...allowedMeanwhile, command.folder]
-    if (signedOutNow) void signIn()
+  }
+
+  /** One at a time, as they came: a folder allowed and then forgotten stays forgotten. */
+  let commands: Promise<void> = Promise.resolve()
+  const hear = (command: DesktopRunnerCommand) => {
+    commands = commands.then(() => apply(command)).catch(reportFailure)
   }
 
   void (async () => {
@@ -189,10 +193,14 @@ export async function runDesktopRunner(options: {
         if (command) hear(command)
       }
     }
-    // The app is gone, however it went: what it started goes too.
+    // The app is gone, however it went: what it started goes too, after what it last asked for.
     if (retry) clearTimeout(retry)
-    void stopInTime().finally(() => finish(0))
+    void commands.then(stop).finally(() => finish(0))
   })()
+
+  // Ctrl+C in the terminal running `sixb dev --desktop` reaches this too. Its stdin closing, as the
+  // app goes, is what ends it, with a running turn's end recorded.
+  process.on("SIGINT", () => {})
 
   const unhook = stopOnHangUp(
     () => computer,
