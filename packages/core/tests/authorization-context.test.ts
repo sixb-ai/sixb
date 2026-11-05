@@ -398,21 +398,18 @@ describe("view conditions", () => {
     const { security } = resolveWith([role("triage", "support", [urgent])])
     const [resolved] = security.listResolvedRoles()
 
-    expect(resolved?.viewConditions?.get("ticket")).toEqual({
-      propertyId: "priority",
-      op: "gt",
-      value: 3,
-      scalarKind: "integer",
-    })
+    expect(resolved?.viewConditions?.get("ticket")).toEqual([
+      { propertyId: "priority", op: "gt", value: 3, scalarKind: "integer" },
+    ])
     expect(Object.isFrozen(resolved?.viewConditions?.get("ticket"))).toBe(true)
+    expect(Object.isFrozen(resolved?.viewConditions?.get("ticket")?.[0])).toBe(true)
   })
 
-  test("one role's conditions on a type combine with or", () => {
+  // Merged with `or`, the two would read through one expression no prepared index holds.
+  test("one role's conditions on a type stay apart, as preparation indexes them", () => {
     const { contextFor } = resolveWith([role("triage", "support", [open, mine])])
 
-    expect(contextFor(["support"]).viewConditions?.get("ticket")).toEqual([
-      { op: "or", items: [openTickets, myTickets] },
-    ])
+    expect(contextFor(["support"]).viewConditions?.get("ticket")).toEqual([openTickets, myTickets])
   })
 
   test("a role that also views a type without a condition shows all of it", () => {

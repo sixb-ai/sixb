@@ -45,10 +45,10 @@ export interface ResolvedRole {
   readonly grants: GrantIndex
   /**
    * What the role's `can.view(Type).where(...)` grants show, per concrete type: the type's
-   * conditions, combined with `or`. A type the role also views without a condition is in
-   * `grants["view:object"]` and not here. Absent means none.
+   * conditions, any of which shows an object. A type the role also views without a condition is
+   * in `grants["view:object"]` and not here. Absent means none.
    */
-  readonly viewConditions?: ReadonlyMap<string, ObjectQueryPredicate>
+  readonly viewConditions?: ReadonlyMap<string, readonly ObjectQueryPredicate[]>
   /** Marking ids this role clears. Absent means none. */
   readonly clearances?: ReadonlySet<string>
 }
@@ -61,8 +61,8 @@ export interface AuthorizationContext {
   readonly roleIds: readonly string[]
   readonly grants: GrantIndex
   /**
-   * The object types the principal views only where a condition matches, with one condition per
-   * role that grants it. A type in `grants["view:object"]` is never here, so a check on that grant
+   * The object types the principal views only where a condition matches, with every condition
+   * its roles put on each. A type in `grants["view:object"]` is never here, so a check on that grant
    * denies these types; only the authorized object reader reads them, through these conditions.
    * Absent means none.
    */

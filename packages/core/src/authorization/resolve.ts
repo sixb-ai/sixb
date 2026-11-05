@@ -53,8 +53,9 @@ export function resolveRoleGrants(role: RoleDefinition, universe: GrantUniverse)
  * Resolve a role's conditional view grants once at startup, from their validated conditions.
  *
  * A condition applies to the type its grant names and to each subtype, as a view grant does.
- * Several conditions on one type combine with `or`, and a type the role also views without a
- * condition drops them: the role shows every object of it.
+ * Several conditions on one type stay apart: the role shows what any of them matches, and each
+ * keeps the index storage prepared for it. A type the role also views without a condition drops
+ * them: the role shows every object of it.
  */
 export function resolveRoleViewConditions(
   conditions: readonly {
@@ -63,7 +64,7 @@ export function resolveRoleViewConditions(
   }[],
   grants: GrantIndex,
   universe: GrantUniverse
-): ReadonlyMap<string, ObjectQueryPredicate> {
+): ReadonlyMap<string, readonly ObjectQueryPredicate[]> {
   const byType = new Map<string, ObjectQueryPredicate[]>()
 
   for (const condition of conditions) {
@@ -79,13 +80,10 @@ export function resolveRoleViewConditions(
   }
 
   return new Map(
-    [...byType].map(([objectTypeId, predicates]) => [objectTypeId, anyOf(predicates)] as const)
+    [...byType].map(
+      ([objectTypeId, predicates]) => [objectTypeId, Object.freeze(predicates)] as const
+    )
   )
-}
-
-function anyOf(predicates: readonly ObjectQueryPredicate[]): ObjectQueryPredicate {
-  if (predicates.length === 1) return predicates[0]!
-  return Object.freeze({ op: "or", items: Object.freeze([...predicates]) })
 }
 
 function expandSelection(
@@ -153,8 +151,8 @@ export function resolveAuthorizationContext(input: {
     for (const markingId of role.clearances ?? []) {
       clearances.add(markingId)
     }
-    for (const [objectTypeId, predicate] of role.viewConditions ?? []) {
-      viewConditions.set(objectTypeId, [...(viewConditions.get(objectTypeId) ?? []), predicate])
+    for (const [objectTypeId, predicates] of role.viewConditions ?? []) {
+      viewConditions.set(objectTypeId, [...(viewConditions.get(objectTypeId) ?? []), ...predicates])
     }
   }
 
