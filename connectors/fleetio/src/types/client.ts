@@ -35,6 +35,8 @@ import type { VehiclesResource } from "../resources/vehicles"
 import type { VendorsResource } from "../resources/vendors"
 import type { VmrsReasonsForRepairResource } from "../resources/vmrs-reasons-for-repair"
 import type { WatchersResource } from "../resources/watchers"
+import type { WebhookEventsResource } from "../resources/webhook-events"
+import type { WebhooksResource } from "../resources/webhooks"
 import type { WorkOrderLineItemsResource } from "../resources/work-order-line-items"
 import type { WorkOrderStatusesResource } from "../resources/work-order-statuses"
 import type { WorkOrdersResource } from "../resources/work-orders"
@@ -85,4 +87,7 @@ export interface FleetioClient {
   readonly inspectionForms: InspectionFormsResource
   readonly submittedInspectionForms: SubmittedInspectionFormsResource
   readonly inspectionSchedules: InspectionSchedulesResource
+  readonly webhooks: WebhooksResource
+  /** Delivery history for webhooks, kept for 30 days. */
+  readonly webhookEvents: WebhookEventsResource
 }

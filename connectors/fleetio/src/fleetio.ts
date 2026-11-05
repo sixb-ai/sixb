@@ -4,7 +4,11 @@ import {
   rest,
   shouldRetryRestRequest,
 } from "@sixb/connector-rest"
-import type { ConnectorAdapter } from "@sixb/core"
+import {
+  type ConnectorAdapter,
+  resolveWebhookVerification,
+  type WebhookDefinition,
+} from "@sixb/core"
 import { createFleetioClient } from "./client"
 import { FleetioConfigurationError } from "./errors"
 import { createFleetioHttp } from "./http"
@@ -16,6 +20,7 @@ import type {
   FleetioRetryContext,
   FleetioRetryPolicy,
 } from "./types"
+import { createFleetioEventsWebhook, FLEETIO_CONNECTOR_WEBHOOK } from "./webhooks"
 
 const DEFAULT_BASE_URL = "https://secure.fleetio.com/api/"
 const DEFAULT_API_VERSION = "2025-05-05"
@@ -27,6 +32,8 @@ export type FleetioConnector = ConnectorAdapter<"fleetio", FleetioClient>
  * Fleetio connector built on `@sixb/connector-rest`.
  *
  * Returns a typed client grouped by resource (`workOrders`, `vehicles`, `issues`, `parts`, …).
+ * Passing `onEvent` also registers an inbound webhook that verifies Fleetio's signature and forwards
+ * every delivery to the handler.
  *
  * ```ts
  * export const fleetioConnector = defineConnector("fleetio", fleetio({
@@ -61,6 +68,22 @@ export function fleetio(options: FleetioConnectorOptions): FleetioConnector {
 
   return {
     type: "fleetio",
+    webhooks: options.onEvent
+      ? [
+          createFleetioEventsWebhook(
+            {
+              onEvent: options.onEvent,
+              // The secret usually arrives from the environment, so the decision is made here
+              // rather than by the type: a secret, an explicit opt-in, or no webhook.
+              ...resolveWebhookVerification(FLEETIO_CONNECTOR_WEBHOOK, {
+                credential: options.webhookSecret,
+                allowUnverified: options.webhookAllowUnverified,
+              }),
+            },
+            FLEETIO_CONNECTOR_WEBHOOK
+          ) as WebhookDefinition<unknown, FleetioClient>,
+        ]
+      : undefined,
     async connect(context) {
       assertReliabilityOptions(options)
       const restClient = await restAdapter.connect(context)

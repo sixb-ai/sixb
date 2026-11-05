@@ -1,3 +1,5 @@
+import type { FleetioEventHandler } from "./events"
+
 export type FleetioCredentialResolver = string | (() => string | Promise<string>)
 
 export type FleetioRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
@@ -35,4 +37,18 @@ export interface FleetioConnectorOptions {
   readonly minDelayMs?: number
   /** Retry policy. By default reads retry transient failures and writes retry only a 429. */
   readonly retry?: FleetioRetryPolicy
+  /**
+   * Handler for inbound webhook deliveries. Providing it registers the connector's `events`
+   * webhook route; omit it and the connector exposes no inbound HTTP surface.
+   */
+  readonly onEvent?: FleetioEventHandler
+  /** The webhook's secret, from "View Secret" in Fleetio or `shared_key` on the API response. */
+  readonly webhookSecret?: string
+  /**
+   * Register the inbound webhook even though it cannot be verified.
+   *
+   * Without `webhookSecret` the route accepts unverified requests from anyone who can
+   * reach it, so the connector refuses to build it unless this says otherwise.
+   */
+  readonly webhookAllowUnverified?: boolean
 }
