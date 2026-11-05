@@ -236,7 +236,7 @@ describe("DuckLakeStorage retention", () => {
   // the dataset's latest version, and retention expires the version it really holds.
   test("keeps the latest version, not a later flush of its inlined rows", async () => {
     const items = defineDataset("raw.items", {
-      schema: [col("id", "string"), col("revision", "int64")],
+      schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
       primaryKey: "id",
       sequenceBy: "revision",
     })
@@ -245,7 +245,9 @@ describe("DuckLakeStorage retention", () => {
     // A seed file, then updates of its rows, inlined: flushing them deletes rows of the file.
     const upsert = async (rows: readonly { id: string; revision: number }[]) => {
       const merge = await storage.beginMerge({ dataset: items })
-      await merge.writeChanges(rows.map((row) => change.upsert(row)))
+      await merge.writeChanges(
+        rows.map((row) => change.upsert({ ...row, name: `revision ${row.revision}` }))
+      )
       return (await merge.commit()).version
     }
     await upsert(Array.from({ length: 20 }, (_, n) => ({ id: `item_${n}`, revision: 0 })))
@@ -271,6 +273,7 @@ describe("DuckLakeStorage retention", () => {
     expect(await collectRows(storage.readRows({ datasetId: items.id }))).toContainEqual({
       id: "item_1",
       revision: "3",
+      name: "revision 3",
     })
   })
 
