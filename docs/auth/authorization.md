@@ -133,10 +133,12 @@ Limits:
   their handlers, and an action can create an object its requester cannot see.
 
 On PostgreSQL, `sixb db migrate` indexes each condition, so a member's reads find the objects they
-see instead of checking every one. Two shapes are still checked object by object: a negated
-`currentUser()` (`neq(currentUser())`, or `not` around it), and `currentUser()` required in two
-places at once (`owner` is me *and* `watchers` contains me). Preparation warns about each
-condition it cannot index.
+see instead of checking every one. Three shapes are still checked object by object, and
+preparation warns about each:
+
+- a negated `currentUser()`: `neq(currentUser())`, or `not` around it;
+- `currentUser()` required twice at once: `owner` is me *and* `watchers` contains me;
+- `contains` on a fixed value: `tags` contains `"vip"`.
 
 ## Choose who sees the app's sections
 
