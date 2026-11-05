@@ -134,7 +134,7 @@ export function compilePgObjectQuery(
       source,
     })
   )
-  if (options.sortIndexBound && source === DEFAULT_OBJECT_QUERY_SOURCE) {
+  if (options.sortIndexBound) {
     let bounded = query
     const expansions: (readonly ObjectExpansion[])[] = []
     while (bounded.kind === "expand") {
@@ -168,7 +168,8 @@ export function compilePgObjectQuery(
           source,
         })
       }
-      compiled = { ...compiled, ...rows }
+      // The rows replace the wrapped statement, so they take the source's relations again.
+      compiled = { ...compiled, ...source.wrapStatement(rows.sql, rows.args) }
     }
   }
   const traversal = !options.correlatedTraversal && boundedTraversal(query)
