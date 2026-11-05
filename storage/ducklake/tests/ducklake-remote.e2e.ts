@@ -267,16 +267,17 @@ describe("DuckLakeStorage remote catalogs", () => {
     }
   })
 
-  // Regression proof: in DuckLakeMaintenance, stop keeping each dataset's latest version, or
-  // ignore `protect`. The idle dataset's version, or the protected one, then expires.
-  test("keeps needed versions during maintenance of a PostgreSQL catalog", async () => {
+  // Regression proof: in DuckLakeMaintenance.planExpiry, expire the last version of each dataset,
+  // or ignore `protect`. The idle dataset's version, or the protected one, then expires.
+  test("keeps needed versions during retention of a PostgreSQL catalog", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-maintenance-"))
     const idle = defineDataset(`raw.pg.idle.${randomId()}`, { schema: [col("id", "string")] })
     const busy = defineDataset(`raw.pg.busy.${randomId()}`, { schema: [col("id", "string")] })
-    const storage = new DuckLakeStorage({
+    const options: DuckLakeStorageOptions = {
       catalog: postgresCatalog(),
       dataPath: join(rootDir, "data"),
-    })
+    }
+    const storage = new DuckLakeStorage(options)
 
     const commit = async (dataset: DatasetDefinition, id: string) => {
       const write = await storage.beginWrite({ dataset, mode: "snapshot" })
@@ -293,13 +294,21 @@ describe("DuckLakeStorage remote catalogs", () => {
       const applied = await commit(busy, "reading_2")
       await commit(busy, "reading_3")
 
-      const report = await storage.runMaintenance({
-        expireOlderThan: "0 seconds",
-        deleteOlderThan: "0 seconds",
+      // Backdate the catalog's history instead of waiting for it to age.
+      const runtime = await (
+        storage as unknown as { connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+      ).connections.attachedRuntime()
+      await runtime.run(`
+        UPDATE ${duckLakeMetadataTableName(options, "ducklake_snapshot")}
+        SET snapshot_time = snapshot_time - INTERVAL '2 hours'
+      `)
+
+      const report = await storage.maintenance.applyRetention({
+        keepVersionsForMs: 60 * 60 * 1000,
         protect: [{ datasetId: busy.id, versionId: applied.versionId }],
       })
 
-      expect(report.keptSnapshots).toBe(2)
+      expect(report.keptVersions).toBe(1)
       expect(await storage.getVersion(busy.id, replaced.versionId)).toBeNull()
       expect(await storage.getVersion(busy.id, applied.versionId)).not.toBeNull()
       expect((await storage.getLatestVersion(idle.id))?.versionId).toBe(idleVersion.versionId)

@@ -60,7 +60,7 @@ bun add @sixb/cli
 | `sixb build` | Bundle the project runtime and the app |
 | `sixb db migrate` | Run adapter-owned database migrations ahead of, or instead of, role startup |
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
-| `sixb lake cleanup` | Run provider-supported lake maintenance cleanup |
+| `sixb lake cleanup` | Expire replaced lake versions and delete the files only they read |
 | `sixb init [dir]` | Initialize a new sixb project in a directory. In a terminal, asks for the directory when it is left out. |
 | `sixb help` | Show help |
 | `sixb --version` | Show version |
@@ -131,8 +131,8 @@ supervisor disappears, so a stuck startup cannot leave its process group running
 | `--json` | profile and credential commands | false | Print machine-readable JSON |
 | `--outdir <path>` | `build` | `.sixb/dist` | Build output directory |
 | `--dry-run` | `lake cleanup` | false | Preview cleanup without changing storage |
-| `--expire-older-than <interval>` | `lake cleanup` | `7 days` | Snapshot expiration window |
-| `--delete-older-than <interval>` | `lake cleanup` | expire window | File deletion window |
+| `--keep-versions-for <duration>` | `lake cleanup` | `7d` | How long a replaced version stays readable, at least `1h` |
+| `--delete-files-after <duration>` | `lake cleanup` | `7d` | How long files no kept version reads wait before deletion |
 
 Options are command-scoped. Unknown options, missing values, duplicate scalar options, and extra
 positionals fail before the command runs. Repeatable options such as `--group` and the typed
@@ -208,10 +208,10 @@ sixb db migrate
 # Check lake dataset definitions for drift during deploy
 sixb lake check
 
-# Preview or run lake maintenance cleanup
+# Preview or run lake retention
 sixb lake cleanup --dry-run
-sixb lake cleanup --expire-older-than "1 hour" --delete-older-than "1 hour"
-sixb lake cleanup --expire-older-than "7 days" --delete-older-than "7 days"
+sixb lake cleanup --keep-versions-for 1h --delete-files-after 1h
+sixb lake cleanup --keep-versions-for 14d
 
 # Scaffold a new project without installing the CLI
 bun create sixb my-project
@@ -378,11 +378,12 @@ The lake is opened only when a role actually does lake work — API dataset rout
 pipeline jobs, and projection jobs. Write paths re-validate their target dataset through the lake
 provider's `createDataset` before committing, so drift still fails clearly even between deploys.
 
-Use `sixb lake cleanup` for operator-run lake maintenance on providers that expose
-`runMaintenance`. It defaults to a seven-day snapshot expiration and file deletion window. Start
-with `--dry-run` to preview how many snapshots and files DuckLake reports as eligible. Each
+Use `sixb lake cleanup` to run one retention pass on providers with lake maintenance. A version
+stays readable for `--keep-versions-for` (7 days by default) after a newer version replaced it,
+and the files only expired versions read are deleted `--delete-files-after` (7 days) later. Each
 dataset's latest version and the version each projection applied, read from the project's
-storage, outlive the window; DuckLake reports the snapshots it kept for them as kept snapshots.
+storage, are always kept; the report counts the second ones as kept versions. A pass expires and
+deletes at most 1,000 of each: when it says more is due, run it again. Start with `--dry-run`.
 
 ### Production topologies
 

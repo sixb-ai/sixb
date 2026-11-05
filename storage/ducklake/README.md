@@ -88,40 +88,50 @@ both builds. Keep the tested build in the image's DuckDB extension directory
 
 ### Maintenance
 
-DuckLake keeps historical snapshots and deleted files until maintenance runs.
-Maintenance is operator-driven: run it on demand from the CLI or call
-`runMaintenance()` directly. It expires snapshots, reclaims deleted file blocks,
-and removes orphaned files through DuckLake's explicit maintenance functions,
-keeping seven days of snapshots/files by default.
-
-Run it from the CLI (preview with `--dry-run`):
-
-```bash
-sixb lake cleanup --dry-run
-sixb lake cleanup --expire-older-than "14 days" --delete-older-than "14 days"
-```
-
-Or run it directly against the provider:
+DuckLake keeps every snapshot, and every file a snapshot reads, until retention removes them.
+`lakeStorage.maintenance` implements core's `LakeMaintenance`:
 
 ```ts
-const report = await lakeStorage.runMaintenance({
-  dryRun: true,
-  expireOlderThan: "7 days",
+const report = await lakeStorage.maintenance.applyRetention({
+  keepVersionsForMs: 7 * 24 * 60 * 60 * 1000, // default; at least 1 hour
+  deleteFilesAfterMs: 7 * 24 * 60 * 60 * 1000, // default
   protect: [{ datasetId: "invoices", versionId: "ducklake:42" }],
 })
+// { expiredVersions, keptVersions, deletedFiles, orphanedFiles, hasMore, ... }
+
+const health = await lakeStorage.maintenance.describeStorage(["invoices"])
+// [{ dataFiles, smallDataFiles, deleteFiles, inlinedRows, retainedSnapshots, warnings, ... }]
 ```
 
-Expiring a snapshot removes the version it holds. Two kinds of versions are kept whatever their
-age, and the snapshots holding them are reported as `keptSnapshots`: each dataset's latest
-version, so a dataset idle longer than the retention stays readable, and the versions passed as
-`protect`. `sixb lake cleanup` protects the version each projection applied.
+`sixb lake cleanup` runs one pass, protecting the version each projection applied.
+
+**What expires.** A version's age counts from the commit that replaced it, not its own: a version
+expires once a newer version of its dataset has been there for `keepVersionsForMs`. A pipeline
+step resolves its inputs' latest versions when it starts and reads them by id, so whatever it
+resolved stays readable for that long, with nothing recorded. Each dataset's latest version and
+the `protect` versions never expire; protected ones past retention are reported as
+`keptVersions`. Snapshots holding no version (maintenance commits, catalog-only changes) expire
+once they are older than `keepVersionsForMs`, except the newest snapshot.
+
+**One pass is bounded.** The pass walks the history oldest first, 512 snapshots per catalog
+query, and stops at the retention cutoff or once `limit` (1,000) snapshots are expirable, which
+it expires by id in one call. It then deletes the files DuckLake scheduled at least
+`deleteFilesAfterMs` ago, oldest first and about `limit` at most (files one commit scheduled go
+together). `hasMore` says another pass has work. Orphaned files, which no catalog row knows, are
+searched only on a pass with no backlog left, since the search lists the whole data path. Expiry
+is catalog-only and takes no lock on reads; only file deletion waits for this provider's reads,
+for as long as the deletion itself.
+
+On a SQLite catalog, DuckLake `ac7595b0` compares stored schedule times with a given time
+unreliably outside UTC (west of UTC it deleted files scheduled a moment ago), so files there are
+deleted all at once, and only once every scheduled file is due.
 
 ### Read and Write Concurrency
 
 Large reads stream through dedicated connections in the same DuckDB engine, sharing its memory
 budget and PostgreSQL metadata pool. Metadata and writes remain available between yielded rows.
-Each read stays pinned to one immutable snapshot. Maintenance waits until no reads remain; it
-blocks new reads only while running, so continuous traffic can postpone it.
+Each read stays pinned to one immutable snapshot. Retention's file deletion waits until no reads
+remain; it blocks new reads only while deleting, so continuous traffic can postpone it.
 
 `readChanges` compares two versions in DuckDB. When no version between them changed rows
 (`rowsChanged` in the commit metadata, read from at most 32 snapshots), it returns an empty change

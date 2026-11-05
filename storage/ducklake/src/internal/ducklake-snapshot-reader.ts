@@ -12,7 +12,7 @@ import type {
 } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
-import { getBigIntLike, getDate, getOptionalString, getString } from "./duckdb-row"
+import { getBigIntLike, getBoolean, getDate, getOptionalString, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
@@ -84,6 +84,15 @@ interface VisibleSnapshotRowsInput {
 export interface DuckLakeTableVersionRef extends DatasetVersionRef {
   readonly table: DatasetTableRef
   readonly snapshot: DatasetSnapshotRow
+}
+
+/** A snapshot of the lake's history, as retention reads it. */
+export interface DuckLakeHistorySnapshot {
+  readonly snapshotId: string
+  /** Whether it was committed before the cutoff its page was read with. */
+  readonly beforeCutoff: boolean
+  /** The datasets it holds a version of: none for a maintenance or catalog-only commit. */
+  readonly versionOf: readonly string[]
 }
 
 /** What a commit needs of the version it builds on. */
@@ -327,7 +336,8 @@ export class DuckLakeSnapshotReader {
     })
   }
 
-  private async queryHeadSnapshotId(runtime: DuckDbQueryRuntime): Promise<string> {
+  /** The newest snapshot of the lake. */
+  async queryHeadSnapshotId(runtime: DuckDbQueryRuntime): Promise<string> {
     const [row] = await runtime.query(
       buildDuckLakeMetadataQuery(
         this.options,
@@ -460,11 +470,8 @@ export class DuckLakeSnapshotReader {
     return latest
   }
 
-  /**
-   * The snapshot of every dataset's latest version, however old, from one shared walk down the
-   * whole history: maintenance must never expire one.
-   */
-  async latestVersionSnapshotIds(runtime: DuckDbQueryRuntime): Promise<readonly string[]> {
+  /** The tables of every dataset the lake holds now. */
+  async listCurrentDatasetTables(runtime: DuckDbQueryRuntime): Promise<readonly DatasetTableRef[]> {
     const tables = await runtime.query(`
       SELECT table_name
       FROM ${duckLakeMetadataTableName(this.options, "ducklake_table")}
@@ -479,12 +486,84 @@ export class DuckLakeSnapshotReader {
       return []
     }
 
-    const latest = await this.resolveLatestSnapshotRows(
-      runtime,
-      await this.resolveDatasetTables(runtime, datasetIds),
-      Number.POSITIVE_INFINITY
+    return [...(await this.resolveDatasetTables(runtime, datasetIds)).values()]
+  }
+
+  /**
+   * Up to `limit` snapshots of the lake's history after `afterSnapshotId`, oldest first. Each one
+   * names the datasets it holds a version of, by the same rule as every version read, and says
+   * whether it was committed before `cutoff`.
+   */
+  async readHistoryPage(
+    runtime: DuckDbQueryRuntime,
+    input: {
+      readonly tables: readonly DatasetTableRef[]
+      readonly afterSnapshotId?: string
+      readonly cutoff: Date
+      readonly limit: number
+    }
+  ): Promise<readonly DuckLakeHistorySnapshot[]> {
+    let afterSql = ""
+    if (input.afterSnapshotId !== undefined) {
+      assertDuckLakeSnapshotId(input.afterSnapshotId)
+      afterSql = `WHERE snapshot.snapshot_id > ${input.afterSnapshotId}`
+    }
+
+    // Cast, not compared as stored: a SQLite catalog stores snapshot times as text with their UTC
+    // offset, which only compares as an instant once cast.
+    const rows = await runtime.query(
+      buildDuckLakeMetadataQuery(
+        this.options,
+        (table) => `
+          SELECT
+            snapshot.snapshot_id,
+            snapshot.snapshot_time,
+            CAST(snapshot.snapshot_time AS TIMESTAMPTZ)
+              < CAST(${quoteSqlString(input.cutoff.toISOString())} AS TIMESTAMPTZ) AS before_cutoff,
+            changes.changes_made,
+            changes.commit_extra_info
+          FROM ${table("ducklake_snapshot")} snapshot
+          LEFT JOIN ${table("ducklake_snapshot_changes")} changes
+            ON changes.snapshot_id = snapshot.snapshot_id
+          ${afterSql}
+          ORDER BY snapshot.snapshot_id
+          LIMIT ${Math.max(0, Math.trunc(input.limit))}
+        `
+      )
     )
-    return [...latest.values()].map((row) => row.snapshotId)
+
+    const tablesById = new Map<string, DatasetTableRef>()
+    for (const table of input.tables) {
+      for (const tableId of datasetTableIds(table)) {
+        tablesById.set(tableId.toString(), table)
+      }
+    }
+
+    return rows.map((row) => {
+      const candidate: DatasetSnapshotCandidateRow = {
+        snapshotId: String(getBigIntLike(row, "snapshot_id")),
+        createdAt: getDate(row, "snapshot_time"),
+        changesMade: getOptionalString(row, "changes_made") ?? "",
+        ...optionalMetadata(row.commit_extra_info),
+      }
+
+      // Only the datasets whose tables the snapshot names can have a version in it.
+      const touched = new Set<DatasetTableRef>()
+      for (const change of candidate.changesMade.split(",")) {
+        const table = tablesById.get(change.split(":")[1] ?? "")
+        if (table) touched.add(table)
+      }
+
+      const versionOf = [...touched]
+        .filter((table) => this.candidateToSnapshotRow(table.datasetId, table.tableId, candidate))
+        .map((table) => table.datasetId)
+
+      return {
+        snapshotId: candidate.snapshotId,
+        beforeCutoff: getBoolean(row, "before_cutoff"),
+        versionOf,
+      }
+    })
   }
 
   private snapshotRowToSummary(
@@ -560,8 +639,7 @@ export class DuckLakeSnapshotReader {
    */
   private async resolveLatestSnapshotRows(
     runtime: DuckDbQueryRuntime,
-    tablesByDatasetId: ReadonlyMap<string, DatasetTableRef>,
-    scanLimit = CATALOG_SNAPSHOT_SCAN_LIMIT
+    tablesByDatasetId: ReadonlyMap<string, DatasetTableRef>
   ): Promise<Map<string, DatasetSnapshotRow>> {
     const result = new Map<string, DatasetSnapshotRow>()
     if (tablesByDatasetId.size === 0) {
@@ -572,7 +650,7 @@ export class DuckLakeSnapshotReader {
 
     let beforeSnapshotId: string | undefined
     let scanned = 0
-    while (unresolved.size > 0 && scanned < scanLimit) {
+    while (unresolved.size > 0 && scanned < CATALOG_SNAPSHOT_SCAN_LIMIT) {
       const candidates = await this.queryCatalogSnapshotBatch(
         runtime,
         beforeSnapshotId,
@@ -1191,6 +1269,11 @@ function storedLineage(
   return metadata.lineage === undefined
     ? {}
     : { lineage: decodeLineage(metadata.datasetId, metadata.lineage) }
+}
+
+function optionalMetadata(value: unknown): { readonly metadata?: SixbCommitMetadata } {
+  const metadata = parseCommitMetadata(value)
+  return metadata === undefined ? {} : { metadata }
 }
 
 function tableVersionRef(
