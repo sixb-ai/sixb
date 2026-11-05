@@ -10,6 +10,7 @@ import {
   type Storage,
 } from "../../storage"
 import { createConnectorCodedError, isConnectorStorageError, storageBoundaryError } from "../errors"
+import type { ConnectorAccountCandidate } from "../types"
 import {
   assertConnectorAuthorizationActor,
   type DefaultConnectorAuthorizationLifecycle,
@@ -326,19 +327,28 @@ export class ConnectorConnectionRunService {
       )
     }
 
+    return this.view(await this.connectRunAccount(run, account, input.replace === true))
+  }
+
+  /** Fills the run's slot with one of its authorization's accounts and finishes the run. */
+  private async connectRunAccount(
+    run: ConnectorConnectionRunRecord,
+    account: ConnectorAccountCandidate,
+    replace: boolean
+  ): Promise<ConnectorConnectionRunRecord> {
     let selected: Awaited<ReturnType<ConnectorConnectionStorage["putConnectionFromRun"]>>
     try {
       selected = await this.connectionStorage.putConnectionFromRun({
         id: `ccn_${randomUUID()}`,
         projectId: this.projectId,
-        connectorId: definition.id,
+        connectorId: run.connectorId,
         runId: run.id,
         account,
-        replace: input.replace === true,
+        replace,
       })
     } catch (error) {
       if (isConnectorStorageError(error, "run_invalid")) {
-        const latest = await this.readRun(definition.id, run.id)
+        const latest = await this.readRun(run.connectorId, run.id)
         if (latest) await this.continueRunCleanup(latest)
         throw createConnectorCodedError(
           "connector.operation_conflict",
@@ -364,7 +374,7 @@ export class ConnectorConnectionRunService {
     }
     const cleanupCompleted = selected.revocationPendingAuthorizationId
       ? await this.continuePendingRevocation(
-          definition.id,
+          run.connectorId,
           selected.revocationPendingAuthorizationId
         )
       : true
@@ -373,7 +383,23 @@ export class ConnectorConnectionRunService {
     } else {
       this.scheduleRunMaintenance(selected.run, CLEANUP_RETRY_DELAY_MS)
     }
-    return this.view(selected.run)
+    return selected.run
+  }
+
+  /**
+   * A grant with one account leaves the user nothing to choose. The run is already waiting, so any
+   * failure here falls back to the picker with the grant intact.
+   */
+  private async connectOnlyAccount(
+    run: ConnectorConnectionRunRecord,
+    account: ConnectorAccountCandidate
+  ): Promise<void> {
+    try {
+      await this.connectRunAccount(run, account, false)
+    } catch (error) {
+      if (isSixbError(error) && error.code === "connector.replacement_required") return
+      console.warn("[Sixb] Connecting the only connector account failed; the user can still select it.", error)
+    }
   }
 
   private async claimCallback(state: string, callbackBinding: string, redirectUri: string) {
@@ -440,6 +466,12 @@ export class ConnectorConnectionRunService {
     authorization: ConnectorAuthorizationRecord
   ): Promise<ConnectorConnectionRunRecord> {
     if (run.kind === "connect") {
+      if (authorization.accounts.length === 0) {
+        throw createConnectorCodedError(
+          "connector.not_found",
+          "This authorization does not give access to any account. Sign in with one that has access."
+        )
+      }
       if (!authorization.selectionExpiresAt) {
         throw createConnectorCodedError(
           "internal.unexpected",
@@ -461,6 +493,8 @@ export class ConnectorConnectionRunService {
       )
       if (waiting) {
         this.scheduleRunMaintenance(waiting, this.selectionTtlMs + 1)
+        const [account, ...others] = authorization.accounts
+        if (account && others.length === 0) await this.connectOnlyAccount(waiting, account)
         return waiting
       }
     } else {
