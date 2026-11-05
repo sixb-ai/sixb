@@ -16,7 +16,7 @@ import {
   duckLakeCatalogColumnsToDatasetSchema,
 } from "./ducklake-catalog-schema"
 import { decodeDatasetTableName, encodeDatasetTableName } from "./names"
-import { duckLakeAlias, duckLakeMetadataTableName, quoteSqlString, quoteSqlStringList } from "./sql"
+import { duckLakeMetadataTableName, quoteSqlStringList } from "./sql"
 
 interface CurrentDatasetTable {
   readonly datasetId: string
@@ -89,15 +89,29 @@ async function readCurrentDatasetTables(
   const tableNameFilter =
     datasetIds === undefined
       ? ""
-      : `AND table_name IN (${quoteSqlStringList(
+      : `AND table_meta.table_name IN (${quoteSqlStringList(
           [...new Set(datasetIds)].map((datasetId) => encodeDatasetTableName(datasetId))
         )})`
 
-  const rows = await input.runtime.query(
-    `SELECT table_name, comment FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
-      duckLakeAlias(input.options)
-    )} AND schema_name = 'main' ${tableNameFilter} AND NOT internal ORDER BY table_name`
-  )
+  // The committed catalog rows, as the columns and partitions below: `duckdb_tables()` would
+  // load DuckLake's whole catalog first, the costliest statement of a small write.
+  const ducklakeTable = duckLakeMetadataTableName(input.options, "ducklake_table")
+  const ducklakeSchema = duckLakeMetadataTableName(input.options, "ducklake_schema")
+  const ducklakeTag = duckLakeMetadataTableName(input.options, "ducklake_tag")
+  const rows = await input.runtime.query(`
+    SELECT table_meta.table_name, table_tag."value" AS comment
+    FROM ${ducklakeTable} table_meta
+    JOIN ${ducklakeSchema} schema_meta
+      ON schema_meta.schema_id = table_meta.schema_id
+      AND schema_meta.end_snapshot IS NULL
+      AND schema_meta.schema_name = 'main'
+    LEFT JOIN ${ducklakeTag} table_tag
+      ON table_tag.object_id = table_meta.table_id
+      AND table_tag."key" = 'comment'
+      AND table_tag.end_snapshot IS NULL
+    WHERE table_meta.end_snapshot IS NULL ${tableNameFilter}
+    ORDER BY table_meta.table_name
+  `)
 
   const tables: CurrentDatasetTable[] = []
   for (const row of rows) {

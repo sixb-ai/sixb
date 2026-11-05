@@ -386,7 +386,7 @@ describe("DuckLakeStorage dataset metadata", () => {
     await storage.createDataset(ordersDataset)
 
     const runtime = await runtimeForStorage(storage)
-    const pause = pauseAfterNextQuery(runtime, (sql) => sql.includes("duckdb_tables()"))
+    const pause = pauseAfterNextQuery(runtime, (sql) => sql.includes('"ducklake_schema"'))
 
     const listing = storage.listDatasets()
     await withTimeout(pause.paused, "listDatasets did not reach its first metadata query")
