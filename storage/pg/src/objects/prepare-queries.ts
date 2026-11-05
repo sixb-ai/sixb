@@ -8,6 +8,8 @@ import { ensureObjectPartition } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
 import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./query-indexes"
 import { type PgObjectTextCountIndex, preparePgObjectTextCounts } from "./text-count-index"
+import { compilePgVisibilityKeys } from "./visibility"
+import { preparePgVisibilityIndexes } from "./visibility-indexes"
 
 /** Reconcile ontology indexes and text columns once per plan, coordinating concurrent startups. */
 export async function preparePgObjectQueries(
@@ -61,6 +63,8 @@ function preparationFingerprint(plan: ObjectQueryPreparationPlan): string {
         .map(normalizeIndex)
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       links: [...type.links].sort((a, b) => a.linkId.localeCompare(b.linkId)),
+      // The SQL each condition's index is built on, so a change to its compilation rebuilds it.
+      ...(type.visibility ? { visibility: type.visibility.map(compilePgVisibilityKeys) } : {}),
     }))
     .sort((a, b) => a.objectTypeId.localeCompare(b.objectTypeId))
 
@@ -117,11 +121,12 @@ async function prepareStructures(
 
   const names = await ensurePgObjectQueryIndexes(sql, schema, indexes)
   const texts = await preparePgObjectTextCounts(sql, schema, textCounts)
+  const visibility = await preparePgVisibilityIndexes(sql, schema, plan)
   return {
     status: "prepared",
     objectTypes: plan.objectTypes.length,
-    indexes: new Set([...names, ...texts]).size,
-    warnings,
+    indexes: new Set([...names, ...texts, ...visibility.names]).size,
+    warnings: [...warnings, ...visibility.warnings],
   }
 }
 

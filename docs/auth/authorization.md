@@ -132,6 +132,12 @@ Limits:
 - Actions and workflows run [trusted](#permissions-during-execution): conditions do not apply in
   their handlers, and an action can create an object its requester cannot see.
 
+On PostgreSQL, `sixb db migrate` indexes each condition, so a member's reads find the objects they
+see instead of checking every one. Two shapes are still checked object by object: a negated
+`currentUser()` (`neq(currentUser())`, or `not` around it), and `currentUser()` required in two
+places at once (`owner` is me *and* `watchers` contains me). Preparation warns about each
+condition it cannot index.
+
 ## Choose who sees the app's sections
 
 Every signed-in member opens the project's app. Roles decide what each member can read and do in

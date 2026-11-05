@@ -1,4 +1,3 @@
-import { bindCurrentUserPredicate } from "../objects/query/current-user"
 import { ObjectQueryValidationError } from "../objects/query/errors"
 import type { ObjectQueryPredicate } from "../objects/query/ir"
 import {
@@ -10,6 +9,7 @@ import { compileConditionalObjectReadScope } from "../storage/objects/read-scope
 import type { ObjectReadScopeFactory } from "../storage/objects/types"
 import { SecurityValidationError } from "./errors"
 import type { GrantDefinition, Selection } from "./types"
+import { viewConditionReadCondition } from "./visibility-keys"
 
 /** A role's `can.view(Type).where(...)`, validated against the ontology at startup. */
 export interface ViewCondition {
@@ -103,7 +103,6 @@ export function assertViewConditionsReadable(input: {
   readonly getSubTypes: (objectTypeId: string) => readonly string[]
 }): void {
   for (const condition of input.conditions) {
-    const predicate = bindCurrentUserPredicate(condition.predicate, STARTUP_CHECK_USER)
     const objectTypeIds = [condition.objectTypeId, ...input.getSubTypes(condition.objectTypeId)]
 
     try {
@@ -111,7 +110,9 @@ export function assertViewConditionsReadable(input: {
         projectId: input.projectId,
         scope: compileConditionalObjectReadScope({
           kind: "conditional",
-          conditions: objectTypeIds.map((objectTypeId) => ({ objectTypeId, predicate })),
+          conditions: objectTypeIds.map((objectTypeId) =>
+            viewConditionReadCondition(objectTypeId, [condition.predicate], STARTUP_CHECK_USER)
+          ),
         }),
       })
     } catch (error) {

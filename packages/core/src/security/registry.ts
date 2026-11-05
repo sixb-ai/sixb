@@ -18,6 +18,8 @@ export interface SecurityDefinitionCatalog {
   listRoles(): readonly RoleDefinition[]
   getRoleById(roleId: string): RoleDefinition | null
   listResolvedRoles(): readonly ResolvedRole[]
+  /** Every role's `can.view(Type).where(...)`, validated, in declaration order. */
+  listViewConditions(): readonly ViewCondition[]
   listMembershipPolicies(): readonly MembershipPolicyDefinition[]
   getMembershipPolicyById(policyId: string): MembershipPolicyDefinition | null
 }

@@ -14,6 +14,7 @@ export async function runDbPrepare(options: { entry?: string } = {}): Promise<vo
     const result = await prepareObjectQueries({
       projectId: sixb.id,
       ontology: sixb.definitions.ontology,
+      security: sixb.definitions.security,
       storage: sixb.storage,
     })
     console.info(

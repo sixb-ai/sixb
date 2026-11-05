@@ -485,6 +485,7 @@ export type {
   Selection,
   ShareGrant,
   UsersViewGrant,
+  ViewCondition,
   ViewGrant,
   ViewGrantTarget,
 } from "./security"

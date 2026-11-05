@@ -6,6 +6,7 @@ import type {
   ObjectQuerySortField,
   QueryScalarKind,
 } from "../../objects/query"
+import type { UserRef } from "../../ontology/user-ref"
 import type { Redactions } from "../../security/types"
 import type { UserProfile } from "../../users"
 import type { UniqueValueRef } from "../ontology/materializations"
@@ -203,7 +204,49 @@ export interface ObjectReadCondition {
    * bound to the reader. Providers compile it with their own predicate compiler.
    */
   readonly predicate: ObjectQueryPredicate
+  /**
+   * The same condition read from visibility keys, for a provider that indexes them. Absent when
+   * none of the reader's conditions on the type has keys.
+   */
+  readonly visibility?: ObjectReadVisibility
 }
+
+/**
+ * `predicate` read from keys: it matches an object exactly when one of `keys` shows it to everyone
+ * or to `user`, or when `remainder` matches it.
+ */
+export interface ObjectReadVisibility {
+  /** One per condition of the reader's roles that has keys, the same for every reader. */
+  readonly keys: readonly ObjectVisibilityKeys[]
+  /** The user reading; without one, an object is only shown by keys for everyone. */
+  readonly user?: UserRef
+  /** The reader's other conditions, bound to its user: an object either matches is shown. */
+  readonly remainder?: ObjectQueryPredicate
+}
+
+/**
+ * Who a view condition shows an object to, read from the object alone: everyone holding the
+ * condition, or the users some of its properties name.
+ *
+ * `currentUser()` only appears where a condition compares user references, so a condition has
+ * keys unless it negates such a comparison, or needs two of them to hold at once. Unlike the
+ * condition bound to a reader, keys are the same for every reader, so a provider can index them
+ * once per condition. A reader sees an object when its keys show it to everyone or to the reader.
+ */
+export type ObjectVisibilityKeys =
+  /** Everyone, when `when` matches. `when` never reads `currentUser()`. */
+  | { readonly kind: "everyone"; readonly when: ObjectQueryPredicate }
+  /** The user a `ref.user()` property holds, as `eq(property, currentUser())` compares it. */
+  | { readonly kind: "user"; readonly propertyId: string }
+  /** Each user a list holds, as `contains(property, currentUser())` compares them. */
+  | { readonly kind: "users"; readonly propertyId: string }
+  | { readonly kind: "union"; readonly items: readonly ObjectVisibilityKeys[] }
+  /** `keys`, when `when` matches. `when` never reads `currentUser()`. */
+  | {
+      readonly kind: "when"
+      readonly when: ObjectQueryPredicate
+      readonly keys: ObjectVisibilityKeys
+    }
 
 /**
  * Detached and deeply immutable conditions, one per concrete type, ordered by type id.

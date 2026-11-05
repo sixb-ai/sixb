@@ -1,6 +1,6 @@
 import { compareStrings, getInvalidJsonValueReason } from "../../json"
 import type { ObjectQueryPredicate, QueryScalarKind } from "../../objects/query"
-import { isCurrentUser } from "../../ontology/user-ref"
+import { isCurrentUser, type UserRef } from "../../ontology/user-ref"
 import type {
   CompiledConditionalObjectReadScope,
   CompiledObjectReadObjectSelection,
@@ -14,6 +14,8 @@ import type {
   ObjectReadNode,
   ObjectReadObjectSelection,
   ObjectReadRoot,
+  ObjectReadVisibility,
+  ObjectVisibilityKeys,
   SelectedObjectReadScope,
 } from "./types"
 
@@ -560,7 +562,13 @@ export function compileConditionalObjectReadScope(
     objectTypeIds.add(objectTypeId)
 
     const predicate = capturePredicate(condition.predicate, `${path}.predicate`, 0, budget)
-    conditions.push(Object.freeze({ objectTypeId, predicate }))
+    const visibility =
+      condition.visibility === undefined
+        ? undefined
+        : captureVisibility(condition.visibility, `${path}.visibility`, budget)
+    conditions.push(
+      Object.freeze({ objectTypeId, predicate, ...(visibility ? { visibility } : {}) })
+    )
   }
 
   conditions.sort((left, right) => compareStrings(left.objectTypeId, right.objectTypeId))
@@ -569,6 +577,104 @@ export function compileConditionalObjectReadScope(
     kind: "conditional",
     conditions: Object.freeze(conditions),
   }) as CompiledConditionalObjectReadScope
+}
+
+/** The reader's keys, user and remainder: shaped as providers read them, every predicate bound. */
+function captureVisibility(
+  value: unknown,
+  path: string,
+  budget: { nodes: number }
+): ObjectReadVisibility {
+  if (!isRecord(value)) throw invalidScope(`${path} must hold keys`)
+
+  const source = captureArray(value.keys, `${path}.keys`)
+  if (source.length === 0) throw invalidScope(`${path}.keys must not be empty`)
+
+  const keys: ObjectVisibilityKeys[] = []
+  for (let index = 0; index < source.length; index += 1) {
+    keys.push(captureKeys(source.value[index], `${path}.keys[${index}]`, 0, budget))
+  }
+
+  let user: UserRef | undefined
+  if (value.user !== undefined) {
+    const ref = value.user
+    if (!isRecord(ref) || ref.type !== "user" || Object.keys(ref).length !== 2) {
+      throw invalidScope(`${path}.user must be a user reference`)
+    }
+    if (typeof ref.id !== "string" || ref.id.length === 0) {
+      throw invalidScope(`${path}.user.id must be a non-empty string`)
+    }
+    user = Object.freeze({ type: "user", id: ref.id })
+  }
+
+  const remainder =
+    value.remainder === undefined
+      ? undefined
+      : capturePredicate(value.remainder, `${path}.remainder`, 0, budget)
+
+  return Object.freeze({
+    keys: Object.freeze(keys),
+    ...(user ? { user } : {}),
+    ...(remainder ? { remainder } : {}),
+  })
+}
+
+function captureKeys(
+  value: unknown,
+  path: string,
+  depth: number,
+  budget: { nodes: number }
+): ObjectVisibilityKeys {
+  if (depth > CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateDepth) {
+    throw invalidScope(
+      `${path} exceeds the maximum predicate depth of ${CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateDepth}`
+    )
+  }
+
+  budget.nodes += 1
+  if (budget.nodes > CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateNodes) {
+    throw invalidScope(
+      `scope exceeds the maximum of ${CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateNodes} predicate nodes`
+    )
+  }
+
+  if (!isRecord(value)) throw invalidScope(`${path} must be visibility keys`)
+
+  switch (value.kind) {
+    case "everyone":
+      return Object.freeze({
+        kind: "everyone",
+        when: capturePredicate(value.when, `${path}.when`, depth + 1, budget),
+      })
+
+    case "user":
+    case "users":
+      return Object.freeze({
+        kind: value.kind,
+        propertyId: nonEmptyString(value.propertyId, `${path}.propertyId`),
+      })
+
+    case "union": {
+      const items = captureArray(value.items, `${path}.items`)
+      if (items.length === 0) throw invalidScope(`${path}.items must not be empty`)
+
+      const captured: ObjectVisibilityKeys[] = []
+      for (let index = 0; index < items.length; index += 1) {
+        captured.push(captureKeys(items.value[index], `${path}.items[${index}]`, depth + 1, budget))
+      }
+      return Object.freeze({ kind: "union", items: Object.freeze(captured) })
+    }
+
+    case "when":
+      return Object.freeze({
+        kind: "when",
+        when: capturePredicate(value.when, `${path}.when`, depth + 1, budget),
+        keys: captureKeys(value.keys, `${path}.keys`, depth + 1, budget),
+      })
+
+    default:
+      throw invalidScope(`${path}.kind must be a kind of visibility keys`)
+  }
 }
 
 function capturePredicate(

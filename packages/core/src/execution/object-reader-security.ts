@@ -2,7 +2,6 @@ import { assertAuthorized, assertRuntimeAuthorizationBound, isAllowed } from "..
 import { AuthorizationError } from "../authorization/errors"
 import type { AuthorizationContext } from "../authorization/types"
 import { type Unreadable, unreadableError } from "../objects/property-clearance"
-import { bindCurrentUserPredicate } from "../objects/query/current-user"
 import type { ObjectQueryPredicate } from "../objects/query/ir"
 import {
   createSelectedObjectQueryAdmission,
@@ -11,6 +10,7 @@ import {
 import type { OntologyRegistry } from "../ontology"
 import type { UserRef } from "../ontology/user-ref"
 import type { AppliedMarkings } from "../security/applied-markings"
+import { viewConditionReadCondition } from "../security/visibility-keys"
 import type {
   CompiledConditionalObjectReadScope,
   CompiledObjectReadStep,
@@ -108,10 +108,9 @@ export class ObjectReaderSecurity {
 
       this.conditionalScope = compileConditionalObjectReadScope({
         kind: "conditional",
-        conditions: [...conditions].map(([objectTypeId, predicates]) => ({
-          objectTypeId,
-          predicate: bindCurrentUserPredicate(anyOf(predicates), grantee),
-        })),
+        conditions: [...conditions].map(([objectTypeId, predicates]) =>
+          viewConditionReadCondition(objectTypeId, predicates, grantee)
+        ),
       })
     }
 
@@ -236,10 +235,6 @@ function propertiesReadBy(predicate: ObjectQueryPredicate): readonly string[] {
     default:
       return [predicate.propertyId]
   }
-}
-
-function anyOf(predicates: readonly ObjectQueryPredicate[]): ObjectQueryPredicate {
-  return predicates.length === 1 ? predicates[0]! : { op: "or", items: predicates }
 }
 
 /**

@@ -97,6 +97,7 @@ async function runMigration(sixb: LoadedSixbHost, role: StorageSchemaRole) {
     return await migrateStorage(sixb.storage, {
       projectId: sixb.id,
       ontology: sixb.definitions.ontology,
+      security: sixb.definitions.security,
     })
   } catch (error) {
     throw isBusyDatabaseError(error) ? concurrentMigrationError(error, role) : error
