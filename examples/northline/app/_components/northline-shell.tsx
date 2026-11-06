@@ -88,7 +88,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
       <Sidebar collapsible="offcanvas" className="nl-sidebar">
         <SidebarHeader className="nl-sidebar-header">
           <Link to="/" aria-label="Northline Operations home" className="nl-sidebar-brand">
-            <NorthlineWordmark className="mx-0 h-[22px]" />
+            <NorthlineWordmark className="mx-0 h-8" />
           </Link>
           <GlobalSearch />
         </SidebarHeader>
