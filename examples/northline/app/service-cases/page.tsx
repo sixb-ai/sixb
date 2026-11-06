@@ -5,7 +5,7 @@ import { ChevronRight, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
-import { deadlineLabel, PageHeader, QueryState, StatusBadge, statusTone } from "../_components/ui"
+import { CaseClockText, caseClock, PageHeader, QueryState, StatusBadge } from "../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
 
 const allCases = objects(ServiceCase)
@@ -134,8 +134,6 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
     equipment?.properties.equipmentType
   )
   const Icon = equipmentIcon(equipment?.properties.equipmentType)
-  const closed = ["closed", "cancelled"].includes(serviceCase.properties.status ?? "")
-  const deadlineTone = statusTone(serviceCase.properties.slaStatus)
 
   return (
     <li className="border-t border-border/70 first:border-t-0">
@@ -187,24 +185,10 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
             ) : null}
             <StatusBadge value={serviceCase.properties.status} />
           </span>
-          <span
-            className={cn(
-              "text-[13px] font-medium tabular-nums",
-              closed
-                ? "text-muted-foreground"
-                : deadlineTone === "critical"
-                  ? "text-destructive"
-                  : deadlineTone === "warning"
-                    ? "text-[color:var(--warning)]"
-                    : "text-foreground/70"
-            )}
-          >
-            {closed
-              ? serviceCase.properties.slaStatus === "met"
-                ? "Commitment met"
-                : "Closed"
-              : deadlineLabel(serviceCase.properties.responseDeadline)}
-          </span>
+          <CaseClockText
+            serviceCase={serviceCase.properties}
+            className="text-[13px] font-medium text-foreground/70"
+          />
         </span>
         <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground" />
       </Link>
@@ -232,7 +216,7 @@ function casePriority(serviceCase: CaseRow): number {
       serviceCase.properties.slaStatus ?? "on_track"
     ] ?? 0
   const state = ["closed", "cancelled"].includes(serviceCase.properties.status ?? "") ? -100 : 0
-  const deadline = new Date(serviceCase.properties.responseDeadline ?? Date.now()).getTime()
+  const dueAt = caseClock(serviceCase.properties).dueAt
   // Earlier deadlines win ties within the same severity and risk.
-  return severity + sla + state - deadline / 1e13
+  return severity + sla + state - (Number.isFinite(dueAt) ? dueAt : Date.now()) / 1e13
 }

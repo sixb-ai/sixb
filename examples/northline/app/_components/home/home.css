@@ -1,4 +1,5 @@
-/* Home: the composer as wide as the widgets. */
+/* Home: the composer as wide as the widgets. Its content column is capped for the conversation
+   view; here it spans the panel. */
 .nl-home-composer > div {
   max-width: none;
 }

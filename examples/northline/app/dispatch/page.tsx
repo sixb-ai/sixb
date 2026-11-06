@@ -19,7 +19,7 @@ import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
 import {
-  deadlineLabel,
+  CaseClockText,
   formatTime,
   humanize,
   PageHeader,
@@ -27,7 +27,6 @@ import {
   Section,
   StatusBadge,
   StatusIndicator,
-  statusTone,
 } from "../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
 import type { QueryRow } from "../_lib/query-types"
@@ -457,16 +456,14 @@ function DispatchDecision({
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
             <span className="text-[12px] font-semibold text-primary">Dispatch recommendation</span>
             <span className="flex items-center gap-2.5">
-              <span
-                className={cn(
-                  "text-[13px] font-medium tabular-nums",
-                  toneText(serviceCase?.properties.slaStatus)
-                )}
-              >
-                {serviceCase
-                  ? deadlineLabel(serviceCase.properties.responseDeadline)
-                  : "Needs review"}
-              </span>
+              {serviceCase ? (
+                <CaseClockText
+                  serviceCase={serviceCase.properties}
+                  className="text-[13px] font-medium text-foreground/70"
+                />
+              ) : (
+                <span className="text-[13px] font-medium text-foreground/70">Needs review</span>
+              )}
               <StatusBadge value={serviceCase?.properties.severity ?? "urgent"} />
             </span>
           </div>
@@ -867,13 +864,6 @@ function scheduleTone(status: string): BlockTone {
   if (status === "paused") return "warning"
   if (status === "dispatched" || status === "en_route") return "info"
   return "primary"
-}
-
-function toneText(status: string | undefined): string {
-  const tone = statusTone(status)
-  if (tone === "critical") return "text-destructive"
-  if (tone === "warning") return "text-[color:var(--warning)]"
-  return "text-foreground/70"
 }
 
 function scheduleBlockStyle(

@@ -21,7 +21,8 @@ import { WorkOrder } from "../../../ontology/work-order"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
-  deadlineLabel,
+  CaseClockText,
+  caseClock,
   formatDateTime,
   formatMoney,
   formatRelativeTime,
@@ -30,7 +31,6 @@ import {
   Section,
   StatusBadge,
   StatusIndicator,
-  statusTone,
 } from "../../_components/ui"
 import { equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
@@ -145,6 +145,7 @@ export default function ServiceCaseDetailPage() {
 
   let next: NextStep | null = null
   const status = serviceCase?.properties.status
+  const clock = caseClock(serviceCase?.properties ?? {})
   if (serviceCase && status === "new") {
     next = {
       title: "Acknowledge the case",
@@ -255,16 +256,14 @@ export default function ServiceCaseDetailPage() {
               </div>
             </div>
             <dl className="flex flex-wrap gap-x-9 gap-y-3 pt-1">
-              <Fact label="Response">
-                <span className={deadlineClass(serviceCase.properties.slaStatus)}>
-                  {["resolved", "closed"].includes(status ?? "")
-                    ? humanize(serviceCase.properties.slaStatus ?? "met")
-                    : deadlineLabel(serviceCase.properties.responseDeadline)}
-                </span>
+              <Fact label={clock.label}>
+                <CaseClockText serviceCase={serviceCase.properties} variant="value" />
               </Fact>
-              <Fact label="Resolution by">
-                {formatDateTime(serviceCase.properties.resolutionDeadline)}
-              </Fact>
+              {Number.isFinite(clock.dueAt) ? (
+                <Fact label="Resolve by">
+                  {formatDateTime(serviceCase.properties.resolutionDeadline)}
+                </Fact>
+              ) : null}
               <Fact label="Coverage">
                 {humanize(serviceCase.properties.coverageStatus ?? "unknown")}
               </Fact>
@@ -670,13 +669,6 @@ function timelineEntries(
         ]
       : []),
   ]
-}
-
-function deadlineClass(slaStatus: string | undefined): string {
-  const tone = statusTone(slaStatus)
-  if (tone === "critical") return "text-destructive"
-  if (tone === "warning") return "text-[color:var(--warning)]"
-  return ""
 }
 
 function caseHeadline(title: string, equipmentName: string | undefined): string {
