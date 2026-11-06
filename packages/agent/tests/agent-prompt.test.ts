@@ -455,7 +455,7 @@ describe("agent system prompt", () => {
     const prompt = renderPrompt({ mode: "conversation", skills: [] })
 
     expect(prompt).toContain(
-      "Delegate with spawn_agent only independent, heavier investigations that can run in parallel, then collect their answers with wait_agent. Never delegate a simple lookup, a second opinion, or a quick generation."
+      "Delegate with spawn_agent only independent, heavier investigations that can run in parallel, then collect their answers with wait_agent. Never delegate a simple lookup or a quick generation."
     )
   })
 

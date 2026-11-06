@@ -249,7 +249,7 @@ The Agent can delegate focused tasks to headless child agents with `spawn_agent`
 language model configured in `models.language`, keep working after a child starts, and collect
 results with `wait_agent` only when it needs them. Children are created at runtime; no extra
 project configuration is required. The conversation rules say when to delegate: independent,
-heavier investigations that can run in parallel, never a lookup or a second opinion.
+heavier investigations that can run in parallel, never a lookup or a quick generation.
 
 Each child:
 
