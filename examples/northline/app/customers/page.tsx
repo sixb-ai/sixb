@@ -21,6 +21,7 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../_components/ui"
+import type { QueryRow } from "../_lib/query-types"
 
 const customersQuery = objects(CustomerAccount)
   .query()
@@ -52,10 +53,10 @@ const sortOptions = [
 
 type View = (typeof views)[number][0]
 type Sort = (typeof sortOptions)[number][0]
-type CustomerRow = NonNullable<Awaited<ReturnType<typeof customersQuery.first>>>
-type FacilityRow = NonNullable<Awaited<ReturnType<typeof facilitiesQuery.first>>>
-type CaseRow = NonNullable<Awaited<ReturnType<typeof casesQuery.first>>>
-type ContractRow = NonNullable<Awaited<ReturnType<typeof contractsQuery.first>>>
+type CustomerRow = QueryRow<typeof customersQuery>
+type FacilityRow = QueryRow<typeof facilitiesQuery>
+type CaseRow = QueryRow<typeof casesQuery>
+type ContractRow = QueryRow<typeof contractsQuery>
 
 export default function CustomersPage() {
   const customers = useObjectsQuery(customersQuery)

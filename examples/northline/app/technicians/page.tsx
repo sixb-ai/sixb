@@ -15,6 +15,7 @@ import {
   QueryState,
   StatusBadge,
 } from "../_components/ui"
+import type { QueryRow } from "../_lib/query-types"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(100)
 const workOrdersQuery = objects(WorkOrder)
@@ -39,8 +40,8 @@ const sortOptions = [
 
 type View = (typeof views)[number][0]
 type Sort = (typeof sortOptions)[number][0]
-type TechnicianRow = NonNullable<Awaited<ReturnType<typeof techniciansQuery.first>>>
-type WorkOrderRow = NonNullable<Awaited<ReturnType<typeof workOrdersQuery.first>>>
+type TechnicianRow = QueryRow<typeof techniciansQuery>
+type WorkOrderRow = QueryRow<typeof workOrdersQuery>
 
 export default function TechniciansPage() {
   const technicians = useObjectsQuery(techniciansQuery)

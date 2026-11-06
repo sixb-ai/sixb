@@ -31,6 +31,7 @@ import {
   formatRelativeTime,
   humanize,
   QueryState,
+  Row,
   Section,
   StatusBadge,
   StatusIndicator,
@@ -561,15 +562,6 @@ function ContractCard({ serviceCase }: { serviceCase: ServiceCaseRow }) {
         <Row label="Approval above">{formatMoney(contract.properties.approvalThreshold)}</Row>
       </dl>
     </Section>
-  )
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-t border-border/70 py-2.5 first:border-t-0">
-      <dt className="truncate text-[14.5px] font-medium">{label}</dt>
-      <dd className="shrink-0 text-[13.5px] text-muted-foreground">{children}</dd>
-    </div>
   )
 }
 

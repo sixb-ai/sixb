@@ -24,6 +24,7 @@ import {
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
 import { equipmentIcon, equipmentIllustration } from "./_lib/equipment"
+import type { QueryRow } from "./_lib/query-types"
 import { caseDecision, useCasesWithFieldWorkDone } from "./_lib/service-cases"
 
 const casesQuery = objects(ServiceCase)
@@ -51,8 +52,8 @@ const alarmsQuery = objects(BuildingAlarm)
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(50)
 
-type CaseRow = NonNullable<Awaited<ReturnType<typeof casesQuery.first>>>
-type AlarmRow = NonNullable<Awaited<ReturnType<typeof alarmsQuery.first>>>
+type CaseRow = QueryRow<typeof casesQuery>
+type AlarmRow = QueryRow<typeof alarmsQuery>
 
 const severityRank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
 const summaryLink = "font-semibold whitespace-nowrap hover:underline"

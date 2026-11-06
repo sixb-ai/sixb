@@ -1,6 +1,6 @@
 import { Cpu, Fan, type LucideIcon, Snowflake, Wind } from "lucide-react"
 
-export interface EquipmentIllustration {
+interface EquipmentIllustration {
   readonly src: string
   /** Fit the whole unit inside the frame instead of filling it. */
   readonly contain: boolean
@@ -27,7 +27,7 @@ export function equipmentIllustration(
   return illustrationsByType[equipmentType ?? ""]
 }
 
-/** The icon for a unit with no illustration: a type this example has no picture for. */
+/** The icon for a unit with no picture: a case or alarm whose equipment link is missing. */
 export function equipmentIcon(equipmentType: string | undefined): LucideIcon {
   if (equipmentType === "rooftop_unit" || equipmentType === "heat_pump") return Fan
   if (equipmentType === "air_handler") return Wind

@@ -27,6 +27,7 @@ import {
   humanize,
   PageHeader,
   QueryState,
+  Row,
   Section,
   StatusBadge,
 } from "../_components/ui"
@@ -696,15 +697,6 @@ function DocumentPart({ label, children }: { label: string; children: ReactNode 
     <div className="mx-6 flex flex-col gap-1.5 border-t border-border/70 py-5 sm:mx-8">
       <h3 className="text-[12.5px] font-semibold text-muted-foreground">{label}</h3>
       {children}
-    </div>
-  )
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-t border-border/70 py-2.5 first:border-t-0">
-      <dt className="truncate text-[14.5px] font-medium">{label}</dt>
-      <dd className="shrink-0 text-[13.5px] text-muted-foreground">{children}</dd>
     </div>
   )
 }

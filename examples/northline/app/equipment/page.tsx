@@ -14,6 +14,7 @@ import {
   StatusIndicator,
 } from "../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
+import type { QueryRow } from "../_lib/query-types"
 
 const equipmentQuery = objects(Equipment)
   .query()
@@ -30,7 +31,7 @@ const views = [
 ] as const
 
 type View = (typeof views)[number][0]
-type EquipmentRow = NonNullable<Awaited<ReturnType<typeof equipmentQuery.first>>>
+type EquipmentRow = QueryRow<typeof equipmentQuery>
 
 export default function EquipmentPage() {
   const equipment = useObjectsQuery(equipmentQuery)
