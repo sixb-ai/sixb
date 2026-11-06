@@ -15096,6 +15096,40 @@ export type HeadAgentChildFileContentResponses = {
   206: unknown
 }
 
+export type ListAgentComputersData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/agent-computers"
+}
+
+export type ListAgentComputersErrors = {
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAgentComputersError = ListAgentComputersErrors[keyof ListAgentComputersErrors]
+
+export type ListAgentComputersResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    computers: Array<{
+      id: string
+      name: string
+      folders: Array<string>
+    }>
+  }
+}
+
+export type ListAgentComputersResponse =
+  ListAgentComputersResponses[keyof ListAgentComputersResponses]
+
 export type MoveAgentThreadToCloudData = {
   body?: never
   path: {

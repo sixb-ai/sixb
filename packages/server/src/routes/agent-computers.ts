@@ -18,10 +18,14 @@ import type {
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { requestActor, requireRequestSixb } from "../auth/scope"
-import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
+import {
+  SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+  SIXB_SESSION_SECURITY_REQUIREMENT,
+} from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AgentBackgroundCommandParamsSchema,
+  AgentComputerListResponseSchema,
   AgentComputerSessionParamsSchema,
   AgentRequestErrorResponseSchema,
   AgentThreadComputerInputSchema,
@@ -121,6 +125,40 @@ export async function endLapsedComputerSessions(host: SixbHostView): Promise<voi
 
 export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
   return app
+    .get(
+      "/api/agent-computers",
+      async (context) => {
+        const { set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          const agents = host.storage.agents
+          if (!agents) return unconfiguredStorageResponse(set, "Agent storage")
+
+          const live = await agents.computers.listLive({
+            projectId: host.id,
+            ownerPrincipal: requestActor(sixb),
+            now: new Date(),
+          })
+          return AgentComputerListResponseSchema.parse({ computers: computersOf(live) })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        response: {
+          200: AgentComputerListResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "List your computers with sixb open now",
+          description:
+            "Each of your computers with a live session, and the folders `sixb` is open in there: a thread created to run in one of them runs there now.",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "listAgentComputers",
+          security: SIXB_SESSION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
     .post(
       "/api/agent-threads/:threadId/computer",
       async (context) => {
@@ -403,6 +441,26 @@ function sameCommands(
   now: readonly AgentComputerBackgroundCommand[]
 ): boolean {
   return stableJsonStringify(before) === stableJsonStringify(now)
+}
+
+/** Live sessions as computers, each with its folders: sorted, so a list reads the same each time. */
+function computersOf(
+  sessions: readonly AgentComputerSessionRecord[]
+): { id: string; name: string; folders: string[] }[] {
+  const byId = new Map<string, { id: string; name: string; folders: Set<string> }>()
+  for (const { computer } of sessions) {
+    const known = byId.get(computer.id)
+    if (known) known.folders.add(computer.folder)
+    else
+      byId.set(computer.id, {
+        id: computer.id,
+        name: computer.name,
+        folders: new Set([computer.folder]),
+      })
+  }
+  return [...byId.values()]
+    .map(({ id, name, folders }) => ({ id, name, folders: [...folders].sort() }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
 }
 
 /** The owner's queued turns that wait for this computer, in this folder. */

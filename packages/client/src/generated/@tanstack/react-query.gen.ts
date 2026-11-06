@@ -117,6 +117,7 @@ import {
   listActivityUsers,
   listActivityVisits,
   listAgentApprovals,
+  listAgentComputers,
   listAgentMemoryRevisions,
   listAgentThreadApprovals,
   listAgentThreadChildren,
@@ -523,6 +524,9 @@ import type {
   ListAgentApprovalsData,
   ListAgentApprovalsError,
   ListAgentApprovalsResponse,
+  ListAgentComputersData,
+  ListAgentComputersError,
+  ListAgentComputersResponse,
   ListAgentMemoryRevisionsData,
   ListAgentMemoryRevisionsError,
   ListAgentMemoryRevisionsResponse,
@@ -5114,6 +5118,33 @@ export const getAgentChildFileContentOptions = (options: Options<GetAgentChildFi
       return data
     },
     queryKey: getAgentChildFileContentQueryKey(options),
+  })
+
+export const listAgentComputersQueryKey = (options?: Options<ListAgentComputersData>) =>
+  createQueryKey("listAgentComputers", options)
+
+/**
+ * List your computers with sixb open now
+ *
+ * Each of your computers with a live session, and the folders `sixb` is open in there: a thread created to run in one of them runs there now.
+ */
+export const listAgentComputersOptions = (options?: Options<ListAgentComputersData>) =>
+  queryOptions<
+    ListAgentComputersResponse,
+    ListAgentComputersError,
+    ListAgentComputersResponse,
+    ReturnType<typeof listAgentComputersQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentComputers({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentComputersQueryKey(options),
   })
 
 /**
