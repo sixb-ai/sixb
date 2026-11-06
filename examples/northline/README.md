@@ -21,14 +21,28 @@ credentials.
 - Northline Operations: <http://localhost:3000>
 - API documentation: <http://localhost:3001/docs>
 
-The Northline home route is a branded assistant landing with a centered prompt. Once it creates a
-durable thread, navigating into the operations app hands that thread to the persistent side dock in
-the same browser tab.
+Home opens with one sentence on what needs you and a chat bar pinned above a panel of widgets:
+service cases by stage, what is due next, the crew, the latest alarm, the cases waiting on a
+decision, today's schedule, quotes, and equipment condition. Sending a message opens the
+conversation as a thread, and recent threads stay in the sidebar.
 
-### Optional Operations Assistant
+Every case shows the clock that matters at its stage: the response until a technician is on site,
+then the resolution, which pauses while the customer authorizes a repair. The scenario is anchored
+to the moment the demo sources were created, so deadlines pass over an afternoon as they would in a
+real one; `bun run demo:reset` starts a fresh day.
 
-The button at the bottom-right opens an agent dock with the current route and detail object attached
-as context. Files and artifacts open in a closable canvas over Northline while the dock remains interactive.
+### On a phone
+
+Below 768 px Northline switches to a phone layout: a tab bar for Home, Service cases, Dispatch and
+Equipment, **More** for everything else and recent chats, and a top bar with Search and **Chat**.
+Pages push with swipe back and refresh by pulling down. The shell is ordinary app code in
+[`app/_components/phone/`](./app/_components/phone/), ready to change.
+
+### The assistant
+
+On every other page, **Chat** opens the dock with the current page and record attached as
+context: at the bottom-right on a desktop, in the top bar on a phone. The dock starts closed so it
+never covers a page. Files and artifacts open in a closable canvas over Northline while the dock remains interactive.
 The dock header keeps collapse, thread history, and one-click compose immediately available. The
 history dialog shows the current thread, recent activity, and meaningful work status; it becomes a
 full-page search surface on small screens. The dock's open state, width, and current thread persist
