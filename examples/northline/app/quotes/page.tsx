@@ -272,8 +272,9 @@ function QuoteListRow({ quote, awaitingApproval }: { quote: QuoteRow; awaitingAp
     <li className="border-t border-border/70 first:border-t-0">
       <Link
         to={quotePath(quote.primaryId)}
-        className="group grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none sm:grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] sm:px-6 dark:hover:bg-white/[0.03]"
+        className="group grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none max-sm:grid-cols-1 max-sm:gap-2.5 sm:grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] sm:px-6 dark:hover:bg-white/[0.03]"
       >
+        {/* On a phone the amount, state and validity become one line under the scope. */}
         <span className="hidden size-11 items-center justify-center rounded-[12px] bg-muted sm:flex">
           <FileText className="size-5 text-foreground/55" strokeWidth={1.6} />
         </span>
@@ -295,7 +296,7 @@ function QuoteListRow({ quote, awaitingApproval }: { quote: QuoteRow; awaitingAp
             {quote.links.facility?.properties.name ?? "Facility"}
           </span>
         </span>
-        <span className="flex flex-col items-end gap-1.5">
+        <span className="flex flex-col items-end gap-1.5 max-sm:flex-row max-sm:flex-wrap max-sm:items-center max-sm:gap-2.5">
           <span className="text-[16px] font-semibold tracking-[-0.01em] tabular-nums">
             {formatMoney(quote.properties.amount)}
           </span>
@@ -305,7 +306,7 @@ function QuoteListRow({ quote, awaitingApproval }: { quote: QuoteRow; awaitingAp
           />
           <span
             className={cn(
-              "text-[13px] whitespace-nowrap tabular-nums",
+              "text-[13px] whitespace-nowrap tabular-nums max-sm:ml-auto",
               expiresSoon(quote)
                 ? "font-medium text-[color:var(--warning)]"
                 : "text-muted-foreground"
@@ -314,7 +315,7 @@ function QuoteListRow({ quote, awaitingApproval }: { quote: QuoteRow; awaitingAp
             {validityLabel(quote)}
           </span>
         </span>
-        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground" />
+        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground max-sm:hidden" />
       </Link>
     </li>
   )
