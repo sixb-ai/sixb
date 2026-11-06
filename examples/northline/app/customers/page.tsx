@@ -9,7 +9,15 @@ import { Facility } from "../../ontology/facility"
 import { ServiceCase } from "../../ontology/service-case"
 import { ServiceContract } from "../../ontology/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
-import { humanize, PageHeader, QueryState, StatusBadge, StatusIndicator } from "../_components/ui"
+import {
+  formatMinutes,
+  humanize,
+  initials,
+  PageHeader,
+  QueryState,
+  StatusBadge,
+  StatusIndicator,
+} from "../_components/ui"
 
 const customersQuery = objects(CustomerAccount)
   .query()
@@ -224,7 +232,7 @@ function CustomerListRow({
           </span>
           <span className="truncate text-[13px] text-muted-foreground tabular-nums">
             {activeContract
-              ? `${duration(activeContract.properties.responseTargetMinutes)} response · ${
+              ? `${formatMinutes(activeContract.properties.responseTargetMinutes)} response · ${
                   activeContract.properties.coverageHours === "24_7" ? "24/7" : "Business hours"
                 }`
               : "Coverage unavailable"}
@@ -323,20 +331,4 @@ function openCaseCount(customer: CustomerRow, cases: readonly CaseRow[]): number
 
 function tierPriority(customer: CustomerRow): number {
   return { strategic: 30, priority: 20, standard: 10 }[customer.properties.serviceTier]
-}
-
-function duration(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`
-  const hours = minutes / 60
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
 }

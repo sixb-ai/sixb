@@ -6,7 +6,14 @@ import { type ReactNode, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ServiceContract } from "../../ontology/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
-import { humanize, PageHeader, QueryState, StatusBadge } from "../_components/ui"
+import {
+  daysUntil,
+  formatMinutes,
+  humanize,
+  PageHeader,
+  QueryState,
+  StatusBadge,
+} from "../_components/ui"
 
 const contractsQuery = objects(ServiceContract)
   .query()
@@ -189,8 +196,8 @@ function ContractListRow({ contract }: { contract: ContractRow }) {
         secondary={properties.includedLabor ? "Labor included" : "Labor excluded"}
       />
       <Cell
-        primary={duration(properties.responseTargetMinutes)}
-        secondary={`${duration(properties.resolutionTargetMinutes)} to resolve`}
+        primary={formatMinutes(properties.responseTargetMinutes)}
+        secondary={`${formatMinutes(properties.resolutionTargetMinutes)} to resolve`}
       />
       <Cell
         primary={`${monthYear(properties.startsOn)} – ${monthYear(properties.endsOn)}`}
@@ -291,12 +298,6 @@ function needsRenewalAttention(contract: ContractRow): boolean {
   )
 }
 
-function duration(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`
-  const hours = minutes / 60
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`
-}
-
 function renewalLabel(value: string | Date): string {
   const days = daysUntil(value)
   if (days < 0) return `Ended ${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} ago`
@@ -317,14 +318,6 @@ function monthYear(value: string | Date): string {
   return new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" }).format(
     new Date(value)
   )
-}
-
-function daysUntil(value: string | Date): number {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(value)
-  target.setHours(0, 0, 0, 0)
-  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
 }
 
 function dateValue(value: string | Date): number {

@@ -15,9 +15,12 @@ import { WorkOrder } from "../../../ontology/work-order"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
+  Fact,
   formatDate,
+  formatMinutes,
   formatMoney,
   humanize,
+  initials,
   QueryState,
   Section,
   StatusBadge,
@@ -289,7 +292,7 @@ function ContractsCard({ contracts }: { contracts: readonly ContractRow[] }) {
                 </div>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
                   <SmallFact label="Response">
-                    {duration(properties.responseTargetMinutes)}
+                    {formatMinutes(properties.responseTargetMinutes)}
                   </SmallFact>
                   <SmallFact label="Hours">
                     {properties.coverageHours === "24_7" ? "24/7" : "Business hours"}
@@ -425,15 +428,6 @@ function UnitThumb({
   )
 }
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="truncate text-[14.5px] font-medium tabular-nums">{children}</dd>
-    </div>
-  )
-}
-
 function SmallFact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
@@ -553,22 +547,6 @@ function casePriority(serviceCase: CaseRow): number {
   return (
     (severity[serviceCase.properties.severity] ?? 0) + (sla[serviceCase.properties.slaStatus] ?? 0)
   )
-}
-
-function duration(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`
-  const hours = minutes / 60
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`
-}
-
-function initials(value: string): string {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
 }
 
 function pluralize(singular: string, plural: string, count: number): string {

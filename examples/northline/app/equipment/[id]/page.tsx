@@ -2,7 +2,7 @@ import { useObjectsQuery, useTelemetryHistoryQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, Radio } from "lucide-react"
-import { type ReactNode, useMemo } from "react"
+import { useMemo } from "react"
 import { Link, useParams } from "react-router-dom"
 import { BuildingAlarm } from "../../../ontology/building-alarm"
 import { Equipment } from "../../../ontology/equipment"
@@ -10,6 +10,7 @@ import { ServiceCase } from "../../../ontology/service-case"
 import { TelemetryChart, type TelemetryPoint } from "../../_components/telemetry-chart"
 import {
   CaseClockText,
+  Fact,
   formatDate,
   formatRelativeTime,
   humanize,
@@ -324,15 +325,6 @@ function Reading({
         expectedHigh={high}
         label={label}
       />
-    </div>
-  )
-}
-
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="text-[14.5px] font-medium tabular-nums">{children}</dd>
     </div>
   )
 }

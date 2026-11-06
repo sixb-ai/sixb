@@ -19,6 +19,8 @@ import { Quote } from "../../ontology/quote"
 import { ServiceCase } from "../../ontology/service-case"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
+  daysUntil,
+  Fact,
   formatDate,
   formatMoney,
   formatRelativeTime,
@@ -696,15 +698,6 @@ function DocumentPart({ label, children }: { label: string; children: ReactNode 
   )
 }
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="text-[14.5px] font-medium tabular-nums">{children}</dd>
-    </div>
-  )
-}
-
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border/70 py-2.5 first:border-t-0">
@@ -853,15 +846,6 @@ function quotePath(primaryId: string): string {
 
 function casePath(primaryId: string): string {
   return `/service-cases/${encodeURIComponent(primaryId)}`
-}
-
-function daysUntil(value: string | Date | undefined): number {
-  if (!value) return Number.POSITIVE_INFINITY
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(value)
-  target.setHours(0, 0, 0, 0)
-  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
 }
 
 function dateValue(value: string | Date | undefined): number {
