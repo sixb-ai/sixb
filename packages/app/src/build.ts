@@ -188,7 +188,9 @@ async function buildBrowserEntry(
       chunk: "chunk-[name]-[hash].[ext]",
       asset: "asset-[name]-[hash].[ext]",
     },
-    plugins: [extensionlessSourceImportPlugin],
+    plugins: [extensionlessSourceImportPlugin, publicRootUrlPlugin],
+    // Report a failed build through `result.logs` instead of throwing Bun's bare "Bundle failed".
+    throw: false,
     // React is bundled into this browser output, so without pinning NODE_ENV the production build
     // of a user's app ships React's development build: dev-only checks on every render, and the
     // warnings that go with them. This is also the only knob that selects the production JSX
@@ -285,7 +287,8 @@ export async function buildAuthExperience(
       chunk: "chunk-[name]-[hash].[ext]",
       asset: "asset-[name]-[hash].[ext]",
     },
-    plugins: [extensionlessSourceImportPlugin],
+    plugins: [extensionlessSourceImportPlugin, publicRootUrlPlugin],
+    throw: false,
     define: { "process.env.NODE_ENV": '"production"' },
     sourcemap: "external",
   })
@@ -437,6 +440,19 @@ export async function startupChunks(outdir: string, entry: string): Promise<stri
     }
   }
   return [...found]
+}
+
+// A root-relative `url()` in CSS, such as a font at `/fonts/x.woff2`, names a file in `app/public`.
+// That folder is copied into the output as-is, so the URL has to stay as written instead of being
+// resolved against the filesystem root, where Bun fails the build.
+const publicRootUrlPlugin: Bun.BunPlugin = {
+  name: "sixb-public-root-urls",
+  setup(build) {
+    // Bun reports a CSS `url()` as kind "internal", so the importer is what says it came from CSS.
+    build.onResolve({ filter: /^\/(?!\/)/ }, (args) =>
+      args.importer.endsWith(".css") ? { path: args.path, external: true } : undefined
+    )
+  },
 }
 
 const extensionlessSourceImportPlugin: Bun.BunPlugin = {
