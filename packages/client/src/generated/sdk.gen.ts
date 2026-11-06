@@ -348,6 +348,9 @@ import type {
   ListAgentApprovalsData,
   ListAgentApprovalsErrors,
   ListAgentApprovalsResponses,
+  ListAgentComputersData,
+  ListAgentComputersErrors,
+  ListAgentComputersResponses,
   ListAgentMemoryRevisionsData,
   ListAgentMemoryRevisionsErrors,
   ListAgentMemoryRevisionsResponses,
@@ -3260,6 +3263,24 @@ export const headAgentChildFileContent = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-threads/{threadId}/child-files/content",
+    ...options,
+  })
+
+/**
+ * List your computers with sixb open now
+ *
+ * Each of your computers with a live session, and the folders `sixb` is open in there: a thread created to run in one of them runs there now.
+ */
+export const listAgentComputers = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAgentComputersData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    ListAgentComputersResponses,
+    ListAgentComputersErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-computers",
     ...options,
   })
 

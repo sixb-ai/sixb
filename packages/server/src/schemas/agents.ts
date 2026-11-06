@@ -291,6 +291,17 @@ export const StopAgentBackgroundCommandResponseSchema = z.object({
   command: AgentBackgroundCommandSchema.extend({ stopping: z.boolean().optional() }),
 })
 
+/** One of your computers with `sixb` open on it now, and the folders it's open in. */
+export const AgentComputerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  folders: z.array(z.string()),
+})
+
+export const AgentComputerListResponseSchema = z.object({
+  computers: z.array(AgentComputerSchema),
+})
+
 export const AddAgentThreadParticipantsBodySchema = z
   .object({
     /**

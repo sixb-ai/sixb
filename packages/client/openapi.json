@@ -44393,6 +44393,74 @@
         ]
       }
     },
+    "/api/agent-computers": {
+      "get": {
+        "summary": "List your computers with sixb open now",
+        "description": "Each of your computers with a live session, and the folders `sixb` is open in there: a thread created to run in one of them runs there now.",
+        "tags": ["Agent Threads"],
+        "operationId": "listAgentComputers",
+        "security": [
+          {
+            "sixbSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "computers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "folders": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": ["id", "name", "folders"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["computers"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agent-threads/{threadId}/computer": {
       "post": {
         "summary": "Move a thread to one of your computers, in a folder there",
