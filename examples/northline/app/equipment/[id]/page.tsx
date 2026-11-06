@@ -158,7 +158,7 @@ export default function EquipmentDetailPage() {
           <div className="flex flex-wrap items-start gap-5">
             <Section
               title="Readings"
-              description="The last 48 readings from building controls"
+              description="The last day from building controls, every half hour"
               className="min-w-0 flex-[999_1_560px]"
             >
               <div className="flex flex-col px-6 pb-4">
@@ -166,22 +166,22 @@ export default function EquipmentDetailPage() {
                   label="Supply air temperature"
                   unit="°C"
                   points={supply.data ?? []}
-                  low={18}
-                  high={24}
+                  low={10}
+                  high={19}
                 />
                 <Reading
                   label="Return air temperature"
                   unit="°C"
                   points={returnAir.data ?? []}
-                  low={19}
+                  low={20}
                   high={25}
                 />
                 <Reading
                   label="Compressor current"
                   unit="A"
                   points={current.data ?? []}
-                  low={24}
-                  high={34}
+                  low={8}
+                  high={28}
                 />
               </div>
             </Section>
