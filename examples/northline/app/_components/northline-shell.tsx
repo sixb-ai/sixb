@@ -62,23 +62,15 @@ const groups: ReadonlyArray<{ readonly label?: string; readonly items: readonly 
   },
 ]
 
-// Sits in `AppShellProvider` from the root layout, which also covers the full-screen threads page.
+// Sits in `AppShellProvider` from the root layout.
 export function NorthlineShell({ children }: PropsWithChildren) {
   const location = useLocation()
-  const threadsPageActive = location.pathname === "/threads"
   const conversationActive = location.pathname.startsWith("/threads/")
-  // Console and Settings pages bring their own margins, and some fill the height.
   const sectionActive = useCurrentSection() !== null
-  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], {
-    debounceMs: 75,
-    enabled: !threadsPageActive,
-  })
-  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], {
-    debounceMs: 75,
-    enabled: !threadsPageActive,
-  })
-
-  if (threadsPageActive) return children
+  // The threads list, Console and Settings pages bring their own margins, and some fill the height.
+  const ownLayout = conversationActive || location.pathname === "/threads" || sectionActive
+  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], { debounceMs: 75 })
+  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], { debounceMs: 75 })
 
   return (
     <>
@@ -117,7 +109,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
           <div className="min-h-0 flex-1 overflow-y-auto" data-app-scroll>
             <div
               className={
-                conversationActive || sectionActive
+                ownLayout
                   ? "h-full w-full"
                   : "mx-auto w-full max-w-[1180px] px-5 pt-2 pb-6 sm:px-10 md:pt-10 md:pb-16 lg:px-14"
               }
