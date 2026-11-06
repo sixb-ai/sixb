@@ -6,7 +6,7 @@ import { DuckLakeStorage } from "@sixb/ducklake"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 import { SqliteStorage } from "@sixb/sqlite"
-import { imageModels, languageModels } from "./ai/models"
+import { decisionModels, imageModels, languageModels } from "./ai/models"
 import { lookupResponsePolicy } from "./ai/tools"
 import { productionRuntime } from "./lib/runtime/production"
 import { localAdmins } from "./security/groups/local-admins"
@@ -19,7 +19,7 @@ const production = process.env.NODE_ENV === "production" ? productionRuntime() :
 
 export const sixb = createSixb({
   id: "northline",
-  models: { language: languageModels, image: imageModels },
+  models: { language: languageModels, decision: decisionModels, image: imageModels },
   tools: [lookupResponsePolicy],
   broker: production?.broker ?? new InMemoryBroker(),
   storage: production?.storage ?? new SqliteStorage({ path: ".sixb" }),
