@@ -11,6 +11,7 @@ import {
   getAgentThreadOptions,
   getAgentThreadQueryKey,
   listAgentApprovalsQueryKey,
+  listAgentComputersQueryKey,
   listAgentThreadApprovalsOptions,
   listAgentThreadApprovalsQueryKey,
   listAgentThreadMessagesOptions,
@@ -214,9 +215,11 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     // A held call changed: its card, and the thread list's count of what waits for the reader. Its
     // turn's runs follow from their own events.
     onApprovalActivity: (event) => void refreshApprovals(event.threadId),
-    // Its owner's sixb opened or closed where the open conversation runs: its badge follows. So do
-    // its background commands, which may run where it ran before it moved.
+    // The reader's sixb opened or closed in a folder: the places a new conversation can run follow,
+    // and so does the open conversation's badge, should it run there. So do its background
+    // commands, which may run where it ran before it moved.
     onComputerActivity: (event) => {
+      void queryClient.invalidateQueries({ queryKey: listAgentComputersQueryKey() })
       const place = thread?.computer
       const here = place?.id === event.computerId && place.folder === event.folder
       if (threadId && (here || thread?.backgroundCommands)) void refreshThread(threadId)
@@ -228,6 +231,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     // On every (re)subscription: catch up with what changed while the socket was away.
     onSubscribed: () => {
       void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: listAgentComputersQueryKey() })
       void (threadId === null ? refreshThreads() : refreshThread(threadId))
     },
   })
