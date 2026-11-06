@@ -144,20 +144,16 @@ describe("prefetchDuckDbExtensions", () => {
   })
 
   test("never rejects, so a broken setup still reaches DuckDB's INSTALL", async () => {
-    // Red check: drop the .catch() in prefetchDuckDbExtensions; the missing temp directory rejects.
+    // Red check: drop the .catch() in prefetchDuckDbExtensions; the failed query rejects.
     const fetch = serve(() => new Response(gzipped))
     const warn = spyOn(console, "warn").mockImplementation(() => {})
     const runtime = await open()
-    const tmpdir = process.env.TMPDIR
-    process.env.TMPDIR = join(directory, "missing", "tmp")
-    try {
-      await prefetchDuckDbExtensions(runtime, ["ducklake"])
-    } finally {
-      process.env.TMPDIR = tmpdir
-    }
+    spyOn(runtime, "query").mockRejectedValue(new Error("catalog unavailable"))
+
+    await prefetchDuckDbExtensions(runtime, ["ducklake"])
 
     expect(fetch).not.toHaveBeenCalled()
-    expect(String(warn.mock.calls[0]?.[0])).toContain("ENOENT")
+    expect(String(warn.mock.calls[0]?.[0])).toContain("(catalog unavailable)")
   })
 
   test("leaves a custom extension repository to DuckDB", async () => {
