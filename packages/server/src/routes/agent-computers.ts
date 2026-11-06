@@ -49,8 +49,11 @@ import {
 
 /** How long a session stays live without a renewal; `sixb` renews it three times as often. */
 const SESSION_MS = 60_000
-/** How many sessions one person holds at once: one per open `sixb`, a terminal each. */
-const MAX_SESSIONS = 20
+/**
+ * How many sessions one person holds at once, a folder connected on a computer each. A computer
+ * keeps every folder chosen on it connected, so this only bounds abuse.
+ */
+const MAX_SESSIONS = 200
 
 type ComputerClaim =
   | { readonly computer: AgentThreadComputer }
@@ -212,7 +215,7 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
           ) {
             set.status = 429
             return {
-              error: `[SixbServer] You have ${MAX_SESSIONS} sixb sessions open: quit one to open another.`,
+              error: `[SixbServer] You have ${MAX_SESSIONS} folders connected: forget one to connect another.`,
             }
           }
           const expiresAt = new Date(now.getTime() + SESSION_MS)
