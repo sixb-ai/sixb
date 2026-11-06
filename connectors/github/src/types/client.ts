@@ -1,3 +1,4 @@
+import type { RepositoryBranchesApi } from "./branches"
 import type { GitHubRepositoryTarget } from "./common"
 import type {
   AuthenticatedUserIssuesApi,
@@ -28,6 +29,7 @@ export interface GitHubClient {
 }
 
 export interface GitHubRepositoryScope {
+  readonly branches: RepositoryBranchesApi
   readonly issues: RepositoryIssuesApi
   readonly releases: RepositoryReleasesApi
   get(): Promise<GitHubRepository>

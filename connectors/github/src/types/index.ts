@@ -1,3 +1,10 @@
+export type {
+  GitHubBranch,
+  GitHubBranchCommit,
+  GitHubBranchDetail,
+  ListBranchesOptions,
+  RepositoryBranchesApi,
+} from "./branches"
 export type { GitHubClient, GitHubOrganizationScope, GitHubRepositoryScope } from "./client"
 export type {
   GitHubPage,

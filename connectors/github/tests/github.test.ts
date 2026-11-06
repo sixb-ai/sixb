@@ -213,6 +213,19 @@ describe("github connector", () => {
       { per_page: "50", since: "2026-01-01T00:00:00Z" },
     ],
     [
+      "repo().branches.list",
+      (client: GitHubClient) =>
+        client.repo(webRepo).branches.list({ protected: true, pageSize: 50 }),
+      "/repos/acme/web/branches",
+      { protected: "true", per_page: "50" },
+    ],
+    [
+      "repo().branches.list unprotected",
+      (client: GitHubClient) => client.repo(webRepo).branches.list({ protected: false }),
+      "/repos/acme/web/branches",
+      { protected: "false" },
+    ],
+    [
       "repo().releases.list",
       (client: GitHubClient) => client.repo(webRepo).releases.list({ pageSize: 50 }),
       "/repos/acme/web/releases",
@@ -310,6 +323,13 @@ describe("github connector", () => {
       (c) => c.repo(webRepo).issues.comments.delete(99),
       "DELETE",
       "/repos/acme/web/issues/comments/99",
+      undefined,
+    ],
+    [
+      "repo().branches.get",
+      (c) => c.repo(webRepo).branches.get("feature/login"),
+      "GET",
+      "/repos/acme/web/branches/feature%2Flogin",
       undefined,
     ],
     [
@@ -455,6 +475,29 @@ describe("github connector", () => {
     expect(second).toMatchObject({ items: [{ id: 2 }], hasMore: false, nextPageToken: undefined })
   })
 
+  test("follows a branch page's next link with its protected filter", async () => {
+    const calls = record((_, index) =>
+      json(
+        [{ name: `release/${index}`, commit: { sha: `sha-${index}`, url: "x" }, protected: true }],
+        index === 1
+          ? nextLink("https://api.github.com/repos/acme/web/branches?protected=true&page=2")
+          : undefined
+      )
+    )
+    const branches = (await connect()).repo(webRepo).branches
+
+    const first = await branches.list({ protected: true })
+    const second = await branches.list({ pageToken: first.nextPageToken })
+
+    expect(first).toMatchObject({ items: [{ name: "release/1" }], hasMore: true })
+    expect(calls[1]?.url.pathname).toBe("/repos/acme/web/branches")
+    expect(Object.fromEntries(calls[1]?.url.searchParams ?? [])).toEqual({
+      protected: "true",
+      page: "2",
+    })
+    expect(second).toMatchObject({ items: [{ name: "release/2" }], hasMore: false })
+  })
+
   test("rejects caller-provided pageTokens that decode to absolute URLs", async () => {
     const calls = record()
     const client = await connect()
@@ -497,10 +540,11 @@ describe("github connector", () => {
     expect(calls[1]?.url.pathname).toBe("/api/v3/user/repos")
   })
 
-  test("rejects invalid issue ids, comment ids and release tags before requesting", async () => {
+  test("rejects invalid issue ids, comment ids, release tags and branch names before requesting", async () => {
     const calls = record()
-    const { issues, releases } = (await connect()).repo(webRepo)
+    const { branches, issues, releases } = (await connect()).repo(webRepo)
 
+    await expect(branches.get(" ")).rejects.toThrow("branch must not be empty")
     await expect(issues.get(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.get(0)).rejects.toThrow("commentId must be a positive integer")
