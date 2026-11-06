@@ -293,16 +293,10 @@ function ContractsCard({ contracts }: { contracts: readonly ContractRow[] }) {
                   <StatusBadge value={properties.status} />
                 </div>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
-                  <SmallFact label="Response">
-                    {formatMinutes(properties.responseTargetMinutes)}
-                  </SmallFact>
-                  <SmallFact label="Hours">
-                    {formatCoverageHours(properties.coverageHours)}
-                  </SmallFact>
-                  <SmallFact label="Approval above">
-                    {formatMoney(properties.approvalThreshold)}
-                  </SmallFact>
-                  <SmallFact label="Renews">{formatDate(properties.endsOn)}</SmallFact>
+                  <Fact label="Response">{formatMinutes(properties.responseTargetMinutes)}</Fact>
+                  <Fact label="Hours">{formatCoverageHours(properties.coverageHours)}</Fact>
+                  <Fact label="Approval above">{formatMoney(properties.approvalThreshold)}</Fact>
+                  <Fact label="Renews">{formatDate(properties.endsOn)}</Fact>
                 </dl>
                 <p className="text-[13px] text-muted-foreground">
                   Labor {properties.includedLabor ? "included" : "excluded"} · major parts{" "}
@@ -422,15 +416,6 @@ function UnitThumb({
         iconClassName="size-[45%] text-foreground/55"
       />
     </span>
-  )
-}
-
-function SmallFact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="truncate text-[14px] font-medium tabular-nums">{children}</dd>
-    </div>
   )
 }
 
