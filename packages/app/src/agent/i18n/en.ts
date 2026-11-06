@@ -827,8 +827,8 @@ export const en = {
   },
   /** A conversation that runs on its owner's computer, as its owner sees it. */
   computer: {
-    online: "sixb is open there",
-    offline: "sixb is closed there",
+    online: "Connected",
+    offline: "Not connected",
     offlineNotice: (computer: string, folder: string) =>
       `${computer} is offline. Your message waits until ${folder} is connected there.`,
     noFolder:

@@ -801,14 +801,14 @@ describe("sharing", () => {
 describe("a conversation on its owner's computer", () => {
   const laptop = { id: "cmp_laptop", name: "Alice's MacBook Pro", folder: "/Users/alice/q3" }
 
-  test("shows its owner the computer and folder it runs in, and that sixb is open there", async () => {
+  test("shows its owner the computer and folder it runs in, and that it's connected", async () => {
     const { view } = renderChat("alice", {
       thread: thread({ runsOn: "computer", computer: { ...laptop, online: true } }),
     })
 
     expect(await view.findByText("Alice's MacBook Pro")).toBeDefined()
     expect(view.getByText("· ~/q3")).toBeDefined()
-    expect(view.getByText("sixb is open there")).toBeDefined()
+    expect(view.getByText("Connected")).toBeDefined()
     expect(view.queryByRole("button", { name: "Continue in the cloud" })).toBeNull()
     expect(await view.findByRole("textbox", { name: "Message" })).toBeDefined()
   })
