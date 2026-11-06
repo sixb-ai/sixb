@@ -5,7 +5,6 @@ import { CustomerAccount } from "../../ontology/customer-account"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
-import { NorthlineWordmark } from "./northline-wordmark"
 
 const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/service-cases", "Service cases"],
@@ -46,10 +45,12 @@ export function OperationsAssistant() {
 
   return (
     <AgentSurface
-      title="Northline Operations Assistant"
-      launcherLabel="Ask Northline"
+      title="Chat"
+      launcherLabel="Chat"
       context={context}
-      welcomeContent={<NorthlineWordmark className="h-10" />}
+      welcomeContent={
+        <DockWelcome label={objectContext ? "this record" : pageLabel.toLowerCase()} />
+      }
       fullPage={fullPage}
       panelClassName={fullPage ? "max-md:[&_[data-agent-conversation-header]]:pl-12" : undefined}
       threadId={threadRoute?.params.id}
@@ -90,4 +91,15 @@ function routeId(pathname: string, prefix: string): string | undefined {
   } catch {
     return encoded
   }
+}
+
+function DockWelcome({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1.5 px-6 text-center">
+      <p className="text-[17px] font-semibold tracking-[-0.01em]">Chat about {label}</p>
+      <p className="max-w-[16rem] text-[13.5px] leading-5 text-muted-foreground">
+        What you ask here comes with the page you’re on, so you don’t have to explain it.
+      </p>
+    </div>
+  )
 }
