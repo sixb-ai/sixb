@@ -9,7 +9,7 @@ import { Equipment } from "../../../ontology/equipment"
 import { ServiceCase } from "../../../ontology/service-case"
 import { TelemetryChart, type TelemetryPoint } from "../../_components/telemetry-chart"
 import {
-  deadlineLabel,
+  CaseClockText,
   formatDate,
   formatRelativeTime,
   humanize,
@@ -147,7 +147,7 @@ export default function EquipmentDetailPage() {
                 </span>
                 <span className="truncate text-[13.5px] text-muted-foreground">
                   {activeCase.links.customer?.properties.name} ·{" "}
-                  {deadlineLabel(activeCase.properties.responseDeadline)}
+                  <CaseClockText serviceCase={activeCase.properties} />
                 </span>
               </span>
               <StatusBadge value={activeCase.properties.status} />

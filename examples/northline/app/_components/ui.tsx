@@ -292,12 +292,26 @@ export function formatRelativeTime(value: string | Date | undefined): string {
   return `${Math.round(hours / 24)}d ago`
 }
 
+/** A moment in words close to now: "Today, 6:49 PM", "Tomorrow, 9:00 AM", "Nov 3, 2:15 PM". */
 export function formatDateTime(value: string | Date | undefined): string {
   if (!value) return "—"
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value))
+  const date = new Date(value)
+  const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(date)
+  const days = Math.round((startOfDay(date) - startOfDay(new Date())) / 86_400_000)
+  if (days === 0) return `Today, ${time}`
+  if (days === -1) return `Yesterday, ${time}`
+  if (days === 1) return `Tomorrow, ${time}`
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  const day = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+  }).format(date)
+  return `${day}, ${time}`
+}
+
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
 
 export function formatMoney(value: number | undefined): string {
@@ -310,13 +324,104 @@ export function formatMoney(value: number | undefined): string {
       }).format(value)
 }
 
-export function deadlineLabel(value: string | Date | undefined): string {
-  if (!value) return "No deadline"
-  const difference = new Date(value).getTime() - Date.now()
-  const minutes = Math.round(Math.abs(difference) / 60_000)
-  if (minutes < 60) return difference < 0 ? `${minutes}m overdue` : `${minutes}m left`
+export interface CaseClockFields {
+  readonly status?: string
+  readonly slaStatus?: string
+  readonly responseDeadline?: string | Date
+  readonly resolutionDeadline?: string | Date
+}
+
+export interface CaseClock {
+  /** Which commitment is running: "Response", "Resolution" or "Commitment" once it is over. */
+  readonly label: string
+  /** The clock on its own, for a labelled fact: "47m left", "2h overdue", "Met". */
+  readonly value: string
+  /** The clock as a phrase, for rows that have no label: "47m to respond". */
+  readonly summary: string
+  readonly tone: Tone
+  /** When the running commitment falls due, for sorting; infinity once it is over. */
+  readonly dueAt: number
+}
+
+const awaitingResponse = new Set(["new", "triage", "dispatching"])
+const finished = new Set(["resolved", "closed", "cancelled"])
+
+/**
+ * The commitment that matters at a case's stage. Until a technician is on site the customer is
+ * waiting on a response; after that, on a resolution; once resolved, the commitment was met or
+ * missed.
+ */
+export function caseClock(serviceCase: CaseClockFields): CaseClock {
+  const status = serviceCase.status ?? "new"
+  const atRisk = serviceCase.slaStatus === "at_risk" || serviceCase.slaStatus === "breached"
+  if (finished.has(status)) {
+    const missed = serviceCase.slaStatus === "breached"
+    return {
+      label: "Commitment",
+      value: missed ? "Missed" : "Met",
+      summary: missed ? "Commitment missed" : "Commitment met",
+      tone: missed ? "critical" : "neutral",
+      dueAt: Number.POSITIVE_INFINITY,
+    }
+  }
+
+  const responding = awaitingResponse.has(status)
+  const label = responding ? "Response" : "Resolution"
+  const deadline = responding ? serviceCase.responseDeadline : serviceCase.resolutionDeadline
+  if (!deadline) {
+    const dueAt = Number.POSITIVE_INFINITY
+    return { label, value: "No deadline", summary: "No deadline", tone: "neutral", dueAt }
+  }
+
+  const dueAt = new Date(deadline).getTime()
+  const remaining = dueAt - Date.now()
+  const duration = formatDuration(Math.abs(remaining))
+  if (remaining < 0) {
+    return {
+      label,
+      value: `${duration} overdue`,
+      summary: `${label} ${duration} overdue`,
+      tone: "critical",
+      dueAt,
+    }
+  }
+  return {
+    label,
+    value: `${duration} left`,
+    summary: `${duration} to ${responding ? "respond" : "resolve"}`,
+    tone: atRisk ? "warning" : "neutral",
+    dueAt,
+  }
+}
+
+/** A case's clock in its tone; neutral clocks take the surrounding text color. */
+export function CaseClockText({
+  serviceCase,
+  variant = "summary",
+  className,
+}: {
+  serviceCase: CaseClockFields
+  variant?: "summary" | "value"
+  className?: string
+}) {
+  const clock = caseClock(serviceCase)
+  return (
+    <span
+      className={cn(
+        "tabular-nums",
+        clock.tone === "neutral" ? undefined : toneStyles[clock.tone].text,
+        className
+      )}
+    >
+      {clock[variant]}
+    </span>
+  )
+}
+
+function formatDuration(milliseconds: number): string {
+  const minutes = Math.max(1, Math.round(milliseconds / 60_000))
+  if (minutes < 60) return `${minutes}m`
   const hours = Math.round(minutes / 60)
-  if (hours < 48) return difference < 0 ? `${hours}h overdue` : `${hours}h left`
-  const days = Math.round(hours / 24)
-  return difference < 0 ? `${days}d overdue` : `${days}d left`
+  if (hours < 48) return `${hours}h`
+  return `${Math.round(hours / 24)}d`
 }

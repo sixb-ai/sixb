@@ -12,7 +12,8 @@ import { ServiceVisit } from "../ontology/service-visit"
 import { Technician } from "../ontology/technician"
 import { Widget, WidgetBreakdown, WidgetMetric, WidgetState } from "./_components/home/widget"
 import {
-  deadlineLabel,
+  CaseClockText,
+  caseClock,
   formatMoney,
   formatRelativeTime,
   formatTime,
@@ -83,17 +84,19 @@ export default function NorthlineHomePage() {
   const atRisk = open.filter((item) =>
     ["at_risk", "breached"].includes(item.properties.slaStatus ?? "")
   )
-  const byDeadline = [...open].sort(
-    (left, right) =>
-      time(left.properties.responseDeadline) - time(right.properties.responseDeadline)
-  )
+  // The commitments still running, soonest first: responses, then resolutions once on site.
+  const dueNext = open
+    .map((item) => ({ item, dueAt: caseClock(item.properties).dueAt }))
+    .filter((entry) => Number.isFinite(entry.dueAt))
+    .sort((left, right) => left.dueAt - right.dueAt)
+    .map((entry) => entry.item)
   const decisionRows = open
     .filter((item) => (item.properties.status ?? "") in decisions)
     .sort(
       (left, right) =>
         (severityRank[left.properties.severity ?? "low"] ?? 9) -
           (severityRank[right.properties.severity ?? "low"] ?? 9) ||
-        time(left.properties.responseDeadline) - time(right.properties.responseDeadline)
+        caseClock(left.properties).dueAt - caseClock(right.properties).dueAt
     )
 
   const quoteRows = quotes.data?.objects ?? []
@@ -163,11 +166,11 @@ export default function NorthlineHomePage() {
       </header>
 
       {/* Pinned while widgets scroll under it; the fade hides their edges above the glass. */}
-      <div className="nl-home-composer sticky top-3 z-30 mt-6 before:pointer-events-none before:absolute before:inset-x-0 before:-top-4 before:-z-10 before:h-12 before:bg-gradient-to-b before:from-background before:from-40% before:to-transparent sm:top-4">
+      <div className="sticky top-3 z-30 mt-6 before:pointer-events-none before:absolute before:inset-x-0 before:-top-4 before:-z-10 before:h-12 before:bg-gradient-to-b before:from-background before:from-40% before:to-transparent sm:top-4">
         <Composer
           {...conversation.composerProps}
           placeholder="Ask about today’s work"
-          className="bg-transparent px-0 pt-0 pb-0"
+          className="nl-home-composer bg-transparent px-0 pt-0 pb-0"
         />
       </div>
 
@@ -222,12 +225,7 @@ export default function NorthlineHomePage() {
             </WidgetState>
           </Widget>
 
-          <Widget
-            to="/service-cases"
-            label="View response deadlines"
-            title="Response clock"
-            size="small"
-          >
+          <Widget to="/service-cases" label="View what is due next" title="Due next" size="small">
             <WidgetState loading={cases.isLoading} error={cases.isError} label="deadlines">
               <div className="mt-auto flex flex-col gap-3 pt-4">
                 <WidgetMetric
@@ -236,16 +234,17 @@ export default function NorthlineHomePage() {
                   valueClassName={atRisk.length > 0 ? "text-[color:var(--warning)]" : ""}
                 />
                 <ul className="flex flex-col gap-1.5 text-[13px]">
-                  {byDeadline.slice(0, 2).map((item) => (
+                  {dueNext.slice(0, 2).map((item) => (
                     <li key={item.primaryId} className="flex justify-between gap-2">
                       <span className="truncate text-foreground/80">{item.properties.number}</span>
-                      <span className="shrink-0 font-medium tabular-nums">
-                        {deadlineLabel(item.properties.responseDeadline)}
-                      </span>
+                      <CaseClockText
+                        serviceCase={item.properties}
+                        className="shrink-0 font-medium"
+                      />
                     </li>
                   ))}
-                  {byDeadline.length === 0 ? (
-                    <li className="text-muted-foreground">No open deadlines</li>
+                  {dueNext.length === 0 ? (
+                    <li className="text-muted-foreground">Nothing is due</li>
                   ) : null}
                 </ul>
               </div>
@@ -303,7 +302,7 @@ export default function NorthlineHomePage() {
                   Nothing is waiting on a decision.
                 </p>
               ) : (
-                <ul className="mt-auto flex flex-col pt-3">
+                <ul className="mt-2 flex flex-col">
                   {decisionRows.slice(0, 3).map((item) => (
                     <DecisionRow key={item.primaryId} item={item} />
                   ))}
@@ -323,7 +322,7 @@ export default function NorthlineHomePage() {
               {todaysVisits.length === 0 ? (
                 <p className="mt-auto pt-4 text-[14px] text-muted-foreground">No visits today.</p>
               ) : (
-                <ul className="mt-auto flex flex-col pt-3">
+                <ul className="mt-2 flex flex-col">
                   {todaysVisits.slice(0, 3).map((visit) => (
                     <li
                       key={visit.primaryId}
@@ -522,7 +521,7 @@ function DecisionRow({ item }: { item: CaseRow }) {
         </span>
         <span className="truncate text-[12.5px] text-muted-foreground">
           {item.links.customer?.properties.name ?? "Customer"} ·{" "}
-          {deadlineLabel(item.properties.responseDeadline)}
+          <CaseClockText serviceCase={item.properties} />
         </span>
       </span>
       <Link
@@ -572,11 +571,6 @@ function initials(name: string | undefined): string {
     .join("")
     .slice(0, 2)
     .toUpperCase()
-}
-
-function time(value: string | Date | undefined): number {
-  if (!value) return Number.POSITIVE_INFINITY
-  return value instanceof Date ? value.getTime() : new Date(value).getTime()
 }
 
 function isToday(value: string | Date | undefined): boolean {

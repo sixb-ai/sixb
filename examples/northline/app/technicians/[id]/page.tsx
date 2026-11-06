@@ -13,14 +13,14 @@ import { WorkOrder } from "../../../ontology/work-order"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
-  deadlineLabel,
+  CaseClockText,
+  caseClock,
   formatDateTime,
   humanize,
   QueryState,
   Section,
   StatusBadge,
   StatusIndicator,
-  statusTone,
 } from "../../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
 
@@ -394,7 +394,6 @@ function VisitHero({
     equipment.properties.equipmentType
   )
   const Icon = equipmentIcon(equipment.properties.equipmentType)
-  const caseClosed = ["resolved", "closed"].includes(serviceCase.properties.status ?? "")
   return (
     <section className="flex flex-wrap overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
       <div className="relative flex min-h-48 flex-[1_1_280px] items-center justify-center bg-muted">
@@ -436,12 +435,8 @@ function VisitHero({
         </div>
 
         <dl className="flex flex-wrap gap-x-9 gap-y-3">
-          <Fact label="Response">
-            <span className={deadlineClass(serviceCase.properties.slaStatus)}>
-              {caseClosed
-                ? humanize(serviceCase.properties.slaStatus ?? "met")
-                : deadlineLabel(serviceCase.properties.responseDeadline)}
-            </span>
+          <Fact label={caseClock(serviceCase.properties).label}>
+            <CaseClockText serviceCase={serviceCase.properties} variant="value" />
           </Fact>
           <Fact label="Scheduled">{formatDateTime(visit.properties.scheduledStart)}</Fact>
           <Fact label="Service case">
@@ -835,13 +830,6 @@ function visitStage(visit: VisitRow): string {
     return "complete"
   }
   return visit.properties.startedAt ? "diagnosis" : "on_site"
-}
-
-function deadlineClass(slaStatus: string | undefined): string {
-  const tone = statusTone(slaStatus)
-  if (tone === "critical") return "text-destructive"
-  if (tone === "warning") return "text-[color:var(--warning)]"
-  return ""
 }
 
 function initials(value: string): string {

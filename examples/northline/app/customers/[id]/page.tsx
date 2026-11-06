@@ -14,7 +14,7 @@ import { ServiceVisit } from "../../../ontology/service-visit"
 import { WorkOrder } from "../../../ontology/work-order"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
-  deadlineLabel,
+  CaseClockText,
   formatDate,
   formatMoney,
   humanize,
@@ -22,7 +22,6 @@ import {
   Section,
   StatusBadge,
   StatusIndicator,
-  statusTone,
 } from "../../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
@@ -246,14 +245,10 @@ function OpenCaseRow({ serviceCase }: { serviceCase: CaseRow }) {
         </span>
         <span className="flex flex-col items-end gap-1.5">
           <StatusBadge value={serviceCase.properties.status} />
-          <span
-            className={cn(
-              "text-[13px] font-medium whitespace-nowrap tabular-nums",
-              deadlineClass(serviceCase.properties.slaStatus)
-            )}
-          >
-            {deadlineLabel(serviceCase.properties.responseDeadline)}
-          </span>
+          <CaseClockText
+            serviceCase={serviceCase.properties}
+            className="text-[13px] font-medium whitespace-nowrap text-foreground/70"
+          />
         </span>
         <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground" />
       </Link>
@@ -558,13 +553,6 @@ function casePriority(serviceCase: CaseRow): number {
   return (
     (severity[serviceCase.properties.severity] ?? 0) + (sla[serviceCase.properties.slaStatus] ?? 0)
   )
-}
-
-function deadlineClass(slaStatus: string | undefined): string {
-  const tone = statusTone(slaStatus)
-  if (tone === "critical") return "text-destructive"
-  if (tone === "warning") return "text-[color:var(--warning)]"
-  return "text-foreground/70"
 }
 
 function duration(minutes: number): string {
