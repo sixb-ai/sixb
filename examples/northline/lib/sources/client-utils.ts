@@ -18,6 +18,18 @@ export function pageRows<T>(rows: readonly T[], input: SourceListInput = {}): So
   }
 }
 
+/** Every row of a paged listing, following each page's cursor to the last. */
+export async function* allRows<T>(
+  list: (input: SourceListInput) => Promise<SourcePage<T>>
+): AsyncGenerator<T> {
+  let cursor: string | undefined
+  do {
+    const page = await list(cursor ? { cursor } : {})
+    yield* page.rows
+    cursor = page.nextCursor
+  } while (cursor)
+}
+
 export function orderedChangesSince<T extends object>(
   changes: readonly T[],
   cursor?: string

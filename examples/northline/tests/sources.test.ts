@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
-import { orderedChangesSince } from "../lib/sources/client-utils"
+import { allRows, orderedChangesSince, pageRows } from "../lib/sources/client-utils"
 import { AtomicJsonStore } from "../lib/sources/file-store"
 
 const roots = new Set<string>()
@@ -65,5 +65,18 @@ describe("orderedChangesSince", () => {
     expect(original.row.status).toBe("sent")
 
     expect(() => orderedChangesSince(changes, "3")).toThrow("beyond the retained change history")
+  })
+})
+
+describe("allRows", () => {
+  test("follows every page of a listing", async () => {
+    // A day of readings for ten units is 480 rows; a source page holds 100. Reproduce: make
+    // allRows read only the first page and the readings sync keeps three units of ten.
+    const readings = Array.from({ length: 480 }, (_, index) => index)
+    const received: number[] = []
+    for await (const value of allRows((input) => Promise.resolve(pageRows(readings, input)))) {
+      received.push(value)
+    }
+    expect(received).toEqual(readings)
   })
 })
