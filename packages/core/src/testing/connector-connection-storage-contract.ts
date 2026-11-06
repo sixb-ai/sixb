@@ -454,6 +454,29 @@ export function runConnectorConnectionStorageContractSuite<
       })
     })
 
+    test("connects another account to a disconnected slot without replacement", async () => {
+      await withStorage(async (storage) => {
+        const first = await createAuthorization(storage, "authorization-a", "account-a")
+        const connected = await connect(storage, first, "connection-a", "account-a")
+        await storage.disconnectConnection({
+          projectId,
+          connectorId,
+          connectionId: connected.connection.id,
+        })
+
+        const second = await createAuthorization(storage, "authorization-b", "account-b")
+        const reconnected = await connect(storage, second, "ignored-new-id", "account-b")
+
+        expect(reconnected.connection).toMatchObject({
+          id: connected.connection.id,
+          authorizationId: second.id,
+          account: { id: "account-b" },
+          status: "connected",
+        })
+        expect(reconnected.replaced).toBe(false)
+      })
+    })
+
     test("keeps pending selection untouched when connection validation fails", async () => {
       await withStorage(async (storage) => {
         const active = await createAuthorization(storage, "authorization-a", "account-a")

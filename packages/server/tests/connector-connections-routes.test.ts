@@ -23,6 +23,11 @@ let revokeCount = 0
 let exchangeCount = 0
 let exchangedCallbackParameters: Readonly<Record<string, string>> | undefined
 let discoveredContext: ConnectorOAuthCredentials["authorizationContext"]
+const twoAccounts = [
+  { id: "account-a", label: "Account A" },
+  { id: "account-b", label: "Account B" },
+]
+let discoveredAccounts = twoAccounts
 
 const connector = defineConnector("crm", {
   type: "test-oauth",
@@ -59,10 +64,7 @@ const connector = defineConnector("crm", {
   discoverAccounts(_context, credentials) {
     discoveredContext = credentials.authorizationContext
     if (discoverError) throw discoverError
-    return [
-      { id: "account-a", label: "Account A" },
-      { id: "account-b", label: "Account B" },
-    ]
+    return discoveredAccounts
   },
   connect() {
     return {}
@@ -85,6 +87,7 @@ const connectorManager = defineRole("connector.manager", {
 async function createHarness() {
   revokeError = undefined
   discoverError = undefined
+  discoveredAccounts = twoAccounts
   revokeCount = 0
   exchangeCount = 0
   exchangedCallbackParameters = undefined
@@ -884,6 +887,25 @@ describe("connector connection Headless API", () => {
         expect.objectContaining({ slot: "ads", status: "connected" }),
       ])
     )
+  })
+
+  test("connects the only account during the OAuth callback", async () => {
+    const harness = await createHarness()
+    discoveredAccounts = [{ id: "account-a", label: "Account A" }]
+    const started = await startRun(harness, "social")
+
+    const callback = await completeRunAtProvider(harness, started.state, started.callbackCookie)
+
+    expect(callback.status).toBe(302)
+    const run = await harness.app.handle(
+      new Request(`http://api.localhost/api/connectors/crm/connection-runs/${started.runId}`, {
+        headers: harness.session.readHeaders,
+      })
+    )
+    expect(await run.json()).toMatchObject({
+      status: "succeeded",
+      connections: [{ slot: "social", status: "connected", account: { id: "account-a" } }],
+    })
   })
 
   test("returns a dedicated conflict when account selection requires replacement", async () => {

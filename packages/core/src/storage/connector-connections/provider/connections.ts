@@ -182,7 +182,7 @@ export class DurableConnectorConnections extends ConnectorConnectionOperations {
     }
     const existing = await persistence.getConnectionBySelector(input)
     const sameAccount = existing?.account.id === account.id
-    if (existing && !sameAccount && !input.replace) {
+    if (existing?.status === "connected" && !sameAccount && !input.replace) {
       throw new ConnectorConnectionStorageError(
         "connection_conflict",
         `[Sixb] Connector slot '${input.slot}' is already connected to another account; explicit replacement is required.`
@@ -267,7 +267,7 @@ export class DurableConnectorConnections extends ConnectorConnectionOperations {
         ? {}
         : { revocationPendingAuthorizationId }),
       created: existing === null,
-      replaced: existing !== null && !sameAccount,
+      replaced: existing?.status === "connected" && !sameAccount,
     }
   }
 }
