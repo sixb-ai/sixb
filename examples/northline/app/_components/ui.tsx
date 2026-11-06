@@ -54,7 +54,7 @@ const info = new Set([
 
 export type Tone = "critical" | "warning" | "success" | "info" | "neutral"
 
-export function statusTone(status: string | undefined): Tone {
+function statusTone(status: string | undefined): Tone {
   const value = status ?? "unknown"
   if (critical.has(value)) return "critical"
   if (warning.has(value)) return "warning"
@@ -131,24 +131,21 @@ export function StatusIndicator({
   )
 }
 
-/** The large title every page opens with; the eyebrow is a quiet breadcrumb above it. */
+/** The large title every list page opens with, its description, and the page's controls. */
 export function PageHeader({
   title,
   description,
   action,
-  eyebrow,
   children,
 }: PropsWithChildren<{
   title: string
   description?: ReactNode
   action?: ReactNode
-  eyebrow?: ReactNode
 }>) {
   return (
     <header className="mb-8 flex flex-col gap-5">
       <div className="flex items-start justify-between gap-6 max-sm:flex-col max-sm:gap-4">
         <div className="min-w-0">
-          {eyebrow ? <div className="mb-2 text-[14px] text-muted-foreground">{eyebrow}</div> : null}
           <h1 className="text-[34px] leading-[1.06] font-semibold tracking-[-0.03em] text-balance text-foreground sm:text-[40px]">
             {title}
           </h1>
@@ -173,6 +170,16 @@ export function Fact({ label, children }: PropsWithChildren<{ label: string }>) 
     <div className="flex min-w-0 flex-col gap-0.5">
       <dt className="text-[12px] text-muted-foreground">{label}</dt>
       <dd className="truncate text-[14.5px] font-medium tabular-nums">{children}</dd>
+    </div>
+  )
+}
+
+/** A label and its value on one line, for the side cards on a record page; inside a `<dl>`. */
+export function Row({ label, children }: PropsWithChildren<{ label: string }>) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border/70 py-2.5 first:border-t-0">
+      <dt className="truncate text-[14.5px] font-medium">{label}</dt>
+      <dd className="shrink-0 text-[13.5px] text-muted-foreground">{children}</dd>
     </div>
   )
 }
@@ -207,38 +214,6 @@ export function Section({
       ) : null}
       {children}
     </section>
-  )
-}
-
-/** One headline number with what it means underneath. */
-export function StatTile({
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  label: string
-  value: ReactNode
-  detail?: ReactNode
-  tone?: Tone
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5 rounded-[18px] bg-card px-5 py-4 shadow-[var(--shadow-card)]">
-      <span className="text-[13px] font-medium text-muted-foreground">{label}</span>
-      <span className="text-[30px] leading-9 font-semibold tracking-[-0.02em] text-foreground">
-        {value}
-      </span>
-      {detail ? (
-        <span
-          className={cn(
-            "truncate text-[13px]",
-            tone ? toneStyles[tone].text : "text-foreground/75"
-          )}
-        >
-          {detail}
-        </span>
-      ) : null}
-    </div>
   )
 }
 
@@ -455,6 +430,29 @@ export function caseClock(serviceCase: CaseClockFields): CaseClock {
 /** At risk is what the clock shows: overdue, or flagged by the contract while time remains. */
 export function isCaseAtRisk(serviceCase: CaseClockFields): boolean {
   return caseClock(serviceCase).tone !== "neutral"
+}
+
+const severityWeight: Readonly<Record<string, number>> = {
+  critical: 40,
+  high: 30,
+  medium: 20,
+  low: 10,
+}
+const riskWeight: Readonly<Record<string, number>> = { critical: 30, warning: 20 }
+
+/** Most urgent first: severity, then what the clock shows, then the soonest deadline. */
+export function casePriority(
+  serviceCase: CaseClockFields & { readonly severity?: string }
+): number {
+  const clock = caseClock(serviceCase)
+  const closed = ["closed", "cancelled"].includes(serviceCase.status ?? "") ? -100 : 0
+  const dueAt = Number.isFinite(clock.dueAt) ? clock.dueAt : Date.now()
+  return (
+    (severityWeight[serviceCase.severity ?? "low"] ?? 0) +
+    (riskWeight[clock.tone] ?? 0) +
+    closed -
+    dueAt / 1e13
+  )
 }
 
 /** A case's clock in its tone; neutral clocks take the surrounding text color. */

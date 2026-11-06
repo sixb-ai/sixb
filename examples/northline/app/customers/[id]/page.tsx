@@ -15,6 +15,7 @@ import { WorkOrder } from "../../../ontology/work-order"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
+  casePriority,
   Fact,
   formatCoverageHours,
   formatDate,
@@ -91,7 +92,7 @@ export default function CustomerDetailPage() {
   const caseIds = new Set(cases.map((serviceCase) => serviceCase.primaryId))
   const activeCases = cases
     .filter((serviceCase) => !["closed", "cancelled"].includes(serviceCase.properties.status))
-    .sort((left, right) => casePriority(right) - casePriority(left))
+    .sort((left, right) => casePriority(right.properties) - casePriority(left.properties))
   const contracts = (contractsResult.data?.objects ?? [])
     .filter((contract) => contract.links.customer?.primaryId === id)
     .sort((left, right) => Number(isCurrent(right)) - Number(isCurrent(left)))
@@ -536,14 +537,6 @@ function TimelineLink({ to, children }: { to: string; children: ReactNode }) {
 
 function isCurrent(contract: ContractRow): boolean {
   return ["active", "expiring"].includes(contract.properties.status)
-}
-
-function casePriority(serviceCase: CaseRow): number {
-  const severity: Record<string, number> = { critical: 40, high: 30, medium: 20, low: 10 }
-  const sla: Record<string, number> = { breached: 30, at_risk: 20, on_track: 0, met: -10 }
-  return (
-    (severity[serviceCase.properties.severity] ?? 0) + (sla[serviceCase.properties.slaStatus] ?? 0)
-  )
 }
 
 function pluralize(singular: string, plural: string, count: number): string {

@@ -25,6 +25,7 @@ import {
   StatusIndicator,
 } from "../../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
+import type { QueryRow } from "../../_lib/query-types"
 
 const visitsQuery = objects(ServiceVisit)
   .query()
@@ -47,9 +48,9 @@ const notesQuery = objects(FieldNote)
   .limit(100)
 const techniciansBaseQuery = objects(Technician).query()
 
-type VisitRow = NonNullable<Awaited<ReturnType<typeof visitsQuery.first>>>
-type NoteRow = NonNullable<Awaited<ReturnType<typeof notesQuery.first>>>
-type TechnicianRow = NonNullable<Awaited<ReturnType<typeof techniciansBaseQuery.first>>>
+type VisitRow = QueryRow<typeof visitsQuery>
+type NoteRow = QueryRow<typeof notesQuery>
+type TechnicianRow = QueryRow<typeof techniciansBaseQuery>
 type VisitWorkOrder = NonNullable<VisitRow["links"]["workOrder"]>
 type VisitServiceCase = NonNullable<VisitWorkOrder["links"]["serviceCase"]>
 type VisitEquipment = NonNullable<VisitWorkOrder["links"]["equipment"]>

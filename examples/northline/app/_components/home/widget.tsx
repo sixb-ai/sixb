@@ -12,7 +12,7 @@ const sizeClassNames = {
   large: "col-span-2 row-span-2",
 } as const
 
-export type WidgetSize = keyof typeof sizeClassNames
+type WidgetSize = keyof typeof sizeClassNames
 
 /**
  * A home widget. The whole card opens `to`; controls inside it sit above the link with
@@ -94,7 +94,7 @@ export function WidgetMetric({
   )
 }
 
-export interface BreakdownSegment {
+interface BreakdownSegment {
   readonly key: string
   readonly label: string
   readonly count: number

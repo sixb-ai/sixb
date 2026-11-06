@@ -8,13 +8,14 @@ import { ServiceCase } from "../../ontology/service-case"
 import { SearchField, ViewPills } from "../_components/list-controls"
 import {
   CaseClockText,
-  caseClock,
+  casePriority,
   isCaseAtRisk,
   PageHeader,
   QueryState,
   StatusBadge,
 } from "../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
+import type { QueryRow } from "../_lib/query-types"
 import { caseDecision, useCasesWithFieldWorkDone } from "../_lib/service-cases"
 
 const allCases = objects(ServiceCase)
@@ -34,7 +35,7 @@ const views = [
 ] as const
 
 type View = (typeof views)[number][0]
-type CaseRow = NonNullable<Awaited<ReturnType<typeof allCases.first>>>
+type CaseRow = QueryRow<typeof allCases>
 
 export default function ServiceCasesPage() {
   const query = useObjectsQuery(allCases)
@@ -71,7 +72,7 @@ export default function ServiceCasesPage() {
           item.links.equipment?.properties.name,
         ].some((value) => value?.toLowerCase().includes(normalized))
       })
-      .sort((left, right) => casePriority(right) - casePriority(left))
+      .sort((left, right) => casePriority(right.properties) - casePriority(left.properties))
   }, [allRows, fieldWorkDone, search, view])
 
   return (
@@ -200,17 +201,4 @@ function matchesView(
   if (view === "field") return ["dispatching", "in_service"].includes(status)
   if (view === "risk") return isCaseAtRisk(serviceCase.properties)
   return true
-}
-
-function casePriority(serviceCase: CaseRow): number {
-  const severity =
-    { critical: 40, high: 30, medium: 20, low: 10 }[serviceCase.properties.severity ?? "low"] ?? 0
-  const sla =
-    { breached: 30, at_risk: 20, on_track: 0, met: -10 }[
-      serviceCase.properties.slaStatus ?? "on_track"
-    ] ?? 0
-  const state = ["closed", "cancelled"].includes(serviceCase.properties.status ?? "") ? -100 : 0
-  const dueAt = caseClock(serviceCase.properties).dueAt
-  // Earlier deadlines win ties within the same severity and risk.
-  return severity + sla + state - (Number.isFinite(dueAt) ? dueAt : Date.now()) / 1e13
 }

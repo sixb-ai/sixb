@@ -16,6 +16,7 @@ import {
   QueryState,
   StatusBadge,
 } from "../_components/ui"
+import type { QueryRow } from "../_lib/query-types"
 
 const contractsQuery = objects(ServiceContract)
   .query()
@@ -52,7 +53,7 @@ const columns =
 
 type View = (typeof views)[number][0]
 type Sort = (typeof sortOptions)[number][0]
-type ContractRow = NonNullable<Awaited<ReturnType<typeof contractsQuery.first>>>
+type ContractRow = QueryRow<typeof contractsQuery>
 
 export default function ContractsPage() {
   const contracts = useObjectsQuery(contractsQuery)
