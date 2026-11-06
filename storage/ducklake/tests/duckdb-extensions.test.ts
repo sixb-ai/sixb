@@ -10,6 +10,8 @@ import {
   installDuckLakeExtensions,
 } from "../src/internal/duckdb-runtime"
 
+// Not a real extension: DuckDB refuses it, so these tests stub INSTALL or prove the refusal.
+// tests/duckdb-extensions.e2e.ts installs a real one.
 const payload = new TextEncoder().encode("extension bytes")
 const gzipped = new Uint8Array(gzipSync(payload))
 
@@ -56,16 +58,20 @@ describe("prefetchDuckDbExtensions", () => {
     return { version, platform, path: join(directory, "extensions", version, platform) }
   }
 
-  test("downloads missing extensions over HTTPS into the configured extension_directory", async () => {
-    // Red check: drop the alias lookup; sqlite is then written as sqlite.duckdb_extension and
-    // DuckDB does not report sqlite_scanner as installed.
+  test("installs each download from a file named after the extension", async () => {
+    // Red check: drop the alias match in missingExtensions; sqlite is then not fetched at all.
     const urls: string[] = []
     serve((url) => {
       urls.push(url)
       return new Response(gzipped)
     })
     const runtime = await open()
-    const { version, platform, path: target } = await platformDirectory(runtime)
+    const { version, platform } = await platformDirectory(runtime)
+    const installed: { statement: string; bytes: Uint8Array }[] = []
+    spyOn(runtime, "run").mockImplementation(async (sql) => {
+      const file = /^INSTALL '(.+)'$/.exec(sql)?.[1] ?? ""
+      installed.push({ statement: sql, bytes: new Uint8Array(await readFile(file)) })
+    })
 
     await prefetchDuckDbExtensions(runtime, ["ducklake", "sqlite"])
 
@@ -73,25 +79,15 @@ describe("prefetchDuckDbExtensions", () => {
       `https://extensions.duckdb.org/${version}/${platform}/ducklake.duckdb_extension.gz`,
       `https://extensions.duckdb.org/${version}/${platform}/sqlite_scanner.duckdb_extension.gz`,
     ])
-    expect((await readdir(target)).sort()).toEqual([
-      "ducklake.duckdb_extension",
-      "sqlite_scanner.duckdb_extension",
+    expect(installed.map(({ statement }) => statement.split("/").at(-1)).sort()).toEqual([
+      "ducklake.duckdb_extension'",
+      "sqlite_scanner.duckdb_extension'",
     ])
-    expect(new Uint8Array(await readFile(join(target, "ducklake.duckdb_extension")))).toEqual(
-      payload
-    )
-    expect(
-      await runtime.query(
-        "SELECT extension_name, installed FROM duckdb_extensions() WHERE extension_name IN ('ducklake', 'sqlite_scanner') ORDER BY 1"
-      )
-    ).toEqual([
-      { extension_name: "ducklake", installed: true },
-      { extension_name: "sqlite_scanner", installed: true },
-    ])
+    for (const { bytes } of installed) expect(bytes).toEqual(payload)
   })
 
-  test("skips extensions whose file already exists", async () => {
-    // Red check: remove the exists() check in downloadExtension.
+  test("skips extensions DuckDB already reports installed", async () => {
+    // Red check: drop `NOT installed` in missingExtensions.
     const fetch = serve(() => new Response(gzipped))
     const runtime = await open()
     const { path: target } = await platformDirectory(runtime)
@@ -106,12 +102,30 @@ describe("prefetchDuckDbExtensions", () => {
     )
   })
 
+  test("leaves a download DuckDB refuses out of its extension directory", async () => {
+    // Red check: drop the .catch() around the INSTALL '<file>'; prefetch rejects.
+    serve(() => new Response(gzipped))
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const runtime = await open()
+
+    await prefetchDuckDbExtensions(runtime, ["ducklake"])
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain("'ducklake'")
+    expect(
+      await runtime.query(
+        "SELECT installed FROM duckdb_extensions() WHERE extension_name = 'ducklake'"
+      )
+    ).toEqual([{ installed: false }])
+  })
+
   test("falls back to DuckDB's INSTALL when the download fails", async () => {
-    // Red check: drop the .catch() around downloadExtension; installDuckLakeExtensions rejects.
+    // Red check: drop the .catch() around download; installDuckLakeExtensions rejects.
     serve((url) => {
       if (url.includes("ducklake")) throw new TypeError("network unreachable")
       return new Response("not found", { status: 404 })
     })
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
     const runtime = await open()
     const statements: string[] = []
     spyOn(runtime, "run").mockImplementation(async (sql) => {
@@ -123,11 +137,31 @@ describe("prefetchDuckDbExtensions", () => {
     })
 
     expect(statements).toEqual(["INSTALL ducklake", 'INSTALL "sqlite"'])
-    expect(await readdir(directory)).not.toContain("extensions")
+    expect(warn.mock.calls.map(([message]) => String(message)).sort()).toEqual([
+      expect.stringContaining("'ducklake' over HTTPS (network unreachable)"),
+      expect.stringContaining("'sqlite_scanner' over HTTPS (HTTP 404)"),
+    ])
+  })
+
+  test("never rejects, so a broken setup still reaches DuckDB's INSTALL", async () => {
+    // Red check: drop the .catch() in prefetchDuckDbExtensions; the missing temp directory rejects.
+    const fetch = serve(() => new Response(gzipped))
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const runtime = await open()
+    const tmpdir = process.env.TMPDIR
+    process.env.TMPDIR = join(directory, "missing", "tmp")
+    try {
+      await prefetchDuckDbExtensions(runtime, ["ducklake"])
+    } finally {
+      process.env.TMPDIR = tmpdir
+    }
+
+    expect(fetch).not.toHaveBeenCalled()
+    expect(String(warn.mock.calls[0]?.[0])).toContain("ENOENT")
   })
 
   test("leaves a custom extension repository to DuckDB", async () => {
-    // Red check: remove the custom_extension_repository check in readExtensionTarget.
+    // Red check: remove the custom_extension_repository check in prefetchDuckDbExtensions.
     const fetch = serve(() => new Response(gzipped))
     const runtime = await open({ custom_extension_repository: "http://extensions.example.test" })
 
