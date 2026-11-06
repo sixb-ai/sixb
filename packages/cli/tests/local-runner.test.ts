@@ -43,7 +43,7 @@ async function avasRunner(
   turn: { status: string },
   computer: { readonly id?: string; readonly folder?: string } = {},
   /** What each of a session's renewals waits for before it answers, by its number from 0. */
-  renewalGate: (renewal: number) => Promise<void> = () => Promise.resolve(),
+  renewalGate: (renewal: number, signal: AbortSignal) => Promise<void> = () => Promise.resolve(),
   waiting: readonly string[] = ["run_9"]
 ) {
   const thread = {
@@ -79,7 +79,10 @@ async function avasRunner(
         body: request.method === "PUT" ? await request.json() : undefined,
       })
       if (request.method === "DELETE") return new Response(null, { status: 204 })
-      await renewalGate(sessions.filter((session) => session.method === "PUT").length - 1)
+      await renewalGate(
+        sessions.filter((session) => session.method === "PUT").length - 1,
+        request.signal
+      )
       return Response.json({
         expiresAt: "2026-10-31T09:01:00.000Z",
         waiting,
@@ -232,7 +235,7 @@ describe("a background command", () => {
     const gate = new Promise<void>((resolve) => {
       answer = resolve
     })
-    const { runner, sessions } = await avasRunner({ status: "running" }, {}, gate)
+    const { runner, sessions } = await avasRunner({ status: "running" }, {}, () => gate)
     backgroundOf(runner, [running])
 
     runner.openSession()
@@ -362,7 +365,7 @@ describe("a session's renewals", () => {
     const gate = new Promise<void>((resolve) => {
       answerFirst = resolve
     })
-    // The first stalls, and the second answers: only the release's wait for both can hold it back.
+    // The first stalls, and the second waits behind it: only the release's wait can hold it back.
     const { runner, sessions } = await avasRunner({ status: "queued" }, {}, (renewal) =>
       renewal === 0 ? gate : Promise.resolve()
     )
@@ -371,18 +374,21 @@ describe("a session's renewals", () => {
     while (sessions.length === 0) await Bun.sleep(0)
     const inner = runner as unknown as { session: { renew(): void } }
     inner.session.renew()
-    while (sessions.length < 2) await Bun.sleep(0)
 
     const closed = runner.closeSession()
     for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(0)
-    expect(sessions.map((session) => session.method)).toEqual(["PUT", "PUT"])
+    expect(sessions.map((session) => session.method)).toEqual(["PUT"])
     answerFirst()
     await closed
-    expect(sessions.at(-1)?.method).toBe("DELETE")
+    expect(sessions.map((session) => session.method)).toEqual(["PUT", "PUT", "DELETE"])
   })
 })
 
 describe("turns waiting for a folder", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
   // Guard proof: claim only the first listed, in claimFirst; a turn that keeps failing to claim holds
   // up every turn behind it, for good.
   test("aren't held up by one that can't be claimed", async () => {
@@ -440,38 +446,32 @@ describe("turns waiting for a folder", () => {
     expect(claimed).toEqual(["run_first"])
   })
 
-  // Guard proof: drop the check on `newestAnswered` from openSession; a renewal that stalled, landing
-  // after a later one, reads as the session now: a 401 from its old token ends a valid connection.
-  test("say nothing of a renewal older than one already answered", async () => {
-    let failStalled = (_reason: unknown) => {}
-    const stalled = new Promise<void>((_resolve, reject) => {
-      failStalled = reject
-    })
-    const { runner, sessions } = await avasRunner({ status: "queued" }, {}, (renewal) =>
-      renewal === 0 ? stalled : Promise.reject(new Error("The later one."))
+  // Guard proof: drop `signal: stalled.signal` from openSession; a renewal that never answers keeps
+  // the ones behind it waiting for good, and the session lapses with nothing said.
+  test("wait for one that stalled only until the next is due", async () => {
+    jest.useFakeTimers()
+    // Bun.sleep never wakes under fake timers.
+    const aTurnOfTheLoop = () => new Promise<void>((resolve) => setImmediate(resolve))
+    const { runner, sessions } = await avasRunner({ status: "queued" }, {}, (renewal, signal) =>
+      renewal === 0
+        ? new Promise<void>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(new Error("The stalled one.")))
+          })
+        : Promise.resolve()
     )
-    const told: string[] = []
-    let heard = () => {}
-    const heardLater = new Promise<void>((resolve) => {
-      heard = resolve
-    })
-    Object.assign(runner, {
-      options: {
-        onSessionChange: (failure: Error) => {
-          told.push(failure.message)
-          heard()
-        },
-      },
-    })
-    runner.openSession()
-    while (sessions.length === 0) await Bun.sleep(0)
-    const inner = runner as unknown as { session: { renew(): void }; lastCall: Promise<void> }
-    inner.session.renew()
-    await heardLater
+    runner.claim = async () => true
 
-    failStalled(new Error("The stalled one."))
-    await inner.lastCall
-    expect(told).toEqual(["The later one."])
+    runner.openSession()
+    while (sessions.length === 0) await aTurnOfTheLoop()
+
+    jest.advanceTimersByTime(19_999)
+    for (let turn = 0; turn < 5; turn += 1) await aTurnOfTheLoop()
+    expect(sessions).toHaveLength(1)
+
+    jest.advanceTimersByTime(1)
+    while (sessions.length < 2) await aTurnOfTheLoop()
+    expect(sessions).toHaveLength(2)
+
     await runner.closeSession()
   })
 
