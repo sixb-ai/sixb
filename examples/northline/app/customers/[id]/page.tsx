@@ -21,6 +21,7 @@ import {
   formatMoney,
   humanize,
   initials,
+  isCaseAtRisk,
   QueryState,
   Section,
   StatusBadge,
@@ -98,9 +99,7 @@ export default function CustomerDetailPage() {
   const quotes = (quotesResult.data?.objects ?? []).filter(
     (quote) => quote.links.customer?.primaryId === id
   )
-  const slaRisks = activeCases.filter((serviceCase) =>
-    ["at_risk", "breached"].includes(serviceCase.properties.slaStatus)
-  ).length
+  const slaRisks = activeCases.filter((serviceCase) => isCaseAtRisk(serviceCase.properties)).length
   const loading =
     customerResult.isLoading ||
     facilitiesResult.isLoading ||

@@ -10,9 +10,11 @@ import { ServiceCase } from "../../ontology/service-case"
 import { ServiceContract } from "../../ontology/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
+  caseClock,
   formatMinutes,
   humanize,
   initials,
+  isCaseAtRisk,
   PageHeader,
   QueryState,
   StatusBadge,
@@ -186,7 +188,9 @@ function CustomerListRow({
 }) {
   const openCases = customerCases.filter(isOpenCase)
   const riskCases = openCases.filter(isAtRisk)
-  const breached = riskCases.some((serviceCase) => serviceCase.properties.slaStatus === "breached")
+  const overdue = riskCases.some(
+    (serviceCase) => caseClock(serviceCase.properties).tone === "critical"
+  )
   const activeContract = customerContracts.find((contract) =>
     ["active", "expiring"].includes(contract.properties.status)
   )
@@ -252,7 +256,7 @@ function CustomerListRow({
           </span>
           {riskCases.length > 0 ? (
             <StatusIndicator
-              value={breached ? "breached" : "at_risk"}
+              value={overdue ? "breached" : "at_risk"}
               label={`${riskCases.length} at risk`}
             />
           ) : openCases.length > 0 ? (
@@ -317,7 +321,7 @@ function isOpenCase(serviceCase: CaseRow): boolean {
 }
 
 function isAtRisk(serviceCase: CaseRow): boolean {
-  return ["at_risk", "breached"].includes(serviceCase.properties.slaStatus)
+  return isCaseAtRisk(serviceCase.properties)
 }
 
 function customerRisk(customer: CustomerRow, cases: readonly CaseRow[]): number {

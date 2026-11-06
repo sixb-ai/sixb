@@ -285,7 +285,19 @@ export function humanize(value: string): string {
 
 export function formatDate(value: string | Date | undefined): string {
   if (!value) return "—"
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(value))
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(calendarDate(value))
+}
+
+/**
+ * A date to show or count by. A date without a time, such as a quote's valid-until day, is that day
+ * where the reader is; `new Date("2026-11-20")` would be UTC midnight, the evening before in the US.
+ */
+export function calendarDate(value: string | Date): Date {
+  if (typeof value === "string") {
+    const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    if (day) return new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]))
+  }
+  return new Date(value)
 }
 
 export function formatTime(value: string | Date | undefined): string {
@@ -338,9 +350,10 @@ export function daysUntil(value: string | Date | undefined): number {
   if (!value) return Number.POSITIVE_INFINITY
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  const target = new Date(value)
+  const target = calendarDate(value)
   target.setHours(0, 0, 0, 0)
-  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
+  // Rounded, not ceiled: a day across a clock change is 23 or 25 hours.
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000)
 }
 
 export function formatMoney(value: number | undefined): string {
@@ -434,6 +447,11 @@ export function caseClock(serviceCase: CaseClockFields): CaseClock {
   }
 }
 
+/** At risk is what the clock shows: overdue, or flagged by the contract while time remains. */
+export function isCaseAtRisk(serviceCase: CaseClockFields): boolean {
+  return caseClock(serviceCase).tone !== "neutral"
+}
+
 /** A case's clock in its tone; neutral clocks take the surrounding text color. */
 export function CaseClockText({
   serviceCase,
@@ -447,10 +465,11 @@ export function CaseClockText({
   const clock = caseClock(serviceCase)
   return (
     <span
+      // The tone comes last so it wins over a caller's text color; a neutral clock keeps theirs.
       className={cn(
         "tabular-nums",
-        clock.tone === "neutral" ? undefined : toneStyles[clock.tone].text,
-        className
+        className,
+        clock.tone === "neutral" ? undefined : toneStyles[clock.tone].text
       )}
     >
       {clock[variant]}

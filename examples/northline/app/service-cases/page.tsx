@@ -6,7 +6,14 @@ import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
 import { SearchField, ViewPills } from "../_components/list-controls"
-import { CaseClockText, caseClock, PageHeader, QueryState, StatusBadge } from "../_components/ui"
+import {
+  CaseClockText,
+  caseClock,
+  isCaseAtRisk,
+  PageHeader,
+  QueryState,
+  StatusBadge,
+} from "../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
 import { caseDecision } from "../_lib/service-cases"
 
@@ -111,6 +118,7 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
     equipment?.properties.equipmentType
   )
   const Icon = equipmentIcon(equipment?.properties.equipmentType)
+  const closed = ["closed", "cancelled"].includes(serviceCase.properties.status ?? "")
 
   return (
     <li className="border-t border-border/70 first:border-t-0">
@@ -180,7 +188,7 @@ function matchesView(serviceCase: CaseRow, view: View): boolean {
   if (["closed", "cancelled"].includes(status)) return false
   if (view === "action") return caseDecision(status) !== undefined
   if (view === "field") return ["dispatching", "in_service"].includes(status)
-  if (view === "risk") return caseClock(serviceCase.properties).tone !== "neutral"
+  if (view === "risk") return isCaseAtRisk(serviceCase.properties)
   return true
 }
 

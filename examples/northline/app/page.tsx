@@ -19,6 +19,7 @@ import {
   formatTime,
   humanize,
   initials,
+  isCaseAtRisk,
   StatusBadge,
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
@@ -77,8 +78,7 @@ export default function NorthlineHomePage() {
     open.filter((item) => statuses.includes(item.properties.status ?? "")).length
   // Before a technician is on site: new, being triaged, or dispatched and on the way.
   const beforeArrival = countStatus("new", "triage", "dispatching")
-  // At risk is what the clocks say: overdue, or flagged by the contract while time remains.
-  const atRisk = open.filter((item) => caseClock(item.properties).tone !== "neutral")
+  const atRisk = open.filter((item) => isCaseAtRisk(item.properties))
   // The commitments still running, soonest first: responses, then resolutions once on site.
   const dueNext = open
     .map((item) => ({ item, dueAt: caseClock(item.properties).dueAt }))
