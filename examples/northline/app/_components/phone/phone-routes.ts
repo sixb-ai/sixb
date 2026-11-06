@@ -29,8 +29,22 @@ const PUSHED: readonly RegExp[] = [
 
 const CONVERSATION = /^\/threads\/[^/]+$/
 
+/** Records a page opens in place from a query parameter, such as a quote's document on Quotes. */
+const PUSHED_BY_QUERY: Readonly<Record<string, string>> = { "/quotes": "quote" }
+
 export function normalizePath(pathname: string): string {
   return pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname
+}
+
+/**
+ * The screen a location shows: its path, plus the record a query parameter opens on top of it, so
+ * `/quotes?quote=q-1` is a pushed screen with a back button rather than the Quotes list.
+ */
+export function screenPath(pathname: string, search = ""): string {
+  const path = normalizePath(pathname)
+  const parameter = PUSHED_BY_QUERY[path]
+  const record = parameter ? new URLSearchParams(search).get(parameter) : null
+  return record ? `${path}?${parameter}=${encodeURIComponent(record)}` : path
 }
 
 export function isRootPath(pathname: string): boolean {
@@ -44,7 +58,9 @@ export function isConversationPath(pathname: string): boolean {
 
 /** The screen a back button returns to when the app was opened directly on this one. */
 export function parentPath(pathname: string): string {
-  const segments = normalizePath(pathname).split("/").filter(Boolean)
+  const [path = "/", query] = pathname.split("?")
+  if (query) return path
+  const segments = normalizePath(path).split("/").filter(Boolean)
   while (segments.length > 1) {
     segments.pop()
     const candidate = `/${segments.join("/")}`

@@ -24,7 +24,7 @@ import {
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
 import { equipmentIcon, equipmentIllustration } from "./_lib/equipment"
-import { caseDecision } from "./_lib/service-cases"
+import { caseDecision, useCasesWithFieldWorkDone } from "./_lib/service-cases"
 
 const casesQuery = objects(ServiceCase)
   .query()
@@ -68,6 +68,7 @@ export default function NorthlineHomePage() {
   const equipment = useObjectsQuery(equipmentQuery, { staleTime: 30_000 })
   const quotes = useObjectsQuery(quotesQuery, { staleTime: 30_000 })
   const workOrders = useObjectsQuery(workOrdersQuery, { staleTime: 30_000 })
+  const fieldWorkDone = useCasesWithFieldWorkDone()
   const alarms = useObjectsQuery(alarmsQuery, { staleTime: 30_000 })
   const technicians = useObjectsQuery(techniciansQuery, { staleTime: 30_000 })
 
@@ -85,8 +86,10 @@ export default function NorthlineHomePage() {
     .filter((entry) => Number.isFinite(entry.dueAt))
     .sort((left, right) => left.dueAt - right.dueAt)
     .map((entry) => entry.item)
+  const decisionOf = (item: CaseRow) =>
+    caseDecision(item.properties.status, fieldWorkDone.has(item.primaryId))
   const decisionRows = open
-    .filter((item) => caseDecision(item.properties.status) !== undefined)
+    .filter((item) => decisionOf(item) !== undefined)
     .sort(
       (left, right) =>
         (severityRank[left.properties.severity ?? "low"] ?? 9) -
@@ -309,7 +312,7 @@ export default function NorthlineHomePage() {
               ) : (
                 <ul className="mt-2 flex flex-col">
                   {decisionRows.slice(0, 3).map((item) => (
-                    <DecisionRow key={item.primaryId} item={item} />
+                    <DecisionRow key={item.primaryId} item={item} decision={decisionOf(item)} />
                   ))}
                 </ul>
               )}
@@ -373,7 +376,7 @@ export default function NorthlineHomePage() {
                 <WidgetMetric
                   value={formatMoney(sentTotal)}
                   label="with customers"
-                  aside={`${sentQuotes.length} awaiting approval`}
+                  aside={`${quoteCount("draft", "internal_review")} in review`}
                 />
                 <WidgetBreakdown
                   label="Quotes by status"
@@ -420,7 +423,7 @@ export default function NorthlineHomePage() {
                 <WidgetMetric
                   value={units.length ? `${Math.round((healthy / units.length) * 100)}%` : "—"}
                   label="healthy"
-                  aside={`${units.length - healthy} to watch`}
+                  aside={`${units.length - healthy} need attention`}
                 />
                 <WidgetBreakdown
                   label="Equipment by condition"
@@ -525,7 +528,7 @@ function AlarmWidget({
   )
 }
 
-function DecisionRow({ item }: { item: CaseRow }) {
+function DecisionRow({ item, decision }: { item: CaseRow; decision: string | undefined }) {
   return (
     <li className="flex items-center gap-3 border-t border-border/70 py-2.5 first:border-t-0">
       <span className="flex min-w-0 flex-1 flex-col">
@@ -546,7 +549,7 @@ function DecisionRow({ item }: { item: CaseRow }) {
             : "bg-black/[0.05] text-foreground hover:bg-black/[0.08] dark:bg-white/[0.08]"
         )}
       >
-        {caseDecision(item.properties.status)}
+        {decision}
       </Link>
     </li>
   )

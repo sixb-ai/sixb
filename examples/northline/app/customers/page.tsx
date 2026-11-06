@@ -11,6 +11,7 @@ import { ServiceContract } from "../../ontology/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
   caseClock,
+  formatCoverageHours,
   formatMinutes,
   humanize,
   initials,
@@ -237,9 +238,9 @@ function CustomerListRow({
           </span>
           <span className="truncate text-[13px] text-muted-foreground tabular-nums">
             {activeContract
-              ? `${formatMinutes(activeContract.properties.responseTargetMinutes)} response · ${
-                  activeContract.properties.coverageHours === "24_7" ? "24/7" : "Business hours"
-                }`
+              ? `${formatMinutes(activeContract.properties.responseTargetMinutes)} response · ${formatCoverageHours(
+                  activeContract.properties.coverageHours
+                )}`
               : "Coverage unavailable"}
           </span>
         </span>

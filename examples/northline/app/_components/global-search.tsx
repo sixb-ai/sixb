@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Search } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { quotePath } from "../_lib/quotes"
 
 interface GlobalSearchProps {
   /** The sidebar's search row by default; `toolbar` is the phone top bar's icon button. */
@@ -105,7 +106,7 @@ function resultPath(objectTypeId: string, primaryId: string): string {
   if (objectTypeId === "Equipment") return `/equipment/${encoded}`
   if (objectTypeId === "CustomerAccount") return `/customers/${encoded}`
   if (objectTypeId === "Technician") return `/technicians/${encoded}`
-  if (objectTypeId === "Quote") return "/quotes"
+  if (objectTypeId === "Quote") return quotePath(primaryId)
   if (objectTypeId === "ServiceContract") return "/contracts"
   if (objectTypeId === "WorkOrder" || objectTypeId === "ServiceVisit") return "/dispatch"
   return "/"

@@ -31,6 +31,7 @@ import {
   StatusBadge,
 } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
+import { quotePath } from "../_lib/quotes"
 
 const allQuotes = objects(Quote)
   .query()
@@ -839,10 +840,6 @@ function remainingLabel(value: string | Date | undefined): string {
 
 function headline(scope: string): string {
   return scope.replace(/\.$/, "")
-}
-
-function quotePath(primaryId: string): string {
-  return `/quotes?quote=${encodeURIComponent(primaryId)}`
 }
 
 function casePath(primaryId: string): string {

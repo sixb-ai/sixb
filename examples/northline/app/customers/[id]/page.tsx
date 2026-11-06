@@ -16,6 +16,7 @@ import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
   Fact,
+  formatCoverageHours,
   formatDate,
   formatMinutes,
   formatMoney,
@@ -29,6 +30,7 @@ import {
 } from "../../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
+import { quotePath } from "../../_lib/quotes"
 
 const customerBase = objects(CustomerAccount).query()
 const facilitiesQuery = objects(Facility).query().expand(Facility.l.customer).limit(100)
@@ -294,7 +296,7 @@ function ContractsCard({ contracts }: { contracts: readonly ContractRow[] }) {
                     {formatMinutes(properties.responseTargetMinutes)}
                   </SmallFact>
                   <SmallFact label="Hours">
-                    {properties.coverageHours === "24_7" ? "24/7" : "Business hours"}
+                    {formatCoverageHours(properties.coverageHours)}
                   </SmallFact>
                   <SmallFact label="Approval above">
                     {formatMoney(properties.approvalThreshold)}
@@ -519,11 +521,7 @@ function timelineEntries(
       detail: quote.properties.scope,
       source: "Business system",
       status: quote.properties.status,
-      action: (
-        <TimelineLink to={`/quotes?quote=${encodeURIComponent(quote.primaryId)}`}>
-          Open quote
-        </TimelineLink>
-      ),
+      action: <TimelineLink to={quotePath(quote.primaryId)}>Open quote</TimelineLink>,
     })),
   ]
 }

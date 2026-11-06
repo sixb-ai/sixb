@@ -24,7 +24,9 @@ import {
   CaseClockText,
   caseClock,
   Fact,
+  formatCoverageHours,
   formatDateTime,
+  formatMinutes,
   formatMoney,
   formatRelativeTime,
   humanize,
@@ -35,6 +37,7 @@ import {
 } from "../../_components/ui"
 import { equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
+import { quotePath } from "../../_lib/quotes"
 
 const serviceCaseBase = objects(ServiceCase)
   .query()
@@ -111,6 +114,9 @@ export default function ServiceCaseDetailPage() {
   const quotes = (quotesResult.data?.objects ?? []).filter(
     (quote) => quote.links.serviceCase?.primaryId === id
   )
+  const openQuote = quotes.find((quote) =>
+    ["internal_review", "sent"].includes(quote.properties.status)
+  )
 
   const acknowledge = useActionRunMutation<{ operatorName?: string }>({
     actionId: "acknowledge-service-case",
@@ -172,7 +178,11 @@ export default function ServiceCaseDetailPage() {
     next = {
       title: "Review the repair quote",
       detail: "The repair falls outside contract coverage and needs customer authorization.",
-      primary: <PrimaryLink to="/quotes">Review quote</PrimaryLink>,
+      primary: (
+        <PrimaryLink to={openQuote ? quotePath(openQuote.primaryId) : "/quotes"}>
+          Review quote
+        </PrimaryLink>
+      ),
     }
   } else if (
     serviceCase &&
@@ -518,7 +528,10 @@ function WorkCard({
             key={quote.primaryId}
             className="flex items-center justify-between gap-3 border-t border-border/70 py-3 first:border-t-0"
           >
-            <Link to="/quotes" className="flex min-w-0 flex-col hover:text-primary">
+            <Link
+              to={quotePath(quote.primaryId)}
+              className="flex min-w-0 flex-col hover:text-primary"
+            >
               <span className="truncate text-[14.5px] font-medium">
                 {quote.properties.number} · {formatMoney(quote.properties.amount)}
               </span>
@@ -541,10 +554,10 @@ function ContractCard({ serviceCase }: { serviceCase: ServiceCaseRow }) {
         <Row label={contract.properties.name ?? "Contract"}>{contract.properties.number}</Row>
         <Row label="Response target">
           {contract.properties.responseTargetMinutes
-            ? `${contract.properties.responseTargetMinutes} min`
+            ? formatMinutes(contract.properties.responseTargetMinutes)
             : "—"}
         </Row>
-        <Row label="Hours">{humanize(contract.properties.coverageHours ?? "business_hours")}</Row>
+        <Row label="Hours">{formatCoverageHours(contract.properties.coverageHours)}</Row>
         <Row label="Approval above">{formatMoney(contract.properties.approvalThreshold)}</Row>
       </dl>
     </Section>
