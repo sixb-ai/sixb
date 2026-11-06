@@ -1,12 +1,14 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronRight, Search } from "lucide-react"
+import { ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
+import { SearchField, ViewPills } from "../_components/list-controls"
 import { CaseClockText, caseClock, PageHeader, QueryState, StatusBadge } from "../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
+import { caseDecision } from "../_lib/service-cases"
 
 const allCases = objects(ServiceCase)
   .query()
@@ -18,11 +20,9 @@ const allCases = objects(ServiceCase)
 
 const views = [
   ["open", "Open"],
-  ["dispatch", "Needs dispatch"],
-  ["in_service", "In service"],
-  ["awaiting_authorization", "Authorization"],
-  ["sla", "At risk"],
-  ["resolved", "Ready to close"],
+  ["action", "Needs you"],
+  ["field", "In the field"],
+  ["risk", "At risk"],
   ["all", "All"],
 ] as const
 
@@ -31,7 +31,11 @@ type CaseRow = NonNullable<Awaited<ReturnType<typeof allCases.first>>>
 
 export default function ServiceCasesPage() {
   const query = useObjectsQuery(allCases)
-  const [view, setView] = useState<View>("open")
+  // The view lives in the URL so Home can link straight to one.
+  const [params, setParams] = useSearchParams()
+  const view = views.find(([id]) => id === params.get("view"))?.[0] ?? "open"
+  const setView = (next: View) =>
+    setParams(next === "open" ? {} : { view: next }, { replace: true })
   const [search, setSearch] = useState("")
   const allRows = query.data?.objects ?? []
   const counts = useMemo(
@@ -65,48 +69,21 @@ export default function ServiceCasesPage() {
         title="Service cases"
         description="Customer-impacting issues, most urgent first."
         action={
-          <label className="relative block w-72 max-sm:w-full">
-            <span className="sr-only">Search service cases</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground"
-              strokeWidth={1.8}
-            />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search cases, customers, equipment"
-              className="h-10 w-full rounded-[10px] bg-black/[0.045] pr-3 pl-10 text-[14px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.07]"
-            />
-          </label>
+          <SearchField
+            label="Search service cases"
+            value={search}
+            placeholder="Search cases, customers, equipment"
+            onChange={setSearch}
+          />
         }
       >
-        <div role="tablist" aria-label="Case views" className="-mx-1 flex flex-wrap gap-1.5">
-          {views.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={view === id}
-              onClick={() => setView(id)}
-              className={cn(
-                "inline-flex h-9 items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                view === id
-                  ? "bg-foreground text-background"
-                  : "bg-black/[0.045] text-foreground/80 hover:bg-black/[0.07] dark:bg-white/[0.07]"
-              )}
-            >
-              {label}
-              <span
-                className={cn(
-                  "text-[12.5px] tabular-nums",
-                  view === id ? "text-background/70" : "text-muted-foreground"
-                )}
-              >
-                {counts[id] ?? 0}
-              </span>
-            </button>
-          ))}
-        </div>
+        <ViewPills
+          label="Case views"
+          views={views}
+          value={view}
+          counts={counts}
+          onChange={setView}
+        />
       </PageHeader>
 
       <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
@@ -139,9 +116,10 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
     <li className="border-t border-border/70 first:border-t-0">
       <Link
         to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}
-        className="group grid grid-cols-[3.5rem_minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none sm:px-6 dark:hover:bg-white/[0.03]"
+        className="group grid grid-cols-[3.5rem_minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none max-sm:grid-cols-[3rem_minmax(0,1fr)] max-sm:items-start max-sm:gap-x-3.5 max-sm:gap-y-2.5 sm:px-6 dark:hover:bg-white/[0.03]"
       >
-        <span className="relative flex size-14 items-center justify-center overflow-hidden rounded-[14px] bg-muted">
+        {/* On a phone the state and clock move under the text, which gets the full width. */}
+        <span className="relative flex size-14 items-center justify-center overflow-hidden rounded-[14px] bg-muted max-sm:size-12 max-sm:rounded-[12px]">
           {illustration ? (
             <img
               src={illustration.src}
@@ -156,13 +134,13 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
           )}
         </span>
         <span className="flex min-w-0 flex-col gap-1">
-          <span className="flex min-w-0 items-center gap-2">
+          <span className="flex min-w-0 items-center gap-2 max-sm:items-baseline">
             <span className="shrink-0 text-[13px] font-semibold text-muted-foreground tabular-nums">
               {serviceCase.properties.number}
             </span>
             <span
               className={cn(
-                "truncate text-[16px] font-semibold tracking-[-0.01em] group-hover:text-primary",
+                "truncate text-[16px] font-semibold tracking-[-0.01em] group-hover:text-primary max-sm:line-clamp-2 max-sm:text-[15.5px] max-sm:leading-5 max-sm:whitespace-normal",
                 closed && "text-foreground/60"
               )}
             >
@@ -177,7 +155,7 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
               : ""}
           </span>
         </span>
-        <span className="flex flex-col items-end gap-1.5">
+        <span className="flex flex-col items-end gap-1.5 max-sm:col-start-2 max-sm:flex-row max-sm:flex-wrap max-sm:items-center max-sm:justify-between">
           <span className="flex items-center gap-2">
             {serviceCase.properties.severity === "critical" ||
             serviceCase.properties.severity === "high" ? (
@@ -190,7 +168,7 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
             className="text-[13px] font-medium text-foreground/70"
           />
         </span>
-        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground" />
+        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground max-sm:hidden" />
       </Link>
     </li>
   )
@@ -198,14 +176,12 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
 
 function matchesView(serviceCase: CaseRow, view: View): boolean {
   const status = serviceCase.properties.status ?? ""
-  const closed = ["closed", "cancelled"].includes(status)
   if (view === "all") return true
-  if (view === "open") return !closed
-  if (view === "dispatch") return ["new", "triage", "dispatching"].includes(status)
-  if (view === "sla") {
-    return !closed && ["at_risk", "breached"].includes(serviceCase.properties.slaStatus ?? "")
-  }
-  return status === view
+  if (["closed", "cancelled"].includes(status)) return false
+  if (view === "action") return caseDecision(status) !== undefined
+  if (view === "field") return ["dispatching", "in_service"].includes(status)
+  if (view === "risk") return caseClock(serviceCase.properties).tone !== "neutral"
+  return true
 }
 
 function casePriority(serviceCase: CaseRow): number {

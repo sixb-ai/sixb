@@ -16,7 +16,7 @@ export function SearchField({
   onChange(value: string): void
 }) {
   return (
-    <label className="relative block w-64 min-w-0 shrink">
+    <label className="relative block w-64 min-w-0 shrink max-sm:w-auto max-sm:flex-1">
       <span className="sr-only">{label}</span>
       <Search
         className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground"

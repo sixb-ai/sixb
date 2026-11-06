@@ -1,11 +1,11 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
-import { Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
+import { SearchField, ViewPills } from "../_components/list-controls"
 import {
   formatRelativeTime,
   humanize,
@@ -78,48 +78,21 @@ export default function EquipmentPage() {
         title="Equipment"
         description="Every unit Northline maintains, with its live condition from building controls."
         action={
-          <label className="relative block w-72 max-sm:w-full">
-            <span className="sr-only">Search equipment</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground"
-              strokeWidth={1.8}
-            />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search units, models, facilities"
-              className="h-10 w-full rounded-[10px] bg-black/[0.045] pr-3 pl-10 text-[14px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.07]"
-            />
-          </label>
+          <SearchField
+            label="Search equipment"
+            value={search}
+            placeholder="Search units, models, facilities"
+            onChange={setSearch}
+          />
         }
       >
-        <div role="tablist" aria-label="Equipment views" className="-mx-1 flex flex-wrap gap-1.5">
-          {views.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={view === id}
-              onClick={() => setView(id)}
-              className={cn(
-                "inline-flex h-9 items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                view === id
-                  ? "bg-foreground text-background"
-                  : "bg-black/[0.045] text-foreground/80 hover:bg-black/[0.07] dark:bg-white/[0.07]"
-              )}
-            >
-              {label}
-              <span
-                className={cn(
-                  "text-[12.5px] tabular-nums",
-                  view === id ? "text-background/70" : "text-muted-foreground"
-                )}
-              >
-                {counts[id] ?? 0}
-              </span>
-            </button>
-          ))}
-        </div>
+        <ViewPills
+          label="Equipment views"
+          views={views}
+          value={view}
+          counts={counts}
+          onChange={setView}
+        />
       </PageHeader>
 
       <QueryState

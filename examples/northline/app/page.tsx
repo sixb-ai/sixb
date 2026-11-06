@@ -8,8 +8,8 @@ import { BuildingAlarm } from "../ontology/building-alarm"
 import { Equipment } from "../ontology/equipment"
 import { Quote } from "../ontology/quote"
 import { ServiceCase } from "../ontology/service-case"
-import { ServiceVisit } from "../ontology/service-visit"
 import { Technician } from "../ontology/technician"
+import { WorkOrder } from "../ontology/work-order"
 import { Widget, WidgetBreakdown, WidgetMetric, WidgetState } from "./_components/home/widget"
 import {
   CaseClockText,
@@ -17,10 +17,12 @@ import {
   formatMoney,
   formatRelativeTime,
   formatTime,
+  humanize,
   StatusBadge,
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
 import { equipmentIcon, equipmentIllustration } from "./_lib/equipment"
+import { caseDecision } from "./_lib/service-cases"
 
 const casesQuery = objects(ServiceCase)
   .query()
@@ -33,11 +35,10 @@ const equipmentQuery = objects(Equipment).query().limit(200)
 
 const quotesQuery = objects(Quote).query().limit(100)
 
-const visitsQuery = objects(ServiceVisit)
+const workOrdersQuery = objects(WorkOrder)
   .query()
-  .expand(ServiceVisit.l.workOrder)
-  .expand(ServiceVisit.l.technician)
-  .orderBy(ServiceVisit.p.scheduledStart, "asc")
+  .expand(WorkOrder.l.assignee)
+  .orderBy(WorkOrder.p.scheduledStart, "asc")
   .limit(100)
 
 const alarmsQuery = objects(BuildingAlarm)
@@ -50,13 +51,6 @@ const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, 
 
 type CaseRow = NonNullable<Awaited<ReturnType<typeof casesQuery.first>>>
 type AlarmRow = NonNullable<Awaited<ReturnType<typeof alarmsQuery.first>>>
-
-const decisions: Record<string, string> = {
-  new: "Acknowledge",
-  triage: "Dispatch",
-  awaiting_authorization: "Review quote",
-  resolved: "Close",
-}
 
 const severityRank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
 const summaryLink = "font-semibold whitespace-nowrap hover:underline"
@@ -71,7 +65,7 @@ export default function NorthlineHomePage() {
   const cases = useObjectsQuery(casesQuery, { staleTime: 30_000 })
   const equipment = useObjectsQuery(equipmentQuery, { staleTime: 30_000 })
   const quotes = useObjectsQuery(quotesQuery, { staleTime: 30_000 })
-  const visits = useObjectsQuery(visitsQuery, { staleTime: 30_000 })
+  const workOrders = useObjectsQuery(workOrdersQuery, { staleTime: 30_000 })
   const alarms = useObjectsQuery(alarmsQuery, { staleTime: 30_000 })
   const technicians = useObjectsQuery(techniciansQuery, { staleTime: 30_000 })
 
@@ -80,10 +74,10 @@ export default function NorthlineHomePage() {
   )
   const countStatus = (...statuses: string[]) =>
     open.filter((item) => statuses.includes(item.properties.status ?? "")).length
-  const needsDispatch = countStatus("new", "triage", "dispatching")
-  const atRisk = open.filter((item) =>
-    ["at_risk", "breached"].includes(item.properties.slaStatus ?? "")
-  )
+  // Before a technician is on site: new, being triaged, or dispatched and on the way.
+  const beforeArrival = countStatus("new", "triage", "dispatching")
+  // At risk is what the clocks say: overdue, or flagged by the contract while time remains.
+  const atRisk = open.filter((item) => caseClock(item.properties).tone !== "neutral")
   // The commitments still running, soonest first: responses, then resolutions once on site.
   const dueNext = open
     .map((item) => ({ item, dueAt: caseClock(item.properties).dueAt }))
@@ -91,7 +85,7 @@ export default function NorthlineHomePage() {
     .sort((left, right) => left.dueAt - right.dueAt)
     .map((entry) => entry.item)
   const decisionRows = open
-    .filter((item) => (item.properties.status ?? "") in decisions)
+    .filter((item) => caseDecision(item.properties.status) !== undefined)
     .sort(
       (left, right) =>
         (severityRank[left.properties.severity ?? "low"] ?? 9) -
@@ -110,11 +104,17 @@ export default function NorthlineHomePage() {
     units.filter((item) => item.properties.health === health).length
   const healthy = unitCount("healthy")
 
-  const todaysVisits = (visits.data?.objects ?? []).filter(
-    (item) =>
-      item.properties.status === "in_progress" ||
-      (item.properties.status === "scheduled" && isToday(item.properties.scheduledStart))
-  )
+  // The same jobs Dispatch schedules today: everything not finished, on-site work first.
+  const todaysWork = (workOrders.data?.objects ?? [])
+    .filter(
+      (item) =>
+        !["completed", "cancelled"].includes(item.properties.status) &&
+        isToday(item.properties.scheduledStart)
+    )
+    .sort(
+      (left, right) =>
+        Number(right.properties.status === "on_site") - Number(left.properties.status === "on_site")
+    )
 
   const crew = (technicians.data?.objects ?? []).filter(
     (item) => item.properties.availability !== "off_duty"
@@ -133,22 +133,23 @@ export default function NorthlineHomePage() {
           {cases.isLoading || quotes.isLoading ? null : (
             <Summary
               parts={[
-                needsDispatch > 0 ? (
+                decisionRows.length > 0 ? (
                   <Link
-                    key="dispatch"
+                    key="action"
                     className={cn(summaryLink, "text-foreground")}
-                    to="/service-cases"
+                    to="/service-cases?view=action"
                   >
-                    {needsDispatch} {needsDispatch === 1 ? "case needs" : "cases need"} dispatch
+                    {decisionRows.length} {decisionRows.length === 1 ? "case needs" : "cases need"}{" "}
+                    you
                   </Link>
                 ) : null,
                 atRisk.length > 0 ? (
                   <Link
                     key="risk"
                     className={cn(summaryLink, "text-[color:var(--warning)]")}
-                    to="/service-cases"
+                    to="/service-cases?view=risk"
                   >
-                    {atRisk.length} {atRisk.length === 1 ? "response is" : "responses are"} at risk
+                    {atRisk.length} {atRisk.length === 1 ? "case is" : "cases are"} at risk
                   </Link>
                 ) : null,
                 sentQuotes.length > 0 ? (
@@ -188,9 +189,7 @@ export default function NorthlineHomePage() {
                 <WidgetMetric
                   value={open.length}
                   label="open"
-                  aside={
-                    needsDispatch > 0 ? `${needsDispatch} waiting on dispatch` : "All assigned"
-                  }
+                  aside={`${countStatus("dispatching", "in_service")} in the field`}
                 />
                 <WidgetBreakdown
                   label="Open cases by stage"
@@ -198,7 +197,7 @@ export default function NorthlineHomePage() {
                     {
                       key: "dispatch",
                       label: "Dispatch",
-                      count: needsDispatch,
+                      count: beforeArrival,
                       className: "bg-primary",
                     },
                     {
@@ -225,7 +224,12 @@ export default function NorthlineHomePage() {
             </WidgetState>
           </Widget>
 
-          <Widget to="/service-cases" label="View what is due next" title="Due next" size="small">
+          <Widget
+            to="/service-cases?view=risk"
+            label="View cases at risk"
+            title="Due next"
+            size="small"
+          >
             <WidgetState loading={cases.isLoading} error={cases.isError} label="deadlines">
               <div className="mt-auto flex flex-col gap-3 pt-4">
                 <WidgetMetric
@@ -290,11 +294,11 @@ export default function NorthlineHomePage() {
           />
 
           <Widget
-            to="/service-cases"
+            to="/service-cases?view=action"
             label="View cases waiting on a decision"
             title="Needs you"
             size="medium"
-            meta={cases.isLoading ? null : `${decisionRows.length} open`}
+            meta={cases.isLoading ? null : `${decisionRows.length} waiting`}
           >
             <WidgetState loading={cases.isLoading} error={cases.isError} label="decisions">
               {decisionRows.length === 0 ? (
@@ -314,31 +318,39 @@ export default function NorthlineHomePage() {
           <Widget
             to="/dispatch"
             label="View today’s schedule"
-            title="Today’s visits"
+            title="Today’s schedule"
             size="medium"
-            meta={visits.isLoading ? null : `${todaysVisits.length} scheduled`}
+            meta={workOrders.isLoading ? null : `${todaysWork.length} jobs`}
           >
-            <WidgetState loading={visits.isLoading} error={visits.isError} label="visits">
-              {todaysVisits.length === 0 ? (
-                <p className="mt-auto pt-4 text-[14px] text-muted-foreground">No visits today.</p>
+            <WidgetState loading={workOrders.isLoading} error={workOrders.isError} label="jobs">
+              {todaysWork.length === 0 ? (
+                <p className="mt-auto pt-4 text-[14px] text-muted-foreground">
+                  Nothing is scheduled today.
+                </p>
               ) : (
                 <ul className="mt-2 flex flex-col">
-                  {todaysVisits.slice(0, 3).map((visit) => (
+                  {todaysWork.slice(0, 3).map((job) => (
                     <li
-                      key={visit.primaryId}
-                      className="grid grid-cols-[3.75rem_minmax(0,1fr)] items-baseline gap-3 border-t border-border/70 py-2.5 first:border-t-0"
+                      key={job.primaryId}
+                      className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-baseline gap-3 border-t border-border/70 py-2.5 first:border-t-0"
                     >
-                      <span className="text-[14px] font-semibold tabular-nums">
-                        {visit.properties.status === "in_progress"
+                      <span
+                        className={cn(
+                          "text-[14px] font-semibold tabular-nums",
+                          job.properties.status === "on_site" && "text-primary"
+                        )}
+                      >
+                        {job.properties.status === "on_site"
                           ? "Now"
-                          : formatTime(visit.properties.scheduledStart)}
+                          : formatTime(job.properties.scheduledStart)}
                       </span>
                       <span className="flex min-w-0 flex-col">
                         <span className="truncate text-[14.5px] font-medium">
-                          {visit.links.workOrder?.properties.title ?? visit.properties.number}
+                          {job.properties.title}
                         </span>
                         <span className="truncate text-[12.5px] text-muted-foreground">
-                          {visit.links.technician?.properties.name ?? "Unassigned"}
+                          {job.links.assignee?.properties.name ?? "Unassigned"} ·{" "}
+                          {humanize(job.properties.status)}
                         </span>
                       </span>
                     </li>
@@ -533,7 +545,7 @@ function DecisionRow({ item }: { item: CaseRow }) {
             : "bg-black/[0.05] text-foreground hover:bg-black/[0.08] dark:bg-white/[0.08]"
         )}
       >
-        {decisions[item.properties.status ?? ""]}
+        {caseDecision(item.properties.status)}
       </Link>
     </li>
   )
