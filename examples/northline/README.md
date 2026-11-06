@@ -46,8 +46,12 @@ never covers a page. Files and artifacts open in a closable canvas over Northlin
 The dock header keeps collapse, thread history, and one-click compose immediately available. The
 history dialog shows the current thread, recent activity, and meaningful work status; it becomes a
 full-page search surface on small screens. The dock's open state, width, and current thread persist
-independently in each browser tab. Northline configures three language models through Vercel AI Gateway; choose
-the model and reasoning effort from the composer. The first model is the default.
+independently in each browser tab.
+
+Northline routes chat across three open-weight models through Vercel AI Gateway: GLM 5.3 Flash
+(`light`), DeepSeek V4.1 Flash (`standard`) and Kimi K3 (`heavy`). The composer's model chip reads
+**Auto**: before each answer, the Jev decision model judges the work the message needs, so a lookup
+runs on GLM and an investigation on Kimi. Pick a model from the chip to pin it for the thread.
 
 ```bash
 AI_GATEWAY_API_KEY=your_key bun --filter @sixb/example-northline dev
