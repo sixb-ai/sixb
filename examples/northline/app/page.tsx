@@ -2,37 +2,35 @@ import { Composer, useAgentConversation, useCurrentUser } from "@sixb/app"
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowUpRight, BellRing, ChevronRight } from "lucide-react"
-import { type ReactNode, useMemo } from "react"
+import { Fragment, type ReactNode } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { BuildingAlarm } from "../ontology/building-alarm"
 import { Equipment } from "../ontology/equipment"
 import { Quote } from "../ontology/quote"
 import { ServiceCase } from "../ontology/service-case"
 import { ServiceVisit } from "../ontology/service-visit"
+import { Technician } from "../ontology/technician"
+import { Widget, WidgetBreakdown, WidgetMetric, WidgetState } from "./_components/home/widget"
 import {
   deadlineLabel,
   formatMoney,
   formatRelativeTime,
   formatTime,
-  Section,
-  StatTile,
   StatusBadge,
-  StatusIndicator,
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
+import { equipmentIcon, equipmentIllustration } from "./_lib/equipment"
 
 const casesQuery = objects(ServiceCase)
   .query()
   .expand(ServiceCase.l.customer)
-  .expand(ServiceCase.l.facility)
   .expand(ServiceCase.l.equipment)
   .orderBy(ServiceCase.p.responseDeadline, "asc")
   .limit(100)
 
-const equipmentQuery = objects(Equipment).query().expand(Equipment.l.facility).limit(100)
+const equipmentQuery = objects(Equipment).query().limit(200)
 
-const quotesQuery = objects(Quote).query().expand(Quote.l.customer).limit(100)
+const quotesQuery = objects(Quote).query().limit(100)
 
 const visitsQuery = objects(ServiceVisit)
   .query()
@@ -45,24 +43,22 @@ const alarmsQuery = objects(BuildingAlarm)
   .query()
   .expand(BuildingAlarm.l.equipment)
   .orderBy(BuildingAlarm.p.observedAt, "desc")
-  .limit(6)
+  .limit(5)
+
+const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(50)
 
 type CaseRow = NonNullable<Awaited<ReturnType<typeof casesQuery.first>>>
+type AlarmRow = NonNullable<Awaited<ReturnType<typeof alarmsQuery.first>>>
 
-const decisions: Record<string, { label: string; action: string }> = {
-  new: { label: "Acknowledge", action: "Acknowledge" },
-  triage: { label: "Dispatch", action: "Review dispatch" },
-  awaiting_authorization: { label: "Repair quote", action: "Review quote" },
-  resolved: { label: "Ready to close", action: "Close case" },
+const decisions: Record<string, string> = {
+  new: "Acknowledge",
+  triage: "Dispatch",
+  awaiting_authorization: "Review quote",
+  resolved: "Close",
 }
 
 const severityRank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
-
-const suggestions = [
-  "What needs dispatch right now?",
-  "Which equipment is trending unhealthy?",
-  "Summarize SC-1042 for the customer",
-]
+const summaryLink = "font-semibold whitespace-nowrap hover:underline"
 
 export default function NorthlineHomePage() {
   const navigate = useNavigate()
@@ -71,258 +67,460 @@ export default function NorthlineHomePage() {
     threadId: null,
     onThreadCreated: (threadId) => navigate(threadPath(threadId)),
   })
-  const cases = useObjectsQuery(casesQuery)
-  const equipment = useObjectsQuery(equipmentQuery)
-  const quotes = useObjectsQuery(quotesQuery)
-  const visits = useObjectsQuery(visitsQuery)
-  const alarms = useObjectsQuery(alarmsQuery)
+  const cases = useObjectsQuery(casesQuery, { staleTime: 30_000 })
+  const equipment = useObjectsQuery(equipmentQuery, { staleTime: 30_000 })
+  const quotes = useObjectsQuery(quotesQuery, { staleTime: 30_000 })
+  const visits = useObjectsQuery(visitsQuery, { staleTime: 30_000 })
+  const alarms = useObjectsQuery(alarmsQuery, { staleTime: 30_000 })
+  const technicians = useObjectsQuery(techniciansQuery, { staleTime: 30_000 })
 
-  const caseRows = cases.data?.objects ?? []
-  const openCases = caseRows.filter(
+  const open = (cases.data?.objects ?? []).filter(
     (item) => !["closed", "cancelled"].includes(item.properties.status ?? "")
   )
-  const atRisk = openCases.filter((item) =>
+  const countStatus = (...statuses: string[]) =>
+    open.filter((item) => statuses.includes(item.properties.status ?? "")).length
+  const needsDispatch = countStatus("new", "triage", "dispatching")
+  const atRisk = open.filter((item) =>
     ["at_risk", "breached"].includes(item.properties.slaStatus ?? "")
   )
-  const needsDispatch = openCases.filter((item) => item.properties.status === "triage")
-  const nextDeadline = openCases.find(
-    (item) => new Date(item.properties.responseDeadline).getTime() > Date.now()
+  const byDeadline = [...open].sort(
+    (left, right) =>
+      time(left.properties.responseDeadline) - time(right.properties.responseDeadline)
   )
-  const equipmentRows = equipment.data?.objects ?? []
-  const watchedEquipment = equipmentRows
-    .filter((item) => ["unhealthy", "watch", "offline"].includes(item.properties.health ?? ""))
-    .sort((left, right) => healthRank(left.properties.health) - healthRank(right.properties.health))
-  const unhealthyCount = watchedEquipment.filter(
-    (item) => item.properties.health !== "watch"
-  ).length
-  const sentQuotes = (quotes.data?.objects ?? []).filter(
-    (item) => item.properties.status === "sent"
-  )
-  const sentTotal = sentQuotes.reduce((total, item) => total + item.properties.amount, 0)
+  const decisionRows = open
+    .filter((item) => (item.properties.status ?? "") in decisions)
+    .sort(
+      (left, right) =>
+        (severityRank[left.properties.severity ?? "low"] ?? 9) -
+          (severityRank[right.properties.severity ?? "low"] ?? 9) ||
+        time(left.properties.responseDeadline) - time(right.properties.responseDeadline)
+    )
 
-  const decisionRows = useMemo(
-    () =>
-      openCases
-        .filter((item) => item.properties.status in decisions)
-        .sort(
-          (left, right) =>
-            (severityRank[left.properties.severity] ?? 9) -
-              (severityRank[right.properties.severity] ?? 9) ||
-            new Date(left.properties.responseDeadline).getTime() -
-              new Date(right.properties.responseDeadline).getTime()
-        )
-        .slice(0, 5),
-    [openCases]
+  const quoteRows = quotes.data?.objects ?? []
+  const quoteCount = (...statuses: string[]) =>
+    quoteRows.filter((item) => statuses.includes(item.properties.status ?? "")).length
+  const sentQuotes = quoteRows.filter((item) => item.properties.status === "sent")
+  const sentTotal = sentQuotes.reduce((total, item) => total + (item.properties.amount ?? 0), 0)
+
+  const units = equipment.data?.objects ?? []
+  const unitCount = (health: string) =>
+    units.filter((item) => item.properties.health === health).length
+  const healthy = unitCount("healthy")
+
+  const todaysVisits = (visits.data?.objects ?? []).filter(
+    (item) =>
+      item.properties.status === "in_progress" ||
+      (item.properties.status === "scheduled" && isToday(item.properties.scheduledStart))
   )
 
-  const scheduleRows = (visits.data?.objects ?? [])
-    .filter((item) => {
-      if (item.properties.status === "in_progress") return true
-      if (item.properties.status !== "scheduled") return false
-      return isToday(item.properties.scheduledStart)
-    })
-    .slice(0, 5)
+  const crew = (technicians.data?.objects ?? []).filter(
+    (item) => item.properties.availability !== "off_duty"
+  )
+  const available = crew.filter((item) => item.properties.availability === "available")
 
   return (
-    <div className="flex flex-col gap-8">
-      <section className="flex flex-col items-center gap-6 pt-4 pb-2 text-center md:pt-10">
-        <div className="flex flex-col gap-2">
-          <p className="text-[15px] font-medium text-muted-foreground">{todayLabel()}</p>
-          <h1 className="text-[38px] leading-[1.05] font-semibold tracking-[-0.035em] text-balance sm:text-[46px]">
-            {greeting()}
-            {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
-          </h1>
-        </div>
-        <div className="w-full max-w-[46rem] text-left">
-          <Composer
-            {...conversation.composerProps}
-            placeholder="Ask about today’s work"
-            className="bg-transparent px-0 pt-0 pb-0"
-          />
-        </div>
-        <div className="flex max-w-3xl flex-wrap justify-center gap-2">
-          {suggestions.map((text) => (
-            <button
-              key={text}
-              type="button"
-              onClick={() => conversation.composerProps.onSend(text, [], [])}
-              className="h-9 rounded-full bg-black/[0.045] px-4 text-[14px] font-medium text-foreground/85 transition-colors hover:bg-black/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:bg-white/[0.07] dark:hover:bg-white/[0.1]"
+    <div className="mx-auto w-full max-w-[68rem] pb-12">
+      <header>
+        <p className="text-[13px] font-medium text-muted-foreground">{todayLabel()}</p>
+        <h1 className="mt-1 text-[32px] leading-tight font-bold tracking-[-0.025em]">
+          {greeting()}
+          {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
+        </h1>
+        <p className="mt-2 min-h-6 max-w-3xl text-[15px] leading-normal text-pretty text-muted-foreground">
+          {cases.isLoading || quotes.isLoading ? null : (
+            <Summary
+              parts={[
+                needsDispatch > 0 ? (
+                  <Link
+                    key="dispatch"
+                    className={cn(summaryLink, "text-foreground")}
+                    to="/service-cases"
+                  >
+                    {needsDispatch} {needsDispatch === 1 ? "case needs" : "cases need"} dispatch
+                  </Link>
+                ) : null,
+                atRisk.length > 0 ? (
+                  <Link
+                    key="risk"
+                    className={cn(summaryLink, "text-[color:var(--warning)]")}
+                    to="/service-cases"
+                  >
+                    {atRisk.length} {atRisk.length === 1 ? "response is" : "responses are"} at risk
+                  </Link>
+                ) : null,
+                sentQuotes.length > 0 ? (
+                  <Fragment key="quotes">
+                    <Link className={cn(summaryLink, "text-foreground")} to="/quotes">
+                      {sentQuotes.length} {sentQuotes.length === 1 ? "quote is" : "quotes are"}
+                    </Link>{" "}
+                    waiting on customers
+                  </Fragment>
+                ) : null,
+              ]}
+            />
+          )}
+        </p>
+      </header>
+
+      {/* Pinned while widgets scroll under it; the fade hides their edges above the glass. */}
+      <div className="nl-home-composer sticky top-3 z-30 mt-6 before:pointer-events-none before:absolute before:inset-x-0 before:-top-4 before:-z-10 before:h-12 before:bg-gradient-to-b before:from-background before:from-40% before:to-transparent sm:top-4">
+        <Composer
+          {...conversation.composerProps}
+          placeholder="Ask about today’s work"
+          className="bg-transparent px-0 pt-0 pb-0"
+        />
+      </div>
+
+      <section aria-label="Operations overview" className="@container mt-8">
+        <div className="nl-widget-grid grid auto-rows-[minmax(13rem,auto)] grid-cols-2 gap-4 @4xl:grid-cols-4">
+          <Widget
+            to="/service-cases"
+            label="View service cases"
+            title="Service cases"
+            size="medium"
+            meta={cases.isLoading ? null : `${cases.data?.objects.length ?? 0} total`}
+          >
+            <WidgetState loading={cases.isLoading} error={cases.isError} label="service cases">
+              <div className="mt-auto pt-4">
+                <WidgetMetric
+                  value={open.length}
+                  label="open"
+                  aside={
+                    needsDispatch > 0 ? `${needsDispatch} waiting on dispatch` : "All assigned"
+                  }
+                />
+                <WidgetBreakdown
+                  label="Open cases by stage"
+                  segments={[
+                    {
+                      key: "dispatch",
+                      label: "Dispatch",
+                      count: needsDispatch,
+                      className: "bg-primary",
+                    },
+                    {
+                      key: "in_service",
+                      label: "In service",
+                      count: countStatus("in_service"),
+                      className: "bg-[color:var(--northline-air)]",
+                    },
+                    {
+                      key: "authorization",
+                      label: "Authorization",
+                      count: countStatus("awaiting_authorization"),
+                      className: "bg-slate-500 dark:bg-slate-400",
+                    },
+                    {
+                      key: "resolved",
+                      label: "To close",
+                      count: countStatus("resolved"),
+                      className: "bg-slate-300 dark:bg-slate-600",
+                    },
+                  ]}
+                />
+              </div>
+            </WidgetState>
+          </Widget>
+
+          <Widget
+            to="/service-cases"
+            label="View response deadlines"
+            title="Response clock"
+            size="small"
+          >
+            <WidgetState loading={cases.isLoading} error={cases.isError} label="deadlines">
+              <div className="mt-auto flex flex-col gap-3 pt-4">
+                <WidgetMetric
+                  value={atRisk.length}
+                  label="at risk"
+                  valueClassName={atRisk.length > 0 ? "text-[color:var(--warning)]" : ""}
+                />
+                <ul className="flex flex-col gap-1.5 text-[13px]">
+                  {byDeadline.slice(0, 2).map((item) => (
+                    <li key={item.primaryId} className="flex justify-between gap-2">
+                      <span className="truncate text-foreground/80">{item.properties.number}</span>
+                      <span className="shrink-0 font-medium tabular-nums">
+                        {deadlineLabel(item.properties.responseDeadline)}
+                      </span>
+                    </li>
+                  ))}
+                  {byDeadline.length === 0 ? (
+                    <li className="text-muted-foreground">No open deadlines</li>
+                  ) : null}
+                </ul>
+              </div>
+            </WidgetState>
+          </Widget>
+
+          <Widget to="/technicians" label="View technicians" title="Crew" size="small">
+            <WidgetState
+              loading={technicians.isLoading}
+              error={technicians.isError}
+              label="the crew"
             >
-              {text}
-            </button>
-          ))}
+              <div className="mt-auto flex flex-col gap-3 pt-4">
+                <WidgetMetric value={available.length} label="available" />
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex -space-x-2">
+                    {crew.slice(0, 5).map((item) => (
+                      <span
+                        key={item.primaryId}
+                        title={item.properties.name}
+                        className={cn(
+                          "flex size-8 items-center justify-center rounded-full border-2 border-card text-[11px] font-semibold",
+                          item.properties.availability === "available"
+                            ? "bg-[color:var(--northline-tint)] text-primary"
+                            : "bg-muted text-foreground/60"
+                        )}
+                      >
+                        {initials(item.properties.name)}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-[13px] text-muted-foreground">{crew.length} on duty</span>
+                </div>
+              </div>
+            </WidgetState>
+          </Widget>
+
+          <AlarmWidget
+            loading={alarms.isLoading}
+            error={alarms.isError}
+            alarm={alarms.data?.objects[0]}
+            count={alarms.data?.objects.length ?? 0}
+          />
+
+          <Widget
+            to="/service-cases"
+            label="View cases waiting on a decision"
+            title="Needs you"
+            size="medium"
+            meta={cases.isLoading ? null : `${decisionRows.length} open`}
+          >
+            <WidgetState loading={cases.isLoading} error={cases.isError} label="decisions">
+              {decisionRows.length === 0 ? (
+                <p className="mt-auto pt-4 text-[14px] text-muted-foreground">
+                  Nothing is waiting on a decision.
+                </p>
+              ) : (
+                <ul className="mt-auto flex flex-col pt-3">
+                  {decisionRows.slice(0, 3).map((item) => (
+                    <DecisionRow key={item.primaryId} item={item} />
+                  ))}
+                </ul>
+              )}
+            </WidgetState>
+          </Widget>
+
+          <Widget
+            to="/dispatch"
+            label="View today’s schedule"
+            title="Today’s visits"
+            size="medium"
+            meta={visits.isLoading ? null : `${todaysVisits.length} scheduled`}
+          >
+            <WidgetState loading={visits.isLoading} error={visits.isError} label="visits">
+              {todaysVisits.length === 0 ? (
+                <p className="mt-auto pt-4 text-[14px] text-muted-foreground">No visits today.</p>
+              ) : (
+                <ul className="mt-auto flex flex-col pt-3">
+                  {todaysVisits.slice(0, 3).map((visit) => (
+                    <li
+                      key={visit.primaryId}
+                      className="grid grid-cols-[3.75rem_minmax(0,1fr)] items-baseline gap-3 border-t border-border/70 py-2.5 first:border-t-0"
+                    >
+                      <span className="text-[14px] font-semibold tabular-nums">
+                        {visit.properties.status === "in_progress"
+                          ? "Now"
+                          : formatTime(visit.properties.scheduledStart)}
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate text-[14.5px] font-medium">
+                          {visit.links.workOrder?.properties.title ?? visit.properties.number}
+                        </span>
+                        <span className="truncate text-[12.5px] text-muted-foreground">
+                          {visit.links.technician?.properties.name ?? "Unassigned"}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </WidgetState>
+          </Widget>
+
+          <Widget
+            to="/quotes"
+            label="View quotes"
+            title="Quotes"
+            size="medium"
+            meta={quotes.isLoading ? null : `${quoteRows.length} total`}
+          >
+            <WidgetState loading={quotes.isLoading} error={quotes.isError} label="quotes">
+              <div className="mt-auto pt-4">
+                <WidgetMetric
+                  value={formatMoney(sentTotal)}
+                  label="with customers"
+                  aside={`${sentQuotes.length} awaiting approval`}
+                />
+                <WidgetBreakdown
+                  label="Quotes by status"
+                  segments={[
+                    {
+                      key: "draft",
+                      label: "In review",
+                      count: quoteCount("draft", "internal_review"),
+                      className: "bg-slate-300 dark:bg-slate-600",
+                    },
+                    {
+                      key: "sent",
+                      label: "Sent",
+                      count: quoteCount("sent"),
+                      className: "bg-[color:var(--northline-air)]",
+                    },
+                    {
+                      key: "approved",
+                      label: "Approved",
+                      count: quoteCount("approved"),
+                      className: "bg-primary",
+                    },
+                    {
+                      key: "declined",
+                      label: "Declined",
+                      count: quoteCount("declined", "expired"),
+                      className: "bg-slate-500 dark:bg-slate-400",
+                    },
+                  ]}
+                />
+              </div>
+            </WidgetState>
+          </Widget>
+
+          <Widget
+            to="/equipment"
+            label="View equipment"
+            title="Equipment"
+            size="medium"
+            meta={equipment.isLoading ? null : `${units.length} units`}
+          >
+            <WidgetState loading={equipment.isLoading} error={equipment.isError} label="equipment">
+              <div className="mt-auto pt-4">
+                <WidgetMetric
+                  value={units.length ? `${Math.round((healthy / units.length) * 100)}%` : "—"}
+                  label="healthy"
+                  aside={`${units.length - healthy} to watch`}
+                />
+                <WidgetBreakdown
+                  label="Equipment by condition"
+                  segments={[
+                    {
+                      key: "healthy",
+                      label: "Healthy",
+                      count: healthy,
+                      className: "bg-[color:var(--success)]",
+                    },
+                    {
+                      key: "watch",
+                      label: "Watch",
+                      count: unitCount("watch"),
+                      className: "bg-[color:var(--warning)]",
+                    },
+                    {
+                      key: "unhealthy",
+                      label: "Unhealthy",
+                      count: unitCount("unhealthy"),
+                      className: "bg-destructive",
+                    },
+                    {
+                      key: "offline",
+                      label: "Offline",
+                      count: unitCount("offline"),
+                      className: "bg-slate-400",
+                    },
+                  ]}
+                />
+              </div>
+            </WidgetState>
+          </Widget>
         </div>
       </section>
-
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-4">
-        <StatTile
-          label="Open cases"
-          value={cases.isLoading ? "—" : openCases.length}
-          detail={
-            needsDispatch.length > 0
-              ? `${needsDispatch.length} waiting on dispatch`
-              : "All assigned"
-          }
-        />
-        <StatTile
-          label="Response at risk"
-          value={cases.isLoading ? "—" : atRisk.length}
-          detail={
-            nextDeadline
-              ? `Next deadline ${deadlineLabel(nextDeadline.properties.responseDeadline)}`
-              : "No open deadlines"
-          }
-          tone={atRisk.length > 0 ? "warning" : undefined}
-        />
-        <StatTile
-          label="Equipment to watch"
-          value={equipment.isLoading ? "—" : watchedEquipment.length}
-          detail={
-            unhealthyCount > 0 ? `${unhealthyCount} unhealthy or offline` : "Nothing unhealthy"
-          }
-          tone={unhealthyCount > 0 ? "critical" : undefined}
-        />
-        <StatTile
-          label="Quotes with customers"
-          value={quotes.isLoading ? "—" : formatMoney(sentTotal)}
-          detail={`${sentQuotes.length} waiting on approval`}
-        />
-      </div>
-
-      <div className="grid items-start gap-5 lg:grid-cols-2">
-        <Section
-          title="Needs you"
-          action={<span className="text-muted-foreground">{decisionRows.length} open</span>}
-        >
-          {decisionRows.length === 0 ? (
-            <Empty>Nothing is waiting on a decision.</Empty>
-          ) : (
-            <ul className="px-6 pb-2">
-              {decisionRows.map((item) => (
-                <DecisionRow key={item.primaryId} item={item} />
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section
-          title="On the schedule"
-          action={
-            <Link to="/dispatch" className="font-medium text-primary hover:underline">
-              Dispatch
-            </Link>
-          }
-        >
-          {scheduleRows.length === 0 ? (
-            <Empty>No visits today.</Empty>
-          ) : (
-            <ul className="px-6 pb-2">
-              {scheduleRows.map((visit) => (
-                <li
-                  key={visit.primaryId}
-                  className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-4 border-t border-border/70 py-3.5 first:border-t-0"
-                >
-                  <span className="text-[14px] font-semibold tabular-nums">
-                    {visit.properties.status === "in_progress"
-                      ? "Now"
-                      : formatTime(visit.properties.scheduledStart)}
-                  </span>
-                  <span className="flex min-w-0 flex-col gap-0.5">
-                    <span className="truncate text-[15px] font-medium">
-                      {visit.links.workOrder?.properties.title ?? visit.properties.number}
-                    </span>
-                    <span className="truncate text-[13px] text-muted-foreground">
-                      {visit.links.technician?.properties.name ?? "Unassigned"} ·{" "}
-                      {visit.properties.number}
-                    </span>
-                  </span>
-                  <StatusIndicator value={visit.properties.status} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section title="Latest alarms" description="From building controls">
-          {(alarms.data?.objects ?? []).length === 0 ? (
-            <Empty>No alarms.</Empty>
-          ) : (
-            <ul className="px-6 pb-2">
-              {(alarms.data?.objects ?? []).map((alarm) => (
-                <li
-                  key={alarm.primaryId}
-                  className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-start gap-3 border-t border-border/70 py-3.5 first:border-t-0"
-                >
-                  <span className="flex size-8 items-center justify-center rounded-full bg-muted">
-                    <BellRing className="size-4 text-foreground/70" strokeWidth={1.8} />
-                  </span>
-                  <span className="flex min-w-0 flex-col gap-0.5">
-                    <span className="truncate text-[15px] font-medium">
-                      {alarm.properties.message}
-                    </span>
-                    <span className="truncate text-[13px] text-muted-foreground">
-                      {alarm.links.equipment?.properties.name ?? "Equipment"} ·{" "}
-                      {formatRelativeTime(alarm.properties.observedAt)}
-                    </span>
-                  </span>
-                  <StatusBadge value={alarm.properties.severity} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section
-          title="Equipment to watch"
-          action={
-            <Link to="/equipment" className="font-medium text-primary hover:underline">
-              All equipment
-            </Link>
-          }
-        >
-          {watchedEquipment.length === 0 ? (
-            <Empty>Every unit reads healthy.</Empty>
-          ) : (
-            <ul className="px-6 pb-2">
-              {watchedEquipment.slice(0, 5).map((item) => (
-                <li key={item.primaryId} className="border-t border-border/70 first:border-t-0">
-                  <Link
-                    to={`/equipment/${encodeURIComponent(item.primaryId)}`}
-                    className="group grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-3 py-3.5"
-                  >
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="truncate text-[15px] font-medium group-hover:text-primary">
-                        {item.properties.name}
-                      </span>
-                      <span className="truncate text-[13px] text-muted-foreground">
-                        {item.links.facility?.properties.name ?? "Facility"} ·{" "}
-                        {item.properties.healthReason ?? "Readings outside range"}
-                      </span>
-                    </span>
-                    <StatusIndicator value={item.properties.health} />
-                    <ChevronRight className="size-4 text-muted-foreground/60" />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      </div>
     </div>
   )
 }
 
-function DecisionRow({ item }: { item: CaseRow }) {
-  const decision = decisions[item.properties.status]
-  const primary = item.properties.status === "triage"
+/** The newest alarm as the panel's one picture: the unit it came from, and what it said. */
+function AlarmWidget({
+  loading,
+  error,
+  alarm,
+  count,
+}: {
+  loading: boolean
+  error: boolean
+  alarm: AlarmRow | undefined
+  count: number
+}) {
+  const equipment = alarm?.links.equipment
+  const illustration = equipmentIllustration(
+    equipment?.properties.name,
+    equipment?.properties.equipmentType
+  )
+  const Icon = equipmentIcon(equipment?.properties.equipmentType)
   return (
-    <li className="flex items-center gap-4 border-t border-border/70 py-3.5 first:border-t-0">
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-[12px] font-semibold text-primary">{decision?.label}</span>
-        <span className="truncate text-[15.5px] font-semibold">
+    <Widget
+      to={equipment ? `/equipment/${encodeURIComponent(equipment.primaryId)}` : "/equipment"}
+      label="View the latest alarm"
+      title="Latest alarm"
+      size="large"
+      meta={loading ? null : `${count} recent`}
+      className="pb-0"
+    >
+      <WidgetState loading={loading} error={error} label="alarms">
+        {alarm ? (
+          <div className="-mx-[22px] mt-4 flex flex-1 flex-col">
+            <div className="relative flex min-h-48 flex-1 items-center justify-center bg-muted">
+              {illustration ? (
+                <img
+                  src={illustration.src}
+                  alt=""
+                  className={cn(
+                    "absolute inset-0 size-full",
+                    illustration.contain ? "object-contain p-6" : "object-cover"
+                  )}
+                />
+              ) : (
+                <Icon className="size-14 text-foreground/30" strokeWidth={1.2} />
+              )}
+              <span className="absolute top-3 left-[22px]">
+                <StatusBadge value={alarm.properties.severity} />
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 px-[22px] pt-4 pb-5">
+              <span className="text-[18px] leading-6 font-semibold tracking-[-0.015em] text-pretty">
+                {alarm.properties.message}
+              </span>
+              <span className="text-[13.5px] text-muted-foreground">
+                {equipment?.properties.name ?? "Equipment"} ·{" "}
+                {formatRelativeTime(alarm.properties.observedAt)}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-auto pt-4 pb-5 text-[14px] text-muted-foreground">No recent alarms.</p>
+        )}
+      </WidgetState>
+    </Widget>
+  )
+}
+
+function DecisionRow({ item }: { item: CaseRow }) {
+  return (
+    <li className="flex items-center gap-3 border-t border-border/70 py-2.5 first:border-t-0">
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[14.5px] font-medium">
           {item.properties.number} · {item.properties.title}
         </span>
-        <span className="truncate text-[13px] text-muted-foreground">
+        <span className="truncate text-[12.5px] text-muted-foreground">
           {item.links.customer?.properties.name ?? "Customer"} ·{" "}
           {deadlineLabel(item.properties.responseDeadline)}
         </span>
@@ -330,32 +528,60 @@ function DecisionRow({ item }: { item: CaseRow }) {
       <Link
         to={`/service-cases/${encodeURIComponent(item.primaryId)}`}
         className={cn(
-          "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[14px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          primary
+          "relative z-20 inline-flex h-8 shrink-0 items-center rounded-full px-3.5 text-[13px] font-semibold transition-colors",
+          item.properties.status === "triage"
             ? "bg-primary text-primary-foreground hover:bg-primary/90"
             : "bg-black/[0.05] text-foreground hover:bg-black/[0.08] dark:bg-white/[0.08]"
         )}
       >
-        {decision?.action}
-        {primary ? <ArrowUpRight className="size-3.5" /> : null}
+        {decisions[item.properties.status ?? ""]}
       </Link>
     </li>
   )
 }
 
-function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-6 pt-2 pb-7 text-[14px] text-muted-foreground">{children}</p>
+/** Joins what needs attention into one sentence, or says nothing does. */
+function Summary({ parts }: { parts: ReadonlyArray<ReactNode | null> }) {
+  const present = parts
+    .map((part, position) => ({ part, position }))
+    .filter((entry) => entry.part !== null)
+  if (present.length === 0) return <>Nothing needs your attention right now.</>
+  return (
+    <>
+      {present.map((entry, index) => (
+        <Fragment key={entry.position}>
+          {index === 0
+            ? ""
+            : index === present.length - 1
+              ? present.length > 2
+                ? ", and "
+                : " and "
+              : ", "}
+          {entry.part}
+        </Fragment>
+      ))}
+      .
+    </>
+  )
 }
 
-function healthRank(health: string | undefined): number {
-  return health === "offline" ? 0 : health === "unhealthy" ? 1 : 2
+function initials(name: string | undefined): string {
+  return (name ?? "")
+    .split(" ")
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+}
+
+function time(value: string | Date | undefined): number {
+  if (!value) return Number.POSITIVE_INFINITY
+  return value instanceof Date ? value.getTime() : new Date(value).getTime()
 }
 
 function isToday(value: string | Date | undefined): boolean {
   if (!value) return false
-  const date = new Date(value)
-  const now = new Date()
-  return date.toDateString() === now.toDateString()
+  return new Date(value).toDateString() === new Date().toDateString()
 }
 
 function greeting(): string {
