@@ -18,6 +18,7 @@ import { Link } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
+import { EquipmentPicture } from "../_components/equipment-picture"
 import { decisionRingClass, pillClass } from "../_components/next-step"
 import {
   CaseClockText,
@@ -31,7 +32,6 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../_components/ui"
-import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
 import type { QueryRow } from "../_lib/query-types"
 
 type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
@@ -419,26 +419,18 @@ function DispatchDecision({
     intervention.defaultResponse.scheduledStart ?? intervention.input.scheduledStart
   const scheduledEnd = intervention.defaultResponse.scheduledEnd ?? intervention.input.scheduledEnd
   const equipment = serviceCase?.links.equipment?.properties
-  const illustration = equipmentIllustration(equipment?.name, equipment?.equipmentType)
-  const EquipmentIcon = equipmentIcon(equipment?.equipmentType)
   const duration = durationLabel(scheduledStart, scheduledEnd)
 
   return (
     <article className={cn("flex flex-col gap-5 p-6 max-sm:p-5", decisionRingClass)}>
       <div className="flex items-start gap-5 max-sm:gap-4">
         <span className="flex size-[88px] shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-muted max-sm:size-16">
-          {illustration ? (
-            <img
-              src={illustration.src}
-              alt=""
-              className={cn(
-                "size-full",
-                illustration.contain ? "object-contain p-2" : "object-cover"
-              )}
-            />
-          ) : (
-            <EquipmentIcon className="size-7 text-foreground/45" strokeWidth={1.5} />
-          )}
+          <EquipmentPicture
+            name={equipment?.name}
+            type={equipment?.equipmentType}
+            inset="p-2"
+            iconClassName="size-7 text-foreground/45"
+          />
         </span>
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">

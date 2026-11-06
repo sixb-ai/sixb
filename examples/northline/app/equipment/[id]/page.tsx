@@ -7,6 +7,7 @@ import { Link, useParams } from "react-router-dom"
 import { BuildingAlarm } from "../../../ontology/building-alarm"
 import { Equipment } from "../../../ontology/equipment"
 import { ServiceCase } from "../../../ontology/service-case"
+import { EquipmentPicture } from "../../_components/equipment-picture"
 import { TelemetryChart, type TelemetryPoint } from "../../_components/telemetry-chart"
 import {
   CaseClockText,
@@ -19,7 +20,6 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../../_components/ui"
-import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
 
 const alarmsQuery = objects(BuildingAlarm).query().expand(BuildingAlarm.l.equipment).limit(100)
 const casesQuery = objects(ServiceCase)
@@ -259,19 +259,15 @@ export default function EquipmentDetailPage() {
 }
 
 function Hero({ name, type }: { name: string | undefined; type: string | undefined }) {
-  const illustration = equipmentIllustration(name, type)
-  const Icon = equipmentIcon(type)
   return (
     <div className="flex h-56 flex-[1_1_300px] items-center justify-center overflow-hidden rounded-[22px] bg-muted sm:max-w-[360px]">
-      {illustration ? (
-        <img
-          src={illustration.src}
-          alt={`${name ?? "Equipment"} illustration`}
-          className={cn("size-full", illustration.contain ? "object-contain p-6" : "object-cover")}
-        />
-      ) : (
-        <Icon className="size-16 text-foreground/40" strokeWidth={1.2} />
-      )}
+      <EquipmentPicture
+        name={name}
+        type={type}
+        inset="p-6"
+        iconClassName="size-16 text-foreground/40"
+        alt={`${name ?? "Equipment"} illustration`}
+      />
     </div>
   )
 }
