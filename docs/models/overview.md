@@ -205,7 +205,9 @@ kept for 90 days.
 
 When a request splits into independent investigations, the chat agent can hand each one to a
 sub-agent, let them work in parallel, and answer from what they return. It does not delegate a
-simple lookup; for a second opinion it [asks another model](./configuration.md#call-models-over-the-api).
+simple lookup or a quick generation. [Another model's answer](./configuration.md#call-models-over-the-api)
+comes from the prompt alone; a sub-agent reads the project itself, so a project can say in `SIXB.md`
+when a second opinion needs one.
 
 - **A sub-agent works for the same user**, with their permissions and
   [approval mode](#approve-what-the-agent-changes), on the [tier](./configuration.md#tiers) or the
