@@ -68,7 +68,11 @@ export interface NewThreadPlace {
   readonly pickFolder?: () => Promise<void>
   /** In a desktop app: take a folder back. */
   readonly forgetFolder?: (folder: string) => void
-  readonly refreshFolders: () => void
+  /**
+   * In a desktop app: read this computer's folders again, as the menu opens. A browser's list
+   * follows the activity feed instead.
+   */
+  readonly refreshFolders?: () => void
 }
 
 export interface NewThreadPlaceState {
@@ -89,11 +93,13 @@ export interface NewThreadPlaceState {
  * Where a new conversation runs. In a desktop app that can run the agent here: this computer
  * unless the person chooses the cloud. In a browser: the cloud unless they choose a folder on one
  * of their computers where `sixb` is open now, and there's nothing to choose while none is.
+ *
+ * `starting`: a new conversation is open. Only then does a browser list the person's computers.
  */
-export function useNewThreadPlace(): NewThreadPlaceState {
+export function useNewThreadPlace(starting: boolean): NewThreadPlaceState {
   const access: DesktopComputerAccess | null = useDesktop()?.computer ?? null
   const desktop = useDesktopPlace(access)
-  const online = useOnlineComputersPlace(access === null)
+  const online = useOnlineComputersPlace(starting && access === null)
   return desktop ?? online
 }
 
@@ -282,7 +288,6 @@ function useOnlineComputersPlace(enabled: boolean): NewThreadPlaceState {
       chooseFolder: (computer, folder) => {
         if (computer.id) remember({ computerId: computer.id, folder })
       },
-      refreshFolders: () => void listed.refetch(),
     },
     resolveBody,
   }
