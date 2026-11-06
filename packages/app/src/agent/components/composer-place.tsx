@@ -53,7 +53,7 @@ export function ComposerPlace({
     <ComposerMenu
       open={open}
       onOpenChange={(next) => {
-        if (next) place.refreshFolders()
+        if (next) place.refreshFolders?.()
         setOpen(next)
       }}
       title={messages.placeTitle}

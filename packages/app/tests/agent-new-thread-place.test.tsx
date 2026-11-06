@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { client } from "@sixb/client"
-import type { DesktopComputerAccess } from "@sixb/client/hooks"
+import { type DesktopComputerAccess, listAgentComputersQueryKey } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
@@ -82,9 +82,11 @@ function api(listed: () => Response | Promise<Response>) {
   client.setConfig({ baseUrl: "http://localhost", fetch: fetchMock })
 }
 
-function renderPlace() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return renderHook(() => useNewThreadPlace(), {
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+function renderPlace(starting = true) {
+  queryClient.clear()
+  return renderHook(() => useNewThreadPlace(starting), {
     wrapper: ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
@@ -348,11 +350,25 @@ describe("where a new conversation runs, in a browser", () => {
     expect(result.current.place?.cloud).toBe(true)
     expect(await result.current.resolveBody()).toEqual({})
 
+    // sixb opened there: the activity feed's computer event marks the list stale, as the
+    // conversation hook does.
     computers = [IMAC, LAPTOP]
-    act(() => result.current.place?.refreshFolders())
+    await act(() => queryClient.invalidateQueries({ queryKey: listAgentComputersQueryKey() }))
     await waitFor(() => expect(result.current.place?.cloud).toBe(false))
     expect(result.current.place?.chosen?.folder).toBe("/work/q3")
     expect(await result.current.resolveBody()).toMatchObject({ runsOn: "computer" })
+  })
+
+  // Guard proof: enable the list query whatever `starting` says; every open conversation in a
+  // browser reads the person's computers for a menu it never shows.
+  test("lists nothing while a conversation is open", () => {
+    api(() => Response.json({ computers: [LAPTOP] }))
+    renderPlace(false)
+
+    // An enabled query is fetching as soon as it mounts.
+    expect(queryClient.getQueryState(listAgentComputersQueryKey())?.fetchStatus ?? "idle").toBe(
+      "idle"
+    )
   })
 
   // Guard proof: read the list's current data in resolveBody instead of ensureQueryData; a message
@@ -397,7 +413,6 @@ describe("the line under the composer", () => {
     chooseFolder: () => {},
     pickFolder: async () => {},
     forgetFolder: () => {},
-    refreshFolders: () => {},
   }
 
   function composer(newThreadPlace?: ComposerProps["newThreadPlace"]) {

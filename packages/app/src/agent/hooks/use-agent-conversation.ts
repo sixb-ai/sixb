@@ -185,7 +185,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     waiting: newThreadPlaceWaiting,
     computerId: desktopComputerId,
     resolveBody: resolvePlaceBody,
-  } = useNewThreadPlace()
+  } = useNewThreadPlace(threadId === null)
   const desktopComputer = useDesktop()?.computer
   // Asking for a folder can take as long as the person does: the composer holds meanwhile.
   const [resolvingPlace, setResolvingPlace] = useState(false)
