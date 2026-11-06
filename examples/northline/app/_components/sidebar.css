@@ -14,9 +14,9 @@
 .nl-sidebar-brand {
   display: flex;
   align-items: center;
-  height: 36px;
+  height: 40px;
   margin: 0 8px 4px;
-  padding: 0 10px;
+  padding: 0 6px;
   border-radius: 8px;
   outline: none;
   transition: opacity 160ms ease;

@@ -16,3 +16,21 @@ export function NorthlineWordmark({ className }: { className?: string }) {
     </>
   )
 }
+
+/** The Northline mark alone, for small, quiet places such as an empty conversation. */
+export function NorthlineMark({ className }: { className?: string }) {
+  return (
+    <>
+      <img
+        src="/brand/northline-mark.svg"
+        alt="Northline"
+        className={cn("mx-auto block dark:hidden", className)}
+      />
+      <img
+        src="/brand/northline-mark-light.svg"
+        alt="Northline"
+        className={cn("mx-auto hidden dark:block", className)}
+      />
+    </>
+  )
+}
