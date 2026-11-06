@@ -10,6 +10,7 @@ import { Quote } from "../ontology/quote"
 import { ServiceCase } from "../ontology/service-case"
 import { Technician } from "../ontology/technician"
 import { WorkOrder } from "../ontology/work-order"
+import { EquipmentPicture } from "./_components/equipment-picture"
 import { Widget, WidgetBreakdown, WidgetMetric, WidgetState } from "./_components/home/widget"
 import {
   CaseClockText,
@@ -23,7 +24,6 @@ import {
   StatusBadge,
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
-import { equipmentIcon, equipmentIllustration } from "./_lib/equipment"
 import type { QueryRow } from "./_lib/query-types"
 import { caseDecision, useCasesWithFieldWorkDone } from "./_lib/service-cases"
 
@@ -477,11 +477,6 @@ function AlarmWidget({
   count: number
 }) {
   const equipment = alarm?.links.equipment
-  const illustration = equipmentIllustration(
-    equipment?.properties.name,
-    equipment?.properties.equipmentType
-  )
-  const Icon = equipmentIcon(equipment?.properties.equipmentType)
   return (
     <Widget
       to={equipment ? `/equipment/${encodeURIComponent(equipment.primaryId)}` : "/equipment"}
@@ -495,18 +490,13 @@ function AlarmWidget({
         {alarm ? (
           <div className="-mx-[22px] mt-4 flex flex-1 flex-col">
             <div className="relative flex min-h-48 flex-1 items-center justify-center bg-muted">
-              {illustration ? (
-                <img
-                  src={illustration.src}
-                  alt=""
-                  className={cn(
-                    "absolute inset-0 size-full",
-                    illustration.contain ? "object-contain p-6" : "object-cover"
-                  )}
-                />
-              ) : (
-                <Icon className="size-14 text-foreground/30" strokeWidth={1.2} />
-              )}
+              <EquipmentPicture
+                name={equipment?.properties.name}
+                type={equipment?.properties.equipmentType}
+                inset="p-6"
+                className="absolute inset-0"
+                iconClassName="size-14 text-foreground/30"
+              />
               <span className="absolute top-3 left-[22px]">
                 <StatusBadge value={alarm.properties.severity} />
               </span>

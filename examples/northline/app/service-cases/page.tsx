@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
+import { EquipmentPicture } from "../_components/equipment-picture"
 import { SearchField, ViewPills } from "../_components/list-controls"
 import {
   CaseClockText,
@@ -14,7 +15,6 @@ import {
   QueryState,
   StatusBadge,
 } from "../_components/ui"
-import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
 import type { QueryRow } from "../_lib/query-types"
 import { caseDecision, useCasesWithFieldWorkDone } from "../_lib/service-cases"
 
@@ -118,11 +118,6 @@ export default function ServiceCasesPage() {
 
 function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
   const equipment = serviceCase.links.equipment
-  const illustration = equipmentIllustration(
-    equipment?.properties.name,
-    equipment?.properties.equipmentType
-  )
-  const Icon = equipmentIcon(equipment?.properties.equipmentType)
   const closed = ["closed", "cancelled"].includes(serviceCase.properties.status ?? "")
 
   return (
@@ -133,18 +128,12 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
       >
         {/* On a phone the state and clock move under the text, which gets the full width. */}
         <span className="relative flex size-14 items-center justify-center overflow-hidden rounded-[14px] bg-muted max-sm:size-12 max-sm:rounded-[12px]">
-          {illustration ? (
-            <img
-              src={illustration.src}
-              alt=""
-              className={cn(
-                "size-full",
-                illustration.contain ? "object-contain p-1.5" : "object-cover"
-              )}
-            />
-          ) : (
-            <Icon className="size-6 text-foreground/55" strokeWidth={1.6} />
-          )}
+          <EquipmentPicture
+            name={equipment?.properties.name}
+            type={equipment?.properties.equipmentType}
+            inset="p-1.5"
+            iconClassName="size-6 text-foreground/55"
+          />
         </span>
         <span className="flex min-w-0 flex-col gap-1">
           <span className="flex min-w-0 items-center gap-2 max-sm:items-baseline">

@@ -1,10 +1,10 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { cn } from "@sixb/ui/lib/utils"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
+import { EquipmentPicture } from "../_components/equipment-picture"
 import { SearchField, ViewPills } from "../_components/list-controls"
 import {
   formatRelativeTime,
@@ -13,7 +13,6 @@ import {
   QueryState,
   StatusIndicator,
 } from "../_components/ui"
-import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
 import type { QueryRow } from "../_lib/query-types"
 
 const equipmentQuery = objects(Equipment)
@@ -117,8 +116,6 @@ export default function EquipmentPage() {
 }
 
 function AssetCard({ asset, openCase }: { asset: EquipmentRow; openCase: string | undefined }) {
-  const illustration = equipmentIllustration(asset.properties.name, asset.properties.equipmentType)
-  const Icon = equipmentIcon(asset.properties.equipmentType)
   return (
     <li>
       <Link
@@ -126,18 +123,13 @@ function AssetCard({ asset, openCase }: { asset: EquipmentRow; openCase: string 
         className="group flex h-full flex-col overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-raised)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <span className="relative flex h-40 items-center justify-center bg-muted">
-          {illustration ? (
-            <img
-              src={illustration.src}
-              alt=""
-              className={cn(
-                "size-full transition-transform duration-500 group-hover:scale-[1.03]",
-                illustration.contain ? "object-contain p-5" : "object-cover"
-              )}
-            />
-          ) : (
-            <Icon className="size-12 text-foreground/35" strokeWidth={1.2} />
-          )}
+          <EquipmentPicture
+            name={asset.properties.name}
+            type={asset.properties.equipmentType}
+            inset="p-5"
+            className="transition-transform duration-500 group-hover:scale-[1.03]"
+            iconClassName="size-12 text-foreground/35"
+          />
           {openCase ? (
             <span className="absolute top-3 left-3 rounded-full bg-card/90 px-2.5 py-1 text-[12px] font-semibold shadow-sm backdrop-blur">
               {openCase} open

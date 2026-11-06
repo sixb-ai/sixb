@@ -10,6 +10,7 @@ import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { Technician } from "../../../ontology/technician"
 import { WorkOrder } from "../../../ontology/work-order"
+import { EquipmentPicture } from "../../_components/equipment-picture"
 import { NextStepCard, pillClass } from "../../_components/next-step"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
@@ -25,7 +26,6 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../../_components/ui"
-import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
 
 const visitsQuery = objects(ServiceVisit)
@@ -402,26 +402,17 @@ function VisitHero({
   serviceCase: VisitServiceCase
   equipment: VisitEquipment
 }) {
-  const illustration = equipmentIllustration(
-    equipment.properties.name,
-    equipment.properties.equipmentType
-  )
-  const Icon = equipmentIcon(equipment.properties.equipmentType)
   return (
     <section className="flex flex-wrap overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
       <div className="relative flex min-h-48 flex-[1_1_280px] items-center justify-center bg-muted">
-        {illustration ? (
-          <img
-            src={illustration.src}
-            alt={`${equipment.properties.name} illustration`}
-            className={cn(
-              "absolute inset-0 size-full",
-              illustration.contain ? "object-contain p-5" : "object-cover"
-            )}
-          />
-        ) : (
-          <Icon className="size-14 text-foreground/35" strokeWidth={1.2} aria-hidden="true" />
-        )}
+        <EquipmentPicture
+          name={equipment.properties.name}
+          type={equipment.properties.equipmentType}
+          inset="p-5"
+          className="absolute inset-0"
+          iconClassName="size-14 text-foreground/35"
+          alt={`${equipment.properties.name} illustration`}
+        />
       </div>
 
       <div className="flex min-w-0 flex-[999_1_360px] flex-col gap-5 p-5 sm:p-6">

@@ -12,6 +12,7 @@ import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceContract } from "../../../ontology/service-contract"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { WorkOrder } from "../../../ontology/work-order"
+import { EquipmentPicture } from "../../_components/equipment-picture"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
@@ -29,7 +30,6 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../../_components/ui"
-import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
 import { quotePath } from "../../_lib/quotes"
 
@@ -408,8 +408,6 @@ function UnitThumb({
   type: string | undefined
   className: string
 }) {
-  const illustration = equipmentIllustration(name, type)
-  const Icon = equipmentIcon(type)
   return (
     <span
       className={cn(
@@ -417,15 +415,12 @@ function UnitThumb({
         className
       )}
     >
-      {illustration ? (
-        <img
-          src={illustration.src}
-          alt=""
-          className={cn("size-full", illustration.contain ? "object-contain p-1" : "object-cover")}
-        />
-      ) : (
-        <Icon className="size-[45%] text-foreground/55" strokeWidth={1.6} />
-      )}
+      <EquipmentPicture
+        name={name}
+        type={type}
+        inset="p-1"
+        iconClassName="size-[45%] text-foreground/55"
+      />
     </span>
   )
 }
