@@ -753,15 +753,15 @@ describe("a runner outside the worker", () => {
 
   // Guard proof: drop the MAX_SESSIONS check from the session route; one person holds sessions
   // without end, each a row the sweeper reads and an event every client hears.
-  test("keeps a person to twenty open sixb sessions", async () => {
+  test("keeps a person to two hundred connected folders", async () => {
     const { person, call } = await setup()
     const ava = await person("ava")
     const hold = (id: string, folder: string) =>
       call(ava, "PUT", `/api/agent-computers/sessions/${id}`, { computer: { ...LAPTOP, folder } })
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < 200; index += 1) {
       expect((await hold(`cs_${index}`, `/Users/ava/${index}`)).status).toBe(200)
     }
-    expect((await hold("cs_20", "/Users/ava/20")).status).toBe(429)
+    expect((await hold("cs_200", "/Users/ava/200")).status).toBe(429)
     // Renewing one held already still works.
     expect((await hold("cs_3", "/Users/ava/3")).status).toBe(200)
   })
