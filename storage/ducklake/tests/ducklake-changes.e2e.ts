@@ -150,6 +150,7 @@ describe("DuckLakeStorage changes between versions of identical rows", () => {
   })
 
   // Red check: drop the limit of the walk in `holdsRowsOf`; the long history is walked.
+  // Its 34 commits take 3-5 s on a CI runner, past the default 5 s timeout, hence the bound.
   test("compares the rows rather than walk a long history", async () => {
     const first = await write(rows)
     let latest = first
@@ -159,5 +160,5 @@ describe("DuckLakeStorage changes between versions of identical rows", () => {
     const { result, reads } = await recordTableReads(async () => collect(await read(first, latest)))
     expect(result).toEqual({ fromRowCount: 2, toRowCount: 2, changes: [] })
     expect(reads).not.toEqual([])
-  })
+  }, 30_000)
 })
