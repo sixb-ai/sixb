@@ -1,11 +1,12 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowUpDown, ChevronRight, Search } from "lucide-react"
+import { ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
+import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import { formatDateTime, humanize, PageHeader, QueryState, StatusBadge } from "../_components/ui"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(100)
@@ -24,9 +25,9 @@ const views = [
 ] as const
 
 const sortOptions = [
-  ["availability", "Availability"],
-  ["name", "Name"],
-  ["territory", "Territory"],
+  ["availability", "By availability"],
+  ["name", "By name"],
+  ["territory", "By territory"],
 ] as const
 
 type View = (typeof views)[number][0]
@@ -63,85 +64,44 @@ export default function TechniciansPage() {
       .sort((left, right) => compareTechnicians(left, right, sort))
   }, [allTechnicians, allWorkOrders, search, sort, view])
 
+  const counts = Object.fromEntries(
+    views.map(([value]) => [
+      value,
+      allTechnicians.filter(
+        (technician) => value === "all" || technician.properties.availability === value
+      ).length,
+    ])
+  )
+
   return (
     <div>
       <PageHeader
         title="Technicians"
         description="Who is free, where they cover, and what each person is working on."
         action={
-          <label className="relative block w-72 max-sm:w-full">
-            <span className="sr-only">Search technicians</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground"
-              strokeWidth={1.8}
-            />
-            <input
+          <>
+            <SearchField
+              label="Search technicians"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={setSearch}
               placeholder="Search people, territories, work"
-              className="h-10 w-full rounded-[10px] bg-black/[0.045] pr-3 pl-10 text-[14px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.07]"
             />
-          </label>
+            <SortSelect
+              label="Sort technicians"
+              value={sort}
+              options={sortOptions}
+              onChange={setSort}
+            />
+          </>
         }
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div
-            role="tablist"
-            aria-label="Technician views"
-            className="-mx-1 flex flex-wrap gap-1.5"
-          >
-            {views.map(([value, label]) => {
-              const count = allTechnicians.filter(
-                (technician) => value === "all" || technician.properties.availability === value
-              ).length
-              const active = view === value
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setView(value)}
-                  className={cn(
-                    "inline-flex h-9 items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                    active
-                      ? "bg-foreground text-background"
-                      : "bg-black/[0.045] text-foreground/80 hover:bg-black/[0.07] dark:bg-white/[0.07]"
-                  )}
-                >
-                  {label}
-                  <span
-                    className={cn(
-                      "text-[12.5px] tabular-nums",
-                      active ? "text-background/70" : "text-muted-foreground"
-                    )}
-                  >
-                    {count}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-
-          <label className="relative inline-flex items-center">
-            <span className="sr-only">Sort technicians</span>
-            <ArrowUpDown
-              className="pointer-events-none absolute left-3.5 size-3.5 text-muted-foreground"
-              strokeWidth={1.8}
-            />
-            <select
-              value={sort}
-              onChange={(event) => setSort(event.target.value as Sort)}
-              className="h-9 appearance-none rounded-full bg-black/[0.045] pr-4 pl-9 text-[14px] font-medium text-foreground/80 outline-none transition-colors hover:bg-black/[0.07] focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.07]"
-            >
-              {sortOptions.map(([value, label]) => (
-                <option key={value} value={value}>
-                  Sort by {label.toLowerCase()}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <ViewPills
+          label="Technician views"
+          views={views}
+          value={view}
+          counts={counts}
+          onChange={setView}
+        />
       </PageHeader>
 
       <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">

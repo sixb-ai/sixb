@@ -158,7 +158,9 @@ export function PageHeader({
             </p>
           ) : null}
         </div>
-        {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+        {action ? (
+          <div className="flex shrink-0 items-center gap-2 max-sm:w-full">{action}</div>
+        ) : null}
       </div>
       {children}
     </header>
@@ -348,8 +350,8 @@ const finished = new Set(["resolved", "closed", "cancelled"])
 
 /**
  * The commitment that matters at a case's stage. Until a technician is on site the customer is
- * waiting on a response; after that, on a resolution; once resolved, the commitment was met or
- * missed.
+ * waiting on a response; after that, on a resolution, which pauses while the customer authorizes
+ * a repair; once resolved, the commitment was met or missed.
  */
 export function caseClock(serviceCase: CaseClockFields): CaseClock {
   const status = serviceCase.status ?? "new"
@@ -361,6 +363,17 @@ export function caseClock(serviceCase: CaseClockFields): CaseClock {
       value: missed ? "Missed" : "Met",
       summary: missed ? "Commitment missed" : "Commitment met",
       tone: missed ? "critical" : "neutral",
+      dueAt: Number.POSITIVE_INFINITY,
+    }
+  }
+
+  // Contracts stop the resolution clock while the customer decides on work outside coverage.
+  if (status === "awaiting_authorization") {
+    return {
+      label: "Resolution",
+      value: "Paused",
+      summary: "Waiting on the customer",
+      tone: "neutral",
       dueAt: Number.POSITIVE_INFINITY,
     }
   }
