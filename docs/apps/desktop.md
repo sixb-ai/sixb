@@ -121,7 +121,8 @@ The first folder signs the computer in with one approval in the browser, or uses
 project, and conversations run as that account. Sign it out in **Settings**: signing out of the window
 doesn't end it.
 
-On Windows, which has no local sandbox yet, conversations run in the cloud.
+On Windows, which has no local sandbox yet, conversations run in the cloud. On Linux, the computer
+needs `bwrap`, or its turns fail.
 
 ## Check for the desktop app in your code
 
