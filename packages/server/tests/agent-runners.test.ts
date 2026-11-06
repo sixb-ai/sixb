@@ -515,6 +515,35 @@ describe("a runner outside the worker", () => {
     ])
   })
 
+  test("lists its owner's computers with sixb open now, each with its folders", async () => {
+    const { person, call } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const listed = async () =>
+      ((await (await call(ava, "GET", "/api/agent-computers")).json()) as { computers: unknown })
+        .computers
+
+    expect(await listed()).toEqual([])
+    await call(bob, "PUT", "/api/agent-computers/sessions/cs_bob", { computer: LAPTOP })
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_q3", { computer: LAPTOP })
+    // Two sessions in one folder, as the desktop app and a terminal hold: it's listed once.
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_q3_again", { computer: LAPTOP })
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_notes", {
+      computer: { ...LAPTOP, folder: "/Users/ava/notes" },
+    })
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_imac", { computer: DESKTOP })
+
+    expect(await listed()).toEqual([
+      { id: "desktop", name: "Ava's iMac", folders: ["/Users/ava/q3"] },
+      { id: "laptop", name: "Ava's MacBook Pro", folders: ["/Users/ava/notes", "/Users/ava/q3"] },
+    ])
+
+    await call(ava, "DELETE", "/api/agent-computers/sessions/cs_imac")
+    expect(await listed()).toEqual([
+      { id: "laptop", name: "Ava's MacBook Pro", folders: ["/Users/ava/notes", "/Users/ava/q3"] },
+    ])
+  })
+
   // Guard proof: list the project's oldest queued runs in waitingTurns, as it first did; Bob's
   // hundred turns waiting for his laptop leave Ava's off her session's list.
   test("lists the turns waiting for a folder, however many of someone else's wait", async () => {
