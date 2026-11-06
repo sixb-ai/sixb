@@ -36,6 +36,24 @@
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 25%, transparent);
 }
 
+/* On a phone the model picker leaves a one-line draft too little room, so the draft always takes
+   the top row with the controls under it: the layout the composer switches to once a draft wraps. */
+@media (max-width: 767px) {
+  .nl-home-composer .sixb-composer-surface {
+    row-gap: 0.25rem;
+  }
+
+  .nl-home-composer .sixb-composer-surface textarea {
+    order: -1;
+    flex-basis: 100%;
+    padding: 0.375rem 0.625rem 0.25rem;
+  }
+
+  .nl-home-composer .sixb-composer-surface > span[aria-hidden="true"] {
+    display: block;
+  }
+}
+
 /* Widgets rise in once, in reading order; their bars grow from the left when data lands. */
 @keyframes nl-rise {
   from {

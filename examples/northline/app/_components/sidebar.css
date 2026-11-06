@@ -14,9 +14,10 @@
 .nl-sidebar-brand {
   display: flex;
   align-items: center;
+  gap: 9px;
   height: 40px;
   margin: 0 8px 4px;
-  padding: 0 6px;
+  padding: 0 8px;
   border-radius: 8px;
   outline: none;
   transition: opacity 160ms ease;
@@ -26,6 +27,14 @@
   .nl-sidebar-brand:hover {
     opacity: 0.7;
   }
+}
+
+/* The name is live text: the wordmark's small caps blur at sidebar size. */
+.nl-sidebar-brand-name {
+  color: var(--sidebar-foreground);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
 }
 
 .nl-sidebar-brand:focus-visible {

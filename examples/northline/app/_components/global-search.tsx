@@ -12,7 +12,12 @@ import { Search } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-export function GlobalSearch() {
+interface GlobalSearchProps {
+  /** The sidebar's search row by default; `toolbar` is the phone top bar's icon button. */
+  readonly placement?: "sidebar" | "toolbar"
+}
+
+export function GlobalSearch({ placement = "sidebar" }: GlobalSearchProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const navigate = useNavigate()
@@ -32,6 +37,56 @@ export function GlobalSearch() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
+  // On phones it fills the screen instead of floating (see phone/phone-navigation.css).
+  const dialog = (
+    <CommandDialog open={open} onOpenChange={setOpen} className="northline-search">
+      <CommandInput
+        placeholder="Search Northline Operations"
+        value={query}
+        onValueChange={setQuery}
+      />
+      <CommandList>
+        <CommandEmpty>{query.length < 2 ? "Type to search." : "No matching records."}</CommandEmpty>
+        <CommandGroup heading="Results">
+          {(results.data?.items ?? []).map((item) => (
+            <CommandItem
+              key={`${item.ref.objectTypeId}:${item.ref.primaryId}`}
+              value={`${item.label} ${item.ref.primaryId}`}
+              onSelect={() => {
+                navigate(resultPath(item.ref.objectTypeId, item.ref.primaryId))
+                setOpen(false)
+              }}
+            >
+              <Search className="size-4 text-muted-foreground" />
+              <span>{item.label}</span>
+              <span className="ml-auto text-[11px] text-muted-foreground">
+                {item.ref.objectTypeId}
+              </span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </CommandDialog>
+  )
+
+  if (placement === "toolbar") {
+    return (
+      <>
+        <button
+          type="button"
+          aria-label="Search"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className="phone-bar-action"
+          onClick={() => setOpen(true)}
+        >
+          <Search className="size-[21px]" strokeWidth={1.8} aria-hidden="true" />
+        </button>
+        {dialog}
+      </>
+    )
+  }
+
   return (
     <>
       <button type="button" className="nl-sidebar-row" onClick={() => setOpen(true)}>
@@ -39,36 +94,7 @@ export function GlobalSearch() {
         <span>Search</span>
         <kbd>⌘K</kbd>
       </button>
-      <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput
-          placeholder="Search Northline Operations"
-          value={query}
-          onValueChange={setQuery}
-        />
-        <CommandList>
-          <CommandEmpty>
-            {query.length < 2 ? "Type to search." : "No matching records."}
-          </CommandEmpty>
-          <CommandGroup heading="Results">
-            {(results.data?.items ?? []).map((item) => (
-              <CommandItem
-                key={`${item.ref.objectTypeId}:${item.ref.primaryId}`}
-                value={`${item.label} ${item.ref.primaryId}`}
-                onSelect={() => {
-                  navigate(resultPath(item.ref.objectTypeId, item.ref.primaryId))
-                  setOpen(false)
-                }}
-              >
-                <Search className="size-4 text-muted-foreground" />
-                <span>{item.label}</span>
-                <span className="ml-auto text-[11px] text-muted-foreground">
-                  {item.ref.objectTypeId}
-                </span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        </CommandList>
-      </CommandDialog>
+      {dialog}
     </>
   )
 }

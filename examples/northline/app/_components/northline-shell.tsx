@@ -1,14 +1,7 @@
 import { SectionNav, UserMenu, useCurrentSection } from "@sixb/app"
 import { events, objectQueryKeys, useInvalidateOnEvent, useObjectsCount } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarInset,
-  SidebarTrigger,
-} from "@sixb/ui/components"
+import { SidebarContent, SidebarFooter, SidebarHeader, SidebarInset } from "@sixb/ui/components"
 import {
   CalendarClock,
   ClipboardList,
@@ -25,8 +18,12 @@ import { Quote } from "../../ontology/quote"
 import { ServiceCase } from "../../ontology/service-case"
 import { threadPath, useRecentThreads } from "../_lib/agent-threads"
 import { GlobalSearch } from "./global-search"
-import { NorthlineWordmark } from "./northline-wordmark"
+import { NorthlineMark } from "./northline-mark"
 import { OperationsAssistant } from "./operations-assistant"
+import { SidebarOrMoreSheet } from "./phone/phone-shell"
+import { PhoneTabBar } from "./phone/phone-tab-bar"
+import { PhoneTopBar } from "./phone/phone-top-bar"
+import { PullToRefresh } from "./phone/pull-to-refresh"
 
 const openCases = objects(ServiceCase)
   .query()
@@ -85,10 +82,11 @@ export function NorthlineShell({ children }: PropsWithChildren) {
 
   return (
     <>
-      <Sidebar collapsible="offcanvas" className="nl-sidebar">
+      <SidebarOrMoreSheet collapsible="offcanvas" className="nl-sidebar">
         <SidebarHeader className="nl-sidebar-header">
           <Link to="/" aria-label="Northline Operations home" className="nl-sidebar-brand">
-            <NorthlineWordmark className="mx-0 h-8" />
+            <NorthlineMark className="mx-0 size-[26px]" />
+            <span className="nl-sidebar-brand-name">Northline</span>
           </Link>
           <GlobalSearch />
         </SidebarHeader>
@@ -106,21 +104,28 @@ export function NorthlineShell({ children }: PropsWithChildren) {
         <SidebarFooter className="nl-sidebar-footer">
           <UserMenu />
         </SidebarFooter>
-      </Sidebar>
-      <div className="relative flex min-h-0 min-w-0 flex-1">
+      </SidebarOrMoreSheet>
+      {/* Below 768 px: a top bar and a tab bar over the page; a conversation's composer takes
+          the tab bar's place. */}
+      <div
+        className="phone-shell relative flex min-h-0 min-w-0 flex-1"
+        data-tab-bar={conversationActive ? "hidden" : undefined}
+      >
         <SidebarInset className="relative h-svh min-h-0 overflow-hidden bg-background">
-          <SidebarTrigger className="absolute top-3 left-3 z-50 md:hidden" />
+          <PhoneTopBar />
+          <PullToRefresh />
           <div className="min-h-0 flex-1 overflow-y-auto" data-app-scroll>
             <div
               className={
                 conversationActive || sectionActive
                   ? "h-full w-full"
-                  : "mx-auto w-full max-w-[1180px] px-5 pt-14 pb-16 sm:px-10 md:pt-10 lg:px-14"
+                  : "mx-auto w-full max-w-[1180px] px-5 pt-2 pb-6 sm:px-10 md:pt-10 md:pb-16 lg:px-14"
               }
             >
               {children}
             </div>
           </div>
+          {conversationActive ? null : <PhoneTabBar />}
         </SidebarInset>
         <OperationsAssistant />
       </div>

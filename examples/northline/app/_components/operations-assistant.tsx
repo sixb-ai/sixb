@@ -5,7 +5,7 @@ import { CustomerAccount } from "../../ontology/customer-account"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
-import { NorthlineMark } from "./northline-wordmark"
+import { NorthlineMark } from "./northline-mark"
 
 const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/service-cases", "Service cases"],
@@ -46,6 +46,8 @@ export function OperationsAssistant() {
 
   return (
     <AgentSurface
+      // Conversations start on Home; the dock opens on request so it never covers a page.
+      defaultMode="collapsed"
       title="Chat"
       launcherLabel="Chat"
       context={context}
