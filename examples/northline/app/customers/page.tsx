@@ -202,10 +202,11 @@ function CustomerListRow({
     <li className="border-t border-border/70 first:border-t-0">
       <Link
         to={`/customers/${encodeURIComponent(customer.primaryId)}`}
-        className="group grid grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none sm:px-6 md:grid-cols-[2.75rem_minmax(0,1.3fr)_minmax(0,1fr)_8.5rem_1rem] dark:hover:bg-white/[0.03]"
+        className="group grid grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none max-sm:grid-cols-[2.75rem_minmax(0,1fr)] max-sm:gap-x-3.5 max-sm:gap-y-1.5 sm:px-6 md:grid-cols-[2.75rem_minmax(0,1.3fr)_minmax(0,1fr)_8.5rem_1rem] dark:hover:bg-white/[0.03]"
       >
+        {/* On a phone the open work moves under the name, which gets the full width. */}
         <span
-          className="flex size-11 items-center justify-center rounded-full bg-[var(--northline-tint)] text-[15px] font-semibold text-primary"
+          className="flex size-11 items-center justify-center rounded-full bg-[var(--northline-tint)] text-[15px] font-semibold text-primary max-sm:row-span-2 max-sm:self-start"
           aria-hidden="true"
         >
           {initials(customer.properties.name)}
@@ -238,10 +239,10 @@ function CustomerListRow({
               : "Coverage unavailable"}
           </span>
         </span>
-        <span className="flex flex-col items-end gap-1.5">
+        <span className="flex flex-col items-end gap-1.5 max-sm:col-start-2 max-sm:flex-row max-sm:items-center max-sm:gap-3">
           <span
             className={cn(
-              "text-[14.5px] font-medium whitespace-nowrap tabular-nums",
+              "text-[14.5px] font-medium whitespace-nowrap tabular-nums max-sm:text-[13.5px]",
               openCases.length === 0 && "text-muted-foreground"
             )}
           >
@@ -258,7 +259,7 @@ function CustomerListRow({
             <StatusIndicator value="on_track" label="On track" />
           ) : null}
         </span>
-        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground" />
+        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground max-sm:hidden" />
       </Link>
     </li>
   )
