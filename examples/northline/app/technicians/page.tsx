@@ -1,12 +1,12 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Input } from "@sixb/ui/components"
-import { ArrowRight, ArrowUpDown, Search } from "lucide-react"
+import { cn } from "@sixb/ui/lib/utils"
+import { ArrowUpDown, ChevronRight, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
-import { formatDateTime, humanize, QueryState, StatusIndicator } from "../_components/ui"
+import { formatDateTime, humanize, PageHeader, QueryState, StatusBadge } from "../_components/ui"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(100)
 const workOrdersQuery = objects(WorkOrder)
@@ -25,7 +25,7 @@ const views = [
 
 const sortOptions = [
   ["availability", "Availability"],
-  ["name", "Technician name"],
+  ["name", "Name"],
   ["territory", "Territory"],
 ] as const
 
@@ -42,12 +42,6 @@ export default function TechniciansPage() {
   const [search, setSearch] = useState("")
   const allTechnicians = technicians.data?.objects ?? []
   const allWorkOrders = workOrders.data?.objects ?? []
-  const available = allTechnicians.filter(
-    (technician) => technician.properties.availability === "available"
-  ).length
-  const assigned = allTechnicians.filter(
-    (technician) => technician.properties.availability === "assigned"
-  ).length
   const rows = useMemo(() => {
     const normalized = search.trim().toLowerCase()
     return allTechnicians
@@ -70,212 +64,206 @@ export default function TechniciansPage() {
   }, [allTechnicians, allWorkOrders, search, sort, view])
 
   return (
-    <div className="pb-8">
-      <header className="mb-6 flex items-start justify-between gap-6 max-sm:flex-col">
-        <div className="min-w-0">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-primary uppercase">
-            Field response
-          </p>
-          <h1 className="text-[32px] leading-9 font-semibold tracking-[-0.035em] text-foreground max-sm:text-[28px]">
-            Technicians
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Dispatchability, qualifications, and current field commitments across Northline
-            territories.
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-8 text-right max-sm:text-left">
-          <span>
-            <strong className="block font-mono text-xl font-semibold">{available}</strong>
-            <span className="text-xs text-muted-foreground">available now</span>
-          </span>
-          <span>
-            <strong className="block font-mono text-xl font-semibold">{assigned}</strong>
-            <span className="text-xs text-muted-foreground">in the field</span>
-          </span>
-        </div>
-      </header>
-
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <label className="relative block">
-          <span className="sr-only">Search technicians</span>
-          <Search
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search technicians, territories, or qualifications"
-            className="h-12 rounded-lg border-border/90 bg-card pl-11 text-sm shadow-none focus-visible:ring-2"
-          />
-        </label>
-
-        <label className="relative block">
-          <span className="sr-only">Sort technicians</span>
-          <ArrowUpDown
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <select
-            value={sort}
-            onChange={(event) => setSort(event.target.value as Sort)}
-            className="h-12 w-full appearance-none rounded-lg border border-border/90 bg-card pr-10 pl-11 text-sm font-medium text-foreground outline-none transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring"
+    <div>
+      <PageHeader
+        title="Technicians"
+        description="Who is free, where they cover, and what each person is working on."
+        action={
+          <label className="relative block w-72 max-sm:w-full">
+            <span className="sr-only">Search technicians</span>
+            <Search
+              className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground"
+              strokeWidth={1.8}
+            />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search people, territories, work"
+              className="h-10 w-full rounded-[10px] bg-black/[0.045] pr-3 pl-10 text-[14px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.07]"
+            />
+          </label>
+        }
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div
+            role="tablist"
+            aria-label="Technician views"
+            className="-mx-1 flex flex-wrap gap-1.5"
           >
-            {sortOptions.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <span
-            className="pointer-events-none absolute top-1/2 right-4 size-2.5 -translate-y-2/3 rotate-45 border-r border-b border-muted-foreground"
-            aria-hidden="true"
-          />
-        </label>
-      </div>
+            {views.map(([value, label]) => {
+              const count = allTechnicians.filter(
+                (technician) => value === "all" || technician.properties.availability === value
+              ).length
+              const active = view === value
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setView(value)}
+                  className={cn(
+                    "inline-flex h-9 items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                    active
+                      ? "bg-foreground text-background"
+                      : "bg-black/[0.045] text-foreground/80 hover:bg-black/[0.07] dark:bg-white/[0.07]"
+                  )}
+                >
+                  {label}
+                  <span
+                    className={cn(
+                      "text-[12.5px] tabular-nums",
+                      active ? "text-background/70" : "text-muted-foreground"
+                    )}
+                  >
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
 
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-2" aria-label="Technician views">
-        {views.map(([value, label]) => {
-          const count = allTechnicians.filter(
-            (technician) => value === "all" || technician.properties.availability === value
-          ).length
-          const active = view === value
-          return (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={active}
-              className={
-                active
-                  ? "h-9 shrink-0 rounded-md border border-primary bg-primary px-3.5 text-xs font-semibold text-primary-foreground shadow-sm"
-                  : "h-9 shrink-0 rounded-md border border-border/90 bg-card px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground"
-              }
-              onClick={() => setView(value)}
+          <label className="relative inline-flex items-center">
+            <span className="sr-only">Sort technicians</span>
+            <ArrowUpDown
+              className="pointer-events-none absolute left-3.5 size-3.5 text-muted-foreground"
+              strokeWidth={1.8}
+            />
+            <select
+              value={sort}
+              onChange={(event) => setSort(event.target.value as Sort)}
+              className="h-9 appearance-none rounded-full bg-black/[0.045] pr-4 pl-9 text-[14px] font-medium text-foreground/80 outline-none transition-colors hover:bg-black/[0.07] focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.07]"
             >
-              {label} <span className="ml-1.5 font-mono text-[10px] opacity-75">{count}</span>
-            </button>
-          )
-        })}
-      </div>
+              {sortOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  Sort by {label.toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </PageHeader>
 
-      <section className="mt-4">
-        <header className="mb-3 flex flex-wrap items-baseline gap-x-5 gap-y-1">
-          <h2 className="text-base font-semibold tracking-[-0.015em]">Field team</h2>
-          <p className="text-xs text-muted-foreground">
-            Coverage, qualifications, current commitment, and next availability.
-          </p>
-        </header>
+      <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
         <QueryState
           loading={technicians.isLoading || workOrders.isLoading}
           error={technicians.isError || workOrders.isError}
           empty={rows.length === 0}
-          emptyMessage="No technicians match this view."
+          emptyMessage={
+            search ? "No technicians match that search." : "No technicians in this view."
+          }
         >
-          <div className="grid gap-2.5">
+          <ul>
             {rows.map((technician) => (
-              <TechnicianWorklistRow
+              <TechnicianListRow
                 key={technician.primaryId}
                 technician={technician}
                 assignment={currentAssignment(technician, allWorkOrders)}
               />
             ))}
-          </div>
+          </ul>
         </QueryState>
       </section>
     </div>
   )
 }
 
-function TechnicianWorklistRow({
+function TechnicianListRow({
   technician,
   assignment,
 }: {
   technician: TechnicianRow
   assignment: WorkOrderRow | undefined
 }) {
+  const offDuty = technician.properties.availability === "off_duty"
+  const assignmentDetail = assignment
+    ? [
+        assignment.properties.number,
+        humanize(assignment.properties.status),
+        assignment.links.equipment?.properties.name,
+        assignment.links.serviceCase?.properties.number,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : offDuty
+      ? "Not on shift"
+      : "Ready for dispatch"
+
   return (
-    <Link
-      to={`/technicians/${encodeURIComponent(technician.primaryId)}`}
-      className="group relative grid grid-cols-[58px_minmax(0,1fr)] items-center gap-x-4 gap-y-3 rounded-xl border border-border/85 bg-card py-3.5 pr-11 pl-3.5 transition-[border-color,background-color,box-shadow] hover:border-primary/70 hover:bg-primary/[0.045] hover:shadow-[0_1px_2px_rgba(13,32,39,0.04)] focus-visible:border-primary/70 focus-visible:bg-primary/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:grid-cols-[58px_minmax(170px,0.85fr)_minmax(170px,0.72fr)_minmax(260px,1.15fr)_190px_120px_18px] xl:gap-x-5 xl:pr-5"
-    >
-      <span className="grid size-[58px] shrink-0 place-items-center rounded-full bg-primary/14 text-base font-semibold tracking-[-0.025em] text-primary">
-        {initials(technician.properties.name)}
-      </span>
-
-      <div className="min-w-0">
-        <strong className="block truncate text-sm font-semibold group-hover:text-primary">
-          {technician.properties.name}
-        </strong>
-        <span className="mt-1 block truncate text-xs text-muted-foreground">
-          {technician.properties.phone ?? technician.properties.email}
+    <li className="border-t border-border/70 first:border-t-0">
+      <Link
+        to={`/technicians/${encodeURIComponent(technician.primaryId)}`}
+        className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none sm:px-6 dark:hover:bg-white/[0.03]"
+      >
+        <span
+          className={cn(
+            "flex size-11 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold tracking-[-0.01em]",
+            offDuty ? "bg-muted text-muted-foreground" : "bg-[var(--northline-tint)] text-primary"
+          )}
+          aria-hidden="true"
+        >
+          {initials(technician.properties.name)}
         </span>
-      </div>
 
-      <div className="col-start-2 min-w-0 border-t border-border/65 pt-3 xl:col-start-auto xl:border-0 xl:pt-0">
-        <span className="block text-xs font-medium">
-          {humanize(technician.properties.territory)} territory
+        <span className="grid min-w-0 flex-1 gap-x-8 gap-y-2.5 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] md:items-center">
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 items-center justify-between gap-3">
+              <span
+                className={cn(
+                  "truncate text-[16px] font-semibold tracking-[-0.01em] group-hover:text-primary",
+                  offDuty && "text-foreground/60"
+                )}
+              >
+                {technician.properties.name}
+              </span>
+              <span className="md:hidden">
+                <StatusBadge value={technician.properties.availability} />
+              </span>
+            </span>
+            <span className="truncate text-[13.5px] text-muted-foreground">
+              {humanize(technician.properties.territory)} ·{" "}
+              {humanize(technician.properties.certification)} certified
+            </span>
+          </span>
+
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span
+              className={cn(
+                "truncate text-[14.5px] font-medium",
+                assignment ? "text-foreground" : "text-foreground/60"
+              )}
+            >
+              {assignment ? assignment.properties.title : "No current assignment"}
+            </span>
+            <span className="truncate text-[13px] text-muted-foreground tabular-nums">
+              {assignmentDetail}
+              {assignment ? (
+                <span className="md:hidden">
+                  {" "}
+                  · {formatDateTime(assignment.properties.scheduledStart)}
+                </span>
+              ) : null}
+            </span>
+          </span>
         </span>
-        <span className="mt-1.5 block text-xs text-muted-foreground">
-          {humanize(technician.properties.certification)} certified
+
+        <span className="hidden w-44 shrink-0 flex-col items-end gap-1.5 md:flex">
+          <StatusBadge value={technician.properties.availability} />
+          <span className="text-[13px] text-muted-foreground tabular-nums">
+            {assignment
+              ? formatDateTime(assignment.properties.scheduledStart)
+              : offDuty
+                ? "Off shift"
+                : "Available now"}
+          </span>
         </span>
-      </div>
 
-      <div className="col-start-2 min-w-0 xl:col-start-auto">
-        {assignment ? (
-          <>
-            <span className="flex items-center gap-2">
-              <strong className="font-mono text-xs font-semibold">
-                {assignment.properties.number}
-              </strong>
-              <StatusIndicator value={assignment.properties.status} />
-            </span>
-            <span className="mt-1.5 block truncate text-xs font-medium">
-              {assignment.properties.title}
-            </span>
-            <span className="mt-1 block truncate text-[11px] text-muted-foreground">
-              {assignment.links.equipment?.properties.name ?? "Equipment"} ·{" "}
-              {assignment.links.serviceCase?.properties.number ?? "Service case"}
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="block text-xs font-medium">Open capacity</span>
-            <span className="mt-1.5 block text-[11px] text-muted-foreground">
-              Ready for dispatch
-            </span>
-          </>
-        )}
-      </div>
-
-      <div className="col-start-2 text-xs xl:col-start-auto">
-        {assignment ? (
-          <>
-            <span className="block text-muted-foreground">Scheduled</span>
-            <strong className="mt-1.5 block font-mono text-[11px] font-medium text-foreground">
-              {formatDateTime(assignment.properties.scheduledStart)}
-            </strong>
-          </>
-        ) : (
-          <>
-            <span className="block text-muted-foreground">Next window</span>
-            <strong className="mt-1.5 block text-xs font-medium text-[color:var(--success)]">
-              Available now
-            </strong>
-          </>
-        )}
-      </div>
-
-      <div className="col-start-2 xl:col-start-auto">
-        <StatusIndicator value={technician.properties.availability} />
-      </div>
-
-      <ArrowRight
-        className="absolute top-1/2 right-4 size-4 -translate-y-1/2 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary xl:static xl:translate-y-0"
-        strokeWidth={1.8}
-        aria-hidden="true"
-      />
-    </Link>
+        <ChevronRight
+          className="size-4 shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground"
+          aria-hidden="true"
+        />
+      </Link>
+    </li>
   )
 }
 
