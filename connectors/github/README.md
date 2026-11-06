@@ -3,6 +3,7 @@
 A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 - **Repositories** — list authenticated-user/org repositories, get a repository
+- **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
 - **People** — query users, organization members, memberships, outside collaborators, and invitations
@@ -32,8 +33,9 @@ export const githubConnector = defineConnector(
 | `onEvent`       | Handler for inbound webhook events. See [Webhooks](#webhooks).           |
 
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
-repository and issue APIs. Releases need `Contents: read`, or `Contents: read & write` to create,
-update or delete them and their assets. Organization people APIs require `Members: read`. Public user profiles
+repository and issue APIs. Branches need `Contents: read`. Releases need `Contents: read`, or
+`Contents: read & write` to create, update or delete them and their assets. Organization people
+APIs require `Members: read`. Public user profiles
 and public organization membership can be queried without that organization permission, but private
 membership visibility depends on the authenticated user's organization access.
 
@@ -82,6 +84,8 @@ The client is scoped by GitHub resource:
 | `gh.repos.listForAuthenticatedUser()`    | `GET /user/repos`                             |
 | `gh.issues.listForAuthenticatedUser()`   | `GET /issues`                                 |
 | `gh.repo({ owner, repo }).get()`         | `GET /repos/{owner}/{repo}`                   |
+| `gh.repo({ owner, repo }).branches.list()` | `GET /repos/{owner}/{repo}/branches`        |
+| `gh.repo({ owner, repo }).branches.get(branch)` | `GET /repos/{owner}/{repo}/branches/{branch}` |
 | `gh.repo({ owner, repo }).issues.list()` | `GET /repos/{owner}/{repo}/issues`            |
 | `gh.repo({ owner, repo }).issues.get()`  | `GET /repos/{owner}/{repo}/issues/{number}`   |
 | `gh.repo({ owner, repo }).issues.create()` | `POST /repos/{owner}/{repo}/issues`         |
@@ -142,6 +146,9 @@ const profile = await gh.users.get(members.items[0]!.login)
 const membership = await gh.org("acme").members.getMembership(profile.login)
 
 const repo = gh.repo({ owner: "acme", repo: "web" })
+const protectedBranches = await repo.branches.list({ protected: true, pageSize: 100, signal })
+const branch = await repo.branches.get("feature/login")
+
 const issue = await repo.issues.create({ title: "Bug", labels: ["triage"] })
 const comment = await repo.issues.comments.create(issue.number, { body: "Investigating." })
 await repo.issues.comments.update(comment.id, { body: "Fixed." })
@@ -161,6 +168,12 @@ await repo.releases.reactions.create(release.id, { content: "rocket" })
 const file = await repo.releases.assets.download(release.assets[0]!.id)
 await Bun.write("app.zip", file)
 ```
+
+Branch calls accept a `signal` to abort the request. `branches.list()` returns every
+branch unless `protected` is set: `true` keeps only branches protected by branch protection
+or rulesets, `false` only the others. Each item carries the branch `name`, the tip
+`commit.sha` and `protected`. `branches.get()` accepts names containing `/` and adds
+`_links.html`, the branch's web page.
 
 Release calls accept a `signal` to abort the request. `releases.list()` returns
 newest first and includes drafts only when the token can push to the repository;
