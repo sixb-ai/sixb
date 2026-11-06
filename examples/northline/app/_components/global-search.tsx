@@ -6,7 +6,6 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  Kbd,
 } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Search } from "lucide-react"
@@ -35,14 +34,10 @@ export function GlobalSearch() {
 
   return (
     <>
-      <button
-        type="button"
-        className="group flex h-10 w-full items-center gap-2.5 rounded-[10px] border border-black/[0.07] bg-card px-3 text-left text-[14px] text-muted-foreground shadow-[0_1px_1px_rgb(0_0_0/0.03)] transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:border-white/[0.08]"
-        onClick={() => setOpen(true)}
-      >
-        <Search className="size-4" strokeWidth={1.8} />
-        <span className="flex-1">Search</span>
-        <Kbd className="h-5 bg-transparent px-1 text-[12px] text-muted-foreground">⌘K</Kbd>
+      <button type="button" className="nl-sidebar-row" onClick={() => setOpen(true)}>
+        <Search />
+        <span>Search</span>
+        <kbd>⌘K</kbd>
       </button>
       <CommandDialog open={open} onOpenChange={setOpen}>
         <CommandInput
