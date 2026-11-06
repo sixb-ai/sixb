@@ -1,14 +1,15 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Input } from "@sixb/ui/components"
-import { ArrowUpDown, ChevronRight, Search } from "lucide-react"
+import { cn } from "@sixb/ui/lib/utils"
+import { ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { CustomerAccount } from "../../ontology/customer-account"
 import { Facility } from "../../ontology/facility"
 import { ServiceCase } from "../../ontology/service-case"
 import { ServiceContract } from "../../ontology/service-contract"
-import { humanize, QueryState, StatusIndicator } from "../_components/ui"
+import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
+import { humanize, PageHeader, QueryState, StatusBadge, StatusIndicator } from "../_components/ui"
 
 const customersQuery = objects(CustomerAccount)
   .query()
@@ -27,7 +28,7 @@ const views = [
   ["strategic", "Strategic"],
   ["priority", "Priority"],
   ["standard", "Standard"],
-  ["attention", "SLA attention"],
+  ["attention", "At risk"],
   ["multi_site", "Multiple sites"],
 ] as const
 
@@ -58,10 +59,20 @@ export default function CustomersPage() {
   const caseRows = cases.data?.objects ?? []
   const contractRows = contracts.data?.objects ?? []
   const totalAtRisk = caseRows.filter(
-    (serviceCase) =>
-      !["closed", "cancelled"].includes(serviceCase.properties.status) &&
-      ["at_risk", "breached"].includes(serviceCase.properties.slaStatus)
+    (serviceCase) => isOpenCase(serviceCase) && isAtRisk(serviceCase)
   ).length
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        views.map(([id]) => [
+          id,
+          customerRows.filter((customer) =>
+            matchesView(customer, id, facilitiesFor(customer, facilityRows), caseRows)
+          ).length,
+        ])
+      ),
+    [caseRows, customerRows, facilityRows]
+  )
   const rows = useMemo(() => {
     const normalized = search.trim().toLowerCase()
     return customerRows
@@ -85,100 +96,61 @@ export default function CustomersPage() {
   }, [caseRows, customerRows, facilityRows, search, sort, view])
 
   return (
-    <div className="pb-8">
-      <header className="mb-6 flex items-start justify-between gap-6 max-sm:flex-col">
-        <div className="min-w-0">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-primary uppercase">
-            Commercial relationships
-          </p>
-          <h1 className="text-[32px] leading-9 font-semibold tracking-[-0.035em] text-foreground max-sm:text-[28px]">
-            Customers
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Accounts ordered by active service exposure across facilities, contracts, and equipment.
-          </p>
-        </div>
-        <div className="shrink-0 text-right max-sm:text-left">
-          <strong className="block font-mono text-xl font-semibold">{totalAtRisk}</strong>
-          <span className="text-xs text-muted-foreground">SLA risks</span>
-        </div>
-      </header>
+    <div>
+      <PageHeader
+        title="Customers"
+        description={
+          <>
+            The accounts Northline serves, with their sites, coverage and open work.
+            {totalAtRisk > 0 ? (
+              <>
+                {" "}
+                <span className="font-medium text-foreground tabular-nums">{totalAtRisk}</span> open{" "}
+                {totalAtRisk === 1 ? "case is" : "cases are"} at risk.
+              </>
+            ) : null}
+          </>
+        }
+        action={
+          <>
+            <SearchField
+              label="Search customers"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search customers, contacts, sites"
+            />
+            <SortSelect
+              label="Sort customers"
+              value={sort}
+              options={sortOptions}
+              onChange={setSort}
+            />
+          </>
+        }
+      >
+        <ViewPills
+          label="Customer views"
+          views={views}
+          value={view}
+          counts={counts}
+          onChange={setView}
+        />
+      </PageHeader>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <label className="relative block">
-          <span className="sr-only">Search customers</span>
-          <Search
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search customers, contacts, or facilities"
-            className="h-12 rounded-lg border-border/90 bg-card pl-11 text-sm shadow-none focus-visible:ring-2"
-          />
-        </label>
-
-        <label className="relative block">
-          <span className="sr-only">Sort customers</span>
-          <ArrowUpDown
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <select
-            value={sort}
-            onChange={(event) => setSort(event.target.value as Sort)}
-            className="h-12 w-full appearance-none rounded-lg border border-border/90 bg-card pr-10 pl-11 text-sm font-medium text-foreground outline-none transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {sortOptions.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <span
-            className="pointer-events-none absolute top-1/2 right-4 size-2.5 -translate-y-2/3 rotate-45 border-r border-b border-muted-foreground"
-            aria-hidden="true"
-          />
-        </label>
-      </div>
-
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-2" aria-label="Customer views">
-        {views.map(([value, label]) => {
-          const count = customerRows.filter((customer) =>
-            matchesView(customer, value, facilitiesFor(customer, facilityRows), caseRows)
-          ).length
-          const active = view === value
-          return (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={active}
-              className={
-                active
-                  ? "h-9 shrink-0 rounded-md border border-primary bg-primary px-3.5 text-xs font-semibold text-primary-foreground shadow-sm"
-                  : "h-9 shrink-0 rounded-md border border-border/90 bg-card px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground"
-              }
-              onClick={() => setView(value)}
-            >
-              {label} <span className="ml-1.5 font-mono text-[10px] opacity-75">{count}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <section className="mt-3">
+      <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
         <QueryState
           loading={
             customers.isLoading || facilities.isLoading || cases.isLoading || contracts.isLoading
           }
           error={customers.isError || facilities.isError || cases.isError || contracts.isError}
           empty={rows.length === 0}
-          emptyMessage="No customer accounts match this view."
+          emptyMessage={
+            search ? "No customers match that search." : "No customer accounts in this view."
+          }
         >
-          <div className="grid gap-2.5">
+          <ul>
             {rows.map((customer) => (
-              <CustomerWorklistRow
+              <CustomerListRow
                 key={customer.primaryId}
                 customer={customer}
                 facilities={facilitiesFor(customer, facilityRows)}
@@ -186,14 +158,14 @@ export default function CustomersPage() {
                 contracts={contractsFor(customer, contractRows)}
               />
             ))}
-          </div>
+          </ul>
         </QueryState>
       </section>
     </div>
   )
 }
 
-function CustomerWorklistRow({
+function CustomerListRow({
   customer,
   facilities: customerFacilities,
   cases: customerCases,
@@ -204,138 +176,83 @@ function CustomerWorklistRow({
   cases: CaseRow[]
   contracts: ContractRow[]
 }) {
-  const href = `/customers/${encodeURIComponent(customer.primaryId)}`
-  const openCases = customerCases.filter(
-    (serviceCase) => !["closed", "cancelled"].includes(serviceCase.properties.status)
-  )
-  const riskCases = openCases.filter((serviceCase) =>
-    ["at_risk", "breached"].includes(serviceCase.properties.slaStatus)
-  )
+  const openCases = customerCases.filter(isOpenCase)
+  const riskCases = openCases.filter(isAtRisk)
+  const breached = riskCases.some((serviceCase) => serviceCase.properties.slaStatus === "breached")
   const activeContract = customerContracts.find((contract) =>
     ["active", "expiring"].includes(contract.properties.status)
   )
-  const territories = [
-    ...new Set(customerFacilities.map((facility) => humanize(facility.properties.territory))),
+  const summary = [
+    humanize(customer.properties.serviceTier),
+    `${customerFacilities.length} ${customerFacilities.length === 1 ? "facility" : "facilities"}`,
+    customer.properties.primaryContactName,
   ]
+    .filter(Boolean)
+    .join(" · ")
 
   return (
-    <Link
-      to={href}
-      className="group relative grid grid-cols-[48px_minmax(0,1fr)] items-center gap-x-4 gap-y-4 rounded-xl border border-border/85 bg-card px-4 py-3.5 transition-[border-color,background-color,box-shadow] hover:border-primary/55 hover:bg-primary/[0.025] hover:shadow-[0_1px_2px_rgba(13,32,39,0.04)] focus-visible:border-primary/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring 2xl:grid-cols-[52px_minmax(240px,1.2fr)_minmax(180px,0.72fr)_150px_minmax(190px,0.8fr)_minmax(190px,0.78fr)_18px] 2xl:pr-5"
-    >
-      <CustomerTile name={customer.properties.name} />
-
-      <div className="min-w-0 self-center">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <strong className="truncate text-sm font-semibold tracking-[-0.012em] text-foreground group-hover:text-primary">
-            {customer.properties.name}
-          </strong>
-          <TierIndicator tier={customer.properties.serviceTier} />
-        </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
-          <StatusIndicator value={customer.properties.status} />
-          <span className="text-[11px] text-muted-foreground">
-            {humanize(customer.properties.serviceTier)} service relationship
-          </span>
-        </div>
-      </div>
-
-      <div className="col-start-2 min-w-0 border-t border-border/65 pt-3 2xl:col-start-auto 2xl:border-0 2xl:pt-0">
-        <strong className="block text-xs font-semibold text-foreground">
-          {customerFacilities.length} {customerFacilities.length === 1 ? "facility" : "facilities"}
-        </strong>
-        <span className="mt-1.5 block truncate text-[11px] text-muted-foreground">
-          {customerFacilities[0]?.properties.name ?? "No facility"}
-          {customerFacilities.length > 1 ? ` +${customerFacilities.length - 1} more` : ""}
-        </span>
-        <span className="mt-1 block truncate text-[10px] text-muted-foreground">
-          {territories.join(" · ") || "Territory unavailable"}
-        </span>
-      </div>
-
-      <div className="col-start-2 2xl:col-start-auto">
-        <strong className="block font-mono text-sm font-semibold tracking-[-0.02em]">
-          {openCases.length}
-        </strong>
-        <span className="mt-1 block text-[10px] text-muted-foreground">open service cases</span>
+    <li className="border-t border-border/70 first:border-t-0">
+      <Link
+        to={`/customers/${encodeURIComponent(customer.primaryId)}`}
+        className="group grid grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none sm:px-6 md:grid-cols-[2.75rem_minmax(0,1.3fr)_minmax(0,1fr)_8.5rem_1rem] dark:hover:bg-white/[0.03]"
+      >
         <span
-          className={`mt-1.5 block text-[11px] font-medium ${
-            riskCases.length > 0 ? "text-destructive" : "text-[color:var(--success)]"
-          }`}
+          className="flex size-11 items-center justify-center rounded-full bg-[var(--northline-tint)] text-[15px] font-semibold text-primary"
+          aria-hidden="true"
         >
-          {riskCases.length > 0
-            ? `${riskCases.length} ${riskCases.length === 1 ? "SLA risk" : "SLA risks"}`
-            : "SLA on track"}
+          {initials(customer.properties.name)}
         </span>
-      </div>
-
-      <div className="col-start-2 min-w-0 2xl:col-start-auto">
-        {activeContract ? (
-          <>
-            <strong className="block truncate text-xs font-semibold text-foreground">
-              {activeContract.properties.name}
-            </strong>
-            <span className="mt-1.5 block text-[11px] text-muted-foreground">
-              {humanize(activeContract.properties.contractType)} · {coverageLabel(activeContract)}
+        <span className="flex min-w-0 flex-col gap-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[16px] font-semibold tracking-[-0.01em] group-hover:text-primary">
+              {customer.properties.name}
             </span>
-            <span className="mt-1 block text-[10px] text-muted-foreground">
-              {duration(activeContract.properties.responseTargetMinutes)} response target
-            </span>
-          </>
-        ) : (
-          <>
-            <strong className="block text-xs font-medium text-muted-foreground">
-              No active contract
-            </strong>
-            <span className="mt-1.5 block text-[11px] text-muted-foreground">
-              Coverage unavailable
-            </span>
-          </>
-        )}
-      </div>
-
-      <div className="col-start-2 min-w-0 2xl:col-start-auto">
-        <span className="block text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-          Authorization contact
+            {customer.properties.status !== "active" ? (
+              <StatusBadge value={customer.properties.status} />
+            ) : null}
+          </span>
+          <span className="truncate text-[13.5px] text-muted-foreground">{summary}</span>
         </span>
-        <strong className="mt-1.5 block truncate text-xs font-semibold text-foreground">
-          {customer.properties.primaryContactName ?? "No contact assigned"}
-        </strong>
-        <span className="mt-1 block truncate text-[11px] text-muted-foreground">
-          {customer.properties.primaryContactEmail ?? "—"}
+        <span className="hidden min-w-0 flex-col gap-1 md:flex">
+          <span
+            className={cn(
+              "truncate text-[14.5px] font-medium",
+              !activeContract && "text-muted-foreground"
+            )}
+          >
+            {activeContract?.properties.name ?? "No active contract"}
+          </span>
+          <span className="truncate text-[13px] text-muted-foreground tabular-nums">
+            {activeContract
+              ? `${duration(activeContract.properties.responseTargetMinutes)} response · ${
+                  activeContract.properties.coverageHours === "24_7" ? "24/7" : "Business hours"
+                }`
+              : "Coverage unavailable"}
+          </span>
         </span>
-      </div>
-
-      <ChevronRight
-        className="absolute right-4 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary 2xl:static"
-        strokeWidth={1.8}
-        aria-hidden="true"
-      />
-    </Link>
-  )
-}
-
-function CustomerTile({ name }: { name: string }) {
-  return (
-    <span className="grid size-12 place-items-center rounded-full border border-primary/25 bg-secondary/80 font-mono text-xs font-semibold text-primary">
-      {initials(name)}
-    </span>
-  )
-}
-
-function TierIndicator({ tier }: { tier: string }) {
-  const tone =
-    tier === "strategic"
-      ? "text-primary before:bg-primary"
-      : tier === "priority"
-        ? "text-[color:var(--info)] before:bg-[color:var(--info)]"
-        : "text-muted-foreground before:bg-muted-foreground/65"
-  return (
-    <span
-      className={`inline-flex items-center gap-2 text-xs font-medium before:size-1.5 before:rounded-full ${tone}`}
-    >
-      {humanize(tier)}
-    </span>
+        <span className="flex flex-col items-end gap-1.5">
+          <span
+            className={cn(
+              "text-[14.5px] font-medium whitespace-nowrap tabular-nums",
+              openCases.length === 0 && "text-muted-foreground"
+            )}
+          >
+            {openCases.length === 0
+              ? "No open cases"
+              : `${openCases.length} open ${openCases.length === 1 ? "case" : "cases"}`}
+          </span>
+          {riskCases.length > 0 ? (
+            <StatusIndicator
+              value={breached ? "breached" : "at_risk"}
+              label={`${riskCases.length} at risk`}
+            />
+          ) : openCases.length > 0 ? (
+            <StatusIndicator value="on_track" label="On track" />
+          ) : null}
+        </span>
+        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground" />
+      </Link>
+    </li>
   )
 }
 
@@ -386,26 +303,26 @@ function contractsFor(customer: CustomerRow, contracts: readonly ContractRow[]):
   return contracts.filter((contract) => contract.links.customer?.primaryId === customer.primaryId)
 }
 
+function isOpenCase(serviceCase: CaseRow): boolean {
+  return !["closed", "cancelled"].includes(serviceCase.properties.status)
+}
+
+function isAtRisk(serviceCase: CaseRow): boolean {
+  return ["at_risk", "breached"].includes(serviceCase.properties.slaStatus)
+}
+
 function customerRisk(customer: CustomerRow, cases: readonly CaseRow[]): number {
   return casesFor(customer, cases).filter(
-    (serviceCase) =>
-      !["closed", "cancelled"].includes(serviceCase.properties.status) &&
-      ["at_risk", "breached"].includes(serviceCase.properties.slaStatus)
+    (serviceCase) => isOpenCase(serviceCase) && isAtRisk(serviceCase)
   ).length
 }
 
 function openCaseCount(customer: CustomerRow, cases: readonly CaseRow[]): number {
-  return casesFor(customer, cases).filter(
-    (serviceCase) => !["closed", "cancelled"].includes(serviceCase.properties.status)
-  ).length
+  return casesFor(customer, cases).filter(isOpenCase).length
 }
 
 function tierPriority(customer: CustomerRow): number {
   return { strategic: 30, priority: 20, standard: 10 }[customer.properties.serviceTier]
-}
-
-function coverageLabel(contract: ContractRow): string {
-  return contract.properties.coverageHours === "24_7" ? "24/7" : "Business hours"
 }
 
 function duration(minutes: number): string {
