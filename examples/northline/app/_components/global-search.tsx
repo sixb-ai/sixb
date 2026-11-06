@@ -37,15 +37,12 @@ export function GlobalSearch() {
     <>
       <button
         type="button"
-        className="group flex h-9 w-full max-w-80 items-center gap-3 rounded-full px-3 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group flex h-10 w-full items-center gap-2.5 rounded-[10px] border border-black/[0.07] bg-card px-3 text-left text-[14px] text-muted-foreground shadow-[0_1px_1px_rgb(0_0_0/0.03)] transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:border-white/[0.08]"
         onClick={() => setOpen(true)}
       >
-        <Search className="size-4" />
-        <span className="flex-1 max-sm:hidden">Search Northline</span>
-        <span className="sm:hidden">Search</span>
-        <Kbd className="h-6 bg-transparent px-1.5 text-sm group-hover:bg-background/70 max-sm:hidden">
-          ⌘K
-        </Kbd>
+        <Search className="size-4" strokeWidth={1.8} />
+        <span className="flex-1">Search</span>
+        <Kbd className="h-5 bg-transparent px-1 text-[12px] text-muted-foreground">⌘K</Kbd>
       </button>
       <CommandDialog open={open} onOpenChange={setOpen}>
         <CommandInput
