@@ -882,8 +882,8 @@ export const fr: Translation<AgentMessages> = {
     },
   },
   computer: {
-    online: "sixb y est ouvert",
-    offline: "sixb y est fermé",
+    online: "Connecté",
+    offline: "Non connecté",
     offlineNotice: (computer, folder) =>
       `${computer} est hors ligne. Votre message attendra que ${folder} y soit connecté.`,
     noFolder:
