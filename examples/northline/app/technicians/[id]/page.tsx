@@ -1,7 +1,7 @@
 import { useActionRunMutation, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Button, NativeSelect, NativeSelectOption, Textarea } from "@sixb/ui/components"
-import { ArrowLeft, Check, ChevronRight, Circle, Mail } from "lucide-react"
+import { cn } from "@sixb/ui/lib/utils"
+import { ChevronRight, ClipboardCheck, FileText, Mail, Wrench } from "lucide-react"
 import type { ReactNode } from "react"
 import { useMemo, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
@@ -10,13 +10,19 @@ import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { Technician } from "../../../ontology/technician"
 import { WorkOrder } from "../../../ontology/work-order"
+import { StageRail } from "../../_components/stage-rail"
+import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   deadlineLabel,
   formatDateTime,
   humanize,
   QueryState,
+  Section,
+  StatusBadge,
   StatusIndicator,
+  statusTone,
 } from "../../_components/ui"
+import { equipmentIcon, equipmentIllustration } from "../../_lib/equipment"
 
 const visitsQuery = objects(ServiceVisit)
   .query()
@@ -42,6 +48,23 @@ const techniciansBaseQuery = objects(Technician).query()
 type VisitRow = NonNullable<Awaited<ReturnType<typeof visitsQuery.first>>>
 type NoteRow = NonNullable<Awaited<ReturnType<typeof notesQuery.first>>>
 type TechnicianRow = NonNullable<Awaited<ReturnType<typeof techniciansBaseQuery.first>>>
+type VisitWorkOrder = NonNullable<VisitRow["links"]["workOrder"]>
+type VisitServiceCase = NonNullable<VisitWorkOrder["links"]["serviceCase"]>
+type VisitEquipment = NonNullable<VisitWorkOrder["links"]["equipment"]>
+type Disposition = "resolved_on_site" | "follow_up_required" | "quote_required"
+
+const dispositions: ReadonlyArray<readonly [Disposition, string]> = [
+  ["resolved_on_site", "Resolved on site"],
+  ["follow_up_required", "Follow-up required"],
+  ["quote_required", "Quote required"],
+]
+
+const visitStages = [
+  { id: "scheduled", label: "Scheduled" },
+  { id: "on_site", label: "On site" },
+  { id: "diagnosis", label: "Diagnosis" },
+  { id: "complete", label: "Complete" },
+]
 
 export default function TechnicianWorkspacePage() {
   const { id = "" } = useParams<{ id: string }>()
@@ -77,9 +100,7 @@ export default function TechnicianWorkspacePage() {
     ? technicianNotes.filter((note) => note.links.visit?.primaryId === visit.primaryId)
     : []
   const [finding, setFinding] = useState("")
-  const [disposition, setDisposition] = useState<
-    "resolved_on_site" | "follow_up_required" | "quote_required"
-  >("quote_required")
+  const [disposition, setDisposition] = useState<Disposition>("quote_required")
   const [workPerformed, setWorkPerformed] = useState("")
 
   const startVisit = useActionRunMutation<{
@@ -94,7 +115,7 @@ export default function TechnicianWorkspacePage() {
     serviceCase: { objectTypeId: "ServiceCase"; primaryId: string }
     equipment: { objectTypeId: "Equipment"; primaryId: string }
     technician: { objectTypeId: "Technician"; primaryId: string }
-    disposition: "resolved_on_site" | "follow_up_required" | "quote_required"
+    disposition: Disposition
     finding: string
   }>({
     actionId: "record-diagnosis",
@@ -121,19 +142,14 @@ export default function TechnicianWorkspacePage() {
       emptyMessage="Technician not found."
     >
       {technician ? (
-        <div className="pb-8">
-          <Link
-            to="/technicians"
-            className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-primary transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" strokeWidth={1.8} /> Technicians
-          </Link>
-
-          <TechnicianMasthead technician={technician} visits={technicianVisits} />
+        <div className="flex flex-col gap-6">
+          <TechnicianHeader technician={technician} visits={technicianVisits} />
 
           {visit && workOrder && serviceCase && equipment ? (
             <VisitWorkspace
+              technician={technician}
               visit={visit}
+              visits={technicianVisits}
               workOrder={workOrder}
               serviceCase={serviceCase}
               equipment={equipment}
@@ -194,59 +210,60 @@ export default function TechnicianWorkspacePage() {
   )
 }
 
-function TechnicianMasthead({
+function TechnicianHeader({
   technician,
   visits,
 }: {
   technician: TechnicianRow
-  visits: VisitRow[]
+  visits: readonly VisitRow[]
 }) {
   const completed = visits.filter((visit) => visit.properties.status === "completed").length
   return (
-    <header className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="flex min-w-0 items-start gap-5 max-sm:flex-col">
-        <span className="grid size-[76px] shrink-0 place-items-center rounded-full bg-primary/15 text-2xl font-semibold tracking-[-0.04em] text-primary">
-          {initials(technician.properties.name)}
-        </span>
-        <div className="min-w-0 pt-0.5">
-          <StatusIndicator value={technician.properties.availability} />
-          <h1 className="mt-3 text-[36px] leading-[1.08] font-semibold tracking-[-0.045em] text-foreground max-sm:text-[32px]">
-            {technician.properties.name}
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {humanize(technician.properties.territory)} territory ·{" "}
-            {humanize(technician.properties.certification)} certified
-          </p>
-          <dl className="mt-5 flex flex-wrap items-stretch">
-            <MastheadSignal label="Territory">
-              {humanize(technician.properties.territory)}
-            </MastheadSignal>
-            <MastheadSignal label="Qualification">
-              {humanize(technician.properties.certification)}
-            </MastheadSignal>
-            <MastheadSignal label="Completed visits">{completed}</MastheadSignal>
-          </dl>
+    <header className="flex flex-col gap-4">
+      <nav className="flex items-center gap-2 text-[14px] text-muted-foreground">
+        <Link to="/technicians" className="text-primary hover:underline">
+          Technicians
+        </Link>
+        <ChevronRight className="size-3.5" aria-hidden="true" />
+        <span className="truncate">{technician.properties.name}</span>
+      </nav>
+
+      <div className="flex items-start justify-between gap-6 max-md:flex-col max-md:gap-4">
+        <div className="flex min-w-0 items-center gap-4">
+          <span
+            className="flex size-14 shrink-0 items-center justify-center rounded-full bg-[var(--northline-tint)] text-[20px] font-semibold tracking-[-0.02em] text-primary sm:size-16 sm:text-[22px]"
+            aria-hidden="true"
+          >
+            {initials(technician.properties.name)}
+          </span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <h1 className="text-[34px] leading-[1.06] font-semibold tracking-[-0.03em] text-balance sm:text-[40px]">
+              {technician.properties.name}
+            </h1>
+            <p className="text-[16px] text-muted-foreground">
+              {humanize(technician.properties.territory)} ·{" "}
+              {humanize(technician.properties.certification)} certified
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2.5 md:pt-2">
+          <StatusBadge value={technician.properties.availability} />
+          <a
+            href={`mailto:${technician.properties.email}`}
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-black/[0.05] px-5 text-[14px] font-semibold transition-colors hover:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:bg-white/[0.08]"
+          >
+            <Mail className="size-4" strokeWidth={1.8} aria-hidden="true" /> Email
+          </a>
         </div>
       </div>
 
-      <div className="pt-1 lg:justify-self-end">
-        <p className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-          Field contact
-        </p>
-        <strong className="mt-2 block text-base font-semibold">
-          {technician.properties.phone ?? "No phone available"}
-        </strong>
-        <span className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
-          <Mail className="size-4 shrink-0" strokeWidth={1.7} />
-          {technician.properties.email}
-        </span>
-        <a
-          href={`mailto:${technician.properties.email}`}
-          className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-md border border-primary bg-card px-5 text-sm font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-        >
-          <Mail className="size-4" strokeWidth={1.7} /> Email technician
-        </a>
-      </div>
+      <dl className="flex flex-wrap gap-x-9 gap-y-3 pt-1">
+        <Fact label="Phone">{technician.properties.phone ?? "Not on file"}</Fact>
+        <Fact label="Email">
+          <span className="break-all">{technician.properties.email}</span>
+        </Fact>
+        <Fact label="Completed visits">{completed}</Fact>
+      </dl>
     </header>
   )
 }
@@ -257,142 +274,206 @@ function TechnicianProfile({
   notes,
 }: {
   technician: TechnicianRow
-  visits: VisitRow[]
-  notes: NoteRow[]
+  visits: readonly VisitRow[]
+  notes: readonly NoteRow[]
 }) {
-  const latestNote = notes[0]
+  const available = technician.properties.availability === "available"
   return (
     <>
-      <section className="mt-6 overflow-hidden rounded-lg border border-border/90 bg-card">
-        <div className="flex items-center justify-between gap-6 px-5 py-5 max-sm:flex-col max-sm:items-start sm:px-6">
-          <div>
+      {available ? (
+        <NextStepCard
+          title="Ready for dispatch"
+          detail="No visit is assigned. Match this technician to waiting work on the dispatch board."
+        >
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link to="/dispatch" className={primaryPill}>
+              Open dispatch board
+            </Link>
+          </div>
+        </NextStepCard>
+      ) : (
+        <Section>
+          <div className="flex flex-col gap-1.5 px-6 py-5">
             <StatusIndicator value={technician.properties.availability} />
-            <h2 className="mt-2 text-lg font-semibold tracking-[-0.02em]">
-              {technician.properties.availability === "available"
-                ? "Ready for dispatch"
-                : "No active field visit"}
+            <h2 className="text-[19px] leading-6 font-semibold tracking-[-0.015em]">
+              No active field visit
             </h2>
-            <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-              {humanize(technician.properties.territory)} coverage ·{" "}
-              {humanize(technician.properties.certification)} qualification
+            <p className="text-[14px] text-muted-foreground">
+              {technician.properties.availability === "assigned"
+                ? "Assigned work appears here once a visit is scheduled."
+                : "Not on shift right now."}
             </p>
           </div>
-          {technician.properties.availability === "available" ? (
-            <Button asChild variant="outline" className="h-10 border-primary text-primary">
-              <Link to="/dispatch">Open dispatch board</Link>
-            </Button>
-          ) : null}
-        </div>
-      </section>
+        </Section>
+      )}
 
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.9fr)]">
-        <section className="overflow-hidden rounded-lg border border-border/90 bg-card">
-          <header className="flex items-baseline gap-4 px-5 pt-4 pb-3 sm:px-6">
-            <h2 className="text-base font-semibold tracking-[-0.015em]">Recent visits</h2>
-            <span className="font-mono text-xs text-muted-foreground">{visits.length}</span>
-          </header>
-          <div className="mx-5 divide-y divide-border/80 border-t border-border/85 sm:mx-6">
-            {visits.map((visit) => {
-              const workOrder = visit.links.workOrder
-              const serviceCase = workOrder?.links.serviceCase
-              return (
-                <Link
-                  key={visit.primaryId}
-                  to={`/technicians/${encodeURIComponent(technician.primaryId)}?visit=${encodeURIComponent(visit.primaryId)}`}
-                  className="group grid items-center gap-4 py-4 hover:bg-accent/45 xl:-mx-3 xl:grid-cols-[120px_minmax(0,1fr)_190px_130px_20px] xl:px-3"
-                >
-                  <span>
-                    <strong className="block font-mono text-xs font-semibold">
-                      {visit.properties.number}
-                    </strong>
-                    <StatusIndicator value={visit.properties.status} className="mt-2" />
-                  </span>
-                  <span className="min-w-0">
-                    <strong className="block truncate text-sm font-semibold group-hover:text-primary">
-                      {workOrder?.properties.title ?? "Service visit"}
-                    </strong>
-                    <span className="mt-1.5 block truncate text-xs text-muted-foreground">
-                      {serviceCase?.links.facility?.properties.name ?? "Facility"} ·{" "}
-                      {workOrder?.links.equipment?.properties.name ?? "Equipment"}
-                    </span>
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {formatDateTime(visit.properties.scheduledStart)}
-                  </span>
-                  <StatusIndicator value={serviceCase?.properties.severity} />
-                  <ChevronRight
-                    className="size-5 transition-transform group-hover:translate-x-0.5"
-                    strokeWidth={1.7}
-                  />
-                </Link>
-              )
-            })}
-            {visits.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                No service visits recorded.
-              </p>
-            ) : null}
-          </div>
-        </section>
+      <div className="flex flex-wrap items-start gap-5">
+        <Section
+          title="Visits"
+          description={
+            visits.length === 1 ? "1 visit, newest first" : `${visits.length} visits, newest first`
+          }
+          className="min-w-0 flex-[999_1_560px]"
+        >
+          <VisitList technician={technician} visits={visits} />
+        </Section>
 
-        <section className="overflow-hidden rounded-lg border border-border/90 bg-card">
-          <header className="px-5 pt-4 pb-3 sm:px-6">
-            <h2 className="text-base font-semibold tracking-[-0.015em]">Latest field record</h2>
-          </header>
-          <div className="mx-5 border-t border-border/85 py-4 sm:mx-6">
-            {latestNote ? (
-              <>
-                <div className="flex items-center justify-between gap-3">
-                  <StatusIndicator value={latestNote.properties.noteType} />
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    {formatDateTime(latestNote.properties.recordedAt)}
-                  </span>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-foreground">
-                  {latestNote.properties.body}
-                </p>
-              </>
-            ) : (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                No field notes recorded.
-              </p>
-            )}
-          </div>
-        </section>
+        <Section title="Field notes" className="min-w-0 flex-[1_1_320px]">
+          <Timeline entries={activityEntries([], notes)} limit={6} />
+        </Section>
       </div>
     </>
   )
 }
 
 function VisitWorkspace({
+  technician,
   visit,
+  visits,
   workOrder,
   serviceCase,
   equipment,
   notes,
-  finding,
-  disposition,
-  workPerformed,
-  setFinding,
-  setDisposition,
-  setWorkPerformed,
-  starting,
-  recording,
-  completing,
-  onStart,
-  onRecordDiagnosis,
-  onComplete,
+  ...action
+}: {
+  technician: TechnicianRow
+  visit: VisitRow
+  visits: readonly VisitRow[]
+  workOrder: VisitWorkOrder
+  serviceCase: VisitServiceCase
+  equipment: VisitEquipment
+  notes: readonly NoteRow[]
+} & VisitActionProps) {
+  return (
+    <>
+      <VisitHero
+        visit={visit}
+        workOrder={workOrder}
+        serviceCase={serviceCase}
+        equipment={equipment}
+      />
+
+      <div className="flex flex-wrap items-start gap-5">
+        <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-5">
+          <VisitAction visit={visit} {...action} />
+
+          <Section title="Visit activity" description="Arrival, findings and work, newest first">
+            <Timeline entries={activityEntries([visit], notes)} />
+          </Section>
+        </div>
+
+        <aside className="flex min-w-0 flex-[1_1_320px] flex-col gap-5">
+          <SiteCard
+            visit={visit}
+            workOrder={workOrder}
+            serviceCase={serviceCase}
+            equipment={equipment}
+          />
+          <Section title="Visits">
+            <VisitList technician={technician} visits={visits} currentId={visit.primaryId} />
+          </Section>
+        </aside>
+      </div>
+    </>
+  )
+}
+
+function VisitHero({
+  visit,
+  workOrder,
+  serviceCase,
+  equipment,
 }: {
   visit: VisitRow
-  workOrder: NonNullable<VisitRow["links"]["workOrder"]>
-  serviceCase: NonNullable<NonNullable<VisitRow["links"]["workOrder"]>["links"]["serviceCase"]>
-  equipment: NonNullable<NonNullable<VisitRow["links"]["workOrder"]>["links"]["equipment"]>
-  notes: NoteRow[]
+  workOrder: VisitWorkOrder
+  serviceCase: VisitServiceCase
+  equipment: VisitEquipment
+}) {
+  const illustration = equipmentIllustration(
+    equipment.properties.name,
+    equipment.properties.equipmentType
+  )
+  const Icon = equipmentIcon(equipment.properties.equipmentType)
+  const caseClosed = ["resolved", "closed"].includes(serviceCase.properties.status ?? "")
+  return (
+    <section className="flex flex-wrap overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
+      <div className="relative flex min-h-48 flex-[1_1_280px] items-center justify-center bg-muted">
+        {illustration ? (
+          <img
+            src={illustration.src}
+            alt={`${equipment.properties.name} illustration`}
+            className={cn(
+              "absolute inset-0 size-full",
+              illustration.contain ? "object-contain p-5" : "object-cover"
+            )}
+          />
+        ) : (
+          <Icon className="size-14 text-foreground/35" strokeWidth={1.2} aria-hidden="true" />
+        )}
+      </div>
+
+      <div className="flex min-w-0 flex-[999_1_360px] flex-col gap-5 p-5 sm:p-6">
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-semibold text-muted-foreground tabular-nums">
+              {visit.properties.number}
+            </span>
+            <StatusBadge value={visit.properties.status} />
+            <StatusBadge value={serviceCase.properties.severity} />
+          </div>
+          <h2 className="text-[24px] leading-[1.15] font-semibold tracking-[-0.02em] text-balance sm:text-[28px]">
+            {workOrder.properties.title}
+          </h2>
+          {serviceCase.properties.customerImpact ? (
+            <p className="max-w-2xl text-[15px] leading-6 text-pretty text-foreground/75">
+              {serviceCase.properties.customerImpact}
+            </p>
+          ) : null}
+          <p className="text-[13.5px] text-muted-foreground">
+            {serviceCase.links.customer?.properties.name ?? "Customer"} ·{" "}
+            {serviceCase.links.facility?.properties.name ?? "Facility"}
+          </p>
+        </div>
+
+        <dl className="flex flex-wrap gap-x-9 gap-y-3">
+          <Fact label="Response">
+            <span className={deadlineClass(serviceCase.properties.slaStatus)}>
+              {caseClosed
+                ? humanize(serviceCase.properties.slaStatus ?? "met")
+                : deadlineLabel(serviceCase.properties.responseDeadline)}
+            </span>
+          </Fact>
+          <Fact label="Scheduled">{formatDateTime(visit.properties.scheduledStart)}</Fact>
+          <Fact label="Service case">
+            <Link
+              to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}
+              className="text-primary hover:underline"
+            >
+              {serviceCase.properties.number}
+            </Link>
+          </Fact>
+          <Fact label="Equipment">
+            <Link
+              to={`/equipment/${encodeURIComponent(equipment.primaryId)}`}
+              className="text-primary hover:underline"
+            >
+              {equipment.properties.name}
+            </Link>
+          </Fact>
+        </dl>
+
+        <StageRail stages={visitStages} current={visitStage(visit)} />
+      </div>
+    </section>
+  )
+}
+
+interface VisitActionProps {
   finding: string
-  disposition: "resolved_on_site" | "follow_up_required" | "quote_required"
+  disposition: Disposition
   workPerformed: string
   setFinding: (value: string) => void
-  setDisposition: (value: "resolved_on_site" | "follow_up_required" | "quote_required") => void
+  setDisposition: (value: Disposition) => void
   setWorkPerformed: (value: string) => void
   starting: boolean
   recording: boolean
@@ -400,79 +481,6 @@ function VisitWorkspace({
   onStart: () => void
   onRecordDiagnosis: () => void
   onComplete: () => void
-}) {
-  return (
-    <>
-      <section className="mt-6 overflow-hidden rounded-lg border border-border/90 bg-card">
-        <div className="grid gap-5 px-5 py-5 sm:px-6 xl:grid-cols-[160px_minmax(0,1fr)_220px] xl:items-center">
-          <span>
-            <strong className="block font-mono text-sm font-semibold text-primary">
-              {visit.properties.number}
-            </strong>
-            <span className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
-              <StatusIndicator value={visit.properties.status} />
-              <StatusIndicator value={serviceCase.properties.severity} />
-            </span>
-          </span>
-          <span className="min-w-0">
-            <strong className="block text-lg font-semibold tracking-[-0.02em]">
-              {workOrder.properties.title}
-            </strong>
-            <span className="mt-1.5 block text-sm leading-6 text-muted-foreground">
-              {serviceCase.properties.customerImpact}
-            </span>
-            <span className="mt-2 block text-xs text-muted-foreground">
-              {serviceCase.links.customer?.properties.name ?? "Customer"} ·{" "}
-              {serviceCase.links.facility?.properties.name ?? "Facility"} ·{" "}
-              {equipment.properties.name}
-            </span>
-          </span>
-          <span className="xl:text-right">
-            <strong className="block font-mono text-sm font-semibold text-[color:var(--warning)]">
-              {deadlineLabel(serviceCase.properties.responseDeadline)}
-            </strong>
-            <span className="mt-2 block text-xs text-muted-foreground">
-              Scheduled {formatDateTime(visit.properties.scheduledStart)}
-            </span>
-            <Link
-              to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}
-              className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-foreground"
-            >
-              Open service case <ChevronRight className="size-4" strokeWidth={1.7} />
-            </Link>
-          </span>
-        </div>
-      </section>
-
-      <WorkSequence visit={visit} />
-
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(330px,0.85fr)]">
-        <VisitAction
-          visit={visit}
-          finding={finding}
-          disposition={disposition}
-          workPerformed={workPerformed}
-          setFinding={setFinding}
-          setDisposition={setDisposition}
-          setWorkPerformed={setWorkPerformed}
-          starting={starting}
-          recording={recording}
-          completing={completing}
-          onStart={onStart}
-          onRecordDiagnosis={onRecordDiagnosis}
-          onComplete={onComplete}
-        />
-
-        <VisitContext
-          visit={visit}
-          workOrder={workOrder}
-          serviceCase={serviceCase}
-          equipment={equipment}
-          latestNote={notes[0]}
-        />
-      </div>
-    </>
-  )
 }
 
 function VisitAction({
@@ -489,336 +497,351 @@ function VisitAction({
   onStart,
   onRecordDiagnosis,
   onComplete,
-}: {
-  visit: VisitRow
-  finding: string
-  disposition: "resolved_on_site" | "follow_up_required" | "quote_required"
-  workPerformed: string
-  setFinding: (value: string) => void
-  setDisposition: (value: "resolved_on_site" | "follow_up_required" | "quote_required") => void
-  setWorkPerformed: (value: string) => void
-  starting: boolean
-  recording: boolean
-  completing: boolean
-  onStart: () => void
-  onRecordDiagnosis: () => void
-  onComplete: () => void
-}) {
+}: { visit: VisitRow } & VisitActionProps) {
   if (visit.properties.status === "scheduled") {
     return (
-      <ActionSection
-        eyebrow="Next field action"
-        title="Start service visit"
-        description="Confirm arrival before recording site findings or work performed."
+      <NextStepCard
+        title="Start the visit"
+        detail="Confirm you are on site before recording findings or work performed."
       >
-        <Button className="mt-5 h-10" disabled={starting} onClick={onStart}>
-          {starting ? "Starting…" : "Start visit"}
-        </Button>
-      </ActionSection>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button type="button" disabled={starting} onClick={onStart} className={primaryPill}>
+            {starting ? "Starting…" : "Start visit"}
+          </button>
+        </div>
+      </NextStepCard>
     )
   }
 
   if (visit.properties.status === "in_progress" && !visit.properties.diagnosisDisposition) {
     return (
-      <ActionSection
-        eyebrow="Active field task"
-        title="Record diagnosis"
-        description="Capture the confirmed condition and determine what should happen next."
+      <NextStepCard
+        title="Record the diagnosis"
+        detail="Describe the confirmed condition and choose what should happen next."
       >
-        <div className="mt-5 grid gap-4">
-          <label className="grid gap-2 text-xs font-semibold">
-            Diagnostic finding
-            <Textarea
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-2">
+            <label htmlFor="diagnosis-finding" className="text-[14px] font-semibold">
+              What you found
+            </label>
+            <textarea
+              id="diagnosis-finding"
               value={finding}
               onChange={(event) => setFinding(event.target.value)}
               rows={6}
-              placeholder="Describe the observed fault, tests performed, and confirmed cause."
-              className="resize-none bg-background/60 text-sm font-normal leading-6"
+              placeholder="The observed fault, the tests you ran, and the confirmed cause."
+              className={textareaClass}
             />
-          </label>
-          <label className="grid gap-2 text-xs font-semibold">
-            Disposition
-            <NativeSelect
-              value={disposition}
-              onChange={(event) => setDisposition(event.target.value as typeof disposition)}
-              className="bg-background/60 text-sm font-normal"
-            >
-              <NativeSelectOption value="resolved_on_site">Resolved on site</NativeSelectOption>
-              <NativeSelectOption value="follow_up_required">Follow-up required</NativeSelectOption>
-              <NativeSelectOption value="quote_required">Quote required</NativeSelectOption>
-            </NativeSelect>
-          </label>
-          <div className="flex justify-end border-t border-border/85 pt-4">
-            <Button
-              className="h-10"
+          </div>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-2 text-[14px] font-semibold">Outcome</legend>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {dispositions.map(([value, label]) => (
+                <label
+                  key={value}
+                  className={cn(
+                    "flex min-h-11 cursor-pointer items-center gap-3 rounded-[12px] px-3.5 py-2.5 text-[14.5px] font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                    disposition === value
+                      ? "bg-[var(--northline-tint)] text-foreground shadow-[0_0_0_1.5px_var(--primary)]"
+                      : "bg-black/[0.035] text-foreground/80 hover:bg-black/[0.06] dark:bg-white/[0.06]"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="diagnosis-disposition"
+                    value={value}
+                    checked={disposition === value}
+                    onChange={() => setDisposition(value)}
+                    className="size-4 shrink-0 accent-primary"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border/70 pt-5">
+            <button
+              type="button"
               disabled={recording || !finding.trim()}
               onClick={onRecordDiagnosis}
+              className={primaryPill}
             >
               {recording ? "Recording…" : "Record diagnosis"}
-            </Button>
+            </button>
           </div>
         </div>
-      </ActionSection>
+      </NextStepCard>
     )
   }
 
   if (visit.properties.status === "in_progress" && visit.properties.diagnosisDisposition) {
     return (
-      <ActionSection
-        eyebrow="Active field task"
-        title="Complete visit"
-        description="Document the completed work and return the case for recovery verification."
+      <NextStepCard
+        title="Complete the visit"
+        detail="Describe the work you finished so the case can return for recovery verification."
       >
-        <div className="mt-5 grid gap-4">
-          <div className="rounded-md border border-primary/20 bg-primary/[0.045] px-4 py-3 text-sm">
-            <span className="text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
-              Recorded disposition
-            </span>
-            <strong className="mt-1 block font-medium">
-              {humanize(visit.properties.diagnosisDisposition)}
-            </strong>
+        <div className="flex flex-col gap-5">
+          <div className="flex items-center justify-between gap-3 rounded-[14px] bg-muted px-4 py-3">
+            <span className="text-[14px] text-foreground/80">Diagnosis recorded</span>
+            <StatusBadge value={visit.properties.diagnosisDisposition} />
           </div>
-          <label className="grid gap-2 text-xs font-semibold">
-            Work performed
-            <Textarea
+
+          <div className="flex flex-col gap-2">
+            <label htmlFor="work-performed" className="text-[14px] font-semibold">
+              Work performed
+            </label>
+            <textarea
+              id="work-performed"
               value={workPerformed}
               onChange={(event) => setWorkPerformed(event.target.value)}
               rows={6}
-              placeholder="Describe the completed work and final equipment condition."
-              className="resize-none bg-background/60 text-sm font-normal leading-6"
+              placeholder="The work you completed and the final condition of the equipment."
+              className={textareaClass}
             />
-          </label>
-          <div className="flex justify-end border-t border-border/85 pt-4">
-            <Button
-              className="h-10"
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border/70 pt-5">
+            <button
+              type="button"
               disabled={completing || !workPerformed.trim()}
               onClick={onComplete}
+              className={primaryPill}
             >
               {completing ? "Completing…" : "Complete visit"}
-            </Button>
+            </button>
           </div>
         </div>
-      </ActionSection>
+      </NextStepCard>
     )
   }
 
   return (
-    <ActionSection
-      eyebrow="Visit record"
+    <Section
       title="Field work completed"
-      description="This visit is complete and its service record is preserved below."
+      description="This visit is complete and its service record is preserved."
     >
-      <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
-        <CompactDetail label="Disposition">
-          {humanize(visit.properties.completionDisposition ?? "completed")}
-        </CompactDetail>
-        <CompactDetail label="Completed">
-          {formatDateTime(visit.properties.completedAt)}
-        </CompactDetail>
-        <CompactDetail label="Work performed" className="sm:col-span-2">
-          {visit.properties.workPerformed ?? "No work summary recorded."}
-        </CompactDetail>
+      <dl className="flex flex-col px-6 pb-4">
+        <div className="flex items-center justify-between gap-3 py-2.5">
+          <dt className="text-[14.5px] font-medium">Outcome</dt>
+          <dd>
+            <StatusBadge value={visit.properties.completionDisposition ?? "completed"} />
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-border/70 py-2.5">
+          <dt className="text-[14.5px] font-medium">Completed</dt>
+          <dd className="text-[13.5px] text-muted-foreground tabular-nums">
+            {formatDateTime(visit.properties.completedAt)}
+          </dd>
+        </div>
+        <div className="flex flex-col gap-1 border-t border-border/70 py-3">
+          <dt className="text-[14.5px] font-medium">Work performed</dt>
+          <dd className="text-[15px] leading-6 text-pretty text-foreground/80">
+            {visit.properties.workPerformed ?? "No work summary recorded."}
+          </dd>
+        </div>
       </dl>
-    </ActionSection>
+    </Section>
   )
 }
 
-function VisitContext({
+function SiteCard({
   visit,
   workOrder,
   serviceCase,
   equipment,
-  latestNote,
 }: {
   visit: VisitRow
-  workOrder: NonNullable<VisitRow["links"]["workOrder"]>
-  serviceCase: NonNullable<NonNullable<VisitRow["links"]["workOrder"]>["links"]["serviceCase"]>
-  equipment: NonNullable<NonNullable<VisitRow["links"]["workOrder"]>["links"]["equipment"]>
-  latestNote: NoteRow | undefined
+  workOrder: VisitWorkOrder
+  serviceCase: VisitServiceCase
+  equipment: VisitEquipment
 }) {
-  const illustration = equipmentIllustration(
-    equipment.properties.name,
-    equipment.properties.equipmentType
-  )
+  const unit = [equipment.properties.manufacturer, equipment.properties.model]
+    .filter(Boolean)
+    .join(" ")
   return (
-    <section className="overflow-hidden rounded-lg border border-border/90 bg-card">
-      <header className="px-5 pt-4 pb-3">
-        <h2 className="text-base font-semibold tracking-[-0.015em]">Visit context</h2>
-      </header>
-      <div className="px-5 pb-5">
-        <Link
-          to={`/equipment/${encodeURIComponent(equipment.primaryId)}`}
-          className="group flex items-center gap-4 border-t border-border/85 pt-4"
-        >
-          <span className="grid size-[76px] shrink-0 place-items-center overflow-hidden rounded-lg border border-primary/15 bg-secondary/70">
-            <img
-              src={illustration.src}
-              alt=""
-              className={
-                illustration.contain ? "size-full object-contain p-1.5" : "size-full object-cover"
-              }
-            />
-          </span>
-          <span className="min-w-0">
-            <strong className="block text-sm font-semibold group-hover:text-primary">
-              {equipment.properties.name}
-            </strong>
-            <span className="mt-1 block text-xs text-muted-foreground">
-              {equipment.properties.manufacturer} · {equipment.properties.model}
-            </span>
-            <span className="mt-1.5 block font-mono text-[10px] text-muted-foreground">
-              {equipment.properties.serialNumber}
-            </span>
-          </span>
-          <ChevronRight className="ml-auto size-5" strokeWidth={1.7} />
-        </Link>
-
-        <dl className="mt-5 grid gap-4 border-t border-border/85 pt-4 text-sm">
-          <CompactDetail label="Facility">
-            {serviceCase.links.facility?.properties.name ?? "Customer facility"}
-          </CompactDetail>
-          <CompactDetail label="Site access">
-            {serviceCase.links.facility?.properties.accessNotes ?? "Check in with facilities."}
-          </CompactDetail>
-          <CompactDetail label="Authorized scope">{workOrder.properties.scope}</CompactDetail>
-          <CompactDetail label="Visit started">
-            {formatDateTime(visit.properties.startedAt)}
-          </CompactDetail>
-        </dl>
-
-        {latestNote ? (
-          <div className="mt-5 border-t border-border/85 pt-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-                Latest field note
-              </p>
-              <span className="font-mono text-[9px] text-muted-foreground">
-                {formatDateTime(latestNote.properties.recordedAt)}
-              </span>
-            </div>
-            <p className="mt-2 text-xs leading-5 text-foreground">{latestNote.properties.body}</p>
-          </div>
-        ) : null}
-      </div>
-    </section>
+    <Section title="On site">
+      <dl className="flex flex-col px-6 pb-3">
+        <Detail label="Facility">
+          {serviceCase.links.facility?.properties.name ?? "Customer facility"}
+        </Detail>
+        <Detail label="Site access">
+          {serviceCase.links.facility?.properties.accessNotes ?? "Check in with facilities."}
+        </Detail>
+        <Detail label="Unit">
+          {[unit, equipment.properties.serialNumber].filter(Boolean).join(" · ") ||
+            equipment.properties.name}
+        </Detail>
+        <Detail label="Authorized scope">{workOrder.properties.scope}</Detail>
+        <Detail label="Visit started">{formatDateTime(visit.properties.startedAt)}</Detail>
+      </dl>
+    </Section>
   )
 }
 
-function ActionSection({
-  eyebrow,
+function VisitList({
+  technician,
+  visits,
+  currentId,
+}: {
+  technician: TechnicianRow
+  visits: readonly VisitRow[]
+  currentId?: string
+}) {
+  if (visits.length === 0) {
+    return <p className="px-6 pt-2 pb-6 text-[14px] text-muted-foreground">No visits recorded.</p>
+  }
+  return (
+    <ul className="px-6 pb-3">
+      {visits.map((visit) => {
+        const workOrder = visit.links.workOrder
+        const serviceCase = workOrder?.links.serviceCase
+        const current = visit.primaryId === currentId
+        const severity = serviceCase?.properties.severity
+        return (
+          <li key={visit.primaryId} className="border-t border-border/70 first:border-t-0">
+            <Link
+              to={`/technicians/${encodeURIComponent(technician.primaryId)}?visit=${encodeURIComponent(visit.primaryId)}`}
+              aria-current={current ? "page" : undefined}
+              className="group flex items-center gap-3 py-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 text-[13px] font-semibold text-muted-foreground tabular-nums">
+                    {visit.properties.number}
+                  </span>
+                  <span
+                    className={cn(
+                      "truncate text-[15px] font-semibold group-hover:text-primary",
+                      current && "text-primary"
+                    )}
+                  >
+                    {workOrder?.properties.title ?? "Service visit"}
+                  </span>
+                </span>
+                <span className="truncate text-[13px] text-muted-foreground tabular-nums">
+                  {current ? "Viewing · " : ""}
+                  {formatDateTime(visit.properties.scheduledStart)} ·{" "}
+                  {serviceCase?.links.facility?.properties.name ?? "Facility"} ·{" "}
+                  {workOrder?.links.equipment?.properties.name ?? "Equipment"}
+                </span>
+              </span>
+              {currentId === undefined && (severity === "critical" || severity === "high") ? (
+                <span className="max-sm:hidden">
+                  <StatusBadge value={severity} />
+                </span>
+              ) : null}
+              <StatusBadge value={visit.properties.status} />
+              <ChevronRight
+                className="size-4 shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground"
+                aria-hidden="true"
+              />
+            </Link>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function NextStepCard({
   title,
-  description,
+  detail,
   children,
 }: {
-  eyebrow: string
   title: string
-  description: string
+  detail: string
   children: ReactNode
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border/90 bg-card px-5 py-5 sm:px-6">
-      <p className="text-[10px] font-semibold tracking-[0.16em] text-primary uppercase">
-        {eyebrow}
-      </p>
-      <h2 className="mt-2 text-lg font-semibold tracking-[-0.02em]">{title}</h2>
-      <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
+    <section className="flex flex-col gap-5 rounded-[20px] bg-card p-5 shadow-[0_0_0_1.5px_var(--primary),0_10px_28px_color-mix(in_srgb,var(--primary)_12%,transparent)] sm:p-6">
+      <div className="flex flex-col gap-1">
+        <span className="text-[12px] font-semibold text-primary">Next step</span>
+        <h2 className="text-[22px] leading-7 font-semibold tracking-[-0.015em]">{title}</h2>
+        <p className="max-w-2xl text-[15px] leading-6 text-pretty text-foreground/75">{detail}</p>
+      </div>
       {children}
     </section>
   )
 }
 
-function WorkSequence({ visit }: { visit: VisitRow }) {
-  const steps = [
-    { label: "Scheduled", complete: true },
-    { label: "On site", complete: Boolean(visit.properties.startedAt) },
-    { label: "Diagnosis", complete: Boolean(visit.properties.diagnosisDisposition) },
-    { label: "Complete", complete: visit.properties.status === "completed" },
+const primaryPill =
+  "inline-flex h-11 items-center justify-center rounded-full bg-primary px-5 text-[14px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full sm:h-10"
+
+const textareaClass =
+  "min-h-36 w-full resize-y rounded-[14px] bg-black/[0.035] px-4 py-3 text-[15px] leading-6 shadow-[inset_0_0_0_1px_rgb(0_0_0/0.06)] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.06] dark:shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]"
+
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="text-[12px] text-muted-foreground">{label}</dt>
+      <dd className="text-[14.5px] font-medium tabular-nums">{children}</dd>
+    </div>
+  )
+}
+
+function Detail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-t border-border/70 py-3 first:border-t-0">
+      <dt className="text-[13px] text-muted-foreground">{label}</dt>
+      <dd className="text-[15px] leading-6 text-pretty">{children}</dd>
+    </div>
+  )
+}
+
+function activityEntries(visits: readonly VisitRow[], notes: readonly NoteRow[]): TimelineEntry[] {
+  return [
+    ...visits.flatMap((visit): TimelineEntry[] => [
+      {
+        id: `${visit.primaryId}-start`,
+        at: visit.properties.startedAt ?? visit.properties.scheduledStart,
+        icon: Wrench,
+        title: visit.properties.startedAt ? "Arrived on site" : "Visit scheduled",
+        detail: visit.links.workOrder?.links.serviceCase?.links.facility?.properties.name,
+        source: visit.properties.number,
+      },
+      ...(visit.properties.completedAt
+        ? [
+            {
+              id: `${visit.primaryId}-complete`,
+              at: visit.properties.completedAt,
+              icon: ClipboardCheck,
+              title: "Visit completed",
+              detail: visit.properties.workPerformed,
+              source: visit.properties.number,
+              status: visit.properties.completionDisposition,
+              emphasis: true,
+            },
+          ]
+        : []),
+    ]),
+    ...notes.map(
+      (note): TimelineEntry => ({
+        id: note.primaryId,
+        at: note.properties.recordedAt,
+        icon: FileText,
+        title: `${humanize(note.properties.noteType)} note`,
+        detail: note.properties.body,
+        source: note.links.visit?.properties.number,
+      })
+    ),
   ]
-  const current = steps.findIndex((step) => !step.complete)
-  return (
-    <section className="mt-4 overflow-hidden rounded-lg border border-border/90 bg-card">
-      <header className="border-b border-border/80 px-5 py-3">
-        <h2 className="text-sm font-semibold">Visit progress</h2>
-      </header>
-      <ol className="grid grid-cols-2 sm:grid-cols-4">
-        {steps.map((step, index) => (
-          <li
-            key={step.label}
-            className="relative flex items-center gap-3 border-r border-border/75 px-4 py-3 last:border-r-0"
-          >
-            <span
-              className={`grid size-6 shrink-0 place-items-center rounded-full border ${
-                step.complete
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : index === current
-                    ? "border-primary text-primary"
-                    : "border-border text-muted-foreground"
-              }`}
-            >
-              {step.complete ? <Check className="size-3.5" /> : <Circle className="size-2.5" />}
-            </span>
-            <span
-              className={`text-xs font-semibold ${
-                index === current ? "text-primary" : "text-foreground"
-              }`}
-            >
-              {step.label}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
-  )
 }
 
-function MastheadSignal({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="border-border/90 py-1 pr-6 sm:border-r sm:px-6 sm:first:pl-0 sm:last:border-r-0">
-      <dt className="text-[10px] text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-xs font-semibold">{children}</dd>
-    </div>
-  )
+/** The first stage not yet done; a finished visit rests on "Complete". */
+function visitStage(visit: VisitRow): string {
+  if (visit.properties.status === "completed" || visit.properties.diagnosisDisposition) {
+    return "complete"
+  }
+  return visit.properties.startedAt ? "diagnosis" : "on_site"
 }
 
-function CompactDetail({
-  label,
-  children,
-  className = "",
-}: {
-  label: string
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <div className={className}>
-      <dt className="text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
-        {label}
-      </dt>
-      <dd className="mt-1.5 text-sm leading-6 text-foreground">{children}</dd>
-    </div>
-  )
-}
-
-function equipmentIllustration(equipmentName: string, equipmentType: string) {
-  const normalized = equipmentName.toLowerCase()
-  if (normalized === "rtu-2") return { src: "/illustrations/rtu-2.webp", contain: false }
-  if (normalized === "rtu-7") return { src: "/illustrations/rtu-7.webp", contain: false }
-  if (equipmentType === "rooftop_unit") {
-    return { src: "/illustrations/rtu-7.webp", contain: false }
-  }
-  if (equipmentType === "air_handler") {
-    return { src: "/illustrations/ahu-3.webp", contain: false }
-  }
-  if (equipmentType === "controller") {
-    return { src: "/illustrations/building-controller.webp", contain: false }
-  }
-  if (equipmentType === "boiler") {
-    return { src: "/illustrations/boiler-2.webp", contain: true }
-  }
-  if (equipmentType === "chiller") {
-    return { src: "/illustrations/chiller-1.webp", contain: false }
-  }
-  return { src: "/illustrations/heat-pump-4.webp", contain: false }
+function deadlineClass(slaStatus: string | undefined): string {
+  const tone = statusTone(slaStatus)
+  if (tone === "critical") return "text-destructive"
+  if (tone === "warning") return "text-[color:var(--warning)]"
+  return ""
 }
 
 function initials(value: string): string {
