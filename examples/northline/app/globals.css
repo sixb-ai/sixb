@@ -1,4 +1,5 @@
 @import "@sixb/ui/globals.css";
+@import "./_components/sidebar.css";
 @source "./**/*.{ts,tsx}";
 
 /*

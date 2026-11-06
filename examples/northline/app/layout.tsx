@@ -15,7 +15,7 @@ export const toolViews = [responsePolicyView]
 
 export default function RootLayout({ children }: PropsWithChildren) {
   return (
-    <AppShellProvider style={{ "--sidebar-width": "15.5rem" } as CSSProperties}>
+    <AppShellProvider style={{ "--sidebar-width": "220px" } as CSSProperties}>
       <NorthlineShell>{children}</NorthlineShell>
     </AppShellProvider>
   )

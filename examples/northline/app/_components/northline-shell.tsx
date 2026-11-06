@@ -9,7 +9,6 @@ import {
   SidebarInset,
   SidebarTrigger,
 } from "@sixb/ui/components"
-import { cn } from "@sixb/ui/lib/utils"
 import {
   CalendarClock,
   ClipboardList,
@@ -86,18 +85,14 @@ export function NorthlineShell({ children }: PropsWithChildren) {
 
   return (
     <>
-      <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
-        <SidebarHeader className="gap-4 px-3.5 pt-5 pb-2">
-          <Link
-            to="/"
-            aria-label="Northline Operations home"
-            className="flex h-9 items-center px-1.5"
-          >
-            <NorthlineWordmark className="mx-0 h-8" />
+      <Sidebar collapsible="offcanvas" className="nl-sidebar">
+        <SidebarHeader className="nl-sidebar-header">
+          <Link to="/" aria-label="Northline Operations home" className="nl-sidebar-brand">
+            <NorthlineWordmark className="mx-0 h-[22px]" />
           </Link>
           <GlobalSearch />
         </SidebarHeader>
-        <SidebarContent className="gap-6 px-3.5 pt-3 pb-4">
+        <SidebarContent className="nl-sidebar-content">
           {/* Inside the Console or Settings the sidebar lists that section's pages instead. */}
           <SectionNav
             fallback={
@@ -108,7 +103,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
             }
           />
         </SidebarContent>
-        <SidebarFooter className="border-t border-sidebar-border px-3.5 py-3">
+        <SidebarFooter className="nl-sidebar-footer">
           <UserMenu />
         </SidebarFooter>
       </Sidebar>
@@ -140,42 +135,33 @@ function NorthlineNav() {
   const counts = { openCases: openCaseCount.data, quotesWithCustomer: quoteCount.data }
 
   return (
-    <nav aria-label="Northline" className="flex flex-col gap-5">
+    <nav aria-label="Northline">
       {groups.map((group) => (
-        <div key={group.label ?? "workspace"} className="flex flex-col gap-0.5">
-          {group.label ? (
-            <span className="px-3 pb-1.5 text-[12px] font-semibold text-muted-foreground">
-              {group.label}
-            </span>
-          ) : null}
-          {group.items.map((item) => {
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
-            const count = item.count ? counts[item.count] : undefined
-            return (
-              <Link
-                key={item.href}
-                to={item.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex h-10 items-center gap-3 rounded-[10px] px-3 text-[14.5px] font-medium text-foreground/80 transition-colors hover:bg-black/[0.04] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:bg-white/[0.06]",
-                  active &&
-                    "bg-sidebar-accent font-semibold text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.07)] hover:bg-sidebar-accent"
-                )}
-              >
-                <item.icon
-                  className={cn("size-[18px]", active ? "text-primary" : "text-foreground/70")}
-                  strokeWidth={active ? 2 : 1.7}
-                />
-                <span className="flex-1 truncate">{item.label}</span>
-                {count ? (
-                  <span className="text-[12px] font-medium text-muted-foreground tabular-nums">
-                    {count}
-                  </span>
-                ) : null}
-              </Link>
-            )
-          })}
-        </div>
+        <section
+          key={group.label ?? "workspace"}
+          className={group.label ? "nl-sidebar-section" : undefined}
+        >
+          {group.label ? <h2 className="nl-sidebar-label">{group.label}</h2> : null}
+          <ul className="nl-sidebar-list">
+            {group.items.map((item) => {
+              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
+              const count = item.count ? counts[item.count] : undefined
+              return (
+                <li key={item.href}>
+                  <Link
+                    to={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className="nl-sidebar-row"
+                  >
+                    <item.icon />
+                    <span className="truncate">{item.label}</span>
+                    {count ? <span className="nl-sidebar-count">{count}</span> : null}
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
       ))}
     </nav>
   )
@@ -187,39 +173,34 @@ function RecentThreads() {
   if (threads.length === 0) return null
 
   return (
-    <div className="flex min-h-0 flex-col gap-0.5">
-      <div className="flex items-center justify-between px-3 pb-1.5">
-        <span className="text-[12px] font-semibold text-muted-foreground">Recents</span>
-        <Link to="/threads" className="text-[12px] font-medium text-primary hover:underline">
+    <section className="nl-sidebar-section">
+      <div className="nl-sidebar-label">
+        <h2>Recents</h2>
+        <Link to="/threads" className="nl-sidebar-label-action">
           View all
         </Link>
       </div>
-      {threads.slice(0, 8).map((thread) => {
-        const to = threadPath(thread.id)
-        const active = pathname === to
-        const title = thread.title?.trim() || "New conversation"
-        return (
-          <Link
-            key={thread.id}
-            to={to}
-            title={title}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "flex h-9 items-center gap-2 rounded-[9px] px-3 text-[13.5px] text-foreground/75 transition-colors hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]",
-              active && "bg-sidebar-accent font-semibold text-foreground hover:bg-sidebar-accent"
-            )}
-          >
-            <span className="flex-1 truncate">{title}</span>
-            {thread.activeRunId ? (
-              <span
-                role="status"
-                aria-label="Working"
-                className="size-[7px] shrink-0 animate-pulse rounded-full bg-primary"
-              />
-            ) : null}
-          </Link>
-        )
-      })}
-    </div>
+      <ul className="nl-sidebar-list">
+        {threads.slice(0, 12).map((thread) => {
+          const to = threadPath(thread.id)
+          const title = thread.title?.trim() || "New conversation"
+          return (
+            <li key={thread.id}>
+              <Link
+                to={to}
+                title={title}
+                aria-current={pathname === to ? "page" : undefined}
+                className="nl-sidebar-row nl-sidebar-chat"
+              >
+                <span className="truncate">{title}</span>
+                {thread.activeRunId ? (
+                  <span role="status" aria-label="Working" className="nl-sidebar-live" />
+                ) : null}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
