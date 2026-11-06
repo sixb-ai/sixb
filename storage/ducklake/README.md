@@ -72,9 +72,10 @@ data path and secrets need. A missing extension is downloaded over HTTPS from
 `https://extensions.duckdb.org` into DuckDB's extension directory
 (`duckdb.config.extension_directory`, `~/.duckdb/extensions` by default), so a
 host that allows only that HTTPS domain, such as a restricted Vercel sandbox,
-can open a lake. DuckDB's own `INSTALL` uses plain HTTP and runs as before when
-that download fails. With `custom_extension_repository` set, DuckDB installs
-from that repository alone.
+can open a lake. When that download fails, the provider logs a warning and
+DuckDB's own `INSTALL` downloads the extension over plain HTTP, as before.
+With `custom_extension_repository` set, DuckDB installs from that repository
+alone.
 
 ### Maintenance
 
