@@ -8,7 +8,13 @@ import {
   northlineServiceCases,
 } from "../datasets/building-controls"
 import { businessContracts, businessFacilities } from "../datasets/business-system"
-import { alarmsUpdated, rawReadingsUpdated } from "../schedules/data-plane"
+import {
+  alarmsUpdated,
+  contractsUpdated,
+  equipmentUpdated,
+  facilitiesUpdated,
+  rawReadingsUpdated,
+} from "../schedules/data-plane"
 
 export const normalizeControlsReadings = definePipelineStep("normalize-controls-readings")
   .inputs({ readings: controlsRawReadings })
@@ -220,4 +226,7 @@ export const deriveServiceCases = definePipelineStep("derive-service-cases")
 
 export const serviceCaseIntakePipeline = definePipeline("service-case-intake")
   .when(alarmsUpdated)
+  .when(equipmentUpdated)
+  .when(facilitiesUpdated)
+  .when(contractsUpdated)
   .then(deriveServiceCases)

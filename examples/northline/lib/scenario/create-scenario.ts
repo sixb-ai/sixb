@@ -240,7 +240,7 @@ export function createNorthlineScenario(
         currency: "USD",
         status: "sent",
         valid_until: clock.dateDaysFromNow(21),
-        updated_at: clock.hoursAgo(5),
+        updated_at: clock.hoursAgo(2),
       },
       {
         quote_id: "quote-q-881",
@@ -877,9 +877,11 @@ function createAlarms(clock: ScenarioClock): AlarmRow[] {
       "medium",
       "comfort",
       "acknowledged",
-      clock.hoursAgo(6),
+      // Broad Street's contract allows four hours to respond; the technician arrives with half an
+      // hour to spare, so the case opens on track.
+      clock.hoursAgo(3.5),
       clock.minutesAgo(20),
-      clock.hoursAgo(5.8)
+      clock.hoursAgo(3.3)
     ),
     alarm(
       "alarm-camden-condenser-fan",
