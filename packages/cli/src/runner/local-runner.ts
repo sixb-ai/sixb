@@ -157,6 +157,9 @@ export class LocalRunner {
     const hold = async () => {
       // Read as it is sent, so a renewal that waited its turn reports the commands as they are.
       const backgroundCommands = this.runner.backgroundCommands()
+      const stalled = new AbortController()
+      const giveUp = setTimeout(() => stalled.abort(), SESSION_RENEW_MS)
+
       const { data, error } = await holdAgentComputerSession({
         client: this.connection.client,
         path: { sessionId: id },
@@ -164,7 +167,9 @@ export class LocalRunner {
           computer: { ...(await thisComputer()), folder: this.folder },
           ...(backgroundCommands.length > 0 ? { backgroundCommands: [...backgroundCommands] } : {}),
         },
-      })
+        signal: stalled.signal,
+      }).finally(() => clearTimeout(giveUp))
+
       if (error) throw error
       this.noteSession(id, null)
       void this.claimFirst(id, data?.waiting ?? [])
@@ -173,8 +178,9 @@ export class LocalRunner {
     }
 
     // One renewal at a time, in order, so an older report never lands after a newer one; one
-    // asked for while another waits its turn is that one. A missed renewal is retried at the
-    // next; the session lasts three of them.
+    // asked for while another waits its turn is that one. One that stalls gives up when the next
+    // is due, so it can't hold up those behind it. A missed renewal is retried at the next; the
+    // session lasts three of them.
     let queued = false
     const renew = () => {
       if (queued) return
