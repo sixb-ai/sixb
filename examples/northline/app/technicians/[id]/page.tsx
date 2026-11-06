@@ -10,6 +10,7 @@ import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { Technician } from "../../../ontology/technician"
 import { WorkOrder } from "../../../ontology/work-order"
+import { NextStepCard, pillClass } from "../../_components/next-step"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
@@ -298,7 +299,7 @@ function TechnicianProfile({
           detail="No visit is assigned. Match this technician to waiting work on the dispatch board."
         >
           <div className="flex flex-wrap items-center gap-2.5">
-            <Link to="/dispatch" className={primaryPill}>
+            <Link to="/dispatch" className={pillClass("primary", "max-sm:h-11 max-sm:w-full")}>
               Open dispatch board
             </Link>
           </div>
@@ -512,7 +513,12 @@ function VisitAction({
         detail="Confirm you are on site before recording findings or work performed."
       >
         <div className="flex flex-wrap items-center gap-2.5">
-          <button type="button" disabled={starting} onClick={onStart} className={primaryPill}>
+          <button
+            type="button"
+            disabled={starting}
+            onClick={onStart}
+            className={pillClass("primary", "max-sm:h-11 max-sm:w-full")}
+          >
             {starting ? "Starting…" : "Start visit"}
           </button>
         </div>
@@ -573,7 +579,7 @@ function VisitAction({
               type="button"
               disabled={recording || !finding.trim()}
               onClick={onRecordDiagnosis}
-              className={primaryPill}
+              className={pillClass("primary", "max-sm:h-11 max-sm:w-full")}
             >
               {recording ? "Recording…" : "Record diagnosis"}
             </button>
@@ -614,7 +620,7 @@ function VisitAction({
               type="button"
               disabled={completing || !workPerformed.trim()}
               onClick={onComplete}
-              className={primaryPill}
+              className={pillClass("primary", "max-sm:h-11 max-sm:w-full")}
             >
               {completing ? "Completing…" : "Complete visit"}
             </button>
@@ -751,30 +757,6 @@ function VisitList({
     </ul>
   )
 }
-
-function NextStepCard({
-  title,
-  detail,
-  children,
-}: {
-  title: string
-  detail: string
-  children: ReactNode
-}) {
-  return (
-    <section className="flex flex-col gap-5 rounded-[20px] bg-card p-5 shadow-[0_0_0_1.5px_var(--primary),0_10px_28px_color-mix(in_srgb,var(--primary)_12%,transparent)] sm:p-6">
-      <div className="flex flex-col gap-1">
-        <span className="text-[12px] font-semibold text-primary">Next step</span>
-        <h2 className="text-[22px] leading-7 font-semibold tracking-[-0.015em]">{title}</h2>
-        <p className="max-w-2xl text-[15px] leading-6 text-pretty text-foreground/75">{detail}</p>
-      </div>
-      {children}
-    </section>
-  )
-}
-
-const primaryPill =
-  "inline-flex h-11 items-center justify-center rounded-full bg-primary px-5 text-[14px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full sm:h-10"
 
 const textareaClass =
   "min-h-36 w-full resize-y rounded-[14px] bg-black/[0.035] px-4 py-3 text-[15px] leading-6 shadow-[inset_0_0_0_1px_rgb(0_0_0/0.06)] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.06] dark:shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]"

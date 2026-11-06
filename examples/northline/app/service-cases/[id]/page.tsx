@@ -18,6 +18,7 @@ import { Quote } from "../../../ontology/quote"
 import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { WorkOrder } from "../../../ontology/work-order"
+import { NextStepCard, PillButton, PillLink } from "../../_components/next-step"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
@@ -159,12 +160,12 @@ export default function ServiceCaseDetailPage() {
       title: "Acknowledge the case",
       detail: "Take ownership so the response clock is covered and dispatch can begin.",
       primary: (
-        <PrimaryButton
-          pending={acknowledge.isPending}
+        <PillButton
+          disabled={acknowledge.isPending}
           onClick={() => acknowledge.mutate({ operatorName: "Alex Dawson" })}
         >
           {acknowledge.isPending ? "Acknowledging…" : "Acknowledge"}
-        </PrimaryButton>
+        </PillButton>
       ),
     }
   } else if (serviceCase && status === "triage") {
@@ -173,16 +174,16 @@ export default function ServiceCaseDetailPage() {
       detail:
         serviceCase.properties.nextAction ??
         "Pick the technician and window that meet the response target.",
-      primary: <PrimaryLink to="/dispatch">Review dispatch</PrimaryLink>,
+      primary: <PillLink to="/dispatch">Review dispatch</PillLink>,
     }
   } else if (serviceCase && status === "awaiting_authorization") {
     next = {
       title: "Review the repair quote",
       detail: "The repair falls outside contract coverage and needs customer authorization.",
       primary: (
-        <PrimaryLink to={openQuote ? quotePath(openQuote.primaryId) : "/quotes"}>
+        <PillLink to={openQuote ? quotePath(openQuote.primaryId) : "/quotes"}>
           Review quote
-        </PrimaryLink>
+        </PillLink>
       ),
     }
   } else if (
@@ -195,8 +196,8 @@ export default function ServiceCaseDetailPage() {
       title: "Verify the equipment recovered",
       detail: "Field work is complete. Confirm the readings are back in range before resolving.",
       primary: (
-        <PrimaryButton
-          pending={verify.isPending}
+        <PillButton
+          disabled={verify.isPending}
           onClick={() =>
             verify.mutate({
               equipment: {
@@ -207,7 +208,7 @@ export default function ServiceCaseDetailPage() {
           }
         >
           {verify.isPending ? "Verifying…" : "Verify recovery"}
-        </PrimaryButton>
+        </PillButton>
       ),
     }
   } else if (serviceCase && status === "resolved") {
@@ -215,19 +216,19 @@ export default function ServiceCaseDetailPage() {
       title: "Close the case",
       detail: serviceCase.properties.resolutionSummary ?? "Recovery is verified.",
       primary: (
-        <PrimaryButton
-          pending={close.isPending}
+        <PillButton
+          disabled={close.isPending}
           onClick={() => close.mutate({ summary: serviceCase.properties.resolutionSummary })}
         >
           {close.isPending ? "Closing…" : "Close case"}
-        </PrimaryButton>
+        </PillButton>
       ),
     }
   } else if (serviceCase && workspaceHref && status !== "closed" && status !== "cancelled") {
     next = {
       title: "Follow the field work",
       detail: serviceCase.properties.nextAction ?? "The technician is working the case.",
-      primary: <PrimaryLink to={workspaceHref}>Open field workspace</PrimaryLink>,
+      primary: <PillLink to={workspaceHref}>Open field workspace</PillLink>,
     }
   }
 
@@ -291,28 +292,16 @@ export default function ServiceCaseDetailPage() {
           <div className="flex flex-wrap items-start gap-5">
             <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-5">
               {next ? (
-                <section className="flex flex-col gap-4 rounded-[20px] bg-card p-6 shadow-[0_0_0_1.5px_var(--primary),0_10px_28px_color-mix(in_srgb,var(--primary)_12%,transparent)]">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[12px] font-semibold text-primary">Next step</span>
-                    <h2 className="text-[22px] leading-7 font-semibold tracking-[-0.015em]">
-                      {next.title}
-                    </h2>
-                    <p className="max-w-2xl text-[15px] leading-6 text-foreground/75">
-                      {next.detail}
-                    </p>
-                  </div>
+                <NextStepCard title={next.title} detail={next.detail}>
                   <div className="flex flex-wrap items-center gap-2.5">
                     {next.primary}
                     {workspaceHref && next.title !== "Follow the field work" ? (
-                      <Link
-                        to={workspaceHref}
-                        className="inline-flex h-10 items-center rounded-full bg-black/[0.05] px-5 text-[14px] font-semibold transition-colors hover:bg-black/[0.08] dark:bg-white/[0.08]"
-                      >
+                      <PillLink to={workspaceHref} tone="secondary">
                         Field workspace
-                      </Link>
+                      </PillLink>
                     ) : null}
                   </div>
-                </section>
+                </NextStepCard>
               ) : null}
 
               {latestDiagnosis ? <Diagnosis note={latestDiagnosis} /> : null}
@@ -349,38 +338,6 @@ interface NextStep {
   readonly title: string
   readonly detail: string
   readonly primary: ReactNode
-}
-
-function PrimaryButton({
-  pending,
-  onClick,
-  children,
-}: {
-  pending: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      disabled={pending}
-      onClick={onClick}
-      className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-[14px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-60"
-    >
-      {children}
-    </button>
-  )
-}
-
-function PrimaryLink({ to, children }: { to: string; children: ReactNode }) {
-  return (
-    <Link
-      to={to}
-      className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-[14px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
-    >
-      {children}
-    </Link>
-  )
 }
 
 function Diagnosis({ note }: { note: NoteRow }) {
