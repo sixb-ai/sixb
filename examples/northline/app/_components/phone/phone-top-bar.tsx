@@ -30,6 +30,8 @@ function TopBar() {
   const navigate = useNavigate()
   const path = screenPath(location.pathname, location.search)
   const home = path === "/"
+  // Neither mounts the dock: Home is a chat of its own, and Threads starts new ones on Home.
+  const dockless = home || path === "/threads"
   const conversation = isConversationPath(path)
   const heading = usePageHeading(path)
   const scrolled = useScrolled(path)
@@ -77,7 +79,7 @@ function TopBar() {
             <div className="phone-bar-group phone-glass">
               <GlobalSearch placement="toolbar" />
               {/* New chats start in Home's chat bar; elsewhere Chat opens the dock on this page. */}
-              {home ? null : (
+              {dockless ? null : (
                 <button
                   type="button"
                   onClick={() => setAgentSurfaceMode("dock")}
