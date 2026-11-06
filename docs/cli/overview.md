@@ -59,6 +59,10 @@ you can move the conversation to the cloud. Forgetting a folder that `sixb conne
 turn running there. Once a folder is chosen, whoever is signed in as you can
 send it messages, and the agent's commands run there without asking.
 
+A new conversation in the app can start on your computer too, in any folder where `sixb` or `sixb
+connect` takes messages now: under the message box, choose the folder from those listed for each of
+your computers. It starts in the cloud until you do, and while none of them is open.
+
 To keep a computer available without `sixb` open, such as a machine that stays on, run:
 
 ```bash
