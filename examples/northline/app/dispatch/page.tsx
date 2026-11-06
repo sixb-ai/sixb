@@ -18,6 +18,7 @@ import { Link } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
+import { decisionRingClass, pillClass } from "../_components/next-step"
 import {
   CaseClockText,
   Fact,
@@ -77,11 +78,6 @@ interface TimelineRange {
 type TechnicianRow = QueryRow<typeof techniciansQuery>
 type WorkOrderRow = QueryRow<typeof workOrdersQuery>
 type ServiceCaseRow = QueryRow<typeof serviceCasesQuery>
-
-const primaryPill =
-  "inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-[14px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60"
-const secondaryPill =
-  "inline-flex h-10 items-center gap-2 rounded-full bg-black/[0.05] px-5 text-[14px] font-semibold text-foreground transition-colors hover:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60 dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
 
 export default function DispatchPage() {
   const queryClient = useQueryClient()
@@ -363,7 +359,7 @@ function DateControl({
           <ChevronRight className="size-4" strokeWidth={2} />
         </button>
       </div>
-      <button type="button" className={secondaryPill} onClick={onToday}>
+      <button type="button" className={pillClass("secondary")} onClick={onToday}>
         Today
       </button>
     </div>
@@ -428,7 +424,7 @@ function DispatchDecision({
   const duration = durationLabel(scheduledStart, scheduledEnd)
 
   return (
-    <article className="flex flex-col gap-5 rounded-[20px] bg-card p-6 shadow-[0_0_0_1.5px_var(--primary),0_10px_28px_color-mix(in_srgb,var(--primary)_12%,transparent)] max-sm:p-5">
+    <article className={cn("flex flex-col gap-5 p-6 max-sm:p-5", decisionRingClass)}>
       <div className="flex items-start gap-5 max-sm:gap-4">
         <span className="flex size-[88px] shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-muted max-sm:size-16">
           {illustration ? (
@@ -535,7 +531,7 @@ function DispatchDecision({
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              className={primaryPill}
+              className={pillClass("primary")}
               disabled={submitting || !technician}
               onClick={() => onApprove({ technician, scheduledStart, scheduledEnd })}
             >
@@ -548,7 +544,7 @@ function DispatchDecision({
             </button>
             <button
               type="button"
-              className={secondaryPill}
+              className={pillClass("secondary")}
               disabled={submitting}
               onClick={onCancel}
             >
@@ -558,7 +554,12 @@ function DispatchDecision({
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2.5">
-          <button type="button" className={primaryPill} disabled={!technician} onClick={onReview}>
+          <button
+            type="button"
+            className={pillClass("primary")}
+            disabled={!technician}
+            onClick={onReview}
+          >
             Review assignment
             <ArrowRight className="size-4" strokeWidth={2} />
           </button>

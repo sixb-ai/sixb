@@ -18,6 +18,7 @@ import { Link, useSearchParams } from "react-router-dom"
 import { Quote } from "../../ontology/quote"
 import { ServiceCase } from "../../ontology/service-case"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
+import { decisionRingClass, NextStepCard, PillButton, PillLink } from "../_components/next-step"
 import {
   daysUntil,
   Fact,
@@ -71,9 +72,6 @@ const sortOptions = [
   ["amount", "Highest value"],
   ["number", "Quote number"],
 ] as const
-
-const decisionCardClass =
-  "flex flex-col gap-4 rounded-[20px] bg-card p-6 shadow-[0_0_0_1.5px_var(--primary),0_10px_28px_color-mix(in_srgb,var(--primary)_12%,transparent)]"
 
 type QuoteRow = QueryRow<typeof allQuotes>
 type ServiceCaseRow = QueryRow<typeof linkedServiceCases>
@@ -345,7 +343,7 @@ function ReviewCard({
   const customer = serviceCase?.links.customer?.properties.name
 
   return (
-    <section className={decisionCardClass}>
+    <section className={cn("flex flex-col gap-4 p-6 max-sm:p-5", decisionRingClass)}>
       <div className="flex items-start justify-between gap-6 max-sm:flex-col max-sm:gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <span className="text-[12px] font-semibold text-primary">Needs your approval</span>
@@ -385,14 +383,16 @@ function ReviewCard({
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2.5">
-        <PrimaryButton
+        <PillButton
           disabled={pending || !scope || amount <= 0}
           onClick={() => onApprove({ scope, amount })}
         >
           {pending ? "Sending…" : "Approve and send"}
-        </PrimaryButton>
+        </PillButton>
         {caseId && caseNumber ? (
-          <SecondaryLink to={casePath(caseId)}>Open {caseNumber}</SecondaryLink>
+          <PillLink tone="secondary" to={casePath(caseId)}>
+            Open {caseNumber}
+          </PillLink>
         ) : null}
       </div>
       {failed ? <ErrorLine>The approval could not be sent. Try again.</ErrorLine> : null}
@@ -462,21 +462,20 @@ function QuoteDocument({
     const scope = text(review.defaultResponse.scope ?? review.input.scope)
     const amount = numeric(review.defaultResponse.amount ?? review.input.amount)
     next = (
-      <section className={decisionCardClass}>
-        <NextStepHeading
-          title="Approve the quote for customer authorization"
-          detail={`Confirm the repair scope and ${formatMoney(amount)} price before the quote is sent to ${customer?.properties.name ?? "the customer"}.`}
-        />
+      <NextStepCard
+        title="Approve the quote for customer authorization"
+        detail={`Confirm the repair scope and ${formatMoney(amount)} price before the quote is sent to ${customer?.properties.name ?? "the customer"}.`}
+      >
         <div className="flex flex-wrap items-center gap-2.5">
-          <PrimaryButton
+          <PillButton
             disabled={reviewPending || !scope || amount <= 0}
             onClick={() => onApproveReview({ scope, amount })}
           >
             {reviewPending ? "Sending…" : "Approve and send"}
-          </PrimaryButton>
+          </PillButton>
         </div>
         {reviewFailed ? <ErrorLine>The approval could not be sent. Try again.</ErrorLine> : null}
-      </section>
+      </NextStepCard>
     )
   } else if (canRecordDecision && linkedCase) {
     const recording = decide.isPending ? decide.variables?.decision : undefined
@@ -486,23 +485,26 @@ function QuoteDocument({
         decision,
       })
     next = (
-      <section className={decisionCardClass}>
-        <NextStepHeading
-          title="Record the customer’s decision"
-          detail={`Did ${customer?.properties.name ?? "the customer"} approve the ${formatMoney(properties.amount)} repair? Approved work goes back to dispatch; a declined repair resolves ${linkedCase.properties.number}.`}
-        />
+      <NextStepCard
+        title="Record the customer’s decision"
+        detail={`Did ${customer?.properties.name ?? "the customer"} approve the ${formatMoney(properties.amount)} repair? Approved work goes back to dispatch; a declined repair resolves ${linkedCase.properties.number}.`}
+      >
         <div className="flex flex-wrap items-center gap-2.5">
-          <PrimaryButton disabled={decide.isPending} onClick={() => record("approved")}>
+          <PillButton disabled={decide.isPending} onClick={() => record("approved")}>
             {recording === "approved" ? "Saving…" : "Customer approved"}
-          </PrimaryButton>
-          <SecondaryButton disabled={decide.isPending} onClick={() => record("declined")}>
+          </PillButton>
+          <PillButton
+            tone="secondary"
+            disabled={decide.isPending}
+            onClick={() => record("declined")}
+          >
             {recording === "declined" ? "Saving…" : "Customer declined"}
-          </SecondaryButton>
+          </PillButton>
         </div>
         {decide.isError ? (
           <ErrorLine>The decision could not be recorded. Try again.</ErrorLine>
         ) : null}
-      </section>
+      </NextStepCard>
     )
   }
 
@@ -682,67 +684,12 @@ function QuoteDocument({
   )
 }
 
-function NextStepHeading({ title, detail }: { title: string; detail: string }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[12px] font-semibold text-primary">Next step</span>
-      <h2 className="text-[22px] leading-7 font-semibold tracking-[-0.015em]">{title}</h2>
-      <p className="max-w-2xl text-[15px] leading-6 text-pretty text-foreground/75">{detail}</p>
-    </div>
-  )
-}
-
 function DocumentPart({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="mx-6 flex flex-col gap-1.5 border-t border-border/70 py-5 sm:mx-8">
       <h3 className="text-[12.5px] font-semibold text-muted-foreground">{label}</h3>
       {children}
     </div>
-  )
-}
-
-const primaryClass =
-  "inline-flex h-10 items-center rounded-full bg-primary px-5 text-[14px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-60"
-const secondaryClass =
-  "inline-flex h-10 items-center rounded-full bg-black/[0.05] px-5 text-[14px] font-semibold text-foreground transition-colors hover:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60 dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
-
-function PrimaryButton({
-  disabled,
-  onClick,
-  children,
-}: {
-  disabled: boolean
-  onClick(): void
-  children: ReactNode
-}) {
-  return (
-    <button type="button" disabled={disabled} onClick={onClick} className={primaryClass}>
-      {children}
-    </button>
-  )
-}
-
-function SecondaryButton({
-  disabled,
-  onClick,
-  children,
-}: {
-  disabled: boolean
-  onClick(): void
-  children: ReactNode
-}) {
-  return (
-    <button type="button" disabled={disabled} onClick={onClick} className={secondaryClass}>
-      {children}
-    </button>
-  )
-}
-
-function SecondaryLink({ to, children }: { to: string; children: ReactNode }) {
-  return (
-    <Link to={to} className={secondaryClass}>
-      {children}
-    </Link>
   )
 }
 
