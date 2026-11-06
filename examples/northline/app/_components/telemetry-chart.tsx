@@ -47,9 +47,14 @@ export function TelemetryChart({
     .slice()
     .reverse()
 
+  // History often arrives after the chart mounts. Both branches render the same root element with
+  // the ref, so React keeps that node and the observer attached at mount goes on measuring it.
   if (values.length < 2) {
     return (
-      <div className="flex h-[168px] items-center justify-center rounded-[14px] bg-muted text-[13px] text-muted-foreground">
+      <div
+        ref={wrapper}
+        className="flex h-[168px] items-center justify-center rounded-[14px] bg-muted text-[13px] text-muted-foreground"
+      >
         The trend appears when building controls report history.
       </div>
     )

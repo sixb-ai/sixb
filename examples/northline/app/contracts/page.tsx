@@ -7,6 +7,7 @@ import { Link } from "react-router-dom"
 import { ServiceContract } from "../../ontology/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
+  calendarDate,
   daysUntil,
   formatMinutes,
   humanize,
@@ -316,7 +317,7 @@ function renewalTone(contract: ContractRow): string {
 
 function monthYear(value: string | Date): string {
   return new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" }).format(
-    new Date(value)
+    calendarDate(value)
   )
 }
 
