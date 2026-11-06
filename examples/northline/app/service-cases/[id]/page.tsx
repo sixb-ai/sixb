@@ -23,6 +23,7 @@ import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
   caseClock,
+  Fact,
   formatDateTime,
   formatMoney,
   formatRelativeTime,
@@ -368,15 +369,6 @@ function PrimaryLink({ to, children }: { to: string; children: ReactNode }) {
     >
       {children}
     </Link>
-  )
-}
-
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="text-[14.5px] font-medium tabular-nums">{children}</dd>
-    </div>
   )
 }
 

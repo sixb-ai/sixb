@@ -15,8 +15,10 @@ import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
   caseClock,
+  Fact,
   formatDateTime,
   humanize,
+  initials,
   QueryState,
   Section,
   StatusBadge,
@@ -767,15 +769,6 @@ const primaryPill =
 const textareaClass =
   "min-h-36 w-full resize-y rounded-[14px] bg-black/[0.035] px-4 py-3 text-[15px] leading-6 shadow-[inset_0_0_0_1px_rgb(0_0_0/0.06)] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-white/[0.06] dark:shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]"
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="text-[14.5px] font-medium tabular-nums">{children}</dd>
-    </div>
-  )
-}
-
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 border-t border-border/70 py-3 first:border-t-0">
@@ -830,16 +823,6 @@ function visitStage(visit: VisitRow): string {
     return "complete"
   }
   return visit.properties.startedAt ? "diagnosis" : "on_site"
-}
-
-function initials(value: string): string {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
 }
 
 function timestamp(value: string | Date | undefined): number {

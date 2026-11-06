@@ -20,8 +20,10 @@ import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
 import {
   CaseClockText,
+  Fact,
   formatTime,
   humanize,
+  initials,
   PageHeader,
   QueryState,
   Section,
@@ -323,15 +325,6 @@ export default function DispatchPage() {
           </QueryState>
         </section>
       </div>
-    </div>
-  )
-}
-
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="text-[14.5px] font-medium tabular-nums">{children}</dd>
     </div>
   )
 }
@@ -1052,16 +1045,6 @@ function isSameDay(left: Date, right: Date): boolean {
 
 function isToday(date: Date): boolean {
   return isSameDay(date, new Date())
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
 }
 
 function objectRef(value: unknown): { objectTypeId: string; primaryId: string } | null {

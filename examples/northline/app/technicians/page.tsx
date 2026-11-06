@@ -7,7 +7,14 @@ import { Link } from "react-router-dom"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
-import { formatDateTime, humanize, PageHeader, QueryState, StatusBadge } from "../_components/ui"
+import {
+  formatDateTime,
+  humanize,
+  initials,
+  PageHeader,
+  QueryState,
+  StatusBadge,
+} from "../_components/ui"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(100)
 const workOrdersQuery = objects(WorkOrder)
@@ -269,14 +276,4 @@ function availabilityPriority(status: string): number {
   return { available: 30, assigned: 20, off_duty: 0 }[
     status as "available" | "assigned" | "off_duty"
   ]
-}
-
-function initials(value: string): string {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
 }

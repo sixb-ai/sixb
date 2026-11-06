@@ -167,6 +167,16 @@ export function PageHeader({
   )
 }
 
+/** A labelled value in a record's facts row; place it inside a `<dl>`. */
+export function Fact({ label, children }: PropsWithChildren<{ label: string }>) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="text-[12px] text-muted-foreground">{label}</dt>
+      <dd className="truncate text-[14.5px] font-medium tabular-nums">{children}</dd>
+    </div>
+  )
+}
+
 /** A white card on the page ground. Rows inside use `px-6` and a hairline between them. */
 export function Section({
   title,
@@ -316,6 +326,23 @@ function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
 
+/** A span of minutes as a contract states it: "45 min", "1.5 hr", "4 hr". */
+export function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`
+  const hours = minutes / 60
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`
+}
+
+/** Whole days from today to a date; negative once it has passed, infinity without one. */
+export function daysUntil(value: string | Date | undefined): number {
+  if (!value) return Number.POSITIVE_INFINITY
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(value)
+  target.setHours(0, 0, 0, 0)
+  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
+}
+
 export function formatMoney(value: number | undefined): string {
   return value === undefined
     ? "—"
@@ -437,4 +464,15 @@ function formatDuration(milliseconds: number): string {
   const hours = Math.round(minutes / 60)
   if (hours < 48) return `${hours}h`
   return `${Math.round(hours / 24)}d`
+}
+
+/** Up to two initials for an avatar: "Marcus Reed" becomes "MR". */
+export function initials(name: string | undefined): string {
+  return (name ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase()
 }

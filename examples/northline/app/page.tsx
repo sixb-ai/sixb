@@ -18,6 +18,7 @@ import {
   formatRelativeTime,
   formatTime,
   humanize,
+  initials,
   StatusBadge,
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
@@ -574,15 +575,6 @@ function Summary({ parts }: { parts: ReadonlyArray<ReactNode | null> }) {
       .
     </>
   )
-}
-
-function initials(name: string | undefined): string {
-  return (name ?? "")
-    .split(" ")
-    .map((part) => part[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
 }
 
 function isToday(value: string | Date | undefined): boolean {
