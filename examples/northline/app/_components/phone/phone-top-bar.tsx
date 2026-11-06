@@ -9,8 +9,8 @@ import {
   fallbackTitle,
   isConversationPath,
   isRootPath,
-  normalizePath,
   parentPath,
+  screenPath,
 } from "./phone-routes"
 
 /**
@@ -28,7 +28,7 @@ export function PhoneTopBar() {
 function TopBar() {
   const location = useLocation()
   const navigate = useNavigate()
-  const path = normalizePath(location.pathname)
+  const path = screenPath(location.pathname, location.search)
   const home = path === "/"
   const conversation = isConversationPath(path)
   const heading = usePageHeading(path)

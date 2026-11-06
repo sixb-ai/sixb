@@ -15,7 +15,7 @@ import {
   StatusBadge,
 } from "../_components/ui"
 import { equipmentIcon, equipmentIllustration } from "../_lib/equipment"
-import { caseDecision } from "../_lib/service-cases"
+import { caseDecision, useCasesWithFieldWorkDone } from "../_lib/service-cases"
 
 const allCases = objects(ServiceCase)
   .query()
@@ -38,6 +38,7 @@ type CaseRow = NonNullable<Awaited<ReturnType<typeof allCases.first>>>
 
 export default function ServiceCasesPage() {
   const query = useObjectsQuery(allCases)
+  const fieldWorkDone = useCasesWithFieldWorkDone()
   // The view lives in the URL so Home can link straight to one.
   const [params, setParams] = useSearchParams()
   const view = views.find(([id]) => id === params.get("view"))?.[0] ?? "open"
@@ -48,14 +49,17 @@ export default function ServiceCasesPage() {
   const counts = useMemo(
     () =>
       Object.fromEntries(
-        views.map(([id]) => [id, allRows.filter((row) => matchesView(row, id)).length])
+        views.map(([id]) => [
+          id,
+          allRows.filter((row) => matchesView(row, id, fieldWorkDone)).length,
+        ])
       ),
-    [allRows]
+    [allRows, fieldWorkDone]
   )
   const rows = useMemo(() => {
     const normalized = search.trim().toLowerCase()
     return allRows
-      .filter((item) => matchesView(item, view))
+      .filter((item) => matchesView(item, view, fieldWorkDone))
       .filter((item) => {
         if (!normalized) return true
         return [
@@ -68,7 +72,7 @@ export default function ServiceCasesPage() {
         ].some((value) => value?.toLowerCase().includes(normalized))
       })
       .sort((left, right) => casePriority(right) - casePriority(left))
-  }, [allRows, search, view])
+  }, [allRows, fieldWorkDone, search, view])
 
   return (
     <div>
@@ -182,11 +186,17 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
   )
 }
 
-function matchesView(serviceCase: CaseRow, view: View): boolean {
+function matchesView(
+  serviceCase: CaseRow,
+  view: View,
+  fieldWorkDone: ReadonlySet<string>
+): boolean {
   const status = serviceCase.properties.status ?? ""
   if (view === "all") return true
   if (["closed", "cancelled"].includes(status)) return false
-  if (view === "action") return caseDecision(status) !== undefined
+  if (view === "action") {
+    return caseDecision(status, fieldWorkDone.has(serviceCase.primaryId)) !== undefined
+  }
   if (view === "field") return ["dispatching", "in_service"].includes(status)
   if (view === "risk") return isCaseAtRisk(serviceCase.properties)
   return true

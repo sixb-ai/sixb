@@ -9,6 +9,7 @@ import { SearchField, SortSelect, ViewPills } from "../_components/list-controls
 import {
   calendarDate,
   daysUntil,
+  formatCoverageHours,
   formatMinutes,
   humanize,
   PageHeader,
@@ -193,7 +194,7 @@ function ContractListRow({ contract }: { contract: ContractRow }) {
         }
       />
       <Cell
-        primary={properties.coverageHours === "24_7" ? "24/7" : "Business hours"}
+        primary={formatCoverageHours(properties.coverageHours)}
         secondary={properties.includedLabor ? "Labor included" : "Labor excluded"}
       />
       <Cell

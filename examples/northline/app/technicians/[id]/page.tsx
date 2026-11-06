@@ -104,6 +104,15 @@ export default function TechnicianWorkspacePage() {
   const [finding, setFinding] = useState("")
   const [disposition, setDisposition] = useState<Disposition>("quote_required")
   const [workPerformed, setWorkPerformed] = useState("")
+  // What was typed belongs to one visit: opening another starts the form over, so a diagnosis is
+  // never recorded against the wrong visit.
+  const [formVisitId, setFormVisitId] = useState(visit?.primaryId)
+  if (formVisitId !== visit?.primaryId) {
+    setFormVisitId(visit?.primaryId)
+    setFinding("")
+    setDisposition("quote_required")
+    setWorkPerformed("")
+  }
 
   const startVisit = useActionRunMutation<{
     serviceCase: { objectTypeId: "ServiceCase"; primaryId: string }

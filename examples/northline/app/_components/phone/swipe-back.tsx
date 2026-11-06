@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { suppressNextNavigationMotion } from "./navigation-motion"
-import { isRootPath, parentPath } from "./phone-routes"
+import { isRootPath, parentPath, screenPath } from "./phone-routes"
 
 const EDGE = 24
 const PHONE = "(max-width: 767px)"
@@ -34,9 +34,9 @@ export function SwipeBack() {
     let dragging = false
 
     const back = () => {
-      const { key, pathname } = current.current
+      const { key, pathname, search } = current.current
       if (key !== "default") navigate(-1)
-      else navigate(parentPath(pathname), { replace: true })
+      else navigate(parentPath(screenPath(pathname, search)), { replace: true })
     }
 
     const settle = (element: HTMLElement, to: number, done?: () => void) => {
@@ -55,7 +55,7 @@ export function SwipeBack() {
     const onStart = (event: TouchEvent) => {
       const touch = event.touches[0]
       if (!phone.matches || event.touches.length !== 1 || touch.clientX > EDGE) return
-      if (isRootPath(current.current.pathname)) return
+      if (isRootPath(screenPath(current.current.pathname, current.current.search))) return
       if (
         document.querySelector(
           '[role="dialog"][data-state="open"], [data-vaul-drawer][data-state="open"]'

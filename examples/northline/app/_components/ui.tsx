@@ -345,6 +345,11 @@ export function formatMinutes(minutes: number): string {
   return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`
 }
 
+/** A contract's coverage hours: "24/7" or "Business hours". */
+export function formatCoverageHours(value: string | undefined): string {
+  return value === "24_7" ? "24/7" : "Business hours"
+}
+
 /** Whole days from today to a date; negative once it has passed, infinity without one. */
 export function daysUntil(value: string | Date | undefined): number {
   if (!value) return Number.POSITIVE_INFINITY
