@@ -280,6 +280,73 @@ if (!result.success) throw new Error((result.logs ?? []).join("\\n"))
   }, 90_000)
 })
 
+describe("custom app stylesheet URLs", () => {
+  const roots: string[] = []
+
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  })
+
+  // Builds a project whose `app/globals.css` is `css`, and prints the build result as JSON.
+  async function buildWithStylesheet(css: string) {
+    const root = await mkdtemp(join(tmpdir(), "sixb-app-css-url-"))
+    roots.push(root)
+    await mkdir(join(root, "app", "public", "fonts"), { recursive: true })
+    await linkFixtureDependencies(root)
+    await writeFile(join(root, "app", "public", "fonts", "font.woff2"), "font")
+    await writeFile(join(root, "app", "globals.css"), css)
+    await writeFile(
+      join(root, "app", "page.tsx"),
+      "export default function Page() { return <main>ok</main> }\n"
+    )
+
+    const buildScript = join(root, "build.ts")
+    await writeFile(
+      buildScript,
+      `import { createCustomApp } from ${JSON.stringify(join(packageRoot, "src", "createCustomApp.ts"))}
+
+const app = await createCustomApp({
+  rootDir: ${JSON.stringify(root)},
+  apiBaseUrl: "http://127.0.0.1:3000",
+  authEnabled: false,
+  builtInPages: false,
+})
+console.log(JSON.stringify(await app.build()))
+`
+    )
+    const build = await runBunScript(buildScript, root, "unused", 60_000)
+    expect(build.exitCode, build.stderr).toBe(0)
+    return { root, result: JSON.parse(build.stdout) as { success: boolean; logs?: string[] } }
+  }
+
+  // Reproduce: drop publicRootUrlPlugin from buildBrowserEntry and this fails on Bun's
+  // `Could not resolve: "/fonts/font.woff2"`.
+  test("keeps a root-relative font URL and serves the file from app/public", async () => {
+    const { root, result } = await buildWithStylesheet(
+      '@font-face { font-family: Brand; src: url("/fonts/font.woff2") format("woff2"); }\n' +
+        "body { font-family: Brand; }\n"
+    )
+    expect(result.success, result.logs?.join("\n")).toBe(true)
+
+    const outdir = join(root, ".sixb", "dist", "app")
+    const css = await Array.fromAsync(new Bun.Glob("*.css").scan({ cwd: outdir, absolute: true }))
+    expect(await readFile(css[0] as string, "utf-8")).toMatch(
+      /url\(["']?\/fonts\/font\.woff2["']?\)/
+    )
+    expect(await readFile(join(outdir, "fonts", "font.woff2"), "utf-8")).toBe("font")
+  }, 60_000)
+
+  // Reproduce: drop `throw: false` from buildBrowserEntry and the child dies on Bun's bare
+  // "Bundle failed", with no mention of the file.
+  test("reports which URL a failed build could not resolve", async () => {
+    const { result } = await buildWithStylesheet(
+      '@font-face { font-family: Brand; src: url("./missing.woff2"); }\n'
+    )
+    expect(result.success).toBe(false)
+    expect(result.logs?.join("\n")).toContain("missing.woff2")
+  }, 60_000)
+})
+
 async function linkFixtureDependencies(root: string): Promise<void> {
   const dependencies = new Map([
     ["react", join(packageRoot, "node_modules", "react")],
