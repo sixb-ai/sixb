@@ -4,6 +4,7 @@ import { type IngestPassInput, ingestPass } from "./ingest-pass"
 import { LakeChangeFeed } from "./lake-change-feed"
 import { type ProjectionsPassInput, projectionsPass } from "./projections-pass"
 import { RECOVERY_INTERVAL_MS } from "./recovery-pass"
+import { type RunsPassInput, runsPass } from "./runs-pass"
 import { type TriggersPassInput, triggersPass } from "./triggers-pass"
 
 type WithoutShared<T> = Omit<T, "projectId" | "feed" | "lakeStorage">
@@ -17,6 +18,8 @@ export interface RecoveryPassesInput {
   readonly triggers?: WithoutShared<TriggersPassInput>
   /** When the project can ingest. */
   readonly ingest?: Omit<IngestPassInput, "projectId">
+  /** When the project has runs a worker can lose. */
+  readonly runs?: Omit<RunsPassInput, "projectId">
 }
 
 /**
@@ -31,5 +34,6 @@ export function recoveryPasses(input: RecoveryPassesInput): readonly Maintenance
     input.projections && projectionsPass({ ...input.projections, projectId, lakeStorage, feed }),
     input.triggers && triggersPass({ ...input.triggers, projectId, lakeStorage, feed }),
     input.ingest && ingestPass({ ...input.ingest, projectId }),
+    input.runs && runsPass({ ...input.runs, projectId }),
   ].filter((pass) => pass !== undefined)
 }
