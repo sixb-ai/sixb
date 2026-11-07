@@ -55,6 +55,35 @@ describe("SixbServer start", () => {
     }
   })
 
+  // Reproduce: call `startOntologyMaintenance()` from `SixbServer.start()` again; the spy sees it.
+  test("leaves recovering undelivered events to the orchestrator", async () => {
+    const host = new SixbHost({
+      id: "test-project",
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+    const maintenance = spyOn(host, "startOntologyMaintenance")
+    const server = new SixbServer({
+      host,
+      hostname: "127.0.0.1",
+      port: 0,
+      quiet: true,
+      browser: createTestBrowserPolicy(),
+    })
+
+    await server.start()
+
+    try {
+      expect(maintenance).not.toHaveBeenCalled()
+    } finally {
+      await server.stop()
+    }
+  })
+
   // Reproduce: remove `checkPipelineMarkings` from `SixbServer.start()`; the server listens.
   test("refuses to start when a SQL step gives a projected column undeclared markings", async () => {
     const financial = defineMarking("financial")

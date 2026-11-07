@@ -43,7 +43,7 @@ separate cached check and retries failures with a cooldown.
 
 ## Retention tables
 
-The API role purges expired rows every 60 seconds, in the same maintenance pass that
+The orchestrator purges expired rows every 60 seconds, in the same maintenance pass that
 catches the outbox up.
 
 | Table                                           | Purged                                                         | Default |

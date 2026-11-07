@@ -44,7 +44,10 @@ interface OntologyMaintenanceDependencies {
   readonly onError?: (error: unknown) => void
 }
 
-/** API-owned catch-up, retention, and operational snapshot lifecycle. */
+/**
+ * Catch-up, retention, and operational snapshot lifecycle, hosted by the orchestrator. The process
+ * that commits delivers its own events right away; a pass delivers what it left behind.
+ */
 export class OntologyMaintenance {
   private readonly projectId: string
   private readonly storage: Storage
@@ -134,8 +137,14 @@ export class OntologyMaintenance {
     return structuredClone(this.snapshot)
   }
 
-  getOperationalStatus(): OntologyOperationalStatus {
-    const snapshot = this.getSnapshot()
+  /**
+   * Reads the outbox as storage holds it, not as the last pass saw it: the API answers this and
+   * runs no pass, and events left undelivered are what shows that nothing recovers them.
+   */
+  async getOperationalStatus(): Promise<OntologyOperationalStatus> {
+    const outbox = await this.storage.ontology.outbox.summarize({ projectId: this.projectId })
+    const snapshot = { ...this.getSnapshot(), outbox }
+
     const lastActivityAt = latestTimestamp(snapshot.lastStartedAt, snapshot.lastCompletedAt)
     const overdue =
       lastActivityAt !== null &&
@@ -342,7 +351,7 @@ export class OntologyMaintenance {
     try {
       await uploads.abort(session.id)
     } catch (error) {
-      // Another API instance's pass retired it first.
+      // Another pass, or the client, aborted it first.
       if (!(error instanceof FileUploadSessionError && error.reason === "already_aborted")) {
         throw error
       }

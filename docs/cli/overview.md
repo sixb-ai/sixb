@@ -152,7 +152,7 @@ Each command runs one service. See [Deployment](../deployment/overview.md) for t
 | --- | --- |
 | `sixb api` | HTTP API, WebSockets, and OpenAPI docs. |
 | `sixb app` | The app. |
-| `sixb orchestrator` | Dispatch event-triggered work. |
+| `sixb orchestrator` | Dispatch event-triggered work, and deliver events whose first delivery failed. |
 | `sixb scheduler` | Trigger cron schedules. |
 | `sixb rules` | Evaluate rules. |
 | `sixb worker <type>` | Execute one kind of background job. |

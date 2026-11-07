@@ -33,11 +33,6 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
 
     runtime = await startOrchestratorRuntime(sixb)
 
-    const warnings = [...runtime.warnings]
-    if (runtime.orchestratorWorker === null) {
-      warnings.push("No orchestrator routes are registered; the orchestrator process is idle.")
-    }
-
     app.stop()
     await renderStatic(
       roleView({
@@ -45,7 +40,7 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
         name: sixb.id,
         items: [{ label: "role", value: "event-to-queue dispatcher" }],
         storage: migration.summary,
-        warnings,
+        warnings: runtime.warnings,
       })
     )
 

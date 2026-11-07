@@ -17,8 +17,8 @@ runtime telemetry       -> telemetry.append (origin: telemetry/runtime)
 
 Committed facts are published from the transactional outbox after the commit resolves.
 `OntologyOutboxDispatcher` owns that protocol: ingresses call `notify()` for prompt, non-blocking
-in-process delivery; `OntologyMaintenance` hosts recovery catch-up. Publication is
-best effort — delivery may lag, but a committed fact is never lost.
+in-process delivery; `OntologyMaintenance`, hosted by the orchestrator, catches up the rest.
+Publication is best effort — delivery may lag, but a committed fact is never lost.
 
 ## Common commit pipeline
 

@@ -428,14 +428,18 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     return this.webhookRegistry.getById(connectorId, webhookId)
   }
 
-  /** Start the API-owned recovery and retention loop. Embedded runtimes opt in explicitly. */
+  /** Start the recovery and retention loop. The orchestrator hosts it; embedded runtimes opt in. */
   startOntologyMaintenance(): Promise<OntologyMaintenanceHandle> {
-    this.storageReadiness.startSchemaValidation()
     return this.ontologyMaintenance.start()
   }
 
-  getOntologyOperationalStatus(): OntologyOperationalStatus {
+  getOntologyOperationalStatus(): Promise<OntologyOperationalStatus> {
     return this.ontologyMaintenance.getOperationalStatus()
+  }
+
+  /** Start the schema check behind `checkReadiness()`, so the first probe need not wait for it. */
+  prepareReadiness(): void {
+    this.storageReadiness.startSchemaValidation()
   }
 
   async checkReadiness(): Promise<SixbReadiness> {

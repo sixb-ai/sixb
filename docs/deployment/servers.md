@@ -83,7 +83,7 @@ export default defineDeploy({
 })
 ```
 
-The scheduler and rules processes wait idly when the project has no schedules or rules; turn them off to save memory.
+The scheduler and rules processes wait idly when the project has no schedules or rules; turn them off to save memory. Keep the orchestrator on: it also delivers events whose first delivery failed.
 
 | Service | Settings |
 | --- | --- |

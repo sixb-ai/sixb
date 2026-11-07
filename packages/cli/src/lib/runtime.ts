@@ -212,10 +212,15 @@ export async function startOrchestratorRuntime(
     await orchestratorWorker.start()
   }
 
+  // Delivers what a committing process left in the outbox, and purges expired records. Every
+  // project commits events, so it runs with or without routes.
+  const maintenance = await sixb.startOntologyMaintenance()
+
   return {
     orchestratorWorker,
     warnings,
     async stop() {
+      await stopQuietly(() => maintenance.stop())
       await stopQuietly(() => orchestratorWorker?.stop() ?? Promise.resolve())
     },
   }
@@ -230,7 +235,7 @@ export async function startOrchestratorRuntime(
  *   3. PipelineWorker (claims from queues)
  *   4. WorkflowWorker (claims from queues)
  *   5. SyncWorker (claims from queues)
- *   6. Orchestrator (subscribes to events and enqueues jobs)
+ *   6. Orchestrator (subscribes to events, enqueues jobs, recovers undelivered events)
  *   7. Scheduler (emits schedule.triggered)
  *   8. API server, when this process serves it
  *   9. AgentWorker (claims from queues; its turns call the API)

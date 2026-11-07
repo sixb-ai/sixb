@@ -79,6 +79,15 @@ history:
 The live event path, not the interval, sets normal projection latency. The interval bounds only
 how long a lost event or publication waits for repair.
 
+## Ontology maintenance
+
+The process that commits an ontology change delivers its outbox events right away. The orchestrator
+process (`startOrchestratorRuntime` in the CLI) hosts `OntologyMaintenance` for the rest, whether or
+not any route is registered: every 60 seconds it delivers the outbox rows left undelivered by a
+crash or a failed publish, dispatches pending vector indexing, and purges expired outbox rows,
+superseded sources, abandoned uploads, and expired grants. Outbox rows are claimed under a lease,
+so passes in two processes never claim the same row together.
+
 ## Usage (co-hosted in `sixb dev`)
 
 When `cohostWorkers` is enabled, `sixb dev` automatically compiles routes from registered syncs,

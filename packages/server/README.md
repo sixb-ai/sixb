@@ -82,12 +82,12 @@ See [OAuth connection flows](../../docs/connectors/authentication.md#connect-an-
 Upload sessions live in `storage.fileUploadSessions`, so they survive restarts and span replicas
 with `@sixb/pg` and `@sixb/sqlite`. The session routes answer `501` when the storage has no such
 store; single-request `POST /api/files` does not use it. A session that expires unfinished while
-holding a provider upload is aborted by the API's maintenance pass, then deleted.
+holding a provider upload is aborted by the orchestrator's maintenance pass, then deleted.
 
 Download URLs live in `storage.fileDownloadGrants`, which stores each URL's token only as a hash.
 They name `browser.publicOrigin`, which the server records on the host for that purpose. The
-maintenance pass deletes a grant a week after it expires; until then it records which execution
-exposed which file.
+orchestrator's maintenance pass deletes a grant a week after it expires; until then it records
+which execution exposed which file.
 
 ### WebSocket
 
