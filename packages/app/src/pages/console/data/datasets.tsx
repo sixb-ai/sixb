@@ -55,6 +55,7 @@ import {
   useFormat,
   useNumbers,
 } from "../../section-ui"
+import { MetaSkeleton, SkeletonBlock, TrailingSkeleton } from "../skeletons"
 import { useDatasetLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
 import { DatasetProducerLabel, DatasetVersionInputs } from "./producer"
@@ -83,7 +84,11 @@ export function ConsoleDatasetsPage() {
     >
       <Panel>
         {datasetsQuery.isPending ? (
-          <PanelSkeleton rows={4} />
+          <PanelSkeleton
+            rows={4}
+            interactive
+            trailing={<TrailingSkeleton pill={false} chevron />}
+          />
         ) : datasetsQuery.isError ? (
           <PanelEmpty
             tone="error"
@@ -226,6 +231,30 @@ function DatasetDetail({ datasetId }: { readonly datasetId: string }) {
         id={datasetId}
         icon={Database}
         error={datasetQuery.error}
+        workspace={
+          <>
+            <WorkspaceHeader
+              back={back}
+              icon={<IconTile icon={Database} />}
+              title={<span className="font-mono">{datasetId}</span>}
+              meta={<MetaSkeleton pill={false} />}
+              actions={
+                <>
+                  <SkeletonBlock className="h-8 w-36 sm:w-44" />
+                  <SkeletonBlock className="h-8 w-8 sm:w-20" />
+                </>
+              }
+            />
+            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3 md:px-4">
+              <SkeletonBlock className="h-8 w-full max-w-72" />
+              <SkeletonBlock className="ml-auto h-8 w-8 sm:w-24" />
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <DataTable columns={[]} data={[]} isLoading />
+            </div>
+            <footer className="h-10 shrink-0 border-t border-border" />
+          </>
+        }
       />
     )
   }

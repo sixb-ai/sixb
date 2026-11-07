@@ -31,7 +31,8 @@ import { type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useS
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { objectHref } from "../../routes"
 import { SectionPage } from "../../section-page"
-import { PanelEmpty, PanelSkeleton, useLoadFailure } from "../../section-ui"
+import { PanelEmpty, SkeletonText, useLoadFailure } from "../../section-ui"
+import { SkeletonBlock } from "../skeletons"
 import { CollectionSearchInput } from "./components/collection-toolbar"
 import { LetterAvatar } from "./components/common"
 import { ObjectFilterPopover } from "./components/object-filter-popover"
@@ -502,9 +503,13 @@ function ObjectsWorkbench({
 
       <div className="mt-6 space-y-6">
         {pageLoading ? (
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <PanelSkeleton rows={4} />
-          </div>
+          !selectedTypeMode ? (
+            <ObjectsOverviewSkeleton />
+          ) : viewStyle === "table" ? (
+            <TableViewSkeleton />
+          ) : (
+            <ObjectCardSectionSkeleton objectTypeId={classFilter} />
+          )
         ) : !queryMode && loadError ? (
           <ObjectsFailure error={loadError} />
         ) : queryMode && queriedObjects.isError ? null : !hasResults && searching ? (
@@ -591,7 +596,7 @@ function ObjectsFailure({ error }: { readonly error: unknown }) {
   )
 }
 
-function SectionHeading({ title, description }: { title: string; description?: string }) {
+function SectionHeading({ title, description }: { title: string; description?: ReactNode }) {
   return (
     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
       <h2 className="text-base font-semibold tracking-[-0.02em] text-foreground">{title}</h2>
@@ -616,7 +621,7 @@ function ObjectsOverview({
       {recentObjects.length > 0 ? (
         <section className="space-y-3">
           <SectionHeading title="Recently updated" />
-          <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+          <div className={recentGridClass}>
             {recentObjects.map((object) => {
               const label = object.name || humanizeIdentifier(object.id)
               return (
@@ -624,7 +629,10 @@ function ObjectsOverview({
                   key={object.id}
                   type="button"
                   onClick={() => onSelectObject(object.id)}
-                  className="group flex min-h-24 min-w-0 flex-col items-start bg-card p-4 text-left transition-colors hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className={cn(
+                    recentItemClass,
+                    "group transition-colors hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  )}
                 >
                   <div className="flex w-full min-w-0 items-center gap-2">
                     <ObjectIcon
@@ -649,13 +657,76 @@ function ObjectsOverview({
           title="Browse by type"
           description={`${formatCount(sections.length)} populated object types.`}
         />
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className={typeGridClass}>
           {sections.map((section) => (
             <ObjectTypeSummaryCard
               key={section.objectTypeId}
               section={section}
               onClick={() => onSelectType(section.objectTypeId)}
             />
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+const recentGridClass =
+  "grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-4"
+const recentItemClass = "flex min-h-24 min-w-0 flex-col items-start bg-card p-4 text-left"
+const typeGridClass = "grid gap-3 md:grid-cols-2 xl:grid-cols-3"
+const typeCardClass = "flex min-h-40 flex-col rounded-xl border border-border bg-card p-4 text-left"
+
+/** The overview while its objects load, shaped like `ObjectsOverview`. */
+function ObjectsOverviewSkeleton() {
+  return (
+    <div aria-hidden className="space-y-8">
+      <section className="space-y-3">
+        <SectionHeading title="Recently updated" />
+        <div className={recentGridClass}>
+          {Array.from({ length: 8 }, (_, index) => (
+            <div key={index} className={recentItemClass}>
+              <div className="flex w-full min-w-0 items-center gap-2">
+                <SkeletonBlock className="size-3.5 rounded-sm" />
+                <span className="text-sm">
+                  <SkeletonText className="h-3 w-28" />
+                </span>
+              </div>
+              <p className="mt-auto pt-3 text-[11px]">
+                <SkeletonText className="h-2 w-24 bg-muted/70" />
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <SectionHeading
+          title="Browse by type"
+          description={<SkeletonText className="h-2 w-36" />}
+        />
+        <div className={typeGridClass}>
+          {Array.from({ length: 3 }, (_, index) => (
+            <div key={index} className={typeCardClass}>
+              <div className="flex w-full items-start gap-3">
+                <SkeletonBlock className="size-5" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm">
+                    <SkeletonText className="h-3 w-28" />
+                  </h3>
+                  <p className="mt-0.5 text-xs">
+                    <SkeletonText className="h-2 w-16 bg-muted/70" />
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 w-full space-y-1.5 border-t border-border/70 pt-3">
+                {["w-32", "w-24", "w-28"].map((width) => (
+                  <p key={width} className="text-xs">
+                    <SkeletonText className={cn("h-2 bg-muted/70", width)} />
+                  </p>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </section>
@@ -675,7 +746,10 @@ function ObjectTypeSummaryCard({
     <button
       type="button"
       onClick={onClick}
-      className="group flex min-h-40 flex-col rounded-xl border border-border bg-card p-4 text-left transition-[border-color,background-color,transform] hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        typeCardClass,
+        "group transition-[border-color,background-color,transform] hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      )}
     >
       <div className="flex w-full items-start gap-3">
         <LetterAvatar label={label} />
@@ -698,6 +772,37 @@ function ObjectTypeSummaryCard({
   )
 }
 
+const cardSectionHeadingClass =
+  "sticky top-0 z-10 -mx-1 flex items-baseline gap-2 bg-background/95 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+
+/** One type's cards while its objects load, shaped like `ObjectCardSection`. */
+function ObjectCardSectionSkeleton({ objectTypeId }: { objectTypeId: string | null }) {
+  const label = objectTypeId ? humanizeIdentifier(objectTypeId) : ""
+  return (
+    <section aria-hidden className="space-y-2">
+      <div className={cardSectionHeadingClass}>
+        <LetterAvatar label={label} />
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
+          {label}
+        </h3>
+        <span className="text-[11px]">
+          <SkeletonText className="h-2 w-10" />
+        </span>
+      </div>
+      <CollectionCardGrid>
+        {Array.from({ length: 6 }, (_, index) => (
+          <Card key={index} className="flex-row items-center gap-3 px-3 py-2.5">
+            <SkeletonBlock className="size-7" />
+            <p className="min-w-0 flex-1 text-sm">
+              <SkeletonText className="h-3 w-32" />
+            </p>
+          </Card>
+        ))}
+      </CollectionCardGrid>
+    </section>
+  )
+}
+
 function ObjectCardSection({
   objectTypeId,
   objects,
@@ -715,7 +820,7 @@ function ObjectCardSection({
 
   return (
     <section className="space-y-2">
-      <div className="sticky top-0 z-10 -mx-1 flex items-baseline gap-2 bg-background/95 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <div className={cardSectionHeadingClass}>
         <LetterAvatar label={label} />
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
           {label}
@@ -749,6 +854,57 @@ function ObjectCardItem({ object, onSelect }: { object: ObjectSummary; onSelect:
   )
 }
 
+function ObjectTableHeader() {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead>Name</TableHead>
+        <TableHead className="hidden sm:table-cell">Class</TableHead>
+        <TableHead className="hidden sm:table-cell">Location</TableHead>
+        <TableHead className="hidden md:table-cell">Updated</TableHead>
+        <TableHead className="hidden lg:table-cell">Key Signal</TableHead>
+      </TableRow>
+    </TableHeader>
+  )
+}
+
+/** The table while its objects load, row for row the shape of `TableView`. */
+function TableViewSkeleton() {
+  return (
+    <Card aria-hidden className="overflow-hidden p-0">
+      <Table>
+        <ObjectTableHeader />
+        <TableBody>
+          {Array.from({ length: 8 }, (_, index) => (
+            <TableRow key={index}>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <SkeletonBlock className="size-3.5 rounded-sm" />
+                  <span className="text-sm">
+                    <SkeletonText className="h-3 w-32" />
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell className="hidden text-xs sm:table-cell">
+                <SkeletonText className="h-2 w-16" />
+              </TableCell>
+              <TableCell className="hidden text-xs sm:table-cell">
+                <SkeletonText className="h-2 w-24" />
+              </TableCell>
+              <TableCell className="hidden text-xs md:table-cell">
+                <SkeletonText className="h-2 w-14" />
+              </TableCell>
+              <TableCell className="hidden text-xs lg:table-cell">
+                <SkeletonText className="h-2 w-20" />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
+  )
+}
+
 function TableView({
   objects,
   updatesByObject,
@@ -761,15 +917,7 @@ function TableView({
   return (
     <Card className="overflow-hidden p-0">
       <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead className="hidden sm:table-cell">Class</TableHead>
-            <TableHead className="hidden sm:table-cell">Location</TableHead>
-            <TableHead className="hidden md:table-cell">Updated</TableHead>
-            <TableHead className="hidden lg:table-cell">Key Signal</TableHead>
-          </TableRow>
-        </TableHeader>
+        <ObjectTableHeader />
         <TableBody>
           {objects.map((object) => {
             const updates = updatesByObject.get(object.id) ?? []

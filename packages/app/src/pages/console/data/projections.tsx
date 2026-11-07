@@ -34,6 +34,7 @@ import {
   useNumbers,
   useRunStatusLabels,
 } from "../../section-ui"
+import { MetaSkeleton, SkeletonBlock, StatsSkeleton, TrailingSkeleton } from "../skeletons"
 import { useDataMessages } from "./messages"
 
 type Projection =
@@ -109,11 +110,15 @@ export function ConsoleProjectionsPage() {
     >
       <Panel
         toolbar={
-          all.length > 0 ? <ToolbarTabs value={tab} onChange={setTab} tabs={tabs} /> : undefined
+          projectionsQuery.isPending ? (
+            <SkeletonBlock className="h-7 w-56" />
+          ) : all.length > 0 ? (
+            <ToolbarTabs value={tab} onChange={setTab} tabs={tabs} />
+          ) : undefined
         }
       >
         {projectionsQuery.isPending ? (
-          <PanelSkeleton rows={3} />
+          <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
         ) : projectionsQuery.isError ? (
           <PanelEmpty
             tone="error"
@@ -216,6 +221,20 @@ export function ConsoleProjectionPage() {
         id={projectionId}
         icon={Layers}
         error={projectionQuery.error}
+        loading={{
+          icon: <SkeletonBlock className="size-11 rounded-xl" />,
+          meta: <MetaSkeleton />,
+          children: (
+            <StatsSkeleton
+              labels={[
+                messages.common.lastRun,
+                messages.common.started,
+                messages.common.took,
+                messages.projections.rowsRead,
+              ]}
+            />
+          ),
+        }}
       />
     )
   }
@@ -304,7 +323,7 @@ export function ConsoleProjectionPage() {
       <PageSection title={messages.common.runs} description={messages.common.runsDescription}>
         <Panel>
           {runsQuery.isPending ? (
-            <PanelSkeleton rows={3} />
+            <PanelSkeleton rows={3} leading="none" trailing={<TrailingSkeleton />} />
           ) : runsQuery.isError ? (
             isUnrecorded(runsQuery.error) ? (
               <UnrecordedHistory what={messages.projections.runWhat} />

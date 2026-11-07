@@ -43,6 +43,7 @@ import { objectHref, objectTypeHref } from "../../routes"
 import { PageFrame } from "../../section-page"
 import { Panel, PanelEmpty, useLoadFailure } from "../../section-ui"
 import { fieldRecordSchema, objectFileLinks, useValueTypes, valueSchema } from "../../values"
+import { MetaSkeleton } from "../skeletons"
 import { ActionButton } from "./components/action-button"
 import { LetterAvatar, LoadingState, Section } from "./components/common"
 import { TelemetryGrid } from "./components/telemetry-grid"
@@ -543,6 +544,7 @@ export function ObjectPage() {
       <PageFrame
         icon={<LetterAvatar label={params.primaryId ?? "?"} size="lg" />}
         title={objectQuery.error ? failure.title : (params.primaryId ?? "")}
+        meta={objectQuery.error ? undefined : <MetaSkeleton pill={false} />}
       >
         {objectQuery.error ? (
           <Panel>

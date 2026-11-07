@@ -249,6 +249,10 @@ export function ConsoleIndexPage() {
 /**
  * A detail page while its subject loads, or once it could not be: "Not found" for a 404 alone, so
  * a refusal or an outage says what it is.
+ *
+ * While it loads it takes the loaded page's shape, so nothing moves when the subject arrives:
+ * `loading` gives the header's mark, facts and actions and the body's placeholders, and a page
+ * that fills the frame edge to edge passes its whole loading view as `workspace`.
  */
 export function DetailFallback({
   section,
@@ -258,6 +262,8 @@ export function DetailFallback({
   id,
   icon,
   error,
+  loading,
+  workspace,
 }: {
   readonly section: AppSectionId
   readonly page: string
@@ -268,22 +274,46 @@ export function DetailFallback({
   readonly icon: ComponentType<{ readonly className?: string }>
   /** `null` while it loads. */
   readonly error: unknown
+  /** Without `children`, the body is two placeholder rows. */
+  readonly loading?: Pick<SectionPageProps, "icon" | "meta" | "actions" | "width"> & {
+    readonly children?: ReactNode
+  }
+  /** The loading view of a `SectionWorkspace` page, drawn in the workspace's frame. */
+  readonly workspace?: ReactNode
 }) {
   const failure = useLoadFailure(error, { id })
-  return (
-    <SectionPage section={section} page={page} back={back} title={error ? failure.title : name}>
-      <Panel>
-        {error ? (
+
+  if (error) {
+    return (
+      <SectionPage section={section} page={page} back={back} title={failure.title}>
+        <Panel>
           <PanelEmpty
             tone="error"
             icon={icon}
             title={failure.title}
             description={failure.description}
           />
-        ) : (
+        </Panel>
+      </SectionPage>
+    )
+  }
+
+  if (workspace) {
+    return (
+      <SectionWorkspace section={section} page={page}>
+        {workspace}
+      </SectionWorkspace>
+    )
+  }
+
+  const { children, ...frame } = loading ?? {}
+  return (
+    <SectionPage section={section} page={page} back={back} title={name} {...frame}>
+      {children ?? (
+        <Panel>
           <PanelSkeleton rows={2} />
-        )}
-      </Panel>
+        </Panel>
+      )}
     </SectionPage>
   )
 }

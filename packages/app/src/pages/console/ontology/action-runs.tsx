@@ -21,12 +21,14 @@ import {
   PanelRow,
   PanelSkeleton,
   RunStatusPill,
+  SkeletonText,
   UnrecordedHistory,
   useFormat,
   useLoadFailure,
   useNumbers,
   useRunStatusLabels,
 } from "../../section-ui"
+import { TrailingSkeleton } from "../skeletons"
 import { humanizeIdentifier } from "./lib/labels"
 
 type ActionRun = ListActionRunsResponse["runs"][number]
@@ -141,7 +143,11 @@ export function ActionRuns({
         </div>
       }
       footer={
-        runs.length > 0 && total > 0 ? (
+        query.isPending ? (
+          <span className="tabular-nums">
+            <SkeletonText className="w-16" />
+          </span>
+        ) : runs.length > 0 && total > 0 ? (
           <div className="flex items-center justify-between gap-3">
             <span className="tabular-nums">
               {query.isError ? (
@@ -172,7 +178,7 @@ export function ActionRuns({
       }
     >
       {query.isPending ? (
-        <PanelSkeleton rows={4} />
+        <PanelSkeleton rows={6} interactive trailing={<TrailingSkeleton chevron />} />
       ) : query.isError && runs.length === 0 ? (
         isUnrecorded(query.error) ? (
           <UnrecordedHistory what="Action runs" />

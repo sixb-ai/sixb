@@ -25,10 +25,11 @@ import { DetailFallback, SectionPage } from "../../section-page"
 import {
   isUnrecorded,
   PanelEmpty,
-  PanelSkeleton,
+  SkeletonText,
   UnrecordedHistory,
   useLoadFailure,
 } from "../../section-ui"
+import { CountSkeleton, MetaSkeleton, SkeletonBlock } from "../skeletons"
 import { CollectionToolbar } from "./components/collection-toolbar"
 import { useRuleLiveUpdates } from "./hooks/rule-live-updates"
 import { formatValue } from "./lib/format-value"
@@ -305,6 +306,75 @@ function RuleListItem({
   )
 }
 
+/** A rule's card while the rules load: its mark, name, id and predicate. */
+function RuleListItemSkeleton() {
+  return (
+    <Card aria-hidden className="flex-row items-center gap-3 px-3 py-2.5">
+      <SkeletonBlock className="size-8 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm">
+          <SkeletonText className="h-3 w-40" />
+        </p>
+        <p className="mt-0.5 text-xs">
+          <SkeletonText className="h-2 w-28 bg-muted/70" />
+        </p>
+        <p className="mt-1 text-xs">
+          <SkeletonText className="h-2 w-56 bg-muted/70" />
+        </p>
+      </div>
+    </Card>
+  )
+}
+
+function RuleTableHeader() {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead>Rule</TableHead>
+        <TableHead className="hidden sm:table-cell">Subject</TableHead>
+        <TableHead className="hidden md:table-cell">Predicate</TableHead>
+        <TableHead>Active</TableHead>
+        <TableHead className="hidden text-right lg:table-cell">Dependencies</TableHead>
+      </TableRow>
+    </TableHeader>
+  )
+}
+
+/** The rules table while the rules load, row for row the shape of `RuleTableView`. */
+function RuleTableSkeleton() {
+  return (
+    <Card aria-hidden className="overflow-hidden p-0">
+      <Table>
+        <RuleTableHeader />
+        <TableBody>
+          {Array.from({ length: 5 }, (_, index) => (
+            <TableRow key={index}>
+              <TableCell className="max-w-[260px]">
+                <p className="text-sm">
+                  <SkeletonText className="h-3 w-36" />
+                </p>
+                <p className="mt-0.5 text-xs">
+                  <SkeletonText className="h-2 w-24 bg-muted/70" />
+                </p>
+              </TableCell>
+              <TableCell className="hidden text-xs sm:table-cell">
+                <SkeletonText className="h-2 w-20" />
+              </TableCell>
+              <TableCell className="hidden text-xs md:table-cell">
+                <SkeletonText className="h-2 w-48" />
+              </TableCell>
+              <TableCell />
+              <TableCell className="hidden text-right text-sm lg:table-cell">
+                <SkeletonText className="w-4" />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
+  )
+}
+
 function RuleTableView({
   rules,
   activeCount,
@@ -317,15 +387,7 @@ function RuleTableView({
   return (
     <Card className="overflow-hidden p-0">
       <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Rule</TableHead>
-            <TableHead className="hidden sm:table-cell">Subject</TableHead>
-            <TableHead className="hidden md:table-cell">Predicate</TableHead>
-            <TableHead>Active</TableHead>
-            <TableHead className="hidden text-right lg:table-cell">Dependencies</TableHead>
-          </TableRow>
-        </TableHeader>
+        <RuleTableHeader />
         <TableBody>
           {rules.map((rule) => {
             return (
@@ -540,6 +602,56 @@ function RuleStatesList({
   )
 }
 
+/** A rule's active states while they load, shaped like `RuleStatesList` at each width. */
+function RuleStatesSkeleton() {
+  const rows = Array.from({ length: 3 }, (_, index) => index)
+  return (
+    <div aria-hidden>
+      <div className="space-y-2 md:hidden">
+        {rows.map((index) => (
+          <div key={index} className="rounded-md border border-border p-3">
+            <div className="text-xs">
+              <SkeletonText className="h-2 w-32" />
+            </div>
+            <p className="mt-2 text-xs">
+              <SkeletonText className="h-2 w-24 bg-muted/70" />
+            </p>
+          </div>
+        ))}
+      </div>
+      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+        <table className="w-full table-fixed text-left text-sm">
+          <colgroup>
+            <col className="w-auto" />
+            <col className="w-44" />
+            <col className="w-10" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-border bg-muted text-xs text-muted-foreground">
+              <th className="py-2 pl-4 pr-3 font-medium">Object</th>
+              <th className="px-3 py-2 font-medium">Triggered</th>
+              <th className="py-2 pl-3 pr-4 font-medium" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/50">
+            {rows.map((index) => (
+              <tr key={index}>
+                <td className="py-2.5 pl-4 pr-3 text-xs">
+                  <SkeletonText className="h-2 w-40" />
+                </td>
+                <td className="px-3 py-2.5 text-xs">
+                  <SkeletonText className="h-2 w-20 bg-muted/70" />
+                </td>
+                <td className="py-2.5 pl-3 pr-4" />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function RulesContent({
   rules,
   filteredRules,
@@ -645,20 +757,18 @@ export function ConsoleRulesPage() {
       width="wide"
       title="Rules"
       meta={
-        rulesQuery.data ? (
+        rulesQuery.isPending ? (
+          <CountSkeleton />
+        ) : rulesQuery.data ? (
           <span>{`${rules.length} rule${rules.length === 1 ? "" : "s"}`}</span>
         ) : undefined
       }
     >
-      {rulesQuery.isPending ? (
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
-          <PanelSkeleton rows={4} />
-        </div>
-      ) : rulesQuery.isError ? (
+      {rulesQuery.isError ? (
         <LoadFailure icon={ListChecks} error={rulesQuery.error} />
       ) : (
         <div className="-mt-4">
-          {rules.length > 0 ? (
+          {rulesQuery.isPending || rules.length > 0 ? (
             <CollectionToolbar
               search={{
                 value: searchQuery,
@@ -678,13 +788,25 @@ export function ConsoleRulesPage() {
             />
           ) : null}
           <div className="mt-2">
-            <RulesContent
-              rules={rules}
-              filteredRules={filteredRules}
-              viewStyle={viewStyle}
-              activeCount={activeCount}
-              onSelectRule={handleSelectRule}
-            />
+            {rulesQuery.isPending ? (
+              viewStyle === "table" ? (
+                <RuleTableSkeleton />
+              ) : (
+                <CollectionCardGrid>
+                  {Array.from({ length: 4 }, (_, index) => (
+                    <RuleListItemSkeleton key={index} />
+                  ))}
+                </CollectionCardGrid>
+              )
+            ) : (
+              <RulesContent
+                rules={rules}
+                filteredRules={filteredRules}
+                viewStyle={viewStyle}
+                activeCount={activeCount}
+                onSelectRule={handleSelectRule}
+              />
+            )}
           </div>
         </div>
       )}
@@ -731,6 +853,34 @@ export function ConsoleRulePage() {
         id={decodedRuleId}
         icon={ListChecks}
         error={ruleQuery.error}
+        loading={{
+          meta: <MetaSkeleton pill={false} />,
+          children: (
+            <>
+              <section aria-hidden className="space-y-3">
+                <div className="space-y-1">
+                  <h2 className="text-sm font-semibold tracking-normal text-foreground">
+                    Definition
+                  </h2>
+                  <p className="text-xs">
+                    <SkeletonText className="h-2 w-56" />
+                  </p>
+                </div>
+                <div className="space-y-2 rounded-xl bg-muted px-5 py-4 sm:px-6 sm:py-5">
+                  <p className="text-sm">
+                    <SkeletonText className="w-48 bg-foreground/10" />
+                  </p>
+                  <p className="text-sm">
+                    <SkeletonText className="w-36 bg-foreground/10" />
+                  </p>
+                </div>
+              </section>
+              <ActiveStatesSection>
+                <RuleStatesSkeleton />
+              </ActiveStatesSection>
+            </>
+          ),
+        }}
       />
     )
   }
@@ -779,12 +929,9 @@ export function ConsoleRulePage() {
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold tracking-normal text-foreground">Active states</h2>
+      <ActiveStatesSection>
         {statesQuery.isPending ? (
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <PanelSkeleton rows={3} />
-          </div>
+          <RuleStatesSkeleton />
         ) : isUnrecorded(statesQuery.error) ? (
           <UnrecordedHistory what="Rule states" />
         ) : statesQuery.isError ? (
@@ -792,8 +939,17 @@ export function ConsoleRulePage() {
         ) : (
           <RuleStatesList states={states} onSelectObject={handleSelectObject} />
         )}
-      </section>
+      </ActiveStatesSection>
     </SectionPage>
+  )
+}
+
+function ActiveStatesSection({ children }: { readonly children: React.ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold tracking-normal text-foreground">Active states</h2>
+      {children}
+    </section>
   )
 }
 

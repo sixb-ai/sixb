@@ -25,6 +25,8 @@ import { Fragment, type ReactNode, useMemo } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { graphTypeHref, objectsOfTypeHref, objectTypeHref } from "../../routes"
 import { DetailFallback, SectionPage } from "../../section-page"
+import { SkeletonText } from "../../section-ui"
+import { SkeletonBlock } from "../skeletons"
 import { LetterAvatar } from "./components/common"
 import { humanizeIdentifier } from "./lib/labels"
 
@@ -112,6 +114,12 @@ export function ConsoleObjectTypePage() {
         id={typeId}
         icon={LayoutGrid}
         error={typeQuery.error}
+        loading={{
+          width: "wide",
+          icon: <LetterAvatar label={humanizeIdentifier(typeId)} size="md" />,
+          actions: <TypeLinks typeId={typeId} />,
+          children: <ObjectTypeSkeleton />,
+        }}
       />
     )
   }
@@ -130,20 +138,7 @@ export function ConsoleObjectTypePage() {
       icon={<LetterAvatar label={displayTitle} size="md" />}
       title={displayTitle}
       description={objectType.description}
-      actions={
-        <>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={objectsOfTypeHref(objectType.id)}>
-              <Box /> View objects
-            </Link>
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={graphTypeHref(objectType.id)}>
-              <Network /> Show in graph
-            </Link>
-          </Button>
-        </>
-      }
+      actions={<TypeLinks typeId={objectType.id} />}
     >
       {ancestors.length > 0 || subtypes.length > 0 ? (
         <div className="-mt-4 space-y-2">
@@ -505,6 +500,70 @@ export function ConsoleObjectTypePage() {
         ) : null}
       </Tabs>
     </SectionPage>
+  )
+}
+
+function TypeLinks({ typeId }: { typeId: string }) {
+  return (
+    <>
+      <Button variant="outline" size="sm" asChild>
+        <Link to={objectsOfTypeHref(typeId)}>
+          <Box /> View objects
+        </Link>
+      </Button>
+      <Button variant="outline" size="sm" asChild>
+        <Link to={graphTypeHref(typeId)}>
+          <Network /> Show in graph
+        </Link>
+      </Button>
+    </>
+  )
+}
+
+/** The tabs and the properties table while the type loads. */
+function ObjectTypeSkeleton() {
+  return (
+    <Tabs value="properties">
+      <TabsList variant="line" className="min-w-max">
+        {["Properties", "Vectors", "Links", "Actions"].map((tab) => (
+          <TabsTrigger key={tab} value={tab.toLowerCase()} disabled>
+            {tab}
+            <SkeletonBlock className="ml-1.5 h-[15px] w-5 rounded" />
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <TabsContent value="properties" className="space-y-6 pt-4">
+        <section aria-hidden className="space-y-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Static properties
+          </h3>
+          <Card className="overflow-hidden p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Flags</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {["w-24", "w-32", "w-20", "w-28", "w-24"].map((width, index) => (
+                  <TableRow key={index}>
+                    <TableCell>
+                      <SkeletonText className={cn("h-2", width)} />
+                    </TableCell>
+                    <TableCell>
+                      <SkeletonText className="h-2 w-14 bg-muted/70" />
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </section>
+      </TabsContent>
+    </Tabs>
   )
 }
 

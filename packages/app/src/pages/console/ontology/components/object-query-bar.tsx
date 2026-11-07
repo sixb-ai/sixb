@@ -2,6 +2,8 @@ import type { ObjectQueryFacetResult } from "@sixb/client"
 import { Alert, AlertDescription, Badge, Button } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { AlertCircle, X } from "lucide-react"
+import type { ReactNode } from "react"
+import { SkeletonBlock } from "../../skeletons"
 import { formatCount, formatValue } from "../lib/format-value"
 import {
   createFilterId,
@@ -125,16 +127,19 @@ function FacetSuggestions({
     .slice(0, 8)
 
   if (loading && suggestions.length === 0) {
-    return <p className="px-1 text-xs text-muted-foreground">Loading facet suggestions...</p>
+    return (
+      <FacetSuggestionsRow>
+        {["w-28", "w-24", "w-32"].map((width) => (
+          <SkeletonBlock key={width} className={cn("h-7 rounded-full", width)} />
+        ))}
+      </FacetSuggestionsRow>
+    )
   }
 
   if (suggestions.length === 0) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-      <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        Try
-      </span>
+    <FacetSuggestionsRow>
       {suggestions.map(({ property, bucket }) => {
         return (
           <button
@@ -161,6 +166,17 @@ function FacetSuggestions({
           </button>
         )
       })}
+    </FacetSuggestionsRow>
+  )
+}
+
+function FacetSuggestionsRow({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+      <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        Try
+      </span>
+      {children}
     </div>
   )
 }

@@ -29,6 +29,7 @@ import {
   useFormat,
   useNumbers,
 } from "../../section-ui"
+import { MetaSkeleton, SkeletonBlock, TrailingSkeleton } from "../skeletons"
 import { useDataMessages } from "./messages"
 import { ConnectorIcon } from "./shared"
 
@@ -47,7 +48,11 @@ export function ConsoleConnectorsPage() {
     >
       <Panel>
         {connectorsQuery.isPending ? (
-          <PanelSkeleton rows={3} />
+          <PanelSkeleton
+            rows={3}
+            interactive
+            trailing={<TrailingSkeleton pill={false} chevron />}
+          />
         ) : connectorsQuery.isError ? (
           <PanelEmpty
             tone="error"
@@ -124,6 +129,20 @@ export function ConsoleConnectorPage() {
         id={connectorId}
         icon={Cable}
         error={connectorQuery.error}
+        loading={{
+          icon: <SkeletonBlock className="size-12 rounded-xl" />,
+          meta: <MetaSkeleton pill={false} />,
+          children: (
+            <PageSection
+              title={messages.connectors.syncsTitle}
+              description={messages.connectors.syncsDescription}
+            >
+              <Panel>
+                <SyncsSkeleton />
+              </Panel>
+            </PageSection>
+          ),
+        }}
       />
     )
   }
@@ -153,7 +172,7 @@ export function ConsoleConnectorPage() {
       >
         <Panel>
           {syncsQuery.isPending ? (
-            <PanelSkeleton rows={2} />
+            <SyncsSkeleton />
           ) : syncsQuery.isError ? (
             <PanelEmpty
               tone="error"
@@ -249,7 +268,7 @@ export function ConsoleConnectorPage() {
           >
             <Panel>
               {runsQuery.isPending ? (
-                <PanelSkeleton rows={3} />
+                <PanelSkeleton rows={3} leading="none" trailing={<TrailingSkeleton />} />
               ) : runsQuery.isError ? (
                 isUnrecorded(runsQuery.error) ? (
                   <UnrecordedHistory what={messages.connectors.deliveryWhat} />
@@ -314,4 +333,9 @@ export function ConsoleConnectorPage() {
       ) : null}
     </SectionPage>
   )
+}
+
+/** A connector's syncs while they load, each ending in its latest run's status. */
+function SyncsSkeleton() {
+  return <PanelSkeleton rows={2} interactive trailing={<TrailingSkeleton />} />
 }

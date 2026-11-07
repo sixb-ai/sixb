@@ -50,6 +50,7 @@ import {
   FailureSummary,
   isUnrecorded,
   RunStatusPill,
+  SkeletonText,
   UnrecordedHistory,
 } from "../../section-ui"
 import {
@@ -62,6 +63,7 @@ import {
   workflowRunFileLinks,
   workflowStepFileLinks,
 } from "../../values"
+import { PillSkeleton, SkeletonBlock } from "../skeletons"
 import { useWorkflowLiveUpdates } from "./hooks/workflow-live-updates"
 import { formatRelativeTime } from "./lib/time"
 import { AgentExecutionPanel } from "./workflows/agent-execution-panel"
@@ -164,6 +166,25 @@ export function ConsoleWorkflowPage() {
         id={workflowId}
         icon={GitBranch}
         error={workflowQuery.error}
+        workspace={
+          <div className="relative min-h-0 w-full flex-1">
+            <WorkflowHeader
+              workflowId={workflowId}
+              onBack={() => navigate("/console/workflows")}
+              facts={
+                <span>
+                  <SkeletonText className="h-2 w-40" />
+                </span>
+              }
+              actions={
+                <>
+                  <SkeletonBlock className="h-8 w-[4.5rem]" />
+                  <SkeletonBlock className="h-9 w-32" />
+                </>
+              }
+            />
+          </div>
+        }
       />
     )
   }
@@ -250,81 +271,61 @@ export function ConsoleWorkflowPage() {
               panelOpen={panelOpen}
             />
 
-            {/* Floating header */}
-            <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex flex-wrap items-start justify-between gap-3">
-              <div className="pointer-events-auto min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-                <div className="flex items-center gap-3 px-3 py-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => navigate("/console/workflows")}
-                    aria-label="Back to workflows"
-                  >
-                    <ChevronLeft />
-                  </Button>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Workflow
-                    </p>
-                    <h1 className="truncate text-sm font-medium text-foreground">{workflow.id}</h1>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border bg-background/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-                  {activeRunId && runDetail ? (
-                    <>
-                      <span className="inline-flex items-center gap-1.5 text-foreground">
-                        <span
-                          className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            STATUS_DOT[runDetail.run.status]
-                          )}
-                        />
-                        Viewing run
-                        <span className="font-mono text-muted-foreground">
-                          {shortRunId(runDetail.run.id)}
-                        </span>
+            <WorkflowHeader
+              workflowId={workflow.id}
+              onBack={() => navigate("/console/workflows")}
+              facts={
+                activeRunId && runDetail ? (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 text-foreground">
+                      <span
+                        className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[runDetail.run.status])}
+                      />
+                      Viewing run
+                      <span className="font-mono text-muted-foreground">
+                        {shortRunId(runDetail.run.id)}
                       </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={closeAll}
+                      className="border-l border-border pl-3 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      Exit run view
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span>{summaryLine(workflow)}</span>
+                    {latestRun ? (
                       <button
                         type="button"
-                        onClick={closeAll}
-                        className="border-l border-border pl-3 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                        onClick={() => selectRun(latestRun.id)}
+                        className="inline-flex items-center gap-1 border-l border-border pl-3 text-muted-foreground hover:text-foreground"
                       >
-                        Exit run view
+                        <History className="h-3 w-3" />
+                        {runTimeLabel(latestRun)}
                       </button>
-                    </>
-                  ) : (
-                    <>
-                      <span>{summaryLine(workflow)}</span>
-                      {latestRun ? (
-                        <button
-                          type="button"
-                          onClick={() => selectRun(latestRun.id)}
-                          className="inline-flex items-center gap-1 border-l border-border pl-3 text-muted-foreground hover:text-foreground"
-                        >
-                          <History className="h-3 w-3" />
-                          {runTimeLabel(latestRun)}
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-border bg-card p-1.5 shadow-sm">
-                <Button
-                  type="button"
-                  variant={runsActive ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={toggleRunsList}
-                  aria-expanded={runsActive}
-                >
-                  <History />
-                  Runs
-                </Button>
-                <RequestWorkflowRunDialog workflow={workflow} />
-              </div>
-            </div>
+                    ) : null}
+                  </>
+                )
+              }
+              actions={
+                <>
+                  <Button
+                    type="button"
+                    variant={runsActive ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={toggleRunsList}
+                    aria-expanded={runsActive}
+                  >
+                    <History />
+                    Runs
+                  </Button>
+                  <RequestWorkflowRunDialog workflow={workflow} />
+                </>
+              }
+            />
           </div>
 
           <WorkflowSidePanel open={panelOpen} wide={runNodesByFlowId.has(selectedNodeId ?? "")}>
@@ -333,6 +334,50 @@ export function ConsoleWorkflowPage() {
         </ReactFlowProvider>
       </div>
     </SectionWorkspace>
+  )
+}
+
+/** The cards floating over the canvas: the way back, the workflow's name and facts, and actions. */
+function WorkflowHeader({
+  workflowId,
+  onBack,
+  facts,
+  actions,
+}: {
+  workflowId: string
+  onBack: () => void
+  facts: ReactNode
+  actions: ReactNode
+}) {
+  return (
+    <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex flex-wrap items-start justify-between gap-3">
+      <div className="pointer-events-auto min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex items-center gap-3 px-3 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onBack}
+            aria-label="Back to workflows"
+          >
+            <ChevronLeft />
+          </Button>
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Workflow
+            </p>
+            <h1 className="truncate text-sm font-medium text-foreground">{workflowId}</h1>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border bg-background/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+          {facts}
+        </div>
+      </div>
+
+      <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-border bg-card p-1.5 shadow-sm">
+        {actions}
+      </div>
+    </div>
   )
 }
 
@@ -1220,10 +1265,21 @@ function RunsListPanel({
       />
       <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
         {runsQuery.isLoading ? (
-          <div className="flex items-center gap-3 px-4 py-8 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">Loading runs...</span>
-          </div>
+          <ul aria-hidden className="divide-y divide-border/40">
+            {Array.from({ length: 6 }, (_, index) => (
+              <li key={index} className="flex items-start justify-between gap-2 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-[11px]">
+                    <SkeletonText className="h-2 w-40" />
+                  </p>
+                  <p className="mt-0.5 text-[11px]">
+                    <SkeletonText className="h-2 w-28 bg-muted/70" />
+                  </p>
+                </div>
+                <PillSkeleton />
+              </li>
+            ))}
+          </ul>
         ) : isUnrecorded(runsQuery.error) ? (
           <UnrecordedHistory what="Workflow runs" />
         ) : runsQuery.isError ? (
