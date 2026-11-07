@@ -12,6 +12,7 @@ import type {
   ProjectionRunFailureCode,
   ProjectionTarget,
 } from "../../projections/types"
+import type { ConfirmRunExecutionInput, ReleaseRunExecutionInput, RunExecution } from "../run-claim"
 
 export type { ProjectionRunFailureCode } from "../../projections/types"
 export { PROJECTION_RUN_FAILURE_CODES } from "../../projections/types"
@@ -83,6 +84,8 @@ interface ProjectionRunRecordBase {
   readonly executionId: string
   readonly status: ProjectionRunStatus
   readonly attempt: number
+  /** Until when the execution holding the run is known to live. */
+  readonly queueLeaseExpiresAt?: Date
   readonly progress: ProjectionRunProgress
   readonly queuedAt: Date
   readonly startedAt?: Date
@@ -168,7 +171,11 @@ export type QueueProjectionRunInput =
 
 export type StartOrReclaimProjectionRunInput = QueueProjectionRunInput extends infer TInput
   ? TInput extends QueueProjectionRunInput
-    ? Omit<TInput, "executionId" | "queuedAt"> & { readonly startedAt?: Date }
+    ? Omit<TInput, "executionId" | "queuedAt"> & {
+        readonly startedAt?: Date
+        /** The execution taking the run. Without one, the store makes a token, holding no lease. */
+        readonly execution?: RunExecution
+      }
     : never
   : never
 
@@ -268,6 +275,10 @@ export interface ListLatestProjectionRunsResult {
 export interface ProjectionRunStorage {
   queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord>
   startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim>
+  /** Projects a renewed queue lease onto the run. */
+  confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<ProjectionRunRecord>
+  /** Lets the lease lapse, so the next delivery need not wait. Attempts here are not limited. */
+  releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
   failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord>
   /** Transactionally fences the current execution before ontology materialization writes. */
   lockForMaterialization(

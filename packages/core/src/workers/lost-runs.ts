@@ -26,8 +26,11 @@ const LOST_WORKER = "Its worker was lost, and it was too old or too unclear to r
 
 export interface RepublishLostRunsInput {
   readonly projectId: string
-  readonly storage: Pick<Storage, "executions" | "syncRuns" | "pipelineRuns" | "workflowRuns">
-  readonly queues: Pick<Queues, "syncRuns" | "pipelines" | "workflows">
+  readonly storage: Pick<
+    Storage,
+    "executions" | "syncRuns" | "pipelineRuns" | "workflowRuns" | "projectionRuns"
+  >
+  readonly queues: Pick<Queues, "syncRuns" | "pipelines" | "workflows" | "projections">
   readonly events: Pick<DomainEventLog, "emit">
   readonly now: Date
   /** Most runs of each primitive one call looks at, longest lost first. */
@@ -84,7 +87,8 @@ interface RecoveryJob {
  *   happen by surprise that late, least of all a workflow's side effects.
  *
  * A delivery that finds the run held or finished does nothing, so this can be wrong about a job
- * being lost without doing harm.
+ * being lost without doing harm. Projections republish their queued runs through their own
+ * reconciler and have no older version to settle, so what is left of them here is a lapsed lease.
  */
 export async function republishLostRuns(
   input: RepublishLostRunsInput
@@ -93,6 +97,7 @@ export async function republishLostRuns(
     recoverLane(input, syncLane(input)),
     recoverLane(input, pipelineLane(input)),
     recoverLane(input, workflowLane(input)),
+    republishLapsedProjections(input),
   ]
 
   // A lane that fails must not hold the others, and still has to reach the caller.
@@ -198,6 +203,37 @@ async function settleRun<TRun extends LostRunCandidate>(
     { events: [finished], correlationId: await readCorrelationId(input, run) },
     { source: SOURCE }
   )
+}
+
+async function republishLapsedProjections(
+  input: RepublishLostRunsInput
+): Promise<RepublishLostRunsResult> {
+  const { projectId, storage, queues, now } = input
+  if (!storage.projectionRuns) return { republished: 0, settled: 0 }
+
+  const { runs } = await storage.projectionRuns.list({
+    projectId,
+    statuses: ["running"],
+    order: "asc",
+    limit: input.limit ?? DEFAULT_LIMIT,
+  })
+
+  const jobs = runs
+    .filter((run) => run.queueLeaseExpiresAt && run.queueLeaseExpiresAt.getTime() <= now.getTime())
+    .map(recoveryJob)
+
+  if (jobs.length > 0) {
+    await queues.projections.enqueue({
+      projectId,
+      jobs: jobs.map(({ id, runId }) => ({
+        id,
+        type: "projection.run.requested",
+        payload: { runId },
+      })),
+    })
+  }
+
+  return { republished: jobs.length, settled: 0 }
 }
 
 /**
