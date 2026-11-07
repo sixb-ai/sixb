@@ -16,72 +16,20 @@ type EncodedChange =
       readonly sequenceIsDate?: true
     }
 
-/**
- * PostgreSQL `jsonb` refuses U+0000 in any string. A delivery holding one stores its changes with
- * every string, object keys included, escaped: `\` becomes `\\` and U+0000 becomes `\0`. Escaping
- * all of them, not only those holding U+0000, keeps the decoding unambiguous.
- */
-interface NulEscapedChanges {
-  readonly nulEscaped: true
-  readonly changes: readonly unknown[]
-}
-
 /** JSON text of a delivery's changes, for one column. */
 export function encodeDatasetIngestChanges(changes: readonly DatasetIngestChange[]): string {
-  const encoded = changes.map(encodeChange)
-  if (!holdsNul(encoded)) return JSON.stringify(encoded)
-
-  const escaped: NulEscapedChanges = {
-    nulEscaped: true,
-    changes: mapStrings(encoded, escapeString) as unknown[],
-  }
-  return JSON.stringify(escaped)
+  return JSON.stringify(changes.map(encodeChange))
 }
 
-/** Changes from the column `encodeDatasetIngestChanges` filled, as text or as parsed JSON. */
-export function decodeDatasetIngestChanges(value: unknown): DatasetIngestChange[] {
-  const parsed = typeof value === "string" ? JSON.parse(value) : value
-  const changes =
-    isPlainRecord(parsed) && parsed.nulEscaped === true && Array.isArray(parsed.changes)
-      ? (mapStrings(parsed.changes, unescapeString) as unknown[])
-      : parsed
+/** Changes from the text `encodeDatasetIngestChanges` wrote. */
+export function decodeDatasetIngestChanges(text: string): DatasetIngestChange[] {
+  const changes: unknown = JSON.parse(text)
 
   if (!Array.isArray(changes)) {
     throw new Error("[Sixb] Stored dataset ingest changes are not an array.")
   }
 
   return changes.map(decodeChange)
-}
-
-function holdsNul(value: unknown): boolean {
-  if (typeof value === "string") return value.includes("\u0000")
-  if (Array.isArray(value)) return value.some(holdsNul)
-  if (isPlainRecord(value)) {
-    return Object.entries(value).some(([key, item]) => key.includes("\u0000") || holdsNul(item))
-  }
-  return false
-}
-
-/** Every string of a JSON value, object keys included, mapped. */
-function mapStrings(value: unknown, map: (text: string) => string): unknown {
-  if (typeof value === "string") return map(value)
-  if (Array.isArray(value)) return value.map((item) => mapStrings(item, map))
-  if (isPlainRecord(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [map(key), mapStrings(item, map)])
-    )
-  }
-  return value
-}
-
-function escapeString(text: string): string {
-  return text.replaceAll("\\", "\\\\").replaceAll("\u0000", "\\0")
-}
-
-function unescapeString(text: string): string {
-  return text.replaceAll(/\\([\\0])/g, (_match, escaped: string) =>
-    escaped === "0" ? "\u0000" : "\\"
-  )
 }
 
 function encodeChange(change: DatasetIngestChange): EncodedChange {

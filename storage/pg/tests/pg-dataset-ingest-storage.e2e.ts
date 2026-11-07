@@ -69,6 +69,26 @@ test("a delivery waits for a batch closing the request it would have joined", as
   }
 })
 
+// Reproduce: make `id` the whole primary key in the migration. With one dataset's backlog ahead of
+// another's, the planner then walks that key past the first to read the second.
+test("the deliveries' primary key leads with the dataset", async () => {
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const client = createPgClient({ connectionString, schemaName, max: 1 })
+
+  try {
+    const [row] = await client<{ readonly definition: string }[]>`
+      SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = 'dataset_ingest_deliveries'::regclass AND contype = 'p'
+    `
+
+    expect(row?.definition).toBe("PRIMARY KEY (project_id, dataset_id, id)")
+  } finally {
+    await client.end()
+    await disposeTestStorage(storage)
+  }
+})
+
 function delivery(id: string) {
   return {
     projectId,

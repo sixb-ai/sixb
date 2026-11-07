@@ -76,7 +76,7 @@ export interface DatasetIngestPersistence {
     datasetId: string,
     flushId: string,
     page: { readonly afterId: string | null; readonly limit: number }
-  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: unknown }[]>
+  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: string }[]>
   deleteFlush(projectId: string, datasetId: string, flushId: string): Promise<void>
   deleteDeliveries(
     projectId: string,

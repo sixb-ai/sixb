@@ -180,7 +180,7 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
     datasetId: string,
     flushId: string,
     page: { readonly afterId: string | null; readonly limit: number }
-  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: unknown }[]> {
+  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: string }[]> {
     const rows = this.db
       .query(
         `SELECT id, dataset_id AS datasetId, execution_id AS executionId,

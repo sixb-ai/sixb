@@ -77,6 +77,23 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
         ])
       }))
 
+    // A sender that truncates text in the middle of an emoji leaves half a surrogate pair. Reproduce
+    // on PostgreSQL: make `changes` jsonb in the migration, which refuses it.
+    test("stores a lone surrogate, which is a valid string but not valid Unicode", () =>
+      withStorage(async (storage) => {
+        const changes: DatasetIngestChange[] = [
+          { kind: "upsert", row: { id: "1", name: "caf\ud83d" } },
+        ]
+
+        await storage.append(deliveryInput(changes))
+
+        const lease = await acquire(storage, "owner-a")
+        await storage.takeBatch({ lease, flushId: "flush-1", maxChanges: 100 })
+        const [read] = await readAll(storage, lease, "flush-1")
+
+        expect(read?.changes).toEqual(changes)
+      }))
+
     test("stores strings holding U+0000 and backslashes exactly, in values and JSON keys", () =>
       withStorage(async (storage) => {
         // Reproduce: drop the escaping in `encodeDatasetIngestChanges`; PostgreSQL's jsonb refuses

@@ -1,15 +1,18 @@
 -- Changes `sixb.datasets.ingest` stored and no flush has written to the lake yet. A flush tags the
 -- deliveries it takes with its id, writes them as one dataset version, then deletes them.
 CREATE TABLE dataset_ingest_deliveries (
-  id BIGSERIAL PRIMARY KEY,
+  id BIGSERIAL,
   project_id TEXT NOT NULL,
   dataset_id TEXT NOT NULL,
   execution_id TEXT NOT NULL,
   correlation_id TEXT NOT NULL,
   received_at TIMESTAMPTZ NOT NULL,
   change_count INTEGER NOT NULL CHECK (change_count > 0),
-  changes JSONB NOT NULL,
-  flush_id TEXT
+  -- Text, not JSONB: nothing reads inside it, and JSONB refuses strings JSON allows.
+  changes TEXT NOT NULL,
+  flush_id TEXT,
+  -- Led by the dataset, so no plan for one dataset walks the deliveries of another.
+  PRIMARY KEY (project_id, dataset_id, id)
 );
 CREATE INDEX dataset_ingest_deliveries_by_flush
   ON dataset_ingest_deliveries (project_id, dataset_id, flush_id, id);
