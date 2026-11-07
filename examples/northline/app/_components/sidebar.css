@@ -1,6 +1,5 @@
-/* The sidebar: a calm, neutral rail sized like Internal's. Rows are rounded pills; the current page
-   is a raised white pill in light mode and a soft lift in dark mode. Labels are quiet and sentence
-   case. */
+/* The sidebar: a calm, neutral rail. Rows are rounded pills; the current page is a raised white
+   pill in light mode and a soft lift in dark mode. Labels are quiet and sentence case. */
 
 .nl-sidebar[data-slot="sidebar-container"] {
   border-right: 1px solid color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
@@ -182,17 +181,18 @@
 }
 
 /* A conversation the agent is working on: a small breathing dot. */
-.nl-sidebar-live {
+/* A thread still working, in the sidebar's Recents and the phone's More sheet. */
+.nl-working-dot {
   flex-shrink: 0;
   width: 6px;
   height: 6px;
   margin-left: auto;
   border-radius: 999px;
   background: var(--primary);
-  animation: nl-sidebar-live 1.8s ease-in-out infinite;
+  animation: nl-working-dot 1.8s ease-in-out infinite;
 }
 
-@keyframes nl-sidebar-live {
+@keyframes nl-working-dot {
   50% {
     opacity: 0.35;
   }

@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react"
 import { useLocation, useNavigationType } from "react-router-dom"
+import { appScroller } from "./phone-dom"
 import { isRootPath, screenPath, tabFor } from "./phone-routes"
 
 type NavigationMotionKind = "push" | "pop" | "switch"
@@ -23,7 +24,7 @@ export function NavigationMotion() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per navigation, keyed by it.
   useLayoutEffect(() => {
-    const scroller = document.querySelector<HTMLElement>("[data-app-scroll]")
+    const scroller = appScroller()
     const from = previousPath.current
     const to = screenPath(location.pathname, location.search)
     previousPath.current = to

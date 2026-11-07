@@ -1,13 +1,12 @@
 import { useEffect } from "react"
+import { PHONE_QUERY, scrolledWithin } from "./phone-dom"
 
 // Search fills the screen on phones rather than rising as a sheet (see phone-navigation.css).
 const SHEETS =
   '[data-slot="dialog-content"]:not(.northline-search), [data-slot="alert-dialog-content"]'
 const OVERLAYS = '[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"]'
-const PHONE = "(max-width: 767px)"
 // Controls that own vertical drags themselves.
-const OWN_DRAG =
-  'input, textarea, select, [contenteditable="true"], [role="slider"], [data-vaul-no-drag]'
+const OWN_DRAG = 'input, textarea, select, [contenteditable="true"], [role="slider"]'
 
 /**
  * On phones every dialog presents as a sheet from the bottom of the screen (see phone-shell.css).
@@ -17,7 +16,7 @@ const OWN_DRAG =
  */
 export function SheetGestures() {
   useEffect(() => {
-    const phone = matchMedia(PHONE)
+    const phone = matchMedia(PHONE_QUERY)
     let sheet: HTMLElement | null = null
     let overlay: HTMLElement | null = null
     let startY = 0
@@ -41,7 +40,7 @@ export function SheetGestures() {
       const target = event.target instanceof Element ? event.target : null
       const found = target?.closest<HTMLElement>(SHEETS)
       if (!target || !found) return
-      if (target.closest(OWN_DRAG) || scrolledBetween(target, found)) return
+      if (target.closest(OWN_DRAG) || scrolledWithin(target, found)) return
       const touch = event.touches[0]
       sheet = found
       overlay = [...document.querySelectorAll<HTMLElement>(OVERLAYS)].at(-1) ?? null
@@ -122,13 +121,4 @@ function springBack(sheet: HTMLElement, overlay: HTMLElement | null) {
     if (overlay) overlay.style.transition = ""
   }
   sheet.addEventListener("transitionend", finish)
-}
-
-/** Whether anything between the touch and the sheet is scrolled away from its top. */
-function scrolledBetween(target: Element, sheet: HTMLElement): boolean {
-  for (let node: Element | null = target; node; node = node.parentElement) {
-    if (node.scrollTop > 0) return true
-    if (node === sheet) return false
-  }
-  return false
 }

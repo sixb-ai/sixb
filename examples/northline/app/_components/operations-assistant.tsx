@@ -5,18 +5,8 @@ import { CustomerAccount } from "../../ontology/customer-account"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
+import { placeFor } from "../_lib/navigation"
 import { NorthlineMark } from "./northline-mark"
-
-const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
-  ["/service-cases", "Service cases"],
-  ["/dispatch", "Dispatch"],
-  ["/quotes", "Quotes"],
-  ["/contracts", "Contracts"],
-  ["/customers", "Customers"],
-  ["/equipment", "Equipment"],
-  ["/technicians", "Technicians"],
-  ["/review", "Operational review"],
-]
 
 export function OperationsAssistant() {
   const location = useLocation()
@@ -31,8 +21,7 @@ export function OperationsAssistant() {
     }
   }, [currentLocation, fullPage, location.pathname])
   const objectContext = currentObjectContext(location.pathname)
-  const pageLabel =
-    pageLabels.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ?? "Home"
+  const pageLabel = placeFor(location.pathname)?.label ?? "Home"
   const pageContext = agentContext.appState("northline-current-page", {
     label: pageLabel,
     description: "The current Northline Operations route and query state.",

@@ -2,8 +2,8 @@ import { useSidebar } from "@sixb/ui/components"
 import { useQueryClient } from "@tanstack/react-query"
 import { ArrowDown } from "lucide-react"
 import { useEffect, useRef } from "react"
+import { appScroller, scrolledWithin } from "./phone-dom"
 
-const PHONE = "(max-width: 767px)"
 // How far the indicator travels, after resistance, before a release refreshes.
 const TRIGGER = 64
 const MAX_PULL = 110
@@ -24,7 +24,6 @@ function PullIndicator() {
   const indicator = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const phone = matchMedia(PHONE)
     const element = indicator.current
     if (!element) return
 
@@ -52,19 +51,12 @@ function PullIndicator() {
     }
 
     const onStart = (event: TouchEvent) => {
-      if (!phone.matches || refreshing || event.touches.length !== 1) return
+      if (refreshing || event.touches.length !== 1) return
       const target = event.target instanceof Element ? event.target : null
-      const page = document.querySelector<HTMLElement>("[data-app-scroll]")
+      const page = appScroller()
       if (!target || !page || !page.contains(target)) return
-      if (
-        target.closest(
-          '[role="dialog"], [data-no-pull-refresh], input, textarea, [contenteditable="true"]'
-        )
-      ) {
-        return
-      }
-      if (document.querySelector("[data-no-pull-refresh]")) return
-      if (scrolledAbove(target, page)) return
+      if (target.closest('[role="dialog"], input, textarea, [contenteditable="true"]')) return
+      if (scrolledWithin(target, page)) return
       scroller = page
       startY = event.touches[0].clientY
       startX = event.touches[0].clientX
@@ -134,13 +126,4 @@ function PullIndicator() {
       <span className="pull-refresh-spinner" />
     </div>
   )
-}
-
-/** Whether the page, or a pane between it and the touch, is scrolled away from its top. */
-function scrolledAbove(target: Element, page: HTMLElement): boolean {
-  for (let node: Element | null = target; node; node = node.parentElement) {
-    if (node.scrollTop > 0) return true
-    if (node === page) return false
-  }
-  return false
 }

@@ -15,7 +15,7 @@ export function StageRail({
     0,
     stages.findIndex((stage) => stage.id === current)
   )
-  const active = stages[currentIndex]
+  const currentStage = stages[currentIndex]
   return (
     <div className="flex flex-col gap-2">
       <ol
@@ -59,7 +59,7 @@ export function StageRail({
       </ol>
       {/* Seven labels don't fit a phone's width; it names the current stage once instead. */}
       <p className="text-[13px] sm:hidden">
-        <span className="font-semibold text-primary">{active?.label}</span>
+        <span className="font-semibold text-primary">{currentStage?.label}</span>
         <span className="text-muted-foreground">
           {" "}
           · {currentIndex + 1} of {stages.length}

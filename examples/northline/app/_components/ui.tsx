@@ -394,11 +394,8 @@ export function CaseClockText({
 
 /** Up to two initials for an avatar: "Marcus Reed" becomes "MR". */
 export function initials(name: string | undefined): string {
-  return (name ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean)
+  // A single word, such as an email address, gives its first two letters.
+  if (parts.length < 2) return (parts[0] ?? "").slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
 }

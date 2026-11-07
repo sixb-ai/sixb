@@ -1,20 +1,12 @@
 import { useSidebar } from "@sixb/ui/components"
-import { CalendarClock, ClipboardList, Ellipsis, Gauge, type LucideIcon, Sun } from "lucide-react"
+import { Ellipsis } from "lucide-react"
 import { type CSSProperties, useEffect } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
+import { places } from "../../_lib/navigation"
+import { appScroller } from "./phone-dom"
 import { normalizePath, type PhoneTab, tabFor } from "./phone-routes"
 
-const TABS = [
-  { tab: "home", root: "/", label: "Home", Icon: Sun },
-  { tab: "service-cases", root: "/service-cases", label: "Service cases", Icon: ClipboardList },
-  { tab: "dispatch", root: "/dispatch", label: "Dispatch", Icon: CalendarClock },
-  { tab: "equipment", root: "/equipment", label: "Equipment", Icon: Gauge },
-] as const satisfies ReadonlyArray<{
-  tab: PhoneTab
-  root: string
-  label: string
-  Icon: LucideIcon
-}>
+const TABS = places.filter((place) => place.tab)
 
 // Each tab keeps the screen it was left on, as native tab bars do.
 const lastPathByTab = new Map<PhoneTab, string>()
@@ -36,26 +28,25 @@ export function PhoneTabBar() {
     lastPathByTab.set(current, location.pathname + location.search)
   }, [current, location.pathname, location.search])
 
-  const select = (tab: PhoneTab, root: string) => {
+  // A tab is named by its first screen.
+  const select = (tab: PhoneTab) => {
     if (tab !== current) {
-      navigate(lastPathByTab.get(tab) ?? root)
+      navigate(lastPathByTab.get(tab) ?? tab)
       return
     }
-    if (path !== root) {
+    if (path !== tab) {
       lastPathByTab.delete(tab)
-      navigate(root)
+      navigate(tab)
       return
     }
-    document
-      .querySelector<HTMLElement>("[data-app-scroll]")
-      ?.scrollTo({ top: 0, behavior: "smooth" })
+    appScroller()?.scrollTo({ top: 0, behavior: "smooth" })
   }
 
   if (!isMobile) return null
 
   // More stands for the sheet while it is open, and for every screen without a tab of its own.
   const moreActive = current === "more" || openMobile
-  const index = moreActive ? TABS.length : TABS.findIndex(({ tab }) => tab === current)
+  const index = moreActive ? TABS.length : TABS.findIndex(({ href }) => href === current)
 
   return (
     <nav
@@ -64,13 +55,13 @@ export function PhoneTabBar() {
       style={{ "--tab-index": index } as CSSProperties}
     >
       <span className="phone-tab-lens" aria-hidden="true" />
-      {TABS.map(({ tab, root, label, Icon }) => {
-        const active = tab === current && !openMobile
+      {TABS.map(({ href, label, icon: Icon }) => {
+        const active = href === current && !openMobile
         return (
           <button
-            key={tab}
+            key={href}
             type="button"
-            onClick={() => select(tab, root)}
+            onClick={() => select(href)}
             aria-label={label}
             aria-current={active ? "page" : undefined}
             className="phone-tab"

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from "react"
 import { useLocation, useNavigationType } from "react-router-dom"
+import { appScroller } from "./phone-dom"
 
 // Data can take a moment to arrive; until the page is tall enough the saved position can't apply.
 const RESTORE_WINDOW_MS = 1500
@@ -61,8 +62,4 @@ export function ScrollRestoration() {
   }, [location.key])
 
   return null
-}
-
-function appScroller(): HTMLElement | null {
-  return document.querySelector<HTMLElement>("[data-app-scroll]")
 }
