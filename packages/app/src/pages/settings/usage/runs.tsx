@@ -14,7 +14,7 @@ import {
   Zap,
 } from "lucide-react"
 import { type ReactNode, useState } from "react"
-import { PanelSkeleton } from "../../section-ui"
+import { SkeletonText } from "../../section-ui"
 import { CallDetail } from "./call-detail"
 import { useNames } from "./filter-menu"
 import { useAiUsageMessages } from "./messages"
@@ -65,18 +65,21 @@ function sourceFor(type: RunType, filters: SpendFilters): string | null | undefi
   return same ? filters.source : null
 }
 
-/** How many conversations and runs the filters keep, for the page's headline. */
+/**
+ * How many conversations and runs the filters keep, for the page's headline. `total` is absent
+ * while it loads and when it could not be counted.
+ */
 export function useRunsTotal(
   query: {
     readonly from: string
     readonly to: string
   } & ReturnType<typeof apiFilters>
-): number | undefined {
-  const { data } = useQuery({
+): { readonly total: number | undefined; readonly loading: boolean } {
+  const { data, isPending } = useQuery({
     ...listAiModelCallGroupsOptions({ query: { ...query, limit: "1" } }),
     retry: false,
   })
-  return data?.total
+  return { total: data?.total, loading: isPending }
 }
 
 /**
@@ -167,7 +170,17 @@ export function Runs({
             <span className="text-right">{messages.columns.when}</span>
           </div>
           {groups.isPending && source !== null ? (
-            <PanelSkeleton rows={5} />
+            <>
+              {["w-44", "w-36", "w-52", "w-32", "w-40"].map((width) => (
+                <GroupRowSkeleton key={width} width={width} />
+              ))}
+              <div
+                aria-hidden
+                className="border-t border-border/50 px-5 py-3.5 text-[0.8125rem] text-muted-foreground"
+              >
+                <SkeletonText className="w-28" />
+              </div>
+            </>
           ) : groups.isError ? (
             <Notice>{messages.failed}</Notice>
           ) : items.length === 0 ? (
@@ -196,6 +209,81 @@ export function Runs({
         </div>
       </div>
     </section>
+  )
+}
+
+/** A conversation or run while the list loads: `TreeRow`'s top row, with placeholders. */
+function GroupRowSkeleton({ width }: { readonly width: string }) {
+  return (
+    <div aria-hidden className={cn(gridRow, "min-h-[60px] border-t border-border/70")}>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="size-4 shrink-0" />
+        <span className="size-7 shrink-0 animate-pulse rounded-lg bg-muted" />
+        <span className="flex min-w-0 flex-col items-start leading-[1.3]">
+          <span className="text-sm font-medium">
+            <SkeletonText className={cn("h-3", width)} />
+          </span>
+          <span className="text-xs">
+            <SkeletonText className="h-2 w-36 bg-muted/70" />
+          </span>
+        </span>
+      </span>
+      <MeasuresSkeleton models />
+    </div>
+  )
+}
+
+/** A model call while an execution's calls load: `TreeRow`'s nested row, with placeholders. */
+function CallRowSkeleton({ depth }: { readonly depth: number }) {
+  return (
+    <div aria-hidden className={cn(gridRow, "min-h-11 border-t border-border/40")}>
+      <span className="flex min-w-0 items-center gap-2" style={{ paddingLeft: depth * 26 }}>
+        <span className="size-4 shrink-0" />
+        <span className="flex w-[22px] shrink-0 justify-center">
+          <span className="size-2.5 animate-pulse rounded-[3px] bg-muted" />
+        </span>
+        <span className="text-[0.8125rem] leading-[1.3]">
+          <SkeletonText className="w-32" />
+        </span>
+      </span>
+      <MeasuresSkeleton />
+    </div>
+  )
+}
+
+/**
+ * The cells after a row's name: its models (a call names its model in its title instead), calls,
+ * tokens, cached share, cost and time.
+ */
+function MeasuresSkeleton({ models = false }: { readonly models?: boolean }) {
+  return (
+    <>
+      <span className="flex min-w-0 items-center gap-2">
+        {models ? (
+          <>
+            <span className="h-1.5 w-14 shrink-0 animate-pulse rounded-[2px] bg-muted" />
+            <span className="text-[0.78rem]">
+              <SkeletonText className="w-16" />
+            </span>
+          </>
+        ) : null}
+      </span>
+      <span className="text-right text-[0.8125rem]">
+        <SkeletonText className="w-5" />
+      </span>
+      <span className="text-right text-[0.8125rem]">
+        <SkeletonText className="w-10" />
+      </span>
+      <span className="text-right text-[0.8125rem]">
+        <SkeletonText className="w-8" />
+      </span>
+      <span className="text-right text-[0.84rem]">
+        <SkeletonText className="w-12" />
+      </span>
+      <span className="text-right text-[0.78rem]">
+        <SkeletonText className="w-12" />
+      </span>
+    </>
   )
 }
 
@@ -699,13 +787,22 @@ function Calls({
     }),
     retry: false,
   })
-  if (isPending || isError) {
+  if (isPending) {
+    // The execution says how many calls it made, so as many rows stand in for them.
+    const count =
+      group.executions.find((execution) => execution.executionId === executionId)?.modelCallCount ??
+      1
+    return Array.from({ length: Math.min(Math.max(count, 1), pageSize) }, (_, index) => (
+      <CallRowSkeleton key={index} depth={depth} />
+    ))
+  }
+  if (isError) {
     return (
       <div
         className="border-t border-border/40 py-3 text-[0.8125rem] text-muted-foreground"
         style={{ paddingLeft: 20 + depth * 26 + 24 }}
       >
-        {isError ? messages.failed : messages.loading}
+        {messages.failed}
       </div>
     )
   }

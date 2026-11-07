@@ -7,7 +7,7 @@ import { ChartNoAxesCombined, Download, Info, ListFilter, TriangleAlert, X } fro
 import { useMemo } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { SectionPage } from "../../section-page"
-import { PageTabs, Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "../../section-ui"
+import { PageTabs, Panel, PanelEmpty, SkeletonText, useLoadFailure } from "../../section-ui"
 import { Breakdown } from "./breakdown"
 import { FilterMenu, useFilterLabels } from "./filter-menu"
 import type { Overview } from "./format"
@@ -295,7 +295,10 @@ function Spend({ range, filters, onFilter, onModel, onClear, limitsHref }: Spend
       ) : (
         <>
           <Hero
-            loading={overview.isPending}
+            // The comparison under the total and the share of all spend arrive with it.
+            loading={
+              overview.isPending || prior.isPending || (narrowed && everythingActive.isPending)
+            }
             overview={overview.data}
             prior={prior.data}
             all={narrowed ? everythingActive.data : overview.data}
@@ -331,7 +334,8 @@ function Spend({ range, filters, onFilter, onModel, onClear, limitsHref }: Spend
           <SpendChart
             range={range}
             overview={chart.data}
-            loading={chart.isPending}
+            // Until every model's color is known, the legend would fold them into one gray entry.
+            loading={chart.isPending || everything.isPending}
             palette={palette}
             currency={currency}
             filters={filters}
@@ -382,34 +386,43 @@ function Hero({
   const locale = useLocale()
   const runs = useRunsTotal(runsQuery)
   const budget = useProjectBudget(currency)
+  // Until everything under the total is known, the hero keeps its shape with placeholders where
+  // its numbers go, so nothing moves when they arrive.
+  // A narrowed total is not what the budget counts.
+  const shownBudget = narrowed ? undefined : budget.value
+  const ready = !loading && overview !== undefined && !runs.loading && (narrowed || !budget.loading)
 
-  if (loading || !overview) {
-    return (
-      <Panel>
-        <PanelSkeleton rows={3} />
-      </Panel>
-    )
-  }
-
-  const totals = overview.totals
+  const totals = overview?.totals
   const cost = costOf(totals, currency)
   const before = costOf(prior?.totals, currency)
   const delta = cost - before
   const { whole, cents } = splitMoney(cost, currency, locale)
   const share = all ? cost / (costOf(all.totals, currency) || 1) : undefined
+  const calls = totals?.modelCallCount ?? 0
 
   return (
-    <section className="flex flex-wrap items-end gap-x-12 gap-y-7">
+    <section aria-busy={!ready} className="flex flex-wrap items-end gap-x-12 gap-y-7">
       <div className="min-w-0 flex-[1_1_300px]">
         <div className="text-xs font-medium text-muted-foreground">
           {narrowed ? messages.spentFiltered : messages.spent}
         </div>
         <div className="mt-2 text-[3.75rem] font-semibold leading-none tracking-[-0.04em] tabular-nums">
-          {whole}
-          <span className="text-muted-foreground/60">{cents}</span>
+          {ready ? (
+            <>
+              {whole}
+              <span className="text-muted-foreground/60">{cents}</span>
+            </>
+          ) : (
+            <SkeletonText className="h-11 w-52 rounded-md" />
+          )}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.8125rem] text-muted-foreground">
-          {prior ? (
+          {!ready ? (
+            <>
+              <SkeletonText className="h-[22px] w-16 rounded-md" />
+              <SkeletonText className="w-32" />
+            </>
+          ) : prior ? (
             <>
               <span className="inline-flex h-[22px] items-center rounded-md bg-muted px-2 font-medium text-foreground tabular-nums">
                 {delta >= 0 ? "↑ " : "↓ "}
@@ -418,11 +431,18 @@ function Hero({
               <span>{messages.versus(priorLabel)}</span>
             </>
           ) : null}
-          {narrowed && share !== undefined ? (
+          {ready && narrowed && share !== undefined ? (
             <span>{messages.shareOfAll(percent(share, locale))}</span>
           ) : null}
         </div>
-        {!narrowed && budget ? (
+        {shownBudget && !ready ? (
+          <div className="mt-3.5 flex max-w-[380px] items-center gap-2.5 text-[0.8125rem]">
+            <span className="h-1 w-full max-w-[120px] flex-1 animate-pulse rounded-sm bg-muted" />
+            <span>
+              <SkeletonText className="w-40" />
+            </span>
+          </div>
+        ) : shownBudget ? (
           <Link
             to={limitsHref}
             className="mt-3.5 flex max-w-[380px] items-center gap-2.5 text-[0.8125rem] text-muted-foreground"
@@ -430,14 +450,16 @@ function Hero({
             <span className="h-1 w-full max-w-[120px] flex-1 overflow-hidden rounded-sm bg-muted">
               <span
                 className="block h-full rounded-sm bg-foreground"
-                style={{ width: `${Math.min(100, (budget.used / (budget.limit || 1)) * 100)}%` }}
+                style={{
+                  width: `${Math.min(100, (shownBudget.used / (shownBudget.limit || 1)) * 100)}%`,
+                }}
               />
             </span>
             <span className="tabular-nums">
               <span className="font-medium text-foreground">
-                {money(budget.used, currency, locale)}
+                {money(shownBudget.used, currency, locale)}
               </span>{" "}
-              {messages.budgetOf(budget.limitLabel, budget.month)}
+              {messages.budgetOf(shownBudget.limitLabel, shownBudget.month)}
             </span>
           </Link>
         ) : null}
@@ -445,40 +467,57 @@ function Hero({
       <div className="flex flex-wrap gap-x-9 gap-y-6">
         <Stat
           label={messages.tokens}
-          value={compact(totals.usage.totalTokens, locale)}
-          detail={messages.cached(percent(cachedShare(totals.usage), locale))}
+          value={ready ? compact(totals?.usage.totalTokens, locale) : undefined}
+          detail={
+            ready && totals
+              ? messages.cached(percent(cachedShare(totals.usage), locale))
+              : undefined
+          }
         />
         <span className="w-px self-stretch bg-border/70" />
         <Stat
           label={messages.calls}
-          value={totals.modelCallCount.toLocaleString(locale)}
-          detail={messages.perCall(
-            fineMoney(
-              totals.modelCallCount > 0 ? cost / totals.modelCallCount : 0,
-              currency,
-              locale
-            )
-          )}
+          value={ready ? calls.toLocaleString(locale) : undefined}
+          detail={
+            ready
+              ? messages.perCall(fineMoney(calls > 0 ? cost / calls : 0, currency, locale))
+              : undefined
+          }
         />
         <span className="w-px self-stretch bg-border/70" />
         <Stat
           label={messages.runs}
-          value={runs === undefined ? "—" : runs.toLocaleString(locale)}
-          detail={messages.perRun(fineMoney(runs ? cost / runs : 0, currency, locale))}
+          value={ready ? (runs.total?.toLocaleString(locale) ?? "—") : undefined}
+          detail={
+            ready
+              ? messages.perRun(fineMoney(runs.total ? cost / runs.total : 0, currency, locale))
+              : undefined
+          }
         />
       </div>
     </section>
   )
 }
 
-function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {
+/** A figure under its label. Without a value, placeholders hold its lines' heights. */
+function Stat({
+  label,
+  value,
+  detail,
+}: {
+  readonly label: string
+  readonly value: string | undefined
+  readonly detail: string | undefined
+}) {
   return (
     <div className="flex min-w-[120px] flex-col gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       <span className="text-[1.625rem] font-semibold leading-[1.1] tracking-[-0.02em] tabular-nums">
-        {value}
+        {value ?? <SkeletonText className="h-5 w-20 rounded-md" />}
       </span>
-      <span className="text-[0.8125rem] text-muted-foreground tabular-nums">{detail}</span>
+      <span className="text-[0.8125rem] text-muted-foreground tabular-nums">
+        {detail ?? <SkeletonText className="w-24" />}
+      </span>
     </div>
   )
 }
@@ -486,7 +525,10 @@ function Stat({ label, value, detail }: { label: string; value: string; detail: 
 /** This month's project-wide cost limit and what it has used, when there is one. */
 function useProjectBudget(currency: string) {
   const locale = useLocale()
-  const { data } = useQuery({ ...getAiLimitStatusOptions(limitStatusQuery), retry: false })
+  const { data, isPending } = useQuery({
+    ...getAiLimitStatusOptions(limitStatusQuery),
+    retry: false,
+  })
   const status = data?.items.find(
     (item) =>
       item.policy.enabled &&
@@ -494,27 +536,32 @@ function useProjectBudget(currency: string) {
       item.policy.limit.meter === "cost.catalogEstimated" &&
       item.policy.limit.amount.currency === currency
   )
-  if (!status || status.policy.limit.meter !== "cost.catalogEstimated") return undefined
+  if (!status || status.policy.limit.meter !== "cost.catalogEstimated") {
+    return { loading: isPending, value: undefined }
+  }
   const used =
     status.consumption.actual.meter === "cost.catalogEstimated"
       ? Number(status.consumption.actual.amount.amountNanos) / 1e9
       : 0
   const limit = Number(status.policy.limit.amount.amountNanos) / 1e9
   return {
-    used,
-    limit,
-    // A round limit reads without cents.
-    limitLabel: Number.isInteger(limit)
-      ? new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 0,
-        }).format(limit)
-      : money(limit, currency, locale),
-    month: new Date(status.period.start).toLocaleDateString(locale, {
-      month: "long",
-      timeZone: "UTC",
-    }),
+    loading: false,
+    value: {
+      used,
+      limit,
+      // A round limit reads without cents.
+      limitLabel: Number.isInteger(limit)
+        ? new Intl.NumberFormat(locale, {
+            style: "currency",
+            currency,
+            maximumFractionDigits: 0,
+          }).format(limit)
+        : money(limit, currency, locale),
+      month: new Date(status.period.start).toLocaleDateString(locale, {
+        month: "long",
+        timeZone: "UTC",
+      }),
+    },
   }
 }
 

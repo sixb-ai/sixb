@@ -1,6 +1,7 @@
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useState } from "react"
+import { SkeletonText } from "../../section-ui"
 import type { Overview } from "./format"
 import { useAiUsageMessages } from "./messages"
 import { Segmented } from "./segmented"
@@ -15,6 +16,7 @@ import {
   niceScale,
   otherModelColor,
   percent,
+  rangePeriods,
   type SpendFilters,
   type SpendRange,
 } from "./spend-model"
@@ -22,6 +24,9 @@ import {
 export type Measure = "cost" | "tokens" | "calls"
 
 const height = 232
+
+// The heights of the bars that stand in while the numbers load, as fractions of the plot.
+const placeholderBars = [0.42, 0.58, 0.36, 0.7, 0.5, 0.64, 0.46, 0.78, 0.4, 0.55, 0.32, 0.6]
 
 interface Series {
   readonly key: string
@@ -71,6 +76,8 @@ export function SpendChart({
         : messages.titles
 
   const periods = overview?.series ?? []
+  // While the numbers load, the bars stand where the range's periods will put them.
+  const starts = loading ? rangePeriods(range) : periods.map((period) => period.start)
   const measureOf = (aggregate: Aggregate) =>
     measure === "cost"
       ? costOf(aggregate, currency)
@@ -136,7 +143,8 @@ export function SpendChart({
         : Math.round(value).toLocaleString(locale)
   const peak = max > 0 ? stacks.indexOf(max) : -1
   const total = stacks.reduce((sum, value) => sum + value, 0)
-  const every = Math.max(1, Math.ceil(periods.length / 8))
+  const every = Math.max(1, Math.ceil(starts.length / 8))
+  const barGap = starts.length > 14 ? "gap-0.5" : "gap-1.5"
   const picked = filters.day ? periods.findIndex((period) => period.start === filters.day) : -1
   const modelFiltered = filters.model !== undefined
 
@@ -161,44 +169,57 @@ export function SpendChart({
       </div>
 
       <div className="mt-3.5 -ml-2 flex min-h-7 flex-wrap items-center gap-x-1 gap-y-0.5">
-        {series.map((entry) => {
-          const on =
-            entry.model !== undefined &&
-            filters.provider === entry.model.providerId &&
-            filters.model === entry.model.modelId
-          const sum = entry.values.reduce((a, b) => a + b, 0)
-          const content = (
-            <>
+        {loading
+          ? ["w-28", "w-20", "w-24"].map((width) => (
               <span
-                className="size-2.5 shrink-0 rounded-[3px]"
-                style={{ background: entry.color }}
-              />
-              <span className="text-foreground/80">{entry.name}</span>
-              <span className="font-medium tabular-nums">{sum > 0 ? format(sum) : "—"}</span>
-            </>
-          )
-          const className = cn(
-            "inline-flex h-7 items-center gap-[7px] rounded-lg pr-2.5 pl-2 text-[0.8125rem] transition-opacity",
-            (on || hoverSeries === entry.key) && "bg-muted",
-            ((modelFiltered && !on) || (hoverSeries !== undefined && hoverSeries !== entry.key)) &&
-              "opacity-45"
-          )
-          return entry.model ? (
-            <button
-              key={entry.key}
-              type="button"
-              aria-pressed={on}
-              onClick={() => entry.model && onModel(entry.model)}
-              className={cn(className, "transition-colors hover:bg-muted/70")}
-            >
-              {content}
-            </button>
-          ) : (
-            <span key={entry.key} className={className}>
-              {content}
-            </span>
-          )
-        })}
+                key={width}
+                aria-hidden
+                className="inline-flex h-7 items-center gap-[7px] pr-2.5 pl-2 text-[0.8125rem]"
+              >
+                <span className="size-2.5 shrink-0 animate-pulse rounded-[3px] bg-muted" />
+                <SkeletonText className={width} />
+                <SkeletonText className="w-10" />
+              </span>
+            ))
+          : series.map((entry) => {
+              const on =
+                entry.model !== undefined &&
+                filters.provider === entry.model.providerId &&
+                filters.model === entry.model.modelId
+              const sum = entry.values.reduce((a, b) => a + b, 0)
+              const content = (
+                <>
+                  <span
+                    className="size-2.5 shrink-0 rounded-[3px]"
+                    style={{ background: entry.color }}
+                  />
+                  <span className="text-foreground/80">{entry.name}</span>
+                  <span className="font-medium tabular-nums">{sum > 0 ? format(sum) : "—"}</span>
+                </>
+              )
+              const className = cn(
+                "inline-flex h-7 items-center gap-[7px] rounded-lg pr-2.5 pl-2 text-[0.8125rem] transition-opacity",
+                (on || hoverSeries === entry.key) && "bg-muted",
+                ((modelFiltered && !on) ||
+                  (hoverSeries !== undefined && hoverSeries !== entry.key)) &&
+                  "opacity-45"
+              )
+              return entry.model ? (
+                <button
+                  key={entry.key}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => entry.model && onModel(entry.model)}
+                  className={cn(className, "transition-colors hover:bg-muted/70")}
+                >
+                  {content}
+                </button>
+              ) : (
+                <span key={entry.key} className={className}>
+                  {content}
+                </span>
+              )
+            })}
       </div>
 
       <div className="relative mt-[34px] ml-[52px]" style={{ height }}>
@@ -212,13 +233,26 @@ export function SpendChart({
             style={{ bottom: ((line * step) / top) * height }}
           >
             <span className="absolute -top-[9px] -left-[52px] w-[42px] text-right text-[0.6875rem] text-muted-foreground tabular-nums">
-              {tick(line * step)}
+              {loading ? <SkeletonText className="h-2 w-6" /> : tick(line * step)}
             </span>
           </div>
         ))}
-        {loading ? null : (
+        {loading ? (
+          <div aria-hidden className={cn("absolute inset-0 flex", barGap)}>
+            {starts.map((start, index) => (
+              <span key={start} className="flex h-full flex-1 items-end justify-center">
+                <span
+                  className="block w-[44%] max-w-[46px] animate-pulse rounded-[4px_4px_1px_1px] bg-muted"
+                  style={{
+                    height: (placeholderBars[index % placeholderBars.length] ?? 0.5) * height,
+                  }}
+                />
+              </span>
+            ))}
+          </div>
+        ) : (
           <div
-            className={cn("absolute inset-0 flex", periods.length > 14 ? "gap-0.5" : "gap-1.5")}
+            className={cn("absolute inset-0 flex", barGap)}
             onMouseLeave={() => {
               setHover(undefined)
               setHoverSeries(undefined)
@@ -313,10 +347,10 @@ export function SpendChart({
           </div>
         )}
       </div>
-      <div className={cn("mt-2.5 ml-[52px] flex", periods.length > 14 ? "gap-0.5" : "gap-1.5")}>
-        {periods.map((period, index) => (
+      <div className={cn("mt-2.5 ml-[52px] flex", barGap)}>
+        {starts.map((start, index) => (
           <span
-            key={period.start}
+            key={start}
             className={cn(
               "flex-1 overflow-visible whitespace-nowrap text-center text-xs",
               picked === index || hover === index ? "text-foreground" : "text-muted-foreground",
@@ -324,7 +358,7 @@ export function SpendChart({
             )}
           >
             {index % every === 0 || picked === index || hover === index
-              ? bucketLabel(period.start, range.bucket, locale)
+              ? bucketLabel(start, range.bucket, locale)
               : ""}
           </span>
         ))}

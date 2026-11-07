@@ -26,6 +26,7 @@ import {
   modelPalette,
   otherModelColor,
   priorRange,
+  rangePeriods,
   readFilters,
   spendRange,
   splitMoney,
@@ -142,6 +143,18 @@ describe("Usage › Spend", () => {
     expect(spendRange("90d", Date.parse(now)).bucket).toBe("week")
     // An unknown range opens the week.
     expect(spendRange("1y", Date.parse(now)).id).toBe("7d")
+  })
+
+  test("lays out a range's bars where the server buckets them", () => {
+    const days = rangePeriods(spendRange("7d", Date.parse(now)))
+    expect(days).toHaveLength(7)
+    expect(days[0]).toBe(week.from)
+    expect(rangePeriods(spendRange("24h", Date.parse(now)))).toHaveLength(24)
+    // Weeks start on Monday, so the first holds the range's start, Saturday, August 1.
+    const weeks = rangePeriods(spendRange("90d", Date.parse(now)))
+    expect(weeks[0]).toBe("2026-07-27T00:00:00.000Z")
+    expect(weeks.at(-1)).toBe("2026-10-26T00:00:00.000Z")
+    expect(weeks).toHaveLength(14)
   })
 
   test("a picked day narrows the range to it, and compares it with the day before", () => {
@@ -269,11 +282,17 @@ describe("Usage › Spend", () => {
         ...aggregate(3, 1.2),
       },
     ]
-    const narrowed = { ...week, person: "user:usr_2", kind: "language" }
+    const filters = { person: "user:usr_2", kind: "language" as const }
+    const narrowed = { ...week, ...filters }
     const html = text(
       usagePage("/settings/usage?person=user%3Ausr_2&kind=language", [
         [overviewKey(week), overview(week, aggregate(40, 24.82), { people })],
         [overviewKey(narrowed), overview(week, aggregate(3, 1.2))],
+        [overviewKey({ ...weekBefore, ...filters }), overview(weekBefore, aggregate(1, 0.4))],
+        [
+          listAiModelCallGroupsOptions({ query: { ...narrowed, limit: "1" } }).queryKey,
+          { items: [], total: 2, hasMore: true },
+        ],
       ])
     )
     expect(html).toContain("Person Priya Shah")
@@ -282,6 +301,22 @@ describe("Usage › Spend", () => {
     expect(html).toContain("Spent, filtered $1 .20")
     expect(html).toContain("· 5% of all spend")
     expect(html).not.toContain("narrow the whole page")
+  })
+
+  // Removal proof: have the hero wait for its total alone; the total then renders before the
+  // comparison under it, which arrives later and pushes the page down.
+  test("the hero holds its shape until the comparison under its total arrives", () => {
+    const html = usagePage("/settings/usage", [
+      [overviewKey(week), overview(week, aggregate(40, 24.82))],
+      [
+        listAiModelCallGroupsOptions({ query: { ...week, limit: "1" } }).queryKey,
+        { items: [], total: 8, hasMore: true },
+      ],
+      [getAiLimitStatusOptions(limitStatusQuery).queryKey, { items: [] }],
+    ])
+    expect(html).toContain('aria-busy="true"')
+    expect(text(html)).toContain("Spent Tokens Model calls Conversations and runs")
+    expect(text(html)).not.toContain("$24")
   })
 
   test("limits open on their own tab", () => {

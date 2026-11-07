@@ -240,6 +240,22 @@ export function sharePercent(value: number, locale = "en"): string {
   }).format(value)
 }
 
+/**
+ * Where the range's bars start, as the server buckets them: whole UTC hours or days, and weeks
+ * from Monday. The chart lays out its bars from these before their numbers arrive.
+ */
+export function rangePeriods(range: Pick<SpendRange, "from" | "to" | "bucket">): string[] {
+  const first = new Date(range.from)
+  first.setUTCMinutes(0, 0, 0)
+  if (range.bucket !== "hour") first.setUTCHours(0)
+  if (range.bucket === "week") first.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7))
+  const starts: string[] = []
+  for (let at = first.getTime(); at < Date.parse(range.to); at += bucketMs(range.bucket)) {
+    starts.push(new Date(at).toISOString())
+  }
+  return starts
+}
+
 /** A bar's label: its hour, its day, or the week it starts. Buckets are UTC periods. */
 export function bucketLabel(start: string, bucket: Bucket, locale = "en"): string {
   const date = new Date(start)
