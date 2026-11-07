@@ -216,6 +216,7 @@ function toDelivery(stored: StoredDelivery): DatasetIngestDelivery {
     correlationId: stored.correlationId,
     receivedAt: stored.receivedAt,
     changeCount: stored.changeCount,
+    definitionHash: stored.definitionHash,
   }
 }
 

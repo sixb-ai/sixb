@@ -8,6 +8,7 @@ CREATE TABLE dataset_ingest_deliveries (
   correlation_id TEXT NOT NULL,
   received_at TEXT NOT NULL,
   change_count INTEGER NOT NULL CHECK (change_count > 0),
+  definition_hash TEXT NOT NULL,
   changes TEXT NOT NULL,
   flush_id TEXT
 );

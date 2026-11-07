@@ -176,6 +176,7 @@ describe("GET /api/lake/health", () => {
       datasetId: invoices.id,
       executionId: "exec-webhook",
       correlationId: "corr-webhook",
+      definitionHash: "definition-1",
       changes: [
         { kind: "upsert", row: { id: "inv-1" } },
         { kind: "upsert", row: { id: "inv-2" } },

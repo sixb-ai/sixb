@@ -22,7 +22,11 @@ import {
   type DatasetIngestStorage,
 } from "../storage/dataset-ingest"
 import { DatasetValidationError } from "./errors"
-import { type DatasetIngestFlushQueue, tryEnqueueIngestFlush } from "./ingest-flush-job"
+import {
+  type DatasetIngestFlushQueue,
+  datasetDefinitionHash,
+  tryEnqueueIngestFlush,
+} from "./ingest-flush-job"
 import type { DatasetDefinition } from "./types"
 import { lakeDatasetDefinition, writeDataset } from "./write"
 
@@ -450,6 +454,17 @@ class DatasetIngestFlush {
     refused: RefusedChange
   ): Promise<void> {
     const { delivery, changeIndex, value } = refused.value
+
+    // During a rollout a worker can be older than the API that stored this delivery, and refuse a
+    // column it has not heard of yet. Failing the attempt keeps the delivery: it is resumed until
+    // the worker and the delivery agree, and only then is a refusal about the delivery.
+    if (delivery.definitionHash !== datasetDefinitionHash(dataset)) {
+      throw new Error(
+        `[Sixb] Delivery '${delivery.id}' of dataset '${dataset.id}' was stored under another definition of the dataset; it waits until this worker runs the same code as the API.`,
+        { cause: refused.cause }
+      )
+    }
+
     await this.inbox.reject({ lease, flushId: batch.flushId, deliveryIds: [delivery.id] })
 
     const sequence = dataset.sequenceBy === undefined ? undefined : sequenceOf(dataset, value)

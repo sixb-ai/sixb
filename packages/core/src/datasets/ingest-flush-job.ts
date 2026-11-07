@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto"
 import type { JsonValue } from "../json"
+import { stableJsonStringify } from "../json"
 import type { Queues } from "../queues/types"
+import type { DatasetDefinition } from "./types"
+import { lakeDatasetDefinition } from "./write"
 
 export type DatasetIngestFlushQueue = Pick<Queues["lake"], "enqueue">
 
@@ -8,6 +12,17 @@ export type DatasetIngestFlushQueue = Pick<Queues["lake"], "enqueue">
  * not answer costs a webhook this much at most, and the attempt goes on behind it.
  */
 const ENQUEUE_BOUND_MS = 1_000
+
+/**
+ * Names what a delivery was validated against. A worker that disagrees may run older code than the
+ * API that stored it, so what it refuses says nothing about the delivery.
+ */
+export function datasetDefinitionHash(dataset: DatasetDefinition): string {
+  const { schema, primaryKey, sequenceBy } = lakeDatasetDefinition(dataset)
+  const definition = stableJsonStringify({ schema, primaryKey, sequenceBy })
+
+  return createHash("sha256").update(definition).digest("hex")
+}
 
 /** A dataset's flush request, as the inbox names it. */
 export interface DatasetIngestFlushRef {

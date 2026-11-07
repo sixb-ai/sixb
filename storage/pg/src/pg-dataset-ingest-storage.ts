@@ -47,6 +47,7 @@ interface PgDeliveryRow {
   readonly correlation_id: string
   readonly received_at: Date
   readonly change_count: number
+  readonly definition_hash: string
 }
 
 class PgDatasetIngestPersistence implements DatasetIngestPersistence {
@@ -95,10 +96,11 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
   async insertDelivery(projectId: string, record: DatasetIngestDeliveryRecord): Promise<string> {
     const [row] = await this.sql<{ readonly id: string }[]>`
       INSERT INTO dataset_ingest_deliveries (
-        project_id, dataset_id, execution_id, correlation_id, received_at, change_count, changes
+        project_id, dataset_id, execution_id, correlation_id, received_at, change_count,
+        definition_hash, changes
       ) VALUES (
         ${projectId}, ${record.datasetId}, ${record.executionId}, ${record.correlationId},
-        ${record.receivedAt}, ${record.changeCount}, ${record.changes}
+        ${record.receivedAt}, ${record.changeCount}, ${record.definitionHash}, ${record.changes}
       )
       RETURNING id::text AS id
     `
@@ -113,7 +115,8 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
   ): Promise<readonly DatasetIngestDelivery[]> {
     const rows = await this.sql<PgDeliveryRow[]>`
       -- The id is read as text: ORDER BY names the table's column, not that alias.
-      SELECT id::text AS id, dataset_id, execution_id, correlation_id, received_at, change_count
+      SELECT id::text AS id, dataset_id, execution_id, correlation_id, received_at, change_count,
+        definition_hash
       FROM dataset_ingest_deliveries
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId} AND flush_id IS NULL
       ORDER BY dataset_ingest_deliveries.id
@@ -142,7 +145,8 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
     flushId: string
   ): Promise<readonly DatasetIngestDelivery[]> {
     const rows = await this.sql<PgDeliveryRow[]>`
-      SELECT id::text AS id, dataset_id, execution_id, correlation_id, received_at, change_count
+      SELECT id::text AS id, dataset_id, execution_id, correlation_id, received_at, change_count,
+        definition_hash
       FROM dataset_ingest_deliveries
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId} AND flush_id = ${flushId}
       ORDER BY dataset_ingest_deliveries.id
@@ -158,7 +162,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
   ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: string }[]> {
     const rows = await this.sql<(PgDeliveryRow & { readonly changes: string })[]>`
       SELECT id::text AS id, dataset_id, execution_id, correlation_id, received_at, change_count,
-        changes
+        definition_hash, changes
       FROM dataset_ingest_deliveries
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId} AND flush_id = ${flushId}
         AND id > ${page.afterId ?? "0"}::bigint
@@ -252,5 +256,6 @@ function deliveryFromRow(row: PgDeliveryRow): DatasetIngestDelivery {
     correlationId: row.correlation_id,
     receivedAt: new Date(row.received_at),
     changeCount: row.change_count,
+    definitionHash: row.definition_hash,
   }
 }

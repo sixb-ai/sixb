@@ -12,6 +12,8 @@ export interface DatasetIngestDelivery {
   readonly correlationId: string
   readonly receivedAt: Date
   readonly changeCount: number
+  /** Names the dataset definition `ingest` validated it against. */
+  readonly definitionHash: string
 }
 
 /** The deliveries one flush writes as one version, in inbox order. */
@@ -60,6 +62,8 @@ export interface AppendDatasetIngestDeliveryInput {
   readonly datasetId: string
   readonly executionId: string
   readonly correlationId: string
+  /** Names the dataset definition these changes were validated against. */
+  readonly definitionHash: string
   /** Validated changes, in the order the lake applies them. At least one. */
   readonly changes: readonly DatasetIngestChange[]
 }

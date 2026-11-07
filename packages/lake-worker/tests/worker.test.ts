@@ -113,6 +113,7 @@ async function ingestPerson(sixb: SixbHost, id: string) {
     datasetId: people.id,
     executionId: `exec-${id}`,
     correlationId: `corr-${id}`,
+    definitionHash: "definition-1",
     changes: [change.upsert(person(id))],
   })
 }
