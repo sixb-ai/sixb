@@ -1,4 +1,5 @@
 import type {
+  CreateAgentThreadData,
   GetAgentResponse,
   GetAgentRunResponse,
   GetAgentThreadContextResponse,
@@ -17,6 +18,9 @@ export type { AgentContextEntryInput, AgentContextInput }
 export type Agent = GetAgentResponse
 
 export type AgentThread = ListAgentThreadsResponse["threads"][number]
+
+/** What a new conversation's sandbox is made from, as the project's sandbox declares its params. */
+export type AgentThreadSandboxParams = NonNullable<CreateAgentThreadData["body"]["sandbox"]>
 
 export type AgentMessage = ListAgentThreadMessagesResponse["messages"][number]
 

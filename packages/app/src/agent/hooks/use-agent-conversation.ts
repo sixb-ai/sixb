@@ -84,8 +84,18 @@ import {
   threadOwner,
   userPrincipal,
 } from "../sharing"
-import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
-import { ComputerUnavailableError, useNewThreadPlace } from "./use-new-thread-place"
+import type {
+  AgentContextEntryInput,
+  AgentFileRef,
+  AgentRun,
+  AgentThreadSandboxParams,
+  LanguageModel,
+} from "../types"
+import {
+  ComputerUnavailableError,
+  type NewThreadPlaceBody,
+  useNewThreadPlace,
+} from "./use-new-thread-place"
 import { useAgentThreadLists } from "./use-thread-lists"
 import { useThreadStream } from "./use-thread-stream"
 
@@ -115,6 +125,12 @@ export interface UseAgentConversationInput {
   readonly threadId: string | null
   /** The first message created a thread; show it from now on. */
   readonly onThreadCreated: (threadId: string) => void
+  /**
+   * The sandbox the conversation the next message creates works in, as the project's sandbox
+   * declares its params, such as a repository and a branch. Such a conversation runs in the cloud,
+   * so the composer offers no other place. An open thread keeps the sandbox it was created with.
+   */
+  readonly newThreadSandbox?: AgentThreadSandboxParams
 }
 
 /** The parts of {@link ComposerProps} a conversation decides; the page adds the rest. */
@@ -176,7 +192,11 @@ const MESSAGES_LOAD_ERROR: AgentConversationMessagesError = { code: "load" }
  * both render it, by spreading `transcriptProps` and `composerProps` or by drawing `messages` and
  * `turn` themselves.
  */
-export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConversationInput) {
+export function useAgentConversation({
+  threadId,
+  onThreadCreated,
+  newThreadSandbox,
+}: UseAgentConversationInput) {
   const agentMessages = useAgentMessages()
   const labels = agentMessages.chat
   const queryClient = useQueryClient()
@@ -549,8 +569,13 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       }
 
       if (!currentAgent) return
-      setResolvingPlace(true)
-      const place = await resolvePlaceBody().finally(() => setResolvingPlace(false))
+      // A conversation with a sandbox runs in the cloud: there is no folder to ask for.
+      const sandbox = newThreadSandbox
+      let place: NewThreadPlaceBody | null = {}
+      if (!sandbox) {
+        setResolvingPlace(true)
+        place = await resolvePlaceBody().finally(() => setResolvingPlace(false))
+      }
       if (!place) {
         // They cancelled choosing a folder: nothing was sent, and their message goes back.
         setDraftReseed((current) => ({ text, attachments, context, nonce: current.nonce + 1 }))
@@ -558,7 +583,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       }
       const title = deriveTitle(text, attachments)
       const created = await createThread.mutateAsync({
-        body: { ...(title ? { title } : {}), ...place },
+        body: { ...(title ? { title } : {}), ...place, ...(sandbox ? { sandbox } : {}) },
       })
       createdThreadId = created.thread.id
       setPendingUser({
@@ -1101,7 +1126,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
   const composerProps: ConversationComposerProps = {
     onSend: send,
-    ...(threadId === null && (newThreadPlace || newThreadPlaceWaiting)
+    ...(threadId === null && !newThreadSandbox && (newThreadPlace || newThreadPlaceWaiting)
       ? { newThreadPlace: newThreadPlace ?? "waiting" }
       : {}),
     error: currentSendError
