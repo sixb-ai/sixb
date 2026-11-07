@@ -10,18 +10,18 @@ export function backoffDelay(attempt: number, policy: BackoffPolicy): number {
 }
 
 /** Waits, or stops waiting as soon as the signal aborts. Either way it resolves. */
-export function waitUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve()
+export function waitUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve()
 
   return new Promise((resolve) => {
     const finish = () => {
       clearTimeout(timer)
-      signal.removeEventListener("abort", finish)
+      signal?.removeEventListener("abort", finish)
       resolve()
     }
 
     const timer = setTimeout(finish, ms)
-    signal.addEventListener("abort", finish, { once: true })
+    signal?.addEventListener("abort", finish, { once: true })
   })
 }
 

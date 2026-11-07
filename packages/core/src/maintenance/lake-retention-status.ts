@@ -1,6 +1,6 @@
 import type { LakeRetentionRunRecord, MaintenanceHeartbeatRecord } from "../storage"
 import type { LakeMaintenanceSettings } from "./lake-retention"
-import { LAKE_RETENTION_PASS_ID } from "./lake-retention-pass"
+import { LAKE_RETENTION_PASS_ID } from "./passes/lake-retention-pass"
 import { isStale } from "./status"
 
 export type LakeRetentionState =

@@ -27,8 +27,6 @@ type DatasetStorage = GetLakeHealthResponse["datasets"][number]
 /** Console › Lake health: how each dataset is stored, and the lake's automatic cleanup. */
 export function ConsoleLakeHealthPage() {
   const messages = useDataMessages()
-  const healthQuery = useQuery({ ...getLakeHealthOptions(), retry: false })
-  const health = healthQuery.data
 
   return (
     <SectionPage
@@ -37,34 +35,54 @@ export function ConsoleLakeHealthPage() {
       title={messages.lakeHealth.title}
       description={messages.lakeHealth.description}
     >
-      {healthQuery.isPending ? (
-        <Panel>
-          <PanelSkeleton rows={4} />
-        </Panel>
-      ) : healthQuery.isError || !health ? (
-        <Panel>
-          <PanelEmpty
-            tone="error"
-            icon={HardDrive}
-            title={messages.lakeHealth.title}
-            description={apiErrorMessage(healthQuery.error, messages.common.loadFailed)}
-          />
-        </Panel>
-      ) : !health.available ? (
-        <Panel>
-          <PanelEmpty
-            icon={HardDrive}
-            title={messages.lakeHealth.unavailableTitle}
-            description={messages.lakeHealth.unavailableDescription}
-          />
-        </Panel>
-      ) : (
-        <div className="flex flex-col gap-8">
-          <CleanupSection cleanup={health.cleanup} />
-          <DatasetsSection datasets={health.datasets} />
-        </div>
-      )}
+      <LakeHealth />
     </SectionPage>
+  )
+}
+
+function LakeHealth() {
+  const messages = useDataMessages()
+  const query = useQuery({ ...getLakeHealthOptions(), retry: false })
+  const health = query.data
+
+  if (query.isPending) {
+    return (
+      <Panel>
+        <PanelSkeleton rows={4} />
+      </Panel>
+    )
+  }
+
+  if (query.isError || !health) {
+    return (
+      <Panel>
+        <PanelEmpty
+          tone="error"
+          icon={HardDrive}
+          title={messages.lakeHealth.title}
+          description={apiErrorMessage(query.error, messages.common.loadFailed)}
+        />
+      </Panel>
+    )
+  }
+
+  if (!health.available) {
+    return (
+      <Panel>
+        <PanelEmpty
+          icon={HardDrive}
+          title={messages.lakeHealth.unavailableTitle}
+          description={messages.lakeHealth.unavailableDescription}
+        />
+      </Panel>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-8">
+      <CleanupSection cleanup={health.cleanup} />
+      <DatasetsSection datasets={health.datasets} />
+    </div>
   )
 }
 
@@ -138,44 +156,51 @@ function DatasetsSection({ datasets }: { readonly datasets: readonly DatasetStor
 
 /** One dataset's storage. Not a link: its warnings read under it, and its name opens it. */
 function DatasetRow({ dataset }: { readonly dataset: DatasetStorage }) {
-  const messages = useDataMessages()
+  const messages = useDataMessages().lakeHealth
+
+  const title = (
+    <>
+      <Link
+        to={`/console/datasets/${encodeURIComponent(dataset.datasetId)}`}
+        className="truncate hover:underline"
+      >
+        {dataset.datasetId}
+      </Link>
+
+      {/* Beside the name rather than trailing, so the warning text below keeps the width. */}
+      {dataset.warnings.length > 0 ? (
+        <Pill tone="warn">{messages.warnings(dataset.warnings.length)}</Pill>
+      ) : null}
+    </>
+  )
 
   return (
     <PanelRow
       leading={<IconTile icon={Database} />}
-      title={
-        <>
-          <Link
-            to={`/console/datasets/${encodeURIComponent(dataset.datasetId)}`}
-            className="truncate hover:underline"
-          >
-            {dataset.datasetId}
-          </Link>
-          {/* Beside the name rather than trailing, so the warning text below keeps the width. */}
-          {dataset.warnings.length > 0 ? (
-            <Pill tone="warn">{messages.lakeHealth.warnings(dataset.warnings.length)}</Pill>
-          ) : null}
-        </>
-      }
+      title={title}
       meta={dataset.materialized ? <StorageFacts dataset={dataset} /> : null}
-      trailing={
-        dataset.materialized ? null : <Pill tone="muted">{messages.lakeHealth.notWritten}</Pill>
-      }
+      trailing={dataset.materialized ? null : <Pill tone="muted">{messages.notWritten}</Pill>}
     >
-      {dataset.warnings.length > 0 ? (
-        <ul className="flex flex-col gap-1">
-          {dataset.warnings.map((warning) => (
-            <li
-              key={warning.code}
-              className="flex items-start gap-1.5 text-[0.8125rem] leading-5 text-amber-700 dark:text-amber-400"
-            >
-              <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-              <span>{warning.message}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <DatasetWarnings warnings={dataset.warnings} />
     </PanelRow>
+  )
+}
+
+function DatasetWarnings({ warnings }: { readonly warnings: DatasetStorage["warnings"] }) {
+  if (warnings.length === 0) return null
+
+  return (
+    <ul className="flex flex-col gap-1">
+      {warnings.map((warning) => (
+        <li
+          key={warning.code}
+          className="flex items-start gap-1.5 text-[0.8125rem] leading-5 text-amber-700 dark:text-amber-400"
+        >
+          <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          <span>{warning.message}</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 

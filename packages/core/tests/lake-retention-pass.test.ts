@@ -9,9 +9,9 @@ import {
   SixbHost,
 } from "../src"
 import type { LakeMaintenance } from "../src/lake-storage"
-import { MaintenanceLoop } from "../src/maintenance"
-import { lakeRetentionPass } from "../src/maintenance/lake-retention-pass"
 import type { LakeRetentionState } from "../src/maintenance/lake-retention-status"
+import { MaintenanceLoop } from "../src/maintenance/loop"
+import { lakeRetentionPass } from "../src/maintenance/passes/lake-retention-pass"
 import { InMemoryQueues } from "../src/queues"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
