@@ -1,5 +1,5 @@
 import { type DecimalValue, normalizeDecimalValue } from "@sixb/core"
-import { LakeValueRefusedError } from "@sixb/core/lake-storage"
+import { LakeStorageError } from "@sixb/core/lake-storage"
 import { DUCKDB_COLUMN_TYPES } from "./duckdb-column-types"
 
 const decimalType = DUCKDB_COLUMN_TYPES.decimal
@@ -10,7 +10,7 @@ const maxIntegerDigits = decimalType.precision - decimalType.scale
  */
 export function normalizeDuckDbDecimalValue(value: unknown, columnName: string): DecimalValue {
   if (typeof value !== "string") {
-    throw new LakeValueRefusedError(
+    throw new LakeStorageError(
       `[SixbDuckLake] Decimal column '${columnName}' must be an exact decimal string.`
     )
   }
@@ -19,7 +19,7 @@ export function normalizeDuckDbDecimalValue(value: unknown, columnName: string):
   try {
     normalized = normalizeDecimalValue(value)
   } catch {
-    throw new LakeValueRefusedError(
+    throw new LakeStorageError(
       `[SixbDuckLake] Decimal column '${columnName}' must be an exact decimal string.`
     )
   }
@@ -27,7 +27,7 @@ export function normalizeDuckDbDecimalValue(value: unknown, columnName: string):
   const unsigned = normalized.startsWith("-") ? normalized.slice(1) : normalized
   const [integer, fraction = ""] = unsigned.split(".")
   if (integer.length > maxIntegerDigits || fraction.length > decimalType.scale) {
-    throw new LakeValueRefusedError(
+    throw new LakeStorageError(
       `[SixbDuckLake] Decimal column '${columnName}' cannot be represented exactly as ${decimalType.sql}; expected at most ${maxIntegerDigits} integer digits and ${decimalType.scale} fractional digits.`
     )
   }

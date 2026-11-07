@@ -17,6 +17,9 @@ import {
 } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { getDatasetIngestRuntime } from "@sixb/core/internal/runtime"
+import { LakeValueRefusedError } from "@sixb/core/lake-storage"
+import { DatasetValidationError } from "../../../packages/core/src/datasets/errors"
+import { datasetDefinitionHash } from "../../../packages/core/src/datasets/ingest-flush-job"
 import { createTestingScope } from "../../../packages/core/src/execution/scopes"
 import type { DuckLakeStorage } from "../src"
 import { createLocalDuckLakeStorage } from "./test-utils"
@@ -26,6 +29,8 @@ const invoices = defineDataset("raw.invoices", {
     col("id", "string"),
     col("amount", "decimal", { nullable: true }),
     col("issued_at", "timestamp", { nullable: true }),
+    col("issued_on", "date", { nullable: true }),
+    col("count", "int64", { nullable: true }),
   ],
   primaryKey: "id",
 })
@@ -132,19 +137,129 @@ test("a worker older than the API keeps the delivery, and the rollout writes it"
   expect(rows.find((row) => row.id === "2")).toMatchObject({ nick: "Countess" })
 })
 
-// Reproduce: rethrow every error as it is in `appendDatasetRow` (row-appender.ts); the batch
-// then fails as an outage on each attempt, and nothing is written.
-test("refuses the deliveries holding values DuckDB cannot hold, and writes the others", async () => {
-  const { host, lakeStorage, reports } = await setup()
-  const sixb = host.withScope(createTestingScope({ projectId: host.id }))
-  const ingest = (row: DatasetRow) =>
-    sixb.datasets.ingest(invoices, { changes: [change.upsert(row)] })
+// What `ingest` refuses in the request, against what DuckDB refuses when it stages the value: a
+// check stricter than DuckDB would turn working webhooks away, and a looser one answers 200 for a
+// change it then drops. Reproduce: relax TIMESTAMP_FORMAT in value-limits.ts to `.*`.
+test("ingest refuses exactly what DuckDB refuses, for what its schema lets through", async () => {
+  const { lakeStorage } = await setup()
+  await lakeStorage.createDataset(invoices)
 
-  await ingest({ id: "inv-1", amount: "120.50" })
-  // DECIMAL(38,9) holds nine fractional digits, and a DuckDB timestamp no year past 294,000.
-  const decimal = await ingest({ id: "inv-2", amount: "1.0000000001" })
-  const timestamp = await ingest({ id: "inv-3", issued_at: "+275760-09-13T00:00:00.000Z" })
-  await ingest({ id: "inv-4", amount: "80.00" })
+  const staged = async (row: DatasetRow) => {
+    const session = await lakeStorage.beginMerge({ dataset: invoices })
+    try {
+      await session.writeChanges([change.upsert({ id: "1", ...row })])
+      return "holds"
+    } catch (error) {
+      if (error instanceof LakeValueRefusedError) return "refuses"
+      throw error
+    } finally {
+      await session.abort().catch(() => {})
+    }
+  }
+  const checked = (row: DatasetRow) => {
+    try {
+      lakeStorage.assertHoldsChanges(invoices, [change.upsert({ id: "1", ...row })])
+      return "holds"
+    } catch (error) {
+      if (error instanceof LakeValueRefusedError) return "refuses"
+      throw error
+    }
+  }
+
+  const rows: DatasetRow[] = [
+    ...[
+      "2026-09-09T10:00:00.123Z",
+      "2026-09-09 10:00:00",
+      "2026-09-09T10:00:00",
+      "2026-09-09",
+      "2026-09-09T10:00",
+      "2026-09-09 10:00:00+02",
+      "2026-09-09T10:00:00+02:00",
+      "2026-09-09T10:00:00+0200",
+      "2026-09-09T10:00:00.123456789Z",
+      "2026-9-9 1:2:3",
+      "2026-09-09T24:00:00Z",
+      "2026/09/09",
+      "2026/09/09 10:00:00",
+      "0000-01-01T00:00:00Z",
+      "2024-02-29T10:00:00Z",
+      "2026-02-29T10:00:00Z",
+      "2026-02-30T10:00:00Z",
+      "Mon, 09 Sep 2026 10:00:00 GMT",
+      "9/9/2026",
+      "Sep 9, 2026 10:00 AM",
+      "Sep 9 2026",
+      "2026-09-09 10:00:00 GMT",
+      "+012026-09-09T10:00:00Z",
+      "2026-09-09T10:00:00z",
+      "+275760-09-13T00:00:00.000Z",
+    ].map((issued_at) => ({ issued_at })),
+    ...["2026-09-09", "2024-02-29", "2026-02-29", "2026-02-30", "0000-01-01"].map((issued_on) => ({
+      issued_on,
+    })),
+    ...[
+      "120.50",
+      "1.000000001",
+      "1.0000000001",
+      "12345678901234567890123456789",
+      "123456789012345678901234567890",
+    ].map((amount) => ({ amount })),
+    ...[
+      "9223372036854775807",
+      "9223372036854775808",
+      "-9223372036854775808",
+      "-9223372036854775809",
+      "007",
+    ].map((count) => ({ count })),
+  ]
+
+  for (const row of rows) expect([row, checked(row)]).toEqual([row, await staged(row)])
+})
+
+// Reproduce: remove `assertHoldsChanges` from DuckLakeStorage, and `ingest` answers for changes
+// the lake will refuse.
+test("a value DuckDB cannot read is refused to the caller, and nothing is stored", async () => {
+  const { host } = await setup()
+  const sixb = host.withScope(createTestingScope({ projectId: host.id }))
+
+  const failure = await sixb.datasets
+    .ingest(invoices, {
+      changes: [change.upsert({ id: "inv-1", issued_at: "Mon, 09 Sep 2026 10:00:00 GMT" })],
+    })
+    .catch((error) => error)
+
+  expect(failure).toBeInstanceOf(DatasetValidationError)
+  expect(await host.storage.datasetIngest?.summarize({ projectId: host.id })).toEqual([])
+})
+
+// What passes `ingest` can still reach a flush the lake refuses: a worker on another provider, or a
+// stored row older than the check. Reproduce: drop `LakeValueRefusedError` from `refusedChange` in
+// ingest-flush.ts; the batch then fails on each attempt, and nothing behind it is written.
+test("deliveries DuckDB refuses at the flush never hold the others back", async () => {
+  const { host, lakeStorage, reports } = await setup()
+  const inbox = host.storage.datasetIngest
+  if (!inbox) throw new Error("expected a storage with an inbox")
+
+  const store = async (row: DatasetRow) => {
+    const { delivery } = await inbox.append({
+      projectId: host.id,
+      datasetId: invoices.id,
+      executionId: `exec-${String(row.id)}`,
+      correlationId: `corr-${String(row.id)}`,
+      definitionHash: datasetDefinitionHash(invoices),
+      changes: [change.upsert(row)],
+    })
+    return delivery.id
+  }
+
+  // Good ones around the bad ones: the refusal has to name the right change, not the first.
+  await store({ id: "inv-0", amount: "12.00" })
+  const refused = [
+    await store({ id: "inv-1", issued_at: "Mon, 09 Sep 2026 10:00:00 GMT" }),
+    await store({ id: "inv-2", amount: "1.0000000001" }),
+    await store({ id: "inv-3", issued_at: "9/9/2026" }),
+  ]
+  await store({ id: "inv-4", amount: "80.00" })
 
   const outcome = await getDatasetIngestRuntime(host).flush(
     invoices.id,
@@ -154,11 +269,12 @@ test("refuses the deliveries holding values DuckDB cannot hold, and writes the o
 
   const rows: DatasetRow[] = []
   for await (const row of lakeStorage.readRows({ datasetId: invoices.id })) rows.push(row)
-  expect(rows.map((row) => row.id).sort()).toEqual(["inv-1", "inv-4"])
+  expect(rows.map((row) => row.id).sort()).toEqual(["inv-0", "inv-4"])
 
   await flushSixbErrors(host)
-  expect(reports.filter((report) => report.type === "dataset.ingest.rejected")).toEqual([
-    expect.objectContaining({ deliveryId: decimal.deliveryId, key: { id: "inv-2" } }),
-    expect.objectContaining({ deliveryId: timestamp.deliveryId, key: { id: "inv-3" } }),
-  ])
+  expect(
+    reports
+      .flatMap((report) => (report.type === "dataset.ingest.rejected" ? [report.deliveryId] : []))
+      .sort()
+  ).toEqual(refused.sort())
 })

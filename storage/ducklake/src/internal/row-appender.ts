@@ -5,12 +5,14 @@ import { normalizeDuckDbDecimalValue } from "./duckdb-decimal"
 import type { DuckDbAppender } from "./duckdb-runtime"
 
 /**
- * Append one validated dataset row into the staging table's DuckDB appender.
+ * Append one validated dataset row into the staging table's DuckDB appender. `position` is where
+ * the row came in what the caller was handed, for the refusal to name it.
  */
 export function appendDatasetRow(
   appender: DuckDbAppender,
   schema: DatasetSchema,
-  row: DatasetRow
+  row: DatasetRow,
+  position: number
 ): void {
   for (const column of schema.columns) {
     try {
@@ -18,10 +20,9 @@ export function appendDatasetRow(
     } catch (error) {
       // DuckDB converts the value as it appends it: a value its column type cannot hold, such as
       // a timestamp outside its range or an integer past 64 bits, fails here.
-      if (error instanceof LakeValueRefusedError) throw error
       throw new LakeValueRefusedError(
         `[SixbDuckLake] Column '${column.name}' cannot hold the value: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+        { changeIndex: position, cause: error }
       )
     }
   }

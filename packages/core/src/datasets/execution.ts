@@ -7,6 +7,7 @@ import {
 import type { BlobStorage } from "../blob-storage"
 import type { ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import { LakeValueRefusedError } from "../lake-storage/errors"
 import { getDatasetPrimaryKeyColumns } from "../lake-storage/merge-validation"
 import type { DatasetRow, DatasetVersion, LakeStorage } from "../lake-storage/types"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -14,6 +15,7 @@ import type { DatasetVersionMarkings } from "../security/dataset-version-marking
 import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 import type { MergeChange } from "./changes"
+import { DatasetValidationError } from "./errors"
 import { datasetDefinitionHash, tryEnqueueIngestFlush } from "./ingest-flush-job"
 import {
   type DatasetLineage,
@@ -23,7 +25,7 @@ import {
   walkDatasetLineage,
 } from "./lineage"
 import type { DatasetDefinition } from "./types"
-import { validateDatasetMergeChanges } from "./write"
+import { lakeDatasetDefinition, validateDatasetMergeChanges } from "./write"
 
 export interface DatasetIngestInput {
   readonly changes:
@@ -221,6 +223,8 @@ export function createDatasetsRuntime(
       )
       if (changes.length === 0) return { deliveryId: null, changes: 0 }
 
+      assertLakeHolds(lakeStorage, registered, changes)
+
       const { delivery, flush } = await inbox.append({
         projectId: runtime.projectId,
         datasetId: registered.id,
@@ -242,6 +246,27 @@ export function createDatasetsRuntime(
 
       return { deliveryId: delivery.id, changes: changes.length }
     },
+  }
+}
+
+/**
+ * What the lake can say it will refuse goes back to the caller, who can still do something about
+ * it. The rest is found when the flush writes it, after `ingest` has answered.
+ */
+function assertLakeHolds(
+  lakeStorage: LakeStorage,
+  dataset: DatasetDefinition,
+  changes: readonly MergeChange<DatasetRow, DatasetRow>[]
+): void {
+  try {
+    lakeStorage.assertHoldsChanges?.(lakeDatasetDefinition(dataset), changes)
+  } catch (error) {
+    if (!(error instanceof LakeValueRefusedError)) throw error
+
+    throw new DatasetValidationError(
+      `[Sixb] Dataset '${dataset.id}' cannot hold change ${error.changeIndex}: ${error.message}`,
+      { cause: error }
+    )
   }
 }
 
