@@ -120,7 +120,6 @@ describe("deploy release", () => {
       ["api", "http"],
       ["app", "http"],
       ["orchestrator", "singleton"],
-      ["scheduler", "singleton"],
       ["rules", "singleton"],
       ["workers", "workers"],
     ])
@@ -156,7 +155,6 @@ describe("deploy release", () => {
       api: "api",
       app: "app",
       orchestrator: "orchestrator",
-      scheduler: "scheduler",
       rules: "rules",
       workers: "worker-group",
     }
@@ -204,7 +202,6 @@ describe("deploy release", () => {
       ["api", true],
       ["app", false],
       ["orchestrator", false],
-      ["scheduler", false],
       ["rules", false],
       ["workers", true],
     ])
@@ -224,7 +221,7 @@ describe("deploy release", () => {
       services: {
         app: { domain: "ops.example.com" },
         api: { env: { POSTGRES_POOL_MAX: "6" } },
-        scheduler: false,
+        rules: false,
       },
     })
 
@@ -242,7 +239,7 @@ describe("deploy release", () => {
       domain: "ops.example.com",
       publicOrigin: "https://ops.example.com",
     })
-    expect(built.services.some((entry) => entry.name === "scheduler")).toBe(false)
+    expect(built.services.some((entry) => entry.name === "rules")).toBe(false)
   })
 
   test("tells a desktop build where browsers reach the app and the API", () => {

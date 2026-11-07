@@ -7,6 +7,5 @@ export default defineDeploy({
   target: new SshTarget({ host: "203.0.113.10", ports: { api: 3012 } }),
   services: {
     app: { domain: "ops.example.com" },
-    scheduler: false,
   },
 })

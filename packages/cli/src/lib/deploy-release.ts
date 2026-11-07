@@ -28,7 +28,6 @@ const ROLE_SERVICES = {
   api: "api",
   app: "app",
   orchestrator: "orchestrator",
-  scheduler: "scheduler",
   rules: "rules",
   "worker-group": "workers",
   // A deployment co-hosts its workers in one `worker-group`; `workers.process.instances` scales it.
@@ -44,7 +43,6 @@ const SERVICE_ROLES: { readonly [Service in DeployServiceName]: RoleOf<Service> 
   api: "api",
   app: "app",
   orchestrator: "orchestrator",
-  scheduler: "scheduler",
   rules: "rules",
   workers: "worker-group",
 }

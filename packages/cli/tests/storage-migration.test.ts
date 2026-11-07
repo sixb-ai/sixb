@@ -67,12 +67,12 @@ describe("migrateStorageForRole", () => {
     const sixb = runtimeWithMigrators([migrator("Sqlite", ["0001_objects"])])
 
     const byFlag = await migrateStorageForRole(sixb, {
-      role: "scheduler",
+      role: "orchestrator",
       noMigrate: true,
       env: {},
     })
     const byEnv = await migrateStorageForRole(sixb, {
-      role: "scheduler",
+      role: "orchestrator",
       env: { SIXB_SKIP_MIGRATION: "1" },
     })
 

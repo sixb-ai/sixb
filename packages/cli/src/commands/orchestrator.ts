@@ -38,7 +38,7 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
       roleView({
         command: "orchestrator",
         name: sixb.id,
-        items: [{ label: "role", value: "event-to-queue dispatcher" }],
+        items: [{ label: "role", value: "event dispatch, cron and upkeep" }],
         storage: migration.summary,
         warnings: runtime.warnings,
       })
