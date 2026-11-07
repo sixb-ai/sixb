@@ -123,10 +123,7 @@ export interface CompileRoutesResult {
 }
 
 export interface ProjectionReconciliationPorts {
-  readonly lakeStorage: Pick<
-    LakeStorage,
-    "getLatestVersion" | "getVersion" | "listVersions" | "listLatestVersionsSince"
-  >
+  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
   /** Source of runs whose queue publication was lost. */
   readonly projectionRuns: Pick<ProjectionRunStorage, "list">
   /**
@@ -137,10 +134,7 @@ export interface ProjectionReconciliationPorts {
 }
 
 export interface DatasetTriggerReconciliationPorts {
-  readonly lakeStorage: Pick<
-    LakeStorage,
-    "getLatestVersion" | "listVersions" | "listLatestVersionsSince"
-  >
+  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "listVersions">
   /** What each pipeline last read. */
   readonly pipelineRuns: Pick<PipelineRunStorage, "listLatestByPipelineIds" | "listSteps">
   /**

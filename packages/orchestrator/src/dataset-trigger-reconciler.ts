@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
-import type { DatasetVersion, LatestVersionsSince } from "@sixb/core/lake-storage"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
-import { readChangeFeed } from "./lake-change-feed"
+import type { LakeChangeFeed, LakeChangeReader } from "./lake-change-feed"
 import type {
   DatasetTriggerReconciliationPorts,
   OrchestratorRoutes,
@@ -25,6 +25,7 @@ interface DatasetTriggerReconcilerInput extends DatasetTriggerReconciliationPort
   readonly projectId: string
   readonly dispatcher: PipelineDispatcherPort
   readonly triggers: readonly DatasetTrigger[]
+  readonly feed: LakeChangeFeed
 }
 
 /** The newest version that would have fired `updated()`, and every version from it to the latest. */
@@ -78,42 +79,33 @@ export function datasetTriggers(routes: OrchestratorRoutes): readonly DatasetTri
  * | cancelled          | Does not count: the run before it decides.                   |
  * | none               | Nothing: a first run stays the user's or the next event's.   |
  *
- * A pass reads the change feed from an in-memory cursor, which is one catalog query when nothing
- * moved, and looks at no pipeline. The triggers of the datasets that moved stay unsettled until a
- * run covers them. Every trigger starts unsettled, so a restart needs no stored cursor.
+ * A pass reads the change feed, which costs no pipeline anything when nothing moved. The triggers
+ * of the datasets that moved stay unsettled until a run covers them. Every trigger starts unsettled,
+ * so a restart needs no stored cursor.
  */
 export class DatasetTriggerReconciler {
   readonly intervalMs: number
   private readonly triggersByDatasetId: ReadonlyMap<string, readonly DatasetTrigger[]>
   private readonly unsettled: Map<string, DatasetTrigger>
-  private cursor: string | null = null
+  private readonly changes: LakeChangeReader
 
   constructor(private readonly input: DatasetTriggerReconcilerInput) {
     this.intervalMs = input.intervalMs ?? INTERVAL_MS
     this.triggersByDatasetId = groupByDataset(input.triggers)
     this.unsettled = new Map(input.triggers.map((trigger) => [triggerKey(trigger), trigger]))
+    this.changes = input.feed.subscribe({
+      datasetIds: this.triggersByDatasetId.keys(),
+      onCursorLost: () => this.markUnsettled(input.triggers),
+    })
   }
 
   async pass(signal: AbortSignal, now = Date.now()): Promise<void> {
-    const changes = await this.readFeed()
-
-    for (const { datasetId } of changes.versions) {
+    // Read first: anything the checks below read after this is in the next read too.
+    for (const { datasetId } of await this.changes.read()) {
       this.markUnsettled(this.triggersByDatasetId.get(datasetId) ?? [])
     }
-    // Moves on before the checks: anything they read after the feed is in the next read too.
-    this.cursor = changes.cursor
 
     if (this.unsettled.size > 0) await this.settle(signal, now)
-  }
-
-  private readFeed(): Promise<LatestVersionsSince> {
-    return readChangeFeed({
-      lakeStorage: this.input.lakeStorage,
-      projectId: this.input.projectId,
-      cursor: this.cursor,
-      datasetIds: [...this.triggersByDatasetId.keys()],
-      onCursorLost: () => this.markUnsettled(this.input.triggers),
-    })
   }
 
   private markUnsettled(triggers: readonly DatasetTrigger[]): void {

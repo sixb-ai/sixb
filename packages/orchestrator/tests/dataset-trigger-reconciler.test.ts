@@ -22,6 +22,7 @@ import {
   DatasetTriggerReconciler,
   datasetTriggers,
 } from "../src/dataset-trigger-reconciler"
+import { LakeChangeFeed } from "../src/lake-change-feed"
 import type { DatasetTriggerReconciliationPorts } from "../src/types"
 
 const INTERVAL_MS = 30_000
@@ -102,6 +103,7 @@ function createScene() {
       lakeStorage,
       pipelineRuns,
       intervalMs: INTERVAL_MS,
+      feed: new LakeChangeFeed({ lakeStorage, projectId: "project", freshForMs: 0 }),
     })
 
   /** One that sees every commit as old enough that its event should have arrived. */

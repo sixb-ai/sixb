@@ -1,7 +1,9 @@
 import { createSixbError } from "@sixb/core/internal/errors"
 import { everyMs, type MaintenancePass } from "@sixb/core/internal/maintenance"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
+import type { LakeStorage } from "@sixb/core/lake-storage"
 import { DatasetTriggerReconciler, datasetTriggers } from "./dataset-trigger-reconciler"
+import { LakeChangeFeed } from "./lake-change-feed"
 import { ProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
 import type {
   DatasetTriggerReconciliationPorts,
@@ -11,6 +13,8 @@ import type {
 } from "./types"
 import { requireDispatcher } from "./worker"
 
+const INTERVAL_MS = 30_000
+
 // A first pass looks every dataset up, and later ones read what changed: only a hung call gets here.
 const PASS_BUDGET_MS = 5 * 60_000
 
@@ -18,6 +22,8 @@ export interface ReconciliationPassesInput {
   readonly projectId: string
   readonly routes: OrchestratorRoutes
   readonly dispatchers: OrchestratorDispatchers
+  /** The lake's change feed, which every pass here reads through one reader. */
+  readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince">
   /** Required when the routes contain projections. */
   readonly projections?: ProjectionReconciliationPorts
   /** Without it, a pipeline's dataset triggers have only their event. */
@@ -31,10 +37,21 @@ export interface ReconciliationPassesInput {
 export function createReconciliationPasses(
   input: ReconciliationPassesInput
 ): readonly MaintenancePass[] {
-  return [projectionPass(input), datasetTriggerPass(input)].filter((pass) => pass !== null)
+  const feed = new LakeChangeFeed({
+    lakeStorage: input.lakeStorage,
+    projectId: input.projectId,
+    freshForMs: INTERVAL_MS,
+  })
+
+  return [projectionPass(input, feed), datasetTriggerPass(input, feed)].filter(
+    (pass) => pass !== null
+  )
 }
 
-function projectionPass(input: ReconciliationPassesInput): MaintenancePass | null {
+function projectionPass(
+  input: ReconciliationPassesInput,
+  feed: LakeChangeFeed
+): MaintenancePass | null {
   const descriptors = projectionDescriptors(input.projectId, input.routes)
   if (descriptors.length === 0) return null
 
@@ -56,6 +73,8 @@ function projectionPass(input: ReconciliationPassesInput): MaintenancePass | nul
     projectId: input.projectId,
     dispatcher: requireDispatcher(input, "projections"),
     descriptors,
+    feed,
+    intervalMs: INTERVAL_MS,
   })
 
   return everyMs({
@@ -66,7 +85,10 @@ function projectionPass(input: ReconciliationPassesInput): MaintenancePass | nul
   })
 }
 
-function datasetTriggerPass(input: ReconciliationPassesInput): MaintenancePass | null {
+function datasetTriggerPass(
+  input: ReconciliationPassesInput,
+  feed: LakeChangeFeed
+): MaintenancePass | null {
   const triggers = datasetTriggers(input.routes)
   if (triggers.length === 0 || !input.datasetTriggers) return null
 
@@ -75,6 +97,8 @@ function datasetTriggerPass(input: ReconciliationPassesInput): MaintenancePass |
     projectId: input.projectId,
     dispatcher: requireDispatcher(input, "pipelines"),
     triggers,
+    feed,
+    intervalMs: INTERVAL_MS,
   })
 
   return everyMs({
