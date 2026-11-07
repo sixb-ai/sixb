@@ -289,6 +289,52 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
         ])
       }))
 
+    test("keeps a refused delivery whole, out of every batch, and purges it by age", () =>
+      withStorage(async (storage) => {
+        const changes = [upsert("2"), upsert("3")]
+        await append(storage, [upsert("1")])
+        const refused = await append(storage, changes)
+
+        const lease = await acquire(storage, "owner-a")
+        await storage.takeBatch({ lease, flushId: "flush-1", maxChanges: 10 })
+        await storage.reject({
+          lease,
+          flushId: "flush-1",
+          deliveryId: refused.id,
+          reason: "Column 'name' cannot hold the value.",
+        })
+        await storage.complete({ lease, flushId: "flush-1" })
+
+        expect(await storage.takeBatch({ lease, flushId: "flush-2", maxChanges: 10 })).toBeNull()
+        expect(await storage.summarize({ projectId })).toMatchObject([
+          { datasetId, pendingDeliveries: 0, pendingChanges: 0, rejectedDeliveries: 1 },
+        ])
+
+        const listed = [
+          await storage.listRejected({ projectId, datasetId, limit: 10 }),
+          await storage.listRejected({ projectId, limit: 10 }),
+        ]
+        for (const rejected of listed) {
+          expect(rejected).toEqual([
+            {
+              delivery: refused,
+              rejectedAt: expect.any(Date),
+              reason: "Column 'name' cannot hold the value.",
+              changes,
+            },
+          ])
+        }
+        expect(await storage.listRejected({ projectId, datasetId: "other", limit: 10 })).toEqual([])
+
+        await storage.purgeRejected({ projectId, olderThanMs: 60_000 })
+        expect(await storage.listRejected({ projectId, limit: 10 })).toHaveLength(1)
+
+        await Bun.sleep(5)
+        await storage.purgeRejected({ projectId, olderThanMs: 0 })
+        expect(await storage.listRejected({ projectId, limit: 10 })).toEqual([])
+        expect(await storage.summarize({ projectId })).toEqual([])
+      }))
+
     test("rejects chosen deliveries, completes the rest, and counts failures in a row", () =>
       withStorage(async (storage) => {
         const kept = await append(storage, [upsert("1")])
@@ -296,7 +342,7 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
         const lease = await acquire(storage, "owner-a")
         await storage.takeBatch({ lease, flushId: "flush-1", maxChanges: 10 })
 
-        await storage.reject({ lease, flushId: "flush-1", deliveryIds: [refused.id] })
+        await storage.reject({ lease, flushId: "flush-1", deliveryId: refused.id, reason: "No." })
         const read = await readAll(storage, lease, "flush-1")
         expect(read.map(({ delivery }) => delivery.id)).toEqual([kept.id])
 
@@ -318,6 +364,7 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
             request: 1,
             leaseExpiresAt: last.expiresAt,
             failureStreak: 0,
+            rejectedDeliveries: 1,
             lastFlushedAt: expect.any(Date),
           },
         ])
@@ -339,6 +386,7 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
             request: 0,
             leaseExpiresAt: null,
             failureStreak: 0,
+            rejectedDeliveries: 0,
             lastFlushedAt: null,
           },
         ])

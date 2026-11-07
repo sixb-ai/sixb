@@ -20145,13 +20145,23 @@
                               "oldestReceivedAt": {
                                 "type": "string",
                                 "format": "date-time",
+                                "nullable": true,
                                 "description": "When the oldest waiting delivery arrived"
+                              },
+                              "rejectedDeliveries": {
+                                "type": "integer",
+                                "description": "Deliveries refused when written, kept for a week to read and send again"
                               }
                             },
-                            "required": ["pendingDeliveries", "pendingChanges", "oldestReceivedAt"],
+                            "required": [
+                              "pendingDeliveries",
+                              "pendingChanges",
+                              "oldestReceivedAt",
+                              "rejectedDeliveries"
+                            ],
                             "additionalProperties": false,
                             "nullable": true,
-                            "description": "Ingested changes waiting for a flush to write them; null when none wait"
+                            "description": "Ingested changes waiting or refused; null when there are none"
                           }
                         },
                         "required": [

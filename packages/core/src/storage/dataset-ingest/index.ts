@@ -9,6 +9,7 @@ export type {
   DatasetIngestDelivery,
   DatasetIngestFlushRequest,
   DatasetIngestLease,
+  DatasetIngestRejection,
   DatasetIngestStorage,
   DatasetIngestSummary,
   TakeDatasetIngestBatchInput,

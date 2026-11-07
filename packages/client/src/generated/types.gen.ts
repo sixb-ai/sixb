@@ -6759,7 +6759,7 @@ export type GetLakeHealthResponses = {
         message: string
       }>
       /**
-       * Ingested changes waiting for a flush to write them; null when none wait
+       * Ingested changes waiting or refused; null when there are none
        */
       ingest: {
         pendingDeliveries: number
@@ -6767,7 +6767,11 @@ export type GetLakeHealthResponses = {
         /**
          * When the oldest waiting delivery arrived
          */
-        oldestReceivedAt: string
+        oldestReceivedAt: string | null
+        /**
+         * Deliveries refused when written, kept for a week to read and send again
+         */
+        rejectedDeliveries: number
       } | null
     }>
   }

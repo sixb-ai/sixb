@@ -3,6 +3,7 @@ import {
   type DatasetIngestPendingCounts,
   type DatasetIngestPersistence,
   type DatasetIngestPersistenceBackend,
+  type DatasetIngestRejectionRecord,
   type DatasetIngestState,
   DurableDatasetIngestStorage,
   initialDatasetIngestState,
@@ -13,6 +14,7 @@ interface StoredDelivery extends DatasetIngestDeliveryRecord {
   readonly projectId: string
   readonly id: bigint
   readonly flushId: string | null
+  readonly rejection?: { readonly rejectedAt: Date; readonly reason: string }
 }
 
 interface InMemoryDatasetIngestData {
@@ -98,7 +100,7 @@ class InMemoryDatasetIngestPersistence implements DatasetIngestPersistence {
     limit: number
   ): Promise<readonly DatasetIngestDelivery[]> {
     return this.deliveriesOf(projectId, datasetId)
-      .filter((delivery) => delivery.flushId === null)
+      .filter((delivery) => delivery.flushId === null && !delivery.rejection)
       .slice(0, limit)
       .map(toDelivery)
   }
@@ -145,15 +147,48 @@ class InMemoryDatasetIngestPersistence implements DatasetIngestPersistence {
     }
   }
 
-  async deleteDeliveries(
+  async rejectDelivery(
     projectId: string,
     datasetId: string,
     flushId: string,
-    deliveryIds: readonly string[]
+    deliveryId: string,
+    rejection: { readonly rejectedAt: Date; readonly reason: string }
   ): Promise<void> {
-    const ids = new Set(deliveryIds)
     for (const delivery of this.flushOf(projectId, datasetId, flushId)) {
-      if (ids.has(delivery.id.toString())) this.data.deliveries.delete(delivery.id)
+      if (delivery.id.toString() === deliveryId) {
+        this.data.deliveries.set(delivery.id, { ...delivery, flushId: null, rejection })
+      }
+    }
+  }
+
+  async listRejected(
+    projectId: string,
+    datasetId: string | undefined,
+    limit: number
+  ): Promise<readonly DatasetIngestRejectionRecord[]> {
+    const records: DatasetIngestRejectionRecord[] = []
+
+    for (const stored of this.data.deliveries.values()) {
+      if (stored.projectId !== projectId || !stored.rejection) continue
+      if (datasetId !== undefined && stored.datasetId !== datasetId) continue
+
+      records.push({ delivery: toDelivery(stored), ...stored.rejection, changes: stored.changes })
+    }
+
+    return records
+      .sort((left, right) => right.rejectedAt.getTime() - left.rejectedAt.getTime())
+      .slice(0, limit)
+  }
+
+  async deleteRejected(projectId: string, before: Date): Promise<void> {
+    for (const delivery of [...this.data.deliveries.values()]) {
+      if (
+        delivery.projectId === projectId &&
+        delivery.rejection &&
+        delivery.rejection.rejectedAt < before
+      ) {
+        this.data.deliveries.delete(delivery.id)
+      }
     }
   }
 
@@ -180,16 +215,28 @@ class InMemoryDatasetIngestPersistence implements DatasetIngestPersistence {
       if (delivery.projectId !== projectId) continue
       if (wanted !== null && !wanted.has(delivery.datasetId)) continue
 
-      const current = counts.get(delivery.datasetId)
-      counts.set(delivery.datasetId, {
+      const current = counts.get(delivery.datasetId) ?? {
         datasetId: delivery.datasetId,
-        pendingDeliveries: (current?.pendingDeliveries ?? 0) + 1,
-        pendingChanges: (current?.pendingChanges ?? 0) + delivery.changeCount,
-        oldestReceivedAt:
-          current?.oldestReceivedAt && current.oldestReceivedAt <= delivery.receivedAt
-            ? current.oldestReceivedAt
-            : delivery.receivedAt,
-      })
+        pendingDeliveries: 0,
+        pendingChanges: 0,
+        oldestReceivedAt: null,
+        rejectedDeliveries: 0,
+      }
+
+      counts.set(
+        delivery.datasetId,
+        delivery.rejection
+          ? { ...current, rejectedDeliveries: current.rejectedDeliveries + 1 }
+          : {
+              ...current,
+              pendingDeliveries: current.pendingDeliveries + 1,
+              pendingChanges: current.pendingChanges + delivery.changeCount,
+              oldestReceivedAt:
+                current.oldestReceivedAt && current.oldestReceivedAt <= delivery.receivedAt
+                  ? current.oldestReceivedAt
+                  : delivery.receivedAt,
+            }
+      )
     }
 
     return [...counts.values()]

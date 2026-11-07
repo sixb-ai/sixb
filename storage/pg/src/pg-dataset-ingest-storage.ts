@@ -3,6 +3,7 @@ import {
   type DatasetIngestPendingCounts,
   type DatasetIngestPersistence,
   type DatasetIngestPersistenceBackend,
+  type DatasetIngestRejectionRecord,
   type DatasetIngestState,
   DurableDatasetIngestStorage,
   initialDatasetIngestState,
@@ -48,6 +49,12 @@ interface PgDeliveryRow {
   readonly received_at: Date
   readonly change_count: number
   readonly definition_hash: string
+}
+
+interface PgRejectionRow extends PgDeliveryRow {
+  readonly changes: string
+  readonly rejected_at: Date
+  readonly rejection: string
 }
 
 class PgDatasetIngestPersistence implements DatasetIngestPersistence {
@@ -119,6 +126,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
         definition_hash
       FROM dataset_ingest_deliveries
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId} AND flush_id IS NULL
+        AND rejected_at IS NULL
       ORDER BY dataset_ingest_deliveries.id
       LIMIT ${limit}
     `
@@ -179,16 +187,47 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
     `
   }
 
-  async deleteDeliveries(
+  async rejectDelivery(
     projectId: string,
     datasetId: string,
     flushId: string,
-    deliveryIds: readonly string[]
+    deliveryId: string,
+    rejection: { readonly rejectedAt: Date; readonly reason: string }
   ): Promise<void> {
     await this.sql`
-      DELETE FROM dataset_ingest_deliveries
+      UPDATE dataset_ingest_deliveries
+      SET flush_id = NULL, rejected_at = ${rejection.rejectedAt}, rejection = ${rejection.reason}
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId} AND flush_id = ${flushId}
-        AND id = ANY(${this.sql.array([...deliveryIds])}::bigint[])
+        AND id = ${deliveryId}::bigint
+    `
+  }
+
+  async listRejected(
+    projectId: string,
+    datasetId: string | undefined,
+    limit: number
+  ): Promise<readonly DatasetIngestRejectionRecord[]> {
+    const rows = await this.sql<PgRejectionRow[]>`
+      SELECT id::text AS id, dataset_id, execution_id, correlation_id, received_at, change_count,
+        definition_hash, changes, rejected_at, rejection
+      FROM dataset_ingest_deliveries
+      WHERE project_id = ${projectId} AND rejected_at IS NOT NULL
+        AND (${datasetId === undefined} OR dataset_id = ${datasetId ?? ""})
+      ORDER BY rejected_at DESC, dataset_ingest_deliveries.id DESC
+      LIMIT ${limit}
+    `
+    return rows.map((row) => ({
+      delivery: deliveryFromRow(row),
+      rejectedAt: new Date(row.rejected_at),
+      reason: row.rejection,
+      changes: row.changes,
+    }))
+  }
+
+  async deleteRejected(projectId: string, before: Date): Promise<void> {
+    await this.sql`
+      DELETE FROM dataset_ingest_deliveries
+      WHERE project_id = ${projectId} AND rejected_at < ${before}
     `
   }
 
@@ -216,10 +255,14 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
         readonly deliveries: string
         readonly changes: string
         readonly oldest: Date | null
+        readonly rejected: string
       }[]
     >`
-      SELECT dataset_id, count(*)::text AS deliveries, sum(change_count)::text AS changes,
-        min(received_at) AS oldest
+      SELECT dataset_id,
+        count(*) FILTER (WHERE rejected_at IS NULL)::text AS deliveries,
+        coalesce(sum(change_count) FILTER (WHERE rejected_at IS NULL), 0)::text AS changes,
+        min(received_at) FILTER (WHERE rejected_at IS NULL) AS oldest,
+        count(*) FILTER (WHERE rejected_at IS NOT NULL)::text AS rejected
       FROM dataset_ingest_deliveries
       WHERE project_id = ${projectId}
         AND (${datasetIds === undefined} OR dataset_id = ANY(${this.sql.array([...(datasetIds ?? [])])}::text[]))
@@ -230,6 +273,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
       pendingDeliveries: Number(row.deliveries),
       pendingChanges: Number(row.changes),
       oldestReceivedAt: row.oldest === null ? null : new Date(row.oldest),
+      rejectedDeliveries: Number(row.rejected),
     }))
   }
 }

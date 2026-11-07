@@ -123,6 +123,7 @@ Run these from your project root:
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
+| `sixb lake rejected` | Print, as JSON, the [ingested changes](../datasets/ingestion.md#where-it-runs-and-what-can-fail) refused after `ingest` answered, kept for a week. `--dataset <id>` shows one dataset's. |
 | `sixb lake cleanup --dry-run` | Preview which replaced lake versions and files [retention](../datasets/overview.md#storage-maintenance) would remove; without `--dry-run`, remove them now. It keeps what `lakeMaintenance` keeps unless its flags say otherwise. |
 
 `dev` serves the app on port 3000 and the API on 3001. The app runs even without an `app/`

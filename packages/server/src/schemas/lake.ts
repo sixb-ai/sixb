@@ -21,10 +21,18 @@ export const DatasetStorageHealthSchema = z.object({
     .object({
       pendingDeliveries: z.number().int(),
       pendingChanges: z.number().int(),
-      oldestReceivedAt: z.string().datetime().describe("When the oldest waiting delivery arrived"),
+      oldestReceivedAt: z
+        .string()
+        .datetime()
+        .nullable()
+        .describe("When the oldest waiting delivery arrived"),
+      rejectedDeliveries: z
+        .number()
+        .int()
+        .describe("Deliveries refused when written, kept for a week to read and send again"),
     })
     .nullable()
-    .describe("Ingested changes waiting for a flush to write them; null when none wait"),
+    .describe("Ingested changes waiting or refused; null when there are none"),
 })
 
 export const LakeHealthResponseSchema = z.object({

@@ -4,6 +4,7 @@ import {
   type DatasetIngestPendingCounts,
   type DatasetIngestPersistence,
   type DatasetIngestPersistenceBackend,
+  type DatasetIngestRejectionRecord,
   type DatasetIngestState,
   DurableDatasetIngestStorage,
   initialDatasetIngestState,
@@ -54,6 +55,12 @@ interface SqliteDeliveryRow {
   readonly receivedAt: string
   readonly changeCount: number
   readonly definitionHash: string
+}
+
+interface SqliteRejectionRow extends SqliteDeliveryRow {
+  readonly changes: string
+  readonly rejectedAt: string
+  readonly rejection: string
 }
 
 const SELECT_STATE = `
@@ -143,7 +150,7 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
     const rows = this.db
       .query(
         `${SELECT_DELIVERY}
-         WHERE project_id = ? AND dataset_id = ? AND flush_id IS NULL
+         WHERE project_id = ? AND dataset_id = ? AND flush_id IS NULL AND rejected_at IS NULL
          ORDER BY id
          LIMIT ?`
       )
@@ -213,17 +220,59 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
       .run(projectId, datasetId, flushId)
   }
 
-  async deleteDeliveries(
+  async rejectDelivery(
     projectId: string,
     datasetId: string,
     flushId: string,
-    deliveryIds: readonly string[]
+    deliveryId: string,
+    rejection: { readonly rejectedAt: Date; readonly reason: string }
   ): Promise<void> {
-    const statement = this.db.query(
-      `DELETE FROM dataset_ingest_deliveries
-       WHERE project_id = ? AND dataset_id = ? AND flush_id = ? AND id = ?`
-    )
-    for (const id of deliveryIds) statement.run(projectId, datasetId, flushId, Number(id))
+    this.db
+      .query(
+        `UPDATE dataset_ingest_deliveries
+         SET flush_id = NULL, rejected_at = ?, rejection = ?
+         WHERE project_id = ? AND dataset_id = ? AND flush_id = ? AND id = ?`
+      )
+      .run(
+        rejection.rejectedAt.toISOString(),
+        rejection.reason,
+        projectId,
+        datasetId,
+        flushId,
+        Number(deliveryId)
+      )
+  }
+
+  async listRejected(
+    projectId: string,
+    datasetId: string | undefined,
+    limit: number
+  ): Promise<readonly DatasetIngestRejectionRecord[]> {
+    const rows = this.db
+      .query(
+        `SELECT id, dataset_id AS datasetId, execution_id AS executionId,
+           correlation_id AS correlationId, received_at AS receivedAt,
+           change_count AS changeCount, definition_hash AS definitionHash, changes,
+           rejected_at AS rejectedAt, rejection
+         FROM dataset_ingest_deliveries
+         WHERE project_id = ? AND rejected_at IS NOT NULL AND (? IS NULL OR dataset_id = ?)
+         ORDER BY rejected_at DESC, id DESC
+         LIMIT ?`
+      )
+      .all(projectId, datasetId ?? null, datasetId ?? null, limit) as SqliteRejectionRow[]
+
+    return rows.map((row) => ({
+      delivery: deliveryFromRow(row),
+      rejectedAt: new Date(row.rejectedAt),
+      reason: row.rejection,
+      changes: row.changes,
+    }))
+  }
+
+  async deleteRejected(projectId: string, before: Date): Promise<void> {
+    this.db
+      .query(`DELETE FROM dataset_ingest_deliveries WHERE project_id = ? AND rejected_at < ?`)
+      .run(projectId, before.toISOString())
   }
 
   async listStates(
@@ -242,8 +291,11 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
   ): Promise<readonly DatasetIngestPendingCounts[]> {
     const rows = this.db
       .query(
-        `SELECT dataset_id AS datasetId, count(*) AS deliveries, sum(change_count) AS changes,
-           min(received_at) AS oldest
+        `SELECT dataset_id AS datasetId,
+           count(*) FILTER (WHERE rejected_at IS NULL) AS deliveries,
+           coalesce(sum(change_count) FILTER (WHERE rejected_at IS NULL), 0) AS changes,
+           min(received_at) FILTER (WHERE rejected_at IS NULL) AS oldest,
+           count(*) FILTER (WHERE rejected_at IS NOT NULL) AS rejected
          FROM dataset_ingest_deliveries
          WHERE project_id = ?
          GROUP BY dataset_id`
@@ -253,6 +305,7 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
       readonly deliveries: number
       readonly changes: number
       readonly oldest: string | null
+      readonly rejected: number
     }[]
 
     return rows
@@ -262,6 +315,7 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
         pendingDeliveries: row.deliveries,
         pendingChanges: row.changes,
         oldestReceivedAt: row.oldest === null ? null : new Date(row.oldest),
+        rejectedDeliveries: row.rejected,
       }))
   }
 }

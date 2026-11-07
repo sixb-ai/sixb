@@ -44,6 +44,10 @@ when no other call comes.
 - A failure retries after 1, 2, 5, 15 and 30 s, then every minute, and the job never fails: the
   changes stay in the inbox, and the next attempt resumes the batch in flight. The flush reports
   the fifth failure in a row as `dataset.ingest.flush.failed`.
+- A change refused for what it holds sets its delivery aside, and the rest of the batch goes on:
+  one attempt per refused value, since the lake names its position. It stays for a week, for
+  `sixb lake rejected`. A worker whose definition of the dataset differs from the delivery's
+  refuses nothing: the attempt fails, and retries until they agree.
 
 ## Usage
 
