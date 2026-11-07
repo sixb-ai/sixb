@@ -57,6 +57,12 @@ Pending outbox rows and nonterminal sources are live data and are never purged b
 abandoned materialization was never published: it is purged whole, without waiting.
 Size the disk with `ontology_commits` in mind: the pre-0.1 line has no purge for it.
 
+## Maintenance heartbeat
+
+`maintenance_heartbeats` holds one row per project. The maintenance loop rewrites it whole, at start,
+as each pass ends and every 30 seconds, so a pass the code no longer runs leaves it. Two loops on one
+project overwrite each other's row; nothing else depends on there being one.
+
 ## Sequenced dataset writes
 
 Direct snapshot/append sessions and SQL-transform writes to sequenced datasets are rejected. Writes use the merge path to preserve source ordering.

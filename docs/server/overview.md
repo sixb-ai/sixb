@@ -126,4 +126,6 @@ The header reveals how the server spends its time, so it's off by default in pro
 
 Most projects start the API through the [CLI](../cli/overview.md#production-services). If you need to embed it in your own process, use `createSixbServer` from `@sixb/server`; the [package README](https://github.com/sixb-ai/sixb/tree/main/packages/server#readme) documents its options.
 
+An embedded server delivers the events a commit left undelivered and purges expired records, every minute. Pass `ontologyMaintenance: false` when the project also runs `sixb orchestrator`, which does that work.
+
 For builds, public origins, and service health checks, see [Deployment](../deployment/overview.md).
