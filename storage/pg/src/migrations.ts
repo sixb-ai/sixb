@@ -459,6 +459,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("086-partition-objects", partitionObjectsSql),
     pgSql("087-agent-computer-background-commands", agentComputerBackgroundCommandsSql),
     pgSql("088-web-search-model-kind", webSearchModelKindSql),
+    pgSql("089-maintenance-heartbeats", maintenanceHeartbeatsSql),
   ],
 })
 
@@ -535,3 +536,6 @@ import agentComputerBackgroundCommandsSql from "./migrations/087-agent-computer-
   type: "text",
 }
 import webSearchModelKindSql from "./migrations/088-web-search-model-kind.sql" with { type: "text" }
+import maintenanceHeartbeatsSql from "./migrations/089-maintenance-heartbeats.sql" with {
+  type: "text",
+}

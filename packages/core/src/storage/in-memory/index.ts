@@ -20,6 +20,10 @@ import {
   InMemoryFileDownloadGrantStorage,
 } from "../file-download-grants"
 import { type FileUploadSessionStore, InMemoryFileUploadSessions } from "../file-upload-sessions"
+import {
+  InMemoryMaintenanceHeartbeatStorage,
+  type MaintenanceHeartbeatStorage,
+} from "../maintenance-heartbeats"
 import type { ObjectStorage } from "../objects"
 import { InMemoryObjectStorage } from "../objects/in-memory"
 import type { OntologyStorage } from "../ontology"
@@ -134,6 +138,7 @@ export class InMemoryStorage implements Storage {
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   private readonly fileDownloadGrantStorage = new InMemoryFileDownloadGrantStorage()
+  private readonly maintenanceHeartbeatStorage = new InMemoryMaintenanceHeartbeatStorage()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
   private readonly activityStorage = new InMemoryActivityStorage()
   readonly auth: AuthStorage
@@ -155,6 +160,7 @@ export class InMemoryStorage implements Storage {
   readonly shareSessions: ShareSessionStorage
   readonly fileUploadSessions: FileUploadSessionStore
   readonly fileDownloadGrants: FileDownloadGrantStorage
+  readonly maintenanceHeartbeats: MaintenanceHeartbeatStorage
   readonly connectorConnections: ConnectorConnectionStorage
   readonly activity: ActivityStorage
 
@@ -190,6 +196,10 @@ export class InMemoryStorage implements Storage {
     this.shareSessions = createOperationScopedFacade(this.shareSessionStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
     this.fileDownloadGrants = createOperationScopedFacade(this.fileDownloadGrantStorage, scope)
+    this.maintenanceHeartbeats = createOperationScopedFacade(
+      this.maintenanceHeartbeatStorage,
+      scope
+    )
     this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
     this.activity = createOperationScopedFacade(this.activityStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
@@ -402,6 +412,7 @@ export class InMemoryStorage implements Storage {
       shareSessions: this.shareSessionStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
       fileDownloadGrants: this.fileDownloadGrantStorage,
+      maintenanceHeartbeats: this.maintenanceHeartbeatStorage,
       connectorConnections: this.connectorConnectionStorage,
       activity: this.activityStorage,
       ping: async () => undefined,
@@ -435,6 +446,7 @@ export class InMemoryStorage implements Storage {
       shareSessions: this.shareSessionStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
       fileDownloadGrants: this.fileDownloadGrantStorage.snapshot(),
+      maintenanceHeartbeats: this.maintenanceHeartbeatStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
       activity: this.activityStorage.snapshot(),
     }
@@ -463,6 +475,7 @@ export class InMemoryStorage implements Storage {
     this.shareSessionStorage.restore(snapshot.shareSessions)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
     this.fileDownloadGrantStorage.restore(snapshot.fileDownloadGrants)
+    this.maintenanceHeartbeatStorage.restore(snapshot.maintenanceHeartbeats)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
     this.activityStorage.restore(snapshot.activity)
   }
@@ -491,6 +504,7 @@ export interface InMemoryStorageSnapshot {
   readonly shareSessions: ReturnType<InMemoryShareSessionStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
   readonly fileDownloadGrants: ReturnType<InMemoryFileDownloadGrantStorage["snapshot"]>
+  readonly maintenanceHeartbeats: ReturnType<InMemoryMaintenanceHeartbeatStorage["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
   readonly activity: ReturnType<InMemoryActivityStorage["snapshot"]>
 }

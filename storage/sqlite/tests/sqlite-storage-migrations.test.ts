@@ -204,6 +204,7 @@ const shippedMigrationIds = [
   "083-agent-computer-sessions",
   "084-agent-computer-background-commands",
   "085-web-search-model-kind",
+  "086-maintenance-heartbeats",
 ]
 
 afterEach(async () => {
