@@ -245,6 +245,8 @@ export function AgentSurface({
           type="button"
           size="icon"
           className="fixed right-5 bottom-5 z-40 size-11 rounded-full shadow-lg max-sm:right-3 max-sm:bottom-3"
+          // A phone's shell hides it: it would sit on the tab bar, so the top bar opens the agent.
+          data-agent-launcher=""
           aria-label={launcher}
           title={launcher}
           onClick={() => changeMode("dock")}

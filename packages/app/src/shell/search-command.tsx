@@ -23,6 +23,8 @@ import { isExternal, type NavEntry, type NavItem } from "./nav-items"
 export interface SearchCommandProps {
   /** The app's own pages, listed before the built-in sections'. `AppShell` passes its nav. */
   readonly pages?: readonly NavEntry[]
+  /** A row in the sidebar, or an icon in a phone's top bar, where search fills the screen. */
+  readonly placement?: "sidebar" | "toolbar"
 }
 
 /**
@@ -30,7 +32,7 @@ export interface SearchCommandProps {
  * this person may open, and the project's objects as they type, each opening its page. Shared
  * links, which open one page, leave it out.
  */
-export function SearchCommand({ pages = [] }: SearchCommandProps) {
+export function SearchCommand({ pages = [], placement = "sidebar" }: SearchCommandProps) {
   const appMessages = useAppMessages()
   const messages = appMessages.search
   const navigate = useNavigate()
@@ -72,21 +74,34 @@ export function SearchCommand({ pages = [] }: SearchCommandProps) {
     { label: appMessages.artifacts, href: ARTIFACTS_HREF, icon: Layers },
   ]
 
+  const toolbar = placement === "toolbar"
+
   return (
     <>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            tooltip={messages.label}
-            onClick={() => setOpen(true)}
-            className="border border-sidebar-border text-sidebar-foreground/80 hover:border-foreground/15"
-          >
-            <Search />
-            <span>{messages.label}</span>
-            <Kbd className="ml-auto group-data-[collapsible=icon]:hidden">⌘K</Kbd>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+      {toolbar ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={messages.label}
+          className="phone-bar-action"
+        >
+          <Search className="size-[21px]" strokeWidth={1.9} aria-hidden="true" />
+        </button>
+      ) : (
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={messages.label}
+              onClick={() => setOpen(true)}
+              className="border border-sidebar-border text-sidebar-foreground/80 hover:border-foreground/15"
+            >
+              <Search />
+              <span>{messages.label}</span>
+              <Kbd className="ml-auto group-data-[collapsible=icon]:hidden">⌘K</Kbd>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      )}
       <CommandDialog
         open={open}
         onOpenChange={(next) => {
@@ -95,6 +110,7 @@ export function SearchCommand({ pages = [] }: SearchCommandProps) {
         }}
         title={messages.label}
         className="max-w-xl rounded-xl"
+        fullscreen={toolbar}
       >
         <CommandInput value={query} onValueChange={setQuery} placeholder={messages.placeholder} />
         <CommandList className="max-h-[min(28rem,70vh)]">

@@ -24,6 +24,8 @@ export interface NavItem {
   readonly badge?: ReactNode
   /** Links nested under this one. */
   readonly items?: readonly NavItem[]
+  /** One of the places a phone's tab bar holds; the rest are under More. */
+  readonly tab?: boolean
 }
 
 /** Links under a heading. */

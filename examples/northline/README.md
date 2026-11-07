@@ -35,9 +35,11 @@ real one; `bun run demo:reset` starts a fresh day.
 
 Below 768 px Northline switches to a phone layout: a tab bar for Home, Service cases, Dispatch and
 Equipment, **More** for everything else and recent chats, and a top bar with Search and **Chat**.
-Pages push with swipe back and refresh by pulling down. The shell is ordinary app code in
-[`app/_components/phone/`](./app/_components/phone/), ready to change; its places, like the
-sidebar's, come from [`app/_lib/navigation.ts`](./app/_lib/navigation.ts).
+Pages push and pop, swipe back and refresh by pulling down. The keyboard, sheets, motion and
+the shell's parts come from the framework ([On a Phone](../../docs/apps/mobile.md));
+[`app/_components/phone/`](./app/_components/phone/) puts them together with Northline's Search,
+Chat and recent threads, and its places, like the sidebar's, come from
+[`app/_lib/navigation.ts`](./app/_lib/navigation.ts).
 
 ### The assistant
 

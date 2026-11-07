@@ -1,50 +1,45 @@
-import { setAgentSurfaceMode, useBack } from "@sixb/app"
 import { useSidebar } from "@sixb/ui/components"
-import { ChevronLeft, MessageSquareText } from "lucide-react"
-import { useEffect, useState } from "react"
+import { ChevronLeft } from "lucide-react"
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
+import { createPortal } from "react-dom"
 import { useLocation } from "react-router-dom"
-import { GlobalSearch } from "../global-search"
-import { appScroller } from "./phone-dom"
-import {
-  backLabel,
-  fallbackTitle,
-  isConversationPath,
-  isRootPath,
-  screenPath,
-} from "./phone-routes"
+import { useBack } from "./back"
+import { appScroller, isRootPath, normalizePath } from "./routes"
 
-/**
- * The phone's top bar. It sits over the page and turns to frosted glass once content scrolls
- * beneath it. Pushed screens get a back button; the page's own heading moves into the bar when it
- * scrolls out of view, as large titles do on iOS. Over a conversation it is only the back button:
- * the conversation's header carries its own actions.
- */
-export function PhoneTopBar() {
-  // Mounted only on phones, so its search button's ⌘K shortcut never doubles the sidebar's.
-  const { isMobile } = useSidebar()
-  return isMobile ? <TopBar /> : null
+export interface PhoneTopBarProps {
+  /** Controls at the trailing end, such as Search; a page's own actions join them. */
+  readonly trailing?: ReactNode
+  /** Whether the page's heading moves into the bar as it scrolls away. Off for a greeting. */
+  readonly title?: boolean
+  /** Sit above the page's own overlays, as over a full-screen conversation. */
+  readonly raised?: boolean
 }
 
-function TopBar() {
+/**
+ * A phone's top bar, in the iOS 26 manner. It has no bar at all while the page is at rest: its
+ * controls float as glass over the page, and once content scrolls beneath them a soft blurred edge
+ * fades in. Pushed screens get a back button (`useBack`); the page's first heading moves into the
+ * bar when it scrolls out of view, as large titles do.
+ */
+export function PhoneTopBar(props: PhoneTopBarProps) {
+  // Mounted only on phones, so controls with shortcuts never double the sidebar's.
+  const { isMobile } = useSidebar()
+  return isMobile ? <TopBar {...props} /> : null
+}
+
+function TopBar({ trailing, title = true, raised = false }: PhoneTopBarProps) {
   const location = useLocation()
   const back = useBack()
-  const path = screenPath(location.pathname, location.search)
-  const home = path === "/"
-  // Neither mounts the dock: Home is a chat of its own, and Threads starts new ones on Home.
-  const dockless = home || path === "/threads"
-  const conversation = isConversationPath(path)
+  const path = normalizePath(location.pathname)
   const heading = usePageHeading(path)
   const scrolled = useScrolled(path)
-
-  // Home's greeting is not a title, and a conversation names itself in its own header.
-  const title = home || conversation ? "" : (heading?.text ?? fallbackTitle(path))
-  const titleVisible = title !== "" && (heading ? heading.hidden : true)
+  const text = title ? (heading?.text ?? "") : ""
 
   return (
     <header
       className="phone-top-bar"
-      data-scrolled={(scrolled && !conversation) || undefined}
-      data-conversation={conversation || undefined}
+      data-scrolled={scrolled || undefined}
+      data-raised={raised || undefined}
     >
       <div className="phone-top-bar-row">
         <div className="phone-top-bar-leading">
@@ -52,7 +47,7 @@ function TopBar() {
             <button
               type="button"
               onClick={back}
-              aria-label={`Back to ${backLabel(path)}`}
+              aria-label="Back"
               className="phone-back phone-glass"
             >
               <ChevronLeft aria-hidden="true" strokeWidth={2.2} />
@@ -62,34 +57,44 @@ function TopBar() {
 
         <div
           className="phone-top-bar-title"
-          data-visible={titleVisible || undefined}
+          data-visible={(text !== "" && heading?.hidden) || undefined}
           aria-hidden="true"
         >
-          {title}
+          {text}
         </div>
 
-        {conversation ? null : (
-          <div className="phone-top-bar-trailing">
-            <div className="phone-bar-group phone-glass">
-              <GlobalSearch placement="toolbar" />
-              {/* New chats start in Home's chat bar; elsewhere Chat opens the dock on this page. */}
-              {dockless ? null : (
-                <button
-                  type="button"
-                  onClick={() => setAgentSurfaceMode("dock")}
-                  aria-label="Chat about this page"
-                  className="phone-chat"
-                >
-                  <MessageSquareText className="size-[17px]" strokeWidth={2} aria-hidden="true" />
-                  <span>Chat</span>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        <div className="phone-top-bar-trailing">
+          <div ref={registerSlot} className="phone-bar-slot" />
+          {trailing ? <div className="phone-bar-group phone-glass">{trailing}</div> : null}
+        </div>
       </div>
     </header>
   )
+}
+
+let slot: HTMLElement | null = null
+const listeners = new Set<() => void>()
+
+function registerSlot(element: HTMLElement | null): void {
+  if (element === slot) return
+  slot = element
+  for (const listener of listeners) listener()
+}
+
+/**
+ * A page's own actions in the phone's top bar, beside its trailing controls, such as a record's
+ * Edit. Renders nothing while the bar is not shown, so wider screens keep the page's own controls.
+ */
+export function PhoneBarActions({ children }: { readonly children: ReactNode }) {
+  const target = useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => slot,
+    () => null
+  )
+  return target ? createPortal(children, target) : null
 }
 
 interface PageHeading {

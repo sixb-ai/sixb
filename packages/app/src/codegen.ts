@@ -1642,6 +1642,10 @@ function renderMetadataHead(metadata: Awaited<ReturnType<typeof resolveAppMetada
       ? [`    <meta name="description" content="${escapeHtmlAttribute(metadata.description)}" />`]
       : []),
     `    <meta name="theme-color" content="${escapeHtmlAttribute(metadata.themeColor)}" />`,
+    // iOS reads this when the app is added to the Home Screen.
+    ...(metadata.statusBar === "under"
+      ? ['    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />']
+      : []),
     '    <link rel="manifest" href="/app.webmanifest" />',
     ...(metadata.favicon
       ? [`    <link rel="icon" href="${escapeHtmlAttribute(metadata.favicon)}" />`]
