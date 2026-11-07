@@ -21,7 +21,6 @@ const MaintenanceSummarySchema = z.object({
       id: z.string(),
       lastSucceededAt: z.string().nullable(),
       consecutiveFailures: z.number().int().nonnegative(),
-      lastError: z.string().nullable(),
     })
   ),
   outbox: z.object({

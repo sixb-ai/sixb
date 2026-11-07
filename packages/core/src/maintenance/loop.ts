@@ -67,7 +67,6 @@ interface PassState {
   lastFinishedAt: Date | null
   lastSucceededAt: Date | null
   consecutiveFailures: number
-  lastError: string | null
   run: ActiveRun | null
 }
 
@@ -260,12 +259,10 @@ export class MaintenanceLoop {
   private recordSuccess(state: PassState): void {
     state.lastSucceededAt = this.now()
     state.consecutiveFailures = 0
-    state.lastError = null
   }
 
   private recordFailure(state: PassState, error: unknown): void {
     state.consecutiveFailures += 1
-    state.lastError = errorMessage(error)
     this.report(error, { passId: state.pass.id, consecutiveFailures: state.consecutiveFailures })
   }
 
@@ -326,7 +323,6 @@ function initialState(pass: MaintenancePass): PassState {
     lastFinishedAt: null,
     lastSucceededAt: null,
     consecutiveFailures: 0,
-    lastError: null,
     run: null,
   }
 }
@@ -336,7 +332,6 @@ function passHealth(state: PassState): MaintenancePassHealth {
     id: state.pass.id,
     lastSucceededAt: state.lastSucceededAt,
     consecutiveFailures: state.consecutiveFailures,
-    lastError: state.lastError,
   }
 }
 
@@ -346,15 +341,6 @@ function assertUniquePassIds(passes: readonly MaintenancePass[]): void {
     if (seen.has(pass.id)) throw new Error(`[Sixb] Duplicate maintenance pass '${pass.id}'.`)
     seen.add(pass.id)
   }
-}
-
-export function errorMessage(error: unknown): string {
-  if (error instanceof AggregateError) {
-    return [...error.errors].map(errorMessage).join(" | ").slice(0, 2_000)
-  }
-
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-  return message.slice(0, 2_000)
 }
 
 async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {

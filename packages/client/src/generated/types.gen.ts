@@ -4820,7 +4820,6 @@ export type GetStatusResponses = {
         id: string
         lastSucceededAt: string | null
         consecutiveFailures: number
-        lastError: string | null
       }>
       outbox: {
         pendingCount: number

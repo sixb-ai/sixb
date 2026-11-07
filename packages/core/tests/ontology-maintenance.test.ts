@@ -234,17 +234,18 @@ describe("OntologyMaintenance", () => {
     const cleanupTerminal = storage.ontology.sources.cleanupTerminal
     let failing = false
     storage.ontology.sources.cleanupTerminal = async (input) => {
-      if (failing) throw new Error("catalog unavailable")
+      if (failing) throw new Error("connection to postgres://admin:hunter2@db failed")
       return cleanupTerminal.call(storage.ontology.sources, input)
     }
     let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
     const now = () => new Date(nowMs)
+    const reported: unknown[] = []
     const running = new OntologyMaintenance({
       projectId: "project",
       storage,
       dispatcher: new CountingDispatcher(storage),
       now,
-      onError: () => {},
+      onError: (error) => reported.push(error),
     })
     const reader = new OntologyMaintenance({
       projectId: "project",
@@ -263,13 +264,17 @@ describe("OntologyMaintenance", () => {
     failing = true
     await running.runNow()
     await running.runNow()
-    expect(await reader.getOperationalStatus()).toMatchObject({
+    const degraded = await reader.getOperationalStatus()
+    expect(degraded).toMatchObject({
       status: "degraded",
-      maintenance: {
-        stale: false,
-        passes: [{ consecutiveFailures: 2, lastError: "Error: catalog unavailable" }],
-      },
+      maintenance: { stale: false, passes: [{ consecutiveFailures: 2 }] },
     })
+
+    // Reproduce: put the error's message back in `passHealth`; the password reaches the row, and
+    // whoever can read `/api/status`. What failed goes to `onError`, and only there.
+    expect((reported[0] as AggregateError).errors[0].message).toContain("hunter2")
+    const row = await storage.maintenanceHeartbeats.get({ projectId: "project" })
+    expect(JSON.stringify([degraded, row])).not.toContain("hunter2")
 
     failing = false
     await running.runNow()
