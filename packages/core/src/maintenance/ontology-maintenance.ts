@@ -11,10 +11,8 @@ import { storageHeartbeat } from "./heartbeat"
 import { everyMs, type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "./loop"
 import { operationalStatus } from "./status"
 import type {
-  OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
   OntologyMaintenanceOptions,
-  OntologyMaintenanceSnapshot,
   OntologyOperationalStatus,
 } from "./types"
 
@@ -68,7 +66,6 @@ export class OntologyMaintenance {
   private readonly owners = new Set<symbol>()
   private readonly loop: MaintenanceLoop
   private stopping: Promise<void> | null = null
-  private snapshot: OntologyMaintenanceSnapshot
 
   readonly pass: MaintenancePass
 
@@ -94,7 +91,6 @@ export class OntologyMaintenance {
       "cleanupLimit"
     )
     this.now = dependencies.now ?? (() => new Date())
-    this.snapshot = emptySnapshot(this.intervalMs)
 
     this.pass = everyMs({
       id: "ontology",
@@ -104,7 +100,7 @@ export class OntologyMaintenance {
     })
     this.loop = new MaintenanceLoop({
       passes: [this.pass],
-      heartbeat: storageHeartbeat(this.projectId, this.storage),
+      heartbeat: storageHeartbeat(this.projectId, "embedded", this.storage),
       onError:
         dependencies.onError ??
         ((error) => console.error("[Sixb] Ontology maintenance error:", error)),
@@ -146,22 +142,18 @@ export class OntologyMaintenance {
     await this.stopLoop()
   }
 
-  getSnapshot(): OntologyMaintenanceSnapshot {
-    return structuredClone(this.snapshot)
-  }
-
   /**
    * Reads what storage holds, not what this process saw: the API answers this and runs no pass, so
    * the heartbeat is what tells it whether anything does.
    */
   async getOperationalStatus(): Promise<OntologyOperationalStatus> {
-    const [outbox, heartbeat] = await Promise.all([
+    const [outbox, heartbeats] = await Promise.all([
       this.storage.ontology.outbox.summarize({ projectId: this.projectId }),
-      this.storage.maintenanceHeartbeats?.get({ projectId: this.projectId }) ?? null,
+      this.storage.maintenanceHeartbeats?.list({ projectId: this.projectId }) ?? [],
     ])
 
     return operationalStatus({
-      heartbeat,
+      heartbeats,
       outbox,
       pendingLimitMs: this.intervalMs * PENDING_LIMIT_INTERVALS,
       now: this.now(),
@@ -169,28 +161,22 @@ export class OntologyMaintenance {
   }
 
   private async runPass(signal: AbortSignal): Promise<void> {
-    const started = this.now()
-    this.snapshot = { ...this.snapshot, running: true, lastStartedAt: started.toISOString() }
-
     const failures: unknown[] = []
+
     await captureFailure(() => this.dispatcher.drain(), failures)
     const vectorIndexing = this.vectorIndexing
     if (vectorIndexing) await captureFailure(() => vectorIndexing.drain(), failures)
-    const cleanup = await this.cleanupExpiredRows(started, failures, signal)
-    const outbox = await captureFailure(
-      () => this.storage.ontology.outbox.summarize({ projectId: this.projectId }),
-      failures,
-      this.snapshot.outbox
-    )
-    this.completePass({ started, failures, cleanup, outbox })
+    await this.cleanupExpiredRows(this.now(), failures, signal)
+
+    if (failures.length > 0) throw new AggregateError(failures, "Maintenance pass failed.")
   }
 
   private async cleanupExpiredRows(
     started: Date,
     failures: unknown[],
     signal: AbortSignal
-  ): Promise<OntologyMaintenanceCleanupSnapshot> {
-    const publishedOutboxRowsDeleted = await captureFailure(
+  ): Promise<void> {
+    await captureFailure(
       () =>
         this.storage.ontology.outbox.purgePublished({
           projectId: this.projectId,
@@ -199,16 +185,11 @@ export class OntologyMaintenance {
           ).toISOString(),
           limit: this.cleanupLimit,
         }),
-      failures,
-      0
+      failures
     )
     // Plans go first: a source version is cleaned only once its plan is gone.
-    const spentPlanRows = await captureFailure(
-      () => this.purgeSpentPlans(started, signal),
-      failures,
-      0
-    )
-    const terminalSources = await captureFailure(
+    await captureFailure(() => this.purgeSpentPlans(started, signal), failures)
+    await captureFailure(
       () =>
         this.storage.ontology.sources.cleanupTerminal({
           projectId: this.projectId,
@@ -217,19 +198,14 @@ export class OntologyMaintenance {
           ).toISOString(),
           limit: this.cleanupLimit,
         }),
-      failures,
-      { rowsDeleted: 0, materializationsDeleted: 0 }
+      failures
     )
-    const abandonedSources = await captureFailure(
-      () => this.purgeAbandonedSources(started, signal),
-      failures,
-      { rowsDeleted: 0, materializationsDeleted: 0 }
-    )
+    await captureFailure(() => this.purgeAbandonedSources(started, signal), failures)
     const uploads = this.storage.fileUploadSessions
     if (uploads) {
       // Retire abandoned uploads first: the store never reaps one that is still pending.
       await captureFailure(() => this.retireAbandonedUploads(uploads, started, failures), failures)
-      await captureFailure(() => uploads.cleanupExpired(started), failures, 0)
+      await captureFailure(() => uploads.cleanupExpired(started), failures)
     }
     const downloads = this.storage.fileDownloadGrants
     if (downloads) {
@@ -240,8 +216,7 @@ export class OntologyMaintenance {
             expiredBefore: new Date(started.getTime() - EXPIRED_FILE_DOWNLOAD_RETENTION_MS),
             limit: this.cleanupLimit,
           }),
-        failures,
-        0
+        failures
       )
     }
 
@@ -255,54 +230,33 @@ export class OntologyMaintenance {
             expiredBefore: started,
             limit: this.cleanupLimit,
           }),
-        failures,
-        0
+        failures
       )
-    }
-
-    return {
-      publishedOutboxRowsDeleted,
-      terminalSourceRowsDeleted:
-        terminalSources.rowsDeleted + abandonedSources.rowsDeleted + spentPlanRows,
-      terminalSourceMaterializationsDeleted:
-        terminalSources.materializationsDeleted + abandonedSources.materializationsDeleted,
     }
   }
 
   /** Deletes abandoned candidates batch after batch, until none is left or the pass runs long. */
-  private async purgeAbandonedSources(
-    started: Date,
-    signal: AbortSignal
-  ): Promise<{ readonly rowsDeleted: number; readonly materializationsDeleted: number }> {
-    let rowsDeleted = 0
-    let materializationsDeleted = 0
+  private async purgeAbandonedSources(started: Date, signal: AbortSignal): Promise<void> {
     while (true) {
       const purged = await this.storage.ontology.sources.purgeAbandoned({
         projectId: this.projectId,
         limit: ABANDONED_SOURCE_PURGE_BATCH,
       })
-      rowsDeleted += purged.rowsDeleted
-      materializationsDeleted += purged.materializationsDeleted
       const exhausted =
         purged.rowsDeleted + purged.materializationsDeleted < ABANDONED_SOURCE_PURGE_BATCH
-      if (exhausted || this.passedInterval(started) || signal.aborted) {
-        return { rowsDeleted, materializationsDeleted }
-      }
+      if (exhausted || this.passedInterval(started) || signal.aborted) return
     }
   }
 
   /** Deletes the plans of candidates that left `ready`, batch after batch, like candidates. */
-  private async purgeSpentPlans(started: Date, signal: AbortSignal): Promise<number> {
-    let rowsDeleted = 0
+  private async purgeSpentPlans(started: Date, signal: AbortSignal): Promise<void> {
     while (true) {
       const purged = await this.storage.ontology.replacementPlans.purge({
         projectId: this.projectId,
         limit: ABANDONED_SOURCE_PURGE_BATCH,
       })
-      rowsDeleted += purged
-      if (purged < ABANDONED_SOURCE_PURGE_BATCH || this.passedInterval(started) || signal.aborted) {
-        return rowsDeleted
-      }
+      const exhausted = purged < ABANDONED_SOURCE_PURGE_BATCH
+      if (exhausted || this.passedInterval(started) || signal.aborted) return
     }
   }
 
@@ -366,31 +320,6 @@ export class OntologyMaintenance {
     if (abortFailure !== undefined) throw abortFailure
   }
 
-  private completePass(input: {
-    readonly started: Date
-    readonly failures: readonly unknown[]
-    readonly cleanup: OntologyMaintenanceCleanupSnapshot
-    readonly outbox: OntologyMaintenanceSnapshot["outbox"]
-  }): void {
-    const completed = this.now()
-    const failure =
-      input.failures.length > 0
-        ? new AggregateError(input.failures, "Maintenance pass failed.")
-        : null
-    this.snapshot = {
-      running: false,
-      intervalMs: this.intervalMs,
-      lastStartedAt: input.started.toISOString(),
-      lastCompletedAt: completed.toISOString(),
-      lastDurationMs: Math.max(0, completed.getTime() - input.started.getTime()),
-      consecutiveFailures: failure ? this.snapshot.consecutiveFailures + 1 : 0,
-      lastError: failure ? errorMessage(failure) : null,
-      outbox: input.outbox,
-      cleanup: input.cleanup,
-    }
-    if (failure) throw failure
-  }
-
   private stopLoop(): Promise<void> {
     if (this.stopping) return this.stopping
 
@@ -398,20 +327,6 @@ export class OntologyMaintenance {
       this.stopping = null
     })
     return this.stopping
-  }
-}
-
-function emptySnapshot(intervalMs: number): OntologyMaintenanceSnapshot {
-  return {
-    running: false,
-    intervalMs,
-    lastStartedAt: null,
-    lastCompletedAt: null,
-    lastDurationMs: null,
-    consecutiveFailures: 0,
-    lastError: null,
-    outbox: null,
-    cleanup: null,
   }
 }
 
@@ -435,30 +350,10 @@ function assertNonblank(value: string, name: string): void {
   }
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof AggregateError) {
-    return [...error.errors].map(errorMessage).join(" | ").slice(0, 2_000)
-  }
-
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-  return message.slice(0, 2_000)
-}
-
-async function captureFailure(run: () => Promise<void>, failures: unknown[]): Promise<void>
-async function captureFailure<T>(
-  run: () => Promise<T>,
-  failures: unknown[],
-  fallback: T
-): Promise<T>
-async function captureFailure<T>(
-  run: () => Promise<T>,
-  failures: unknown[],
-  fallback?: T
-): Promise<T | undefined> {
+async function captureFailure(run: () => Promise<unknown>, failures: unknown[]): Promise<void> {
   try {
-    return await run()
+    await run()
   } catch (error) {
     failures.push(error)
-    return fallback
   }
 }

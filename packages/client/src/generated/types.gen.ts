@@ -4814,6 +4814,7 @@ export type GetStatusResponses = {
     status: "ok" | "degraded" | "unknown"
     objectTypes: number
     maintenance: {
+      owner: "orchestrator" | "embedded"
       beatAt: string | null
       stale: boolean
       passes: Array<{

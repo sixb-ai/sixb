@@ -508,6 +508,7 @@ export { InMemoryStorage } from "./in-memory"
 export type {
   MaintenanceHeartbeatRecord,
   MaintenanceHeartbeatStorage,
+  MaintenanceLoopOwner,
   MaintenancePassHealth,
 } from "./maintenance-heartbeats"
 export type {

@@ -48,7 +48,7 @@ describe("OntologyMaintenance", () => {
       dispatcher.release()
       await stopping
     }
-    expect(maintenance.getSnapshot().running).toBe(false)
+    expect(stopped).toBe(true)
   })
 
   test("does not start timers from construction and drains once when hosted", async () => {
@@ -70,12 +70,14 @@ describe("OntologyMaintenance", () => {
     expect(await events.read()).toHaveLength(0)
 
     const handle = await maintenance.start()
-    await waitFor(() => maintenance.getSnapshot().lastCompletedAt !== null)
+    await waitFor(async () => (await heartbeatOf(storage))?.passes[0]?.lastSucceededAt != null)
     expect(await events.read()).toHaveLength(1)
-    expect(maintenance.getSnapshot()).toMatchObject({
-      running: false,
-      consecutiveFailures: 0,
-      outbox: { pendingCount: 0, retryingCount: 0 },
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
+      maintenance: {
+        owner: "embedded",
+        passes: [{ consecutiveFailures: 0 }],
+        outbox: { pendingCount: 0, retryingCount: 0 },
+      },
     })
     expect(jest.getTimerCount()).toBe(1)
     await handle.stop()
@@ -95,9 +97,9 @@ describe("OntologyMaintenance", () => {
     const handle = await maintenance.start()
     await dispatcher.started
 
-    expect(maintenance.getSnapshot().running).toBe(true)
+    expect(dispatcher.concurrent).toBe(1)
     dispatcher.release()
-    await waitFor(() => maintenance.getSnapshot().running === false)
+    await waitFor(() => dispatcher.concurrent === 0)
     await handle.stop()
   })
 
@@ -183,7 +185,7 @@ describe("OntologyMaintenance", () => {
     })
 
     const handle = await maintenance.start()
-    await waitFor(() => maintenance.getSnapshot().outbox?.maxAttempts === 1)
+    await waitFor(async () => (await heartbeatOf(storage))?.passes[0]?.lastSucceededAt != null)
 
     expect(await maintenance.getOperationalStatus()).toMatchObject({
       status: "ok",
@@ -202,8 +204,8 @@ describe("OntologyMaintenance", () => {
     await handle.stop()
   })
 
-  // Reproduce: build the status from `getSnapshot()` alone; with no pass in this process, the
-  // outbox reads `null` and the status stays `ok`.
+  // Reproduce: leave the outbox read out of `getOperationalStatus`; with no pass in this process,
+  // the status never sees the event waiting.
   test("reports the outbox from storage in a process that runs no pass", async () => {
     const storage = new InMemoryStorage()
     const { materializer } = createMaterializerFixture({ storage })
@@ -273,7 +275,7 @@ describe("OntologyMaintenance", () => {
     // Reproduce: put the error's message back in `passHealth`; the password reaches the row, and
     // whoever can read `/api/status`. What failed goes to `onError`, and only there.
     expect((reported[0] as AggregateError).errors[0].message).toContain("hunter2")
-    const row = await storage.maintenanceHeartbeats.get({ projectId: "project" })
+    const row = await storage.maintenanceHeartbeats.list({ projectId: "project" })
     expect(JSON.stringify([degraded, row])).not.toContain("hunter2")
 
     failing = false
@@ -315,12 +317,10 @@ describe("OntologyMaintenance", () => {
     })
     await maintenance.runNow()
     expect(outboxRows(storage)).toHaveLength(1)
-    expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(0)
 
     nowMs += 1
     await maintenance.runNow()
     expect(outboxRows(storage)).toHaveLength(0)
-    expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(1)
   })
 
   test("deletes an abandoned candidate on the next pass, whatever the retention", async () => {
@@ -367,12 +367,13 @@ describe("OntologyMaintenance", () => {
     await maintenance.runNow()
 
     expect(sourceVersions(storage)).toHaveLength(0)
-    expect(maintenance.getSnapshot().cleanup).toMatchObject({
-      terminalSourceRowsDeleted: 2,
-      terminalSourceMaterializationsDeleted: 1,
-    })
   })
 })
+
+async function heartbeatOf(storage: InMemoryStorage) {
+  const [heartbeat] = await storage.maintenanceHeartbeats.list({ projectId: "project" })
+  return heartbeat
+}
 
 class DelayedDispatcher extends OntologyOutboxDispatcher {
   private resolveStarted!: () => void
@@ -469,9 +470,9 @@ function flush(): Promise<void> {
 }
 
 /** Waits for a pass that needs no timer: every step of it is a promise the loop can drain. */
-async function waitFor(predicate: () => boolean): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
   for (let turn = 0; turn < 100; turn++) {
-    if (predicate()) return
+    if (await predicate()) return
     await flush()
   }
   throw new Error("Timed out waiting for maintenance condition.")

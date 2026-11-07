@@ -16,6 +16,7 @@ function heartbeat(
 ): MaintenanceHeartbeatRecord {
   return {
     projectId: "project",
+    owner: "orchestrator",
     beatAt: NOW,
     everyMs: 30_000,
     passes: [
@@ -33,7 +34,7 @@ function statusOf(
   input: Partial<Omit<Parameters<typeof operationalStatus>[0], "now" | "pendingLimitMs">>
 ) {
   return operationalStatus({
-    heartbeat: null,
+    heartbeats: [],
     outbox: QUIET_OUTBOX,
     pendingLimitMs: 120_000,
     now: NOW,
@@ -43,9 +44,10 @@ function statusOf(
 
 describe("operationalStatus", () => {
   test("a recent beat with every pass healthy is ok, dates as text", () => {
-    expect(statusOf({ heartbeat: heartbeat() })).toEqual({
+    expect(statusOf({ heartbeats: [heartbeat()] })).toEqual({
       status: "ok",
       maintenance: {
+        owner: "orchestrator",
         beatAt: NOW.toISOString(),
         stale: false,
         passes: [
@@ -61,9 +63,9 @@ describe("operationalStatus", () => {
   })
 
   test("says so when no loop ever beat, rather than claiming ok", () => {
-    expect(statusOf({ heartbeat: null })).toMatchObject({
+    expect(statusOf({ heartbeats: [] })).toMatchObject({
       status: "unknown",
-      maintenance: { beatAt: null, stale: false, passes: [] },
+      maintenance: { owner: null, beatAt: null, stale: false, passes: [] },
     })
   })
 
@@ -73,7 +75,7 @@ describe("operationalStatus", () => {
   ])("a beat $ageMs ms old is $status", ({ ageMs, status, stale }) => {
     const beatAt = new Date(NOW.getTime() - ageMs)
 
-    expect(statusOf({ heartbeat: heartbeat({ beatAt }) })).toMatchObject({
+    expect(statusOf({ heartbeats: [heartbeat({ beatAt })] })).toMatchObject({
       status,
       maintenance: { stale },
     })
@@ -82,7 +84,7 @@ describe("operationalStatus", () => {
   test("reads staleness from the interval the loop wrote", () => {
     const beatAt = new Date(NOW.getTime() - 100_000)
 
-    expect(statusOf({ heartbeat: heartbeat({ beatAt, everyMs: 60_000 }) }).status).toBe("ok")
+    expect(statusOf({ heartbeats: [heartbeat({ beatAt, everyMs: 60_000 })] }).status).toBe("ok")
   })
 
   test.each([
@@ -91,7 +93,25 @@ describe("operationalStatus", () => {
   ])("a pass that failed $failures time(s) in a row is $status", ({ failures, status }) => {
     const passes = [{ id: "cron", lastSucceededAt: null, consecutiveFailures: failures }]
 
-    expect(statusOf({ heartbeat: heartbeat({ passes }) }).status).toBe(status)
+    expect(statusOf({ heartbeats: [heartbeat({ passes })] }).status).toBe(status)
+  })
+
+  // Reproduce: pick the newest beat in `operationalStatus`; the embedded loop reports `ok`.
+  test("an embedded loop cannot speak for a dead orchestrator", () => {
+    const dead = heartbeat({ beatAt: new Date(NOW.getTime() - 60_001) })
+    const embedded = heartbeat({ owner: "embedded" })
+
+    expect(statusOf({ heartbeats: [embedded, dead] })).toMatchObject({
+      status: "degraded",
+      maintenance: { owner: "orchestrator", stale: true },
+    })
+  })
+
+  test("an embedded loop answers when no orchestrator ever beat", () => {
+    expect(statusOf({ heartbeats: [heartbeat({ owner: "embedded" })] })).toMatchObject({
+      status: "ok",
+      maintenance: { owner: "embedded" },
+    })
   })
 
   test("events stuck in the outbox are degraded even with no loop to blame", () => {

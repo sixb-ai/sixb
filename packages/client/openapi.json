@@ -14598,6 +14598,11 @@
                     "maintenance": {
                       "type": "object",
                       "properties": {
+                        "owner": {
+                          "type": "string",
+                          "enum": ["orchestrator", "embedded"],
+                          "nullable": true
+                        },
                         "beatAt": {
                           "type": "string",
                           "nullable": true
@@ -14655,7 +14660,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["beatAt", "stale", "passes", "outbox"],
+                      "required": ["owner", "beatAt", "stale", "passes", "outbox"],
                       "additionalProperties": false
                     }
                   },

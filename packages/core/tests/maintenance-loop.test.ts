@@ -404,24 +404,29 @@ describe("MaintenanceLoop", () => {
       release.resolve()
     })
 
-    test("a failed write is reported, and the next beat tries again", async () => {
+    // Reproduce: report `consecutiveFailures: 1` from `writeBeat`; an alert on the count never fires.
+    test("a failed write is reported and counted, and the next beat tries again", async () => {
       let writes = 0
       startLoop([], {
         heartbeat: {
           everyMs: 30 * SECOND,
           async write() {
             writes += 1
-            if (writes === 1) throw new Error("storage down")
+            if (writes <= 2) throw new Error("storage down")
           },
         },
       })
       await flush()
+      await advance(30 * SECOND)
 
-      expect(failures.map(({ failure }) => failure.passId)).toEqual(["heartbeat"])
+      expect(failures.map(({ failure }) => failure)).toEqual([
+        { passId: "heartbeat", consecutiveFailures: 1 },
+        { passId: "heartbeat", consecutiveFailures: 2 },
+      ])
 
       await advance(30 * SECOND)
-      expect(writes).toBe(2)
-      expect(failures).toHaveLength(1)
+      expect(writes).toBe(3)
+      expect(failures).toHaveLength(2)
     })
   })
 

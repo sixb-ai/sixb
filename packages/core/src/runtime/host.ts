@@ -370,6 +370,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       schedules: definitions.schedules.list(),
       events: this.eventService,
       timeZone: this.timeZone,
+      onError: this.onMaintenanceFailure,
     })
   }
 
@@ -446,7 +447,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
     const loop = new MaintenanceLoop({
       passes: [this.ontologyMaintenance.pass, this.scheduler.pass, ...passes],
-      heartbeat: storageHeartbeat(this.projectId, this.storage),
+      heartbeat: storageHeartbeat(this.projectId, "orchestrator", this.storage),
       onError: this.onMaintenanceFailure,
     })
     loop.start()

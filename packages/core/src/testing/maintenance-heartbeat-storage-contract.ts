@@ -27,56 +27,73 @@ export function runMaintenanceHeartbeatStorageContractSuite<
   }
 
   describe(`${label} maintenance heartbeat contract`, () => {
-    test("no project has a heartbeat before its first beat", () =>
+    test("a project has no heartbeat before its first beat", () =>
       withStorage(async (storage) => {
-        expect(await storage.get({ projectId })).toBeNull()
+        expect(await storage.list({ projectId })).toEqual([])
       }))
 
     test("reads back what it stored, dates and failures included", () =>
       withStorage(async (storage) => {
         const heartbeat = {
           projectId,
+          owner: "orchestrator" as const,
           beatAt,
           everyMs: 30_000,
           passes: [
-            {
-              id: "ontology",
-              lastSucceededAt: succeededAt,
-              consecutiveFailures: 0,
-            },
-            {
-              id: "cron",
-              lastSucceededAt: null,
-              consecutiveFailures: 3,
-            },
+            { id: "ontology", lastSucceededAt: succeededAt, consecutiveFailures: 0 },
+            { id: "cron", lastSucceededAt: null, consecutiveFailures: 3 },
           ],
         }
 
         await storage.record(heartbeat)
 
-        expect(await storage.get({ projectId })).toEqual(heartbeat)
+        expect(await storage.list({ projectId })).toEqual([heartbeat])
       }))
 
-    test("a beat replaces the last one, so a pass no longer run leaves the record", () =>
+    test("a beat replaces its owner's last one, so a pass no longer run leaves the record", () =>
       withStorage(async (storage) => {
+        const owner = "orchestrator" as const
         await storage.record({
           projectId,
+          owner,
           beatAt,
           everyMs: 30_000,
           passes: [{ id: "gone", lastSucceededAt: null, consecutiveFailures: 9 }],
         })
 
-        const next = { projectId, beatAt: new Date(beatAt.getTime() + 1_000), everyMs: 60_000 }
-        await storage.record({ ...next, passes: [] })
+        const next = {
+          projectId,
+          owner,
+          beatAt: new Date(beatAt.getTime() + 1_000),
+          everyMs: 60_000,
+          passes: [],
+        }
+        await storage.record(next)
 
-        expect(await storage.get({ projectId })).toEqual({ ...next, passes: [] })
+        expect(await storage.list({ projectId })).toEqual([next])
       }))
 
-    test("keeps one heartbeat per project", () =>
+    test("keeps each owner's heartbeat apart", () =>
       withStorage(async (storage) => {
-        await storage.record({ projectId, beatAt, everyMs: 30_000, passes: [] })
+        const beat = { projectId, beatAt, everyMs: 30_000, passes: [] }
+        await storage.record({ ...beat, owner: "orchestrator" })
+        await storage.record({ ...beat, owner: "embedded" })
 
-        expect(await storage.get({ projectId: `${projectId}-other` })).toBeNull()
+        const owners = (await storage.list({ projectId })).map((heartbeat) => heartbeat.owner)
+        expect([...owners].sort()).toEqual(["embedded", "orchestrator"])
+      }))
+
+    test("keeps each project's heartbeat apart", () =>
+      withStorage(async (storage) => {
+        await storage.record({
+          projectId,
+          owner: "orchestrator",
+          beatAt,
+          everyMs: 30_000,
+          passes: [],
+        })
+
+        expect(await storage.list({ projectId: `${projectId}-other` })).toEqual([])
       }))
   })
 }

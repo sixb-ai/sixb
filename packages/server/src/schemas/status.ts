@@ -14,6 +14,7 @@ export const ReadinessResponseSchema = z.object({
 })
 
 const MaintenanceSummarySchema = z.object({
+  owner: z.enum(["orchestrator", "embedded"]).nullable(),
   beatAt: z.string().nullable(),
   stale: z.boolean(),
   passes: z.array(

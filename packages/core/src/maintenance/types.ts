@@ -1,3 +1,5 @@
+import type { MaintenanceLoopOwner } from "../storage"
+
 export interface OntologyMaintenanceOptions {
   /** Delay between completed passes. Defaults to 60 seconds. */
   readonly intervalMs?: number
@@ -17,31 +19,11 @@ export interface OntologyMaintenanceOptions {
   readonly shutdownTimeoutMs?: number
 }
 
-export interface OntologyMaintenanceCleanupSnapshot {
-  readonly publishedOutboxRowsDeleted: number
-  /** Rows of candidates that will not be published again, their replacement plans included. */
-  readonly terminalSourceRowsDeleted: number
-  readonly terminalSourceMaterializationsDeleted: number
-}
-
 export interface OutboxSummary {
   readonly pendingCount: number
   readonly oldestPendingAt: string | null
   readonly retryingCount: number
   readonly maxAttempts: number
-}
-
-/** What the last pass in this process did. Only the process that runs passes has one. */
-export interface OntologyMaintenanceSnapshot {
-  readonly running: boolean
-  readonly intervalMs: number
-  readonly lastStartedAt: string | null
-  readonly lastCompletedAt: string | null
-  readonly lastDurationMs: number | null
-  readonly consecutiveFailures: number
-  readonly lastError: string | null
-  readonly outbox: OutboxSummary | null
-  readonly cleanup: OntologyMaintenanceCleanupSnapshot | null
 }
 
 export interface OntologyMaintenanceHandle {
@@ -59,7 +41,9 @@ export interface OntologyOperationalStatus {
   /** `unknown`: no maintenance loop ever reported, so nothing says one runs. */
   readonly status: "ok" | "degraded" | "unknown"
   readonly maintenance: {
-    /** When the maintenance loop last reported. Null when it never did. */
+    /** Whose loop this describes: the orchestrator's whenever one ever reported. */
+    readonly owner: MaintenanceLoopOwner | null
+    /** When that loop last reported. Null when none ever did. */
     readonly beatAt: string | null
     /** The loop stopped reporting: it stopped, or it cannot reach storage. */
     readonly stale: boolean

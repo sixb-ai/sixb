@@ -4,12 +4,14 @@ export class InMemoryMaintenanceHeartbeatStorage implements MaintenanceHeartbeat
   private rows = new Map<string, MaintenanceHeartbeatRecord>()
 
   async record(heartbeat: MaintenanceHeartbeatRecord): Promise<void> {
-    this.rows.set(heartbeat.projectId, structuredClone(heartbeat))
+    this.rows.set(`${heartbeat.projectId}\u0000${heartbeat.owner}`, structuredClone(heartbeat))
   }
 
-  async get(input: { readonly projectId: string }): Promise<MaintenanceHeartbeatRecord | null> {
-    const row = this.rows.get(input.projectId)
-    return row ? structuredClone(row) : null
+  async list(input: {
+    readonly projectId: string
+  }): Promise<readonly MaintenanceHeartbeatRecord[]> {
+    const rows = [...this.rows.values()].filter((row) => row.projectId === input.projectId)
+    return structuredClone(rows)
   }
 
   snapshot(): ReadonlyMap<string, MaintenanceHeartbeatRecord> {
