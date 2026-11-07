@@ -57,7 +57,6 @@ interface DispatchWorkflowRunInput {
   readonly input?: Readonly<Record<string, unknown>>
   readonly source?: WorkflowRunSource
   readonly metadata?: Readonly<Record<string, string>>
-  readonly queueJobId?: string
   /** Automatic callers own publication retries; validate provenance before any replay effect. */
   readonly validateExistingRun?: (run: WorkflowRunRecord) => Promise<void>
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
@@ -108,7 +107,6 @@ export class WorkflowRunDispatcher implements WorkflowRunDispatchPort {
         principal: SYSTEM_PRINCIPAL,
       },
       metadata: input.metadata,
-      queueJobId: input.runId,
       validateExistingRun: (run) => assertAutomaticExecutionIdentity(this.dependencies, input, run),
       createExecution: async (executionId, runId) =>
         createPrimitiveExecutionRecord({
@@ -275,14 +273,15 @@ async function enqueueWorkflowRun(
     projectId: input.projectId,
     jobs: [
       {
-        ...(input.queueJobId === undefined ? {} : { id: input.queueJobId }),
+        // Stable, so publishing a run's job twice leaves one job in the queue.
+        id: run.id,
         type: "workflow.run.requested",
         payload: { runId: run.id },
         ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       },
     ],
   })
-  if (!job || (input.queueJobId !== undefined && job.id !== input.queueJobId)) {
+  if (!job || job.id !== run.id) {
     throw new WorkflowRunError(`[Sixb] Queue did not acknowledge workflow run '${run.id}'.`)
   }
   return job
