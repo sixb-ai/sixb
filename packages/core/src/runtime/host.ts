@@ -395,6 +395,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         lakeStorage: this.lakeStorage,
         blobStorage: this.blobStorage,
         events: this.eventService,
+        queue: this.queues.lake,
         datasets: definitions.datasets,
         reporter: this,
       })

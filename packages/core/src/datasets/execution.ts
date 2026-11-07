@@ -14,6 +14,7 @@ import type { DatasetVersionMarkings } from "../security/dataset-version-marking
 import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 import type { MergeChange } from "./changes"
+import { tryEnqueueIngestFlush } from "./ingest-flush-job"
 import {
   type DatasetLineage,
   type DatasetLineageInput,
@@ -228,19 +229,13 @@ export function createDatasetsRuntime(
         changes,
       })
 
-      // Only the delivery that opens a request announces it; the others join that request. The
-      // announcement follows the commit and never fails the call: the orchestrator's reconciler
-      // queues a flush for a request whose announcement was lost.
-      const { request, requested } = flush
-      if (requested) {
-        await runtime.events.emit(
-          {
-            events: [
-              { type: "dataset.ingest.queued", payload: { datasetId: registered.id, request } },
-            ],
-            correlationId: execution.correlationId,
-          },
-          { source: "SixbDatasets" }
+      // Only the delivery that opens a request queues its flush; the others join that request.
+      if (flush.requested) {
+        await tryEnqueueIngestFlush(
+          runtime.queues.lake,
+          runtime.projectId,
+          { datasetId: registered.id, request: flush.request },
+          { source: "ingest", correlationId: execution.correlationId }
         )
       }
 

@@ -2,10 +2,12 @@ import { afterEach, expect, jest, test } from "bun:test"
 import { InMemoryQueues, type SixbErrorContext } from "@sixb/core"
 import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import type { DatasetIngestSummary } from "@sixb/core/storage"
-import { runIngestReconciler } from "../src/ingest-reconciler"
+import { IngestReconciler } from "../src/ingest-reconciler"
 
 const PROJECT_ID = "ingest-reconciliation"
 const MINUTE = 60_000
+
+const signal = new AbortController().signal
 
 afterEach(() => {
   jest.useRealTimers()
@@ -31,16 +33,9 @@ async function queuedFlushes(queues: InMemoryQueues): Promise<string[]> {
   return claimed.map(({ job }) => job.id)
 }
 
-async function turns(count = 20): Promise<void> {
-  for (let turn = 0; turn < count; turn += 1) {
-    await new Promise<void>((resolve) => setImmediate(resolve))
-  }
-}
-
-// Reproduce: skip the enqueue in `reconcile` (ingest-reconciler.ts); the waiting dataset gets no job.
+// Reproduce: skip the enqueue in `pass` (ingest-reconciler.ts); the waiting dataset gets no job.
 test("queues a flush for each dataset whose deliveries wait with no flush holding it", async () => {
   const queues = new InMemoryQueues()
-  const controller = new AbortController()
   const inbox = {
     summarize: async () => [
       summary({ datasetId: "crm.people", request: 4 }),
@@ -51,20 +46,86 @@ test("queues a flush for each dataset whose deliveries wait with no flush holdin
     ],
   }
 
-  const running = runIngestReconciler(
-    { projectId: PROJECT_ID, queues, inbox, reporter: {} },
-    controller.signal
-  )
-  await turns()
-  controller.abort()
-  await running
+  const reconciler = new IngestReconciler({
+    projectId: PROJECT_ID,
+    queue: queues.lake,
+    inbox,
+    reporter: {},
+  })
+  await reconciler.pass(signal)
 
   expect(await queuedFlushes(queues)).toEqual(["ingest-flush:crm.people:4"])
 })
 
+// Reproduce: name the job anything but the request in `enqueueIngestFlush`; each pass then adds one.
+test("asks for a request's flush again without queueing a second job", async () => {
+  const queues = new InMemoryQueues()
+  const reconciler = new IngestReconciler({
+    projectId: PROJECT_ID,
+    queue: queues.lake,
+    inbox: { summarize: async () => [summary({ datasetId: "crm.people", request: 4 })] },
+    reporter: {},
+  })
+
+  await reconciler.pass(signal)
+  await reconciler.pass(signal)
+
+  expect(await queuedFlushes(queues)).toEqual(["ingest-flush:crm.people:4"])
+})
+
+// Reproduce: wrap the enqueue in `pass` in a catch; the loop then counts a queue that is down as a
+// pass that worked, and nothing says so.
+test("fails the pass when the queue refuses, for the loop to count and report", async () => {
+  const reconciler = new IngestReconciler({
+    projectId: PROJECT_ID,
+    queue: {
+      enqueue: async () => {
+        throw new Error("queue offline")
+      },
+    },
+    inbox: { summarize: async () => [summary({ datasetId: "crm.people" })] },
+    reporter: {},
+  })
+
+  const failure = await reconciler.pass(signal).catch((error) => error)
+
+  expect(failure).toEqual(new Error("queue offline"))
+})
+
+// Reproduce: report after queueing in `pass`; a queue that is down then silences the report.
+test("reports a stall even when the queue refuses", async () => {
+  const host = {}
+  const reports: SixbErrorContext[] = []
+  attachSixbErrorReporter(host, (_error, context) => {
+    reports.push(context)
+  })
+  const reconciler = new IngestReconciler({
+    projectId: PROJECT_ID,
+    queue: {
+      enqueue: async () => {
+        throw new Error("queue offline")
+      },
+    },
+    inbox: {
+      summarize: async () => [
+        summary({
+          datasetId: "crm.people",
+          oldestReceivedAt: new Date(Date.now() - 11 * MINUTE),
+        }),
+      ],
+    },
+    reporter: host,
+  })
+
+  await reconciler.pass(signal).catch(() => {})
+  await flushSixbErrors(host)
+
+  expect(reports).toEqual([expect.objectContaining({ datasetId: "crm.people" })])
+})
+
 // Reproduce: measure the stall from the oldest delivery in `reportStalled`, and the dataset a
-// flush drained 2 min ago is reported, then again with each new oldest; or drop the lease check,
-// and the dataset a flush holds is reported.
+// flush drained 2 min ago is reported, then again with each new oldest; drop the lease check, and
+// the dataset a flush holds is reported; or drop the `reported` check, and each pass reports.
 test("reports a dataset whose changes nothing wrote for 10 minutes, once per stall", async () => {
   jest.useFakeTimers()
   const host = {}
@@ -101,23 +162,16 @@ test("reports a dataset whose changes nothing wrote for 10 minutes, once per sta
       ]
     },
   }
-  const controller = new AbortController()
-  const running = runIngestReconciler(
-    {
-      projectId: PROJECT_ID,
-      queues: new InMemoryQueues(),
-      inbox,
-      reporter: host,
-      intervalMs: MINUTE,
-    },
-    controller.signal
-  )
+  const reconciler = new IngestReconciler({
+    projectId: PROJECT_ID,
+    queue: new InMemoryQueues().lake,
+    inbox,
+    reporter: host,
+  })
 
-  await turns()
+  await reconciler.pass(signal)
   jest.advanceTimersByTime(MINUTE)
-  await turns()
-  controller.abort()
-  await running
+  await reconciler.pass(signal)
   await flushSixbErrors(host)
 
   expect(pass).toBe(2)

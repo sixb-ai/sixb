@@ -234,7 +234,6 @@ export type {
   DatasetEventSelectorContext,
   DatasetEventSelectorEvent,
   DatasetEventToken,
-  DatasetIngestQueuedEvent,
   DatasetVersionCommittedEvent,
   DomainEvent,
   DomainEventLog,

@@ -13,6 +13,7 @@ import {
 import { emptyGrantIndex } from "../src/authorization"
 import { flushSixbErrors } from "../src/error-reporting/capability"
 import { createPrincipalRequestScope, createTestingScope } from "../src/execution/scopes"
+import type { LakeQueueJob, NewQueueJob } from "../src/queues"
 
 const dataset = defineDataset("source.people", {
   schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
@@ -24,7 +25,16 @@ function setup() {
   const lakeStorage = new InMemoryLakeStorage()
   const storage = new InMemoryStorage()
   const broker = new InMemoryBroker()
+  const queues = new InMemoryQueues()
   const failures: Error[] = []
+
+  const enqueued: NewQueueJob<LakeQueueJob>[] = []
+  const enqueue = queues.lake.enqueue.bind(queues.lake)
+  queues.lake.enqueue = async (input) => {
+    enqueued.push(...input.jobs)
+    return enqueue(input)
+  }
+
   const host = new SixbHost({
     id: "ingest-test",
     ontology: [],
@@ -32,7 +42,7 @@ function setup() {
     lakeStorage,
     broker,
     storage,
-    queues: new InMemoryQueues(),
+    queues,
     blobStorage: new InMemoryBlobStorage(),
     onError: (error) => {
       failures.push(error)
@@ -45,6 +55,8 @@ function setup() {
     lakeStorage,
     storage,
     broker,
+    queues,
+    enqueued,
     failures,
     waiting,
     sixb: host.withScope(createTestingScope({ projectId: host.id })),
@@ -52,9 +64,9 @@ function setup() {
 }
 
 test("ingestion stores validated changes for a flush, and one request covers the deliveries after it", async () => {
-  // Regression proof: emit `dataset.ingest.queued` whatever `requestFlush` answers; the second
-  // delivery then queues a second request.
-  const { host, lakeStorage, sixb, waiting } = setup()
+  // Regression proof: queue the flush whatever `append` answers in `ingest`; the second delivery
+  // then asks twice, and a burst costs a queue write per delivery.
+  const { host, lakeStorage, sixb, waiting, enqueued } = setup()
 
   const first = await sixb.datasets.ingest(dataset, {
     changes: [
@@ -76,13 +88,54 @@ test("ingestion stores validated changes for a flush, and one request covers the
     { datasetId: dataset.id, pendingDeliveries: 2, pendingChanges: 3 },
   ])
 
-  const queued = await host.events.read()
-  expect(queued).toHaveLength(1)
-  expect(queued[0]).toMatchObject({
-    type: "dataset.ingest.queued",
-    correlationId: sixb.execution.correlationId,
-    payload: { datasetId: dataset.id, request: 0 },
-  })
+  expect(enqueued).toEqual([
+    {
+      id: `ingest-flush:${dataset.id}:0`,
+      type: "dataset.ingest.flush.requested",
+      payload: { datasetId: dataset.id },
+      metadata: { source: "ingest", correlationId: sixb.execution.correlationId },
+    },
+  ])
+  // Ingestion publishes nothing: no process has to hear about it for a flush to run.
+  expect(await host.events.read()).toEqual([])
+})
+
+test("a burst of deliveries queues one flush", async () => {
+  // Regression proof: drop the `requested` check in `requestFlushIn`; every delivery then asks.
+  const { sixb, enqueued } = setup()
+
+  await Promise.all(
+    Array.from({ length: 20 }, (_, index) =>
+      sixb.datasets.ingest(dataset, {
+        changes: [change.upsert({ id: `${index}`, revision: 1, name: "Sam" })],
+      })
+    )
+  )
+
+  expect(enqueued.map((job) => job.id)).toEqual([`ingest-flush:${dataset.id}:0`])
+})
+
+test("a queue that refuses the flush fails nothing: the changes are stored", async () => {
+  // Regression proof: call `enqueueIngestFlush` from `ingest`; the call then rejects, and the
+  // webhook source sends again what is already stored.
+  const { sixb, queues, waiting } = setup()
+  queues.lake.enqueue = async () => {
+    throw new Error("queue offline")
+  }
+
+  const warn = console.warn
+  console.warn = () => {}
+  try {
+    const result = await sixb.datasets.ingest(dataset, {
+      changes: [change.upsert({ id: "42", revision: 8, name: "Sam" })],
+    })
+
+    expect(result.changes).toBe(1)
+  } finally {
+    console.warn = warn
+  }
+
+  expect(await waiting()).toMatchObject([{ datasetId: dataset.id, pendingDeliveries: 1 }])
 })
 
 test("an ingestion without changes stores and requests nothing", async () => {
@@ -190,8 +243,10 @@ test("ingestion refuses unkeyed datasets and unsupported providers before storin
   expect(await refused(dataset)).toContain("merge support")
 })
 
-test("a request the broker loses is reported, and the changes stay stored", async () => {
-  const { host, broker, failures, sixb, waiting } = setup()
+test("ingestion needs no broker", async () => {
+  // Regression proof: announce the request on the event log in `ingest`; the outage is then
+  // reported, and a flush waits for whoever had to hear it.
+  const { host, broker, enqueued, failures, sixb, waiting } = setup()
   broker.append = async () => {
     throw new Error("broker offline")
   }
@@ -201,8 +256,9 @@ test("a request the broker loses is reported, and the changes stay stored", asyn
   })
 
   expect(result.changes).toBe(1)
+  expect(enqueued).toHaveLength(1)
   expect(await waiting()).toMatchObject([{ datasetId: dataset.id, pendingDeliveries: 1 }])
 
   await flushSixbErrors(host)
-  expect(failures).toHaveLength(1)
+  expect(failures).toEqual([])
 })

@@ -82,7 +82,6 @@ export type {
   AuthorableDomainEvent,
   AuthorableEventDraft,
   DatasetEvent,
-  DatasetIngestQueuedEvent,
   DatasetVersionCommittedEvent,
   DomainEvent,
   DomainEventDraft,

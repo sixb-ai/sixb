@@ -20,19 +20,4 @@ export interface DatasetVersionCommittedEvent extends EventEnvelope {
   }
 }
 
-/**
- * `sixb.datasets.ingest` stored changes and asked for a flush. One event per request: deliveries
- * that arrive while the request is open join it. The orchestrator queues the flush.
- */
-export interface DatasetIngestQueuedEvent extends EventEnvelope {
-  type: "dataset.ingest.queued"
-  topic: "datasets"
-  partitionKey: string
-  payload: {
-    datasetId: string
-    /** The request, which names the flush job: a redelivered event queues nothing more. */
-    request: number
-  }
-}
-
-export type DatasetEvent = DatasetVersionCommittedEvent | DatasetIngestQueuedEvent
+export type DatasetEvent = DatasetVersionCommittedEvent

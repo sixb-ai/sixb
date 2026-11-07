@@ -22,6 +22,7 @@ import {
   type DatasetIngestStorage,
 } from "../storage/dataset-ingest"
 import { DatasetValidationError } from "./errors"
+import { type DatasetIngestFlushQueue, tryEnqueueIngestFlush } from "./ingest-flush-job"
 import type { DatasetDefinition } from "./types"
 import { lakeDatasetDefinition, writeDataset } from "./write"
 
@@ -90,7 +91,9 @@ export interface DatasetIngestRuntimeDependencies {
   readonly inbox: DatasetIngestStorage | undefined
   readonly lakeStorage: LakeStorage
   readonly blobStorage: Pick<BlobStorage, "stat">
-  readonly events: Pick<DomainEventLog, "append" | "emit">
+  readonly events: Pick<DomainEventLog, "append">
+  /** Where a flush that spent its budget asks for the next one. */
+  readonly queue: DatasetIngestFlushQueue
   readonly datasets: {
     list(): readonly DatasetDefinition[]
     getById(datasetId: string): DatasetDefinition | null
@@ -501,13 +504,11 @@ class DatasetIngestFlush {
     })
     if (!requested) return
 
-    await this.dependencies.events.emit(
-      {
-        events: [
-          { type: "dataset.ingest.queued", payload: { datasetId: this.datasetId, request } },
-        ],
-      },
-      { source: "SixbDatasets" }
+    await tryEnqueueIngestFlush(
+      this.dependencies.queue,
+      this.dependencies.projectId,
+      { datasetId: this.datasetId, request },
+      { source: "ingest-flush" }
     )
   }
 

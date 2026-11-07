@@ -102,14 +102,6 @@ export function compileRoutesWithDiagnostics(params: CompileRoutesParams): Compi
     })
   }
 
-  if (params.datasetIngest) {
-    addCompiledRouteJob(
-      routes,
-      { key: "dataset.ingest.queued", eventType: "dataset.ingest.queued" },
-      { queue: "lake", job: { type: "dataset.ingest.flush.requested" } }
-    )
-  }
-
   return { routes, diagnostics }
 }
 

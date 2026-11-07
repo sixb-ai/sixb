@@ -6,7 +6,9 @@ import {
   recoveryPasses,
 } from "@sixb/core/internal/maintenance"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
-import type { OrchestratorDispatchers, OrchestratorRoutes } from "./types"
+import { everyMs } from "@sixb/core/internal/maintenance"
+import { IngestReconciler } from "./ingest-reconciler"
+import type { IngestReconciliationPorts, OrchestratorDispatchers, OrchestratorRoutes } from "./types"
 import { requireDispatcher } from "./worker"
 
 export interface MaintenancePassesInput {
@@ -18,18 +20,25 @@ export interface MaintenancePassesInput {
   readonly projectionRuns?: NonNullable<RecoveryPassesInput["projections"]>["projectionRuns"]
   /** Without it, a pipeline's dataset triggers have only their event. */
   readonly pipelineRuns?: NonNullable<RecoveryPassesInput["triggers"]>["pipelineRuns"]
+  /** When the project can ingest. */
+  readonly ingest?: IngestReconciliationPorts
 }
 
 /** The passes the routes call for, for the orchestrator's maintenance loop. */
 export function createMaintenancePasses(input: MaintenancePassesInput): readonly MaintenancePass[] {
   const { projectId, lakeStorage } = input
 
-  return recoveryPasses({
-    projectId,
-    lakeStorage,
-    projections: projectionsOf(input),
-    triggers: triggersOf(input),
-  })
+  const ingest = ingestPass(input)
+
+  return [
+    ...recoveryPasses({
+      projectId,
+      lakeStorage,
+      projections: projectionsOf(input),
+      triggers: triggersOf(input),
+    }),
+    ...(ingest ? [ingest] : []),
+  ]
 }
 
 function projectionsOf(input: MaintenancePassesInput): RecoveryPassesInput["projections"] {
@@ -88,6 +97,19 @@ export function datasetTriggers(routes: OrchestratorRoutes): readonly DatasetTri
   }
 
   return [...triggers.values()]
+}
+
+function ingestPass(input: MaintenancePassesInput): MaintenancePass | null {
+  if (!input.ingest) return null
+
+  const reconciler = new IngestReconciler({ ...input.ingest, projectId: input.projectId })
+
+  return everyMs({
+    id: "ingest",
+    intervalMs: reconciler.intervalMs,
+    budgetMs: 5 * 60_000,
+    run: (signal) => reconciler.pass(signal),
+  })
 }
 
 function projectionDescriptors(

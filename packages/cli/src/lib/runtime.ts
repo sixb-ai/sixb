@@ -170,7 +170,6 @@ export async function startOrchestratorRuntime(
     pipelines: sixb.definitions.pipelines.list(),
     projections,
     workflows: sixb.definitions.workflows.list(),
-    datasetIngest: getDatasetIngestRuntime(sixb).enabled,
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   const dispatchers = {
@@ -180,7 +179,7 @@ export async function startOrchestratorRuntime(
     workflows: new WorkflowRunDispatcher(sixb),
   }
 
-  const { projectionRuns, pipelineRuns } = sixb.storage
+  const { projectionRuns, pipelineRuns, datasetIngest } = sixb.storage
   if (projections.length > 0 && !projectionRuns) {
     throw new Error("[SixbCLI] Projection dispatch requires storage.projectionRuns.")
   }
@@ -194,9 +193,6 @@ export async function startOrchestratorRuntime(
       routes,
       dispatchers,
       reporter: sixb,
-      ...(sixb.storage.datasetIngest
-        ? { ingestReconciliation: { inbox: sixb.storage.datasetIngest, reporter: sixb } }
-        : {}),
     })
     await orchestratorWorker.start()
   }
@@ -210,6 +206,9 @@ export async function startOrchestratorRuntime(
       lakeStorage: sixb.lakeStorage,
       ...(projectionRuns ? { projectionRuns } : {}),
       ...(pipelineRuns ? { pipelineRuns } : {}),
+      ...(datasetIngest && getDatasetIngestRuntime(sixb).enabled
+        ? { ingest: { inbox: datasetIngest, queue: sixb.queues.lake, reporter: sixb } }
+        : {}),
     })
   )
 
