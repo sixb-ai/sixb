@@ -222,6 +222,7 @@ function normalizeProjectionDefinition(projection: ProjectionDefinition): JsonVa
           ])
       ),
       conflictResolution: projection.conflictResolution ?? { strategy: "editsWin" },
+      ...(projection.whenMissingPolicy ? { whenMissingPolicy: projection.whenMissingPolicy } : {}),
     }
   }
   if (projection._tag === "LinkProjectionDefinition") {

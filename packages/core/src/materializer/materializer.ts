@@ -1,4 +1,5 @@
 import type { ExecutionScope } from "../execution"
+import type { LakeStorage } from "../lake-storage/types"
 import type {
   EditCommitResult,
   OntologyEditCommit,
@@ -107,13 +108,15 @@ export class OntologyMaterializer implements OntologyMaterializerContract {
     ontology: OntologyRegistry,
     projectionRegistry: ProjectionRegistry,
     storage: MaterializerStorage,
-    dependencies: OntologyMaterializerDependencies = {}
+    dependencies: OntologyMaterializerDependencies = {},
+    lakeStorage?: Pick<LakeStorage, "getVersion">
   ) {
     this.context = createMaterializerContext({
       projectId,
       ontology,
       projections: projectionRegistry,
       storage,
+      lakeStorage,
       dependencies,
     })
   }
@@ -124,6 +127,7 @@ export function createOntologyMaterializer(input: {
   readonly ontology: OntologyRegistry
   readonly projections: ProjectionRegistry
   readonly storage: MaterializerStorage
+  readonly lakeStorage?: Pick<LakeStorage, "getVersion">
   readonly dependencies?: OntologyMaterializerDependencies
 }): OntologyMaterializer {
   return new OntologyMaterializer(
@@ -131,6 +135,7 @@ export function createOntologyMaterializer(input: {
     input.ontology,
     input.projections,
     input.storage,
-    input.dependencies
+    input.dependencies,
+    input.lakeStorage
   )
 }

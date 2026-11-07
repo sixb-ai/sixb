@@ -515,6 +515,21 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
            GROUP BY entity_kind, identity_key`
         )
         .run(candidate.version_id, ...rows.values)
+      if (input.whenMissingPolicy === "remove" && input.objectTypeId) {
+        this.db
+          .query(
+            `INSERT INTO ${IDENTITIES} (
+               version_id, entity_kind, identity_key, sort_key, diff_required, expand_at,
+               source_key, target_key
+             )
+             SELECT ?, 'object', json_array(object_type_id, primary_id),
+               LOWER(HEX(CAST(json_array(object_type_id, primary_id) AS BLOB))), 1, NULL, NULL, NULL
+             FROM ontology_object_overrides
+             WHERE project_id = ? AND object_type_id = ? AND json_extract(value, '$.kind') = 'create'
+             ON CONFLICT DO NOTHING`
+          )
+          .run(candidate.version_id, input.projectId, input.objectTypeId)
+      }
       return { committedAt: commit.committedAt }
     })
   }

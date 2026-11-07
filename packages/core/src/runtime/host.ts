@@ -319,6 +319,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       ontology: definitions.ontology,
       projections: definitions.projections,
       storage: this.storage,
+      lakeStorage: this.lakeStorage,
     })
     this.committedFacts = new OntologyOutboxDispatcher({
       projectId: this.projectId,

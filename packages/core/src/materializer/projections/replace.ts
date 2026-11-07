@@ -1,3 +1,4 @@
+import { resolveDatasetSourceReadStartedAt } from "../../datasets/lineage"
 import { assertPinnedDatasetWatermark } from "../../materialization/dataset-watermark"
 import {
   MaterializationConflictError,
@@ -340,6 +341,25 @@ async function commitProjectionCandidate(
   ready: ReadyProjectionReplacement
 ): Promise<ProjectionCommitResult> {
   const plans = context.storage.ontology.replacementPlans
+  const objectTypeId =
+    command.resolved.definition._tag === "ObjectProjectionDefinition"
+      ? command.resolved.definition.objectTypeId
+      : undefined
+  const whenMissingPolicy =
+    command.resolved.definition._tag === "ObjectProjectionDefinition"
+      ? command.resolved.definition.whenMissingPolicy
+      : undefined
+
+  const sourceReadStartedAt =
+    whenMissingPolicy === "remove"
+      ? await resolveDatasetSourceReadStartedAt({
+          projectId: context.projectId,
+          datasetVersion: command.datasetVersion,
+          lakeStorage: context.lakeStorage,
+          syncRuns: context.storage.syncRuns,
+        })
+      : undefined
+
   const plan: ReplacementPlanRef = {
     projectId: context.projectId,
     source: command.source,
@@ -351,13 +371,29 @@ async function commitProjectionCandidate(
   const { committedAt } = await plans.open({
     ...plan,
     commit: projectionCommit(context.projectId, command, ready.identity),
+    ...(whenMissingPolicy ? { whenMissingPolicy } : {}),
+    ...(objectTypeId ? { objectTypeId } : {}),
   })
   const commit = projectionCommit(context.projectId, command, { ...ready.identity, committedAt })
   for (let round = 1; ; round += 1) {
-    await planProjectionReplacement(context, plans, plan, planInput(command, commit))
+    await planProjectionReplacement(
+      context,
+      plans,
+      plan,
+      planInput(command, commit, sourceReadStartedAt)
+    )
     const attempt = await withSerializationRetry(context, () =>
       context.storage.transaction(
-        (storage) => executeProjectionTransaction(context, storage, command, ready, commit, plan),
+        (storage) =>
+          executeProjectionTransaction(
+            context,
+            storage,
+            command,
+            ready,
+            commit,
+            plan,
+            sourceReadStartedAt
+          ),
         { isolation: "serializable" }
       )
     )
@@ -386,7 +422,8 @@ async function executeProjectionTransaction(
   command: PreparedProjectionReplacement,
   ready: ReadyProjectionReplacement,
   commit: OntologyCommitWrite,
-  plan: ReplacementPlanRef
+  plan: ReplacementPlanRef,
+  sourceReadStartedAt?: string
 ): Promise<ProjectionCommitAttempt> {
   await ensureMaterializerExecution(storage.executions, command.scopeExecution)
   await assertProjectionExecution(storage, context.projectId, command)
@@ -407,7 +444,14 @@ async function executeProjectionTransaction(
     assertDeltaBase(active, command)
   }
   throwIfAborted(command.signal)
-  const status = await refreshProjectionPlan(context, storage, command, commit, plan)
+  const status = await refreshProjectionPlan(
+    context,
+    storage,
+    command,
+    commit,
+    plan,
+    sourceReadStartedAt
+  )
   if (!status.fresh) return { kind: "stale", unplanned: status.unplanned }
   const session = await storage.ontology.materializations.begin({
     commit,
@@ -453,12 +497,18 @@ async function refreshProjectionPlan(
   storage: MaterializerStorage,
   command: PreparedProjectionReplacement,
   commit: OntologyCommitWrite,
-  plan: ReplacementPlanRef
+  plan: ReplacementPlanRef,
+  sourceReadStartedAt?: string
 ): Promise<ReplacementPlanStatus> {
   const plans = storage.ontology.replacementPlans
   const status = await plans.refresh(plan)
   if (status.fresh || status.unplanned > context.batching.transactionReplanRows) return status
-  await planProjectionReplacement(context, plans, plan, planInput(command, commit))
+  await planProjectionReplacement(
+    context,
+    plans,
+    plan,
+    planInput(command, commit, sourceReadStartedAt)
+  )
   return plans.refresh(plan)
 }
 
@@ -512,9 +562,19 @@ function projectionCommit(
 
 function planInput(
   command: PreparedProjectionReplacement,
-  commit: OntologyCommitWrite
+  commit: OntologyCommitWrite,
+  sourceReadStartedAt?: string
 ): ProjectionReplacementPlanInput {
-  const input = { projectionKind: command.projectionKind, commit }
+  const whenMissingPolicy =
+    command.resolved.definition._tag === "ObjectProjectionDefinition"
+      ? command.resolved.definition.whenMissingPolicy
+      : undefined
+  const input: ProjectionReplacementPlanInput = {
+    projectionKind: command.projectionKind,
+    commit,
+    ...(whenMissingPolicy ? { whenMissingPolicy } : {}),
+    ...(sourceReadStartedAt ? { sourceReadStartedAt } : {}),
+  }
   return command.signal === undefined ? input : { ...input, signal: command.signal }
 }
 

@@ -255,6 +255,7 @@ function cloneObjectProjectionDefinition(
             sourceTimestamp: projection.conflictResolution.sourceTimestamp,
           }
         : { strategy: "editsWin" },
+    ...(projection.whenMissingPolicy ? { whenMissingPolicy: projection.whenMissingPolicy } : {}),
   }
 }
 

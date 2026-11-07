@@ -212,6 +212,17 @@ export class InMemoryOntologyReplacementPlanStorage implements OntologyReplaceme
           addIdentity(plan, row.assertion, true)
         }
       }
+      if (input.whenMissingPolicy === "remove" && input.objectTypeId) {
+        for (const stored of this.state.objectOverrides.values()) {
+          if (
+            stored.projectId === input.projectId &&
+            stored.ref.objectTypeId === input.objectTypeId &&
+            stored.value.kind === "create"
+          ) {
+            addIdentity(plan, { kind: "object", ref: stored.ref }, true)
+          }
+        }
+      }
       this.state.replacementPlans.set(key, plan)
       return { committedAt: plan.committedAt }
     })

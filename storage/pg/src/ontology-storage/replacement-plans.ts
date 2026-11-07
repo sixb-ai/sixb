@@ -233,6 +233,25 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
           target_key
         FROM keyed
       `
+      if (input.whenMissingPolicy === "remove" && input.objectTypeId) {
+        await sql`
+          WITH keyed AS (
+            SELECT json_build_array(object_type_id, primary_id)::text AS identity_key
+            FROM ontology_object_overrides
+            WHERE project_id = ${input.projectId}
+              AND object_type_id = ${input.objectTypeId}
+              AND value->>'kind' = 'create'
+          )
+          INSERT INTO ${sql(IDENTITIES)} (
+            version_id, entity_kind, identity_key, sort_key, diff_required, expand_at, source_key,
+            target_key
+          )
+          SELECT ${candidate.version_id}, 'object', identity_key,
+            encode(convert_to(identity_key, 'UTF8'), 'hex'), TRUE, NULL, NULL, NULL
+          FROM keyed
+          ON CONFLICT DO NOTHING
+        `
+      }
       if (opened.count >= ANALYZE_ROWS) await analyzePlans(sql)
       return { committedAt: commit.committedAt }
     })

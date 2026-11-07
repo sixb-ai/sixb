@@ -424,6 +424,7 @@ export interface ObjectProjectionBuilder<
   resolveConflicts(
     resolution: ObjectProjectionConflictResolution<TDataset>
   ): ObjectProjectionBuilder<TObjectType, TDataset>
+  whenMissing(policy: "remove"): ObjectProjectionBuilder<TObjectType, TDataset>
 }
 
 /**
@@ -561,6 +562,7 @@ function objectProjectionBuilder<
   readonly users: Readonly<Record<string, ProjectionUserKey>>
   readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
   readonly conflictResolution: SourceEditConflictResolution
+  readonly whenMissingPolicy?: "remove"
 }): ObjectProjectionBuilder<TObjectType, TDataset> {
   const definition: ObjectProjectionDefinition & {
     readonly conflictResolution: SourceEditConflictResolution
@@ -573,6 +575,7 @@ function objectProjectionBuilder<
     ...(Object.keys(input.users).length > 0 ? { users: { ...input.users } } : {}),
     links: { ...input.links },
     conflictResolution: { ...input.conflictResolution },
+    ...(input.whenMissingPolicy ? { whenMissingPolicy: input.whenMissingPolicy } : {}),
   }
 
   return Object.assign(definition, {
@@ -596,6 +599,12 @@ function objectProjectionBuilder<
       return objectProjectionBuilder({
         ...input,
         conflictResolution: resolution as SourceEditConflictResolution,
+      })
+    },
+    whenMissing(policy: "remove"): ObjectProjectionBuilder<TObjectType, TDataset> {
+      return objectProjectionBuilder({
+        ...input,
+        whenMissingPolicy: policy,
       })
     },
   })

@@ -72,6 +72,8 @@ export interface ObjectProjectionDefinition {
   readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
   /** Defaults to `editsWin` when omitted by a legacy lowered definition. */
   readonly conflictResolution?: SourceEditConflictResolution
+
+  readonly whenMissingPolicy?: "remove"
 }
 
 /**

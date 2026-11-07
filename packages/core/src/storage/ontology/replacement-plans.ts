@@ -23,6 +23,8 @@ export interface ReplacementPlanRef {
 export interface OpenReplacementPlanInput extends ReplacementPlanRef {
   /** The commit the plan's work will carry, timed for a plan opened now. */
   readonly commit: OntologyCommitWrite
+  readonly whenMissingPolicy?: "remove"
+  readonly objectTypeId?: string
 }
 
 export interface OpenedReplacementPlan {

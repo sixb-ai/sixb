@@ -48,6 +48,8 @@ export interface ProjectionReplacementPlanInput {
   /** The commit the plan carries, timed as the plan was opened. */
   readonly commit: OntologyCommitWrite
   readonly signal?: AbortSignal
+  readonly whenMissingPolicy?: "remove"
+  readonly sourceReadStartedAt?: string
 }
 
 /**
@@ -120,7 +122,7 @@ function planReplacementObject(
   input: ProjectionReplacementPlanInput,
   state: SourceReplacementObjectState
 ): MaterializationWorkRecord[] {
-  const resolved = resolveReplacementObject(context, state)
+  const resolved = resolveReplacementObject(context, state, input)
   if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
 
   const change = diffEffectiveObject({
@@ -141,6 +143,21 @@ function planReplacementObject(
   ]
   if (Boolean(state.effective) !== Boolean(resolved)) {
     work.push({ kind: "incident-object", recordKey: `incident:${sortKey}`, ref: state.ref })
+  }
+
+  if (resolved === null && state.override && state.override.value.kind === "create") {
+    work.push(
+      planWork(
+        {
+          kind: "object-override-delete",
+          value: {
+            ref: state.ref,
+            expectedLastCommitId: state.override.lastCommitId,
+          },
+        },
+        sortKey
+      )
+    )
   }
 
   if (!change) return work
@@ -257,7 +274,8 @@ function appendLinkChangeWork(
 
 function resolveReplacementObject(
   context: Pick<MaterializerContext, "ontology">,
-  state: SourceReplacementObjectState
+  state: SourceReplacementObjectState,
+  input?: ProjectionReplacementPlanInput
 ) {
   return resolveEffectiveObject({
     ref: state.ref,
@@ -266,5 +284,8 @@ function resolveReplacementObject(
     override: state.override?.value ?? null,
     editedAt: storedObjectEditedAt(state.override),
     latestTelemetry: state.latestTelemetry,
+    whenMissingPolicy: input?.whenMissingPolicy,
+    sourceReadStartedAt: input?.sourceReadStartedAt,
+    overrideCreatedAt: state.override?.updatedAt,
   })
 }
