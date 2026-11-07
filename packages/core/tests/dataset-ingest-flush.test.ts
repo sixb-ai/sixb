@@ -477,6 +477,80 @@ test("a flush that dies after its commit is resumed without writing its batch ag
   expect(new Set(announced.map((event) => event.payload.versionId)).size).toBe(1)
 })
 
+test("a batch resumes however many versions landed while its flush was down", async () => {
+  // Regression proof: throw past the first LOOKUP_VERSIONS in `findCommitted`, as it did: resuming
+  // is the only path, so the dataset then never moves.
+  jest.useFakeTimers()
+  const lakeStorage = new InMemoryLakeStorage()
+  const { host, storage, ingest, flush, rows } = setup(lakeStorage)
+  await ingest(contacts, change.upsert({ id: "1", name: "Ada" }))
+
+  // A flush takes the batch and dies before it commits.
+  const dead = await storage.datasetIngest.acquire({
+    projectId: host.id,
+    datasetId: contacts.id,
+    owner: "dead-flush",
+    leaseMs: 0,
+  })
+  if (!dead.acquired) throw new Error("expected the test to hold the lease")
+  await storage.datasetIngest.takeBatch({
+    lease: dead.lease,
+    flushId: "flush_dead",
+    maxChanges: 100,
+  })
+
+  // A sync goes on writing the dataset meanwhile.
+  for (let round = 0; round < 201; round += 1) {
+    // Each its own millisecond: versions are ordered by when they were committed.
+    jest.advanceTimersByTime(1)
+    await writeDataset({
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      dataset: contacts,
+      mode: "append",
+      signal: new AbortController().signal,
+      readValues: async () => [{ value: { id: `sync-${round}`, name: "Sync" } }],
+    })
+  }
+
+  expect(await flush(contacts)).toEqual({ kind: "flushed", versions: 1, deliveries: 1 })
+  expect((await rows(contacts)).map((row) => row.id)).toContain("1")
+})
+
+test("a batch that committed is found however many versions landed after it", async () => {
+  // Regression proof: return null past the first LOOKUP_VERSIONS in `findCommitted`; the old batch
+  // is then merged again, over the newer write to its key.
+  jest.useFakeTimers()
+  const lakeStorage = new InMemoryLakeStorage()
+  const { storage, ingest, flush, rows } = setup(lakeStorage)
+  await ingest(contacts, change.upsert({ id: "1", name: "Ada" }))
+
+  // The flush dies between its commit and deleting the batch, and a sync writes on.
+  const complete = storage.datasetIngest.complete.bind(storage.datasetIngest)
+  storage.datasetIngest.complete = async () => {
+    throw new Error("killed")
+  }
+  await flush(contacts).catch(() => {})
+  storage.datasetIngest.complete = complete
+
+  for (let round = 0; round < 201; round += 1) {
+    // Each its own millisecond: versions are ordered by when they were committed.
+    jest.advanceTimersByTime(1)
+    await writeDataset({
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      dataset: contacts,
+      mode: "merge",
+      signal: new AbortController().signal,
+      readValues: async () => [{ value: change.upsert({ id: "1", name: `Sync ${round}` }) }],
+    })
+  }
+
+  expect(await flush(contacts)).toEqual({ kind: "flushed", versions: 1, deliveries: 1 })
+
+  expect((await rows(contacts)).map((row) => row.name)).toEqual(["Sync 200"])
+})
+
 test("a version whose announcement fails is announced when its batch is resumed", async () => {
   // Regression proof: complete the batch before announcing it in \`flushBatches\`; the batch is
   // gone when the announcement fails, and no flush ever announces the version.
