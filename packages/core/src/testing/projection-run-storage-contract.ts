@@ -436,6 +436,43 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
       })
     })
 
+    // List running runs and filter them instead to watch live ones use up the limit.
+    test("lists the runs whose lease lapsed, and only those", async () => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const lapsed = replacementInput("lapsed-run")
+        const handedBack = versionedReplacementInput("handed-back-run", "version-2", "2026-02-01")
+        const live = versionedReplacementInput("live-run", "version-3", "2026-03-01")
+        const startedAt = new Date("2026-06-01T12:00:00.000Z")
+        const lapsedBy = new Date("2026-06-01T12:15:00.000Z")
+
+        await admitProjectionRun(context, lapsed)
+        await admitProjectionRun(context, handedBack)
+        await admitProjectionRun(context, live)
+
+        const hold = (token: string, queueLeaseExpiresAt: Date) => ({
+          startedAt,
+          execution: { token, queueLeaseExpiresAt },
+        })
+        await storage.startOrReclaim({ ...live, ...hold("live", new Date(lapsedBy.getTime() + 1)) })
+        await storage.startOrReclaim({ ...lapsed, ...hold("lapsed", lapsedBy) })
+        await storage.startOrReclaim({ ...handedBack, ...hold("back", lapsedBy) })
+        await storage.releaseExecution({
+          projectId: handedBack.projectId,
+          id: handedBack.id,
+          executionToken: "back",
+          spentAttempt: false,
+          releasedAt: startedAt,
+        })
+
+        const found = await storage.listLapsed({ projectId, lapsedBy, limit: 10 })
+        expect(found.map((run) => run.id)).toEqual(["handed-back-run", "lapsed-run"])
+
+        const first = await storage.listLapsed({ projectId, lapsedBy, limit: 1 })
+        expect(first.map((run) => run.id)).toEqual(["handed-back-run"])
+      })
+    })
+
     test("rejects immutable identity and target drift", async () => {
       await withStorage(async (context) => {
         const storage = context.projectionRuns

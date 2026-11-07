@@ -45,6 +45,7 @@ import {
   type FailProjectionRunEnqueueInput,
   type FindSupersedingProjectionRunInput,
   type FinishProjectionRunInput,
+  type ListLapsedProjectionRunsInput,
   type ListLatestProjectionRunsInput,
   type ListLatestProjectionRunsResult,
   type ListProjectionRunsInput,
@@ -177,6 +178,25 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       this.rows.set(key, structuredClone(record))
       return publicProjectionRunRecord(record)
     })
+  }
+
+  async listLapsed(input: ListLapsedProjectionRunsInput): Promise<readonly ProjectionRunRecord[]> {
+    return this.runRootOperation(() =>
+      [...this.rows.values()]
+        .filter(
+          (run) =>
+            run.projectId === input.projectId &&
+            run.status === "running" &&
+            run.queueLeaseExpiresAt !== undefined &&
+            run.queueLeaseExpiresAt.getTime() <= input.lapsedBy.getTime()
+        )
+        .sort(
+          (left, right) =>
+            (left.queueLeaseExpiresAt?.getTime() ?? 0) - (right.queueLeaseExpiresAt?.getTime() ?? 0)
+        )
+        .slice(0, input.limit)
+        .map((run) => structuredClone(run))
+    )
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

@@ -22,6 +22,7 @@ import { ProjectionWorker } from "../src"
 
 const LEASE_MS = 15 * 60_000
 const LONGEST_RETRY_BACKOFF_MS = 5 * 60_000
+const JOB_ON_ITS_WAY_MS = 30_000
 
 const Room = defineObjectType({
   id: "Room",
@@ -207,7 +208,7 @@ test("a run whose job is gone comes back through the recovery pass", async () =>
     storage: restarted.storage,
     queues: restarted.queues,
     events: restarted.events,
-    now: new Date(),
+    now: new Date(Date.now() + JOB_ON_ITS_WAY_MS),
   })
   expect(pass).toEqual({ republished: 1, settled: 0 })
 

@@ -38,6 +38,7 @@ import type {
   FailProjectionRunEnqueueInput,
   FindSupersedingProjectionRunInput,
   FinishProjectionRunInput,
+  ListLapsedProjectionRunsInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
@@ -225,6 +226,21 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
 
       return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
     })
+  }
+
+  async listLapsed(input: ListLapsedProjectionRunsInput): Promise<readonly ProjectionRunRecord[]> {
+    const rows = this.db
+      .query(
+        `
+        SELECT * FROM projection_runs
+        WHERE project_id = ? AND status = 'running' AND execution_queue_lease_expires_at <= ?
+        ORDER BY execution_queue_lease_expires_at
+        LIMIT ?
+        `
+      )
+      .all(input.projectId, input.lapsedBy.toISOString(), input.limit) as DatabaseRow[]
+
+    return rows.map(rowToProjectionRunRecord)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

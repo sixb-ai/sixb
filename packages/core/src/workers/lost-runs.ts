@@ -211,16 +211,13 @@ async function republishLapsedProjections(
   const { projectId, storage, queues, now } = input
   if (!storage.projectionRuns) return { republished: 0, settled: 0 }
 
-  const { runs } = await storage.projectionRuns.list({
+  const lapsed = await storage.projectionRuns.listLapsed({
     projectId,
-    statuses: ["running"],
-    order: "asc",
+    lapsedBy: new Date(now.getTime() - JOB_ON_ITS_WAY_MS),
     limit: input.limit ?? DEFAULT_LIMIT,
   })
 
-  const jobs = runs
-    .filter((run) => run.queueLeaseExpiresAt && run.queueLeaseExpiresAt.getTime() <= now.getTime())
-    .map(recoveryJob)
+  const jobs = lapsed.map(recoveryJob)
 
   if (jobs.length > 0) {
     await queues.projections.enqueue({
