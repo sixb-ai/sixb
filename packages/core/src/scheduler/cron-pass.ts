@@ -4,7 +4,10 @@ import { nextCronOccurrence } from "../schedules/next-occurrence"
 import type { CronScheduleDefinition } from "../schedules/types"
 
 /** Matches the `onError` flush budget: long enough for a healthy broker, short enough to shut down. */
-const EMIT_BUDGET_MS = 5_000
+const APPEND_BUDGET_MS = 5_000
+
+/** How long an occurrence the broker refused waits for its next try. */
+const RETRY_DELAY_MS = 10_000
 
 export interface CronPassOptions {
   readonly schedules: readonly CronScheduleDefinition[]
@@ -14,129 +17,167 @@ export interface CronPassOptions {
   readonly now: () => Date
 }
 
+interface NextOccurrence {
+  readonly at: Date
+  /** Set once the broker refused this occurrence: it is then due at this time instead. */
+  retryAt: Date | null
+}
+
 /**
- * Emits `schedule.triggered` for each cron occurrence, on the second it falls due. The next
- * occurrences live in memory, counted from the moment the pass starts: an occurrence that falls
- * while nothing runs this pass is not caught up.
+ * Appends `schedule.triggered` for each cron occurrence, on the second it falls due. The next
+ * occurrences live in memory, counted from the moment the pass starts: one that falls while nothing
+ * runs this pass is not caught up.
+ *
+ * An occurrence the broker refuses stays the one in hand and is tried again, which fails the pass
+ * until the broker accepts it. Its occurrence key makes that safe. The occurrences that fell
+ * meanwhile are not caught up: the next one counts from the moment it went through.
  */
 export class CronPass implements MaintenancePass {
   readonly id = "cron"
-  readonly budgetMs = EMIT_BUDGET_MS
-  private nextOccurrences: Map<string, Date> | null = null
-  private readonly pendingEmits = new Set<Promise<void>>()
+  readonly budgetMs = APPEND_BUDGET_MS
+  private occurrences: Map<string, NextOccurrence> | null = null
+  private readonly pendingAppends = new Set<Promise<void>>()
 
   constructor(private readonly options: CronPassOptions) {}
 
   nextRunAt(now: Date): Date | null {
-    this.nextOccurrences ??= this.firstOccurrences(now)
+    this.occurrences ??= this.firstOccurrences(now)
 
-    const times = [...this.nextOccurrences.values()].map((date) => date.getTime())
+    const times = [...this.occurrences.values()].map((next) => dueAt(next).getTime())
     return times.length > 0 ? new Date(Math.min(...times)) : null
   }
 
-  /**
-   * `emit` never rejects, and an emit that never settles must not hold the next occurrence, so a
-   * run waits for its emits only until its budget ends. They stay tracked for `drainEmits()`.
-   */
+  /** Each schedule fires on its own, so one that fails costs the others nothing. */
   async run(signal: AbortSignal): Promise<void> {
-    const emits = this.emitDue(this.options.now())
+    const now = this.options.now()
 
-    await Promise.race([Promise.all(emits), aborted(signal)])
+    const results = await Promise.allSettled(
+      this.options.schedules.map((schedule) => this.fireDue(schedule, now, signal))
+    )
+
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []
+    )
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "[Sixb] The broker refused a cron occurrence.")
+    }
   }
 
   /** Forgets the next occurrences, so a later start counts them from then. */
   reset(): void {
-    this.nextOccurrences = null
+    this.occurrences = null
   }
 
   /**
-   * Waits for in-flight emits so shutdown does not return mid-delivery. Bounded on purpose: an emit
-   * that never settles would turn a provider stall into a process that cannot shut down. Losing the
-   * wait is recoverable; losing shutdown is not.
+   * Waits for appends a run stopped waiting for, so shutdown does not return mid-delivery. Bounded
+   * on purpose: an append that never settles would turn a provider stall into a process that cannot
+   * shut down. Losing the wait is recoverable; losing shutdown is not.
    */
-  async drainEmits(timeoutMs = EMIT_BUDGET_MS): Promise<void> {
-    if (this.pendingEmits.size === 0) return
+  async drainAppends(timeoutMs = APPEND_BUDGET_MS): Promise<void> {
+    if (this.pendingAppends.size === 0) return
 
     let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = new Promise<false>((resolve) => {
       timer = setTimeout(() => resolve(false), timeoutMs)
     })
 
-    const drained = await Promise.race([Promise.all(this.pendingEmits).then(() => true), timedOut])
+    const drained = await Promise.race([
+      Promise.all(this.pendingAppends).then(() => true),
+      timedOut,
+    ])
     clearTimeout(timer)
 
     if (!drained) {
       console.error(
-        `[Sixb] Timed out after ${timeoutMs}ms waiting for ${this.pendingEmits.size} schedule emit(s) to settle.`
+        `[Sixb] Timed out after ${timeoutMs}ms waiting for ${this.pendingAppends.size} schedule append(s) to settle.`
       )
     }
   }
 
-  private firstOccurrences(now: Date): Map<string, Date> {
-    const occurrences = new Map<string, Date>()
+  private firstOccurrences(now: Date): Map<string, NextOccurrence> {
+    const occurrences = new Map<string, NextOccurrence>()
 
     for (const schedule of this.options.schedules) {
-      const next = this.occurrenceAfter(schedule, now)
-      if (next) occurrences.set(schedule.id, next)
+      const at = this.occurrenceAfter(schedule, now)
+      if (at) occurrences.set(schedule.id, { at, retryAt: null })
     }
 
     return occurrences
   }
 
-  private emitDue(now: Date): readonly Promise<void>[] {
-    const emits: Promise<void>[] = []
+  private async fireDue(
+    schedule: CronScheduleDefinition,
+    now: Date,
+    signal: AbortSignal
+  ): Promise<void> {
+    let next = this.occurrences?.get(schedule.id)
 
-    for (const schedule of this.options.schedules) {
-      let occurrence = this.nextOccurrences?.get(schedule.id)
-
-      while (occurrence && occurrence <= now) {
-        emits.push(this.emitOccurrence(schedule, occurrence, now))
-        occurrence = this.advance(schedule, occurrence)
+    while (next && dueAt(next) <= now) {
+      try {
+        await this.appendOccurrence(schedule, next.at, now, signal)
+      } catch (error) {
+        next.retryAt = new Date(this.options.now().getTime() + RETRY_DELAY_MS)
+        throw error
       }
-    }
 
-    return emits
+      next = this.advance(schedule, next, now)
+    }
   }
 
-  /** `emit` reports instead of rejecting, so a broker outage reaches `onError`, not nowhere. */
-  private emitOccurrence(
+  /**
+   * An append that hangs must not hold the pass past its budget, so this stops waiting when the
+   * signal aborts. The append stays tracked for `drainAppends()`, and the retry that follows
+   * carries the same key.
+   */
+  private async appendOccurrence(
     schedule: CronScheduleDefinition,
     occurrenceAt: Date,
-    now: Date
+    now: Date,
+    signal: AbortSignal
   ): Promise<void> {
     const occurrenceAtIso = occurrenceAt.toISOString()
     const occurrenceKey = `${schedule.id}:${occurrenceAtIso}`
 
-    const emit = this.options.events.emit(
-      {
-        events: [
-          {
-            type: "schedule.triggered",
-            // Two processes that fire one occurrence store one event, so one run starts.
-            idempotencyKey: occurrenceKey,
-            payload: {
-              scheduleId: schedule.id,
-              occurrenceAt: occurrenceAtIso,
-              triggeredAt: now.toISOString(),
-              occurrenceKey,
-            },
+    const append = this.options.events.append({
+      events: [
+        {
+          type: "schedule.triggered",
+          // A retry, or a second orchestrator, stores one event, so one run starts.
+          idempotencyKey: occurrenceKey,
+          payload: {
+            scheduleId: schedule.id,
+            occurrenceAt: occurrenceAtIso,
+            triggeredAt: now.toISOString(),
+            occurrenceKey,
           },
-        ],
-      },
-      { source: "Sixb" }
-    )
+        },
+      ],
+    })
 
-    const tracked = emit.finally(() => this.pendingEmits.delete(tracked))
-    this.pendingEmits.add(tracked)
-    return tracked
+    const settled = append.then(
+      () => {},
+      () => {}
+    )
+    const tracked = settled.finally(() => this.pendingAppends.delete(tracked))
+    this.pendingAppends.add(tracked)
+
+    await Promise.race([append, aborted(signal)])
   }
 
-  /** Counts from the occurrence, not from now, so a late wake-up drifts nothing. */
-  private advance(schedule: CronScheduleDefinition, occurrence: Date): Date | undefined {
-    const next = this.occurrenceAfter(schedule, occurrence)
+  /**
+   * Counts from the occurrence, not from now, so a late wake-up drifts nothing. One that had to be
+   * retried counts from now instead: what fell during the outage stays lost.
+   */
+  private advance(
+    schedule: CronScheduleDefinition,
+    done: NextOccurrence,
+    now: Date
+  ): NextOccurrence | undefined {
+    const at = this.occurrenceAfter(schedule, done.retryAt ? now : done.at)
+    const next = at ? { at, retryAt: null } : undefined
 
-    if (next) this.nextOccurrences?.set(schedule.id, next)
-    else this.nextOccurrences?.delete(schedule.id)
+    if (next) this.occurrences?.set(schedule.id, next)
+    else this.occurrences?.delete(schedule.id)
 
     return next
   }
@@ -162,9 +203,13 @@ export class CronPass implements MaintenancePass {
   }
 }
 
-function aborted(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) resolve()
-    else signal.addEventListener("abort", () => resolve(), { once: true })
+function dueAt(next: NextOccurrence): Date {
+  return next.retryAt ?? next.at
+}
+
+function aborted(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    if (signal.aborted) reject(signal.reason)
+    else signal.addEventListener("abort", () => reject(signal.reason), { once: true })
   })
 }
