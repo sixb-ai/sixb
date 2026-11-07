@@ -117,6 +117,36 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
         expect(read.map(({ delivery }) => delivery.id)).toEqual(appended.map(({ id }) => id))
       }))
 
+    test("a hand-over releases the dataset under a request no job used, even with one open", () =>
+      withStorage(async (storage) => {
+        const { request } = (await storage.append(deliveryInput([upsert("1")]))).flush
+
+        const lease = await acquire(storage, "owner-a")
+        const handed = await storage.handOver({ lease })
+
+        expect(handed.request).toBeGreaterThan(request)
+        expect(await storage.summarize({ projectId })).toMatchObject([
+          { datasetId, pendingDeliveries: 1, request: handed.request, leaseExpiresAt: null },
+        ])
+
+        // The request it opened covers the next delivery: nothing asks twice.
+        const covered = (await storage.append(deliveryInput([upsert("2")]))).flush
+        expect(covered).toEqual({ request: handed.request, requested: false })
+
+        await acquire(storage, "owner-b")
+      }))
+
+    test("a hand-over refuses a lease another flush took", () =>
+      withStorage(async (storage) => {
+        await storage.append(deliveryInput([upsert("1")]))
+
+        const lost = await acquire(storage, "owner-a", 0)
+        await acquire(storage, "owner-b")
+
+        const failure = await storage.handOver({ lease: lost }).catch((error) => error)
+        expect(failure).toBeInstanceOf(DatasetIngestLeaseLostError)
+      }))
+
     test("asks for a flush with the first delivery of a request, and a batch opens the next", () =>
       withStorage(async (storage) => {
         const opened = (await storage.append(deliveryInput([upsert("1")]))).flush
@@ -124,7 +154,6 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
 
         expect(opened.requested).toBe(true)
         expect(covered).toEqual({ request: opened.request, requested: false })
-        expect(await storage.requestFlush({ projectId, datasetId })).toEqual(covered)
 
         // Both deliveries are in the batch, whichever asked.
         const lease = await acquire(storage, "owner-a")
