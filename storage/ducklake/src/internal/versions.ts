@@ -22,7 +22,8 @@ export interface SixbCommitMetadata {
   readonly rowChanges?: number
   /**
    * How many keyed snapshots in a row, ending with this one, replaced every row without comparing
-   * them with the table first. Absent when this one compared.
+   * them with the table first: 0 for the one that compared and found most rows changed. Absent
+   * otherwise.
    */
   readonly uncomparedReplacements?: number
   readonly validatedPrimaryKeyColumns?: readonly string[]
