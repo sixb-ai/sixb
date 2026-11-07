@@ -11,7 +11,12 @@ import {
   withQuery,
 } from "../http"
 import type { GitHubBodyFormatOptions } from "../types/attachments"
-import type { GitHubPage, GitHubPaginationOptions, GitHubRepositoryTarget } from "../types/common"
+import type {
+  GitHubPage,
+  GitHubPaginationOptions,
+  GitHubRepositoryTarget,
+  GitHubRequestOptions,
+} from "../types/common"
 import type {
   AuthenticatedUserIssuesApi,
   CreateIssueInput,
@@ -27,7 +32,9 @@ import type {
   UpdateIssueInput,
 } from "../types/issues"
 import type { GitHubSortDirection } from "../types/repos"
+import type { GitHubTimelineEvent, ListIssueTimelineOptions } from "../types/timeline"
 import { createRepositoryIssueCommentsApi } from "./issue-comments"
+import { createRepositoryIssueDependenciesApi, createRepositorySubIssuesApi } from "./sub-issues"
 
 export function createAuthenticatedUserIssuesApi(
   context: GitHubHttpContext
@@ -56,6 +63,8 @@ export function createRepositoryIssuesApi(
   const path = `${repositoryPath(target)}/issues`
   return {
     comments: createRepositoryIssueCommentsApi(context, target),
+    subIssues: createRepositorySubIssuesApi(context, target),
+    dependencies: createRepositoryIssueDependenciesApi(context, target),
 
     list: (options) => listIssues(context, path, options, applyRepositoryIssueParams),
 
@@ -69,6 +78,38 @@ export function createRepositoryIssuesApi(
 
     async create(input: CreateIssueInput): Promise<GitHubIssue> {
       return readJson<GitHubIssue>(await context.http.post(path, issueBody(input)))
+    },
+
+    async timeline(
+      issueNumber: number,
+      options?: ListIssueTimelineOptions
+    ): Promise<GitHubPage<GitHubTimelineEvent>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      const timelinePath = withQuery(`${issuePath(path, issueNumber)}/timeline`, params)
+      return readPage<GitHubTimelineEvent>(
+        await context.http.get(resolvePagePath(timelinePath, options), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
+        }),
+        context.apiBaseUrl
+      )
+    },
+
+    async parent(
+      issueNumber: number,
+      options?: GitHubRequestOptions & GitHubBodyFormatOptions
+    ): Promise<GitHubIssue | null> {
+      const response = await context.http.get(`${issuePath(path, issueNumber)}/parent`, {
+        headers: bodyFormatHeaders(options?.bodyFormat),
+        signal: options?.signal,
+      })
+      // GitHub answers 404 for an issue without a parent, the same as for a missing issue.
+      if (response.status === 404) {
+        await response.body?.cancel()
+        return null
+      }
+      return readJson<GitHubIssue>(response)
     },
 
     async update(issueNumber: number, patch: UpdateIssueInput): Promise<GitHubIssue> {

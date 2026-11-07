@@ -1,4 +1,5 @@
 import type { RestClient } from "@sixb/connector-rest"
+import { createRepositoryAssigneesApi } from "./resources/assignees"
 import { createGitHubAttachmentsApi } from "./resources/attachments"
 import { createRepositoryBranchesApi } from "./resources/branches"
 import { createRepositoryCommitsApi } from "./resources/commits"
@@ -7,12 +8,14 @@ import {
   createOrganizationIssuesApi,
   createRepositoryIssuesApi,
 } from "./resources/issues"
+import { createRepositoryLabelsApi } from "./resources/labels"
 import {
   createAuthenticatedUserOrganizationMembershipsApi,
   createOrganizationInvitationsApi,
   createOrganizationMembersApi,
   createOrganizationOutsideCollaboratorsApi,
 } from "./resources/members"
+import { createRepositoryMilestonesApi } from "./resources/milestones"
 import { createRepositoryPullRequestsApi } from "./resources/pulls"
 import { createRepositoryReleasesApi } from "./resources/releases"
 import {
@@ -34,9 +37,12 @@ export function createGitHubClient(http: RestClient, apiBaseUrl: URL): GitHubCli
     attachments: createGitHubAttachmentsApi(context),
     repo: (target) => ({
       ...createRepositoryApi(context, target),
+      assignees: createRepositoryAssigneesApi(context, target),
       branches: createRepositoryBranchesApi(context, target),
       commits: createRepositoryCommitsApi(context, target),
       issues: createRepositoryIssuesApi(context, target),
+      labels: createRepositoryLabelsApi(context, target),
+      milestones: createRepositoryMilestonesApi(context, target),
       pulls: createRepositoryPullRequestsApi(context, target),
       stacks: createRepositoryStacksApi(context, target),
       releases: createRepositoryReleasesApi(context, target),

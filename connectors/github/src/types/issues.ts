@@ -1,7 +1,14 @@
 import type { GitHubBodyFormatOptions } from "./attachments"
-import type { GitHubPage, GitHubPaginationOptions, GitHubUser } from "./common"
+import type {
+  GitHubPage,
+  GitHubPaginationOptions,
+  GitHubRequestOptions,
+  GitHubUser,
+} from "./common"
 import type { RepositoryIssueCommentsApi } from "./issue-comments"
 import type { GitHubRepository, GitHubSortDirection } from "./repos"
+import type { RepositoryIssueDependenciesApi, RepositorySubIssuesApi } from "./sub-issues"
+import type { GitHubTimelineEvent, ListIssueTimelineOptions } from "./timeline"
 
 export type GitHubIssueFilter =
   | "assigned"
@@ -86,9 +93,12 @@ export interface GitHubLabel {
   readonly node_id: string
   readonly url: string
   readonly name: string
+  /** Six hex digits without `#`. */
   readonly color: string
   readonly description: string | null
   readonly default: boolean
+  /** When the label was archived; `null` or absent while it is in use. */
+  readonly archived_at?: string | null
 }
 
 export interface GitHubMilestone {
@@ -148,6 +158,27 @@ export interface GitHubIssue {
   readonly repository?: GitHubRepository
   /** Present only when the entry is actually a pull request. */
   readonly pull_request?: GitHubPullRequestIssueRef
+  /** The issue this one is a sub-issue of, as an API URL. */
+  readonly parent_issue_url?: string | null
+  /** How many sub-issues it has and how many are closed. */
+  readonly sub_issues_summary?: GitHubSubIssuesSummary
+  /** How many issues block it and how many it blocks. */
+  readonly issue_dependencies_summary?: GitHubIssueDependenciesSummary
+}
+
+export interface GitHubSubIssuesSummary {
+  readonly total: number
+  readonly completed: number
+  readonly percent_completed: number
+}
+
+export interface GitHubIssueDependenciesSummary {
+  /** Open issues blocking this one. */
+  readonly blocked_by: number
+  readonly total_blocked_by: number
+  /** Open issues this one blocks. */
+  readonly blocking: number
+  readonly total_blocking: number
 }
 
 export interface AuthenticatedUserIssuesApi {
@@ -166,9 +197,23 @@ export interface OrganizationIssuesApi {
 
 export interface RepositoryIssuesApi {
   readonly comments: RepositoryIssueCommentsApi
+  /** An issue's sub-issues. */
+  readonly subIssues: RepositorySubIssuesApi
+  /** The issues blocking an issue, and those it blocks. */
+  readonly dependencies: RepositoryIssueDependenciesApi
   /** List one page of this repository's issues. GitHub may include pull requests. */
   list(options?: ListRepositoryIssuesOptions): Promise<GitHubPage<GitHubIssue>>
   get(issueNumber: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssue>
   create(input: CreateIssueInput): Promise<GitHubIssue>
   update(issueNumber: number, patch: UpdateIssueInput): Promise<GitHubIssue>
+  /** List one page of an issue's or pull request's timeline: its comments and events, oldest first. */
+  timeline(
+    issueNumber: number,
+    options?: ListIssueTimelineOptions
+  ): Promise<GitHubPage<GitHubTimelineEvent>>
+  /** The issue this one is a sub-issue of, or `null` when it has none or doesn't exist. */
+  parent(
+    issueNumber: number,
+    options?: GitHubRequestOptions & GitHubBodyFormatOptions
+  ): Promise<GitHubIssue | null>
 }

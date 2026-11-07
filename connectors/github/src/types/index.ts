@@ -1,3 +1,4 @@
+export type { ListAssigneesOptions, RepositoryAssigneesApi } from "./assignees"
 export type {
   GitHubAttachment,
   GitHubAttachmentSource,
@@ -33,6 +34,7 @@ export type {
   CreateIssueCommentInput,
   GitHubIssueComment,
   ListIssueCommentsOptions,
+  ListRepositoryIssueCommentsOptions,
   RepositoryIssueCommentsApi,
   UpdateIssueCommentInput,
 } from "./issue-comments"
@@ -40,6 +42,7 @@ export type {
   AuthenticatedUserIssuesApi,
   CreateIssueInput,
   GitHubIssue,
+  GitHubIssueDependenciesSummary,
   GitHubIssueFieldValue,
   GitHubIssueFieldValueInput,
   GitHubIssueFilter,
@@ -48,6 +51,7 @@ export type {
   GitHubLabel,
   GitHubMilestone,
   GitHubPullRequestIssueRef,
+  GitHubSubIssuesSummary,
   ListAuthenticatedUserIssuesOptions,
   ListOrganizationIssuesOptions,
   ListRepositoryIssuesOptions,
@@ -55,6 +59,12 @@ export type {
   RepositoryIssuesApi,
   UpdateIssueInput,
 } from "./issues"
+export type {
+  CreateLabelInput,
+  ListLabelsOptions,
+  RepositoryLabelsApi,
+  UpdateLabelInput,
+} from "./labels"
 export type {
   AuthenticatedUserOrganizationMembershipsApi,
   GitHubOrganizationInvitation,
@@ -74,6 +84,7 @@ export type {
   OrganizationMembersApi,
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
+export type { ListMilestonesOptions, RepositoryMilestonesApi } from "./milestones"
 export type { GitHubConnectorOptions } from "./options"
 export type {
   GetPullRequestOptions,
@@ -133,6 +144,30 @@ export type {
   ListStacksOptions,
   RepositoryStacksApi,
 } from "./stacks"
+export type {
+  ListRelatedIssuesOptions,
+  RepositoryIssueDependenciesApi,
+  RepositorySubIssuesApi,
+} from "./sub-issues"
+export type {
+  GitHubTimelineAssigneeEvent,
+  GitHubTimelineCloseEvent,
+  GitHubTimelineCommentEvent,
+  GitHubTimelineCommitEvent,
+  GitHubTimelineCrossReferenceEvent,
+  GitHubTimelineEvent,
+  GitHubTimelineIssueSummary,
+  GitHubTimelineLabelEvent,
+  GitHubTimelineLockEvent,
+  GitHubTimelineMilestoneEvent,
+  GitHubTimelineParentIssueEvent,
+  GitHubTimelinePlainEvent,
+  GitHubTimelineRenameEvent,
+  GitHubTimelineReviewEvent,
+  GitHubTimelineReviewRequestEvent,
+  GitHubTimelineSubIssueEvent,
+  ListIssueTimelineOptions,
+} from "./timeline"
 export type {
   GitHubUserPlan,
   GitHubUserProfile,

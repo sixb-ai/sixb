@@ -1,9 +1,27 @@
 import type { GitHubBodyFormatOptions } from "./attachments"
-import type { GitHubPage, GitHubPaginationOptions, GitHubUser } from "./common"
+import type {
+  GitHubPage,
+  GitHubPaginationOptions,
+  GitHubRequestOptions,
+  GitHubUser,
+} from "./common"
+import type { GitHubSortDirection } from "./repos"
 
 export interface ListIssueCommentsOptions extends GitHubPaginationOptions, GitHubBodyFormatOptions {
   /** Only show comments updated at or after this ISO 8601 timestamp. */
   readonly since?: string
+}
+
+export interface ListRepositoryIssueCommentsOptions
+  extends GitHubPaginationOptions,
+    GitHubRequestOptions,
+    GitHubBodyFormatOptions {
+  /** Only comments updated at or after this ISO 8601 timestamp. */
+  readonly since?: string
+  /** Defaults to `created`. */
+  readonly sort?: "created" | "updated"
+  /** Applies only with `sort`. */
+  readonly direction?: GitHubSortDirection
 }
 
 export interface CreateIssueCommentInput {
@@ -36,6 +54,13 @@ export interface RepositoryIssueCommentsApi {
   list(
     issueNumber: number,
     options?: ListIssueCommentsOptions
+  ): Promise<GitHubPage<GitHubIssueComment>>
+  /**
+   * List one page of comments on every issue and pull request in the repository. Each names its
+   * issue in `issue_url`, whose last path segment is the issue number.
+   */
+  listForRepository(
+    options?: ListRepositoryIssueCommentsOptions
   ): Promise<GitHubPage<GitHubIssueComment>>
   create(issueNumber: number, input: CreateIssueCommentInput): Promise<GitHubIssueComment>
   get(commentId: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssueComment>

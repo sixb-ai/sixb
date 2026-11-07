@@ -291,6 +291,75 @@ describe("github connector", () => {
       {},
     ],
     [
+      "repo().labels.list",
+      (client: GitHubClient) => client.repo(webRepo).labels.list({ pageSize: 100 }),
+      "/repos/acme/web/labels",
+      { per_page: "100" },
+    ],
+    [
+      "repo().assignees.list",
+      (client: GitHubClient) => client.repo(webRepo).assignees.list({ pageSize: 100 }),
+      "/repos/acme/web/assignees",
+      { per_page: "100" },
+    ],
+    [
+      "repo().milestones.list",
+      (client: GitHubClient) =>
+        client
+          .repo(webRepo)
+          .milestones.list({ state: "all", sort: "completeness", direction: "desc", pageSize: 50 }),
+      "/repos/acme/web/milestones",
+      { state: "all", sort: "completeness", direction: "desc", per_page: "50" },
+    ],
+    [
+      "repo().milestones.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).milestones.list(),
+      "/repos/acme/web/milestones",
+      {},
+    ],
+    [
+      "repo().issues.timeline",
+      (client: GitHubClient) => client.repo(webRepo).issues.timeline(7, { pageSize: 100 }),
+      "/repos/acme/web/issues/7/timeline",
+      { per_page: "100" },
+    ],
+    [
+      "repo().issues.subIssues.list",
+      (client: GitHubClient) => client.repo(webRepo).issues.subIssues.list(7, { pageSize: 50 }),
+      "/repos/acme/web/issues/7/sub_issues",
+      { per_page: "50" },
+    ],
+    [
+      "repo().issues.dependencies.blockedBy",
+      (client: GitHubClient) => client.repo(webRepo).issues.dependencies.blockedBy(7),
+      "/repos/acme/web/issues/7/dependencies/blocked_by",
+      {},
+    ],
+    [
+      "repo().issues.dependencies.blocking",
+      (client: GitHubClient) => client.repo(webRepo).issues.dependencies.blocking(7),
+      "/repos/acme/web/issues/7/dependencies/blocking",
+      {},
+    ],
+    [
+      "repo().issues.comments.listForRepository",
+      (client: GitHubClient) =>
+        client.repo(webRepo).issues.comments.listForRepository({
+          since: "2026-11-01T00:00:00Z",
+          sort: "updated",
+          direction: "asc",
+          pageSize: 100,
+        }),
+      "/repos/acme/web/issues/comments",
+      { since: "2026-11-01T00:00:00Z", sort: "updated", direction: "asc", per_page: "100" },
+    ],
+    [
+      "repo().issues.comments.listForRepository unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).issues.comments.listForRepository(),
+      "/repos/acme/web/issues/comments",
+      {},
+    ],
+    [
       "repo().commits.list",
       (client: GitHubClient) =>
         client.repo(webRepo).commits.list({
@@ -419,6 +488,51 @@ describe("github connector", () => {
       (c) => c.repo(webRepo).stacks.get(1085),
       "GET",
       "/repos/acme/web/stacks/1085",
+      undefined,
+    ],
+    // Reproduce: build the label path with the raw name instead of `pathPart`; the space and the
+    // slash then reach GitHub unencoded and name another path.
+    [
+      "repo().labels.get with a space",
+      (c) => c.repo(webRepo).labels.get("good first issue"),
+      "GET",
+      "/repos/acme/web/labels/good%20first%20issue",
+      undefined,
+    ],
+    [
+      "repo().labels.get with a slash",
+      (c) => c.repo(webRepo).labels.get("area/ui"),
+      "GET",
+      "/repos/acme/web/labels/area%2Fui",
+      undefined,
+    ],
+    [
+      "repo().labels.create",
+      (c) =>
+        c.repo(webRepo).labels.create({ name: "bug", color: "#D73A4A", description: "Broken" }),
+      "POST",
+      "/repos/acme/web/labels",
+      { name: "bug", color: "d73a4a", description: "Broken" },
+    ],
+    [
+      "repo().labels.update",
+      (c) => c.repo(webRepo).labels.update("area/ui", { newName: "area/app", color: "0E8A16" }),
+      "PATCH",
+      "/repos/acme/web/labels/area%2Fui",
+      { new_name: "area/app", color: "0e8a16" },
+    ],
+    [
+      "repo().labels.delete",
+      (c) => c.repo(webRepo).labels.delete("wontfix"),
+      "DELETE",
+      "/repos/acme/web/labels/wontfix",
+      undefined,
+    ],
+    [
+      "repo().milestones.get",
+      (c) => c.repo(webRepo).milestones.get(3),
+      "GET",
+      "/repos/acme/web/milestones/3",
       undefined,
     ],
     [
@@ -738,9 +852,130 @@ describe("github connector", () => {
     ])
   })
 
+  test("checks whether a user can be assigned", async () => {
+    const calls = record((request) =>
+      request.url.pathname.endsWith("/mona")
+        ? new Response(null, { status: 204 })
+        : request.url.pathname.endsWith("/octocat")
+          ? new Response(null, { status: 404 })
+          : json({ message: "Forbidden" }, { status: 403 })
+    )
+    const assignees = (await connect()).repo(webRepo).assignees
+
+    expect(await assignees.check("mona")).toBe(true)
+    expect(await assignees.check("octocat")).toBe(false)
+    const failure: unknown = await assignees.check("hubot").catch((caught) => caught)
+
+    expect(calls.map(({ url }) => url.pathname)).toEqual([
+      "/repos/acme/web/assignees/mona",
+      "/repos/acme/web/assignees/octocat",
+      "/repos/acme/web/assignees/hubot",
+    ])
+    expect(failure).toBeInstanceOf(GitHubApiError)
+  })
+
+  // Reproduce: drop the 404 branch in `issues.parent()`; the first call then throws.
+  test("reads an issue's parent, null without one, and throws on other failures", async () => {
+    record((request) => {
+      const number = request.url.pathname.split("/")[5]
+      if (number === "289183") return json({ number: 289180, title: "Claude agent" })
+      if (number === "334519") return json({ message: "No parent issue found" }, { status: 404 })
+      return json({ message: "Forbidden" }, { status: 403 })
+    })
+    const issues = (await connect()).repo(webRepo).issues
+
+    expect(await issues.parent(334519)).toBeNull()
+    expect(await issues.parent(289183)).toMatchObject({ number: 289180 })
+    expect(await issues.parent(1).catch((caught) => caught)).toBeInstanceOf(GitHubApiError)
+  })
+
+  // Entries shaped as GitHub returned them for microsoft/vscode#289180 and cli/cli#14963.
+  test("narrows a timeline's entries by event", async () => {
+    const actor = { login: "mona", id: 1 }
+    const event = (fields: Record<string, unknown>) => ({
+      id: 1,
+      node_id: "E_1",
+      url: "https://api.github.com/repos/acme/web/issues/events/1",
+      actor,
+      commit_id: null,
+      commit_url: null,
+      created_at: "2026-01-20T19:24:58Z",
+      ...fields,
+    })
+    record(() =>
+      json([
+        event({ event: "labeled", label: { name: "bug", color: "d73a4a" } }),
+        event({
+          event: "sub_issue_added",
+          sub_issue: {
+            number: 289183,
+            title: "Race condition",
+            state: "closed",
+            state_reason: null,
+            repository: { id: 41881900, name: "vscode", full_name: "microsoft/vscode" },
+          },
+        }),
+        event({ event: "renamed", rename: { from: "Old", to: "New" } }),
+        {
+          event: "commented",
+          id: 2,
+          node_id: "IC_2",
+          url: "u",
+          html_url: "h",
+          issue_url: "i",
+          body: "Looks good",
+          user: actor,
+          actor,
+          author_association: "MEMBER",
+          created_at: "2026-01-21T00:00:00Z",
+          updated_at: "2026-01-21T00:00:00Z",
+        },
+        {
+          event: "cross-referenced",
+          actor,
+          created_at: "2026-01-22T00:00:00Z",
+          updated_at: "2026-01-22T00:00:00Z",
+          source: { type: "issue", issue: { number: 290001, pull_request: { url: "p" } } },
+        },
+        event({ event: "closed", state_reason: "completed" }),
+      ])
+    )
+    const page = await (await connect()).repo(webRepo).issues.timeline(289180)
+
+    const summary = page.items.map((entry) => {
+      switch (entry.event) {
+        case "labeled":
+          return `labeled ${entry.label.name}`
+        case "sub_issue_added":
+          return `added #${entry.sub_issue.number}`
+        case "renamed":
+          return `renamed to ${entry.rename.to}`
+        case "commented":
+          return `${entry.user.login}: ${entry.body}`
+        case "cross-referenced":
+          return `mentioned in #${entry.source.issue.number}`
+        case "closed":
+          return `closed as ${entry.state_reason}`
+        default:
+          return entry.event
+      }
+    })
+
+    expect(summary).toEqual([
+      "labeled bug",
+      "added #289183",
+      "renamed to New",
+      "mona: Looks good",
+      "mentioned in #290001",
+      "closed as completed",
+    ])
+  })
+
   test("rejects invalid issue, pull and comment ids, release tags, branch names and commit refs before requesting", async () => {
     const calls = record()
-    const { branches, commits, issues, pulls, releases, stacks } = (await connect()).repo(webRepo)
+    const { assignees, branches, commits, issues, labels, milestones, pulls, releases, stacks } = (
+      await connect()
+    ).repo(webRepo)
 
     await expect(branches.get(" ")).rejects.toThrow("branch must not be empty")
     await expect(commits.get(" ")).rejects.toThrow("ref must not be empty")
@@ -752,6 +987,31 @@ describe("github connector", () => {
       "pullRequest must be a positive integer"
     )
     await expect(stacks.get(1.5)).rejects.toThrow("stackNumber must be a positive integer")
+    await expect(labels.get(" ")).rejects.toThrow("name must not be empty")
+    await expect(labels.create({ name: " ", color: "d73a4a" })).rejects.toThrow(
+      "name must not be empty"
+    )
+    await expect(labels.update("bug", { newName: " " })).rejects.toThrow(
+      "newName must not be empty"
+    )
+    // Reproduce: send `input.color` as given in resources/labels.ts.
+    await expect(labels.create({ name: "bug", color: "red" })).rejects.toThrow(
+      "color must be six hex digits"
+    )
+    await expect(labels.update("bug", { color: "#12345" })).rejects.toThrow(
+      "color must be six hex digits"
+    )
+    await expect(assignees.check(" ")).rejects.toThrow("username must not be empty")
+    await expect(milestones.get(0)).rejects.toThrow("milestoneNumber must be a positive integer")
+    await expect(issues.timeline(0)).rejects.toThrow("issueNumber must be a positive integer")
+    await expect(issues.parent(1.5)).rejects.toThrow("issueNumber must be a positive integer")
+    await expect(issues.subIssues.list(0)).rejects.toThrow("issueNumber must be a positive integer")
+    await expect(issues.dependencies.blockedBy(0)).rejects.toThrow(
+      "issueNumber must be a positive integer"
+    )
+    await expect(issues.dependencies.blocking(0)).rejects.toThrow(
+      "issueNumber must be a positive integer"
+    )
     await expect(issues.get(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.get(0)).rejects.toThrow("commentId must be a positive integer")
@@ -774,6 +1034,27 @@ describe("github connector", () => {
     ["pulls.get", (r, signal) => r.pulls.get(12, { signal })],
     ["pulls.reviews.list", (r, signal) => r.pulls.reviews.list(12, { signal })],
     ["stacks.list", (r, signal) => r.stacks.list({ signal })],
+    ["labels.list", (r, signal) => r.labels.list({ signal })],
+    ["labels.get", (r, signal) => r.labels.get("bug", { signal })],
+    ["labels.create", (r, signal) => r.labels.create({ name: "bug", color: "d73a4a" }, { signal })],
+    ["labels.update", (r, signal) => r.labels.update("bug", { color: "d73a4a" }, { signal })],
+    ["labels.delete", (r, signal) => r.labels.delete("bug", { signal })],
+    ["assignees.list", (r, signal) => r.assignees.list({ signal })],
+    ["assignees.check", (r, signal) => r.assignees.check("mona", { signal })],
+    ["milestones.list", (r, signal) => r.milestones.list({ signal })],
+    ["milestones.get", (r, signal) => r.milestones.get(3, { signal })],
+    ["issues.timeline", (r, signal) => r.issues.timeline(7, { signal })],
+    ["issues.parent", (r, signal) => r.issues.parent(7, { signal })],
+    ["issues.subIssues.list", (r, signal) => r.issues.subIssues.list(7, { signal })],
+    [
+      "issues.dependencies.blockedBy",
+      (r, signal) => r.issues.dependencies.blockedBy(7, { signal }),
+    ],
+    ["issues.dependencies.blocking", (r, signal) => r.issues.dependencies.blocking(7, { signal })],
+    [
+      "issues.comments.listForRepository",
+      (r, signal) => r.issues.comments.listForRepository({ signal }),
+    ],
     ["stacks.get", (r, signal) => r.stacks.get(1085, { signal })],
     ["commits.list", (r, signal) => r.commits.list({ signal })],
     ["commits.get", (r, signal) => r.commits.get("main", { signal })],

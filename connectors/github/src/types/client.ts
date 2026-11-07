@@ -1,3 +1,4 @@
+import type { RepositoryAssigneesApi } from "./assignees"
 import type { GitHubAttachmentsApi } from "./attachments"
 import type { RepositoryBranchesApi } from "./branches"
 import type { RepositoryCommitsApi } from "./commits"
@@ -7,12 +8,14 @@ import type {
   OrganizationIssuesApi,
   RepositoryIssuesApi,
 } from "./issues"
+import type { RepositoryLabelsApi } from "./labels"
 import type {
   AuthenticatedUserOrganizationMembershipsApi,
   OrganizationInvitationsApi,
   OrganizationMembersApi,
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
+import type { RepositoryMilestonesApi } from "./milestones"
 import type { RepositoryPullRequestsApi } from "./pulls"
 import type { RepositoryReleasesApi } from "./releases"
 import type {
@@ -35,9 +38,12 @@ export interface GitHubClient {
 }
 
 export interface GitHubRepositoryScope {
+  readonly assignees: RepositoryAssigneesApi
   readonly branches: RepositoryBranchesApi
   readonly commits: RepositoryCommitsApi
   readonly issues: RepositoryIssuesApi
+  readonly labels: RepositoryLabelsApi
+  readonly milestones: RepositoryMilestonesApi
   readonly pulls: RepositoryPullRequestsApi
   /** Stacks of dependent pull requests. */
   readonly stacks: RepositoryStacksApi

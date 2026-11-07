@@ -16,6 +16,7 @@ import type {
   CreateIssueCommentInput,
   GitHubIssueComment,
   ListIssueCommentsOptions,
+  ListRepositoryIssueCommentsOptions,
   RepositoryIssueCommentsApi,
   UpdateIssueCommentInput,
 } from "../types/issue-comments"
@@ -39,6 +40,23 @@ export function createRepositoryIssueCommentsApi(
       return readPage<GitHubIssueComment>(
         await context.http.get(resolvePagePath(path, options), {
           headers: bodyFormatHeaders(options?.bodyFormat),
+        }),
+        context.apiBaseUrl
+      )
+    },
+
+    async listForRepository(
+      options?: ListRepositoryIssueCommentsOptions
+    ): Promise<GitHubPage<GitHubIssueComment>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      if (options?.since) params.set("since", options.since)
+      if (options?.sort) params.set("sort", options.sort)
+      if (options?.direction) params.set("direction", options.direction)
+      return readPage<GitHubIssueComment>(
+        await context.http.get(resolvePagePath(withQuery(commentsPath, params), options), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
         }),
         context.apiBaseUrl
       )

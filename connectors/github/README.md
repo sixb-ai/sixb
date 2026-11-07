@@ -4,7 +4,8 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 - **Repositories** — list authenticated-user/org repositories, get a repository
 - **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
-- **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
+- **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues, read an issue's timeline, sub-issues, parent and dependencies, list every comment in a repository
+- **Labels, assignees and milestones** — manage a repository's labels, list who can be assigned, list and get milestones
 - **Pull requests** — list a repository's pull requests, get one with its merge state and size, list its reviews
 - **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
 - **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
@@ -37,7 +38,8 @@ export const githubConnector = defineConnector(
 | `onEvent`       | Handler for inbound webhook events. See [Webhooks](#webhooks).           |
 
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
-repository and issue APIs. Pull requests need `Pull requests: read`. Branches and commits need
+repository and issue APIs. Labels, assignees, milestones, timelines, sub-issues and dependencies
+need `Issues: read`; creating, updating or deleting labels needs `Issues: write`. Pull requests need `Pull requests: read`. Branches and commits need
 `Contents: read`. Releases need `Contents: read`, or
 `Contents: read & write` to create, update or delete them and their assets. Organization people
 APIs require `Members: read`. Public user profiles
@@ -107,6 +109,21 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).issues.comments.get()` | `GET /repos/{owner}/{repo}/issues/comments/{id}` |
 | `gh.repo({ owner, repo }).issues.comments.update()` | `PATCH /repos/{owner}/{repo}/issues/comments/{id}` |
 | `gh.repo({ owner, repo }).issues.comments.delete()` | `DELETE /repos/{owner}/{repo}/issues/comments/{id}` |
+| `gh.repo({ owner, repo }).issues.comments.listForRepository()` | `GET /repos/{owner}/{repo}/issues/comments` |
+| `gh.repo({ owner, repo }).issues.timeline(number)` | `GET /repos/{owner}/{repo}/issues/{number}/timeline` |
+| `gh.repo({ owner, repo }).issues.parent(number)` | `GET /repos/{owner}/{repo}/issues/{number}/parent` |
+| `gh.repo({ owner, repo }).issues.subIssues.list(number)` | `GET /repos/{owner}/{repo}/issues/{number}/sub_issues` |
+| `gh.repo({ owner, repo }).issues.dependencies.blockedBy(number)` | `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by` |
+| `gh.repo({ owner, repo }).issues.dependencies.blocking(number)` | `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocking` |
+| `gh.repo({ owner, repo }).labels.list()` | `GET /repos/{owner}/{repo}/labels` |
+| `gh.repo({ owner, repo }).labels.get(name)` | `GET /repos/{owner}/{repo}/labels/{name}` |
+| `gh.repo({ owner, repo }).labels.create()` | `POST /repos/{owner}/{repo}/labels` |
+| `gh.repo({ owner, repo }).labels.update(name)` | `PATCH /repos/{owner}/{repo}/labels/{name}` |
+| `gh.repo({ owner, repo }).labels.delete(name)` | `DELETE /repos/{owner}/{repo}/labels/{name}` |
+| `gh.repo({ owner, repo }).assignees.list()` | `GET /repos/{owner}/{repo}/assignees` |
+| `gh.repo({ owner, repo }).assignees.check(username)` | `GET /repos/{owner}/{repo}/assignees/{username}` |
+| `gh.repo({ owner, repo }).milestones.list()` | `GET /repos/{owner}/{repo}/milestones` |
+| `gh.repo({ owner, repo }).milestones.get(number)` | `GET /repos/{owner}/{repo}/milestones/{number}` |
 | `gh.attachments.find({ body, body_html })` | No request: reads the links in a body      |
 | `gh.attachments.download(attachment)`    | `GET` the attachment's link, without the token |
 | `gh.repo({ owner, repo }).releases.list()` | `GET /repos/{owner}/{repo}/releases`        |
@@ -252,6 +269,54 @@ stack's `number` comes from the same sequence as the repository's issues and pul
 
 Creating, extending and merging stacks are not covered yet: GitHub merges a stack only through its
 asynchronous merge endpoint.
+
+### Issue tracking
+
+The calls below accept a `signal` to abort the request.
+
+**Labels.** `labels.list()` returns a repository's labels with their `color` (six hex digits
+without `#`) and `description`. `create()`, `update()` and `delete()` manage them; a color may be
+given with or without a leading `#`, and anything else is refused before the request. `update()`
+renames a label with `newName`, and issues keep it under the new name. Label names may contain
+spaces and `/`.
+
+**Assignees.** `assignees.list()` returns the users who can be assigned to the repository's issues
+and pull requests, for an assignee picker; `assignees.check(username)` answers whether one can.
+Assign with `issues.update(number, { assignees })`.
+
+**Milestones.** `milestones.list()` returns open milestones by due date unless `state`, `sort`
+(`due_on` or `completeness`) or `direction` say otherwise; each carries its open and closed issue
+counts and `due_on`. `milestones.get(number)` returns one.
+
+**Timeline.** `issues.timeline(number)` returns an issue's or pull request's history, oldest
+first, as entries discriminated by `event`: comments, labels, assignees, milestones, renames,
+closing and reopening, locks, review requests, sub-issues added or removed, commits and reviews on
+a pull request, and `cross-referenced`, where `source.issue` is the issue or pull request (it
+carries `pull_request`) that mentioned this one. Most entries name who did it in `actor` and when
+in `created_at`; a commit's time is `author.date` and a review's is `submitted_at`, with its
+`state` in lowercase. GitHub adds events over time, so treat an `event` you don't handle as
+unknown. With `bodyFormat`, comment and review entries carry `body_html` and `body_text` too.
+
+```ts
+for (const entry of (await repo.issues.timeline(42, { pageSize: 100 })).items) {
+  if (entry.event === "labeled") console.log(entry.actor?.login, "added", entry.label.name)
+  if (entry.event === "cross-referenced") console.log("mentioned in", entry.source.issue.html_url)
+}
+```
+
+**Sub-issues and dependencies.** An issue carries `sub_issues_summary` (`total`, `completed`,
+`percent_completed`), `issue_dependencies_summary` (`blocked_by` and `blocking`, counting open
+issues, with `total_blocked_by` and `total_blocking`) and, for a sub-issue, `parent_issue_url`.
+`issues.subIssues.list(number)` returns its sub-issues, `issues.parent(number)` its parent or
+`null`, and `issues.dependencies.blockedBy(number)` and `.blocking(number)` the issues on either
+side. GitHub answers a missing issue the same way as an issue without a parent, so `parent()`
+returns `null` for both.
+
+**Comments across a repository.** `issues.comments.listForRepository()` returns the comments on
+every issue and pull request in a repository, oldest first unless `sort` (`created` or `updated`)
+and `direction` say otherwise. With `since`, only comments updated after that time, so a sync can
+read just what changed. Each comment names its issue in `issue_url`, whose last path segment is the
+issue number.
 
 Commit calls accept a `signal` to abort the request. `commits.list()` returns newest first from
 the default branch, or from `sha` (a branch or commit), and filters by `path`, `author`,
