@@ -4,11 +4,3 @@
  * other without a jump.
  */
 export const LAUNCH_ICON_SIZE = 72
-
-/** Whether the page runs as the app added to the Home Screen rather than in a browser tab. */
-export function isInstalledApp(): boolean {
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  )
-}

@@ -1,5 +1,5 @@
+import { isInstalledApp } from "@sixb/ui/components"
 import type { QueryClient } from "@tanstack/react-query"
-import { isInstalledApp } from "./phone/launch"
 
 /** Away at least this long, the app refreshes what it shows when it comes back. */
 export const REFRESH_AFTER_MS = 30_000
@@ -24,11 +24,13 @@ let refreshing = false
 let remembering = false
 
 /**
- * Refreshes every query on screen when the app comes back after `REFRESH_AFTER_MS` or longer in
- * the background, so returning to it shows what changed, as a native app does. Once per page.
+ * In the installed app, refreshes every query on screen when the app comes back after
+ * `REFRESH_AFTER_MS` or longer in the background, so returning to it shows what changed, as a
+ * native app does. A browser tab keeps the query client's own choice not to refetch on focus.
+ * Once per page.
  */
 export function refreshOnReturn(queryClient: QueryClient): void {
-  if (refreshing) return
+  if (refreshing || !isInstalledApp()) return
   refreshing = true
 
   let hiddenAt: number | null = null
@@ -57,7 +59,13 @@ export function restoreLastScreen(): void {
     path: window.location.pathname + window.location.search + window.location.hash,
     now: Date.now(),
   })
-  if (path) window.history.replaceState(null, "", path)
+  if (path) {
+    try {
+      window.history.replaceState(null, "", path)
+    } catch {
+      // An address the page can't take: open where iOS did.
+    }
+  }
 
   if (remembering) return
   remembering = true

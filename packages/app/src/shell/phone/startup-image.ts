@@ -1,4 +1,5 @@
-import { isInstalledApp, LAUNCH_ICON_SIZE } from "./launch"
+import { isInstalledApp, isIOS } from "@sixb/ui/components"
+import { LAUNCH_ICON_SIZE } from "./launch"
 
 /**
  * iOS shows a Home Screen app's launch image, read from `apple-touch-startup-image` links when the
@@ -6,13 +7,21 @@ import { isInstalledApp, LAUNCH_ICON_SIZE } from "./launch"
  * image per screen size and orientation, exactly sized. In Safari on an iPhone or iPad this draws
  * the two for the screen in hand, so whatever device adds the app has its own: the app's background
  * with its icon in the middle, matching the loading shell it hands over to. They follow the app's
- * theme until the app is added. Nothing runs once installed, elsewhere, or without canvas.
+ * theme until the app is added. Nothing runs once installed, on a shared link, elsewhere, or
+ * without canvas.
  */
 export function watchStartupImages(): () => void {
-  if (!isIOS() || isInstalledApp()) return () => undefined
+  if (!isIOS() || isInstalledApp() || window.location.pathname.startsWith("/shared/")) {
+    return () => undefined
+  }
 
+  const root = document.documentElement
   let drawn = 0
+  let drawnDark: boolean | null = null
   const draw = async () => {
+    const dark = root.classList.contains("dark")
+    if (dark === drawnDark) return
+    drawnDark = dark
     const run = ++drawn
     const links = await startupImageLinks().catch(() => [])
     if (run !== drawn || links.length === 0) return
@@ -22,10 +31,12 @@ export function watchStartupImages(): () => void {
     document.head.append(...links)
   }
 
-  // After the app's first screen, out of its way; again whenever the theme changes.
-  const timer = window.setTimeout(() => void draw(), 1000)
+  // Once the app's first screen is up, out of its way; again only when the theme flips.
   const observer = new MutationObserver(() => void draw())
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+  const timer = window.setTimeout(() => {
+    void draw()
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] })
+  }, 1000)
   return () => {
     window.clearTimeout(timer)
     observer.disconnect()
@@ -76,6 +87,9 @@ async function startupImageLinks(): Promise<HTMLLinkElement[]> {
     link.media = startupImageMedia(device, orientation)
     link.href = canvas.toDataURL("image/png")
     link.dataset.sixbStartupImage = ""
+    // An iPad's is over 20MB of canvas, which Safari frees late: let it go now.
+    canvas.width = 0
+    canvas.height = 0
     return link
   })
 }
@@ -102,11 +116,4 @@ async function loadIcon(): Promise<HTMLImageElement | null> {
   } catch {
     return null
   }
-}
-
-function isIOS(): boolean {
-  return (
-    /iP(?:hone|ad|od)/.test(navigator.userAgent) ||
-    (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1)
-  )
 }

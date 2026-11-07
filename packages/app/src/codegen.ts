@@ -5,7 +5,7 @@ import { renderAppManifest } from "./manifest"
 import { resolveAppMetadata } from "./metadata"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import { type AppRouteLayout, type PageRoute, routePatternKey } from "./scanner"
-import { SERVICE_WORKER_PATH } from "./service-worker"
+import { RESERVED_PATH_PREFIXES, SERVICE_WORKER_PATH } from "./service-worker"
 
 export interface BuiltInRouteManifestEntry {
   readonly path: string
@@ -615,7 +615,7 @@ function createQueryClient(): QueryClient {
   })
 }
 
-const RESERVED_PATH_PREFIXES = ["/api", "/auth", "/ws", "/docs", "/shared"]
+const RESERVED_PATH_PREFIXES = [${RESERVED_PATH_PREFIXES.map((prefix) => JSON.stringify(prefix)).join(", ")}]
 
 function isReservedPath(pathname: string) {
   return RESERVED_PATH_PREFIXES.some(
@@ -1078,7 +1078,8 @@ function ApiUnavailableView({ apiBaseUrl }: { readonly apiBaseUrl: string }) {
   const [offline, setOffline] = React.useState<boolean | null>(() => (navigator.onLine ? null : true))
   React.useEffect(() => {
     if (offline === null) {
-      fetch("/", { method: "HEAD", cache: "no-store" }).then(
+      // A request that hangs for want of a route out is offline too.
+      fetch("/", { method: "HEAD", cache: "no-store", signal: AbortSignal.timeout(3000) }).then(
         () => setOffline(false),
         () => setOffline(true)
       )
@@ -1152,16 +1153,35 @@ if (import.meta.hot) {
 }
 
 // A production build keeps the app on the device, so the installed app opens without the network.
-// The development server has no worker, and removes one an earlier build left on its address.
+// A browser gives the root one worker: a project that registers its own there keeps it. The
+// development server has no worker, and removes Sixb's if an earlier build left it on its address.
 if ("serviceWorker" in navigator) {
+  const isSixbWorker = (registration: ServiceWorkerRegistration) =>
+    [registration.installing, registration.waiting, registration.active].some((worker) =>
+      worker?.scriptURL.endsWith(${JSON.stringify(SERVICE_WORKER_PATH)})
+    )
   if (import.meta.hot) {
     void navigator.serviceWorker.getRegistrations().then((registrations) => {
-      for (const registration of registrations) void registration.unregister()
+      for (const registration of registrations) {
+        if (isSixbWorker(registration)) void registration.unregister()
+      }
     })
   } else {
-    navigator.serviceWorker.register(${JSON.stringify(SERVICE_WORKER_PATH)}).catch((error: unknown) => {
-      console.warn("[SixbCustomApp] Could not register the service worker:", error)
-    })
+    // Once the page has loaded, so installing never competes with opening the app.
+    const register = () => {
+      navigator.serviceWorker
+        .getRegistration("/")
+        .then((existing) =>
+          existing && !isSixbWorker(existing)
+            ? undefined
+            : navigator.serviceWorker.register(${JSON.stringify(SERVICE_WORKER_PATH)})
+        )
+        .catch((error: unknown) => {
+          console.warn("[SixbCustomApp] Could not register the service worker:", error)
+        })
+    }
+    if (document.readyState === "complete") register()
+    else window.addEventListener("load", register, { once: true })
   }
 }
 

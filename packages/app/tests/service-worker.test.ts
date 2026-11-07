@@ -11,10 +11,15 @@ class WorkerRequest extends Request {
   }
 }
 
-/** A same-origin response, which a browser marks `basic`. */
+/** A same-origin response, which a browser marks `basic`, and so do its clones. */
 function basic(body: string, contentType = "text/html; charset=utf-8", status = 200): Response {
-  const response = new Response(body, { status, headers: { "content-type": contentType } })
+  return markBasic(new Response(body, { status, headers: { "content-type": contentType } }))
+}
+
+function markBasic(response: Response): Response {
+  const clone = response.clone.bind(response)
   Object.defineProperty(response, "type", { value: "basic" })
+  Object.defineProperty(response, "clone", { value: () => markBasic(clone()) })
   return response
 }
 
@@ -40,6 +45,14 @@ function cacheStorage() {
     stores,
     api: {
       open,
+      // Across every cache, oldest first, as the browser's does.
+      match: async (request: RequestInfo) => {
+        for (const store of stores.values()) {
+          const saved = store.get(keyOf(request))
+          if (saved) return saved.clone()
+        }
+        return undefined
+      },
       keys: async () => [...stores.keys()],
       delete: async (name: string) => stores.delete(name),
     },
@@ -65,6 +78,7 @@ function startWorker(options: { network: Network; version?: string; instantTimer
   }
   const source = renderServiceWorker({
     version: options.version ?? "v1",
+    entry: "/app-abc123.js",
     precache: ["/app-abc123.js", "/favicon.svg"],
   })
   const timers = options.instantTimers
@@ -105,9 +119,10 @@ function startWorker(options: { network: Network; version?: string; instantTimer
   }
 }
 
+const SHELL = '<html><script src="/app-abc123.js"></script></html>'
 const online: Network = async (request) =>
   new URL(request.url).pathname === "/"
-    ? basic("<html>shell v2</html>")
+    ? basic(SHELL)
     : basic(`network ${new URL(request.url).pathname}`, "text/plain")
 const offline: Network = async () => {
   throw new TypeError("Load failed")
@@ -127,14 +142,39 @@ describe("the app's service worker", () => {
     expect(worker.skippedWaiting()).toBe(true)
   })
 
-  test("a new version clears the last one's files and leaves other caches alone", async () => {
-    const worker = startWorker({ network: online, version: "v2" })
+  test("a new version keeps the last one's files one more round, and leaves other caches alone", async () => {
+    const worker = startWorker({ network: online, version: "v3" })
     await worker.caches.api.open("sixb-app-v1")
     await worker.caches.api.open("project-cache")
+    await worker.caches.api.open("sixb-app-v2")
     await worker.install()
     await worker.activate()
 
-    expect([...worker.caches.stores.keys()].sort()).toEqual(["project-cache", "sixb-app-v2"])
+    expect([...worker.caches.stores.keys()].sort()).toEqual([
+      "project-cache",
+      "sixb-app-v2",
+      "sixb-app-v3",
+    ])
+  })
+
+  test("a shell from another deploy is never saved", async () => {
+    let network: Network = async () => basic('<html><script src="/app-other99.js"></script></html>')
+    const worker = startWorker({ network: (request) => network(request) })
+    await worker.install()
+    expect(worker.caches.stores.get("sixb-app-v1")?.has(`${ORIGIN}/`)).toBe(false)
+
+    network = online
+    await worker.fetch("/", "navigate")
+    network = offline
+    expect(await (await worker.fetch("/quotes", "navigate"))?.text()).toBe(SHELL)
+  })
+
+  test("a hashed file the last version saved is found after a new one takes over", async () => {
+    const worker = startWorker({ network: offline, version: "v2" })
+    const last = await worker.caches.api.open("sixb-app-v1")
+    await last.put("/chunk-quotes-aa11.js", basic("old chunk", "text/javascript"))
+    await worker.activate()
+    expect(await (await worker.fetch("/chunk-quotes-aa11.js"))?.text()).toBe("old chunk")
   })
 
   test("a page comes from the network, and from the device when the network fails", async () => {
@@ -147,7 +187,7 @@ describe("the app's service worker", () => {
 
     network = offline
     const saved = await worker.fetch("/service-cases/sc-1", "navigate")
-    expect(await saved?.text()).toBe("<html>shell v2</html>")
+    expect(await saved?.text()).toBe(SHELL)
   })
 
   test("a page the network is slow to send opens from the device", async () => {
@@ -157,7 +197,7 @@ describe("the app's service worker", () => {
 
     network = () => new Promise<Response>(() => undefined)
     const page = await worker.fetch("/equipment", "navigate", false)
-    expect(await page?.text()).toBe("<html>shell v2</html>")
+    expect(await page?.text()).toBe(SHELL)
   })
 
   test("only `/` refreshes the saved shell, and only with an HTML page", async () => {
@@ -170,7 +210,7 @@ describe("the app's service worker", () => {
     network = async () => basic("Server error", "text/plain", 500)
     await worker.fetch("/", "navigate")
     network = offline
-    expect(await (await worker.fetch("/", "navigate"))?.text()).toBe("<html>shell v2</html>")
+    expect(await (await worker.fetch("/", "navigate"))?.text()).toBe(SHELL)
   })
 
   test("hashed files come from the device; others from the network first", async () => {
