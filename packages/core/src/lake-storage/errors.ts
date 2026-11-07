@@ -18,4 +18,15 @@ export class LakeConcurrencyError extends LakeStorageError {
  */
 export class LakeValueRefusedError extends LakeStorageError {
   override readonly name = "LakeValueRefusedError"
+
+  /** The refused change's position among those the lake was handed, from 0. */
+  readonly changeIndex: number
+
+  constructor(
+    message: string,
+    options: { readonly changeIndex: number; readonly cause?: unknown }
+  ) {
+    super(message, { cause: options.cause })
+    this.changeIndex = options.changeIndex
+  }
 }

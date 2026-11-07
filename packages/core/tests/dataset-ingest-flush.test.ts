@@ -50,8 +50,10 @@ afterEach(() => {
 class RefusingLakeStorage extends InMemoryLakeStorage {
   constructor(
     private readonly refuses: (name: unknown) => boolean,
-    private readonly refusal: (message: string) => Error = (message) =>
-      new LakeValueRefusedError(message)
+    private readonly refusal: (message: string, changeIndex: number) => Error = (
+      message,
+      changeIndex
+    ) => new LakeValueRefusedError(message, { changeIndex })
   ) {
     super()
   }
@@ -67,7 +69,8 @@ class RefusingLakeStorage extends InMemoryLakeStorage {
       for await (const change of changes) {
         if (change.kind === "upsert" && refuses(change.row.name)) {
           throw refusal(
-            `[TestLake] Column 'name' cannot hold '${String(change.row.name)}' exactly.`
+            `[TestLake] Column 'name' cannot hold '${String(change.row.name)}' exactly.`,
+            accepted.length
           )
         }
         accepted.push(change)
@@ -392,8 +395,8 @@ test("a worker older than the API never refuses what the API stored", async () =
 })
 
 test("a delivery holding a value the lake cannot hold is refused, and the rest commits", async () => {
-  // Regression proof: rethrow without `isolate` in `commit`; every attempt fails on the whole
-  // batch, and no delivery of the dataset is written again.
+  // Regression proof: drop `LakeValueRefusedError` from `refusedChange`; every attempt fails on the
+  // whole batch, and no delivery of the dataset is written again.
   const { scope, ingest, flush, rows, reported } = setup(
     new RefusingLakeStorage((name) => name === "1.0000000001")
   )
@@ -429,24 +432,26 @@ test("a delivery holding a value the lake cannot hold is refused, and the rest c
   ).toHaveLength(2)
 })
 
-test("a lake that refuses every delivery is failing: nothing is refused, and it is retried", async () => {
-  // Regression proof: refuse every delivery `isolate` finds, even when all of a batch are; the
-  // outage drops both.
-  const { ingest, flush, reported, storage, host } = setup(new RefusingLakeStorage(() => true))
-  await ingest(contacts, change.upsert({ id: "1", name: "a" }))
-  await ingest(contacts, change.upsert({ id: "2", name: "b" }))
+test("two deliveries the lake refuses never hold the dataset back", async () => {
+  // Regression proof: fail the attempt when every delivery of a batch is refused, as `isolate` did:
+  // the same batch then comes back on each attempt, with everything behind it.
+  const lakeStorage = new RefusingLakeStorage((name) => name === "unstorable")
+  const { host, storage, ingest, flush, rows } = setup(lakeStorage)
 
-  expect(await flush(contacts).catch((error) => error)).toBeInstanceOf(DatasetIngestFlushError)
-  expect(await storage.datasetIngest.summarize({ projectId: host.id })).toMatchObject([
-    { datasetId: contacts.id, pendingDeliveries: 2 },
-  ])
-  expect((await reported()).filter((report) => report.type === "dataset.ingest.rejected")).toEqual(
-    []
-  )
+  await ingest(contacts, change.upsert({ id: "1", name: "unstorable" }))
+  await ingest(contacts, change.upsert({ id: "2", name: "unstorable" }))
+  await ingest(contacts, change.upsert({ id: "3", name: "unstorable" }))
+
+  await flush(contacts).catch(() => {})
+  await ingest(contacts, change.upsert({ id: "4", name: "Ada" }))
+  await flush(contacts).catch(() => {})
+
+  expect((await rows(contacts)).map((row) => row.id)).toEqual(["4"])
+  expect(await storage.datasetIngest.summarize({ projectId: host.id })).toEqual([])
 })
 
 test("a lake error about its own state is retried, never refused, even for a lone delivery", async () => {
-  // Regression proof: treat every LakeStorageError as a refusal in \`isLakeRefusal\`; the lone
+  // Regression proof: treat every LakeStorageError as a refusal in `refusedChange`; the lone
   // delivery is dropped and reported as refused.
   const { ingest, flush, reported, storage, host } = setup(
     new RefusingLakeStorage(

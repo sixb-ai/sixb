@@ -62,7 +62,7 @@ export interface LakeMergeSession {
    * Stage ordered complete-row upserts and exact primary-key deletes. With sequenceBy, deletes
    * require a sequence, stale changes are ignored, and conflicting ties abort the whole merge with
    * a `DatasetSequenceConflictError` naming the refused change. A value the lake cannot hold
-   * throws a `LakeValueRefusedError`.
+   * throws a `LakeValueRefusedError` with the change's position in `changes`.
    */
   writeChanges(
     changes:

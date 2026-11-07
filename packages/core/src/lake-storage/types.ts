@@ -1,4 +1,5 @@
 import type { DatasetDefinition, DatasetSchema } from "../datasets"
+import type { MergeChange } from "../datasets/changes"
 import type { LakeMaintenance } from "./maintenance"
 import type { BeginDatasetMergeInput, LakeMergeSession } from "./merge"
 
@@ -258,6 +259,15 @@ export interface LakeStorage {
 
   beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession>
   beginMerge(input: BeginDatasetMergeInput): Promise<LakeMergeSession>
+  /**
+   * Throws a `LakeValueRefusedError` for the first change this lake cannot hold, as far as it can
+   * tell without writing, so that `ingest` refuses it to its caller rather than after answering.
+   * Optional, and allowed to miss some: what it misses is refused when the change is written.
+   */
+  assertHoldsChanges?(
+    dataset: DatasetDefinition,
+    changes: readonly MergeChange<DatasetRow, DatasetRow>[]
+  ): void
 
   getLatestVersion(datasetId: string): Promise<DatasetVersion | null>
   getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null>
