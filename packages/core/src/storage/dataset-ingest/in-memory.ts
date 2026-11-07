@@ -130,7 +130,7 @@ class InMemoryDatasetIngestPersistence implements DatasetIngestPersistence {
     datasetId: string,
     flushId: string,
     page: { readonly afterId: string | null; readonly limit: number }
-  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: unknown }[]> {
+  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: string }[]> {
     const afterId = page.afterId === null ? 0n : BigInt(page.afterId)
 
     return this.flushOf(projectId, datasetId, flushId)

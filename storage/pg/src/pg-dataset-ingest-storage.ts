@@ -98,7 +98,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
         project_id, dataset_id, execution_id, correlation_id, received_at, change_count, changes
       ) VALUES (
         ${projectId}, ${record.datasetId}, ${record.executionId}, ${record.correlationId},
-        ${record.receivedAt}, ${record.changeCount}, ${record.changes}::text::jsonb
+        ${record.receivedAt}, ${record.changeCount}, ${record.changes}
       )
       RETURNING id::text AS id
     `
@@ -155,10 +155,10 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
     datasetId: string,
     flushId: string,
     page: { readonly afterId: string | null; readonly limit: number }
-  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: unknown }[]> {
+  ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: string }[]> {
     const rows = await this.sql<(PgDeliveryRow & { readonly changes: string })[]>`
       SELECT id::text AS id, dataset_id, execution_id, correlation_id, received_at, change_count,
-        changes::text AS changes
+        changes
       FROM dataset_ingest_deliveries
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId} AND flush_id = ${flushId}
         AND id > ${page.afterId ?? "0"}::bigint
