@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { startTestRun } from "@sixb/core/testing"
 import {
   col,
   defineConnector,
@@ -390,7 +391,7 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
         return runs.map((run) => run.id)
       },
       start: async (runId) => {
-        await storage.pipelineRuns.start({ projectId, id: runId })
+        await startTestRun(storage.pipelineRuns, { projectId, id: runId })
       },
       claimJobs: async () => {
         const claimed = await queues.pipelines.claim({ projectId, workerId: "test", limit: 50 })
@@ -430,7 +431,7 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
       return runs.map((run) => run.id)
     },
     start: async (runId) => {
-      await storage.syncRuns.start({ projectId, id: runId })
+      await startTestRun(storage.syncRuns, { projectId, id: runId })
     },
     claimJobs: async () => {
       const claimed = await queues.syncRuns.claim({ projectId, workerId: "test", limit: 50 })
@@ -447,7 +448,7 @@ function createAutomaticTarget(kind: "pipeline" | "sync"): AutomaticTarget {
 describe.each(["pipeline", "sync"] as const)("automatic %s dispatch", (kind) => {
   const firstRunId = automaticRunId(kind, "event-1")
   const secondRunId = automaticRunId(kind, "event-2")
-  const joinJobId = (eventId: string) => `${firstRunId}:join:${automaticRunId(kind, eventId)}`
+  const joinJobId = `${firstRunId}:join`
 
   test.each([
     "event",
@@ -468,11 +469,10 @@ describe.each(["pipeline", "sync"] as const)("automatic %s dispatch", (kind) => 
     ])
     expect(await target.runIds("queued")).toEqual([firstRunId])
 
-    // Every job starts the same run; the worker completes the late ones without running it again.
+    // However many triggers join, the run gets one more job: a busy trigger costs nothing per event.
     expect(jobsOf(await target.claimJobs())).toEqual([
       { id: firstRunId, runId: firstRunId },
-      { id: joinJobId("event-2"), runId: firstRunId },
-      { id: joinJobId("event-3"), runId: firstRunId },
+      { id: joinJobId, runId: firstRunId },
     ])
   })
 
@@ -523,9 +523,7 @@ describe.each(["pipeline", "sync"] as const)("automatic %s dispatch", (kind) => 
     expect(await target.runIds("queued")).toEqual([firstRunId])
 
     expect(await target.dispatch("event-2")).toMatchObject({ runId: firstRunId, created: false })
-    expect(jobsOf(await target.claimJobs())).toEqual([
-      { id: joinJobId("event-2"), runId: firstRunId },
-    ])
+    expect(jobsOf(await target.claimJobs())).toEqual([{ id: joinJobId, runId: firstRunId }])
   })
 
   test("publishes one job for a redelivered trigger that joined a run", async () => {
@@ -537,7 +535,7 @@ describe.each(["pipeline", "sync"] as const)("automatic %s dispatch", (kind) => 
 
     expect(jobsOf(await target.claimJobs())).toEqual([
       { id: firstRunId, runId: firstRunId },
-      { id: joinJobId("event-2"), runId: firstRunId },
+      { id: joinJobId, runId: firstRunId },
     ])
   })
 

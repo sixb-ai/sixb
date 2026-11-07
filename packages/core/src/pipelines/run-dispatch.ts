@@ -1,18 +1,16 @@
-import { randomUUID } from "node:crypto"
-import { isDeepStrictEqual } from "node:util"
 import { reportRunFailure } from "../error-reporting/capability"
-import { createSixbError, toSixbFailure } from "../errors/internal"
-import type { SixbFailure } from "../errors/types"
+import { toSixbFailure } from "../errors/internal"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
+import {
+  dispatchQueuedRun,
+  hasAutomaticRunProvenance,
+  type QueuedRunPrimitive,
+  type RunPublication,
+} from "../execution/queued-run-dispatch"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
-import type {
-  CreateExecutionInput,
-  PipelineRunFailureCode,
-  PipelineRunRecord,
-  Storage,
-} from "../storage"
+import type { CreateExecutionInput, PipelineRunRecord, Storage } from "../storage"
 import { PIPELINE_RUN_FAILURE_CODES, PipelineRunError } from "../storage"
 import { PipelineError } from "./errors"
 import type { PipelineRunRequestOptions, PipelineRunRequestResult } from "./request"
@@ -56,17 +54,6 @@ interface DispatchPipelineRunInput extends PipelineRunRequestOptions {
   readonly joinQueuedRun?: boolean
 }
 
-type PersistedPipelineRun =
-  | { readonly publish: false; readonly run: PipelineRunRecord }
-  | {
-      readonly publish: true
-      readonly run: PipelineRunRecord
-      readonly queuedAt: Date
-      readonly created: boolean
-      /** Defaults to the run id. A trigger that joins a run publishes its own job for it. */
-      readonly jobId?: string
-    }
-
 /** Core-owned durable dispatch boundary used by automatic Pipeline triggers. */
 export class PipelineRunDispatcher implements PipelineRunDispatchPort {
   constructor(private readonly dependencies: PipelineRunDispatcherDependencies) {}
@@ -106,213 +93,116 @@ export class PipelineRunDispatcher implements PipelineRunDispatchPort {
 export async function dispatchPipelineRun(
   input: DispatchPipelineRunInput
 ): Promise<PipelineRunRequestResult> {
-  const runId = createPipelineRunId(input.runId)
-  let persisted = await persistPipelineRun(input, runId)
-  if (!persisted.publish && input.validateExistingRun && persisted.run.status === "queued") {
-    persisted = await reusePipelineRun(input, persisted.run)
-  }
-  if (!persisted.publish) return existingPipelineRunResult(persisted.run)
-  return publishPipelineRun(input, persisted)
-}
-
-async function persistPipelineRun(
-  input: DispatchPipelineRunInput,
-  runId: string
-): Promise<PersistedPipelineRun> {
-  const pipelineRuns = requirePipelineRunStorage(input.storage)
-  const existing = await pipelineRuns.getById({ projectId: input.projectId, id: runId })
-  if (existing) return reusePipelineRun(input, existing)
-
-  const execution = await input.createExecution(`exec_${randomUUID()}`, runId)
-  const queuedAt = new Date()
-  try {
-    return await input.storage.transaction(
-      async (tx): Promise<PersistedPipelineRun> => {
-        const transactionalRuns = requirePipelineRunStorage(tx)
-        const raced = await transactionalRuns.getById({ projectId: input.projectId, id: runId })
-        if (raced) {
-          assertExistingRunMatchesRequest(raced, input)
-          await input.validateExistingRun?.(raced, tx)
-          return { publish: false, run: raced }
-        }
-
-        if (input.joinQueuedRun) {
-          const waiting = await findQueuedPipelineRun(transactionalRuns, input)
-          if (waiting) {
-            return {
-              publish: true,
-              run: waiting,
-              queuedAt: waiting.queuedAt,
-              created: false,
-              jobId: joinJobId(waiting, runId),
-            }
-          }
-        }
-
-        await tx.executions.create(execution)
-        const run = await transactionalRuns.queue({
-          projectId: input.projectId,
-          id: runId,
-          executionId: execution.id,
-          pipelineId: input.pipeline.id,
-          queuedAt,
-        })
-        return { publish: true, run, queuedAt, created: true }
-      },
-      { isolation: "serializable" }
-    )
-  } catch (error) {
-    if (!(error instanceof PipelineRunError)) throw error
-    const raced = await pipelineRuns.getById({ projectId: input.projectId, id: runId })
-    if (!raced) throw error
-    assertExistingRunMatchesRequest(raced, input)
-    await input.validateExistingRun?.(raced, input.storage)
-    return { publish: false, run: raced }
-  }
+  return dispatchQueuedRun({
+    primitive: pipelineRunPrimitive(input),
+    projectId: input.projectId,
+    storage: input.storage,
+    runId: input.runId,
+    metadata: input.metadata,
+    createExecution: input.createExecution,
+    validateExistingRun: input.validateExistingRun,
+    joinQueuedRun: input.joinQueuedRun,
+  })
 }
 
 /**
- * A run that has not started reads each input's latest version when its steps start, so it already
- * covers a trigger that arrives now. The oldest one starts first.
+ * A run that has not started reads each input's latest version when its steps start, so any queued
+ * run of this Pipeline already covers a trigger that arrives now.
  */
-async function findQueuedPipelineRun(
-  pipelineRuns: NonNullable<Storage["pipelineRuns"]>,
-  input: Pick<DispatchPipelineRunInput, "projectId" | "pipeline">
-): Promise<PipelineRunRecord | undefined> {
-  const { runs } = await pipelineRuns.list({
-    projectId: input.projectId,
-    pipelineId: input.pipeline.id,
-    statuses: ["queued"],
-    order: "asc",
-    limit: 1,
-  })
-  return runs[0]
-}
+function pipelineRunPrimitive(
+  input: DispatchPipelineRunInput
+): QueuedRunPrimitive<PipelineRunRecord, PipelineRunRequestResult> {
+  const { projectId, pipeline } = input
 
-/**
- * The job a trigger publishes for the run it joins. The run's own job may be gone (a provider
- * keeps a settled job id, and ignores a new job under it), so each joining trigger brings a job
- * that can start the run; once it has started, the others complete without doing anything. The id
- * derives from the trigger's run id, so a redelivered trigger publishes the same job.
- */
-function joinJobId(waiting: PipelineRunRecord, triggerRunId: string): string {
-  return `${waiting.id}:join:${triggerRunId}`
-}
-
-async function reusePipelineRun(
-  input: DispatchPipelineRunInput,
-  existing: PipelineRunRecord
-): Promise<PersistedPipelineRun> {
-  assertExistingRunMatchesRequest(existing, input)
-  await input.validateExistingRun?.(existing, input.storage)
-  if (input.validateExistingRun && existing.status === "queued") {
-    const execution = await input.storage.executions.getById({
-      projectId: input.projectId,
-      id: existing.executionId,
-    })
-    if (!execution)
-      throw new PipelineRunError(`[Sixb] Execution '${existing.executionId}' was not found.`)
-    return { publish: true, run: existing, queuedAt: existing.queuedAt, created: false }
-  }
-  if (
-    existing.status !== "failed" ||
-    existing.error?.code !== "queue.enqueue_failed" ||
-    !existing.error.retryable
-  ) {
-    return { publish: false, run: existing }
-  }
-
-  const execution = await input.storage.executions.getById({
-    projectId: input.projectId,
-    id: existing.executionId,
-  })
-  if (!execution) {
-    throw new PipelineRunError(
-      `[Sixb] Execution '${existing.executionId}' for Pipeline run '${existing.id}' was not found.`
-    )
-  }
-
-  const queuedAt = new Date()
-  const run = await requirePipelineRunStorage(input.storage).queue({
-    projectId: input.projectId,
-    id: existing.id,
-    executionId: existing.executionId,
-    pipelineId: existing.pipelineId,
-    queuedAt,
-  })
-  return { publish: true, run, queuedAt, created: false }
-}
-
-async function publishPipelineRun(
-  input: DispatchPipelineRunInput,
-  persisted: Extract<PersistedPipelineRun, { readonly publish: true }>
-): Promise<PipelineRunRequestResult> {
-  const jobId = persisted.jobId ?? persisted.run.id
-
-  try {
-    const [job] = await input.queue.enqueue({
-      projectId: input.projectId,
-      jobs: [
-        {
-          id: jobId,
-          type: "pipeline.run.requested",
-          payload: { runId: persisted.run.id },
-          ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-        },
-      ],
-    })
-    if (!job || job.id !== jobId) {
-      throw new PipelineRunError(
-        `[Sixb] Queue did not acknowledge Pipeline run '${persisted.run.id}'.`
-      )
-    }
-    return {
-      pipelineId: persisted.run.pipelineId,
-      runId: persisted.run.id,
-      queuedAt: persisted.queuedAt.toISOString(),
-      ...(job?.id ? { jobId: job.id } : {}),
-      created: persisted.created,
-    }
-  } catch (error) {
-    // Automatic consumers retain the batch and retry. Keep uncertain delivery queued:
-    // a lost reply does not prove that the queue rejected the job.
-    if (input.validateExistingRun) throw error
-    const failedAt = new Date()
-    const failure = toEnqueueFailure(error, persisted.run, failedAt)
-    const failed = await requirePipelineRunStorage(input.storage).finish({
-      projectId: input.projectId,
-      id: persisted.run.id,
-      status: "failed",
-      finishedAt: failedAt,
-      error: failure,
-    })
-    reportRunFailure(input.errorReporterHost, error, {
-      projectId: input.projectId,
-      runKind: "pipeline",
-      run: { runId: failed.id, pipelineId: failed.pipelineId },
-      failure,
-    })
-    throw error
-  }
-}
-
-function assertExistingRunMatchesRequest(
-  existing: PipelineRunRecord,
-  input: Pick<DispatchPipelineRunInput, "pipeline">
-): void {
-  if (existing.pipelineId !== input.pipeline.id) {
-    throw new PipelineRunError(
-      `[Sixb] Pipeline run '${existing.id}' already exists with a different request payload.`
-    )
-  }
-}
-
-function existingPipelineRunResult(existing: PipelineRunRecord): PipelineRunRequestResult {
   return {
-    pipelineId: existing.pipelineId,
-    runId: existing.id,
-    queuedAt: existing.queuedAt.toISOString(),
-    created: false,
+    label: "Pipeline",
+    failureDetails: (run) => ({ pipelineId: run.pipelineId }),
+
+    runs: requirePipelineRunStorage,
+    matches: (run) => run.pipelineId === pipeline.id,
+
+    queueRun: (storage, run) =>
+      requirePipelineRunStorage(storage).queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        pipelineId: pipeline.id,
+        queuedAt: run.queuedAt,
+      }),
+
+    requeueRun: (storage, run, queuedAt) =>
+      requirePipelineRunStorage(storage).queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        pipelineId: run.pipelineId,
+        queuedAt,
+      }),
+
+    async oldestQueuedRun(storage) {
+      const { runs } = await requirePipelineRunStorage(storage).list({
+        projectId,
+        pipelineId: pipeline.id,
+        statuses: ["queued"],
+        order: "asc",
+        limit: 1,
+      })
+      return runs[0]
+    },
+
+    async enqueue(job) {
+      const [enqueued] = await input.queue.enqueue({
+        projectId,
+        jobs: [
+          {
+            id: job.id,
+            type: "pipeline.run.requested",
+            payload: { runId: job.runId },
+            ...(job.metadata === undefined ? {} : { metadata: job.metadata }),
+          },
+        ],
+      })
+      return enqueued
+    },
+
+    async failPublication(run, failure, cause, at) {
+      const pipelineFailure = toSixbFailure(failure, {
+        allowedCodes: PIPELINE_RUN_FAILURE_CODES,
+        at,
+      })
+      const failed = await requirePipelineRunStorage(input.storage).finish({
+        projectId,
+        id: run.id,
+        status: "failed",
+        finishedAt: at,
+        error: pipelineFailure,
+      })
+      reportRunFailure(input.errorReporterHost, cause, {
+        projectId,
+        runKind: "pipeline",
+        run: { runId: failed.id, pipelineId: failed.pipelineId },
+        failure: pipelineFailure,
+      })
+    },
+
+    result: toRequestResult,
+
+    runError: (message) => new PipelineRunError(message),
+    isRunError: (error) => error instanceof PipelineRunError,
+    requestError: (message) => new PipelineError(message),
+  }
+}
+
+function toRequestResult(
+  run: PipelineRunRecord,
+  publication?: RunPublication
+): PipelineRunRequestResult {
+  return {
+    pipelineId: run.pipelineId,
+    runId: run.id,
+    queuedAt: (publication?.queuedAt ?? run.queuedAt).toISOString(),
+    ...(publication ? { jobId: publication.jobId } : {}),
+    created: publication?.created ?? false,
   }
 }
 
@@ -321,12 +211,6 @@ function requirePipelineRunStorage(storage: Storage): NonNullable<Storage["pipel
     throw new PipelineError("[Sixb] Pipeline run storage is not configured.")
   }
   return storage.pipelineRuns
-}
-
-function createPipelineRunId(runId: string | undefined): string {
-  if (runId === undefined) return `run_${randomUUID()}`
-  if (!runId.trim()) throw new PipelineError("[Sixb] Pipeline run id must not be empty")
-  return runId
 }
 
 function assertAutomaticDispatchInput(input: AutomaticPipelineRunDispatchInput): void {
@@ -345,32 +229,11 @@ async function assertAutomaticExecutionIdentity(
   run: PipelineRunRecord
 ): Promise<void> {
   const execution = await storage.executions.getById({ projectId, id: run.executionId })
-  if (
-    !execution ||
-    !isDeepStrictEqual(execution.source, input.source) ||
-    execution.correlationId !== input.correlationId ||
-    execution.requestedBy !== undefined
-  ) {
+  if (!hasAutomaticRunProvenance(execution, input)) {
     throw new PipelineError(
       `[Sixb] Pipeline run '${run.id}' already exists with different automatic provenance.`
     )
   }
-}
-
-function toEnqueueFailure(
-  error: unknown,
-  run: PipelineRunRecord,
-  at: Date
-): SixbFailure<PipelineRunFailureCode> {
-  const enqueueError = createSixbError(
-    "queue.enqueue_failed",
-    `[Sixb] Could not enqueue Pipeline run '${run.id}'.`,
-    {
-      cause: error,
-      details: { pipelineId: run.pipelineId, runId: run.id, phase: "enqueue" },
-    }
-  )
-  return toSixbFailure(enqueueError, { allowedCodes: PIPELINE_RUN_FAILURE_CODES, at })
 }
 
 function assertNonBlank(value: string, label: string): void {
