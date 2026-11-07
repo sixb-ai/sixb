@@ -16,6 +16,7 @@ interface LostProjectionRunsInput {
   /** Younger runs may still be in their first publication. */
   readonly queuedBefore: Date
   readonly recovery: ProjectionRunRecovery
+  readonly signal?: AbortSignal
 }
 
 /**
@@ -34,6 +35,8 @@ export async function republishQueuedProjectionRuns(
   let republished = 0
 
   for (const run of runs) {
+    input.signal?.throwIfAborted()
+
     const descriptor = descriptors.find(
       (candidate) => candidate.projectionId === run.identity.projectionId
     )
