@@ -328,7 +328,7 @@ async function requireProducerExecution(input: {
     projectId: input.projectId,
     executionId: input.executionId,
     primitive: input.primitive,
-    sourceTypes: ["execution", "schedule", "event"],
+    sourceTypes: ["execution", "schedule", "event", "datasetVersion"],
   })
   if (execution) return execution
   throw new ProjectionValidationError(
