@@ -94,6 +94,21 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
         expect(read?.changes).toEqual(changes)
       }))
 
+    test("keeps the definition a delivery was validated against, on every way to read it", () =>
+      withStorage(async (storage) => {
+        await storage.append({ ...deliveryInput([upsert("1")]), definitionHash: "definition-v2" })
+
+        const dead = await acquire(storage, "owner-a", 0)
+        const batch = await storage.takeBatch({ lease: dead, flushId: "flush-1", maxChanges: 100 })
+        expect(batch?.deliveries[0]?.definitionHash).toBe("definition-v2")
+
+        const lease = await acquire(storage, "owner-b")
+        expect(lease.inFlight?.deliveries[0]?.definitionHash).toBe("definition-v2")
+
+        const [read] = await readAll(storage, lease, "flush-1")
+        expect(read?.delivery.definitionHash).toBe("definition-v2")
+      }))
+
     test("stores strings holding U+0000 and backslashes exactly, in values and JSON keys", () =>
       withStorage(async (storage) => {
         // Reproduce: drop the escaping in `encodeDatasetIngestChanges`; PostgreSQL's jsonb refuses
@@ -355,7 +370,14 @@ function upsert(id: string): DatasetIngestChange {
 }
 
 function deliveryInput(changes: readonly DatasetIngestChange[]) {
-  return { projectId, datasetId, executionId: "exec-1", correlationId: "corr-1", changes }
+  return {
+    projectId,
+    datasetId,
+    executionId: "exec-1",
+    correlationId: "corr-1",
+    definitionHash: "definition-1",
+    changes,
+  }
 }
 
 async function append(storage: DatasetIngestStorage, changes: readonly DatasetIngestChange[]) {

@@ -53,6 +53,7 @@ interface SqliteDeliveryRow {
   readonly correlationId: string
   readonly receivedAt: string
   readonly changeCount: number
+  readonly definitionHash: string
 }
 
 const SELECT_STATE = `
@@ -63,7 +64,8 @@ const SELECT_STATE = `
 
 const SELECT_DELIVERY = `
   SELECT id, dataset_id AS datasetId, execution_id AS executionId,
-    correlation_id AS correlationId, received_at AS receivedAt, change_count AS changeCount
+    correlation_id AS correlationId, received_at AS receivedAt, change_count AS changeCount,
+    definition_hash AS definitionHash
   FROM dataset_ingest_deliveries`
 
 class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
@@ -116,8 +118,9 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
     const result = this.db
       .query(
         `INSERT INTO dataset_ingest_deliveries (
-          project_id, dataset_id, execution_id, correlation_id, received_at, change_count, changes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+          project_id, dataset_id, execution_id, correlation_id, received_at, change_count,
+          definition_hash, changes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         projectId,
@@ -126,6 +129,7 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
         record.correlationId,
         record.receivedAt.toISOString(),
         record.changeCount,
+        record.definitionHash,
         record.changes
       )
     return String(result.lastInsertRowid)
@@ -185,7 +189,7 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
       .query(
         `SELECT id, dataset_id AS datasetId, execution_id AS executionId,
            correlation_id AS correlationId, received_at AS receivedAt,
-           change_count AS changeCount, changes
+           change_count AS changeCount, definition_hash AS definitionHash, changes
          FROM dataset_ingest_deliveries
          WHERE project_id = ? AND dataset_id = ? AND flush_id = ? AND id > ?
          ORDER BY id
@@ -288,5 +292,6 @@ function deliveryFromRow(row: SqliteDeliveryRow): DatasetIngestDelivery {
     correlationId: row.correlationId,
     receivedAt: new Date(row.receivedAt),
     changeCount: row.changeCount,
+    definitionHash: row.definitionHash,
   }
 }

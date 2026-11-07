@@ -95,6 +95,7 @@ function delivery(id: string) {
     datasetId,
     executionId: "exec-1",
     correlationId: "corr-1",
+    definitionHash: "definition-1",
     changes: [{ kind: "upsert" as const, row: { id } }],
   }
 }

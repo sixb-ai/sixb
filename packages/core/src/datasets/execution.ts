@@ -14,7 +14,7 @@ import type { DatasetVersionMarkings } from "../security/dataset-version-marking
 import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 import type { MergeChange } from "./changes"
-import { tryEnqueueIngestFlush } from "./ingest-flush-job"
+import { datasetDefinitionHash, tryEnqueueIngestFlush } from "./ingest-flush-job"
 import {
   type DatasetLineage,
   type DatasetLineageInput,
@@ -226,6 +226,7 @@ export function createDatasetsRuntime(
         datasetId: registered.id,
         executionId: execution.id,
         correlationId: execution.correlationId,
+        definitionHash: datasetDefinitionHash(registered),
         changes,
       })
 

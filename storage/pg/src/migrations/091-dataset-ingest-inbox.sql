@@ -8,6 +8,7 @@ CREATE TABLE dataset_ingest_deliveries (
   correlation_id TEXT NOT NULL,
   received_at TIMESTAMPTZ NOT NULL,
   change_count INTEGER NOT NULL CHECK (change_count > 0),
+  definition_hash TEXT NOT NULL,
   -- Text, not JSONB: nothing reads inside it, and JSONB refuses strings JSON allows.
   changes TEXT NOT NULL,
   flush_id TEXT,

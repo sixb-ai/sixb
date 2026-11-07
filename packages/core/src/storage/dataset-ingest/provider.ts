@@ -35,6 +35,7 @@ export interface DatasetIngestDeliveryRecord {
   readonly correlationId: string
   readonly receivedAt: Date
   readonly changeCount: number
+  readonly definitionHash: string
   /** `encodeDatasetIngestChanges` text. */
   readonly changes: string
 }
@@ -141,6 +142,7 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
     assertNonBlank(input.datasetId, "datasetId")
     assertNonBlank(input.executionId, "executionId")
     assertNonBlank(input.correlationId, "correlationId")
+    assertNonBlank(input.definitionHash, "definitionHash")
     if (input.changes.length === 0) {
       throw new Error("[Sixb] A dataset ingest delivery needs at least one change.")
     }
@@ -155,6 +157,7 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
         correlationId: input.correlationId,
         receivedAt,
         changeCount: input.changes.length,
+        definitionHash: input.definitionHash,
         changes,
       }
       const id = await persistence.insertDelivery(input.projectId, record)

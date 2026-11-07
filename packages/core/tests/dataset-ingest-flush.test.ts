@@ -341,6 +341,56 @@ test("a change that stopped being valid since ingest is refused, and the rest co
   ])
 })
 
+test("a worker older than the API never refuses what the API stored", async () => {
+  // Regression proof: drop the `definitionHash` check from `reject`; the old worker then finds an
+  // unknown column, and refuses a row nothing is wrong with.
+  const contactsV1 = defineDataset("source.versioned", {
+    schema: [col("id", "string"), col("name", "string")],
+    primaryKey: "id",
+  })
+  const contactsV2 = defineDataset("source.versioned", {
+    schema: [col("id", "string"), col("name", "string"), col("nick", "string", { nullable: true })],
+    primaryKey: "id",
+  })
+
+  const storage = new InMemoryStorage()
+  const lakeStorage = new InMemoryLakeStorage()
+  const reports: SixbErrorContext[] = []
+  const hostOn = (dataset: DatasetDefinition) =>
+    new SixbHost({
+      id: "rolling-deploy",
+      ontology: [],
+      datasets: [dataset],
+      lakeStorage,
+      broker: new InMemoryBroker(),
+      storage,
+      queues: new InMemoryQueues(),
+      blobStorage: new InMemoryBlobStorage(),
+      onError: (_error, context) => {
+        reports.push(context)
+      },
+    })
+
+  // The API runs the new code, and a lake worker still runs the old.
+  const api = hostOn(contactsV2)
+  const oldWorker = hostOn(contactsV1)
+
+  await api.withScope(createTestingScope({ projectId: api.id })).datasets.ingest(contactsV2, {
+    changes: [change.upsert({ id: "1", name: "Ada", nick: "Countess" })],
+  })
+
+  const failure = await getDatasetIngestRuntime(oldWorker)
+    .flush(contactsV2.id, new AbortController().signal)
+    .catch((error) => error)
+
+  expect(failure).toBeInstanceOf(DatasetIngestFlushError)
+  await flushSixbErrors(oldWorker)
+  expect(reports).toEqual([])
+  expect(await storage.datasetIngest.summarize({ projectId: api.id })).toMatchObject([
+    { datasetId: contactsV2.id, pendingDeliveries: 1 },
+  ])
+})
+
 test("a delivery holding a value the lake cannot hold is refused, and the rest commits", async () => {
   // Regression proof: rethrow without `isolate` in `commit`; every attempt fails on the whole
   // batch, and no delivery of the dataset is written again.
