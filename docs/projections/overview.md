@@ -146,6 +146,11 @@ transient reason, such as a lost database connection, is retried. While it retri
 `running` and its `error` says why the last attempt failed. The error is cleared if the run
 succeeds.
 
+A run usually applies only the rows that changed since the version the projection last applied.
+On DuckLake, an object projection whose primary property maps to the dataset's primary key reads
+just those changes, at a cost that follows their number; other projections compare both versions
+in full.
+
 A run that would give one [unique value](../ontology/properties.md#unique-values) to two of its
 objects, or to an object while another holds it, fails without writing anything: objects keep their
 previous values. With the default conflict strategy, a value an app edit set stays with its object

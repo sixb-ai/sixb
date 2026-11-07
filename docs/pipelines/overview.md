@@ -33,7 +33,8 @@ Input names become table references in the SQL query. SQL uses the DuckDB dialec
 [a lake provider with SQL transform support](../infrastructure/overview.md).
 
 Each step replaces its output dataset by default. To append rows instead, use
-`.output(cleanCampaigns, { mode: "append" })`.
+`.output(cleanCampaigns, { mode: "append" })`. When the output dataset has a `primaryKey`, a
+replacement stores only the rows that changed, so projections of it apply only those.
 
 Add more steps with `.then(nextStep)`. They run in order, so each can read the previous step's
 output. If a step fails, outputs from earlier steps remain available.

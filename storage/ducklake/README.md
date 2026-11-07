@@ -186,10 +186,6 @@ budget and PostgreSQL metadata pool. Metadata and writes remain available betwee
 Each read stays pinned to one immutable snapshot. Retention's file deletion waits until no reads
 remain; it blocks new reads only while deleting, so continuous traffic can postpone it.
 
-`readChanges` compares two versions in DuckDB. When no version between them changed rows
-(`rowsChanged` in the commit metadata, read from at most 32 snapshots), it returns an empty change
-set without reading the table.
-
 `maxStreamingReads` limits native streaming readers per provider (default: `4`); extra reads use
 bounded pages on the main connection. It does not limit pipeline inputs. Raise it when memory and
 catalog capacity allow. Finish the iterator, use `for await` with `break`, or pass `signal` to cancel
@@ -241,6 +237,39 @@ use the same schema that DuckLake materializes.
 
 DuckLake stores Sixb `decimal` columns as `DECIMAL(38, 9)` and returns them as exact strings, including from SQL previews. Writes that need more than 29 integer digits or 9 fractional digits are rejected before DuckDB can round or overflow them.
 
+## Snapshot Writes
+
+A snapshot of a dataset with a primary key writes only the difference from the latest version:
+it deletes the rows whose key is gone or whose values changed, and inserts the new and changed
+rows. The version reads exactly the rows written, as a full replacement would, and an identical
+write commits nothing. A write that changes at least 80% of the rows replaces them all instead, as
+does one that changes 5,000 rows or more and at least 5% of them: deleting many rows across files
+costs more than writing them anew. Unkeyed datasets are always replaced. In a table of 100,000
+rows or more, a guarded snapshot over a version that replaced every row replaces them again
+without comparing them first, and compares every 8th time: with a million rows, the comparison
+costs a tenth of such a write.
+
+A difference of up to 10 rows is inlined in the catalog and writes no file; automatic compaction
+moves inlined rows to files later. DuckLake's change feed then holds only what each version
+changed, and change reads between two versions use it (below).
+
+### Change Reads
+
+`readChanges` returns what changed between two versions. It reads DuckLake's change feed, at a
+cost that follows what changed, when:
+
+- the identity is the dataset's primary key;
+- both versions together hold at least 100,000 rows, and the versions in between inserted and
+  deleted at most half as many rows;
+- every version in between was committed by this provider, which records what each one changed,
+  and none changed the schema;
+- retention expired no snapshot in between.
+
+Otherwise it compares both versions in full. Compaction commits in between are skipped: they move
+rows without changing them. When no version in between changed rows (`rowsChanged` in the commit
+metadata, read from at most 32 snapshots), it returns an empty change set without reading the
+table.
+
 ## Keyed Merges
 
 Datasets with a primary key can apply ordered complete-row changes directly through the lake
@@ -290,10 +319,12 @@ See [source ordering](../../docs/datasets/source-ordering.md).
 
 Local catalogs serialize commits within one process. PostgreSQL catalogs support concurrent
 writer processes. DuckLake commits a transaction on top of versions committed since it began
-unless one of them altered the table or deleted rows it touches, so a write that missed a
-concurrent version could keep that version's rows but record what it read before them. Such a
-version claims its table, an idempotent comment update that makes any later concurrent write
-conflict:
+unless one of them conflicts with it. Inserting rows conflicts with a version that deleted rows of
+the table or altered it, and deleting rows with one that inserted rows or altered it, or deleted
+rows of the same file (any inlined rows count as one). Two writes that only insert never conflict,
+nor do two that only delete from different files. A write that missed a concurrent version could
+then keep that version's rows but record what it read before them. Such a version claims its
+table, an idempotent comment update that makes any later concurrent write conflict:
 
 - a version whose lineage carries dependencies on other datasets, or is unknown, so no later
   write records a lineage without them;
@@ -305,8 +336,10 @@ conflict:
 Each claim bumps DuckLake's catalog-wide schema version, which every connection then reloads. On
 PostgreSQL with two writers appending 100 rows each, claiming every commit cut throughput by a
 quarter to a third in our measurements, writers to two different datasets included. Snapshots that
-replace rows conflict through their deletes and do not claim, nor do unkeyed appends to a dataset
-that holds only its own columns, such as a sync target: those commit concurrently.
+change rows both insert and delete some, so they conflict with every concurrent change of rows and
+do not claim: one that would only add or only remove rows also rewrites an unchanged one. Nor do
+unkeyed appends to a dataset that holds only its own columns, such as a sync target: those commit
+concurrently.
 
 A version that changes no rows, a schema change, a merge that only advances source ordering, and
 an unkeyed append guarded on `expectedLatestVersionId` also fail on a concurrent commit to any
