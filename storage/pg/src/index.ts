@@ -58,6 +58,7 @@ import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgExecutionStorage } from "./pg-execution-storage"
 import { PgFileDownloadGrantStorage } from "./pg-file-download-grant-storage"
 import { PgFileUploadSessionStorage } from "./pg-file-upload-session-storage"
+import { PgMaintenanceHeartbeatStorage } from "./pg-maintenance-heartbeat-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
 import { PgRulesStorage } from "./pg-rules-storage"
@@ -187,6 +188,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   readonly fileUploadSessions: PgFileUploadSessionStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
   readonly activity: PgActivityStorage
+  readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -277,6 +279,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
     this.activity = createOperationScopedFacade(stores.activity, scope)
+    this.maintenanceHeartbeats = createOperationScopedFacade(stores.maintenanceHeartbeats, scope)
     registerPostgresStorageTestingAdapter(this, (durationMs) =>
       stores.connectorConnections.advanceTimeForTesting(durationMs)
     )
@@ -452,6 +455,7 @@ function createPostgresStores(
     fileUploadSessions: new PgFileUploadSessionStorage(sql),
     fileDownloadGrants: new PgFileDownloadGrantStorage(sql),
     activity: new PgActivityStorage(sql),
+    maintenanceHeartbeats: new PgMaintenanceHeartbeatStorage(sql),
   }
 }
 
@@ -480,6 +484,7 @@ interface PostgresStoreSet {
   readonly fileUploadSessions: PgFileUploadSessionStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
   readonly activity: PgActivityStorage
+  readonly maintenanceHeartbeats: PgMaintenanceHeartbeatStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

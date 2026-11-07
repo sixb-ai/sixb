@@ -506,6 +506,11 @@ export {
 export type { InMemoryStorageOptions } from "./in-memory"
 export { InMemoryStorage } from "./in-memory"
 export type {
+  MaintenanceHeartbeatRecord,
+  MaintenanceHeartbeatStorage,
+  MaintenancePassHealth,
+} from "./maintenance-heartbeats"
+export type {
   DefineMigrationsOptions,
   MigrationCapableStorage,
   MigrationHistoryStore,

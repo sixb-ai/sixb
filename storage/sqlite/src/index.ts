@@ -43,6 +43,7 @@ import { SqliteConnectorConnectionStorage } from "./connector-connection-storage
 import { SqliteExecutionStorage } from "./execution-storage"
 import { SqliteFileDownloadGrantStorage } from "./file-download-grant-storage"
 import { SqliteFileUploadSessionStorage } from "./file-upload-session-storage"
+import { SqliteMaintenanceHeartbeatStorage } from "./maintenance-heartbeat-storage"
 import { createSqliteStorageMigrators, sqliteStoragePath } from "./migrations"
 import { SqliteObjectStorage } from "./objects"
 import { SqliteOntologyStorage, type SqliteOntologyTransactionContext } from "./ontology-storage"
@@ -109,6 +110,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
   readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
+  readonly maintenanceHeartbeats: SqliteMaintenanceHeartbeatStorage
   readonly activity: SqliteActivityStorage
   readonly migrators: readonly StorageMigrator[]
 
@@ -175,6 +177,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
+    this.maintenanceHeartbeats = createOperationScopedFacade(stores.maintenanceHeartbeats, scope)
     this.activity = createOperationScopedFacade(stores.activity, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
     registerSqliteStorageTestingAdapter(this, {
@@ -341,6 +344,7 @@ function createSqliteStores(
     connectorConnections: new SqliteConnectorConnectionStorage(connection),
     fileUploadSessions: new SqliteFileUploadSessionStorage(connection),
     fileDownloadGrants: new SqliteFileDownloadGrantStorage(connection),
+    maintenanceHeartbeats: new SqliteMaintenanceHeartbeatStorage(connection),
     activity: new SqliteActivityStorage(connection),
   }
 }
@@ -369,6 +373,7 @@ interface SqliteStoreSet {
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
   readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
+  readonly maintenanceHeartbeats: SqliteMaintenanceHeartbeatStorage
   readonly activity: SqliteActivityStorage
 }
 
