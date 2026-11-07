@@ -168,6 +168,7 @@ const backgroundRoles: Array<{
   { name: "orchestrator", command: ["orchestrator"] },
   { name: "rules", command: ["rules"] },
   { name: "worker sync", command: ["worker", "sync"], expectProviderClose: true },
+  { name: "worker lake", command: ["worker", "lake"], expectProviderClose: true },
 ]
 
 describe("role startup connection budget", () => {

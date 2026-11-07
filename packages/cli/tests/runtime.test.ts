@@ -489,9 +489,8 @@ describe("startSixbRuntime", () => {
     await runtime.stop()
   })
 
-  // Reproduce: start the co-hosted sync worker for registered syncs only in lib/runtime.ts, or
-  // leave `lakeRetention` out of its compileRoutes call.
-  test("co-hosts lake retention without syncs, from schedule to worker", async () => {
+  // Reproduce: leave the LakeWorker out of startSixbRuntime in lib/runtime.ts.
+  test("co-hosts lake retention without syncs, from the loop's request to the worker", async () => {
     const passes: LakeRetentionOptions[] = []
     const lakeStorage = new (class extends InMemoryLakeStorage {
       readonly maintenance: LakeMaintenance = {
@@ -523,23 +522,8 @@ describe("startSixbRuntime", () => {
     })
 
     const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
-    expect(runtime.syncWorker).not.toBeNull()
-
-    // What the scheduler emits for the built-in schedule's next occurrence.
-    const occurrenceAt = new Date().toISOString()
-    await sixb.events.append({
-      events: [
-        {
-          type: "schedule.triggered",
-          payload: {
-            scheduleId: "sixb:lake-retention",
-            occurrenceAt,
-            triggeredAt: occurrenceAt,
-            occurrenceKey: `sixb:lake-retention:${occurrenceAt}`,
-          },
-        },
-      ],
-    })
+    expect(runtime.lakeWorker).not.toBeNull()
+    expect(runtime.syncWorker).toBeNull()
 
     await waitFor(
       async () => passes.length,

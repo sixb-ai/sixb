@@ -140,6 +140,9 @@
       "path": "models/protocols/tsconfig.build.json"
     },
     {
+      "path": "packages/lake-worker/tsconfig.build.json"
+    },
+    {
       "path": "packages/orchestrator/tsconfig.build.json"
     },
     {

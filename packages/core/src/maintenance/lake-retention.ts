@@ -277,6 +277,11 @@ function durationOption(field: keyof LakeMaintenanceOptions, value: unknown): nu
 
 function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason)
+      return
+    }
+
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort)
       resolve()
