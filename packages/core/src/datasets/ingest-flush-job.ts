@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import type { JsonValue } from "../json"
 import { stableJsonStringify } from "../json"
 import type { Queues } from "../queues/types"
+import type { DatasetIngestSummary } from "../storage/dataset-ingest"
 import type { DatasetDefinition } from "./types"
 import { lakeDatasetDefinition } from "./write"
 
@@ -12,6 +13,9 @@ export type DatasetIngestFlushQueue = Pick<Queues["lake"], "enqueue">
  * not answer costs a webhook this much at most, and the attempt goes on behind it.
  */
 const ENQUEUE_BOUND_MS = 1_000
+
+/** Deliveries waiting this long with no flush progress, and no flush running or failing, stall. */
+const STALLED_AFTER_MS = 10 * 60_000
 
 /**
  * Names what a delivery was validated against. A worker that disagrees may run older code than the
@@ -88,4 +92,20 @@ export async function tryEnqueueIngestFlush(
   }
 
   clearTimeout(timer)
+}
+
+/**
+ * Since when a dataset's deliveries have waited with nothing writing them, or null if they haven't
+ * for long. The stall starts at the last progress: the oldest delivery's arrival, or the last batch
+ * a flush completed after it. It stays the same while nothing moves.
+ */
+export function ingestStalledSince(summary: DatasetIngestSummary, now: number): number | null {
+  const oldest = summary.oldestReceivedAt
+
+  // A flush holds the dataset, or keeps failing on it and reports that itself.
+  if (oldest === null || summary.leaseExpiresAt !== null || summary.failureStreak > 0) return null
+
+  const stalledSince = Math.max(oldest.getTime(), summary.lastFlushedAt?.getTime() ?? 0)
+
+  return now - stalledSince < STALLED_AFTER_MS ? null : stalledSince
 }

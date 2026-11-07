@@ -25,7 +25,6 @@ import type {
   AutomaticWorkflowRunDispatchInput,
   WorkflowRunDispatchPort,
 } from "@sixb/core/internal/workflows"
-import type { DatasetIngestStorage } from "@sixb/core/storage"
 
 export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
@@ -119,15 +118,6 @@ export type CompileRoutesDiagnostic =
 export interface CompileRoutesResult {
   readonly routes: OrchestratorRoutes
   readonly diagnostics: readonly CompileRoutesDiagnostic[]
-}
-
-export interface IngestReconciliationPorts {
-  readonly inbox: Pick<DatasetIngestStorage, "summarize" | "purgeRejected">
-  readonly queue: Pick<Queues["lake"], "enqueue">
-  /** Where a dataset whose changes wait with no flush is reported: the host. */
-  readonly reporter: object
-  /** Pause between passes. Defaults to 30 s. */
-  readonly intervalMs?: number
 }
 
 export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput
