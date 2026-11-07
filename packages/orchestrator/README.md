@@ -38,31 +38,45 @@ bounded delivery → one attempt per job, in order → confirm → next delivery
 ```
 
 The unread backlog stays in the broker instead of a chain of pending application promises. A job
-that fails costs the jobs behind it one attempt, or 30 seconds if the attempt hangs. It retries on
-its own with backoff, from 250 ms doubling to 10 s, for about five minutes, which rides out a
-database failover or a broker restart with nothing lost. Past that it is dropped and reported as
-`orchestrator.dispatch.failed`. Up to 64 jobs retry at once; beyond that the subscription waits and
-the backlog stays in the broker, so an outage holds the stream instead of draining it into a retry
-list. Retry stops when the worker is stopped; shutdown drains the dispatch in flight.
+that fails costs the jobs behind it one attempt, or 30 seconds if the attempt hangs. What happens
+next depends on the failure:
 
-Each event type has its own subscription, so a route that keeps failing holds its own event type at
-most. A very busy route that fails on every event can slow the routes of its event type, to 64 jobs
-per five minutes. Already admitted siblings are safe to replay through their deterministic run/job
-identities.
+| Failure | Examples | Then |
+| --- | --- | --- |
+| About this event | A mapper that throws or returns no object, a workflow input that fails validation, a run that exists with another payload | Reported and dropped at once. The same event would fail the same way |
+| Anything else | PostgreSQL, the queue, the broker, a hung call, `storage.unavailable` | Retries beside the line, from 250 ms doubling to 10 s, for as long as it takes |
+
+The dispatchers decide what counts as the first kind: a framework error that is not retryable, or
+their own validation errors. Mapper and selector code is wrapped so that whatever it throws counts
+as a failure of the event. Everything else is unclassified, because a driver's error says nothing
+about what it means, and an unclassified failure retries: a defect then keeps a job retrying where
+an outage would, but it shows, and a dropped trigger would not. After five minutes a retrying job
+is reported once as `orchestrator.dispatch.failed` with `dropped: false`.
+
+Up to 64 jobs retry at once per subscription. Beyond that the subscription stops reading, so an
+outage leaves the backlog in the broker rather than in memory, until a job gets through. Each event
+type has its own subscription, so the types that can still dispatch keep flowing. Already admitted
+jobs are safe to replay through their deterministic run/job identities.
 
 | Subscription | While running | After process restart |
 | --- | --- | --- |
-| Direct jobs (cron, projection notifications) | Retry each job, then drop it | Live-only |
-| Event schedules | Retry each job, then drop it | Replay retained history |
+| `schedule.triggered` | Retry each job | Replay retained history |
+| `dataset.version.committed` to projections | Retry each job | Live tail: the `projections` pass reads the lake |
+| Event schedules | Retry each job | Replay retained history |
 
-What a dropped job loses:
+A stop abandons the retries. Nothing is lost by it: retained history brings a cron occurrence or an
+event schedule back at the next start, whether it was retrying or still unread, and the
+`projections` pass covers a commit. Run ids come from the event id, so what was already dispatched
+starts nothing, except a trigger that had joined another run: it has no run of its own, so a restart
+can add one run per schedule.
 
-| Job | Lost | What repairs it |
+What can still be lost:
+
+| Case | Lost | What repairs it |
 | --- | --- | --- |
-| Projection | Nothing | The `projections` pass, within 30 seconds |
-| Pipeline on `events.dataset(x).updated()` | Nothing | The `triggers` pass, within a minute, unless the pipeline never ran |
-| Any other event schedule | One trigger | A restart within retention (two days) replays it. Nothing else does |
-| Cron sync, pipeline or workflow | One occurrence | The next occurrence |
+| A failure about one event | That trigger, reported with `dropped: true` | Nothing: it is a defect to fix. A restart replays the event and reports it again |
+| An outage, or a stop, longer than retention (two days by default) | What retention dropped | Projections and `dataset.updated()` pipelines: their passes. Otherwise nothing |
+| A cron occurrence that falls while no orchestrator runs | That occurrence | The next one. It was never emitted, so there is nothing to replay |
 
 There is no durable consumer registry, definition signature, cursor table, or new application
 configuration.
@@ -87,9 +101,9 @@ lake's history:
 - On start it looks up the latest data-bearing version of every projected dataset. That covers
   commits made while no orchestrator ran and projections the deployment added or revised.
 - Every 30 seconds after that, one pass:
-  - reads the lake's change feed (`LakeStorage.listLatestVersionsSince`) from an in-memory cursor
-    and dispatches the newest data version of each changed dataset. Idle, that is one catalog
-    query;
+  - reads the lake's change feed (`LakeStorage.listLatestVersionsSince`) and dispatches the newest
+    data version of each changed dataset. Idle, that is one catalog query, shared with the
+    `triggers` pass: both read through one `LakeChangeFeed`;
   - looks up directly each projection whose dispatch failed, until it succeeds;
   - dispatches again the runs `queued` for longer than one pass interval and the runs that failed
     with a retryable `queue.enqueue_failed`, which republishes them. Runs admitted under an
@@ -120,10 +134,10 @@ what a run read, so the answer needs no record of its own.
 - A commit younger than one interval is left to its event.
 - A dispatch goes through `PipelineRunDispatcher`, so it joins a run that is still queued.
 
-An idle pass is one catalog query: it looks at no pipeline until the change feed moves. The triggers
-of a dataset that moved cost one read of its latest version, one read of the latest runs and one of
-their steps, whatever the number of pipelines. Every trigger starts unsettled, so a start pays one
-lookup per triggering dataset, and the cursor stays in memory.
+An idle pass reads the shared feed and looks at no pipeline. The triggers of a dataset that moved
+cost one read of its latest version, one read of the latest runs and one of their steps, whatever
+the number of pipelines. Every trigger starts unsettled, so a start pays one lookup per triggering
+dataset, and the cursor stays in memory.
 
 Syncs and workflows have no such pass. A sync records no input and a workflow's input comes from
 the event itself, so neither keeps what the rule needs.
@@ -142,8 +156,9 @@ own failure count. See `packages/core/docs/runtime-lifecycle.md`.
 | `triggers` | 30 s, with dataset-triggered pipelines | See above |
 
 Outbox rows are claimed under a lease, so passes in two processes never claim the same row together.
-A second orchestrator is otherwise harmless, except for `cron`: both emit each occurrence, under
-different event ids, so each dispatches its own run. `sixb deploy` runs one.
+A second orchestrator is otherwise harmless too: both emit each cron occurrence, and `occurrenceKey`
+as the idempotency key lets the broker store one, within its window of two minutes by default.
+`sixb deploy` runs one.
 
 The loop writes a heartbeat to storage, which is how `/api/status` in another process knows it runs.
 

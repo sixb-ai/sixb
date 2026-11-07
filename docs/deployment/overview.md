@@ -85,7 +85,7 @@ PostgreSQL serializes concurrent migrations. With SQLite, run migrations separat
 
 API and browser services can run multiple replicas. Queue workers can also scale through replicas or [concurrency settings](../cli/overview.md#worker-options).
 
-Run only **one orchestrator and one rules process** per project. A second orchestrator fires every cron schedule twice.
+Run only **one orchestrator and one rules process** per project. Multiple instances can duplicate work.
 
 `GET /api/status` reports whether the orchestrator keeps up: `degraded` when it stopped reporting or one of its passes keeps failing, `unknown` when it never reported, which is what a deployment with no orchestrator shows.
 

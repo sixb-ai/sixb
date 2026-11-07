@@ -36,7 +36,7 @@ Configuring `onError` replaces that default console destination, so each failure
 
 The callback covers failed action, agent, pipeline, projection, sync, workflow, and webhook runs;
 post-commit Action effects failures; failed ontology-outbox publication attempts; Rules evaluation
-passes; failed maintenance passes; and jobs the orchestrator gave up dispatching.
+passes; failed maintenance passes; and jobs the orchestrator dropped or keeps failing to dispatch.
 It does not run for successes, cancellations, retries that remain recoverable, workflow nodes or
 pipeline steps separately, or routine webhook 4xx rejections.
 

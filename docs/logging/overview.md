@@ -91,7 +91,7 @@ Pass `onError` to `createSixb()`. `reportError` is your monitoring integration. 
 | `rule.evaluation.failed` | Rule evaluation failed. |
 | `vector.indexing.failed` | Automatic vector indexing failed. The context identifies the object and profile. |
 | `maintenance.pass.failed` | A background pass of the orchestrator failed. It runs again on its own; alert on `consecutiveFailures`. |
-| `orchestrator.dispatch.failed` | A scheduled or event-triggered run could not be dispatched for five minutes, and that trigger was dropped. `target` names the run. |
+| `orchestrator.dispatch.failed` | A scheduled or event-triggered run could not be dispatched. `dropped: true`: this event can never start it, often a mapper that throws, and the trigger is gone. `dropped: false`: it has failed for five minutes and keeps retrying. `target` names the run. |
 
 Notifications may be repeated, and a process crash can prevent delivery. Use `notificationId` to deduplicate alerts. The callback does not change the operation's outcome.
 

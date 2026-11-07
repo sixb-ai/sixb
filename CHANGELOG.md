@@ -20,9 +20,9 @@ Sixb packages are versioned independently. Each release entry names the packages
 - DuckLake compacts a dataset on its own, in the process that wrote, after the commits that need
   it. Compaction never creates a dataset version, and time travel reads the same rows after it.
 - `sixb scheduler` is gone: `sixb orchestrator` runs cron schedules now. The command exits with an
-  error, so a process manager left on it shows up. Remove that process, and keep one orchestrator:
-  running a second one fires every cron twice. During the rollout, stop the old scheduler before
-  the new orchestrator starts, or occurrences due in between fire twice.
+  error, so a process manager left on it shows up. Remove that process. During the rollout, stop the
+  old scheduler before the new orchestrator starts, or occurrences due in between fire twice.
+  `sixb deploy` does this for you: it stops every service of the old release first.
 - `services.scheduler` is no longer a `sixb deploy` setting. Remove it. A deployment with
   `orchestrator: false` runs no cron.
 - `createSixbServer` keeps delivering undelivered events and purging expired records. Pass
@@ -32,9 +32,13 @@ Sixb packages are versioned independently. Each release entry names the packages
   process that answered. Regenerate clients.
 - Storage gains `maintenance_heartbeats`: migrate before starting the new services.
 - `onError` gains `maintenance.pass.failed` and `orchestrator.dispatch.failed`.
-- A dispatch that keeps failing is dropped after about five minutes and reported, instead of being
-  retried forever at the cost of every route behind it. `packages/orchestrator/README.md` lists
-  what that can lose.
+- An automatic dispatch that fails no longer holds the routes behind it. An outage retries until it
+  ends, and a failure about one event, such as a mapper that throws, is reported and dropped.
+  `packages/orchestrator/README.md` lists what can be lost.
+- A restart of the orchestrator replays the retained `schedule.triggered` events, so an occurrence
+  it had not dispatched is not lost. A cron run that had joined another may run once more.
+- `onError`'s `orchestrator.dispatch.failed` carries `dropped`, and `InMemoryBroker` now honors
+  `idempotencyKey`, as Redis and NATS do.
 
 ## 2026-11-07 — Sixb 0.2.2
 
