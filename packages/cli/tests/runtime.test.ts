@@ -949,6 +949,43 @@ describe("split production runtime roles", () => {
 
     expect(calls).toEqual([])
   })
+
+  // Reproduce: drop `startOntologyMaintenance()` from `startOrchestratorRuntime`; the event never
+  // arrives.
+  test("delivers the events a committing process left behind, with no route registered", async () => {
+    const storage = new InMemoryStorage()
+    const providers = () => ({
+      id: "cli-orchestrator-outbox-recovery",
+      ontology: [Transaction],
+      broker: new InMemoryBroker(),
+      storage,
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+
+    // A stopped process delivers nothing, so its commit stays in the outbox as after a crash.
+    const api = new SixbHost(providers())
+    await api.closeBroker()
+    await createTestSixb(api).objects.upsert("Transaction", { id: "tx-1", status: "posted" })
+
+    const sixb = new SixbHost(providers())
+    expect(await sixb.events.read()).toEqual([])
+
+    const runtime = await startOrchestratorRuntime(sixb)
+
+    try {
+      expect(runtime.orchestratorWorker).toBeNull()
+
+      const events = await waitFor(
+        () => sixb.events.read(),
+        (value) => value.length === 1
+      )
+      expect(events[0]?.type).toBe("object.created")
+    } finally {
+      await runtime.stop()
+    }
+  })
 })
 
 describe("split runtime preparation", () => {

@@ -185,7 +185,7 @@ describe("OntologyMaintenance", () => {
     const handle = await maintenance.start()
     await waitFor(() => maintenance.getSnapshot().outbox?.maxAttempts === 1)
 
-    expect(maintenance.getOperationalStatus()).toMatchObject({
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
       status: "ok",
       maintenance: { outbox: { pendingCount: 1, retryingCount: 1, maxAttempts: 1 } },
     })
@@ -195,11 +195,36 @@ describe("OntologyMaintenance", () => {
     nowMs += 2
     await maintenance.runNow()
 
-    expect(maintenance.getOperationalStatus()).toMatchObject({
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
       status: "degraded",
       maintenance: { outbox: { pendingCount: 1, maxAttempts: 3 } },
     })
     await handle.stop()
+  })
+
+  // Reproduce: build the status from `getSnapshot()` alone; with no pass in this process, the
+  // outbox reads `null` and the status stays `ok`.
+  test("reports the outbox from storage in a process that runs no pass", async () => {
+    const storage = new InMemoryStorage()
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObject(materializer)
+    let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
+    const maintenance = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher: new CountingDispatcher(storage),
+      now: () => new Date(nowMs),
+      options: { intervalMs: 60_000 },
+    })
+
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
+      status: "ok",
+      maintenance: { lastStartedAt: null, outbox: { pendingCount: 1 } },
+    })
+
+    // Nothing delivers it: two intervals later, the event shows that no process recovers it.
+    nowMs += 120_001
+    expect(await maintenance.getOperationalStatus()).toMatchObject({ status: "degraded" })
   })
 
   test("purges published rows only once they are older than the retention", async () => {

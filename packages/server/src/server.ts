@@ -1,6 +1,6 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-execution"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
@@ -108,7 +108,6 @@ export class SixbServer {
   private readonly timing: SixbRequestTimingOptions
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
-  private maintenance: OntologyMaintenanceHandle | null = null
   private stopSweeper: (() => void) | null = null
 
   constructor(options: SixbServerOptions) {
@@ -177,7 +176,7 @@ export class SixbServer {
   }
 
   async start(): Promise<void> {
-    if (this.app !== null || this.bunServer !== null || this.maintenance !== null) {
+    if (this.app !== null || this.bunServer !== null) {
       throw new Error("[SixbServer] Server is already running.")
     }
 
@@ -191,8 +190,9 @@ export class SixbServer {
     // needs them waits for them; reading them now spares that read the wait.
     warmAppliedMarkings(this.hostRuntime)
 
-    const maintenance = await this.hostRuntime.startOntologyMaintenance()
-    this.maintenance = maintenance
+    // Undelivered events are the orchestrator's to recover. The API starts only the schema check
+    // behind `/ready`.
+    this.hostRuntime.prepareReadiness()
 
     try {
       this.app = createSixbApi(this)
@@ -205,8 +205,6 @@ export class SixbServer {
     } catch (error) {
       this.app = null
       this.bunServer = null
-      this.maintenance = null
-      await maintenance.stop()
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`[SixbServer] Failed to listen on ${this.hostname}:${this.port}: ${message}`)
     }
@@ -233,10 +231,6 @@ export class SixbServer {
       await this.app.stop()
       this.app = null
     }
-
-    const maintenance = this.maintenance
-    this.maintenance = null
-    await maintenance?.stop()
   }
 }
 

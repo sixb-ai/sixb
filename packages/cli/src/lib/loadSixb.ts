@@ -24,6 +24,7 @@ const REQUIRED_LIFECYCLE_METHODS = [
   "withScope",
   "startOntologyMaintenance",
   "getOntologyOperationalStatus",
+  "prepareReadiness",
   "checkReadiness",
   "closeLogger",
   "closeConnectors",
