@@ -216,12 +216,7 @@ export async function publishAgentComputerActivity(
     ...input,
     occurredAt: new Date().toISOString(),
   }
-  await appendActivity(
-    broker,
-    event,
-    event.computerId,
-    `${event.computerId}:${event.folder}:${event.online}:${event.occurredAt}`
-  )
+  await appendActivity(broker, event, event.computerId)
 }
 
 /** Announce that a thread moved, so whatever has it open follows. */
@@ -235,14 +230,13 @@ export async function publishAgentThreadMoved(
     ...input,
     occurredAt: new Date().toISOString(),
   }
-  await appendActivity(broker, event, event.threadId, `${event.threadId}:moved:${event.occurredAt}`)
+  await appendActivity(broker, event, event.threadId)
 }
 
 async function appendActivity(
   broker: Broker,
   event: AgentComputerActivityEvent | AgentThreadMovedEvent,
-  key: string,
-  idempotencyKey: string
+  key: string
 ): Promise<void> {
   await broker.ensureStream({ projectId: event.projectId, stream: agentActivityStreamDefinition() })
   await broker.append({
@@ -254,7 +248,8 @@ async function appendActivity(
         key,
         // The event is composed only of validated JSON primitives.
         payload: event as unknown as JsonValue,
-        idempotencyKey,
+        // Every announcement is a new one, even a second in the same millisecond.
+        idempotencyKey: crypto.randomUUID(),
       },
     ],
   })
