@@ -50,7 +50,7 @@ async function runProcess(stateDir: string, primitive: string, phase: string) {
 /** A lease only lapses with time. What the time would be is not what this test is about. */
 function letLeaseRunOut(stateDir: string): void {
   const database = new Database(join(stateDir, "storage", "storage.sqlite"))
-  const past = new Date(0).toISOString()
+  const past = new Date(Date.now() - 60 * 60_000).toISOString()
 
   database.run("UPDATE sync_runs SET execution_queue_lease_expires_at = ?", [past])
   database.run("UPDATE pipeline_runs SET execution_queue_lease_expires_at = ?", [past])
