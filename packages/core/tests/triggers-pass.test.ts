@@ -232,11 +232,11 @@ describe("beside the `runs` pass", () => {
       pipelineId: buildReport.id,
     })
     await scene.commit("order-2")
-    const reconciler = scene.createReconciler()
+    const pass = scene.createPass()
 
-    await reconciler.pass(signal, scene.later())
+    await pass.run(signal, scene.later())
     await expect(runsPass(scene)).resolves.toMatchObject({ republished: 1 })
-    await reconciler.pass(signal, scene.later())
+    await pass.run(signal, scene.later())
 
     expect((await queuedRuns(scene.storage)).map((run) => run.id)).toEqual(["lost"])
     expect((await scene.publishedJobs()).map((claimed) => claimed.job.id)).toEqual(["lost"])
@@ -254,14 +254,14 @@ describe("beside the `runs` pass", () => {
     tick()
     setSystemTime(new Date(Date.now() + ORPHANED_RUN_AFTER_MS))
 
-    const reconciler = scene.createReconciler()
-    await reconciler.pass(signal, scene.later())
+    const pass = scene.createPass()
+    await pass.run(signal, scene.later())
     expect(await queuedRuns(scene.storage)).toEqual([])
 
     await expect(runsPass(scene)).resolves.toMatchObject({ settled: 1 })
 
-    await reconciler.pass(signal, scene.later())
-    await reconciler.pass(signal, scene.later())
+    await pass.run(signal, scene.later())
+    await pass.run(signal, scene.later())
 
     expect(await queuedRuns(scene.storage)).toHaveLength(1)
   })

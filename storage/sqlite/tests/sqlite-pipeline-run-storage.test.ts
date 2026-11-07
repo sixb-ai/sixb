@@ -5,7 +5,7 @@ import {
   type PipelineRunStorage,
   type SixbFailure,
 } from "@sixb/core/storage"
-import { createTestPipelineExecution, startTestPipelineRun, startTestRun } from "@sixb/core/testing"
+import { createTestPipelineExecution, startTestPipelineRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 
 const FAILURE: SixbFailure<PipelineRunFailureCode> = {

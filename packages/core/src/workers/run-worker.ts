@@ -1,13 +1,15 @@
 import { withFailureMessage } from "../errors/internal"
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { ClaimedQueueJob, QueueJob } from "../queues"
+import { type BackoffPolicy, backoffDelay } from "../shared/backoff"
 import type {
   ConfirmRunExecutionInput,
+  ExecutionRecord,
+  ExecutionStorage,
   ReleaseRunExecutionInput,
   RunClaim,
   RunExecution,
 } from "../storage"
-import type { ClaimableRun } from "../storage/run-claim"
 import type { QueueDelivery } from "./queue-delivery"
 import {
   QueueWorker,
@@ -18,14 +20,15 @@ import {
 import { projectRunLease } from "./run-lease"
 
 /** A run a worker can lose and take up again: what the shared recovery reads of it. */
-export interface RecoverableRun<TFailureCode extends SixbErrorCode = SixbErrorCode> {
+interface RecoverableRun<TFailureCode extends SixbErrorCode = SixbErrorCode> {
   readonly id: string
+  readonly executionId: string
   readonly status: string
   readonly attempt: number
   readonly error?: SixbFailure<TFailureCode>
 }
 
-export interface RunRecoveryStorage<TRun> {
+interface RunRecoveryStorage<TRun> {
   getById(params: { readonly projectId: string; readonly id: string }): Promise<TRun | null>
   confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<unknown>
   releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
@@ -37,12 +40,14 @@ export interface RunWorkerConfig<
   TRun,
 > extends QueueWorkerConfig<TJob, TFailureCodes> {
   readonly runs: RunRecoveryStorage<TRun>
+  /** Where a run's durable execution is read. */
+  readonly executions: Pick<ExecutionStorage, "getById">
   /** How many executions a run gets. Defaults to five. */
   readonly maxAttempts?: number
 }
 
 /** A queue job that stands for a durable run. */
-export type RunQueueJob = QueueJob<string, { readonly runId: string }>
+type RunQueueJob = QueueJob<string, { readonly runId: string }>
 
 /** A claim, or a run the job takes by a transition of its own: it holds no token until then. */
 export type RunDelivery<TRun> = RunClaim<TRun> | { readonly outcome: "woken"; readonly run: TRun }
@@ -103,8 +108,7 @@ function runAttemptsSpent(runId: string, attempts: number): Error {
 const DEFAULT_MAX_ATTEMPTS = 5
 /** Floor for a duplicate's deferral, so a skewed lease clock cannot make it redeliver at once. */
 const OWNED_ELSEWHERE_MIN_DEFER_MS = 1_000
-const RETRY_INITIAL_DELAY_MS = 1_000
-const RETRY_MAX_DELAY_MS = 60_000
+const RETRY_BACKOFF: BackoffPolicy = { initialMs: 1_000, maxMs: 60_000 }
 /**
  * A finished run wakes the run that waits for it. This is for when that word gets lost: a slow
  * look, once per job, and a job waiting behind a sibling costs nothing in between.
@@ -122,11 +126,13 @@ export abstract class RunWorker<
   TRun extends RecoverableRun<TFailureCodes[number]>,
 > extends QueueWorker<TJob, TFailureCodes> {
   private readonly runs: RunRecoveryStorage<TRun>
+  private readonly executions: RunWorkerConfig<TJob, TFailureCodes, TRun>["executions"]
   private readonly maxAttempts: number
 
   constructor(config: RunWorkerConfig<TJob, TFailureCodes, TRun>) {
     super(config)
     this.runs = config.runs
+    this.executions = config.executions
     this.maxAttempts = config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
   }
 
@@ -143,16 +149,25 @@ export abstract class RunWorker<
     execution: RunExecution
   ): Promise<RunDelivery<TRun>>
 
+  /** The durable execution behind a run: a run with none has nothing to run under. */
+  protected async requireExecution(run: TRun): Promise<ExecutionRecord> {
+    const execution = await this.executions.getById({
+      projectId: this.config.projectId,
+      id: run.executionId,
+    })
+    if (execution) return execution
+
+    throw new Error(
+      `[SixbQueueWorker] Run '${run.id}' references missing execution '${run.executionId}'.`
+    )
+  }
+
   /** When a run that could not finish gets its next delivery. */
   protected nextRetryAt(claimed: ClaimedQueueJob<TJob>): string {
-    const exponent = Math.min(Math.max(claimed.job.attempt - 1, 0), 16)
-    const delayMs = Math.min(RETRY_INITIAL_DELAY_MS * 2 ** exponent, RETRY_MAX_DELAY_MS)
+    const delayMs = backoffDelay(Math.max(claimed.job.attempt - 1, 0), RETRY_BACKOFF)
 
     return new Date(Date.now() + delayMs).toISOString()
   }
-
-  /** This delivery found its run waiting for `sibling`, which may be the one that lost its job. */
-  protected async onWaitingForSibling(_sibling: ClaimableRun): Promise<void> {}
 
   protected async execute(
     claimed: ClaimedQueueJob<TJob>,
@@ -165,10 +180,7 @@ export abstract class RunWorker<
     if (claim.outcome === "settled") return
     if (claim.outcome === "held") throw new RunOwnedElsewhereError(claim.run.id, claim.ownedUntil)
 
-    if (claim.outcome === "waiting") {
-      await this.onWaitingForSibling(claim.sibling)
-      throw new RunWaitingForSiblingError(claim.run.id)
-    }
+    if (claim.outcome === "waiting") throw new RunWaitingForSiblingError(claim.run.id)
 
     const stopProjectingLease = projectRunLease(delivery, this.runs, {
       projectId: this.config.projectId,

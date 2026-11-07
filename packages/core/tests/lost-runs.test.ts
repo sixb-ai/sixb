@@ -4,7 +4,7 @@ import type { EventsAppendInput } from "../src/events/service"
 import { ORPHANED_RUN_AFTER_MS } from "../src/storage/run-claim"
 import { claimTestRun, queueTestPipelineRun } from "../src/testing"
 import { queueTestSyncRun } from "../src/testing/sync-execution"
-import { republishLostRuns } from "../src/workers/lost-runs"
+import { countLostRuns, republishLostRuns } from "../src/workers/lost-runs"
 
 const projectId = "lost-runs"
 const JOB_ON_ITS_WAY_MS = 30_000
@@ -26,6 +26,7 @@ function createFixture() {
     queues,
     emitted,
     pass: (limit?: number) => republishLostRuns({ projectId, storage, queues, events, now, limit }),
+    count: () => countLostRuns({ projectId, storage, queues, events, now }),
     queueSync: (id: string, queuedAt = longAgo) =>
       queueTestSyncRun(storage, {
         id,
@@ -279,13 +280,49 @@ describe("republishLostRuns", () => {
     fixture.storage.syncRuns.finish = (input) =>
       input.id === "sync-old" ? Promise.reject(new Error("row refused")) : finish(input)
 
-    await expect(fixture.pass()).rejects.toThrow("Could not end every run of an older version")
+    await expect(fixture.pass()).rejects.toThrow("Could not end every run beyond recovery")
 
     const [job] = await fixture.claimSyncJobs()
     expect(job?.job.id).toBe("sync-lost")
   })
 
   // Drop the settling from `recoverLane` to watch the trigger pass wait on this run for good.
+  // Reproduce: drop `isStaleRun` from `isBeyondRecovery`; the run gets a job and starts, a week late.
+  test("ends a run lost for a week instead of bringing it back", async () => {
+    const fixture = createFixture()
+    const longer = new Date(now.getTime() - 7 * 24 * 60 * 60_000)
+    await fixture.queueSync("sync-stale", longer)
+    await fixture.queuePipeline("pipeline-stale", longer)
+    await fixture.queueSync("sync-outage", new Date(longer.getTime() + 60_000))
+
+    await expect(fixture.pass()).resolves.toEqual({ republished: 1, settled: 2 })
+
+    await expect(
+      fixture.storage.syncRuns.getById({ projectId, id: "sync-stale" })
+    ).resolves.toMatchObject({ status: "cancelled", error: { code: "runtime.cancelled" } })
+    expect((await fixture.claimSyncJobs()).map(({ job }) => job.id)).toEqual(["sync-outage"])
+    expect(await fixture.claimPipelineJobs()).toEqual([])
+  })
+
+  test("counts what the next pass would do, and moves nothing", async () => {
+    const fixture = createFixture()
+    const longer = new Date(now.getTime() - 7 * 24 * 60 * 60_000)
+    await fixture.queueSync("sync-stale", longer)
+    await fixture.queueSync("sync-lost")
+    await fixture.queuePipeline("pipeline-lost")
+
+    await expect(fixture.count()).resolves.toEqual([
+      { primitive: "sync", goOn: 1, end: 1 },
+      { primitive: "pipeline", goOn: 1, end: 0 },
+      { primitive: "workflow", goOn: 0, end: 0 },
+    ])
+
+    expect(await fixture.claimSyncJobs()).toEqual([])
+    await expect(
+      fixture.storage.syncRuns.getById({ projectId, id: "sync-stale" })
+    ).resolves.toMatchObject({ status: "queued" })
+  })
+
   test("ends a run of an older version once its worker cannot still be alive", async () => {
     const fixture = createFixture()
     await leaveRunningWithoutLease(fixture, new Date(now.getTime() - ORPHANED_RUN_AFTER_MS))

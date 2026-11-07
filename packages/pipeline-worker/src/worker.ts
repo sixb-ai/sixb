@@ -17,7 +17,7 @@ import {
   emitPipelineRunStepStarted,
 } from "./events"
 import { runPipelineJob } from "./run-pipeline-job"
-import type { PipelineWorkerContext, PipelineWorkerHost } from "./types"
+import type { PipelineWorkerContext, PipelineWorkerHost, RunPipelineJobInput } from "./types"
 
 export interface PipelineWorkerOptions {
   /** Maximum pipeline run jobs this worker claims and executes at once. Defaults to 1. */
@@ -49,6 +49,7 @@ export class PipelineWorker extends RunWorker<
       workerId: `pipeline-worker-${host.id}`,
       claimLimit: options.concurrency,
       runs: pipelineRunsStorage,
+      executions: host.storage.executions,
     })
 
     this.context = buildPipelineContext(host, pipelineRunsStorage)
@@ -68,20 +69,11 @@ export class PipelineWorker extends RunWorker<
 
   protected async executeRun(
     claim: HeldRunClaim<PipelineRunRecord>,
-    claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
+    _claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
     const { run } = claim
-
-    const durableExecution = await this.host.storage.executions.getById({
-      projectId: this.host.id,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw new Error(
-        `[SixbPipelineWorker] Pipeline run '${run.id}' references missing execution '${run.executionId}'.`
-      )
-    }
+    const durableExecution = await this.requireExecution(run)
 
     // Pipeline steps currently use host-owned lake and run storage directly. Binding still happens
     // here so the durable execution and its trusted primitive authority are validated before work.
@@ -94,39 +86,45 @@ export class PipelineWorker extends RunWorker<
       runtime: this.context,
       claim,
       signal,
-      onRunStarted: (run) =>
-        emitPipelineRunStarted(this.host.events, run, durableExecution.correlationId),
-      onRunFinished: (run) =>
-        emitPipelineRunFinished(this.host.events, run, durableExecution.correlationId),
-      onRunFailed: (error, run, failure) => {
+      ...this.hooksFor(run, durableExecution.correlationId),
+    })
+  }
+
+  /** What a run tells others as it goes, all under the correlation id of its execution. */
+  private hooksFor(
+    run: PipelineRunRecord,
+    correlationId: string
+  ): Omit<RunPipelineJobInput, "runtime" | "claim" | "signal"> {
+    const { events } = this.host
+
+    return {
+      onRunStarted: (started) => emitPipelineRunStarted(events, started, correlationId),
+      onRunFinished: (finished) => emitPipelineRunFinished(events, finished, correlationId),
+
+      onRunFailed: (error, failed, failure) => {
         reportRunFailure(this.host, error, {
           projectId: this.host.id,
-          attempt: claimed.job.attempt,
+          attempt: failed.attempt,
           runKind: "pipeline",
-          run: {
-            runId: run.id,
-            pipelineId: run.pipelineId,
-          },
+          run: { runId: failed.id, pipelineId: failed.pipelineId },
           failure,
         })
       },
+
       onStepStarted: (step, context) =>
-        emitPipelineRunStepStarted(this.host.events, step, context, durableExecution.correlationId),
+        emitPipelineRunStepStarted(events, step, context, correlationId),
+
       onStepFinished: (step, context) =>
-        emitPipelineRunStepFinished(
-          this.host.events,
-          step,
-          context,
-          durableExecution.correlationId
-        ),
+        emitPipelineRunStepFinished(events, step, context, correlationId),
+
       onStepCommitted: (step) =>
         emitDatasetVersionCommitted(
-          this.host.events,
+          events,
           { id: run.id, pipelineId: run.pipelineId },
           step,
-          durableExecution.correlationId
+          correlationId
         ),
-    })
+    }
   }
 }
 

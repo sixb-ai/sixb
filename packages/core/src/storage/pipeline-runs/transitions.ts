@@ -1,14 +1,17 @@
 import type { FinishPipelineRunInput, PipelineRunStatus } from "./types"
 
 /**
- * A run finishes from `running`. One that never started can only fail: its job could not be
- * published (`queue.enqueue_failed`), or the job ended before starting it.
+ * A run succeeds from `running`. One that never started can fail, its job not published
+ * (`queue.enqueue_failed`) or ended before starting it, or end `cancelled`, lost for too long.
  */
 export function canFinishPipelineRun(
   status: PipelineRunStatus,
   input: FinishPipelineRunInput
 ): boolean {
-  if (input.status !== "failed") return status === "running"
-  if (input.error.code === "queue.enqueue_failed") return status === "queued"
+  if (input.status === "succeeded") return status === "running"
+  if (input.status === "failed" && input.error.code === "queue.enqueue_failed") {
+    return status === "queued"
+  }
+
   return status === "queued" || status === "running"
 }

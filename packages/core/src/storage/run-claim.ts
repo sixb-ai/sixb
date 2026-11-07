@@ -14,6 +14,12 @@ export interface RunExecution {
  */
 export const ORPHANED_RUN_AFTER_MS = 24 * 60 * 60_000
 
+/**
+ * A run lost for this long is ended rather than brought back: whatever it was asked for is a week
+ * old, and a lost job cannot be told from a stopped queue, so the bound sits past a long outage.
+ */
+const STALE_RUN_AFTER_MS = 7 * 24 * 60 * 60_000
+
 export interface ClaimRunInput {
   readonly projectId: string
   readonly id: string
@@ -107,15 +113,6 @@ export function isOrphanedRun(run: ClaimableRun, now: Date): boolean {
   )
 }
 
-/** Whether a lease a run shows has lapsed, so that it takes a delivery to go on. */
-export function hasLapsedLease(run: ClaimableRun, now: Date): boolean {
-  return (
-    run.status === "running" &&
-    run.execution !== undefined &&
-    run.execution.queueLeaseExpiresAt.getTime() <= now.getTime()
-  )
-}
-
 /**
  * The one decision every delivery of a run makes, in the transaction that holds the run: `queued`
  * starts, `running` resumes under a new token once nothing holds it, and anything else is over. A
@@ -136,7 +133,8 @@ export function planRunClaim<TRun extends ClaimableRun>(
     return { take: false, claim: { outcome: "settled", run } }
   }
 
-  if (run.status === "queued" && sibling && !isOrphanedRun(sibling, now)) {
+  // A sibling with no execution was started by an older version, which never promised this rule.
+  if (run.status === "queued" && sibling?.execution) {
     return { take: false, claim: { outcome: "waiting", run, sibling } }
   }
 
@@ -157,6 +155,11 @@ export function planRunClaim<TRun extends ClaimableRun>(
 type LostRunCandidate = ClaimableRun & {
   readonly projectId: string
   readonly queuedAt?: Date
+}
+
+/** Whether a lost run has been lost for so long that it should end, not go on. */
+export function isStaleRun(run: Omit<LostRunCandidate, "projectId">, now: Date): boolean {
+  return now.getTime() - lostSince(run) >= STALE_RUN_AFTER_MS
 }
 
 /**
@@ -189,7 +192,7 @@ function isLostRun(run: LostRunCandidate, input: ListLostRunsInput): boolean {
   return run.startedAt !== undefined && run.startedAt.getTime() <= input.orphanedBefore.getTime()
 }
 
-function lostSince(run: LostRunCandidate): number {
+function lostSince(run: Omit<LostRunCandidate, "projectId">): number {
   return (run.execution?.queueLeaseExpiresAt ?? run.startedAt ?? run.queuedAt ?? 0).valueOf()
 }
 

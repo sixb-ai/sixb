@@ -418,23 +418,6 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
     return rowToWorkflowRunRecord(record)
   }
-
-  private requireStatus(
-    projectId: string,
-    id: string,
-    status: WorkflowRunRecord["status"]
-  ): WorkflowRunDatabaseRow {
-    const row = this.db
-      .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
-      .get(projectId, id) as WorkflowRunDatabaseRow | null
-    if (!row) throw new WorkflowRunError(`[SixbSqlite] Workflow run '${id}' not found.`)
-    if (row.status !== status) {
-      throw new WorkflowRunError(
-        `[SixbSqlite] Workflow run '${id}' must be ${status} (status '${row.status}').`
-      )
-    }
-    return row
-  }
 }
 
 export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorage {

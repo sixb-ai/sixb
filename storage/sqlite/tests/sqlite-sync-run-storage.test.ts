@@ -5,7 +5,7 @@ import {
   type SyncRunFailureCode,
   type SyncRunStorage,
 } from "@sixb/core/storage"
-import { createTestSyncExecution, startTestRun, startTestSyncRun } from "@sixb/core/testing"
+import { createTestSyncExecution, startTestSyncRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 
 const FAILURE: SixbFailure<SyncRunFailureCode> = {

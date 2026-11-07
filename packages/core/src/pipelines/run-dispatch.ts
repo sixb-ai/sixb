@@ -2,16 +2,17 @@ import { reportRunFailure } from "../error-reporting/capability"
 import { toSixbFailure } from "../errors/internal"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
-import {
-  dispatchQueuedRun,
-  hasAutomaticRunProvenance,
-  type QueuedRunPrimitive,
-  type RunPublication,
-} from "../execution/queued-run-dispatch"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
 import type { CreateExecutionInput, PipelineRunRecord, Storage } from "../storage"
 import { PIPELINE_RUN_FAILURE_CODES, PipelineRunError } from "../storage"
+import {
+  dispatchQueuedRun,
+  hasAutomaticRunProvenance,
+  type QueuedRunPrimitive,
+  type QueuedRunStore,
+  type RunPublication,
+} from "../workers/queued-run-dispatch"
 import { PipelineError } from "./errors"
 import type { PipelineRunRequestOptions, PipelineRunRequestResult } from "./request"
 import type { PipelineDefinition } from "./types"
@@ -50,6 +51,8 @@ interface DispatchPipelineRunInput extends PipelineRunRequestOptions {
   readonly metadata?: Readonly<Record<string, string>>
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
   readonly validateExistingRun?: (run: PipelineRunRecord, storage: Storage) => Promise<void>
+  /** A trigger, not a caller (see `dispatchQueuedRun`). */
+  readonly automatic?: boolean
   /** Return a run of this Pipeline that has not started yet instead of queueing another one. */
   readonly joinQueuedRun?: boolean
 }
@@ -71,6 +74,7 @@ export class PipelineRunDispatcher implements PipelineRunDispatchPort {
       queue: this.dependencies.queues.pipelines,
       runId: input.runId,
       metadata: input.metadata,
+      automatic: true,
       validateExistingRun: (run, storage) =>
         assertAutomaticExecutionIdentity(storage, this.dependencies.id, input, run),
       joinQueuedRun: true,
@@ -101,6 +105,7 @@ export async function dispatchPipelineRun(
     metadata: input.metadata,
     createExecution: input.createExecution,
     validateExistingRun: input.validateExistingRun,
+    automatic: input.automatic,
     joinQueuedRun: input.joinQueuedRun,
   })
 }
@@ -118,37 +123,8 @@ function pipelineRunPrimitive(
     label: "Pipeline",
     failureDetails: (run) => ({ pipelineId: run.pipelineId }),
 
-    runs: requirePipelineRunStorage,
+    store: (storage) => pipelineRunStore(input, requirePipelineRunStorage(storage)),
     matches: (run) => run.pipelineId === pipeline.id,
-
-    queueRun: (storage, run) =>
-      requirePipelineRunStorage(storage).queue({
-        projectId,
-        id: run.id,
-        executionId: run.executionId,
-        pipelineId: pipeline.id,
-        queuedAt: run.queuedAt,
-      }),
-
-    requeueRun: (storage, run, queuedAt) =>
-      requirePipelineRunStorage(storage).queue({
-        projectId,
-        id: run.id,
-        executionId: run.executionId,
-        pipelineId: run.pipelineId,
-        queuedAt,
-      }),
-
-    async oldestQueuedRun(storage) {
-      const { runs } = await requirePipelineRunStorage(storage).list({
-        projectId,
-        pipelineId: pipeline.id,
-        statuses: ["queued"],
-        order: "asc",
-        limit: 1,
-      })
-      return runs[0]
-    },
 
     async enqueue(job) {
       const [enqueued] = await input.queue.enqueue({
@@ -187,9 +163,49 @@ function pipelineRunPrimitive(
 
     result: toRequestResult,
 
-    runError: (message) => new PipelineRunError(message),
-    isRunError: (error) => error instanceof PipelineRunError,
-    requestError: (message) => new PipelineError(message),
+    RunError: PipelineRunError,
+    RequestError: PipelineError,
+  }
+}
+
+function pipelineRunStore(
+  input: DispatchPipelineRunInput,
+  runs: NonNullable<Storage["pipelineRuns"]>
+): QueuedRunStore<PipelineRunRecord> {
+  const { projectId, pipeline } = input
+
+  return {
+    getById: (params) => runs.getById(params),
+
+    async oldestQueued() {
+      const { runs: queued } = await runs.list({
+        projectId,
+        pipelineId: pipeline.id,
+        statuses: ["queued"],
+        order: "asc",
+        limit: 1,
+      })
+
+      return queued[0]
+    },
+
+    queue: (run) =>
+      runs.queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        pipelineId: pipeline.id,
+        queuedAt: run.queuedAt,
+      }),
+
+    requeue: (run, queuedAt) =>
+      runs.queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        pipelineId: run.pipelineId,
+        queuedAt,
+      }),
   }
 }
 

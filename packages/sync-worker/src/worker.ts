@@ -1,20 +1,12 @@
-import type {
-  DomainEventLog,
-  LakeStorage,
-  Queues,
-  SixbDefinitions,
-  SixbFailure,
-  Storage,
-} from "@sixb/core"
+import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
   bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
-import { type ClaimableRun, hasLapsedLease } from "@sixb/core/internal/storage"
 import { resolveSyncConnectorSources } from "@sixb/core/internal/syncs"
-import { type HeldRunClaim, RunWorker, recoveryJob } from "@sixb/core/internal/workers"
+import { type HeldRunClaim, RunWorker, wakeJobId } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
 import {
@@ -63,6 +55,7 @@ export class SyncWorker extends RunWorker<
       workerId: `sync-worker-${host.id}`,
       claimLimit: options.concurrency,
       runs: requireSyncRuns(host),
+      executions: host.storage.executions,
     })
 
     this.host = host
@@ -81,20 +74,12 @@ export class SyncWorker extends RunWorker<
 
   protected async executeRun(
     claim: HeldRunClaim<SyncRunRecord>,
-    claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
+    _claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
     const { run } = claim
 
-    const durableExecution = await this.host.storage.executions.getById({
-      projectId: this.host.id,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw new Error(
-        `[SixbSyncWorker] Sync run '${run.id}' references missing execution '${run.executionId}'.`
-      )
-    }
+    const durableExecution = await this.requireExecution(run)
 
     const execution = bindDurablePrimitiveExecution(this.host, {
       execution: durableExecution,
@@ -119,7 +104,7 @@ export class SyncWorker extends RunWorker<
       onRunFailed: (error, run, failure) => {
         reportRunFailure(this.host, error, {
           projectId: this.host.id,
-          attempt: claimed.job.attempt,
+          attempt: run.attempt,
           runKind: "sync",
           run: {
             runId: run.id,
@@ -128,21 +113,6 @@ export class SyncWorker extends RunWorker<
           failure,
         })
       },
-    })
-  }
-
-  /**
-   * The sibling this run waits for may be one that lost its job: after a restart with an in-memory
-   * queue, nothing else would ever bring it back, and neither this run nor any later one could
-   * start. Published under the id the recovery pass uses, so the two make one job.
-   */
-  protected override async onWaitingForSibling(sibling: ClaimableRun): Promise<void> {
-    if (!hasLapsedLease(sibling, new Date())) return
-
-    const { id, runId } = recoveryJob(sibling)
-    await this.host.queues.syncRuns.enqueue({
-      projectId: this.host.id,
-      jobs: [{ id, type: "sync.run.requested", payload: { runId } }],
     })
   }
 
@@ -164,7 +134,7 @@ export class SyncWorker extends RunWorker<
         projectId: this.host.id,
         jobs: [
           {
-            id: `${next.id}:wake:${finished.id}`,
+            id: wakeJobId(next.id, finished.id),
             type: "sync.run.requested",
             payload: { runId: next.id },
           },
@@ -210,7 +180,8 @@ async function emitSyncRunFinishedEvents(
   createdVersion?: DatasetVersion
 ): Promise<void> {
   // Sync owns notification after its run is finalized; the shared dataset writer returns the
-  // created version but does not publish events. Durable delivery is a separate follow-up.
+  // created version but does not publish events. If these are lost, the `projections` and
+  // `triggers` passes find the version in the lake.
   await host.events?.emit(
     {
       events: [

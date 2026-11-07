@@ -256,6 +256,23 @@ export function runRunClaimStorageContractSuite<TStorage extends RunClaimStorage
       })
     })
 
+    // Reproduce: count any running sibling in `planRunClaim`; the second run then waits for a day.
+    test("Sync: a run of an older version holds no later run back", async () => {
+      await withStorage(async (storage) => {
+        const runs = requireRuns(storage.syncRuns)
+        const { queue } = syncPrimitive(storage)
+        await queue("old")
+        await queue("new")
+
+        await runs.startOrReclaim({ projectId, id: "old", execution: held("old"), claimedAt })
+        await options.forgetExecution(storage, "sync_runs", "old")
+
+        await expect(
+          runs.startOrReclaim({ projectId, id: "new", execution: held("new"), claimedAt })
+        ).resolves.toMatchObject({ outcome: "started" })
+      })
+    })
+
     test("Pipeline: only the execution that holds the run writes its steps", async () => {
       await withStorage(async (storage) => {
         const runs = requireRuns(storage.pipelineRuns)
@@ -679,6 +696,16 @@ function describeClaims<
           claimedAt: stillLater,
         })
       ).resolves.toMatchObject({ outcome: "settled", run: { status: "cancelled" } })
+    })
+  })
+
+  test(`${name}: a run that never started can be cancelled`, async () => {
+    await withRun(async (runs) => {
+      await runs.cancel("run")
+
+      await expect(runs.getById({ projectId, id: "run" })).resolves.toMatchObject({
+        status: "cancelled",
+      })
     })
   })
 

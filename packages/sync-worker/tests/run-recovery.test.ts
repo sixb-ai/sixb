@@ -14,6 +14,7 @@ import {
   type SixbHostOptions,
   type SyncDefinition,
 } from "@sixb/core"
+import { republishLostRuns } from "@sixb/core/internal/workers"
 import { RecoveryGate, runRunRecoveryContractSuite } from "@sixb/core/testing"
 import { SyncWorker } from "../src"
 
@@ -495,7 +496,7 @@ describe("SyncWorker recovery", () => {
     await dead.stop()
   })
 
-  // Empty `onWaitingForSibling` to watch the second run wait for good, with nothing left to wake it.
+  // Skip the pass to watch the second run wait for good, with nothing left to wake it.
   test("a restart that loses the queue does not wedge the sync", async () => {
     let held = true
     const gate = new RecoveryGate()
@@ -523,6 +524,14 @@ describe("SyncWorker recovery", () => {
       lakeStorage: host.lakeStorage,
     })
     await queueRun(restarted, "run-2")
+
+    await republishLostRuns({
+      projectId: restarted.id,
+      storage: restarted.storage,
+      queues: restarted.queues,
+      events: restarted.events,
+      now: new Date(Date.now() + 60_000),
+    })
 
     await runWorkerUntil(
       restarted,
