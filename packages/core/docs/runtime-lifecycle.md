@@ -80,13 +80,15 @@ builder. See [Logging](../../../docs/logging/overview.md).
 
 ### Lifecycle
 
-Constructing the host starts no timers. The server owns ontology maintenance automatically; embedded hosts without a server acquire it explicitly.
+Constructing the host starts no timers. All of a project's upkeep runs as passes on one `MaintenanceLoop`, and `sixb orchestrator` hosts that loop. A host embedded without an orchestrator starts what it needs on its own; `createSixbServer` does so for ontology maintenance unless told not to.
 
 | Method | Effect |
 | --- | --- |
-| `host.scheduler.start()` | Start the scheduler for discovered `schedules/` |
-| `host.scheduler.stop()` | Stop the scheduler |
-| `host.startOntologyMaintenance()` | Start outbox recovery and bounded retention; returns a stop handle |
+| `host.startMaintenance(passes)` | Run ontology maintenance, cron and `passes` on one loop that beats to storage; returns a stop handle. The orchestrator calls it |
+| `host.scheduler.start()` | Run cron alone on a loop of its own. Beside an orchestrator, every occurrence fires twice |
+| `host.scheduler.stop()` | Stop it |
+| `host.startOntologyMaintenance()` | Run outbox recovery and bounded retention alone on a loop of its own; returns a stop handle |
+| `host.getOntologyOperationalStatus()` | Read the last heartbeat and the outbox from storage. Works in a process that runs no pass |
 
 ```ts
 const host = await createSixb({ /* providers */ })
@@ -99,6 +101,28 @@ await maintenance.stop()
 ```
 
 `OntologyMaintenance` recovers pending event publication and applies the configured retention policy. It runs once at startup, then every 60 seconds by default, and never removes pending work.
+
+#### The maintenance loop
+
+One timer wakes for whatever comes next: a pass that is due, a run's budget, or a beat. A pass is an id, a budget, a due time and a run:
+
+```ts
+const pass = everyMs({
+  id: "ingest",
+  intervalMs: 30_000,
+  budgetMs: 60_000,
+  run: (signal) => reconcile(signal),
+})
+```
+
+`everyMs` covers an interval. A pass with a due time of its own, like `cron`, implements `MaintenancePass` and answers `nextRunAt(now, lastFinishedAt)`. To add one to the orchestrator, return it from `createReconciliationPasses` in `@sixb/orchestrator`.
+
+- **Passes never wait for each other.** Each has at most one run in flight, and a run that hangs costs the others nothing.
+- **A run has a budget.** Past it the run's signal aborts and the run counts as a failure, then as one more per further budget. It keeps its slot until it ends: starting another beside it would break "one run at a time". A run that stops on the abort should throw, or return having done nothing it needs recorded.
+- **A failure is the pass's own.** Throw from `run`. The loop counts it, reports it as `maintenance.pass.failed` and runs the pass again when it is next due. A pass that wants to do all it can collects its failures and throws an `AggregateError` at the end.
+- **Nothing durable but the heartbeat.** The loop rewrites one row per project: when it beat, how often it promises to, and each pass's last success and consecutive failures. Whatever a pass remembers, such as a change-feed cursor, stays in memory, and its first run after a restart rebuilds it.
+
+`/api/status` turns the row into `ok`, `degraded` (the beat is older than two intervals, or a pass failed twice in a row, or the outbox is stuck) or `unknown` (no loop ever beat).
 
 Release connector, blob, broker, and logger resources with `host.closeConnectors()`,
 `host.closeBlobs()`, `host.closeBroker()`, and `host.closeLogger()`.

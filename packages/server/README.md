@@ -54,7 +54,7 @@ See [OAuth connection flows](../../docs/connectors/authentication.md#connect-an-
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/project` | Project metadata |
-| `GET` | `/api/status` | Runtime status (object type and function counts) |
+| `GET` | `/api/status` | Upkeep status: `ok`, `degraded` or `unknown`, each maintenance pass, and the outbox |
 | `GET` | `/api/actions` | List registered actions |
 | `GET` | `/api/actions/:actionId` | Get action metadata |
 | `POST` | `/api/actions/:actionId` | Run an action and return its finished run (`subject` is optional for global actions) |
@@ -82,12 +82,12 @@ See [OAuth connection flows](../../docs/connectors/authentication.md#connect-an-
 Upload sessions live in `storage.fileUploadSessions`, so they survive restarts and span replicas
 with `@sixb/pg` and `@sixb/sqlite`. The session routes answer `501` when the storage has no such
 store; single-request `POST /api/files` does not use it. A session that expires unfinished while
-holding a provider upload is aborted by the orchestrator's maintenance pass, then deleted.
+holding a provider upload is aborted by the maintenance pass, then deleted.
 
 Download URLs live in `storage.fileDownloadGrants`, which stores each URL's token only as a hash.
 They name `browser.publicOrigin`, which the server records on the host for that purpose. The
-orchestrator's maintenance pass deletes a grant a week after it expires; until then it records
-which execution exposed which file.
+maintenance pass deletes a grant a week after it expires; until then it records which execution
+exposed which file.
 
 ### WebSocket
 

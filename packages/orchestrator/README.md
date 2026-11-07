@@ -1,7 +1,7 @@
 # @sixb/orchestrator
 
-Routes runtime events to primitive dispatchers and recovers missed Projection admissions from lake
-state.
+Routes runtime events to primitive dispatchers, and repairs what that path can lose. The process
+also hosts all of a project's upkeep, on one [maintenance loop](#maintenance-loop).
 
 ## Delivery contract
 
@@ -27,26 +27,45 @@ The Sync and Pipeline workers keep `queued` meaning "a job will start it": a job
 starting its run retries twice (250 ms, then 500 ms) and then fails the run, which has committed
 nothing yet.
 
-The orchestrator returns its processing promise to the broker:
+## Dispatching
+
+The orchestrator returns its processing promise to the broker, and dispatches each job of a batch
+on its own (`job-dispatch.ts`):
 
 ```text
-bounded delivery → dispatch the current batch → confirm → next delivery
-                         failure → backoff → retry the same batch
+bounded delivery → one attempt per job, in order → confirm → next delivery
+                         failure → job leaves the line → retry beside it → dropped and reported
 ```
 
-The unread backlog stays in the broker instead of a chain of pending application promises.
-Direct fan-out attempts all siblings before retrying failures. Already admitted siblings are safe
-to replay through their deterministic run/job identities. Retry stops when the worker is stopped;
-shutdown drains the dispatch already in flight. A hung dispatcher still needs its own I/O timeout.
+The unread backlog stays in the broker instead of a chain of pending application promises. A job
+that fails costs the jobs behind it one attempt, or 30 seconds if the attempt hangs. It retries on
+its own with backoff, from 250 ms doubling to 10 s, for about five minutes, which rides out a
+database failover or a broker restart with nothing lost. Past that it is dropped and reported as
+`orchestrator.dispatch.failed`. Up to 64 jobs retry at once; beyond that the subscription waits and
+the backlog stays in the broker, so an outage holds the stream instead of draining it into a retry
+list. Retry stops when the worker is stopped; shutdown drains the dispatch in flight.
+
+Each event type has its own subscription, so a route that keeps failing holds its own event type at
+most. A very busy route that fails on every event can slow the routes of its event type, to 64 jobs
+per five minutes. Already admitted siblings are safe to replay through their deterministic run/job
+identities.
 
 | Subscription | While running | After process restart |
 | --- | --- | --- |
-| Direct jobs (cron, projection notifications) | Retry current batch | Live-only, as before |
-| Event schedules | Retry current batch without replaying the whole log | Replay retained history, as before |
+| Direct jobs (cron, projection notifications) | Retry each job, then drop it | Live-only |
+| Event schedules | Retry each job, then drop it | Replay retained history |
+
+What a dropped job loses:
+
+| Job | Lost | What repairs it |
+| --- | --- | --- |
+| Projection | Nothing | The `projections` pass, within 30 seconds |
+| Pipeline on `events.dataset(x).updated()` | Nothing | The `triggers` pass, within a minute, unless the pipeline never ran |
+| Any other event schedule | One trigger | A restart within retention (two days) replays it. Nothing else does |
+| Cron sync, pipeline or workflow | One occurrence | The next occurrence |
 
 There is no durable consumer registry, definition signature, cursor table, or new application
-configuration. Permanent errors are logged and remain on retry; this slice adds no quarantine or
-automatic skip policy. A persistent error can block other routes sharing that subscription.
+configuration.
 
 Projection admission has an event path and a reconciliation path:
 
@@ -62,8 +81,8 @@ identity.
 
 The event is a separate write after the lake commit, so it is lost when the process stops between
 the two, while no orchestrator runs, or when broker retention overtakes the consumer.
-Reconciliation repairs those losses. Its cost follows what changed, not the length of the lake's
-history:
+The `projections` pass repairs those losses. Its cost follows what changed, not the length of the
+lake's history:
 
 - On start it looks up the latest data-bearing version of every projected dataset. That covers
   commits made while no orchestrator ran and projections the deployment added or revised.
@@ -79,33 +98,74 @@ history:
 The live event path, not the interval, sets normal projection latency. The interval bounds only
 how long a lost event or publication waits for repair.
 
-## Ontology maintenance
+## Lost dataset triggers
 
-The process that commits an ontology change delivers its outbox events right away. The orchestrator
-process (`startOrchestratorRuntime` in the CLI) hosts `OntologyMaintenance` for the rest, whether or
-not any route is registered: every 60 seconds it delivers the outbox rows left undelivered by a
-crash or a failed publish, dispatches pending vector indexing, and purges expired outbox rows,
-superseded sources, abandoned uploads, and expired grants. Outbox rows are claimed under a lease,
-so passes in two processes never claim the same row together.
+`dataset.version.committed` is written after the commit, so a pipeline on
+`events.dataset(x).updated()` can miss it the same ways a projection can. Pipelines admit no run per
+version, so the `triggers` pass (`dataset-trigger-reconciler.ts`) asks a different question: does
+the dataset hold a change the pipeline's last run did not read? `pipeline_step_runs.inputs` holds
+what a run read, so the answer needs no record of its own.
+
+| Last run | Then |
+| --- | --- |
+| Queued or running | Nothing yet. The trigger stays unsettled, because the run may have read before the change |
+| Failed | What it read counts as read, so a failure is not retried |
+| Cancelled | Does not count: the run before it decides, and with none, it fires. Only a stopping worker cancels a run |
+| None | Nothing: a first run stays the user's or the next event's call |
+
+- A change is the newest version that would fire `updated()`. A later version that changed nothing
+  does not hide it, so the check reads past such versions.
+- A run that has no step on the dataset, because it failed first or because the dataset is no input,
+  covers the versions that existed when it started.
+- A commit younger than one interval is left to its event.
+- A dispatch goes through `PipelineRunDispatcher`, so it joins a run that is still queued.
+
+An idle pass is one catalog query: it looks at no pipeline until the change feed moves. The triggers
+of a dataset that moved cost one read of its latest version, one read of the latest runs and one of
+their steps, whatever the number of pipelines. Every trigger starts unsettled, so a start pays one
+lookup per triggering dataset, and the cursor stays in memory.
+
+Syncs and workflows have no such pass. A sync records no input and a workflow's input comes from
+the event itself, so neither keeps what the rule needs.
+
+## Maintenance loop
+
+`startOrchestratorRuntime` in the CLI runs one `MaintenanceLoop`, with or without routes: every
+project commits events. Its passes never wait for each other, and each has its own budget and its
+own failure count. See `packages/core/docs/runtime-lifecycle.md`.
+
+| Pass | When | Does |
+| --- | --- | --- |
+| `ontology` | 60 s | Delivers outbox rows left undelivered by a crash or a failed publish, dispatches pending vector indexing, and purges expired outbox rows, superseded sources, abandoned uploads and expired grants |
+| `cron` | Each occurrence, to the second | Emits `schedule.triggered`, which the direct route consumes like any other event |
+| `projections` | 30 s, with projection routes | See above |
+| `triggers` | 30 s, with dataset-triggered pipelines | See above |
+
+Outbox rows are claimed under a lease, so passes in two processes never claim the same row together.
+A second orchestrator is otherwise harmless, except for `cron`: both emit each occurrence, under
+different event ids, so each dispatches its own run. `sixb deploy` runs one.
+
+The loop writes a heartbeat to storage, which is how `/api/status` in another process knows it runs.
 
 ## Usage (co-hosted in `sixb dev`)
 
 When `cohostWorkers` is enabled, `sixb dev` automatically compiles routes from registered syncs,
-pipelines, and projections, starts the orchestrator, co-hosts available workers, and starts the
-scheduler. No manual wiring is needed.
+pipelines, and projections, starts the orchestrator and co-hosts available workers. No manual wiring
+is needed.
 
 ## Standalone deployment
 
-In production the orchestrator runs as its own process via `sixb orchestrator` (the event-to-queue
-dispatcher role) pointed at shared durable providers. In local development it is co-hosted within
-`sixb dev` alongside the scheduler and workers, so no manual wiring is needed there.
+In production the orchestrator runs as its own process via `sixb orchestrator`, pointed at shared
+durable providers. In local development it is co-hosted within `sixb dev` alongside the workers, so
+no manual wiring is needed there.
 
 ## Limitations (V1)
 
 - Projection reconciliation repairs a missed dataset event by admitting the latest data-bearing
   version. It is not an event replay log and does not materialize every intermediate version.
 - Publication recovery requires a repeated dispatch. The projection run sweep supplies one;
-  event schedules can replay retained events. Direct cron dispatch has no restart catch-up.
+  event schedules can replay retained events. Direct cron dispatch has no restart catch-up, and an
+  occurrence that falls while no orchestrator runs is not fired later.
 - The change-feed cursor is process memory, so each start pays one latest-version lookup per
   projected dataset before it tails the feed.
 - Broker progress is process-local. Retention can still overtake a slow consumer; backpressure

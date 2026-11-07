@@ -34,7 +34,7 @@ export default defineDeploy({
 })
 ```
 
-This serves the API at `shop-api.example.com` and your app at `shop-app.example.com`. It runs the orchestrator, scheduler, rules, and workers alongside them.
+This serves the API at `shop-api.example.com` and your app at `shop-app.example.com`. It runs the orchestrator, rules, and workers alongside them.
 
 Preview what will run, without connecting to the server:
 
@@ -74,7 +74,7 @@ export default defineDeploy({
   target: new SshTarget({ host: "203.0.113.10" }),
   services: {
     app: { domain: "shop.example.com" },
-    scheduler: false,
+    rules: false,
     workers: {
       concurrency: { sync: 4 },
       process: { instances: 2, maxMemory: "1G" },
@@ -83,12 +83,12 @@ export default defineDeploy({
 })
 ```
 
-The scheduler and rules processes wait idly when the project has no schedules or rules; turn them off to save memory. Keep the orchestrator on: it also delivers events whose first delivery failed.
+The rules process waits idly when the project has no rules; turn it off to save memory. Keep the orchestrator on: it runs cron schedules and delivers events whose first delivery failed.
 
 | Service | Settings |
 | --- | --- |
 | `api`, `app` | `domain`, `env`, `process` |
-| `orchestrator`, `scheduler`, `rules` | `env`, `process`. Each always runs as one process. |
+| `orchestrator`, `rules` | `env`, `process`. Each always runs as one process. |
 | `workers` | `types` (default: every type the project registers work for), `concurrency` per type, `env`, `process` |
 
 `process` sets `maxMemory` (restart a process that grows past a size such as `"512M"`), `killTimeoutMs` (how long a stopping process may take; default 10000, and 70000 for `api` and `workers`, which first wait up to 65 seconds for the Actions they are running and their effects), and `restartDelayMs` (the wait before restarting a process that exited, growing with each restart; default 1000). For `workers` and your own processes, `instances` runs several copies.
