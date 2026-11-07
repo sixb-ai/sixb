@@ -9,8 +9,6 @@ export const metadata = {
   favicon: "/favicon.svg",
   themeColor: "#fbfbfd",
   backgroundColor: "#fbfbfd",
-  // The installed app draws under the status bar; the phone shell clears it.
-  statusBar: "under",
 } satisfies AppMetadata
 
 export const toolViews = [responsePolicyView]

@@ -87,6 +87,33 @@ html[data-keyboard] {
   transition: --keyboard-inset 450ms cubic-bezier(0.2, 1, 0.25, 1) -33ms;
 }
 
+/* Room for the status bar. An installed iPhone or iPad app draws under it (`statusBar: "under"`),
+   and what reaches the top edge clears it: the sidebar runs up under it, as an iPad app's does, with
+   its content below, and the page beside the sidebar and a sheet from the side start below it. The
+   inset is zero everywhere else, the desktop app included, whose sidebar clears the window controls
+   on its own. A transparent top border makes the room, so it adds to the element's own padding and
+   moves what is positioned inside it, such as a close button. Without specificity, so a phone
+   shell, which clears it with its own bars, or an app can take it back. */
+:where(
+    [data-slot="sidebar-inner"],
+    [data-slot="sidebar"][data-mobile],
+    [data-slot="sidebar-inset"],
+    [data-slot="sheet-content"]:is([data-side="left"], [data-side="right"], [data-side="top"]),
+    [data-slot="drawer-content"]:is(
+        [data-vaul-drawer-direction="left"],
+        [data-vaul-drawer-direction="right"],
+        [data-vaul-drawer-direction="top"]
+      )
+  ) {
+  border-top: env(safe-area-inset-top, 0px) solid transparent;
+}
+
+/* Under the status bar iOS reports 100svh and 100dvh short by its height, so the fixed sidebar takes
+   the corrected height and reaches the bottom of the screen. */
+:where([data-slot="sidebar-container"]) {
+  height: var(--viewport-height);
+}
+
 /* Double-tap zoom off everywhere. In the base layer, so `touch-none` and friends still win. */
 @layer base {
   *,

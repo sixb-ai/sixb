@@ -12,9 +12,10 @@ export interface AppMetadata {
   themeColor?: string
   backgroundColor?: string
   /**
-   * Where the installed app starts on an iPhone: under the status bar, as a native app does, so a
-   * sheet's backdrop dims the status bar in step with the page, or below it (the default). Under it,
-   * everything pinned to the top must clear `--safe-top`, as the phone shell does.
+   * Where the installed app starts on an iPhone or iPad: under the status bar (the default), as a
+   * native app does, so a sheet's backdrop dims the status bar in step with the page, or below it.
+   * Under it, a layout of your own clears the status bar with `--safe-top`; Sixb's shells and
+   * screens do.
    */
   statusBar?: "under" | "below"
 }
@@ -114,7 +115,7 @@ export async function resolveAppMetadata(
       ? { appleTouchIcon: "/apple-touch-icon.png" }
       : {}),
     icons,
-    statusBar: configured.statusBar ?? "below",
+    statusBar: configured.statusBar ?? "under",
   }
 }
 

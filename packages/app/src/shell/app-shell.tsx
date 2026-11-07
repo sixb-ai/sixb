@@ -47,7 +47,10 @@ export interface AppShellProviderProps {
 export function AppShellProvider({ className, children, ...sidebarState }: AppShellProviderProps) {
   return (
     <ThemeProvider>
-      <SidebarProvider className={cn("h-dvh overflow-hidden", className)} {...sidebarState}>
+      <SidebarProvider
+        className={cn("h-(--viewport-height) overflow-hidden", className)}
+        {...sidebarState}
+      >
         {children}
       </SidebarProvider>
     </ThemeProvider>

@@ -804,7 +804,8 @@ function AppFallback({
         alignItems: "center",
         justifyContent: "center",
         gap: "1rem",
-        padding: "2rem",
+        padding:
+          "calc(2rem + env(safe-area-inset-top, 0px)) 2rem calc(2rem + env(safe-area-inset-bottom, 0px))",
         textAlign: "center",
         fontFamily:
           "var(--font-sans, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif)",

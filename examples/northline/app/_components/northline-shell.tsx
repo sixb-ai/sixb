@@ -63,7 +63,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
         className="phone-shell relative flex min-h-0 min-w-0 flex-1"
         data-tab-bar={conversationActive ? "hidden" : undefined}
       >
-        <SidebarInset className="relative h-svh min-h-0 overflow-hidden bg-background">
+        <SidebarInset className="relative h-(--viewport-height) min-h-0 overflow-hidden bg-background">
           <NorthlineTopBar />
           <div className="min-h-0 flex-1 overflow-y-auto" data-app-scroll>
             <div

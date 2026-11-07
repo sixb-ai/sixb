@@ -164,7 +164,7 @@ export function SlidesRenderer({
             aria-label={messages.exitPresent}
             title={messages.exitPresent}
             onClick={() => setMode("slide")}
-            className="absolute top-4 right-4 flex size-9 items-center justify-center rounded-full bg-black/45 text-white/80 outline-none transition-colors hover:bg-black/65 hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 [&_svg]:size-[18px]"
+            className="absolute top-[calc(1rem+env(safe-area-inset-top,0px))] right-4 flex size-9 items-center justify-center rounded-full bg-black/45 text-white/80 outline-none transition-colors hover:bg-black/65 hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 [&_svg]:size-[18px]"
           >
             <X aria-hidden="true" strokeWidth={1.75} />
           </button>

@@ -32,14 +32,9 @@ four places with an icon are the tabs.
 File: `app/layout.tsx`
 
 ```tsx
-import { AppShell, type AppMetadata, type NavEntry } from "@sixb/app"
+import { AppShell, type NavEntry } from "@sixb/app"
 import { ClipboardList, Gauge, Network, Sun, UsersRound } from "lucide-react"
 import type { PropsWithChildren } from "react"
-
-export const metadata = {
-  title: "Northline",
-  statusBar: "under",
-} satisfies AppMetadata
 
 const nav: NavEntry[] = [
   { label: "Home", href: "/", icon: Sun, tab: true },
@@ -78,11 +73,21 @@ sidebar, so anything that opens the sidebar opens it. Wrap the page in an elemen
 
 ## The status bar
 
-`statusBar: "under"` draws the installed app under the status bar, as a native app does, so a
-sheet's backdrop dims the status bar in step with the page. Without it, iOS paints the status bar
-itself and snaps it to the backdrop's colour out of step with the fade. Everything pinned to the
-top must then clear `--safe-top`; the phone shell does. iOS reads the setting when the app is added
-to the Home Screen, so an existing install must be removed and added again to pick up a change.
+The installed app draws under the status bar, as a native app does, so a sheet's backdrop dims the
+status bar in step with the page. Sixb's shells and screens leave room for it: the phone shell's
+bars, the sidebar, which runs up under it as an iPad app's does, the page beside the sidebar,
+sheets from the side, and the artifact and agent pages.
+
+A layout of your own leaves the room too. Pad what reaches the top edge by `--safe-top`, which is
+zero in a browser. Or start the app below the status bar, where iOS paints the
+status bar itself and snaps it to a backdrop's colour out of step with the fade:
+
+```tsx
+export const metadata = { title: "My app", statusBar: "below" } satisfies AppMetadata
+```
+
+iOS reads the setting when the app is added to the Home Screen, so an existing install must be
+removed and added again to pick up a change.
 
 ## Opting out and in
 
