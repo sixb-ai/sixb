@@ -615,8 +615,8 @@ async function waitFor<T>(what: string, poll: () => Promise<T | null>): Promise<
 // ── Data ────────────────────────────────────────────────────
 
 /**
- * Ingest, then wait for the version the sync worker writes from it: `ingest` returns once the
- * changes are stored, before they are in the dataset.
+ * Ingest, then wait for the version. The test SDK writes it before `ingest` returns, unless the
+ * lake worker running beside the test takes the flush first: then `ingest` returns without it.
  */
 async function ingestAndWait(
   host: SixbHost,
