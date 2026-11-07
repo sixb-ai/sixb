@@ -1,7 +1,7 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, ChevronRight, ClipboardCheck, Radio, ShieldCheck, Wrench } from "lucide-react"
+import { Check, ChevronRight, Radio } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
 import { Link, useParams } from "react-router-dom"
 import { CustomerAccount } from "../../../ontology/customer-account"
@@ -12,9 +12,16 @@ import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceContract } from "../../../ontology/service-contract"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { WorkOrder } from "../../../ontology/work-order"
-import { EquipmentPicture } from "../../_components/equipment-picture"
-import { Timeline, type TimelineEntry } from "../../_components/timeline"
+import { EquipmentThumb } from "../../_components/equipment-picture"
 import {
+  quoteEntry,
+  Timeline,
+  type TimelineEntry,
+  TimelineLink,
+  visitEntries,
+} from "../../_components/timeline"
+import {
+  Breadcrumb,
   CaseClockText,
   Fact,
   formatCoverageHours,
@@ -30,8 +37,7 @@ import {
 } from "../../_components/ui"
 import { contractTypeLabel, isContractCurrent } from "../../_lib/contracts"
 import type { QueryRow } from "../../_lib/query-types"
-import { quotePath } from "../../_lib/quotes"
-import { casePriority, isCaseAtRisk, isCaseOpen } from "../../_lib/service-cases"
+import { casePath, casePriority, isCaseAtRisk, isCaseOpen } from "../../_lib/service-cases"
 
 /** A customer and the records that belong to it, each followed from the customer by the server. */
 function customerQueries(id: string) {
@@ -119,13 +125,7 @@ export default function CustomerDetailPage() {
       {customer ? (
         <div className="flex flex-col gap-6">
           <header className="flex flex-col gap-4">
-            <nav className="flex items-center gap-2 text-[14px] text-muted-foreground">
-              <Link to="/customers" className="text-primary hover:underline">
-                Customers
-              </Link>
-              <ChevronRight className="size-3.5" />
-              <span className="truncate">{customer.properties.name}</span>
-            </nav>
+            <Breadcrumb to="/customers" label="Customers" current={customer.properties.name} />
             <div className="flex items-start justify-between gap-6 max-md:flex-col max-md:gap-3">
               <div className="flex min-w-0 items-center gap-5">
                 <span
@@ -214,10 +214,10 @@ function OpenCaseRow({ serviceCase }: { serviceCase: CaseRow }) {
   return (
     <li className="border-t border-border/70 first:border-t-0">
       <Link
-        to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}
+        to={casePath(serviceCase.primaryId)}
         className="group grid grid-cols-[3rem_minmax(0,1fr)_auto_1rem] items-center gap-4 py-3.5 focus-visible:outline-none"
       >
-        <UnitThumb
+        <EquipmentThumb
           name={unit?.properties.name}
           type={unit?.properties.equipmentType}
           className="size-12 rounded-[12px]"
@@ -355,7 +355,7 @@ function FacilitiesCard({
                           to={`/equipment/${encodeURIComponent(asset.primaryId)}`}
                           className="group -mx-2 flex items-center gap-3 rounded-[10px] px-2 py-1.5 transition-colors hover:bg-black/[0.03] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:bg-white/[0.05]"
                         >
-                          <UnitThumb
+                          <EquipmentThumb
                             name={asset.properties.name}
                             type={asset.properties.equipmentType}
                             className="size-9 rounded-[9px]"
@@ -385,32 +385,6 @@ function FacilitiesCard({
   )
 }
 
-function UnitThumb({
-  name,
-  type,
-  className,
-}: {
-  name: string | undefined
-  type: string | undefined
-  className: string
-}) {
-  return (
-    <span
-      className={cn(
-        "flex shrink-0 items-center justify-center overflow-hidden bg-muted",
-        className
-      )}
-    >
-      <EquipmentPicture
-        name={name}
-        type={type}
-        inset="p-1"
-        iconClassName="size-[45%] text-foreground/55"
-      />
-    </span>
-  )
-}
-
 function Empty({ children }: { children: ReactNode }) {
   return <p className="px-6 pt-1 pb-6 text-[14px] text-muted-foreground">{children}</p>
 }
@@ -432,11 +406,7 @@ function timelineEntries(
           detail: properties.title,
           source: serviceCase.links.facility?.properties.name ?? "Northline Operations",
           emphasis: properties.severity === "critical",
-          action: (
-            <TimelineLink to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}>
-              Open case
-            </TimelineLink>
-          ),
+          action: <TimelineLink to={casePath(serviceCase.primaryId)}>Open case</TimelineLink>,
         },
       ]
       if (properties.resolvedAt) {
@@ -460,51 +430,19 @@ function timelineEntries(
       }
       return entries
     }),
-    ...visits.flatMap((visit) => {
-      const { properties } = visit
-      const caseNumber = visit.links.workOrder?.links.serviceCase?.properties.number
-      const entries: TimelineEntry[] = [
-        {
-          id: `${visit.primaryId}-start`,
-          at: properties.startedAt ?? properties.scheduledStart,
-          icon: Wrench,
-          title: `${properties.number} ${properties.startedAt ? "started" : "scheduled"}`,
-          detail: [visit.links.technician?.properties.name, caseNumber].filter(Boolean).join(" · "),
-          source: "Field service",
-        },
-      ]
-      if (properties.completedAt) {
-        entries.push({
-          id: `${visit.primaryId}-complete`,
-          at: properties.completedAt,
-          icon: ClipboardCheck,
-          title: `${properties.number} completed`,
-          detail: properties.workPerformed,
-          source: "Field service",
-          status: properties.completionDisposition,
-        })
-      }
-      return entries
-    }),
-    ...quotes.map((quote) => ({
-      id: quote.primaryId,
-      at: quote.properties.decisionAt ?? quote.properties.sourceUpdatedAt,
-      icon: ShieldCheck,
-      title: `${quote.properties.number} · ${formatMoney(quote.properties.amount)}`,
-      detail: quote.properties.scope,
-      source: "Business system",
-      status: quote.properties.status,
-      action: <TimelineLink to={quotePath(quote.primaryId)}>Open quote</TimelineLink>,
-    })),
+    ...visits.flatMap((visit) =>
+      visitEntries(
+        visit,
+        [
+          visit.links.technician?.properties.name,
+          visit.links.workOrder?.links.serviceCase?.properties.number,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      )
+    ),
+    ...quotes.map(quoteEntry),
   ]
-}
-
-function TimelineLink({ to, children }: { to: string; children: ReactNode }) {
-  return (
-    <Link to={to} className="w-fit text-[13px] font-medium text-primary hover:underline">
-      {children}
-    </Link>
-  )
 }
 
 function pluralize(singular: string, plural: string, count: number): string {

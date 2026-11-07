@@ -16,19 +16,20 @@ import {
   initials,
   PageHeader,
   QueryState,
+  Section,
   StatusBadge,
   StatusIndicator,
 } from "../_components/ui"
 import { isContractCurrent } from "../_lib/contracts"
 import type { QueryRow } from "../_lib/query-types"
-import { caseClock, isCaseAtRisk, isCaseOpen } from "../_lib/service-cases"
+import { caseClock, isCaseAtRisk, openServiceCases } from "../_lib/service-cases"
 
 const customersQuery = objects(CustomerAccount)
   .query()
   .orderBy(CustomerAccount.p.name, "asc")
   .limit(100)
 const facilitiesQuery = objects(Facility).query().expand(Facility.l.customer).limit(100)
-const casesQuery = objects(ServiceCase).query().expand(ServiceCase.l.customer).limit(100)
+const casesQuery = openServiceCases.expand(ServiceCase.l.customer).limit(100)
 const contractsQuery = objects(ServiceContract)
   .query()
   .expand(ServiceContract.l.customer)
@@ -58,6 +59,16 @@ type FacilityRow = QueryRow<typeof facilitiesQuery>
 type CaseRow = QueryRow<typeof casesQuery>
 type ContractRow = QueryRow<typeof contractsQuery>
 
+/** What the list shows of one customer, gathered once for the counts, filters, sort and rows. */
+interface CustomerWork {
+  readonly facilities: FacilityRow[]
+  readonly openCases: CaseRow[]
+  readonly atRisk: CaseRow[]
+  readonly contracts: ContractRow[]
+}
+
+const noWork: CustomerWork = { facilities: [], openCases: [], atRisk: [], contracts: [] }
+
 export default function CustomersPage() {
   const customers = useObjectsQuery(customersQuery)
   const facilities = useObjectsQuery(facilitiesQuery)
@@ -67,45 +78,57 @@ export default function CustomersPage() {
   const [sort, setSort] = useState<Sort>("exposure")
   const [search, setSearch] = useState("")
   const customerRows = customers.data?.objects ?? []
-  const facilityRows = facilities.data?.objects ?? []
-  const caseRows = cases.data?.objects ?? []
-  const contractRows = contracts.data?.objects ?? []
-  const totalAtRisk = caseRows.filter(
-    (serviceCase) => isOpenCase(serviceCase) && isAtRisk(serviceCase)
-  ).length
-  const counts = useMemo(
-    () =>
-      Object.fromEntries(
-        views.map(([id]) => [
-          id,
-          customerRows.filter((customer) =>
-            matchesView(customer, id, facilitiesFor(customer, facilityRows), caseRows)
-          ).length,
-        ])
-      ),
-    [caseRows, customerRows, facilityRows]
+  const work = useMemo(() => {
+    const byCustomer = new Map<string, CustomerWork>()
+    const of = (id: string | undefined) => {
+      if (!id) return undefined
+      let entry = byCustomer.get(id)
+      if (!entry) {
+        entry = { facilities: [], openCases: [], atRisk: [], contracts: [] }
+        byCustomer.set(id, entry)
+      }
+      return entry
+    }
+    for (const facility of facilities.data?.objects ?? []) {
+      of(facility.links.customer?.primaryId)?.facilities.push(facility)
+    }
+    for (const serviceCase of cases.data?.objects ?? []) {
+      const entry = of(serviceCase.links.customer?.primaryId)
+      entry?.openCases.push(serviceCase)
+      if (isCaseAtRisk(serviceCase.properties)) entry?.atRisk.push(serviceCase)
+    }
+    for (const contract of contracts.data?.objects ?? []) {
+      of(contract.links.customer?.primaryId)?.contracts.push(contract)
+    }
+    return byCustomer
+  }, [cases.data, contracts.data, facilities.data])
+  const workOf = (customer: CustomerRow) => work.get(customer.primaryId) ?? noWork
+  const totalAtRisk = [...work.values()].reduce((total, entry) => total + entry.atRisk.length, 0)
+  const counts = Object.fromEntries(
+    views.map(([id]) => [
+      id,
+      customerRows.filter((customer) => matchesView(customer, id, workOf(customer))).length,
+    ])
   )
-  const rows = useMemo(() => {
-    const normalized = search.trim().toLowerCase()
-    return customerRows
-      .filter((customer) => {
-        const customerFacilities = facilitiesFor(customer, facilityRows)
-        if (!matchesView(customer, view, customerFacilities, caseRows)) return false
-        if (!normalized) return true
-        return [
-          customer.properties.name,
-          customer.properties.primaryContactName,
-          customer.properties.primaryContactEmail,
-          humanize(customer.properties.serviceTier),
-          ...customerFacilities.flatMap((facility) => [
-            facility.properties.name,
-            facility.properties.city,
-            facility.properties.state,
-          ]),
-        ].some((value) => value?.toLowerCase().includes(normalized))
-      })
-      .sort((left, right) => compareCustomers(left, right, sort, facilityRows, caseRows))
-  }, [caseRows, customerRows, facilityRows, search, sort, view])
+  const normalized = search.trim().toLowerCase()
+  const rows = customerRows
+    .filter((customer) => {
+      const customerWork = workOf(customer)
+      if (!matchesView(customer, view, customerWork)) return false
+      if (!normalized) return true
+      return [
+        customer.properties.name,
+        customer.properties.primaryContactName,
+        customer.properties.primaryContactEmail,
+        humanize(customer.properties.serviceTier),
+        ...customerWork.facilities.flatMap((facility) => [
+          facility.properties.name,
+          facility.properties.city,
+          facility.properties.state,
+        ]),
+      ].some((value) => value?.toLowerCase().includes(normalized))
+    })
+    .sort((left, right) => compareCustomers(left, right, sort, workOf(left), workOf(right)))
 
   return (
     <div>
@@ -149,7 +172,7 @@ export default function CustomersPage() {
         />
       </PageHeader>
 
-      <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
+      <Section className="overflow-hidden">
         <QueryState
           loading={
             customers.isLoading || facilities.isLoading || cases.isLoading || contracts.isLoading
@@ -165,35 +188,22 @@ export default function CustomersPage() {
               <CustomerListRow
                 key={customer.primaryId}
                 customer={customer}
-                facilities={facilitiesFor(customer, facilityRows)}
-                cases={casesFor(customer, caseRows)}
-                contracts={contractsFor(customer, contractRows)}
+                work={workOf(customer)}
               />
             ))}
           </ul>
         </QueryState>
-      </section>
+      </Section>
     </div>
   )
 }
 
-function CustomerListRow({
-  customer,
-  facilities: customerFacilities,
-  cases: customerCases,
-  contracts: customerContracts,
-}: {
-  customer: CustomerRow
-  facilities: FacilityRow[]
-  cases: CaseRow[]
-  contracts: ContractRow[]
-}) {
-  const openCases = customerCases.filter(isOpenCase)
-  const riskCases = openCases.filter(isAtRisk)
+function CustomerListRow({ customer, work }: { customer: CustomerRow; work: CustomerWork }) {
+  const { facilities: customerFacilities, openCases, atRisk: riskCases } = work
   const overdue = riskCases.some(
     (serviceCase) => caseClock(serviceCase.properties).tone === "critical"
   )
-  const activeContract = customerContracts.find((contract) =>
+  const activeContract = work.contracts.find((contract) =>
     isContractCurrent(contract.properties.status)
   )
   const summary = [
@@ -271,15 +281,10 @@ function CustomerListRow({
   )
 }
 
-function matchesView(
-  customer: CustomerRow,
-  view: View,
-  customerFacilities: FacilityRow[],
-  cases: readonly CaseRow[]
-): boolean {
+function matchesView(customer: CustomerRow, view: View, work: CustomerWork): boolean {
   if (view === "all") return true
-  if (view === "attention") return customerRisk(customer, cases) > 0
-  if (view === "multi_site") return customerFacilities.length > 1
+  if (view === "attention") return work.atRisk.length > 0
+  if (view === "multi_site") return work.facilities.length > 1
   return customer.properties.serviceTier === view
 }
 
@@ -287,53 +292,20 @@ function compareCustomers(
   left: CustomerRow,
   right: CustomerRow,
   sort: Sort,
-  facilities: readonly FacilityRow[],
-  cases: readonly CaseRow[]
+  leftWork: CustomerWork,
+  rightWork: CustomerWork
 ): number {
-  if (sort === "name") return left.properties.name.localeCompare(right.properties.name)
+  const byName = () => left.properties.name.localeCompare(right.properties.name)
+  if (sort === "name") return byName()
   if (sort === "facilities") {
-    const facilityDifference =
-      facilitiesFor(right, facilities).length - facilitiesFor(left, facilities).length
-    return facilityDifference || left.properties.name.localeCompare(right.properties.name)
+    return rightWork.facilities.length - leftWork.facilities.length || byName()
   }
-  if (sort === "tier") {
-    const tierDifference = tierPriority(right) - tierPriority(left)
-    return tierDifference || left.properties.name.localeCompare(right.properties.name)
-  }
-  const riskDifference = customerRisk(right, cases) - customerRisk(left, cases)
-  if (riskDifference) return riskDifference
-  const openDifference = openCaseCount(right, cases) - openCaseCount(left, cases)
-  return openDifference || left.properties.name.localeCompare(right.properties.name)
-}
-
-function facilitiesFor(customer: CustomerRow, facilities: readonly FacilityRow[]): FacilityRow[] {
-  return facilities.filter((facility) => facility.links.customer?.primaryId === customer.primaryId)
-}
-
-function casesFor(customer: CustomerRow, cases: readonly CaseRow[]): CaseRow[] {
-  return cases.filter((serviceCase) => serviceCase.links.customer?.primaryId === customer.primaryId)
-}
-
-function contractsFor(customer: CustomerRow, contracts: readonly ContractRow[]): ContractRow[] {
-  return contracts.filter((contract) => contract.links.customer?.primaryId === customer.primaryId)
-}
-
-function isOpenCase(serviceCase: CaseRow): boolean {
-  return isCaseOpen(serviceCase.properties.status)
-}
-
-function isAtRisk(serviceCase: CaseRow): boolean {
-  return isCaseAtRisk(serviceCase.properties)
-}
-
-function customerRisk(customer: CustomerRow, cases: readonly CaseRow[]): number {
-  return casesFor(customer, cases).filter(
-    (serviceCase) => isOpenCase(serviceCase) && isAtRisk(serviceCase)
-  ).length
-}
-
-function openCaseCount(customer: CustomerRow, cases: readonly CaseRow[]): number {
-  return casesFor(customer, cases).filter(isOpenCase).length
+  if (sort === "tier") return tierPriority(right) - tierPriority(left) || byName()
+  return (
+    rightWork.atRisk.length - leftWork.atRisk.length ||
+    rightWork.openCases.length - leftWork.openCases.length ||
+    byName()
+  )
 }
 
 function tierPriority(customer: CustomerRow): number {

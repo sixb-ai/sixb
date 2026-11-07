@@ -1,16 +1,6 @@
-import type {
-  ListWorkflowInterventionsResponse,
-  SubmitWorkflowInterventionData,
-} from "@sixb/client"
-import {
-  listWorkflowInterventionsOptions,
-  listWorkflowInterventionsQueryKey,
-  submitWorkflowInterventionMutation,
-  useObjectsQuery,
-} from "@sixb/client/hooks"
+import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, Check, ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react"
 import type { CSSProperties, ReactNode } from "react"
 import { useMemo, useState } from "react"
@@ -18,7 +8,7 @@ import { Link } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
-import { EquipmentPicture } from "../_components/equipment-picture"
+import { EquipmentThumb } from "../_components/equipment-picture"
 import { decisionRingClass, ErrorLine, pillClass } from "../_components/next-step"
 import {
   CaseClockText,
@@ -32,11 +22,15 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../_components/ui"
+import {
+  type Intervention,
+  type InterventionResponse,
+  refValue,
+  textValue,
+  useInterventionReviews,
+} from "../_lib/interventions"
 import type { QueryRow } from "../_lib/query-types"
-import { openServiceCases, openWorkOrders } from "../_lib/service-cases"
-
-type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
-type InterventionResponse = SubmitWorkflowInterventionData["body"]["response"]
+import { casePath, openServiceCases, openWorkOrders } from "../_lib/service-cases"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(50)
 
@@ -53,13 +47,6 @@ const serviceCasesQuery = openServiceCases
   .expand(ServiceCase.l.equipment)
   .orderBy(ServiceCase.p.responseDeadline, "asc")
   .limit(100)
-
-const interventionQuery = {
-  interventionId: "review-dispatch",
-  status: "pending" as const,
-  limit: "100",
-  order: "desc" as const,
-}
 
 const timelineStartHour = 8
 const timelineEndHour = 18
@@ -80,7 +67,6 @@ type WorkOrderRow = QueryRow<typeof workOrdersQuery>
 type ServiceCaseRow = QueryRow<typeof serviceCasesQuery>
 
 export default function DispatchPage() {
-  const queryClient = useQueryClient()
   // Until someone picks a day, the board opens on today, or on the first day with work.
   const [pickedDate, setPickedDate] = useState<Date>()
   const [scheduleView, setScheduleView] = useState<"timeline" | "list">("timeline")
@@ -89,20 +75,12 @@ export default function DispatchPage() {
   const technicians = useObjectsQuery(techniciansQuery)
   const workOrders = useObjectsQuery(workOrdersQuery)
   const serviceCases = useObjectsQuery(serviceCasesQuery)
-  const reviews = useQuery(listWorkflowInterventionsOptions({ query: interventionQuery }))
-  const submit = useMutation({
-    ...submitWorkflowInterventionMutation(),
-    onSuccess: async () => {
-      setReviewingId(undefined)
-      await queryClient.invalidateQueries({
-        queryKey: listWorkflowInterventionsQueryKey({ query: interventionQuery }),
-      })
-    },
-  })
+  const { reviews, pending, approve, submitting, failed } = useInterventionReviews(
+    "review-dispatch",
+    () => setReviewingId(undefined)
+  )
 
-  const pending = reviews.data?.interventions ?? []
   const caseRows = serviceCases.data?.objects ?? []
-  const submitted = submit.variables?.path.interventionId
   const activeWork = workOrders.data?.objects
   const selectedDate = useMemo(
     () => pickedDate ?? openingDate(activeWork ?? []),
@@ -200,15 +178,11 @@ export default function DispatchPage() {
           {!reviewsLoading && !reviewsError && pending.length > 0 ? (
             <ul className="flex flex-col gap-4">
               {pending.map((intervention) => {
-                const serviceCaseRef = objectRef(intervention.input.serviceCase)
-                const serviceCase = caseRows.find(
-                  (item) => item.primaryId === serviceCaseRef?.primaryId
-                )
-                const technicianRef =
-                  objectRef(intervention.defaultResponse.technician) ??
-                  objectRef(intervention.input.recommendedTechnician)
+                const caseId = refValue(intervention.input.serviceCase)?.primaryId
+                const serviceCase = caseRows.find((item) => item.primaryId === caseId)
+                const technicianId = recommendation(intervention).technician?.primaryId
                 const recommended = technicianRows.find(
-                  (technician) => technician.primaryId === technicianRef?.primaryId
+                  (technician) => technician.primaryId === technicianId
                 )
                 return (
                   <li key={intervention.id}>
@@ -217,16 +191,11 @@ export default function DispatchPage() {
                       serviceCase={serviceCase}
                       recommended={recommended}
                       reviewing={reviewingId === intervention.id}
-                      submitting={submit.isPending && submitted === intervention.id}
-                      failed={submit.isError && submitted === intervention.id}
+                      submitting={submitting(intervention)}
+                      failed={failed(intervention)}
                       onReview={() => setReviewingId(intervention.id)}
                       onCancel={() => setReviewingId(undefined)}
-                      onApprove={(response) => {
-                        submit.mutate({
-                          path: { interventionId: intervention.id },
-                          body: { response },
-                        })
-                      }}
+                      onApprove={(response) => approve(intervention, response)}
                     />
                   </li>
                 )
@@ -244,7 +213,7 @@ export default function DispatchPage() {
           )}
         </section>
 
-        <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
+        <Section className="overflow-hidden">
           <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4 px-6 pt-5 pb-4">
             <div className="min-w-0">
               <h2 className="text-[19px] leading-6 font-semibold tracking-[-0.015em]">
@@ -310,7 +279,7 @@ export default function DispatchPage() {
               <ScheduleList technicians={visibleTechnicians} workOrders={boardWork} />
             )}
           </QueryState>
-        </section>
+        </Section>
       </div>
     </div>
   )
@@ -405,26 +374,18 @@ function DispatchDecision({
   onCancel(): void
   onApprove(response: InterventionResponse): void
 }) {
-  const technician =
-    objectRef(intervention.defaultResponse.technician) ??
-    objectRef(intervention.input.recommendedTechnician)
-  const scheduledStart =
-    intervention.defaultResponse.scheduledStart ?? intervention.input.scheduledStart
-  const scheduledEnd = intervention.defaultResponse.scheduledEnd ?? intervention.input.scheduledEnd
+  const { technician, scheduledStart, scheduledEnd } = recommendation(intervention)
   const equipment = serviceCase?.links.equipment?.properties
   const duration = durationLabel(scheduledStart, scheduledEnd)
 
   return (
     <article className={cn("flex flex-col gap-5 p-6 max-sm:p-5", decisionRingClass)}>
       <div className="flex items-start gap-5 max-sm:gap-4">
-        <span className="flex size-[88px] shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-muted max-sm:size-16">
-          <EquipmentPicture
-            name={equipment?.name}
-            type={equipment?.equipmentType}
-            inset="p-2"
-            iconClassName="size-7 text-foreground/45"
-          />
-        </span>
+        <EquipmentThumb
+          name={equipment?.name}
+          type={equipment?.equipmentType}
+          className="size-[88px] rounded-[16px] max-sm:size-16"
+        />
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
@@ -443,20 +404,17 @@ function DispatchDecision({
           </div>
           <h3 className="text-[22px] leading-7 font-semibold tracking-[-0.015em] text-balance max-sm:text-[19px] max-sm:leading-6">
             <Link
-              to={
-                serviceCase
-                  ? `/service-cases/${encodeURIComponent(serviceCase.primaryId)}`
-                  : "/service-cases"
-              }
+              to={serviceCase ? casePath(serviceCase.primaryId) : "/service-cases"}
               className="rounded-[4px] transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-              {serviceCase?.properties.title ?? text(intervention.input.title, "Dispatch review")}
+              {serviceCase?.properties.title ??
+                textValue(intervention.input.title, "Dispatch review")}
             </Link>
           </h3>
           <p className="text-[14px] leading-5 text-pretty text-muted-foreground">
             <span className="font-semibold text-foreground/70 tabular-nums">
               {serviceCase?.properties.number ??
-                text(intervention.input.caseNumber, "Service case")}
+                textValue(intervention.input.caseNumber, "Service case")}
             </span>
             {" · "}
             {serviceCase?.links.customer?.properties.name ?? "Customer"} ·{" "}
@@ -510,7 +468,7 @@ function DispatchDecision({
               Why this technician
             </span>
             <p className="max-w-2xl text-[15px] leading-6 text-pretty text-foreground/80">
-              {text(intervention.input.recommendation, "Review the recommended assignment.")}
+              {textValue(intervention.input.recommendation, "Review the recommended assignment.")}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -518,7 +476,7 @@ function DispatchDecision({
               type="button"
               className={pillClass("primary")}
               disabled={submitting || !technician}
-              onClick={() => onApprove({ technician, scheduledStart, scheduledEnd })}
+              onClick={() => technician && onApprove({ technician, scheduledStart, scheduledEnd })}
             >
               {submitting ? (
                 <LoaderCircle className="size-4 animate-spin" />
@@ -581,7 +539,7 @@ function ScheduleList({
       {visibleWork.map((workOrder) => (
         <li key={workOrder.primaryId} className="border-t border-border/70 first:border-t-0">
           <Link
-            to={`/service-cases/${encodeURIComponent(workOrder.links.serviceCase?.primaryId ?? "")}`}
+            to={casePath(workOrder.links.serviceCase?.primaryId)}
             className="group grid grid-cols-[4.75rem_minmax(0,1fr)] items-center gap-4 px-6 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none sm:grid-cols-[5.25rem_minmax(0,1fr)_auto_1rem] dark:hover:bg-white/[0.03]"
           >
             <span className="flex flex-col gap-0.5 tabular-nums">
@@ -787,7 +745,7 @@ function ScheduleBlock({
   date: Date
   range: TimelineRange
 }) {
-  const href = `/service-cases/${encodeURIComponent(workOrder.links.serviceCase?.primaryId ?? "")}`
+  const href = casePath(workOrder.links.serviceCase?.primaryId)
   const style = scheduleBlockStyle(
     workOrder.properties.scheduledStart,
     workOrder.properties.scheduledEnd,
@@ -901,15 +859,11 @@ function recommendedAvailabilityStart(
 ): Date | undefined {
   if (technician.properties.availability !== "available") return undefined
 
-  const matchingReview = pending.find((intervention) => {
-    const technicianRef =
-      objectRef(intervention.defaultResponse.technician) ??
-      objectRef(intervention.input.recommendedTechnician)
-    return technicianRef?.primaryId === technician.primaryId
-  })
-  const recommendedStart = matchingReview
-    ? (matchingReview.defaultResponse.scheduledStart ?? matchingReview.input.scheduledStart)
-    : undefined
+  const recommendedStart = pending
+    .map(recommendation)
+    .find(
+      (recommended) => recommended.technician?.primaryId === technician.primaryId
+    )?.scheduledStart
   if (
     (typeof recommendedStart === "string" || recommendedStart instanceof Date) &&
     isSameDay(new Date(recommendedStart), date)
@@ -1067,14 +1021,12 @@ function isToday(date: Date): boolean {
   return isSameDay(date, new Date())
 }
 
-function objectRef(value: unknown): { objectTypeId: string; primaryId: string } | null {
-  if (!value || typeof value !== "object") return null
-  const ref = value as { objectTypeId?: unknown; primaryId?: unknown }
-  return typeof ref.objectTypeId === "string" && typeof ref.primaryId === "string"
-    ? { objectTypeId: ref.objectTypeId, primaryId: ref.primaryId }
-    : null
-}
-
-function text(value: unknown, fallback: string): string {
-  return typeof value === "string" ? value : fallback
+/** The technician and window to approve: the reviewer's edit, else Northline's recommendation. */
+function recommendation(intervention: Intervention) {
+  const { defaultResponse: chosen, input } = intervention
+  return {
+    technician: refValue(chosen.technician) ?? refValue(input.recommendedTechnician),
+    scheduledStart: chosen.scheduledStart ?? input.scheduledStart,
+    scheduledEnd: chosen.scheduledEnd ?? input.scheduledEnd,
+  }
 }

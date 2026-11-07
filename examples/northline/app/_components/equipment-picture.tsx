@@ -37,3 +37,30 @@ export function EquipmentPicture({
     />
   )
 }
+
+/** A unit's picture in a small rounded tile, as list rows show it; the caller sets the size. */
+export function EquipmentThumb({
+  name,
+  type,
+  className,
+}: {
+  name: string | undefined
+  type: string | undefined
+  className: string
+}) {
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center overflow-hidden bg-muted",
+        className
+      )}
+    >
+      <EquipmentPicture
+        name={name}
+        type={type}
+        inset="p-[8%]"
+        iconClassName="size-[45%] text-foreground/55"
+      />
+    </span>
+  )
+}

@@ -14,6 +14,7 @@ import {
   humanize,
   PageHeader,
   QueryState,
+  Section,
   StatusBadge,
 } from "../_components/ui"
 import { contractTypeLabel, isContractCurrent } from "../_lib/contracts"
@@ -124,7 +125,7 @@ export default function ContractsPage() {
         />
       </PageHeader>
 
-      <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
+      <Section className="overflow-hidden">
         <QueryState
           loading={contracts.isLoading}
           error={contracts.isError}
@@ -158,7 +159,7 @@ export default function ContractsPage() {
             </div>
           </div>
         </QueryState>
-      </section>
+      </Section>
     </div>
   )
 }

@@ -1,22 +1,12 @@
-import type {
-  ListWorkflowInterventionsResponse,
-  SubmitWorkflowInterventionData,
-} from "@sixb/client"
-import {
-  listWorkflowInterventionsOptions,
-  listWorkflowInterventionsQueryKey,
-  submitWorkflowInterventionMutation,
-  useActionRunMutation,
-  useObjectsQuery,
-} from "@sixb/client/hooks"
+import { useActionRunMutation, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronRight, FileText } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { Quote } from "../../ontology/quote"
 import { ServiceCase } from "../../ontology/service-case"
+import { CustomerCard } from "../_components/customer-card"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
   decisionRingClass,
@@ -26,6 +16,7 @@ import {
   PillLink,
 } from "../_components/next-step"
 import {
+  Breadcrumb,
   daysUntil,
   Fact,
   formatDate,
@@ -34,12 +25,20 @@ import {
   humanize,
   PageHeader,
   QueryState,
-  Row,
   Section,
   StatusBadge,
 } from "../_components/ui"
+import {
+  type Intervention,
+  type InterventionResponse,
+  numberValue,
+  refValue,
+  textValue,
+  useInterventionReviews,
+} from "../_lib/interventions"
 import type { QueryRow } from "../_lib/query-types"
 import { isQuoteOpen, quotePath } from "../_lib/quotes"
+import { casePath } from "../_lib/service-cases"
 
 const allQuotes = objects(Quote)
   .query()
@@ -55,13 +54,6 @@ const linkedServiceCases = objects(ServiceCase)
   .expand(ServiceCase.l.facility)
   .expand(ServiceCase.l.equipment)
   .limit(100)
-
-const reviewQuery = {
-  interventionId: "review-repair-quote",
-  status: "pending" as const,
-  limit: "100",
-  order: "desc" as const,
-}
 
 const views = [
   ["all", "All"],
@@ -81,36 +73,28 @@ const sortOptions = [
 
 type QuoteRow = QueryRow<typeof allQuotes>
 type ServiceCaseRow = QueryRow<typeof linkedServiceCases>
-type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
-type InterventionResponse = SubmitWorkflowInterventionData["body"]["response"]
 type View = (typeof views)[number][0]
 type Sort = (typeof sortOptions)[number][0]
 type QuoteDecision = "approved" | "declined"
 
 export default function QuotesPage() {
-  const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const selectedId = searchParams.get("quote")
   const [view, setView] = useState<View>("all")
   const [sort, setSort] = useState<Sort>("urgency")
   const [search, setSearch] = useState("")
-  const [submittingId, setSubmittingId] = useState<string>()
   const quotes = useObjectsQuery(allQuotes)
   const serviceCases = useObjectsQuery(linkedServiceCases)
-  const reviews = useQuery(listWorkflowInterventionsOptions({ query: reviewQuery }))
-  const submit = useMutation({
-    ...submitWorkflowInterventionMutation(),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: listWorkflowInterventionsQueryKey({ query: reviewQuery }),
-      })
-    },
-    onSettled: () => setSubmittingId(undefined),
-  })
+  const {
+    reviews,
+    pending: pendingReviews,
+    approve,
+    submitting,
+    failed,
+  } = useInterventionReviews("review-repair-quote")
 
   const allRows = quotes.data?.objects ?? []
   const caseRows = serviceCases.data?.objects ?? []
-  const pendingReviews = reviews.data?.interventions ?? []
   const blockedValue = allRows
     .filter((quote) => isQuoteOpen(quote.properties.status))
     .reduce((total, quote) => total + quote.properties.amount, 0)
@@ -139,30 +123,19 @@ export default function QuotesPage() {
       .sort((left, right) => compareQuotes(left, right, sort))
   }, [allRows, search, sort, view])
   const unmatchedReviews = pendingReviews.filter((intervention) => {
-    const caseNumber = text(intervention.input.caseNumber)
+    const caseNumber = textValue(intervention.input.caseNumber)
     return !allRows.some((quote) => quote.links.serviceCase?.properties.number === caseNumber)
   })
 
   function reviewFor(quote: QuoteRow): Intervention | undefined {
     return pendingReviews.find(
       (intervention) =>
-        text(intervention.input.caseNumber) === quote.links.serviceCase?.properties.number
+        textValue(intervention.input.caseNumber) === quote.links.serviceCase?.properties.number
     )
   }
 
-  function approveReview(intervention: Intervention, response: InterventionResponse) {
-    setSubmittingId(intervention.id)
-    submit.mutate({
-      path: { interventionId: intervention.id },
-      body: { response },
-    })
-  }
-
   function reviewState(intervention: Intervention | undefined) {
-    return {
-      pending: submit.isPending && submittingId === intervention?.id,
-      failed: submit.isError && submit.variables?.path.interventionId === intervention?.id,
-    }
+    return { pending: submitting(intervention), failed: failed(intervention) }
   }
 
   if (selectedId !== null) {
@@ -185,7 +158,7 @@ export default function QuotesPage() {
               review={review}
               {...reviewState(review)}
               onApproveReview={(response) => {
-                if (review) approveReview(review, response)
+                if (review) approve(review, response)
               }}
             />
           ) : null}
@@ -241,13 +214,13 @@ export default function QuotesPage() {
               intervention={intervention}
               serviceCase={caseForReview(intervention, caseRows)}
               {...reviewState(intervention)}
-              onApprove={(response) => approveReview(intervention, response)}
+              onApprove={(response) => approve(intervention, response)}
             />
           ))}
         </div>
       ) : null}
 
-      <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
+      <Section className="overflow-hidden">
         <QueryState
           loading={quotes.isLoading || reviews.isLoading}
           error={quotes.isError || reviews.isError}
@@ -264,7 +237,7 @@ export default function QuotesPage() {
             ))}
           </ul>
         </QueryState>
-      </section>
+      </Section>
     </div>
   )
 }
@@ -341,11 +314,11 @@ function ReviewCard({
   failed: boolean
   onApprove(response: InterventionResponse): void
 }) {
-  const scope = text(intervention.defaultResponse.scope ?? intervention.input.scope)
-  const amount = numeric(intervention.defaultResponse.amount ?? intervention.input.amount)
-  const caseNumber = text(intervention.input.caseNumber) || serviceCase?.properties.number
-  const caseId = refId(intervention.input.serviceCase) ?? serviceCase?.primaryId
-  const validUntil = text(intervention.input.validUntil)
+  const scope = textValue(intervention.defaultResponse.scope ?? intervention.input.scope)
+  const amount = numberValue(intervention.defaultResponse.amount ?? intervention.input.amount)
+  const caseNumber = textValue(intervention.input.caseNumber) || serviceCase?.properties.number
+  const caseId = refValue(intervention.input.serviceCase)?.primaryId ?? serviceCase?.primaryId
+  const validUntil = textValue(intervention.input.validUntil)
   const customer = serviceCase?.links.customer?.properties.name
 
   return (
@@ -383,9 +356,9 @@ function ReviewCard({
         ) : null}
         {validUntil ? <Fact label="Valid until">{formatDate(validUntil)}</Fact> : null}
       </dl>
-      {text(intervention.input.reason) ? (
+      {textValue(intervention.input.reason) ? (
         <p className="rounded-[12px] bg-muted px-4 py-3 text-[14px] leading-5 text-foreground/80">
-          {text(intervention.input.reason)}
+          {textValue(intervention.input.reason)}
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2.5">
@@ -421,13 +394,7 @@ function QuoteDocumentPage({
 
   return (
     <div ref={root} className="flex scroll-mt-14 flex-col gap-4 md:scroll-mt-10">
-      <nav className="flex items-center gap-2 text-[14px] text-muted-foreground">
-        <Link to="/quotes" className="text-primary hover:underline">
-          Quotes
-        </Link>
-        <ChevronRight className="size-3.5" />
-        <span className="tabular-nums">{quoteNumber ?? "Quote"}</span>
-      </nav>
+      <Breadcrumb to="/quotes" label="Quotes" current={quoteNumber ?? "Quote"} />
       {children}
     </div>
   )
@@ -460,13 +427,12 @@ function QuoteDocument({
   const customer = quote.links.customer
   const facility = quote.links.facility
   const linkedCase = quote.links.serviceCase
-  const canRecordDecision = Boolean(linkedCase) && isQuoteOpen(properties.status)
   const decided = properties.status === "approved" || properties.status === "declined"
 
   let next: ReactNode = null
   if (review) {
-    const scope = text(review.defaultResponse.scope ?? review.input.scope)
-    const amount = numeric(review.defaultResponse.amount ?? review.input.amount)
+    const scope = textValue(review.defaultResponse.scope ?? review.input.scope)
+    const amount = numberValue(review.defaultResponse.amount ?? review.input.amount)
     next = (
       <NextStepCard
         title="Approve the quote for customer authorization"
@@ -483,7 +449,7 @@ function QuoteDocument({
         {reviewFailed ? <ErrorLine>The approval could not be sent. Try again.</ErrorLine> : null}
       </NextStepCard>
     )
-  } else if (canRecordDecision && linkedCase) {
+  } else if (linkedCase && isQuoteOpen(properties.status)) {
     const recording = decide.isPending ? decide.variables?.decision : undefined
     const record = (decision: QuoteDecision) =>
       decide.mutate({
@@ -644,9 +610,7 @@ function QuoteDocument({
                   <span className="min-w-0 text-[15px] leading-5 font-semibold">
                     {linkedCase.properties.number} · {linkedCase.properties.title}
                   </span>
-                  <StatusBadge
-                    value={serviceCase?.properties.status ?? linkedCase.properties.status}
-                  />
+                  <StatusBadge value={linkedCase.properties.status} />
                 </div>
                 <span className="text-[13.5px] leading-5 text-muted-foreground">
                   {[serviceCase?.links.equipment?.properties.name, linkedCase.properties.nextAction]
@@ -657,33 +621,7 @@ function QuoteDocument({
             </Section>
           ) : null}
 
-          {customer ? (
-            <Section
-              title="Customer"
-              action={
-                <Link
-                  to={`/customers/${encodeURIComponent(customer.primaryId)}`}
-                  className="font-medium text-primary hover:underline"
-                >
-                  Open
-                </Link>
-              }
-            >
-              <dl className="flex flex-col px-6 pb-4">
-                <Row label={customer.properties.name}>
-                  {humanize(customer.properties.serviceTier)}
-                </Row>
-                {customer.properties.primaryContactName ? (
-                  <Row label={customer.properties.primaryContactName}>Primary contact</Row>
-                ) : null}
-                {facility ? (
-                  <Row label={facility.properties.name}>
-                    {facility.properties.city}, {facility.properties.state}
-                  </Row>
-                ) : null}
-              </dl>
-            </Section>
-          ) : null}
+          <CustomerCard customer={customer} facility={facility} />
         </aside>
       </div>
     </div>
@@ -703,8 +641,8 @@ function caseForReview(
   intervention: Intervention,
   cases: readonly ServiceCaseRow[]
 ): ServiceCaseRow | undefined {
-  const caseId = refId(intervention.input.serviceCase)
-  const caseNumber = text(intervention.input.caseNumber)
+  const caseId = refValue(intervention.input.serviceCase)?.primaryId
+  const caseNumber = textValue(intervention.input.caseNumber)
   return (
     cases.find((serviceCase) => serviceCase.primaryId === caseId) ??
     cases.find((serviceCase) => serviceCase.properties.number === caseNumber)
@@ -774,23 +712,6 @@ function headline(scope: string): string {
   return scope.replace(/\.$/, "")
 }
 
-function casePath(primaryId: string): string {
-  return `/service-cases/${encodeURIComponent(primaryId)}`
-}
-
 function dateValue(value: string | Date | undefined): number {
   return value ? new Date(value).getTime() : Number.POSITIVE_INFINITY
-}
-
-function refId(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null || !("primaryId" in value)) return undefined
-  return typeof value.primaryId === "string" ? value.primaryId : undefined
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : ""
-}
-
-function numeric(value: unknown): number {
-  return typeof value === "number" ? value : 0
 }
