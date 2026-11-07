@@ -60,8 +60,8 @@ export default function NorthlineHomePage() {
   const nextJob = todaysWork.find((item) => item.properties.status !== "on_site")
 
   return (
-    <div className="mx-auto flex w-full max-w-[46rem] flex-col pt-[8vh] pb-12 md:pt-[16vh]">
-      <header className="nl-home-rise flex flex-col items-center text-center">
+    <div className="nl-home mx-auto flex w-full max-w-[46rem] flex-col md:pt-[16vh] md:pb-12">
+      <header className="nl-home-brand nl-home-rise flex flex-col items-center text-center">
         <NorthlineMark className="size-14" />
         <h1 className="mt-4 text-[30px] leading-tight font-semibold tracking-[-0.025em]">
           {greeting()}
@@ -75,12 +75,12 @@ export default function NorthlineHomePage() {
       <Composer
         {...conversation.composerProps}
         placeholder="Ask about today’s work"
-        className="nl-home-composer nl-home-rise mt-8 bg-transparent px-0 pt-0 pb-0 [--rise-delay:60ms]"
+        className="nl-home-composer nl-home-rise md:mt-8 bg-transparent px-0 pt-0 pb-0 [--rise-delay:60ms]"
       />
 
       <section
         aria-label="Today at a glance"
-        className="nl-home-tiles mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"
+        className="nl-home-tiles mt-6 grid md:mt-5 grid-cols-2 gap-3 sm:grid-cols-4"
       >
         <Widget to="/service-cases?view=action" label="View cases that need you" title="Needs you">
           <WidgetState loading={cases.isLoading} error={cases.isError} label="cases">
