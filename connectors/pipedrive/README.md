@@ -16,9 +16,9 @@ This connector covers high-payback CRM sync surface:
 - Inbound Pipedrive general webhook v2 deliveries
 
 The connector uses personal API tokens only. OAuth, most writes, Projects/Tasks, file upload/download,
-and webhook management API calls are intentionally deferred. Person and organization create/update
-are supported for CRM contact writeback flows, and person, organization, deal and product fields can
-be managed in full.
+and webhook management API calls are intentionally deferred. Persons and organizations can be
+created, updated and deleted for CRM contact writeback flows, and person, organization, deal and
+product fields can be managed in full.
 
 ## Register
 
@@ -64,8 +64,8 @@ const pd = await sixb.connector(pipedriveConnector)
 | `pd.deals.listAllArchived(opts?)` | cursor iterator over `GET /api/v2/deals/archived` |
 | `pd.deals.get(id, opts?)` | `GET /api/v2/deals/{id}` |
 | `pd.deals.search(opts)` | `GET /api/v2/deals/search` |
-| `pd.persons.list(opts?)` / `listAll` / `create` / `get` / `update` / `search` | `/api/v2/persons*` |
-| `pd.organizations.list(opts?)` / `listAll` / `create` / `get` / `update` / `search` | `/api/v2/organizations*` |
+| `pd.persons.list(opts?)` / `listAll` / `create` / `get` / `update` / `delete` / `search` | `/api/v2/persons*` |
+| `pd.organizations.list(opts?)` / `listAll` / `create` / `get` / `update` / `delete` / `search` | `/api/v2/organizations*` |
 | `pd.products.list(opts?)` / `get` / `search` | `GET /api/v2/products*` |
 | `pd.pipelines.list(opts?)` / `get` | `GET /api/v2/pipelines*` |
 | `pd.stages.list(opts?)` / `get` | `GET /api/v2/stages*` |
@@ -104,6 +104,18 @@ Pipedrive v2 list endpoints use cursor pagination. `listAll(...)` follows
 
 Pipedrive v1 list endpoints in this connector use offset pagination. `listAll(...)` follows
 `additional_data.pagination.next_start` while `more_items_in_collection` is true.
+
+## Deleting persons and organizations
+
+`delete(id)` marks the record deleted and resolves with its id. Pipedrive removes it for good after
+30 days.
+
+```ts
+const { data } = await pd.persons.delete(123)
+// data: { id: 123 }
+
+await pd.organizations.delete(42)
+```
 
 ## Custom fields
 

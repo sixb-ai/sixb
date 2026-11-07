@@ -53,6 +53,11 @@ export interface PipedriveResponse<TData, TAdditional = PipedriveAdditionalData>
   readonly related_objects?: PipedriveJsonObject
 }
 
+/** The `data` of a v2 delete: the id of the record Pipedrive marked deleted. */
+export interface PipedriveDeletedRecord {
+  readonly id: number
+}
+
 export interface PipedriveAdditionalData extends PipedriveJsonObject {
   readonly next_cursor?: string | null
   readonly pagination?: PipedriveOffsetPagination
