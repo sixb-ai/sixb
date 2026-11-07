@@ -10,6 +10,7 @@ import {
   ORPHANED_RUN_AFTER_MS,
 } from "../storage/run-claim"
 import { recoverJobId } from "./job-ids"
+import { type ProjectionRunRecovery, republishQueuedProjectionRuns } from "./lost-projection-runs"
 
 /**
  * A job may still be on its way for this long: a queued run may be in its first publication, and a
@@ -35,6 +36,8 @@ export interface RepublishLostRunsInput {
   readonly now: Date
   /** Most runs of each primitive one call looks at, longest lost first. */
   readonly limit?: number
+  /** Brings back queued projection runs. Without it, only lapsed ones get a job. */
+  readonly projections?: ProjectionRunRecovery
 }
 
 interface RepublishLostRunsResult {
@@ -87,8 +90,8 @@ interface RecoveryJob {
  *   happen by surprise that late, least of all a workflow's side effects.
  *
  * A delivery that finds the run held or finished does nothing, so this can be wrong about a job
- * being lost without doing harm. Projections republish their queued runs through their own
- * reconciler and have no older version to settle, so what is left of them here is a lapsed lease.
+ * being lost without doing harm. Projections have no older version to settle, and retry without a
+ * cap, so a lost one only ever gets a job (see `republishQueuedProjectionRuns`).
  */
 export async function republishLostRuns(
   input: RepublishLostRunsInput
@@ -97,7 +100,7 @@ export async function republishLostRuns(
     recoverLane(input, syncLane(input)),
     recoverLane(input, pipelineLane(input)),
     recoverLane(input, workflowLane(input)),
-    republishLapsedProjections(input),
+    recoverProjections(input),
   ]
 
   // A lane that fails must not hold the others, and still has to reach the caller.
@@ -205,15 +208,16 @@ async function settleRun<TRun extends LostRunCandidate>(
   )
 }
 
-async function republishLapsedProjections(
-  input: RepublishLostRunsInput
-): Promise<RepublishLostRunsResult> {
-  const { projectId, storage, queues, now } = input
-  if (!storage.projectionRuns) return { republished: 0, settled: 0 }
+async function recoverProjections(input: RepublishLostRunsInput): Promise<RepublishLostRunsResult> {
+  const { projectId, storage, queues, projections } = input
+  const { projectionRuns } = storage
+  if (!projectionRuns) return { republished: 0, settled: 0 }
 
-  const lapsed = await storage.projectionRuns.listLapsed({
+  const jobOnItsWay = new Date(input.now.getTime() - JOB_ON_ITS_WAY_MS)
+
+  const lapsed = await projectionRuns.listLapsed({
     projectId,
-    lapsedBy: new Date(now.getTime() - JOB_ON_ITS_WAY_MS),
+    lapsedBy: jobOnItsWay,
     limit: input.limit ?? DEFAULT_LIMIT,
   })
 
@@ -222,15 +226,20 @@ async function republishLapsedProjections(
   if (jobs.length > 0) {
     await queues.projections.enqueue({
       projectId,
-      jobs: jobs.map(({ id, runId }) => ({
-        id,
-        type: "projection.run.requested",
-        payload: { runId },
-      })),
+      jobs: queueJobs("projection.run.requested", jobs),
     })
   }
 
-  return { republished: jobs.length, settled: 0 }
+  const queued = projections
+    ? await republishQueuedProjectionRuns({
+        projectId,
+        projectionRuns,
+        queuedBefore: jobOnItsWay,
+        recovery: projections,
+      })
+    : 0
+
+  return { republished: jobs.length + queued, settled: 0 }
 }
 
 /**

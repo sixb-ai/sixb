@@ -93,7 +93,7 @@ Projection admission has an event path and a recovery path:
 ```text
 dataset.version.committed --> ProjectionRunDispatcher -> durable execution + run -> queue
 lake change feed + startup lookup ---^
-stuck-run sweep ---------------------^
+`runs` pass -------------------------^
 ```
 
 All of them call the same `ProjectionRunDispatcher`, which derives the same deterministic run ID.
@@ -111,10 +111,11 @@ lake's history:
   - reads the lake's change feed (`LakeStorage.listLatestVersionsSince`) and dispatches the newest
     data version of each changed dataset. Idle, that is one catalog query, shared with the
     `triggers` pass: both read through one `LakeChangeFeed`;
-  - looks up directly each projection whose dispatch failed, until it succeeds;
-  - dispatches again the runs `queued` for longer than one pass interval and the runs that failed
-    with a retryable `queue.enqueue_failed`, which republishes them. Runs admitted under an
-    earlier projection revision are left alone; the start-up lookup admits the current one.
+  - looks up directly each projection whose dispatch failed, until it succeeds.
+
+The `runs` pass dispatches again the runs `queued` for longer than one pass interval and those that
+failed with a retryable `queue.enqueue_failed`, which republishes them. Runs admitted under an
+earlier projection revision are left alone; the start-up lookup admits the current one.
 
 The live event path, not the interval, sets normal projection latency. The interval bounds only
 how long a lost event or publication waits for repair.
@@ -193,8 +194,8 @@ no manual wiring is needed there.
 
 - The `projections` pass repairs a missed dataset event by admitting the latest data-bearing
   version. It is not an event replay log and does not materialize every intermediate version.
-- Publication recovery requires a repeated dispatch or the `runs` pass. The projection run sweep
-  supplies the first, and event schedules can replay retained events.
+- Publication recovery requires a repeated dispatch, which the `runs` pass supplies for queued
+  projection runs, and event schedules can replay retained events.
 - The change-feed cursor is process memory, so each start pays one latest-version lookup per
   projected dataset before it tails the feed.
 - Broker progress is process-local. Retention can still overtake a slow consumer; backpressure
