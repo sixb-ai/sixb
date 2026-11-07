@@ -37,10 +37,15 @@ export function registerStatusRoutes(app: Elysia, host: SixbHostView) {
 
   return app.get(
     "/api/status",
-    async () => ({
-      ...(await host.getOntologyOperationalStatus()),
-      objectTypes: host.definitions.ontology.listObjectTypes().length,
-    }),
+    async () => {
+      const { status, maintenance } = await host.getOntologyOperationalStatus()
+
+      return {
+        status,
+        objectTypes: host.definitions.ontology.listObjectTypes().length,
+        maintenance: { ...maintenance, passes: [...maintenance.passes] },
+      }
+    },
     {
       response: { 200: StatusResponseSchema },
       detail: {

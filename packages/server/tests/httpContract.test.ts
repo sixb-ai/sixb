@@ -556,8 +556,8 @@ describe("SixbServer HTTP contract", () => {
         status: "ok",
         objectTypes: 2,
         maintenance: {
-          running: false,
-          consecutiveFailures: 0,
+          stale: false,
+          passes: [{ id: "ontology", consecutiveFailures: 0, lastError: null }],
           outbox: { pendingCount: 0 },
         },
       })

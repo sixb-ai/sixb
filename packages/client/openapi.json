@@ -14589,7 +14589,7 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok", "degraded"]
+                      "enum": ["ok", "degraded", "unknown"]
                     },
                     "objectTypes": {
                       "type": "integer",
@@ -14598,34 +14598,42 @@
                     "maintenance": {
                       "type": "object",
                       "properties": {
-                        "running": {
+                        "beatAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "stale": {
                           "type": "boolean"
                         },
-                        "intervalMs": {
-                          "type": "integer",
-                          "exclusiveMinimum": true,
-                          "minimum": 0
-                        },
-                        "lastStartedAt": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "lastCompletedAt": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "lastDurationMs": {
-                          "type": "number",
-                          "minimum": 0,
-                          "nullable": true
-                        },
-                        "consecutiveFailures": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "lastError": {
-                          "type": "string",
-                          "nullable": true
+                        "passes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "lastSucceededAt": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "consecutiveFailures": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "lastError": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "lastSucceededAt",
+                              "consecutiveFailures",
+                              "lastError"
+                            ],
+                            "additionalProperties": false
+                          }
                         },
                         "outbox": {
                           "type": "object",
@@ -14653,45 +14661,10 @@
                             "retryingCount",
                             "maxAttempts"
                           ],
-                          "additionalProperties": false,
-                          "nullable": true
-                        },
-                        "cleanup": {
-                          "type": "object",
-                          "properties": {
-                            "publishedOutboxRowsDeleted": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "terminalSourceRowsDeleted": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "terminalSourceMaterializationsDeleted": {
-                              "type": "integer",
-                              "minimum": 0
-                            }
-                          },
-                          "required": [
-                            "publishedOutboxRowsDeleted",
-                            "terminalSourceRowsDeleted",
-                            "terminalSourceMaterializationsDeleted"
-                          ],
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         }
                       },
-                      "required": [
-                        "running",
-                        "intervalMs",
-                        "lastStartedAt",
-                        "lastCompletedAt",
-                        "lastDurationMs",
-                        "consecutiveFailures",
-                        "lastError",
-                        "outbox",
-                        "cleanup"
-                      ],
+                      "required": ["beatAt", "stale", "passes", "outbox"],
                       "additionalProperties": false
                     }
                   },
