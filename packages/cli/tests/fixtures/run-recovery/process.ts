@@ -2,21 +2,16 @@
  * One process of the run recovery end-to-end test: a real sync and pipeline worker on SQLite and
  * DuckLake files, which `crash` phases kill with SIGKILL at a chosen point.
  *
- * bun process.ts <state directory> <sync|pipeline> <crash point|resume|lost-reply>
+ * bun process.ts <state directory> <sync|pipeline> <crash point|resume|lost-reply|queue-only>
  *
  * `lost-reply` kills nothing: the first commit lands and answers with an error, as a connection
- * lost during COMMIT does, and the process runs on.
+ * lost during COMMIT does, and the process runs on. `queue-only` queues the run and exits, and its
+ * job goes with the process.
  */
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import {
-  col,
   type DatasetRow,
-  defineConnector,
-  defineDataset,
-  definePipeline,
-  definePipelineStep,
-  defineSync,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryQueues,
@@ -27,53 +22,28 @@ import { DuckLakeStorage } from "@sixb/ducklake"
 import { PipelineWorker } from "@sixb/pipeline-worker"
 import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
 import { SyncWorker } from "@sixb/sync-worker"
+import { createDefinitions } from "./definitions"
 
-type Phase = "mid-read" | "after-commit" | "after-sql-commit" | "resume" | "lost-reply"
+type Phase =
+  | "mid-read"
+  | "after-commit"
+  | "after-sql-commit"
+  | "resume"
+  | "lost-reply"
+  | "queue-only"
 
 const [stateDir, primitive, phase] = process.argv.slice(2) as [string, "sync" | "pipeline", Phase]
 
 const projectId = "recovery-e2e"
 const runId = "run-1"
 
-const source = defineDataset("source", { schema: [col("id", "string")] })
-const orders = defineDataset("orders", { schema: [col("id", "string")] })
-const published = defineDataset("published", { schema: [col("id", "string")] })
-
-const erp = defineConnector("erp", {
-  type: "test",
-  connect() {
-    return {}
-  },
-})
-
 function die(point: Phase): void {
   if (phase === point) process.kill(process.pid, "SIGKILL")
 }
 
-const ordersSync = defineSync("orders-sync", { mode: "append" })
-  .checkpoint<string>()
-  .from(erp)
-  .read(async function* (_client, { checkpoint, setCheckpoint }) {
-    yield { id: `after-${checkpoint ?? "start"}` }
-    die("mid-read")
-    setCheckpoint("read-once")
-  })
-  .intoDataset(orders)
-
-const fill = definePipelineStep("fill")
-  .inputs({ source })
-  .output(orders, { mode: "append" })
-  .run(async ({ inputs, output }) => {
-    await output.writeRows(inputs.source.readRows())
-    die("mid-read")
-  })
-
-const publish = definePipelineStep("publish")
-  .inputs({ orders })
-  .output(published)
-  .sql(({ orders }) => `SELECT id FROM ${orders}`)
-
-const pipeline = definePipeline("orders-pipeline").then(fill).then(publish)
+const { source, orders, published, erp, ordersSync, pipeline } = createDefinitions((point) =>
+  die(point)
+)
 
 mkdirSync(join(stateDir, "lake"), { recursive: true })
 
@@ -154,7 +124,7 @@ async function queueSyncRun(id: string): Promise<void> {
 
 async function queuePipelineRun(id: string): Promise<void> {
   await storage.executions.create({
-    id: `exec:${id}`,
+    id: `exec:pipeline:${id}`,
     projectId,
     executor: { type: "primitive", kind: "pipeline", runId: id },
     source: { type: "schedule", eventId: `event:${id}` },
@@ -167,7 +137,7 @@ async function queuePipelineRun(id: string): Promise<void> {
   await storage.pipelineRuns.queue({
     id,
     projectId,
-    executionId: `exec:${id}`,
+    executionId: `exec:pipeline:${id}`,
     pipelineId: pipeline.id,
   })
   await host.queues.pipelines.enqueue({
@@ -249,6 +219,8 @@ if (primitive === "sync") {
   await seedSource()
   await queuePipelineRun(runId)
 }
+
+if (phase === "queue-only") process.exit(0)
 
 await worker.start()
 if (phase === "lost-reply") await finishAndReport()
