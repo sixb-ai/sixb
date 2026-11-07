@@ -91,7 +91,11 @@ function createScene(projections = [invoiceProjection]) {
   }
 
   /** The `runs` pass, as the orchestrator runs it, at a time of the test's choosing. */
-  const republishRuns = (now: Date, descriptors = getProjectionDispatchDescriptors(host)) =>
+  const republishRuns = (
+    now: Date,
+    descriptors = getProjectionDispatchDescriptors(host),
+    runSignal?: AbortSignal
+  ) =>
     republishLostRuns({
       projectId: host.id,
       storage,
@@ -99,6 +103,7 @@ function createScene(projections = [invoiceProjection]) {
       events: host.events,
       now,
       projections: { descriptors, dispatcher },
+      signal: runSignal,
     })
 
   return {
@@ -237,6 +242,25 @@ describe("ProjectionDispatchReconciler", () => {
       versionId: second.versionId,
       status: "queued",
     })
+  })
+
+  test("a stopped pass stops republishing queued runs", async () => {
+    // Red check: drop the signal from republishQueuedProjectionRuns; the run reaches the queue, and
+    // a backlog of them would hold the orchestrator's shutdown.
+    const reconciliation = createScene()
+    const stranded = await reconciliation.commit("invoice-1")
+    await reconciliation.failNextPublish()
+    await expect(reconciliation.dispatcher.dispatch(pinned(stranded))).rejects.toThrow(
+      "queue unavailable"
+    )
+
+    const stopped = AbortSignal.abort(new Error("the pass stopped"))
+    const failure = await reconciliation
+      .republishRuns(new Date(Date.now() + INTERVAL_MS + 1_000), undefined, stopped)
+      .catch((error) => error)
+
+    expect(String(failure)).toContain("the pass stopped")
+    expect(await reconciliation.publishedRunIds()).toEqual([])
   })
 
   test("republishes a run left queued by a lost publication", async () => {

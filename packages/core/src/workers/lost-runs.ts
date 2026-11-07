@@ -38,6 +38,8 @@ export interface RepublishLostRunsInput {
   readonly limit?: number
   /** Brings back queued projection runs. Without it, only lapsed ones get a job. */
   readonly projections?: ProjectionRunRecovery
+  /** Stops a backlog of queued projection runs, which no limit caps, between two of them. */
+  readonly signal?: AbortSignal
 }
 
 interface RepublishLostRunsResult {
@@ -236,6 +238,7 @@ async function recoverProjections(input: RepublishLostRunsInput): Promise<Republ
         projectionRuns,
         queuedBefore: jobOnItsWay,
         recovery: projections,
+        signal: input.signal,
       })
     : 0
 
