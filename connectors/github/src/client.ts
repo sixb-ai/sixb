@@ -20,6 +20,7 @@ import {
   createOrganizationRepositoriesApi,
   createRepositoryApi,
 } from "./resources/repos"
+import { createRepositoryStacksApi } from "./resources/stacks"
 import { createGitHubUsersApi } from "./resources/users"
 import type { GitHubClient } from "./types/client"
 
@@ -37,6 +38,7 @@ export function createGitHubClient(http: RestClient, apiBaseUrl: URL): GitHubCli
       commits: createRepositoryCommitsApi(context, target),
       issues: createRepositoryIssuesApi(context, target),
       pulls: createRepositoryPullRequestsApi(context, target),
+      stacks: createRepositoryStacksApi(context, target),
       releases: createRepositoryReleasesApi(context, target),
     }),
     org: (org) => ({

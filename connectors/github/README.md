@@ -6,6 +6,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
 - **Pull requests** — list a repository's pull requests, get one with its merge state and size, list its reviews
+- **Stacks** — see where a pull request sits in a stack of dependent pull requests, list a repository's stacks, get one with its pull requests in order
 - **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
 - **Attachments** — find the images, videos and files in an issue or comment body and download them
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
@@ -93,6 +94,8 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).pulls.list()` | `GET /repos/{owner}/{repo}/pulls`             |
 | `gh.repo({ owner, repo }).pulls.get(number)` | `GET /repos/{owner}/{repo}/pulls/{number}` |
 | `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).stacks.list()` | `GET /repos/{owner}/{repo}/stacks`            |
+| `gh.repo({ owner, repo }).stacks.get(number)` | `GET /repos/{owner}/{repo}/stacks/{number}` |
 | `gh.repo({ owner, repo }).commits.list()` | `GET /repos/{owner}/{repo}/commits`         |
 | `gh.repo({ owner, repo }).commits.get(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}` |
 | `gh.repo({ owner, repo }).issues.list()` | `GET /repos/{owner}/{repo}/issues`            |
@@ -224,6 +227,32 @@ each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DIS
 `PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
 pull request bodies too.
 
+### Stacks
+
+GitHub can group dependent pull requests into a stack: each targets the branch of the one below
+it, and the bottom one targets the stack's base, such as `main`. A pull request in a stack carries
+`stack` in `pulls.list()` and `pulls.get()`: the stack's `number` and `size`, the pull request's
+`position` from 1 at the bottom to `size` at the top, and the stack's `base` branch. GitHub leaves
+`stack` out for a pull request outside any stack.
+
+```ts
+const pull = await repo.pulls.get(1086)
+if (pull.stack) {
+  const { number, position, size, base } = pull.stack // e.g. 5 of 5 in stack 1085, into main
+  const stack = await repo.stacks.get(number)
+  const below = stack.pull_requests[position - 2] // undefined at the bottom
+}
+```
+
+`stacks.list()` returns a repository's stacks, or with `pullRequest` the one holding that pull
+request; each lists its pull requests from the bottom up with their `state`, `draft`, `merged_at`
+and `head` branch. `stacks.get()` adds each pull request's `title`, `user`, `base` and links. A
+stack's `number` comes from the same sequence as the repository's issues and pull requests, and
+`open` turns `false` once none of its pull requests is open. Stack calls accept a `signal`.
+
+Creating, extending and merging stacks are not covered yet: GitHub merges a stack only through its
+asynchronous merge endpoint.
+
 Commit calls accept a `signal` to abort the request. `commits.list()` returns newest first from
 the default branch, or from `sha` (a branch or commit), and filters by `path`, `author`,
 `committer`, `since` and `until`. Each item carries the Git `commit` (message, author and
@@ -302,6 +331,11 @@ github({
 `event.name` is GitHub's webhook event-name union, and narrowing on it narrows
 `event.payload` to the matching GitHub payload type. GitHub's first `ping`
 arrives as `event.name === "ping"`.
+
+GitHub sends `pull_request` with the action `stacked` when a pull request is added to a stack,
+with the stack in the payload. That action and the `stack` field are newer than the payload types
+this package uses, so read them from the payload without relying on their types, or fetch the
+pull request with `pulls.get()`.
 
 ### 2. Register it on GitHub
 

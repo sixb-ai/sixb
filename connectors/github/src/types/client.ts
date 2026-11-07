@@ -20,6 +20,7 @@ import type {
   GitHubRepository,
   OrganizationRepositoriesApi,
 } from "./repos"
+import type { RepositoryStacksApi } from "./stacks"
 import type { GitHubUsersApi } from "./users"
 
 export interface GitHubClient {
@@ -38,6 +39,8 @@ export interface GitHubRepositoryScope {
   readonly commits: RepositoryCommitsApi
   readonly issues: RepositoryIssuesApi
   readonly pulls: RepositoryPullRequestsApi
+  /** Stacks of dependent pull requests. */
+  readonly stacks: RepositoryStacksApi
   readonly releases: RepositoryReleasesApi
   get(): Promise<GitHubRepository>
 }

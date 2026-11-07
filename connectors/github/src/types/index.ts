@@ -124,6 +124,16 @@ export type {
   RepositoryApi,
 } from "./repos"
 export type {
+  GitHubPullRequestStackPosition,
+  GitHubStack,
+  GitHubStackPullRequest,
+  GitHubStackPullRequestBranch,
+  GitHubStackPullRequestSummary,
+  GitHubStackSummary,
+  ListStacksOptions,
+  RepositoryStacksApi,
+} from "./stacks"
+export type {
   GitHubUserPlan,
   GitHubUserProfile,
   GitHubUsersApi,

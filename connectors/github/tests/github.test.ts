@@ -278,6 +278,19 @@ describe("github connector", () => {
       { per_page: "50" },
     ],
     [
+      "repo().stacks.list for one pull request",
+      (client: GitHubClient) =>
+        client.repo(webRepo).stacks.list({ pullRequest: 1086, pageSize: 50 }),
+      "/repos/acme/web/stacks",
+      { pull_request: "1086", per_page: "50" },
+    ],
+    [
+      "repo().stacks.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).stacks.list(),
+      "/repos/acme/web/stacks",
+      {},
+    ],
+    [
       "repo().commits.list",
       (client: GitHubClient) =>
         client.repo(webRepo).commits.list({
@@ -399,6 +412,13 @@ describe("github connector", () => {
       (c) => c.repo(webRepo).pulls.get(12),
       "GET",
       "/repos/acme/web/pulls/12",
+      undefined,
+    ],
+    [
+      "repo().stacks.get",
+      (c) => c.repo(webRepo).stacks.get(1085),
+      "GET",
+      "/repos/acme/web/stacks/1085",
       undefined,
     ],
     [
@@ -651,15 +671,87 @@ describe("github connector", () => {
     expect(calls[1]?.url.pathname).toBe("/api/v3/user/repos")
   })
 
+  // Shapes as GitHub returned them for sixb-ai/sixb's stack #1085, trimmed to the fields read.
+  test("reads where a pull request sits in its stack, and the stack's pull requests from the bottom up", async () => {
+    const stack = {
+      id: 3203111,
+      number: 1085,
+      base: { ref: "main", sha: "abae626" },
+      size: 5,
+      position: 5,
+    }
+    const branch = (ref: string) => ({
+      ref,
+      sha: `${ref}-sha`,
+      repo: { id: 1, name: "web", url: "https://api.github.com/repos/acme/web" },
+    })
+    record((request) => {
+      if (request.url.pathname.endsWith("/pulls")) {
+        return json([
+          { number: 1087, title: "Standalone" },
+          { number: 1086, title: "Top of the stack", stack },
+        ])
+      }
+      return json({
+        id: 3203111,
+        node_id: "PRS_1",
+        number: 1085,
+        url: "https://api.github.com/repos/acme/web/stacks/1085",
+        base: { ref: "main" },
+        open: true,
+        created_at: "2026-11-07T20:50:28Z",
+        pull_requests: [
+          {
+            number: 1081,
+            title: "Examples",
+            state: "open",
+            draft: true,
+            merged_at: null,
+            base: branch("main"),
+            head: branch("examples-upgrades"),
+          },
+          {
+            number: 1086,
+            title: "Launch",
+            state: "open",
+            draft: false,
+            merged_at: null,
+            base: branch("phone/shell"),
+            head: branch("phone/launch"),
+          },
+        ],
+      })
+    })
+    const repo = (await connect()).repo(webRepo)
+
+    const page = await repo.pulls.list()
+    const [standalone, stacked] = page.items
+    const detail = await repo.stacks.get(stacked!.stack!.number)
+
+    expect(standalone?.stack).toBeUndefined()
+    expect(stacked?.stack).toEqual(stack)
+    expect(
+      detail.pull_requests.map(({ number, base, head }) => [number, base.ref, head.ref])
+    ).toEqual([
+      [1081, "main", "examples-upgrades"],
+      [1086, "phone/shell", "phone/launch"],
+    ])
+  })
+
   test("rejects invalid issue, pull and comment ids, release tags, branch names and commit refs before requesting", async () => {
     const calls = record()
-    const { branches, commits, issues, pulls, releases } = (await connect()).repo(webRepo)
+    const { branches, commits, issues, pulls, releases, stacks } = (await connect()).repo(webRepo)
 
     await expect(branches.get(" ")).rejects.toThrow("branch must not be empty")
     await expect(commits.get(" ")).rejects.toThrow("ref must not be empty")
     await expect(pulls.get(0)).rejects.toThrow("pullNumber must be a positive integer")
     await expect(pulls.get(1.5)).rejects.toThrow("pullNumber must be a positive integer")
     await expect(pulls.reviews.list(0)).rejects.toThrow("pullNumber must be a positive integer")
+    // Reproduce: set `pull_request` from the raw option in resources/stacks.ts.
+    await expect(stacks.list({ pullRequest: 0 })).rejects.toThrow(
+      "pullRequest must be a positive integer"
+    )
+    await expect(stacks.get(1.5)).rejects.toThrow("stackNumber must be a positive integer")
     await expect(issues.get(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.get(0)).rejects.toThrow("commentId must be a positive integer")
@@ -681,6 +773,8 @@ describe("github connector", () => {
     ["pulls.list", (r, signal) => r.pulls.list({ signal })],
     ["pulls.get", (r, signal) => r.pulls.get(12, { signal })],
     ["pulls.reviews.list", (r, signal) => r.pulls.reviews.list(12, { signal })],
+    ["stacks.list", (r, signal) => r.stacks.list({ signal })],
+    ["stacks.get", (r, signal) => r.stacks.get(1085, { signal })],
     ["commits.list", (r, signal) => r.commits.list({ signal })],
     ["commits.get", (r, signal) => r.commits.get("main", { signal })],
   ]

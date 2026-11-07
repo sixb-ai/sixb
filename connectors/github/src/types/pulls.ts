@@ -7,6 +7,7 @@ import type {
 } from "./common"
 import type { GitHubLabel, GitHubMilestone } from "./issues"
 import type { GitHubRepository, GitHubSortDirection } from "./repos"
+import type { GitHubPullRequestStackPosition } from "./stacks"
 
 export type GitHubPullRequestState = "open" | "closed" | "all"
 export type GitHubPullRequestSort = "created" | "updated" | "popularity" | "long-running"
@@ -67,6 +68,11 @@ export interface GitHubPullRequest {
   readonly html_url: string
   readonly diff_url: string
   readonly patch_url: string
+  /**
+   * Where the pull request sits in a stack of dependent pull requests. GitHub leaves it out for
+   * a pull request outside any stack.
+   */
+  readonly stack?: GitHubPullRequestStackPosition | null
 }
 
 /** A pull request as `pulls.get()` returns it, with its merge state and size. */
