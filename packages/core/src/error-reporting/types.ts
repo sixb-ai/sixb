@@ -207,7 +207,7 @@ export interface SixbLakeRetentionFailedContext
   extends SixbFailureContext<"lake.retention.failed"> {
   readonly failure: SixbFailure<"internal.unexpected" | "runtime.cancelled">
   /** The start of the interval the run was for. */
-  readonly requestedAt: string
+  readonly intervalStart: string
 }
 
 /**

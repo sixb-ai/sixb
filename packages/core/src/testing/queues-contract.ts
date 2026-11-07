@@ -92,14 +92,14 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
       })
     })
 
-    // SyncWorker claims both lanes, so a lake job claimed from `syncRuns` would run as a sync.
+    // A lake job claimed from `syncRuns` would run as a sync.
     test("lake work has its own lane beside sync runs, with idempotent job ids", async () => {
       await withQueues(async (queues) => {
         const jobs = [
           {
             id: "lake-retention:2026-11-05T10:00:00.000Z",
             type: "lake.retention.requested" as const,
-            payload: { requestedAt: "2026-11-05T10:00:00.000Z" },
+            payload: { intervalStart: "2026-11-05T10:00:00.000Z" },
           },
         ]
         await queues.lake.enqueue({ projectId: "project-a", jobs })
@@ -115,7 +115,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           limit: 2,
         })
         expect(claimed).toHaveLength(1)
-        expect(claimed[0]!.job.payload).toEqual({ requestedAt: "2026-11-05T10:00:00.000Z" })
+        expect(claimed[0]!.job.payload).toEqual({ intervalStart: "2026-11-05T10:00:00.000Z" })
       })
     })
 

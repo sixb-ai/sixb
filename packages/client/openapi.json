@@ -20037,11 +20037,12 @@
                             "not-requested",
                             "no-worker",
                             "failing",
-                            "running"
+                            "cleaning",
+                            "ok"
                           ],
                           "description": "What actually happens: `not-requested` when no orchestrator asks, `no-worker` when no lake worker runs what it asks"
                         },
-                        "requestedAt": {
+                        "lastRequestedAt": {
                           "type": "string",
                           "nullable": true,
                           "description": "When the orchestrator last asked for cleanup"
@@ -20049,7 +20050,7 @@
                         "lastRunAt": {
                           "type": "string",
                           "nullable": true,
-                          "description": "When a lake worker last finished a cleanup"
+                          "description": "When a lake worker last started a cleanup"
                         },
                         "keepVersionsFor": {
                           "type": "string"
@@ -20063,7 +20064,7 @@
                       },
                       "required": [
                         "state",
-                        "requestedAt",
+                        "lastRequestedAt",
                         "lastRunAt",
                         "keepVersionsFor",
                         "deleteFilesAfter",

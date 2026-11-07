@@ -129,8 +129,9 @@ export const en = {
     cleanupDescription:
       "Removes replaced versions and the files only they read. The versions projections applied are always kept.",
     status: "Status",
-    on: (every: string) => `Running, every ${every}`,
     states: {
+      ok: "Healthy",
+      cleaning: "Cleaning now",
       off: "Off",
       idle: "Nothing to clean",
       "not-requested": "Not running",
@@ -140,7 +141,8 @@ export const en = {
     stateNotes: {
       off: "The project turned it off. Replaced versions stay until someone cleans up by hand.",
       idle: "No dataset writes to this lake yet.",
-      running: "The orchestrator requests it and a lake worker runs it.",
+      ok: "The orchestrator requests it and a lake worker runs it.",
+      cleaning: "A lake worker is removing expired versions and their files.",
       "not-requested":
         "Nothing is asking for cleanup: the orchestrator is not running. Replaced versions stay until it does.",
       "no-worker":
@@ -148,6 +150,7 @@ export const en = {
       failing:
         "The last attempt failed, and the next one tries again. The details went to the project's error handler.",
     },
+    interval: "Interval",
     lastRequested: "Last requested",
     lastRun: "Last run",
     never: "Never",
@@ -161,7 +164,7 @@ export const en = {
     notWritten: "Not written yet",
     files: (count: number, formatted: string) =>
       plural("en", count, { one: `${formatted} file`, other: `${formatted} files` }),
-    smallFiles: (formatted: string) => `${formatted} small`,
+    smallFiles: (_count: number, formatted: string) => `${formatted} small`,
     deleteFiles: (count: number, formatted: string) =>
       plural("en", count, { one: `${formatted} delete file`, other: `${formatted} delete files` }),
     inlinedRows: (count: number, formatted: string) =>
@@ -358,8 +361,9 @@ export const fr: Translation<DataMessages> = {
     cleanupDescription:
       "Supprime les versions remplacées et les fichiers qu’elles seules lisent. Les versions appliquées par les projections sont toujours conservées.",
     status: "État",
-    on: (every: string) => `En marche, toutes les ${every}`,
     states: {
+      ok: "Opérationnel",
+      cleaning: "Nettoyage en cours",
       off: "Désactivé",
       idle: "Rien à nettoyer",
       "not-requested": "À l’arrêt",
@@ -369,7 +373,8 @@ export const fr: Translation<DataMessages> = {
     stateNotes: {
       off: "Le projet l’a désactivé. Les versions remplacées restent jusqu’à un nettoyage manuel.",
       idle: "Aucun jeu de données n’écrit encore dans ce lac.",
-      running: "L’orchestrateur le demande et un worker du lac l’exécute.",
+      ok: "L’orchestrateur le demande et un worker du lac l’exécute.",
+      cleaning: "Un worker du lac supprime les versions expirées et leurs fichiers.",
       "not-requested":
         "Rien ne demande le nettoyage : l’orchestrateur ne tourne pas. Les versions remplacées restent en attendant.",
       "no-worker":
@@ -377,6 +382,7 @@ export const fr: Translation<DataMessages> = {
       failing:
         "La dernière tentative a échoué et la suivante réessaiera. Le détail est parti vers le gestionnaire d’erreurs du projet.",
     },
+    interval: "Intervalle",
     lastRequested: "Dernière demande",
     lastRun: "Dernière exécution",
     never: "Jamais",
@@ -384,13 +390,14 @@ export const fr: Translation<DataMessages> = {
     deleteFilesAfter: "Supprime les fichiers non lus après",
     datasetsTitle: "Jeux de données",
     datasetsDescription:
-      "La compaction fusionne les petits fichiers et les lignes en ligne après les écritures qui les laissent.",
+      "La compaction fusionne les petits fichiers et les lignes du catalogue après les écritures qui les laissent.",
     emptyTitle: "Aucun jeu de données",
     emptyDescription: "Une synchronisation ou un pipeline déclare le jeu de données qu’il écrit.",
     notWritten: "Pas encore écrit",
     files: (count: number, formatted: string) =>
       plural("fr", count, { one: `${formatted} fichier`, other: `${formatted} fichiers` }),
-    smallFiles: (formatted: string) => `${formatted} petits`,
+    smallFiles: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} petit`, other: `${formatted} petits` }),
     deleteFiles: (count: number, formatted: string) =>
       plural("fr", count, {
         one: `${formatted} fichier de suppression`,

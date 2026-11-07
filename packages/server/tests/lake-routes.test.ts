@@ -119,7 +119,7 @@ describe("GET /api/lake/health", () => {
       available: true,
       cleanup: {
         state: "not-requested",
-        requestedAt: null,
+        lastRequestedAt: null,
         lastRunAt: null,
         keepVersionsFor: "3d",
         deleteFilesAfter: "7d",
@@ -130,7 +130,7 @@ describe("GET /api/lake/health", () => {
     expect(lakeStorage.described).toEqual([[invoices.id]])
   })
 
-  // Reproduce: answer `state: "running"` from `settings.enabled` in routes/lake.ts.
+  // Reproduce: answer `state: "ok"` from `settings.enabled` in routes/lake.ts.
   test("says what durable state says about retention, not what the settings ask for", async () => {
     const { app, storage } = await createApp({ lakeStorage: new MaintainedLakeStorage() })
     const headers = await seedSession(storage, "usr_staff", [staff.id])
@@ -145,18 +145,22 @@ describe("GET /api/lake/health", () => {
           id: "lake-retention",
           lastSucceededAt: requestedAt,
           consecutiveFailures: 0,
-          lastError: null,
         },
       ],
     })
-    await storage.lakeRetentionRuns?.record({ projectId, finishedAt: requestedAt, failed: false })
+    await storage.lakeRetentionRuns?.record({
+      projectId,
+      startedAt: requestedAt,
+      finishedAt: requestedAt,
+      failed: false,
+    })
 
     const response = await app.fetch(new Request(url, { headers }))
 
     expect(await response.json()).toMatchObject({
       cleanup: {
-        state: "running",
-        requestedAt: requestedAt.toISOString(),
+        state: "ok",
+        lastRequestedAt: requestedAt.toISOString(),
         lastRunAt: requestedAt.toISOString(),
       },
     })

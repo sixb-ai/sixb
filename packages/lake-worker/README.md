@@ -17,14 +17,17 @@ remembers the job.
 One run:
 
 - Does nothing when its interval is over: the next request covers it, so a backlog left by a stopped
-  worker runs once.
+  worker runs once. It also does nothing when retention was turned off since.
 - Runs passes while one reports more to do, reading the versions projections applied before each
   pass. It starts no pass after min(½ `cleanupEvery`, 10 minutes); the next run continues.
-- Records how it ended in `storage.lakeRetentionRuns`, the only proof that a worker consumes the
-  requests: Console › Lake health reads it from the API.
+- Records when it starts and ends in `storage.lakeRetentionRuns`, the only proof that a worker
+  consumes the requests: Console › Lake health reads it from the API.
 - Is not retried when it fails. It reports `lake.retention.failed` to `onError` once, and the next
   interval's request tries again.
-- Returns to the queue on shutdown, without a failure.
+- Returns to the queue on shutdown, without a failure. Shutdown stops a pass that is waiting; one
+  that is deleting finishes first.
+- Never waits for long on the reads of its own process. DuckLake's file deletion gives reads about
+  half a minute to end, then leaves the files to the next pass with `hasMore`.
 
 ## Usage
 
@@ -37,11 +40,11 @@ const worker = new LakeWorker(sixb)
 await worker.start()
 ```
 
-It refuses to start when retention does not run on its own: `lakeMaintenance.enabled` is false, the
-lake storage provider has no maintenance, or the project has no datasets.
+When retention does not run on its own, nothing requests any work and the worker idles, so a
+deployment can always list it.
 
-Two jobs run at once by default, so lake work behind a long retention run does not wait for it. Set
-`--concurrency` on `sixb worker lake`, or `SIXB_LAKE_WORKER_CONCURRENCY`.
+One job runs at a time by default. Set `--concurrency` on `sixb worker lake`, or
+`SIXB_LAKE_WORKER_CONCURRENCY`.
 
 ## Verification
 

@@ -6712,13 +6712,13 @@ export type GetLakeHealthResponses = {
       /**
        * What actually happens: `not-requested` when no orchestrator asks, `no-worker` when no lake worker runs what it asks
        */
-      state: "off" | "idle" | "not-requested" | "no-worker" | "failing" | "running"
+      state: "off" | "idle" | "not-requested" | "no-worker" | "failing" | "cleaning" | "ok"
       /**
        * When the orchestrator last asked for cleanup
        */
-      requestedAt: string | null
+      lastRequestedAt: string | null
       /**
-       * When a lake worker last finished a cleanup
+       * When a lake worker last started a cleanup
        */
       lastRunAt: string | null
       keepVersionsFor: string
