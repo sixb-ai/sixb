@@ -8,9 +8,9 @@ import { runLakeChangesContractSuite } from "@sixb/core/testing"
 import type { DuckLakeStorage } from "../src"
 import type { DuckDbExclusiveRuntime, DuckDbRuntime } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
-import { quoteIdentifier, quoteSqlString } from "../src/internal/sql"
+import { duckLakeMetadataTableName, quoteIdentifier, quoteSqlString } from "../src/internal/sql"
 import { parseVersionId } from "../src/internal/versions"
-import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
+import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
 interface DuckLakeStorageInternals {
   readonly connections: {
@@ -389,6 +389,33 @@ describe("DuckLakeStorage changes from the change feed", () => {
     expect(compareFeed).not.toHaveBeenCalled()
   }, 60_000)
 
+  // Retention expires a maintenance commit past its cutoff even between two versions it keeps, and
+  // that gap reads like an expired version: the versions are compared. Regression proof: in
+  // readChangeRange, leave the count of snapshots out of `complete`. The feed then reads one range
+  // across the expired commit.
+  test("compares the versions once retention expired a compaction between two it keeps", async () => {
+    const first = (await snapshot(seedRows)).versionId
+    const middle = (await snapshot(edited(seedRows, { rename: ["a1"], remove: ["a5"] }))).versionId
+    await compact(storage, accounts.id)
+    const last = (await snapshot(edited(await currentRows(), { rename: ["a2"] }))).versionId
+
+    await backdateHistory("2 hours")
+    const report = await storage.maintenance.applyRetention({
+      keepVersionsForMs: 60 * 60_000,
+      deleteFilesAfterMs: 60 * 60_000,
+      protect: [first, middle].map((versionId) => ({ datasetId: accounts.id, versionId })),
+    })
+    expect(report.expiredVersions).toBeGreaterThan(0)
+    expect(await storage.getVersion(accounts.id, first)).not.toBeNull()
+    expect(await storage.getVersion(accounts.id, middle)).not.toBeNull()
+
+    const compareFeed = spyOn(internals(storage).changes, "compareFeed")
+
+    expect(await changesBetween(first, last)).toEqual(await expectedChanges(first, last))
+    expect(await changesBetween(middle, last)).toEqual(await expectedChanges(middle, last))
+    expect(compareFeed).not.toHaveBeenCalled()
+  }, 60_000)
+
   // Regression proof: in compareVersions, count distinct keys whatever the versions validated.
   // The comparison, which a full replacement in between sends there, then runs the distinct count
   // on both versions.
@@ -464,6 +491,15 @@ describe("DuckLakeStorage changes from the change feed", () => {
     expect(compareFeed).not.toHaveBeenCalled()
     expect(changes).toEqual([])
   }, 60_000)
+
+  async function backdateHistory(interval: string) {
+    await internals(storage).connections.withExclusiveAttached(async (runtime) => {
+      await runtime.run(`
+        UPDATE ${duckLakeMetadataTableName(localDuckLakeOptions(rootDir), "ducklake_snapshot")}
+        SET snapshot_time = snapshot_time - INTERVAL ${quoteSqlString(interval)}
+      `)
+    })
+  }
 
   async function snapshot(rows: readonly DatasetRow[]) {
     const write = await storage.beginWrite({ dataset: accounts, mode: "snapshot" })
