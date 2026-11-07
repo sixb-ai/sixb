@@ -79,7 +79,7 @@ export function TouchViewport() {
 
   // A layout effect, so it already listens when the composer's autofocus runs on first render.
   useLayoutEffect(() => {
-    if (!matchMedia("(pointer: coarse)").matches) return
+    if (!window.matchMedia("(pointer: coarse)").matches) return
     let tappedAt = Number.NEGATIVE_INFINITY
     const ios = isIOS()
     // The last tap or key press: what it touched, when, on which screen, and whether it is still
@@ -171,7 +171,7 @@ export function TouchViewport() {
 
   useEffect(() => {
     const standalone =
-      matchMedia("(display-mode: standalone)").matches ||
+      window.matchMedia("(display-mode: standalone)").matches ||
       (navigator as Navigator & { standalone?: boolean }).standalone === true
     if (!standalone) return
     const prevent = (event: Event) => event.preventDefault()
@@ -181,7 +181,7 @@ export function TouchViewport() {
 
   // iOS: every focus asks not to scroll, and a tapped field takes focus as the touch lifts.
   useEffect(() => {
-    if (!isIOS() || !matchMedia("(pointer: coarse)").matches) return
+    if (!isIOS() || !window.matchMedia("(pointer: coarse)").matches) return
     const prototype = HTMLElement.prototype
     const nativeFocus = prototype.focus
     prototype.focus = function focus(this: HTMLElement, options?: FocusOptions) {
@@ -220,7 +220,7 @@ export function TouchViewport() {
 
   useEffect(() => {
     const viewport = window.visualViewport
-    if (!viewport || !matchMedia("(pointer: coarse)").matches) return
+    if (!viewport || !window.matchMedia("(pointer: coarse)").matches) return
     const root = document.documentElement
     const ios = isIOS()
     const threshold = isStandalone() ? STANDALONE_KEYBOARD_THRESHOLD : KEYBOARD_THRESHOLD
@@ -539,7 +539,7 @@ function appHeight(): number {
 
 function isStandalone(): boolean {
   return (
-    matchMedia("(display-mode: standalone)").matches ||
+    window.matchMedia("(display-mode: standalone)").matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true
   )
 }

@@ -16,7 +16,7 @@ const OWN_DRAG = 'input, textarea, select, [contenteditable="true"], [role="slid
  */
 export function SheetGestures() {
   useEffect(() => {
-    const phone = matchMedia(PHONE_QUERY)
+    const phone = window.matchMedia(PHONE_QUERY)
     let sheet: HTMLElement | null = null
     let overlay: HTMLElement | null = null
     let startY = 0
