@@ -320,20 +320,39 @@ describe("DuckLakeStorage retention", () => {
     expect(await scheduledFileCount()).toBe(1)
   })
 
-  // Regression proof: in DuckLakeMaintenance.deleteScheduledFiles, skip the SQLite branch, and run
-  // with TZ=America/New_York. The file scheduled a moment ago then goes with the due ones.
-  test("sqlite: deletes scheduled files only once every one of them is due", async () => {
+  // Regression proof: in deleteScheduledFilesOnSqlite, delete nothing while a file isn't due: this
+  // pass then deletes none, as on every pass of a lake that keeps writing. Or skip the method in
+  // deleteScheduledFiles: the file scheduled a moment ago then goes with the due ones.
+  test("sqlite: deletes the files due, and never a file that isn't", async () => {
     await useCatalog("sqlite")
     await storage.createDataset(ordersDataset)
     await scheduleFiles(["4 days", "3 days", "2 days", "0 seconds"])
 
-    const waiting = await storage.maintenance.applyRetention(ONE_HOUR)
-    expect(waiting.deletedFiles).toBe(0)
+    expect((await storage.maintenance.applyRetention(ONE_HOUR)).deletedFiles).toBe(3)
+    expect(await scheduledFileCount()).toBe(1)
+  })
+
+  // Regression proof: in deleteScheduledFilesOnSqlite, give older_than the first date itself. Text
+  // comparison then selects the file not due. Both files are stored under one date, whatever the
+  // time of the run: the late one's offset puts it half a day after that date ends.
+  test("sqlite: a due file waits for the files stored under its date", async () => {
+    await useCatalog("sqlite")
+    await storage.createDataset(ordersDataset)
+    await scheduleFiles(["2 hours"])
+
+    const twoHoursAgo = new Date(Date.now() - 2 * HOUR_MS).toISOString()
+    const date = twoHoursAgo.slice(0, 10)
+    const due = `${date} ${twoHoursAgo.slice(11, 19)}+00`
+
+    await storeScheduleTimes(due)
+    await storeScheduleTimes(`${date} 23:59:59-12`, { oneFile: true })
+
+    expect((await storage.maintenance.applyRetention(ONE_HOUR)).deletedFiles).toBe(0)
     expect(await scheduledFileCount()).toBe(4)
 
-    await backdateScheduledFiles(["2 days"])
-    const due = await storage.maintenance.applyRetention(ONE_HOUR)
-    expect(due.deletedFiles).toBe(4)
+    await storeScheduleTimes(due)
+
+    expect((await storage.maintenance.applyRetention(ONE_HOUR)).deletedFiles).toBe(4)
     expect(await scheduledFileCount()).toBe(0)
   })
 
@@ -579,6 +598,18 @@ describe("DuckLakeStorage retention", () => {
         WHERE data_file_id = ${file.data_file_id}
       `)
     }
+  }
+
+  /** Stores a schedule time as text, as a SQLite catalog holds it. */
+  async function storeScheduleTimes(
+    text: string,
+    { oneFile = false }: { readonly oneFile?: boolean } = {}
+  ): Promise<void> {
+    const runtime = await internals(storage).connections.attachedRuntime()
+    const scheduled = duckLakeMetadataTableName(options, "ducklake_files_scheduled_for_deletion")
+    const where = oneFile ? `WHERE data_file_id = (SELECT min(data_file_id) FROM ${scheduled})` : ""
+
+    await runtime.run(`UPDATE ${scheduled} SET schedule_start = ${quoteSqlString(text)} ${where}`)
   }
 
   /** A SQLite catalog stores times as text with their UTC offset, as DuckDB renders them. */

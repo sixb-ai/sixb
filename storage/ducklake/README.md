@@ -132,9 +132,9 @@ files in the data path before it commits, where no catalog row knows them yet: d
 younger than that left a committed version unreadable. Reads in other processes are not waited
 for either.
 
-On a SQLite catalog, DuckLake `ac7595b0` compares stored schedule times with a given time
-unreliably outside UTC (west of UTC it deleted files scheduled a moment ago), so files there are
-deleted all at once, and only once every scheduled file is due.
+On a SQLite catalog, DuckLake `ac7595b0` compares schedule times as text, which tells only whole
+dates apart. Files there go by the date they are stored under, with no `limit`, once every file of
+that date is due: on an active lake, up to a day after `deleteFilesAfterMs`.
 
 ### Automatic Compaction
 

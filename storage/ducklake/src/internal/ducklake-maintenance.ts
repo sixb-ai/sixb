@@ -7,7 +7,7 @@ import type {
 } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
-import { getBigIntLike } from "./duckdb-row"
+import { getBigIntLike, getOptionalString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
@@ -380,28 +380,33 @@ export class DuckLakeMaintenance implements LakeMaintenance {
   }
 
   /**
-   * On a SQLite catalog, DuckLake compares the schedule times it stores as text with the time it
-   * is given unreliably outside UTC: west of UTC, it deleted files scheduled a moment ago. Files
-   * there go all at once, and only once every scheduled file is due.
+   * On a SQLite catalog, DuckLake compares schedule times as text: `2026-11-06 19:32:26-05` as
+   * stored, with `2026-11-06T18:00:00+00` as given. The space sorts before the `T`, so any time
+   * selects every file stored under that UTC date or an earlier one, a file scheduled a moment ago
+   * included, and only whole dates can be told apart.
+   *
+   * So files go by the date they are stored under, and a date goes once all its files are due. It
+   * waits a day at most, whatever keeps being scheduled after it.
    */
   private async deleteScheduledFilesOnSqlite(
     runtime: DuckDbQueryRuntime,
     dueBefore: Date,
     dryRun: boolean
   ): Promise<{ readonly deleted: number; readonly hasMore: boolean }> {
-    const [notDue] = await runtime.query(`
-      SELECT count(*) AS files
+    const [notDue = {}] = await runtime.query(`
+      SELECT min(left(schedule_start, 10)) AS first_date
       FROM ${duckLakeMetadataTableName(this.options, "ducklake_files_scheduled_for_deletion")}
       WHERE CAST(schedule_start AS TIMESTAMPTZ) >= ${timestampSql(dueBefore)}
     `)
-    if (notDue === undefined || getBigIntLike(notDue, "files") > 0n) {
-      return { deleted: 0, hasMore: false }
-    }
+    const firstDate = getOptionalString(notDue, "first_date")
 
     const deleted = await runtime.query(
       procedureSql("ducklake_cleanup_old_files", this.aliasSql(), {
         dryRun,
-        selection: "cleanup_all => true",
+        selection:
+          firstDate === undefined
+            ? "cleanup_all => true"
+            : `older_than => ${timestampSql(dayBefore(firstDate))}`,
       })
     )
 
@@ -540,6 +545,11 @@ function protectedSnapshotId(ref: DatasetVersionRef): string {
       { cause: error }
     )
   }
+}
+
+/** The last millisecond before a `YYYY-MM-DD` date starts in UTC. */
+function dayBefore(date: string): Date {
+  return new Date(Date.parse(`${date}T00:00:00Z`) - 1)
 }
 
 function timestampSql(date: Date): string {
