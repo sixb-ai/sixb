@@ -9,19 +9,12 @@ import {
   DrawerTitle,
   ThemePicker,
 } from "@sixb/ui/components"
-import {
-  ChevronRight,
-  FileText,
-  Handshake,
-  Layers,
-  LogOut,
-  MessagesSquare,
-  Network,
-  UsersRound,
-} from "lucide-react"
+import { ChevronRight, Layers, LogOut, MessagesSquare } from "lucide-react"
 import type { ComponentType, ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
-import { threadPath, useRecentThreads } from "../../_lib/agent-threads"
+import { threadPath, threadTitle, useRecentThreads } from "../../_lib/agent-threads"
+import { places } from "../../_lib/navigation"
+import { initials } from "../ui"
 
 type Icon = ComponentType<{ readonly className?: string }>
 
@@ -31,20 +24,10 @@ interface Row {
   readonly Icon: Icon
 }
 
-// The tab bar holds Home, Service cases, Dispatch and Equipment; everything else is here.
-const GROUPS: ReadonlyArray<{ readonly label: string; readonly rows: readonly Row[] }> = [
-  {
-    label: "Operations",
-    rows: [{ to: "/technicians", label: "Technicians", Icon: UsersRound }],
-  },
-  {
-    label: "Business",
-    rows: [
-      { to: "/quotes", label: "Quotes", Icon: FileText },
-      { to: "/contracts", label: "Contracts", Icon: Handshake },
-      { to: "/customers", label: "Customers", Icon: Network },
-    ],
-  },
+// The tab bar holds the first four places; everything else is here.
+const GROUPS = [
+  { label: "Operations", places: places.filter((p) => p.section === "operations" && !p.tab) },
+  { label: "Business", places: places.filter((p) => p.section === "business" && !p.tab) },
 ]
 
 const RECENT_THREADS = 4
@@ -79,8 +62,15 @@ export function PhoneMoreSheet({
 
           {GROUPS.map((group) => (
             <Group key={group.label} label={group.label}>
-              {group.rows.map((row) => (
-                <SheetRow key={row.to} {...row} current={isCurrent(row.to)} onNavigate={close} />
+              {group.places.map((place) => (
+                <SheetRow
+                  key={place.href}
+                  to={place.href}
+                  label={place.label}
+                  Icon={place.icon}
+                  current={isCurrent(place.href)}
+                  onNavigate={close}
+                />
               ))}
             </Group>
           ))}
@@ -170,13 +160,9 @@ function RecentThreads({
               aria-current={current === to ? "page" : undefined}
               className="phone-more-row"
             >
-              <span className="phone-more-label">{thread.title?.trim() || "New conversation"}</span>
+              <span className="phone-more-label">{threadTitle(thread)}</span>
               {thread.activeRunId ? (
-                <span
-                  role="status"
-                  aria-label="Working"
-                  className="size-[7px] shrink-0 animate-pulse rounded-full bg-primary"
-                />
+                <span role="status" aria-label="Working" className="nl-working-dot" />
               ) : null}
             </Link>
           </li>
@@ -184,7 +170,7 @@ function RecentThreads({
       })}
       <SheetRow
         to="/threads"
-        label="All chats"
+        label="All threads"
         Icon={MessagesSquare}
         current={current === "/threads"}
         onNavigate={onNavigate}
@@ -239,11 +225,4 @@ function SignOut() {
       Sign out
     </button>
   )
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "?"
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
 }

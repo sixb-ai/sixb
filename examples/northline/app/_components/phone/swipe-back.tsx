@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { suppressNextNavigationMotion } from "./navigation-motion"
-import { isRootPath, parentPath, screenPath } from "./phone-routes"
+import { appScroller, isInstalledApp, PHONE_QUERY } from "./phone-dom"
+import { goBack, isRootPath, screenPath } from "./phone-routes"
 
 const EDGE = 24
-const PHONE = "(max-width: 767px)"
 
 /**
  * The iOS back gesture. Safari provides it in the browser, but an installed web app has none, so
@@ -18,11 +18,8 @@ export function SwipeBack() {
   current.current = location
 
   useEffect(() => {
-    const standalone =
-      matchMedia("(display-mode: standalone)").matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true
-    if (!standalone) return
-    const phone = matchMedia(PHONE)
+    if (!isInstalledApp()) return
+    const phone = matchMedia(PHONE_QUERY)
 
     let page: HTMLElement | null = null
     let startX = 0
@@ -32,12 +29,6 @@ export function SwipeBack() {
     let lastX = 0
     let lastTime = 0
     let dragging = false
-
-    const back = () => {
-      const { key, pathname, search } = current.current
-      if (key !== "default") navigate(-1)
-      else navigate(parentPath(screenPath(pathname, search)), { replace: true })
-    }
 
     const settle = (element: HTMLElement, to: number, done?: () => void) => {
       element.style.transition = "transform 280ms cubic-bezier(0.32, 0.72, 0, 1)"
@@ -64,9 +55,7 @@ export function SwipeBack() {
         return
       }
       // A conversation fills the screen above the page scroller, so it is what moves.
-      page =
-        document.querySelector<HTMLElement>('[data-agent-surface="full"]') ??
-        document.querySelector<HTMLElement>("[data-app-scroll]")
+      page = document.querySelector<HTMLElement>('[data-agent-surface="full"]') ?? appScroller()
       startX = lastX = touch.clientX
       startY = touch.clientY
       lastTime = event.timeStamp
@@ -104,7 +93,7 @@ export function SwipeBack() {
       if (offset > width * 0.33 || velocity > 0.5) {
         settle(element, width, () => {
           suppressNextNavigationMotion()
-          back()
+          goBack(navigate, current.current)
           requestAnimationFrame(() => {
             element.style.transform = ""
             element.style.boxShadow = ""

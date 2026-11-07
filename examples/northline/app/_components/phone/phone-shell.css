@@ -10,8 +10,6 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
-  /* Published by ViewportController while the on-screen keyboard is open. */
-  --keyboard-inset: 0px;
   --app-height: calc(100dvh - var(--keyboard-inset));
   --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
 
@@ -61,6 +59,7 @@ html[data-sixb-desktop] {
 /* Registered so it can animate: when the keyboard leaves, whatever rode up on it glides back down
    with it. It never animates on the way up, where it must already be in place when iOS checks
    whether the focused field is covered. */
+/* Published by ViewportController while the on-screen keyboard is open; registered so it animates. */
 @property --keyboard-inset {
   syntax: "<length>";
   inherits: true;
@@ -118,8 +117,7 @@ html {
     transition-duration: 0ms;
   }
 
-  /* iOS zooms into any text field under 16px and Android renders it cramped. Fields that are
-     deliberately large, such as inline record titles, are left alone. */
+  /* iOS zooms into any text field under 16px and Android renders it cramped. */
   input:not(
       [type="checkbox"],
       [type="radio"],
@@ -129,28 +127,9 @@ html {
       [type="button"],
       [type="submit"],
       [type="reset"],
-      [type="image"],
-      [class*="text-[17"],
-      [class*="text-[18"],
-      [class*="text-[19"],
-      [class*="text-[2"],
-      [class*="text-[3"],
-      [class*="text-lg"],
-      [class*="text-xl"],
-      [class*="text-2xl"],
-      [class*="text-3xl"]
+      [type="image"]
     ),
-  textarea:not(
-      [class*="text-[17"],
-      [class*="text-[18"],
-      [class*="text-[19"],
-      [class*="text-[2"],
-      [class*="text-[3"],
-      [class*="text-lg"],
-      [class*="text-xl"],
-      [class*="text-2xl"],
-      [class*="text-3xl"]
-    ),
+  textarea,
   select {
     font-size: 16px;
   }
@@ -266,23 +245,31 @@ html {
     background: rgb(0 0 0 / 0.3);
   }
 
-  :is([data-slot="dialog-content"]:not(.northline-search), [data-slot="alert-dialog-content"]) {
-    top: auto;
+  /* Dialogs and drawers float as one sheet shape above the home indicator and the keyboard. */
+  :is(
+      [data-slot="dialog-content"]:not(.northline-search),
+      [data-slot="alert-dialog-content"],
+      [data-slot="drawer-content"][data-vaul-drawer-direction="bottom"]
+    ) {
     right: 8px;
     bottom: calc(var(--keyboard-inset) + var(--sheet-gap));
     left: 8px;
-    width: auto;
-    max-width: none;
     max-height: calc(var(--app-height) - var(--safe-top) - var(--sheet-gap) - 12px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
     border: 0;
     border-radius: 32px;
-    padding-top: 28px;
-    padding-bottom: 1.5rem;
     box-shadow:
       0 12px 48px rgb(0 0 0 / 0.18),
       0 0 0 0.5px var(--glass-rim);
+  }
+
+  :is([data-slot="dialog-content"]:not(.northline-search), [data-slot="alert-dialog-content"]) {
+    top: auto;
+    width: auto;
+    max-width: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-top: 28px;
+    padding-bottom: 1.5rem;
     /* Undo the centring translate; Tailwind's translate utilities read these variables. */
     --tw-translate-x: 0px;
     --tw-translate-y: 0px;
@@ -366,19 +353,6 @@ html {
     padding-bottom: var(--safe-bottom);
   }
 
-  /* Drawers share the sheet's shape. */
-  [data-slot="drawer-content"][data-vaul-drawer-direction="bottom"] {
-    right: 8px;
-    bottom: calc(var(--keyboard-inset) + var(--sheet-gap));
-    left: 8px;
-    max-height: calc(var(--app-height) - var(--safe-top) - var(--sheet-gap) - 12px);
-    border: 0;
-    border-radius: 32px;
-    box-shadow:
-      0 12px 48px rgb(0 0 0 / 0.18),
-      0 0 0 0.5px var(--glass-rim);
-  }
-
   /* The drawer extends its background below itself for overscroll; a floating card has no edge to
      hide. */
   [data-slot="drawer-content"][data-vaul-drawer-direction="bottom"]::after {
@@ -457,10 +431,6 @@ html {
 
 /* Pull to refresh (PullToRefresh): a small disc that follows the pull under the top bar, its
    arrow turning as the pull arms, then a spinner while data reloads. */
-
-.pull-refresh {
-  display: none;
-}
 
 @media (max-width: 767px) {
   .pull-refresh {

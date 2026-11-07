@@ -2,20 +2,11 @@ import { SectionNav, UserMenu, useCurrentSection } from "@sixb/app"
 import { events, objectQueryKeys, useInvalidateOnEvent, useObjectsCount } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { SidebarContent, SidebarFooter, SidebarHeader, SidebarInset } from "@sixb/ui/components"
-import {
-  CalendarClock,
-  ClipboardList,
-  FileText,
-  Gauge,
-  Handshake,
-  Network,
-  Sun,
-  UsersRound,
-} from "lucide-react"
-import type { ComponentType, PropsWithChildren } from "react"
+import type { PropsWithChildren } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { Quote } from "../../ontology/quote"
-import { threadPath, useRecentThreads } from "../_lib/agent-threads"
+import { threadPath, threadTitle, useRecentThreads } from "../_lib/agent-threads"
+import { places } from "../_lib/navigation"
 import { openServiceCases } from "../_lib/service-cases"
 import { GlobalSearch } from "./global-search"
 import { NorthlineMark } from "./northline-mark"
@@ -29,31 +20,9 @@ const quotesWithCustomer = objects(Quote)
   .query()
   .where((quote) => quote.p.status.eq("sent"))
 
-interface NavLink {
-  readonly href: string
-  readonly label: string
-  readonly icon: ComponentType<{ className?: string; strokeWidth?: number }>
-  readonly count?: "openCases" | "quotesWithCustomer"
-}
-
-const groups: ReadonlyArray<{ readonly label?: string; readonly items: readonly NavLink[] }> = [
-  {
-    items: [
-      { href: "/", label: "Home", icon: Sun },
-      { href: "/service-cases", label: "Service cases", icon: ClipboardList, count: "openCases" },
-      { href: "/dispatch", label: "Dispatch", icon: CalendarClock },
-      { href: "/equipment", label: "Equipment", icon: Gauge },
-      { href: "/technicians", label: "Technicians", icon: UsersRound },
-    ],
-  },
-  {
-    label: "Business",
-    items: [
-      { href: "/quotes", label: "Quotes", icon: FileText, count: "quotesWithCustomer" },
-      { href: "/contracts", label: "Contracts", icon: Handshake },
-      { href: "/customers", label: "Customers", icon: Network },
-    ],
-  },
+const groups = [
+  { items: places.filter((place) => place.section === "operations") },
+  { label: "Business", items: places.filter((place) => place.section === "business") },
 ]
 
 // Sits in `AppShellProvider` from the root layout.
@@ -174,7 +143,7 @@ function RecentThreads() {
       <ul className="nl-sidebar-list">
         {threads.slice(0, 12).map((thread) => {
           const to = threadPath(thread.id)
-          const title = thread.title?.trim() || "New conversation"
+          const title = threadTitle(thread)
           return (
             <li key={thread.id}>
               <Link
@@ -185,7 +154,7 @@ function RecentThreads() {
               >
                 <span className="truncate">{title}</span>
                 {thread.activeRunId ? (
-                  <span role="status" aria-label="Working" className="nl-sidebar-live" />
+                  <span role="status" aria-label="Working" className="nl-working-dot" />
                 ) : null}
               </Link>
             </li>

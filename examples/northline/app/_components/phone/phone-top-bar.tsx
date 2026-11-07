@@ -4,12 +4,13 @@ import { ChevronLeft, MessageSquareText } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { GlobalSearch } from "../global-search"
+import { appScroller } from "./phone-dom"
 import {
   backLabel,
   fallbackTitle,
+  goBack,
   isConversationPath,
   isRootPath,
-  parentPath,
   screenPath,
 } from "./phone-routes"
 
@@ -40,12 +41,6 @@ function TopBar() {
   const title = home || conversation ? "" : (heading?.text ?? fallbackTitle(path))
   const titleVisible = title !== "" && (heading ? heading.hidden : true)
 
-  // Back follows history inside the app; opened directly, it climbs to the parent screen.
-  const back = () => {
-    if (location.key !== "default") navigate(-1)
-    else navigate(parentPath(path), { replace: true })
-  }
-
   return (
     <header
       className="phone-top-bar"
@@ -57,7 +52,7 @@ function TopBar() {
           {isRootPath(path) ? null : (
             <button
               type="button"
-              onClick={back}
+              onClick={() => goBack(navigate, location)}
               aria-label={`Back to ${backLabel(path)}`}
               className="phone-back phone-glass"
             >
@@ -109,7 +104,7 @@ function usePageHeading(path: string): PageHeading | null {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: each screen brings its own heading.
   useEffect(() => {
-    const scroller = document.querySelector<HTMLElement>("[data-app-scroll]")
+    const scroller = appScroller()
     const bar = document.querySelector<HTMLElement>(".phone-top-bar")
     if (!scroller) return
 
@@ -170,7 +165,7 @@ function useScrolled(path: string): boolean {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: each screen starts at its own offset.
   useEffect(() => {
-    const scroller = document.querySelector<HTMLElement>("[data-app-scroll]")
+    const scroller = appScroller()
     if (!scroller) return
     setScrolled(scroller.scrollTop > 1)
 
@@ -188,20 +183,7 @@ function useScrolled(path: string): boolean {
   return scrolled
 }
 
-// Badges and status pills, buttons and icons inside a heading are not part of its name.
-const NOT_TITLE =
-  '[data-slot="badge"], [role="status"], .rounded-full, button, svg, .sr-only, [aria-hidden="true"]'
-
-/** The heading's name for the bar: an explicit `data-bar-title`, else its text without extras. */
+/** The heading's text, as the bar shows it. */
 function headingText(heading: HTMLElement): string {
-  if (heading.dataset.barTitle) return heading.dataset.barTitle
-  const copy = heading.cloneNode(true)
-  if (!(copy instanceof HTMLElement)) return clean(heading.textContent)
-  for (const extra of copy.querySelectorAll(NOT_TITLE)) extra.remove()
-  // A heading that is itself a control, such as a title that renames on tap, keeps its text.
-  return clean(copy.textContent) || clean(heading.textContent)
-}
-
-function clean(text: string | null): string {
-  return (text ?? "").replace(/\s+/g, " ").trim()
+  return (heading.textContent ?? "").replace(/\s+/g, " ").trim()
 }

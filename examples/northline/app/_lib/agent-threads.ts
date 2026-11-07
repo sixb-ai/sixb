@@ -21,6 +21,11 @@ export function useRecentThreads() {
   return { threads, loading: query.isLoading }
 }
 
+/** A thread's name in a list; a thread is untitled until its first answer names it. */
+export function threadTitle(thread: { readonly title?: string | null }): string {
+  return thread.title?.trim() || "New conversation"
+}
+
 export function threadPath(threadId: string): string {
   return `/threads/${encodeURIComponent(threadId)}`
 }

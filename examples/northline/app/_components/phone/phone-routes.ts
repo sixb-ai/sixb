@@ -3,29 +3,20 @@
  * screen or a pushed one, and where its back button leads when there is no history to return to.
  */
 
-export type PhoneTab = "home" | "service-cases" | "dispatch" | "equipment" | "more"
+import type { Location, NavigateFunction } from "react-router-dom"
+import { placeFor, places } from "../../_lib/navigation"
 
-/** Top-level screens: they show their title, never a back button. */
-const ROOTS: Readonly<Record<string, string>> = {
-  "/": "Home",
-  "/service-cases": "Service cases",
-  "/dispatch": "Dispatch",
-  "/equipment": "Equipment",
-  "/technicians": "Technicians",
-  "/quotes": "Quotes",
-  "/contracts": "Contracts",
-  "/customers": "Customers",
-  "/threads": "Chats",
-}
+/** A tab, named by its first screen, or "more" for every screen without a tab of its own. */
+export type PhoneTab = string
 
-/** Records pushed on top of a root. Each takes its title from the page's own heading. */
-const PUSHED: readonly RegExp[] = [
-  /^\/service-cases\/[^/]+$/,
-  /^\/equipment\/[^/]+$/,
-  /^\/technicians\/[^/]+$/,
-  /^\/customers\/[^/]+$/,
-  /^\/threads\/[^/]+$/,
-]
+/**
+ * Top-level screens: they show their title, never a back button. Records pushed on top of one
+ * take their title from the page's own heading.
+ */
+const ROOTS: Readonly<Record<string, string>> = Object.fromEntries([
+  ...places.map((place) => [place.href, place.label]),
+  ["/threads", "Threads"],
+])
 
 const CONVERSATION = /^\/threads\/[^/]+$/
 
@@ -60,13 +51,17 @@ export function isConversationPath(pathname: string): boolean {
 export function parentPath(pathname: string): string {
   const [path = "/", query] = pathname.split("?")
   if (query) return path
-  const segments = normalizePath(path).split("/").filter(Boolean)
-  while (segments.length > 1) {
-    segments.pop()
-    const candidate = `/${segments.join("/")}`
-    if (isRootPath(candidate) || PUSHED.some((route) => route.test(candidate))) return candidate
-  }
-  return "/"
+  const parent = normalizePath(path).replace(/\/[^/]+$/, "") || "/"
+  return isRootPath(parent) ? parent : "/"
+}
+
+/** Back follows history inside the app; opened directly on a screen, it climbs to the parent. */
+export function goBack(
+  navigate: NavigateFunction,
+  location: Pick<Location, "key" | "pathname" | "search">
+): void {
+  if (location.key !== "default") navigate(-1)
+  else navigate(parentPath(screenPath(location.pathname, location.search)), { replace: true })
 }
 
 /** The short name of the screen a back button leads to. */
@@ -81,11 +76,8 @@ export function fallbackTitle(pathname: string): string {
 
 export function tabFor(pathname: string): PhoneTab {
   const path = normalizePath(pathname)
-  const under = (prefix: string) => path === prefix || path.startsWith(`${prefix}/`)
-
-  if (path === "/" || under("/threads")) return "home"
-  if (under("/service-cases")) return "service-cases"
-  if (under("/dispatch")) return "dispatch"
-  if (under("/equipment")) return "equipment"
-  return "more"
+  // Conversations start on Home, so they sit under its tab.
+  if (path === "/threads" || path.startsWith("/threads/")) return "/"
+  const place = placeFor(path)
+  return place?.tab ? place.href : "more"
 }

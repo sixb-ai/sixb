@@ -6,11 +6,6 @@
  * none of this shows and the sidebar returns.
  */
 
-.phone-top-bar,
-.phone-tab-bar {
-  display: none;
-}
-
 @media (max-width: 767px) {
   .phone-shell {
     --tab-bar-height: 62px;

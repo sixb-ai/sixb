@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect } from "react"
+import { isInstalledApp } from "./phone-dom"
 
 /**
  * Android resizes the layout for the keyboard, and fields never zoom on focus because
@@ -82,10 +83,7 @@ export function ViewportController() {
   }, [])
 
   useEffect(() => {
-    const standalone =
-      matchMedia("(display-mode: standalone)").matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true
-    if (!standalone) return
+    if (!isInstalledApp()) return
     const prevent = (event: Event) => event.preventDefault()
     document.addEventListener("gesturestart", prevent)
     return () => document.removeEventListener("gesturestart", prevent)
@@ -264,8 +262,11 @@ function expectedKeyboard(): number {
   }
   // An iPhone keyboard with its suggestion bar covers a little under half the screen. Guessing
   // high only leaves a brief gap; guessing low lets iOS scroll the app.
-  const landscape = window.screen.width > window.screen.height
-  return Math.round(window.screen.height * (landscape ? 0.55 : 0.47))
+  // iOS reports the screen in portrait whichever way it is held, so the window says which it is.
+  const landscape = window.innerWidth > window.innerHeight
+  const { width, height } = window.screen
+  const tall = landscape ? Math.min(width, height) : Math.max(width, height)
+  return Math.round(tall * (landscape ? 0.55 : 0.47))
 }
 
 function rememberKeyboard(height: number) {
