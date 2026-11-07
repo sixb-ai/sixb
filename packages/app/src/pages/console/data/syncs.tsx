@@ -262,7 +262,7 @@ export function ConsoleSyncPage() {
                     {run.attempt > 1 ? (
                       <>
                         <MetaDot />
-                        <span>{messages.projections.attempt(run.attempt)}</span>
+                        <span>{messages.common.attempt(run.attempt)}</span>
                       </>
                     ) : null}
                     {run.rowsRead !== undefined ? (
