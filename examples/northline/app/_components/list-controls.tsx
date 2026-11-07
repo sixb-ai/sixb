@@ -89,7 +89,7 @@ export function ViewPills<T extends string>({
 }) {
   return (
     <div
-      role="tablist"
+      role="group"
       aria-label={label}
       className="-mx-1 flex flex-wrap gap-1.5 max-sm:-mx-5 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-5 max-sm:[scrollbar-width:none]"
     >
@@ -97,8 +97,7 @@ export function ViewPills<T extends string>({
         <button
           key={id}
           type="button"
-          role="tab"
-          aria-selected={value === id}
+          aria-pressed={value === id}
           onClick={() => onChange(id)}
           className={cn(
             "inline-flex h-9 shrink-0 items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",

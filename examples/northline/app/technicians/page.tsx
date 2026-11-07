@@ -16,13 +16,14 @@ import {
   StatusBadge,
 } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
+import { openWorkOrders } from "../_lib/service-cases"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(100)
-const workOrdersQuery = objects(WorkOrder)
-  .query()
+const workOrdersQuery = openWorkOrders
   .expand(WorkOrder.l.assignee)
   .expand(WorkOrder.l.serviceCase)
   .expand(WorkOrder.l.equipment)
+  .orderBy(WorkOrder.p.scheduledStart, "asc")
   .limit(100)
 
 const views = [

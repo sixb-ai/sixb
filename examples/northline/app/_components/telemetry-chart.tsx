@@ -94,7 +94,9 @@ export function TelemetryChart({
           aria-label={`${label}: ${latest?.value.toFixed(1)} ${unit} now, expected ${expectedLow} to ${expectedHigh} ${unit}`}
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
-          className="block touch-none select-none"
+          // A vertical swipe scrolls the page, which cancels the scrub.
+          onPointerCancel={() => setHover(null)}
+          className="block touch-pan-y select-none"
         >
           {ticks.map((tick) => (
             <g key={tick}>

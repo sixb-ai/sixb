@@ -38,9 +38,18 @@ export function GlobalSearch({ placement = "sidebar" }: GlobalSearchProps) {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
-  // On phones it fills the screen instead of floating (see phone/phone-navigation.css).
+  // On phones it fills the screen instead of floating (see phone/phone-navigation.css). The server
+  // matches more fields than a result's label, so the dialog shows its results as they come.
   const dialog = (
-    <CommandDialog open={open} onOpenChange={setOpen} className="northline-search">
+    <CommandDialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setQuery("")
+      }}
+      shouldFilter={false}
+      className="northline-search"
+    >
       <CommandInput
         placeholder="Search Northline Operations"
         value={query}

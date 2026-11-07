@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect } from "react"
 
 /**
- * The page never scales: inputs don't zoom on focus and Android resizes the layout for the
- * keyboard. Pinch-zoom stays available in the browser and is only switched off in the installed
- * app, where it would break the illusion of a native screen.
+ * Android resizes the layout for the keyboard, and fields never zoom on focus because
+ * phone-shell.css keeps them at 16px. Pinch-zoom stays available in the browser and is only
+ * switched off in the installed app, where it would break the illusion of a native screen.
  */
 const VIEWPORT =
-  "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+  "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
 
 // Below this the browser's own toolbars are moving, not a keyboard.
 const KEYBOARD_THRESHOLD = 80

@@ -21,26 +21,31 @@ import {
   StatusIndicator,
 } from "../../_components/ui"
 
-const alarmsQuery = objects(BuildingAlarm).query().expand(BuildingAlarm.l.equipment).limit(100)
-const casesQuery = objects(ServiceCase)
-  .query()
-  .expand(ServiceCase.l.customer)
-  .expand(ServiceCase.l.equipment)
-  .limit(100)
+/** A unit, its alarms and its cases, newest first, each followed from the unit by the server. */
+function equipmentQueries(id: string) {
+  const unit = objects(Equipment)
+    .query()
+    .where((equipment) => equipment.p.id.eq(id))
+  return {
+    equipment: unit.expand(Equipment.l.facility),
+    alarms: unit
+      .traverse(BuildingAlarm.l.equipment, { direction: "incoming" })
+      .orderBy(BuildingAlarm.p.observedAt, "desc")
+      .limit(100),
+    cases: unit
+      .traverse(ServiceCase.l.equipment, { direction: "incoming" })
+      .expand(ServiceCase.l.customer)
+      .orderBy(ServiceCase.p.detectedAt, "desc")
+      .limit(100),
+  }
+}
 
 export default function EquipmentDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
-  const equipmentQuery = useMemo(
-    () =>
-      objects(Equipment)
-        .query()
-        .where((equipment) => equipment.p.id.eq(id))
-        .expand(Equipment.l.facility),
-    [id]
-  )
-  const equipmentResult = useObjectsQuery(equipmentQuery)
-  const alarmsResult = useObjectsQuery(alarmsQuery)
-  const casesResult = useObjectsQuery(casesQuery)
+  const queries = useMemo(() => equipmentQueries(id), [id])
+  const equipmentResult = useObjectsQuery(queries.equipment)
+  const alarmsResult = useObjectsQuery(queries.alarms)
+  const casesResult = useObjectsQuery(queries.cases)
   const recent = { objectId: id, limit: 48, order: "desc" as const, enabled: Boolean(id) }
   const supply = useTelemetryHistoryQuery({
     objectType: Equipment,
@@ -59,12 +64,8 @@ export default function EquipmentDetailPage() {
   })
 
   const equipment = equipmentResult.data?.objects[0]
-  const alarms = (alarmsResult.data?.objects ?? [])
-    .filter((alarm) => alarm.links.equipment?.primaryId === id)
-    .sort((left, right) => time(right.properties.observedAt) - time(left.properties.observedAt))
-  const cases = (casesResult.data?.objects ?? [])
-    .filter((serviceCase) => serviceCase.links.equipment?.primaryId === id)
-    .sort((left, right) => time(right.properties.detectedAt) - time(left.properties.detectedAt))
+  const alarms = alarmsResult.data?.objects ?? []
+  const cases = casesResult.data?.objects ?? []
   const activeCase = cases.find(
     (serviceCase) => !["closed", "cancelled"].includes(serviceCase.properties.status ?? "")
   )
@@ -329,9 +330,4 @@ function assetAge(value: string | Date): string {
   const years = (Date.now() - new Date(value).getTime()) / (365.25 * 24 * 60 * 60 * 1000)
   if (years < 1) return "under a year"
   return `${Math.floor(years)} yr`
-}
-
-function time(value: string | Date | undefined): number {
-  if (!value) return 0
-  return value instanceof Date ? value.getTime() : new Date(value).getTime()
 }

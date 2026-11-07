@@ -13,13 +13,13 @@ import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, Check, ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react"
 import type { CSSProperties, ReactNode } from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
 import { EquipmentPicture } from "../_components/equipment-picture"
-import { decisionRingClass, pillClass } from "../_components/next-step"
+import { decisionRingClass, ErrorLine, pillClass } from "../_components/next-step"
 import {
   CaseClockText,
   Fact,
@@ -33,25 +33,25 @@ import {
   StatusIndicator,
 } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
+import { openServiceCases, openWorkOrders } from "../_lib/service-cases"
 
 type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
 type InterventionResponse = SubmitWorkflowInterventionData["body"]["response"]
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(50)
 
-const workOrdersQuery = objects(WorkOrder)
-  .query()
+const workOrdersQuery = openWorkOrders
   .expand(WorkOrder.l.serviceCase)
   .expand(WorkOrder.l.equipment)
   .expand(WorkOrder.l.assignee)
   .orderBy(WorkOrder.p.scheduledStart, "asc")
   .limit(100)
 
-const serviceCasesQuery = objects(ServiceCase)
-  .query()
+const serviceCasesQuery = openServiceCases
   .expand(ServiceCase.l.customer)
   .expand(ServiceCase.l.facility)
   .expand(ServiceCase.l.equipment)
+  .orderBy(ServiceCase.p.responseDeadline, "asc")
   .limit(100)
 
 const interventionQuery = {
@@ -81,12 +81,11 @@ type ServiceCaseRow = QueryRow<typeof serviceCasesQuery>
 
 export default function DispatchPage() {
   const queryClient = useQueryClient()
-  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()))
+  // Until someone picks a day, the board opens on today, or on the first day with work.
+  const [pickedDate, setPickedDate] = useState<Date>()
   const [scheduleView, setScheduleView] = useState<"timeline" | "list">("timeline")
   const [showAvailableOnly, setShowAvailableOnly] = useState(false)
   const [reviewingId, setReviewingId] = useState<string>()
-  const [submittingId, setSubmittingId] = useState<string>()
-  const didChooseInitialDate = useRef(false)
   const technicians = useObjectsQuery(techniciansQuery)
   const workOrders = useObjectsQuery(workOrdersQuery)
   const serviceCases = useObjectsQuery(serviceCasesQuery)
@@ -99,31 +98,19 @@ export default function DispatchPage() {
         queryKey: listWorkflowInterventionsQueryKey({ query: interventionQuery }),
       })
     },
-    onSettled: () => setSubmittingId(undefined),
   })
 
   const pending = reviews.data?.interventions ?? []
   const caseRows = serviceCases.data?.objects ?? []
-  const activeWork = (workOrders.data?.objects ?? []).filter(
-    (item) => !["completed", "cancelled"].includes(item.properties.status)
+  const submitted = submit.variables?.path.interventionId
+  const activeWork = workOrders.data?.objects
+  const selectedDate = useMemo(
+    () => pickedDate ?? openingDate(activeWork ?? []),
+    [activeWork, pickedDate]
   )
-  useEffect(() => {
-    if (didChooseInitialDate.current || workOrders.isLoading || activeWork.length === 0) return
-    didChooseInitialDate.current = true
-    const hasWorkToday = activeWork.some((item) =>
-      item.properties.scheduledStart
-        ? isSameDay(new Date(item.properties.scheduledStart), selectedDate)
-        : false
-    )
-    const firstScheduledStart = activeWork.find((item) => item.properties.scheduledStart)
-      ?.properties.scheduledStart
-    if (!hasWorkToday && firstScheduledStart) {
-      setSelectedDate(startOfDay(new Date(firstScheduledStart)))
-    }
-  }, [activeWork, selectedDate, workOrders.isLoading])
   const workOnSelectedDate = useMemo(
     () =>
-      activeWork.filter((item) =>
+      (activeWork ?? []).filter((item) =>
         item.properties.scheduledStart
           ? isSameDay(new Date(item.properties.scheduledStart), selectedDate)
           : false
@@ -131,19 +118,14 @@ export default function DispatchPage() {
     [activeWork, selectedDate]
   )
   const technicianRows = useMemo(() => {
-    const rows = (technicians.data?.objects ?? []).filter(
-      (technician) => technician.properties.availability !== "off_duty"
-    )
-    return [...rows].sort((left, right) => {
-      const leftHasWork = workOnSelectedDate.some(
-        (workOrder) => workOrder.links.assignee?.primaryId === left.primaryId
+    const busy = new Set(workOnSelectedDate.map((workOrder) => workOrder.links.assignee?.primaryId))
+    return (technicians.data?.objects ?? [])
+      .filter((technician) => technician.properties.availability !== "off_duty")
+      .sort(
+        (left, right) =>
+          Number(busy.has(right.primaryId)) - Number(busy.has(left.primaryId)) ||
+          left.properties.name.localeCompare(right.properties.name)
       )
-      const rightHasWork = workOnSelectedDate.some(
-        (workOrder) => workOrder.links.assignee?.primaryId === right.primaryId
-      )
-      if (leftHasWork !== rightHasWork) return leftHasWork ? -1 : 1
-      return left.properties.name.localeCompare(right.properties.name)
-    })
   }, [technicians.data?.objects, workOnSelectedDate])
   const visibleTechnicians = technicianRows.filter(
     (technician) => !showAvailableOnly || technician.properties.availability === "available"
@@ -163,9 +145,9 @@ export default function DispatchPage() {
         action={
           <DateControl
             date={selectedDate}
-            onPrevious={() => setSelectedDate((current) => shiftDate(current, -1))}
-            onNext={() => setSelectedDate((current) => shiftDate(current, 1))}
-            onToday={() => setSelectedDate(startOfDay(new Date()))}
+            onPrevious={() => setPickedDate(shiftDate(selectedDate, -1))}
+            onNext={() => setPickedDate(shiftDate(selectedDate, 1))}
+            onToday={() => setPickedDate(startOfDay(new Date()))}
           />
         }
       >
@@ -226,11 +208,11 @@ export default function DispatchPage() {
                       serviceCase={serviceCase}
                       recommended={recommended}
                       reviewing={reviewingId === intervention.id}
-                      submitting={submit.isPending && submittingId === intervention.id}
+                      submitting={submit.isPending && submitted === intervention.id}
+                      failed={submit.isError && submitted === intervention.id}
                       onReview={() => setReviewingId(intervention.id)}
                       onCancel={() => setReviewingId(undefined)}
                       onApprove={(response) => {
-                        setSubmittingId(intervention.id)
                         submit.mutate({
                           path: { interventionId: intervention.id },
                           body: { response },
@@ -399,6 +381,7 @@ function DispatchDecision({
   recommended,
   reviewing,
   submitting,
+  failed,
   onReview,
   onCancel,
   onApprove,
@@ -408,6 +391,7 @@ function DispatchDecision({
   recommended: TechnicianRow | undefined
   reviewing: boolean
   submitting: boolean
+  failed: boolean
   onReview(): void
   onCancel(): void
   onApprove(response: InterventionResponse): void
@@ -543,6 +527,7 @@ function DispatchDecision({
               Cancel
             </button>
           </div>
+          {failed ? <ErrorLine>The approval could not be sent. Try again.</ErrorLine> : null}
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2.5">
@@ -1014,6 +999,19 @@ function formatScheduleHeading(date: Date): string {
 
 function count(value: number, noun: string): string {
   return `${value} ${value === 1 ? noun : `${noun}s`}`
+}
+
+/**
+ * Today when it has work; otherwise the next day that does, or failing that the latest day with
+ * work still open, so the board never opens on an empty day.
+ */
+function openingDate(work: readonly WorkOrderRow[]): Date {
+  const today = startOfDay(new Date())
+  const days = work.flatMap((item) =>
+    item.properties.scheduledStart ? [startOfDay(new Date(item.properties.scheduledStart))] : []
+  )
+  if (days.length === 0 || days.some((day) => isSameDay(day, today))) return today
+  return days.find((day) => day > today) ?? days.at(-1) ?? today
 }
 
 function shiftDate(date: Date, amount: number): Date {

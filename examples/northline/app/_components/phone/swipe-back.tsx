@@ -42,14 +42,14 @@ export function SwipeBack() {
     const settle = (element: HTMLElement, to: number, done?: () => void) => {
       element.style.transition = "transform 280ms cubic-bezier(0.32, 0.72, 0, 1)"
       element.style.transform = to === 0 ? "" : `translate3d(${to}px, 0, 0)`
-      element.addEventListener(
-        "transitionend",
-        () => {
-          element.style.transition = ""
-          done?.()
-        },
-        { once: true }
-      )
+      // A child's transition bubbles up too; only the element's own slide finishing counts.
+      const finish = (event: TransitionEvent) => {
+        if (event.target !== element) return
+        element.removeEventListener("transitionend", finish)
+        element.style.transition = ""
+        done?.()
+      }
+      element.addEventListener("transitionend", finish)
     }
 
     const onStart = (event: TouchEvent) => {

@@ -18,7 +18,13 @@ import { Link, useSearchParams } from "react-router-dom"
 import { Quote } from "../../ontology/quote"
 import { ServiceCase } from "../../ontology/service-case"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
-import { decisionRingClass, NextStepCard, PillButton, PillLink } from "../_components/next-step"
+import {
+  decisionRingClass,
+  ErrorLine,
+  NextStepCard,
+  PillButton,
+  PillLink,
+} from "../_components/next-step"
 import {
   daysUntil,
   Fact,
@@ -690,14 +696,6 @@ function DocumentPart({ label, children }: { label: string; children: ReactNode 
       <h3 className="text-[12.5px] font-semibold text-muted-foreground">{label}</h3>
       {children}
     </div>
-  )
-}
-
-function ErrorLine({ children }: { children: ReactNode }) {
-  return (
-    <p role="alert" className="text-[13.5px] text-destructive">
-      {children}
-    </p>
   )
 }
 

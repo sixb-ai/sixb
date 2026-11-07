@@ -231,7 +231,7 @@ export function QueryState({
 }>) {
   if (loading) {
     return (
-      <div className="grid gap-2 p-4" aria-label="Loading">
+      <div className="grid gap-2 p-4" role="status" aria-label="Loading">
         {[0, 1, 2].map((value) => (
           <Skeleton key={value} className="h-14 w-full rounded-[14px]" />
         ))}
