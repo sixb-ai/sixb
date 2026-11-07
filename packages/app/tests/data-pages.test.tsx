@@ -265,6 +265,7 @@ describe("SyncButton", () => {
     datasetId: "orbit",
     mode: "snapshot" as const,
     status,
+    attempt: 1,
     queuedAt: "2026-10-14T09:00:00.000Z",
     finishedAt: status === "queued" ? undefined : "2026-10-14T09:01:00.000Z",
   })

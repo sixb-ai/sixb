@@ -470,6 +470,7 @@ function RunsPanel({
                       {run.finishedAt
                         ? ` · ${formatDuration(run.startedAt, run.finishedAt)}`
                         : null}
+                      {run.attempt > 1 ? ` · ${messages.projections.attempt(run.attempt)}` : null}
                     </span>
                   </span>
                   <RunStatusPill status={run.status} />

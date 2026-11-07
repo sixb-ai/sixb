@@ -20375,6 +20375,9 @@
                             "type": "string",
                             "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                           },
+                          "attempt": {
+                            "type": "number"
+                          },
                           "queuedAt": {
                             "type": "string"
                           },
@@ -20477,6 +20480,7 @@
                           "datasetId",
                           "mode",
                           "status",
+                          "attempt",
                           "queuedAt"
                         ],
                         "additionalProperties": false,
@@ -20669,6 +20673,9 @@
                           "type": "string",
                           "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
+                        "attempt": {
+                          "type": "number"
+                        },
                         "queuedAt": {
                           "type": "string"
                         },
@@ -20771,6 +20778,7 @@
                         "datasetId",
                         "mode",
                         "status",
+                        "attempt",
                         "queuedAt"
                       ],
                       "additionalProperties": false,
@@ -20917,6 +20925,9 @@
                             "type": "string",
                             "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                           },
+                          "attempt": {
+                            "type": "number"
+                          },
                           "queuedAt": {
                             "type": "string"
                           },
@@ -21019,6 +21030,7 @@
                           "datasetId",
                           "mode",
                           "status",
+                          "attempt",
                           "queuedAt"
                         ],
                         "additionalProperties": false
@@ -21513,6 +21525,9 @@
                             "type": "string",
                             "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                           },
+                          "attempt": {
+                            "type": "number"
+                          },
                           "queuedAt": {
                             "type": "string"
                           },
@@ -21599,7 +21614,14 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
+                        "required": [
+                          "id",
+                          "projectId",
+                          "pipelineId",
+                          "status",
+                          "attempt",
+                          "queuedAt"
+                        ],
                         "additionalProperties": false,
                         "nullable": true
                       }
@@ -21910,6 +21932,9 @@
                           "type": "string",
                           "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
+                        "attempt": {
+                          "type": "number"
+                        },
                         "queuedAt": {
                           "type": "string"
                         },
@@ -21996,7 +22021,14 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
+                      "required": [
+                        "id",
+                        "projectId",
+                        "pipelineId",
+                        "status",
+                        "attempt",
+                        "queuedAt"
+                      ],
                       "additionalProperties": false,
                       "nullable": true
                     }
@@ -22126,6 +22158,9 @@
                             "type": "string",
                             "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                           },
+                          "attempt": {
+                            "type": "number"
+                          },
                           "queuedAt": {
                             "type": "string"
                           },
@@ -22212,7 +22247,14 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
+                        "required": [
+                          "id",
+                          "projectId",
+                          "pipelineId",
+                          "status",
+                          "attempt",
+                          "queuedAt"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -22314,6 +22356,9 @@
                           "type": "string",
                           "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
+                        "attempt": {
+                          "type": "number"
+                        },
                         "queuedAt": {
                           "type": "string"
                         },
@@ -22400,7 +22445,14 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
+                      "required": [
+                        "id",
+                        "projectId",
+                        "pipelineId",
+                        "status",
+                        "attempt",
+                        "queuedAt"
+                      ],
                       "additionalProperties": false
                     },
                     "steps": {
