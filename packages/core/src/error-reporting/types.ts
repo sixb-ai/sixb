@@ -182,18 +182,21 @@ export interface SixbMaintenancePassFailedContext
 }
 
 /**
- * The orchestrator gave up dispatching one job of an event: it kept failing for as long as a job
- * may retry, so the event no longer waits for it. What that loses depends on the job: see
- * `packages/orchestrator/README.md`.
+ * A job of an event could not be dispatched, and `dropped` says what became of it.
+ *
+ * True: the failure is about this event, such as a mapper that throws, so retrying cannot help and
+ * this trigger is gone. False: the job has failed for minutes and keeps retrying. An outage reads
+ * like this. So does a defect that no retry will fix, so a job that stays here wants a look.
  */
 export interface SixbOrchestratorDispatchFailedContext
   extends SixbFailureContext<"orchestrator.dispatch.failed"> {
   readonly failure: SixbFailure<"internal.unexpected">
   readonly eventId: string
   readonly eventType: string
-  /** What the job would have started, such as `pipeline:daily-sales`. */
+  /** What the job starts, such as `pipeline:daily-sales`. */
   readonly target: string
   readonly attempts: number
+  readonly dropped: boolean
 }
 
 /**

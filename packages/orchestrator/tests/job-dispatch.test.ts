@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
-import type { SixbErrorContext } from "@sixb/core"
+import { PipelineError, type SixbErrorContext, WorkflowValidationError } from "@sixb/core"
 import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { type DispatchJob, JobDispatch } from "../src/job-dispatch"
 
-const TOTAL_BACKOFF_MS = 250 + 500 + 1_000 + 2_000 + 4_000 + 8_000 + 29 * 10_000
+/** The backoff up to the attempt that reports a job still retrying. */
+const BACKOFF_UNTIL_REPORT_MS = 250 + 500 + 1_000 + 2_000 + 4_000 + 8_000 + 29 * 10_000
 
 function job(target: string, dispatch: () => Promise<void>): DispatchJob {
   return { event: { id: `event:${target}`, type: "schedule.triggered" }, target, dispatch }
@@ -119,23 +121,29 @@ describe("JobDispatch", () => {
     expect(reported).toEqual([])
   })
 
-  // Reproduce: raise `MAX_ATTEMPTS`; the job outlives the test and nothing is reported.
-  test("drops a job that keeps failing, and reports what it dropped", async () => {
+  // Reproduce: return after `REPORT_AFTER_ATTEMPTS` in `retry`, as dropping did; an outage longer
+  // than five minutes loses the trigger, and the last attempt below never happens.
+  test("an outage retries for as long as it lasts, and is reported once", async () => {
+    let healthy = false
     let attempts = 0
+    let sent = false
     const dispatch = createDispatch()
 
     await dispatch.all([
-      failing("pipeline:daily", () => {
+      job("pipeline:daily", async () => {
         attempts += 1
+        if (!healthy) throw new Error("connection refused")
+        sent = true
       }),
     ])
-    for (let elapsed = 0; elapsed < TOTAL_BACKOFF_MS; elapsed += 250) await advance(250)
-    await dispatch.drain()
+
+    const backoff = BACKOFF_UNTIL_REPORT_MS + 60 * 60_000
+    for (let elapsed = 0; elapsed < backoff; elapsed += 1_000) await advance(1_000)
     await flushSixbErrors(reporter)
 
-    expect(attempts).toBe(36)
+    expect(attempts).toBeGreaterThan(36)
+    expect(sent).toBe(false)
     expect(reported).toHaveLength(1)
-    expect(reported[0]?.error.message).toBe("pipeline:daily unavailable")
     expect(reported[0]?.context).toMatchObject({
       type: "orchestrator.dispatch.failed",
       projectId: "project",
@@ -143,8 +151,77 @@ describe("JobDispatch", () => {
       eventType: "schedule.triggered",
       target: "pipeline:daily",
       attempts: 36,
-      failure: { code: "internal.unexpected" },
+      dropped: false,
     })
+
+    healthy = true
+    await advance(10_000)
+    await dispatch.drain()
+
+    expect(sent).toBe(true)
+    await flushSixbErrors(reporter)
+    expect(reported).toHaveLength(1)
+  })
+
+  // Reproduce: return false from `isPermanentDispatchFailure`; each of these retries forever.
+  test.each([
+    { name: "a framework error that says so", error: createSixbError("internal.unexpected", "x") },
+    { name: "an invalid workflow request", error: new WorkflowValidationError("bad input") },
+    { name: "a definition a dispatcher refuses", error: new PipelineError("unknown pipeline") },
+  ])("drops at once, and reports, $name", async ({ error }) => {
+    let attempts = 0
+    const dispatch = createDispatch()
+
+    await dispatch.all([
+      job("workflow:notify", async () => {
+        attempts += 1
+        throw error
+      }),
+    ])
+    await advance(60_000)
+    await dispatch.drain()
+    await flushSixbErrors(reporter)
+
+    expect(attempts).toBe(1)
+    expect(reported).toHaveLength(1)
+    expect(reported[0]?.context).toMatchObject({ attempts: 1, dropped: true })
+  })
+
+  test("keeps retrying what the framework calls retryable", async () => {
+    let attempts = 0
+    const dispatch = createDispatch()
+
+    await dispatch.all([
+      job("sync:orders", async () => {
+        attempts += 1
+        throw createSixbError("storage.unavailable", "PostgreSQL is unavailable")
+      }),
+    ])
+    await advance(250)
+    await advance(500)
+
+    expect(attempts).toBe(3)
+    await flushSixbErrors(reporter)
+    expect(reported).toEqual([])
+  })
+
+  test("a retry that turns out permanent stops there", async () => {
+    let attempts = 0
+    const dispatch = createDispatch()
+
+    await dispatch.all([
+      job("workflow:notify", async () => {
+        attempts += 1
+        throw attempts === 1 ? new Error("connection reset") : new WorkflowValidationError("bad")
+      }),
+    ])
+    await advance(250)
+    await advance(60_000)
+    await dispatch.drain()
+    await flushSixbErrors(reporter)
+
+    expect(attempts).toBe(2)
+    expect(reported[0]?.context).toMatchObject({ attempts: 2, dropped: true })
   })
 
   // Reproduce: remove the race with `timedOut` in `attempt`; the batch never ends.
@@ -176,20 +253,55 @@ describe("JobDispatch", () => {
 
   // Reproduce: drop the `while` in `one`; the batch ends with every failed job in memory.
   test("past its cap the line waits, so the backlog stays in the broker", async () => {
+    let healthy = false
     const dispatch = createDispatch()
+    const outage = (target: string) =>
+      job(target, async () => {
+        if (!healthy) throw new Error("connection refused")
+      })
     let ended = false
 
-    await dispatch.all(Array.from({ length: 64 }, (_, index) => failing(`bad:${index}`)))
-    const batch = dispatch.all([failing("one-too-many")]).then(() => {
+    await dispatch.all(Array.from({ length: 64 }, (_, index) => outage(`job:${index}`)))
+    const batch = dispatch.all([outage("one-too-many")]).then(() => {
       ended = true
     })
-    await flush()
+    for (let elapsed = 0; elapsed < 30 * 60_000; elapsed += 10_000) await advance(10_000)
     expect(ended).toBe(false)
 
-    for (let elapsed = 0; elapsed < TOTAL_BACKOFF_MS; elapsed += 1_000) await advance(1_000)
+    healthy = true
+    await advance(10_000)
     await batch
 
     expect(ended).toBe(true)
+  })
+
+  test("a permanent failure takes no slot, so a full line still moves past it", async () => {
+    const dispatch = createDispatch()
+
+    await dispatch.all(Array.from({ length: 64 }, (_, index) => failing(`bad:${index}`)))
+    await dispatch.all([
+      job("invalid", async () => {
+        throw new WorkflowValidationError("bad input")
+      }),
+    ])
+
+    await flushSixbErrors(reporter)
+    expect(reported[0]?.context).toMatchObject({ target: "invalid", dropped: true })
+  })
+
+  // Reproduce: drop the abort listener in `sleep`; a stop waits behind the backoff of every retry.
+  test("stopping releases a line that waits for a slot", async () => {
+    const dispatch = createDispatch()
+
+    await dispatch.all(Array.from({ length: 64 }, (_, index) => failing(`bad:${index}`)))
+    const batch = dispatch.all([failing("one-too-many")])
+    await flush()
+
+    controller.current.abort()
+    await batch
+    await dispatch.drain()
+
+    expect(jest.getTimerCount()).toBe(0)
   })
 
   test("stopping ends the retries at once, and reports nothing", async () => {
