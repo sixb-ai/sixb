@@ -7,7 +7,6 @@
 const PRODUCTION_ROLES = {
   api: { onEventPlane: true, usesStorageSchema: true },
   rules: { onEventPlane: true, usesStorageSchema: true },
-  scheduler: { onEventPlane: true, usesStorageSchema: true },
   orchestrator: { onEventPlane: true, usesStorageSchema: true },
   worker: { onEventPlane: true, usesStorageSchema: true },
   "worker-group": { onEventPlane: true, usesStorageSchema: true },

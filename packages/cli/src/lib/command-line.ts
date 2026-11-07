@@ -489,7 +489,7 @@ const commandTree: readonly CommandNode[] = [
       },
     ],
   },
-  command("scheduler", "Start the production scheduler", {
+  command("scheduler", "Removed: the orchestrator runs cron schedules", {
     options: ["entry", "no-migrate"],
   }),
   command("orchestrator", "Start the production orchestrator, which queues work for events", {

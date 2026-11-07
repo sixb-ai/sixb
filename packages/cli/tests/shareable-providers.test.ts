@@ -30,7 +30,6 @@ class ProcessLocalQueues {
 const EVENT_PLANE_ROLES: readonly ProductionRole[] = [
   "api",
   "rules",
-  "scheduler",
   "orchestrator",
   "worker",
   "worker-group",

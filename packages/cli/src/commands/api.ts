@@ -64,6 +64,8 @@ export async function runApi(options: ApiOptions = {}) {
       port: topology.apiPort,
       hostname: topology.apiHost,
       quiet: true,
+      // `sixb orchestrator` owns it.
+      ontologyMaintenance: false,
       browser: {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,

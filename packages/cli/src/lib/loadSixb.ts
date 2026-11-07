@@ -22,6 +22,7 @@ const REQUIRED_HOST_PROPERTIES = [
 
 const REQUIRED_LIFECYCLE_METHODS = [
   "withScope",
+  "startMaintenance",
   "startOntologyMaintenance",
   "getOntologyOperationalStatus",
   "prepareReadiness",

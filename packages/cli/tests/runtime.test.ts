@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, jest, spyOn, test } from "bun:test"
 import { AgentWorker } from "@sixb/agent-worker"
 import {
   col,
@@ -36,7 +36,6 @@ import {
   migrateRuntimeStorage,
   startOrchestratorRuntime,
   startRulesRuntime,
-  startSchedulerRuntime,
   startSixbRuntime,
   stopSixbProviders,
 } from "../src/lib/runtime"
@@ -864,33 +863,6 @@ describe("startSixbRuntime", () => {
 })
 
 describe("split production runtime roles", () => {
-  test("starts only the scheduler for the scheduler role", async () => {
-    const calls: string[] = []
-    const sixb = new SixbHost({
-      id: "cli-scheduler-role",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: createLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      schedules: [defineSchedule("role-daily").cron("0 2 * * *")],
-    })
-    sixb.scheduler.start = async () => {
-      calls.push("scheduler:start")
-    }
-    sixb.scheduler.stop = async () => {
-      calls.push("scheduler:stop")
-    }
-    const runtime = await startSchedulerRuntime(sixb)
-
-    expect(calls).toEqual(["scheduler:start"])
-
-    await runtime.stop()
-
-    expect(calls).toEqual(["scheduler:start", "scheduler:stop"])
-  })
-
   test("starts only rules evaluation for the rules role", async () => {
     const calls: string[] = []
     const sixb = new SixbHost({
@@ -950,7 +922,47 @@ describe("split production runtime roles", () => {
     expect(calls).toEqual([])
   })
 
-  // Reproduce: drop `startOntologyMaintenance()` from `startOrchestratorRuntime`; the event never
+  // Reproduce: drop `this.scheduler.pass` from `SixbHost.startMaintenance`; the timer has nothing
+  // to fire for and no occurrence is emitted.
+  test("fires cron occurrences on the second, with no scheduler process", async () => {
+    const queues = new InMemoryQueues()
+    const daily = defineSchedule("orchestrator-cron").cron("* * * * *")
+    const sixb = new SixbHost({
+      id: "cli-orchestrator-cron",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues,
+      schedules: [daily],
+      workflows: [
+        defineWorkflow("orchestrator-cron-workflow").input({}).when(daily).then(workflowStep),
+      ],
+    })
+
+    jest.useFakeTimers({ now: new Date("2026-11-07T10:00:30.000Z") })
+    const runtime = await startOrchestratorRuntime(sixb)
+
+    try {
+      jest.advanceTimersByTime(29_999)
+      expect(await sixb.events.read({ types: ["schedule.triggered"] })).toEqual([])
+
+      jest.advanceTimersByTime(1)
+      const occurrences = await waitFor(
+        () => sixb.events.read({ types: ["schedule.triggered"] }),
+        (value) => value.length === 1
+      )
+      expect(occurrences[0]).toMatchObject({
+        payload: { scheduleId: daily.id, occurrenceAt: "2026-11-07T10:01:00.000Z" },
+      })
+    } finally {
+      jest.useRealTimers()
+      await runtime.stop()
+    }
+  })
+
+  // Reproduce: drop `sixb.startMaintenance(...)` from `startOrchestratorRuntime`; the event never
   // arrives.
   test("delivers the events a committing process left behind, with no route registered", async () => {
     const storage = new InMemoryStorage()
@@ -1046,13 +1058,11 @@ describe("split runtime preparation", () => {
     })
 
     const rules = await startRulesRuntime(sixb)
-    const scheduler = await startSchedulerRuntime(sixb)
     const orchestrator = await startOrchestratorRuntime(sixb)
 
     expect(calls).toEqual([])
 
     await orchestrator.stop()
-    await scheduler.stop()
     await rules.stop()
   })
 })
