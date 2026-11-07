@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import {
+  change,
   col,
   defineDataset,
   defineMarking,
@@ -16,6 +17,7 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { createTestingScope } from "../../core/src/execution/scopes"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
@@ -84,6 +86,59 @@ describe("SixbServer start", () => {
 
     try {
       expect(maintenance).toHaveBeenCalledTimes(calls)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  // Reproduce: drop `setIngestFlush` from `SixbServer.start()`; an embedded server then queues a job
+  // no worker consumes, and the dataset stops moving with no error.
+  test.each([
+    { name: "before it returns, in an embedded server", option: undefined, versions: 1, jobs: 0 },
+    { name: "through a job, when a lake worker owns it", option: false, versions: 0, jobs: 1 },
+  ])("writes ingested changes $name", async ({ option, versions, jobs }) => {
+    const contacts = defineDataset("crm.contacts", {
+      schema: [col("id", "string"), col("name", "string")],
+      primaryKey: "id",
+    })
+    const lakeStorage = new InMemoryLakeStorage()
+    const queues = new InMemoryQueues()
+    const host = new SixbHost({
+      id: "test-project",
+      ontology: [],
+      datasets: [contacts],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      queues,
+    })
+    const server = new SixbServer({
+      host,
+      hostname: "127.0.0.1",
+      port: 0,
+      quiet: true,
+      browser: createTestBrowserPolicy(),
+      ...(option === undefined ? {} : { ingestFlush: option }),
+    })
+
+    await server.start()
+
+    try {
+      const sixb = host.withScope(createTestingScope({ projectId: host.id }))
+      await sixb.datasets.ingest(contacts, {
+        changes: [change.upsert({ id: "c1", name: "Ada" })],
+      })
+
+      const written = await lakeStorage.listVersions(contacts.id)
+      const queued = await queues.lake.claim({
+        projectId: host.id,
+        workerId: "test",
+        limit: 10,
+      })
+
+      expect(written).toHaveLength(versions)
+      expect(queued).toHaveLength(jobs)
     } finally {
       await server.stop()
     }

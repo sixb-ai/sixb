@@ -128,4 +128,6 @@ Most projects start the API through the [CLI](../cli/overview.md#production-serv
 
 An embedded server delivers the events a commit left undelivered and purges expired records, every minute. Pass `ontologyMaintenance: false` when the project also runs `sixb orchestrator`, which does that work.
 
+It also writes what `sixb.datasets.ingest` stores before the call returns, since no lake worker would. A write that fails rejects the call, the changes stay stored, and the next `ingest` of that dataset writes them. Pass `ingestFlush: false` when a lake worker runs for the project. Cron schedules, lake cleanup and the report of changes that wait need an orchestrator.
+
 For builds, public origins, and service health checks, see [Deployment](../deployment/overview.md).

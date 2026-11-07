@@ -16,6 +16,7 @@ import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 import type { MergeChange } from "./changes"
 import { DatasetValidationError } from "./errors"
+import type { DatasetIngestRuntime } from "./ingest-flush"
 import { datasetDefinitionHash, tryEnqueueIngestFlush } from "./ingest-flush-job"
 import {
   type DatasetLineage,
@@ -110,7 +111,8 @@ export function createDatasetsRuntime(
   source: Pick<DatasetsRuntime, "list" | "getById">,
   lakeStorage: LakeStorage,
   blobStorage: Pick<BlobStorage, "stat">,
-  versionMarkings: DatasetVersionMarkings
+  versionMarkings: DatasetVersionMarkings,
+  ingestRuntime: DatasetIngestRuntime
 ): DatasetsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const allowed = (datasetId: string) =>
@@ -234,8 +236,10 @@ export function createDatasetsRuntime(
         changes,
       })
 
-      // Only the delivery that opens a request queues its flush; the others join that request.
-      if (flush.requested) {
+      if (ingestRuntime.writesInline) {
+        await ingestRuntime.flushAll(registered.id, input.signal ?? new AbortController().signal)
+      } else if (flush.requested) {
+        // Only the delivery that opens a request queues its flush; the others join that request.
         await tryEnqueueIngestFlush(
           runtime.queues.lake,
           runtime.projectId,

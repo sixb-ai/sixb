@@ -38,10 +38,11 @@ when no other call comes.
 - Its id names the flush request (`ingest-flush:<dataset>:<request>`), so the deliveries of one
   request queue one job.
 - A job takes batches for 30 s, then hands over: it leaves the rest to a new request, never to its
-  own, whose id the queue would ignore.
+  own, whose id the queue would ignore. A server embedded with `createSixbServer` has no such job:
+  `ingest` itself flushes until nothing is left (`flushAll`).
 - When another flush holds the dataset, the job tries again a second later, until that flush
   releases it.
-- A failure retries after 1, 2, 5, 15 and 30 s, then every minute, and the job never fails: the
+- A failure retries after 1, 2, 4, 8, 16 and 32 s, then every minute, and the job never fails: the
   changes stay in the inbox, and the next attempt resumes the batch in flight. The flush reports
   the fifth failure in a row as `dataset.ingest.flush.failed`.
 - A change refused for what it holds sets its delivery aside, and the rest of the batch goes on:

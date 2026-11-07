@@ -66,6 +66,8 @@ export async function runApi(options: ApiOptions = {}) {
       quiet: true,
       // `sixb orchestrator` owns it.
       ontologyMaintenance: false,
+      // A lake worker owns it. Without one, changes wait where `sixb check` and the Console show.
+      ingestFlush: false,
       browser: {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,

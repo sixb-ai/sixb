@@ -15,8 +15,12 @@ export type {
   DatasetIngestFlushOutcome,
   DatasetIngestRuntime,
 } from "../datasets/ingest-flush"
-export { DatasetIngestFlushError, getDatasetIngestRuntime } from "../datasets/ingest-flush"
-export { enqueueIngestFlush } from "../datasets/ingest-flush-job"
+export {
+  DatasetIngestFlushError,
+  findDatasetIngestRuntime,
+  getDatasetIngestRuntime,
+} from "../datasets/ingest-flush"
+export { ingestStalledSince } from "../datasets/ingest-flush-job"
 export type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
 export type { LakeMaintenanceSettings, LakeRetention } from "../maintenance/lake-retention"
 export { getLakeRetentionRuntime } from "../maintenance/lake-retention"
