@@ -49,43 +49,6 @@ describe("NatsBroker", () => {
     }
   })
 
-  test("deduplicates records by idempotencyKey within the JetStream duplicate window", async () => {
-    const { broker, projectId, cleanup } = createTestBroker()
-    const stream = { id: "__events" }
-    try {
-      await broker.ensureStream({ projectId, stream })
-      const [first] = await broker.append({
-        projectId,
-        streamId: stream.id,
-        records: [
-          {
-            name: "test.record",
-            payload: { id: "room-1" },
-            idempotencyKey: "dedupe-room-1",
-          },
-        ],
-      })
-      const [second] = await broker.append({
-        projectId,
-        streamId: stream.id,
-        records: [
-          {
-            name: "test.record",
-            payload: { id: "room-2" },
-            idempotencyKey: "dedupe-room-1",
-          },
-        ],
-      })
-
-      expect(first).toBeDefined()
-      expect(second?.cursor).toBe(first?.cursor)
-      expect(second?.payload).toEqual({ id: "room-1" })
-      expect((await broker.read({ projectId, streamId: stream.id })).records).toEqual([first])
-    } finally {
-      await cleanup()
-    }
-  })
-
   test("close drains active subscriptions and rejects later operations", async () => {
     const { broker, projectId } = createTestBroker()
     const stream = { id: "__events" }

@@ -28,6 +28,10 @@ export interface BrokerRecordInput {
   readonly name?: string
   readonly key?: string
   readonly payload: JsonValue
+  /**
+   * Makes retries and racing publishers safe. A record whose key a stream saw within the provider's
+   * window, two minutes by default, is not stored again: the append returns the first one.
+   */
   readonly idempotencyKey?: string
 }
 

@@ -35,7 +35,7 @@ describe("DomainEventService stable envelope publication", () => {
       "event-stable",
       "event-stable",
     ])
-    expect((await events.read()).map((event) => event.id)).toEqual(["event-stable", "event-stable"])
+    expect((await events.read()).map((event) => event.id)).toEqual(["event-stable"])
   })
 
   test("rejects stable envelopes for another project", async () => {
