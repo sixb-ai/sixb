@@ -1,4 +1,5 @@
 import { dirname, resolve } from "node:path"
+import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
 import { assertDeclaredEnv } from "../lib/env-config"
 import { errorMessage } from "../lib/errors"
 import { checkRuntimeHealth } from "../lib/health"
@@ -59,7 +60,11 @@ export async function runCheck(options: CheckOptions = {}) {
           // are a different thing and counting them here read as ontology drift.
           warnings: 0,
         },
-        warnings: [...health.warnings, ...markings.warnings],
+        warnings: [
+          ...health.warnings,
+          ...markings.warnings,
+          ...(await lakeWorkerWarnings(sixb, health.storage.ok)),
+        ],
       })
     )
 
@@ -86,6 +91,25 @@ export async function runCheck(options: CheckOptions = {}) {
 }
 
 const CLOSE_TIMEOUT_MS = 10_000
+
+/**
+ * What storage says, since no process knows what the others run. A storage that is down or behind
+ * has its own row in this report.
+ */
+async function lakeWorkerWarnings(
+  sixb: LoadedSixbHost,
+  storageOk: boolean
+): Promise<readonly string[]> {
+  if (!storageOk) return []
+
+  const status = await getLakeRetentionRuntime(sixb)
+    .status()
+    .catch(() => null)
+
+  return status?.state === "no-worker"
+    ? ["Lake cleanup is requested but no lake worker has run it. Run `sixb worker lake`."]
+    : []
+}
 
 interface MarkingsCheck {
   readonly ok: boolean

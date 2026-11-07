@@ -180,9 +180,10 @@ export const sixb = createSixb({
 | `cleanupEvery` | `"1h"` | How often cleanup runs, such as `15m`, `6h` or `1d`. |
 
 - The latest version of each dataset, and the versions projections applied, are always kept.
-- The orchestrator requests cleanup and a `lake` worker runs it, so both must be running. `sixb dev` and `sixb worker-group` include the worker; a deployment that names its worker `types` must list `lake`, and `sixb deploy` warns when it does not.
+- The orchestrator requests cleanup and a `lake` worker runs it, so both must be running. `sixb dev` and `sixb worker-group` include the worker; a deployment that names its worker `types` must list `lake`, and `sixb deploy` warns when it does not. Separate `sixb worker <type>` processes need a `sixb worker lake`: the orchestrator's output, `sixb check` and the Console say when none has run.
+- Reads running in the same process delay file deletion by about half a minute at most: past that, cleanup leaves the files to its next run.
 - Small files are merged by the lake provider itself after the writes that leave them.
-- Console › Lake health shows when cleanup was last requested and last ran, says which of the two is missing when one is, and shows how each dataset is stored, with warnings such as a partitioned small dataset.
+- Console › Lake health shows when cleanup was last requested and last started, says which of the two is missing when one is, and shows how each dataset is stored, with warnings such as a partitioned small dataset.
 - `sixb lake cleanup` cleans up now, with the settings above unless its flags say otherwise. `--dry-run` measures what one pass would remove.
 - Cleanup needs a lake provider that supports it, such as DuckLake. Otherwise nothing runs.
 

@@ -16,6 +16,7 @@ afterEach(() => {
     drift: false,
     maintenance: true,
     lakeMaintenance: undefined,
+    unansweredRequest: false,
     retentionPassesWithMore: 0,
     appliedVersion: undefined,
   })
