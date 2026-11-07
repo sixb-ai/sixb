@@ -6,6 +6,7 @@ import type {
   GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RenewWebhookRunInput,
   RestartWebhookRunInput,
   StartWebhookRunInput,
   WebhookRunRecord,
@@ -35,10 +36,12 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
       const [row] = await this.sql<WebhookRunDatabaseRow[]>`
         INSERT INTO webhook_runs (
           project_id, id, execution_id, connector_id, webhook_id, status, method, route,
+          execution_token, execution_lease_expires_at,
           started_at, request_body_bytes, request_body_sha256, idempotency_key
         ) VALUES (
           ${input.projectId}, ${input.id}, ${input.executionId}, ${input.connectorId},
           ${input.webhookId}, ${"running"}, ${input.method}, ${input.route},
+          ${input.execution.token}, ${input.execution.leaseExpiresAt},
           ${input.startedAt ?? new Date()}, ${input.requestBodyBytes},
           ${input.requestBodySha256}, ${input.idempotencyKey ?? null}
         )
@@ -69,7 +72,8 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
           "not_found"
         )
       }
-      if (!canRetryWebhookRun(rowToWebhookRunRecord(existing))) {
+      const startedAt = input.startedAt ?? new Date()
+      if (!canRetryWebhookRun(rowToWebhookRunRecord(existing), startedAt)) {
         throw new WebhookRunError(
           `[SixbPg] Webhook run '${input.id}' cannot restart from status '${existing.status}'.`,
           "invalid_transition"
@@ -78,19 +82,25 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
 
       const [updated] = await tx<WebhookRunDatabaseRow[]>`
         UPDATE webhook_runs
-        SET status = ${"running"}, started_at = ${input.startedAt ?? new Date()},
-            finished_at = ${null}, response_status = ${null}, error = ${null}
-        WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"failed"}
+        SET status = ${"running"}, execution_token = ${input.execution.token},
+            execution_lease_expires_at = ${input.execution.leaseExpiresAt},
+            started_at = ${startedAt}, finished_at = ${null}, response_status = ${null},
+            error = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
-      if (!updated) {
-        throw new WebhookRunError(
-          `[SixbPg] Webhook run '${input.id}' changed while restarting.`,
-          "invalid_transition"
-        )
-      }
       return rowToWebhookRunRecord(updated)
     })
+  }
+
+  async renewLease(input: RenewWebhookRunInput): Promise<boolean> {
+    const updated = await this.sql<WebhookRunDatabaseRow[]>`
+      UPDATE webhook_runs SET execution_lease_expires_at = ${input.leaseExpiresAt}
+      WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"running"}
+        AND execution_token = ${input.executionToken}
+      RETURNING *
+    `
+    return updated.length > 0
   }
 
   async finish(input: FinishWebhookRunInput): Promise<WebhookRunRecord> {
@@ -112,10 +122,17 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
           "invalid_transition"
         )
       }
+      if (existing.execution_token !== input.executionToken) {
+        throw new WebhookRunError(
+          `[SixbPg] Execution token is no longer current on webhook run '${input.id}'.`,
+          "invalid_transition"
+        )
+      }
 
       const [updated] = await tx<WebhookRunDatabaseRow[]>`
         UPDATE webhook_runs
-        SET status = ${input.status}, finished_at = ${input.finishedAt ?? new Date()},
+        SET status = ${input.status}, execution_token = ${null},
+            execution_lease_expires_at = ${null}, finished_at = ${input.finishedAt ?? new Date()},
             response_status = ${input.responseStatus ?? null},
             error = ${input.status === "succeeded" ? null : serializeSixbFailure(input.error, WEBHOOK_RUN_FAILURE_CODES)}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -186,6 +203,13 @@ function rowToWebhookRunRecord(row: WebhookRunDatabaseRow): WebhookRunRecord {
     connectorId: row.connector_id,
     webhookId: row.webhook_id,
     status: row.status,
+    execution:
+      row.execution_token && row.execution_lease_expires_at
+        ? {
+            token: row.execution_token,
+            leaseExpiresAt: new Date(row.execution_lease_expires_at),
+          }
+        : undefined,
     method: row.method,
     route: row.route,
     startedAt: new Date(row.started_at),
@@ -205,6 +229,8 @@ interface WebhookRunDatabaseRow {
   readonly connector_id: string
   readonly webhook_id: string
   readonly status: WebhookRunRecord["status"]
+  readonly execution_token: string | null
+  readonly execution_lease_expires_at: Date | string | null
   readonly method: string
   readonly route: string
   readonly started_at: Date | string

@@ -235,7 +235,11 @@ export type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "./projection-runs"
-export { PROJECTION_RUN_FAILURE_CODES, ProjectionRunError } from "./projection-runs"
+export {
+  PROJECTION_RUN_FAILURE_CODES,
+  ProjectionRunError,
+  ProjectionRunHeldError,
+} from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
@@ -291,8 +295,10 @@ export type {
   GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RenewWebhookRunInput,
   RestartWebhookRunInput,
   StartWebhookRunInput,
+  WebhookRunExecution,
   WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,

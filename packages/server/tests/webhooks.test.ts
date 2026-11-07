@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import {
   defineConnector,
   defineWebhook,
@@ -15,6 +16,8 @@ import {
   type SixbHostOptions,
 } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
+import { WEBHOOK_RUN_LEASE_MS } from "@sixb/core/internal/webhooks"
+import { RecoveryGate, runRunRecoveryContractSuite, startTestWebhookRun } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -294,6 +297,53 @@ describe("webhook routes", () => {
     expect(() => createWebhookApp([connector], storage)).toThrow(
       "[Sixb] Webhooks require storage.webhookRuns to be configured."
     )
+  })
+
+  // Leave `running` runs out of `canRetryWebhookRun` to watch this answer 202 and drop the delivery.
+  test("runs a delivery again once the process that was handling it is gone", async () => {
+    let calls = 0
+    const connector = defineConnector("github", {
+      type: "test",
+      webhooks: [
+        defineWebhook("events")
+          .post()
+          .json()
+          .idempotencyKey(() => "delivery-1")
+          .handle(() => {
+            calls += 1
+          }),
+      ],
+      connect() {
+        return {}
+      },
+    })
+    const storage = new InMemoryStorage()
+    const app = createWebhookApp([connector], storage)
+    const body = JSON.stringify({ value: 1 })
+
+    // What a crash leaves: a run that never finished, whose lease lapsed.
+    const crashed = await startTestWebhookRun(storage, {
+      id: "run-crashed",
+      projectId: "test-project",
+      connectorId: "github",
+      webhookId: "events",
+      method: "POST",
+      route: "/api/webhooks/github/events",
+      requestBodyBytes: body.length,
+      requestBodySha256: createHash("sha256").update(body).digest("hex"),
+      idempotencyKey: "delivery-1",
+      execution: { token: "gone", leaseExpiresAt: new Date(0) },
+    })
+
+    const retry = await app.fetch(
+      new Request("http://localhost/api/webhooks/github/events", { method: "POST", body })
+    )
+
+    expect(retry.status).toBe(202)
+    expect(calls).toBe(1)
+    await expect(
+      storage.webhookRuns.getById({ projectId: "test-project", id: crashed.id })
+    ).resolves.toMatchObject({ status: "succeeded" })
   })
 
   test("rejects a reused delivery key with a different payload", async () => {
@@ -680,3 +730,76 @@ function createWebhookRuntime(
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
+
+// A handler runs in its request, so there is no worker to stop: a shutdown is a crash to a provider
+// whose retry comes later. Its work runs again, as a provider's retry always has.
+runRunRecoveryContractSuite("Webhook", async () => {
+  const gate = new RecoveryGate()
+  let starts = 0
+
+  const connector = defineConnector("github", {
+    type: "test",
+    webhooks: [
+      defineWebhook("events")
+        .post()
+        .json()
+        .idempotencyKey(() => "delivery-1")
+        .handle(async () => {
+          starts += 1
+          await gate.wait()
+        }),
+    ],
+    connect() {
+      return {}
+    },
+  })
+
+  const storage = new InMemoryStorage()
+  const app = createWebhookApp([connector], storage)
+  const deliver = () =>
+    app.fetch(
+      new Request("http://localhost/api/webhooks/github/events", {
+        method: "POST",
+        body: JSON.stringify({ value: 1 }),
+      })
+    )
+
+  const readRun = async () => {
+    const { runs } = await storage.webhookRuns.list({ projectId: "test-project" })
+    return runs[0]
+  }
+
+  let first: Promise<Response> = Promise.resolve(new Response())
+
+  return {
+    afterCrash: "resumes",
+    afterShutdown: "not applicable",
+    leaseMs: WEBHOOK_RUN_LEASE_MS,
+
+    async begin() {
+      first = Promise.resolve(deliver())
+      await gate.reached
+    },
+    unblock: () => gate.open(),
+    firstExecutionEnded: async () => {
+      await first
+    },
+    stop: async () => {},
+
+    async redeliver() {
+      await deliver()
+    },
+    async deliverDuplicate() {
+      const retry = await deliver()
+      expect(retry.status).toBe(503)
+      expect(Number(retry.headers.get("retry-after"))).toBeGreaterThan(0)
+    },
+
+    status: async () => String((await readRun())?.status),
+    workStarts: () => starts,
+    outputCopies: async () => ((await readRun())?.status === "succeeded" ? 1 : 0),
+    dispose: async () => {
+      await first
+    },
+  }
+})

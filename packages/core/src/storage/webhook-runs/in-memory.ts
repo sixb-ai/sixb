@@ -15,6 +15,7 @@ import type {
   FinishWebhookRunInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RenewWebhookRunInput,
   RestartWebhookRunInput,
   StartWebhookRunInput,
   WebhookRunRecord,
@@ -61,6 +62,7 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
       connectorId: input.connectorId,
       webhookId: input.webhookId,
       status: "running",
+      execution: input.execution,
       method: input.method,
       route: input.route,
       startedAt: new Date(input.startedAt ?? new Date()),
@@ -75,7 +77,8 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
 
   async restart(input: RestartWebhookRunInput): Promise<WebhookRunRecord> {
     const existing = this.requireWebhookRun(input.projectId, input.id)
-    if (!canRetryWebhookRun(existing)) {
+    const startedAt = new Date(input.startedAt ?? new Date())
+    if (!canRetryWebhookRun(existing, startedAt)) {
       throw new WebhookRunError(
         `[Sixb] Webhook run '${input.id}' cannot restart from status '${existing.status}'.`,
         "invalid_transition"
@@ -84,7 +87,8 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
     const next: WebhookRunRecord = {
       ...existing,
       status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
+      execution: input.execution,
+      startedAt,
       finishedAt: undefined,
       responseStatus: undefined,
       error: undefined,
@@ -93,11 +97,31 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
     return cloneRecord(next)
   }
 
+  async renewLease(input: RenewWebhookRunInput): Promise<boolean> {
+    const key = storageKey(input.projectId, input.id)
+    const existing = this.runs.get(key)
+    if (existing?.status !== "running" || existing.execution?.token !== input.executionToken) {
+      return false
+    }
+
+    const execution = { token: input.executionToken, leaseExpiresAt: input.leaseExpiresAt }
+    this.runs.set(key, cloneRecord({ ...existing, execution }))
+    return true
+  }
+
   async finish(input: FinishWebhookRunInput): Promise<WebhookRunRecord> {
     const existing = this.requireRunningWebhookRun(input.projectId, input.id)
+    if (existing.execution?.token !== input.executionToken) {
+      throw new WebhookRunError(
+        `[Sixb] Execution token is no longer current on webhook run '${input.id}'.`,
+        "invalid_transition"
+      )
+    }
+
     const next: WebhookRunRecord = {
       ...existing,
       status: input.status,
+      execution: undefined,
       finishedAt: new Date(input.finishedAt ?? new Date()),
       responseStatus: input.responseStatus,
       error:

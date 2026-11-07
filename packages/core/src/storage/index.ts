@@ -815,6 +815,7 @@ export {
   PROJECTION_RUN_FAILURE_CODES,
   PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
+  ProjectionRunHeldError,
 } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
@@ -889,9 +890,11 @@ export type {
   GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RenewWebhookRunInput,
   RestartWebhookRunInput,
   StartWebhookRunInput,
   WebhookRunErrorCode,
+  WebhookRunExecution,
   WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,

@@ -131,6 +131,7 @@ const SHIPPED_MIGRATIONS = [
   "090-lake-retention-runs",
   "091-dataset-ingest-inbox",
   "092-run-recovery",
+  "093-webhook-and-projection-leases",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -2216,6 +2217,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
   await storage.webhookRuns.finish({
     id: "webhook-run-1",
     projectId: "project-a",
+    executionToken: "first",
     status: "succeeded",
     finishedAt: new Date("2026-04-19T12:00:02.000Z"),
     responseStatus: 202,

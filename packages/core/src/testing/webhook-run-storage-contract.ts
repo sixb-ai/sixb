@@ -26,6 +26,13 @@ const retryableFailure = {
   at: finishedAt.toISOString(),
   details: { connectorId: "github", webhookId: "events", runId: "delivery-retry" },
 } as const satisfies SixbFailure<WebhookRunFailureCode>
+const held = (token: string, leaseExpiresAt = new Date("2100-01-01T00:00:00.000Z")) => ({
+  token,
+  leaseExpiresAt,
+})
+
+const FIRST_TOKEN = "first"
+
 const rejectedFailure = {
   code: "webhook.delivery_rejected",
   message: "Webhook delivery was rejected.",
@@ -77,12 +84,20 @@ export function runWebhookRunStorageContractSuite<
       await withStorage(async (storage) => {
         const missing = runInput("missing-execution")
         await expect(
-          storage.webhookRuns.start({ ...missing, executionId: "missing" })
+          storage.webhookRuns.start({
+            ...missing,
+            execution: held(FIRST_TOKEN),
+            executionId: "missing",
+          })
         ).rejects.toMatchObject({ code: "invalid_execution" })
 
         await storage.executions.create(disabledRequestExecution("wrong-execution"))
         await expect(
-          storage.webhookRuns.start({ ...missing, executionId: "wrong-execution" })
+          storage.webhookRuns.start({
+            ...missing,
+            execution: held(FIRST_TOKEN),
+            executionId: "wrong-execution",
+          })
         ).rejects.toMatchObject({ code: "invalid_execution" })
       })
     })
@@ -105,12 +120,17 @@ export function runWebhookRunStorageContractSuite<
         await storage.webhookRuns.finish({
           projectId,
           id: started.id,
+          executionToken: FIRST_TOKEN,
           status: "failed",
           finishedAt,
           responseStatus: 503,
           error: retryableFailure,
         })
-        const restarted = await storage.webhookRuns.restart({ projectId, id: started.id })
+        const restarted = await storage.webhookRuns.restart({
+          projectId,
+          id: started.id,
+          execution: held("second"),
+        })
         expect(restarted).toMatchObject({
           id: started.id,
           executionId: started.executionId,
@@ -123,11 +143,12 @@ export function runWebhookRunStorageContractSuite<
         await storage.webhookRuns.finish({
           projectId,
           id: started.id,
+          executionToken: "second",
           status: "succeeded",
           responseStatus: 202,
         })
         await expect(
-          storage.webhookRuns.restart({ projectId, id: started.id })
+          storage.webhookRuns.restart({ projectId, id: started.id, execution: held("third") })
         ).rejects.toMatchObject({ code: "invalid_transition" })
 
         // A terminal client rejection is not reopened either.
@@ -135,14 +156,88 @@ export function runWebhookRunStorageContractSuite<
         await storage.webhookRuns.finish({
           projectId,
           id: rejected.id,
+          executionToken: FIRST_TOKEN,
           status: "failed",
           finishedAt,
           responseStatus: 422,
           error: rejectedFailure,
         })
         await expect(
-          storage.webhookRuns.restart({ projectId, id: rejected.id })
+          storage.webhookRuns.restart({ projectId, id: rejected.id, execution: held("second") })
         ).rejects.toMatchObject({ code: "invalid_transition" })
+      })
+    })
+
+    test("keeps a live run held, and lets a retry take a run whose lease ran out", async () => {
+      await withStorage(async (storage) => {
+        const run = await startTestWebhookRun(storage, runInput("delivery-lost", "provider-lost"))
+        const staleAt = new Date("2100-01-01T00:01:00.000Z")
+
+        await expect(
+          storage.webhookRuns.restart({ projectId, id: run.id, execution: held("second") })
+        ).rejects.toMatchObject({ code: "invalid_transition" })
+
+        await expect(
+          storage.webhookRuns.renewLease({
+            projectId,
+            id: run.id,
+            executionToken: FIRST_TOKEN,
+            leaseExpiresAt: new Date("2100-01-01T00:02:00.000Z"),
+          })
+        ).resolves.toBe(true)
+        await expect(
+          storage.webhookRuns.restart({
+            projectId,
+            id: run.id,
+            execution: held("second"),
+            startedAt: staleAt,
+          })
+        ).rejects.toMatchObject({ code: "invalid_transition" })
+
+        const retried = await storage.webhookRuns.restart({
+          projectId,
+          id: run.id,
+          execution: held("second"),
+          startedAt: new Date("2100-01-01T00:03:00.000Z"),
+        })
+        expect(retried).toMatchObject({ status: "running", execution: { token: "second" } })
+      })
+    })
+
+    test("refuses the writes of an execution that lost its run", async () => {
+      await withStorage(async (storage) => {
+        const run = await startTestWebhookRun(storage, runInput("delivery-stale", "provider-stale"))
+        await storage.webhookRuns.restart({
+          projectId,
+          id: run.id,
+          execution: held("second"),
+          startedAt: new Date("2100-01-01T00:03:00.000Z"),
+        })
+
+        await expect(
+          storage.webhookRuns.renewLease({
+            projectId,
+            id: run.id,
+            executionToken: FIRST_TOKEN,
+            leaseExpiresAt: new Date("2100-01-01T00:04:00.000Z"),
+          })
+        ).resolves.toBe(false)
+        await expect(
+          storage.webhookRuns.finish({
+            projectId,
+            id: run.id,
+            executionToken: FIRST_TOKEN,
+            status: "succeeded",
+          })
+        ).rejects.toMatchObject({ code: "invalid_transition" })
+
+        const finished = await storage.webhookRuns.finish({
+          projectId,
+          id: run.id,
+          executionToken: "second",
+          status: "succeeded",
+        })
+        expect(finished.execution).toBeUndefined()
       })
     })
 
@@ -167,6 +262,7 @@ export function runWebhookRunStorageContractSuite<
         const finished = await storage.webhookRuns.finish({
           projectId,
           id: run.id,
+          executionToken: FIRST_TOKEN,
           status: "failed",
           finishedAt,
           responseStatus: 503,
@@ -197,6 +293,7 @@ export function runWebhookRunStorageContractSuite<
           storage.webhookRuns.finish({
             projectId,
             id: run.id,
+            executionToken: FIRST_TOKEN,
             status: "failed",
             finishedAt,
             error: { ...retryableFailure, code: "runtime.cancelled" } as never,
