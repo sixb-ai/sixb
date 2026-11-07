@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
 import type {
   LakeMaintenance,
   LakeRetentionOptions,
@@ -7,9 +7,9 @@ import type {
 import {
   createLakeRetentionRuntime,
   type LakeMaintenanceOptions,
-  lakeRetentionSchedule,
   resolveLakeMaintenanceSettings,
 } from "../src/maintenance/lake-retention"
+import { InMemoryLakeRetentionRunStorage } from "../src/storage/lake-retention-runs"
 import type { ActiveOntologySource } from "../src/storage/ontology/sources"
 
 const MINUTE = 60_000
@@ -69,11 +69,13 @@ function runtime(input: {
   sources?: ReturnType<typeof appliedSources>
   options?: LakeMaintenanceOptions
   datasetCount?: number
+  lakeRetentionRuns?: InMemoryLakeRetentionRunStorage
 }) {
   return createLakeRetentionRuntime({
     projectId: "project",
     options: input.options,
     lakeStorage: { maintenance: input.maintenance },
+    storage: { lakeRetentionRuns: input.lakeRetentionRuns },
     sources: input.sources ?? appliedSources(),
     datasetCount: input.datasetCount ?? 1,
   })
@@ -106,6 +108,7 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers()
+  jest.restoreAllMocks()
 })
 
 describe("lake maintenance settings", () => {
@@ -121,32 +124,11 @@ describe("lake maintenance settings", () => {
       cleanupEvery: "1h",
       cleanupEveryMs: HOUR,
     })
-    expect(lakeRetentionSchedule(settings)).toEqual({
-      kind: "schedule",
-      id: "sixb:lake-retention",
-      trigger: { type: "cron", expression: "0 * * * *" },
-    })
   })
 
-  test("run every interval that divides an hour or a day, or every day or week", () => {
-    const cron = (cleanupEvery: string) =>
-      lakeRetentionSchedule(resolveLakeMaintenanceSettings({ cleanupEvery })).trigger.expression
-
-    expect(cron("1m")).toBe("* * * * *")
-    expect(cron("15m")).toBe("*/15 * * * *")
-    expect(cron("60m")).toBe("0 * * * *")
-    expect(cron("6h")).toBe("0 */6 * * *")
-    expect(cron("24h")).toBe("0 0 * * *")
-    expect(cron("1d")).toBe("0 0 * * *")
-    expect(cron("1w")).toBe("0 0 * * 1")
-  })
-
-  test("refuse an interval cron cannot keep", () => {
-    for (const cleanupEvery of ["90m", "45m", "5h", "2d"]) {
-      expect(() => resolveLakeMaintenanceSettings({ cleanupEvery })).toThrow(
-        `lakeMaintenance.cleanupEvery must divide an hour or a day, such as 15m, 1h, 6h or 1d; received "${cleanupEvery}".`
-      )
-    }
+  test("take any duration as the interval", () => {
+    expect(resolveLakeMaintenanceSettings({ cleanupEvery: "90m" }).cleanupEveryMs).toBe(90 * MINUTE)
+    expect(resolveLakeMaintenanceSettings({ cleanupEvery: "5h" }).cleanupEveryMs).toBe(5 * HOUR)
   })
 
   test("refuse a value that is not a duration, and versions kept for less than an hour", () => {
@@ -171,13 +153,13 @@ describe("lake maintenance settings", () => {
     expect(resolveLakeMaintenanceSettings({ deleteFilesAfter: "1h" }).deleteFilesAfterMs).toBe(HOUR)
   })
 
-  test("schedule retention only when enabled, with a provider that maintains, and datasets", () => {
+  test("run on their own only when enabled, with a provider that maintains, and datasets", () => {
     const { maintenance } = fakeMaintenance()
 
-    expect(runtime({ maintenance }).scheduled).toBe(true)
-    expect(runtime({ maintenance, options: { enabled: false } }).scheduled).toBe(false)
-    expect(runtime({ maintenance, datasetCount: 0 }).scheduled).toBe(false)
-    expect(runtime({}).scheduled).toBe(false)
+    expect(runtime({ maintenance }).automatic).toBe(true)
+    expect(runtime({ maintenance, options: { enabled: false } }).automatic).toBe(false)
+    expect(runtime({ maintenance, datasetCount: 0 }).automatic).toBe(false)
+    expect(runtime({}).automatic).toBe(false)
   })
 
   test("refuse to enable retention explicitly on a provider without maintenance", () => {
@@ -275,42 +257,42 @@ describe("lake retention passes", () => {
   })
 })
 
-describe("one occurrence of the retention schedule", () => {
-  // Reproduce: drop `budgetMs` from runOccurrence in maintenance/lake-retention.ts.
+describe("a requested retention run", () => {
+  const requestedAt = NOW.toISOString()
+  const signal = new AbortController().signal
+
+  // Reproduce: drop `budgetMs` from runRequested in maintenance/lake-retention.ts.
   test("starts no pass once half its interval has passed", async () => {
     const { maintenance, passes } = fakeMaintenance({ passesWithMore: 5, passMs: 4 * MINUTE })
     const retention = runtime({ maintenance, options: { cleanupEvery: "10m" } })
 
-    const report = await drive(
-      retention.runOccurrence(NOW.toISOString(), new AbortController().signal)
-    )
+    const report = await drive(retention.runRequested(requestedAt, signal))
 
     expect(passes).toHaveLength(2)
     expect(report?.hasMore).toBe(true)
   })
 
-  // Reproduce: remove the 10-minute cap from runOccurrence in maintenance/lake-retention.ts.
+  // Reproduce: remove the 10-minute cap from runRequested in maintenance/lake-retention.ts.
   test("holds a worker for 10 minutes at most, whatever its interval", async () => {
     const { maintenance, passes } = fakeMaintenance({ passesWithMore: 5, passMs: 4 * MINUTE })
     const retention = runtime({ maintenance, options: { cleanupEvery: "6h" } })
 
-    await drive(retention.runOccurrence(NOW.toISOString(), new AbortController().signal))
+    await drive(retention.runRequested(requestedAt, signal))
 
     expect(passes).toHaveLength(3)
   })
 
-  // Reproduce: remove the stale check from runOccurrence in maintenance/lake-retention.ts.
-  test("does nothing for an occurrence older than its interval, which a later one covers", async () => {
+  // Reproduce: remove the check on the interval from runRequested in maintenance/lake-retention.ts.
+  test("does nothing once its interval is over, which the next request covers", async () => {
     const { maintenance, passes } = fakeMaintenance()
     const retention = runtime({ maintenance })
-    const signal = new AbortController().signal
-
-    jest.setSystemTime(NOW.getTime() + HOUR + 1)
-    expect(await retention.runOccurrence(NOW.toISOString(), signal)).toBeNull()
-    expect(passes).toHaveLength(0)
 
     jest.setSystemTime(NOW.getTime() + HOUR)
-    expect(await retention.runOccurrence(NOW.toISOString(), signal)).not.toBeNull()
+    expect(await retention.runRequested(requestedAt, signal)).toBeNull()
+    expect(passes).toHaveLength(0)
+
+    jest.setSystemTime(NOW.getTime() + HOUR - 1)
+    expect(await retention.runRequested(requestedAt, signal)).not.toBeNull()
     expect(passes).toHaveLength(1)
   })
 
@@ -321,12 +303,78 @@ describe("one occurrence of the retention schedule", () => {
       options: { keepVersionsFor: "2d", deleteFilesAfter: "12h" },
     })
 
-    await retention.runOccurrence(NOW.toISOString(), new AbortController().signal)
+    await retention.runRequested(requestedAt, signal)
 
     expect(passes[0]).toMatchObject({
       keepVersionsForMs: 48 * HOUR,
       deleteFilesAfterMs: 12 * HOUR,
       dryRun: false,
     })
+  })
+
+  // Reproduce: drop `recordRun(false)` from runRequested in maintenance/lake-retention.ts.
+  test("records that it ran", async () => {
+    const { maintenance } = fakeMaintenance()
+    const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
+
+    await runtime({ maintenance, lakeRetentionRuns }).runRequested(requestedAt, signal)
+
+    expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toEqual({
+      projectId: "project",
+      finishedAt: NOW,
+      failed: false,
+    })
+  })
+
+  // Reproduce: drop the catch from runRequested in maintenance/lake-retention.ts.
+  test("records that it failed, and still fails", async () => {
+    const { maintenance } = fakeMaintenance()
+    maintenance.applyRetention = async () => {
+      throw new Error("the catalog is unreachable")
+    }
+    const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
+    const retention = runtime({ maintenance, lakeRetentionRuns })
+
+    const error = await retention.runRequested(requestedAt, signal).catch((caught) => caught)
+
+    expect(String(error)).toContain("the catalog is unreachable")
+    expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toMatchObject({
+      failed: true,
+    })
+  })
+
+  // Reproduce: remove the `signal.aborted` guard from runRequested in maintenance/lake-retention.ts.
+  test("records nothing when shutdown stops it, since the job returns to the queue", async () => {
+    const { maintenance } = fakeMaintenance({ passesWithMore: 5 })
+    const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
+    const controller = new AbortController()
+    const running = runtime({ maintenance, lakeRetentionRuns }).runRequested(
+      requestedAt,
+      controller.signal
+    )
+
+    await settle()
+    controller.abort()
+    await running.catch((caught) => caught)
+
+    expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toBeNull()
+  })
+
+  // Reproduce: drop the `.catch` from `recordRun` in maintenance/lake-retention.ts.
+  test("keeps its outcome when recording it fails", async () => {
+    const error = spyOn(console, "error").mockImplementation(() => {})
+    const { maintenance } = fakeMaintenance()
+    const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
+    lakeRetentionRuns.record = async () => {
+      throw new Error("storage is unreachable")
+    }
+
+    const report = await runtime({ maintenance, lakeRetentionRuns }).runRequested(
+      requestedAt,
+      signal
+    )
+
+    expect(report?.expiredVersions).toBe(2)
+    expect(String(error.mock.calls[0])).toContain("Could not record a lake retention run")
   })
 })

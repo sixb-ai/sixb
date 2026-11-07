@@ -61,11 +61,11 @@ import type {
 } from "../maintenance"
 import {
   createLakeRetentionRuntime,
-  LAKE_RETENTION_SCHEDULE_ID,
+  getLakeRetentionRuntime,
   type LakeMaintenanceOptions,
-  lakeRetentionSchedule,
   registerLakeRetentionRuntime,
 } from "../maintenance/lake-retention"
+import { lakeRetentionPass } from "../maintenance/lake-retention-pass"
 import { storageHeartbeat } from "../maintenance/heartbeat"
 import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
 import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
@@ -375,28 +375,18 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       createVectorIndexingRuntime(this.hostContext, this.materializer)
     )
 
-    // The built-in schedule sits beside the project's own, never among them: user code cannot
-    // read it from `sixb.schedules` or point a trigger at it.
-    if (definitions.schedules.getById(LAKE_RETENTION_SCHEDULE_ID)) {
-      throw new RuntimeError(
-        `[Sixb] Schedule id '${LAKE_RETENTION_SCHEDULE_ID}' is reserved for lake maintenance. Rename the schedule.`
-      )
-    }
-
     const lakeRetention = createLakeRetentionRuntime({
       projectId: this.projectId,
       options: options.lakeMaintenance,
       lakeStorage: this.lakeStorage,
+      storage: this.storage,
       sources: this.storage.ontology.sources,
       datasetCount: definitions.datasets.list().length,
     })
     registerLakeRetentionRuntime(this, lakeRetention)
 
     this.cron = cronPass({
-      schedules: [
-        ...definitions.schedules.list(),
-        ...(lakeRetention.scheduled ? [lakeRetentionSchedule(lakeRetention.settings)] : []),
-      ],
+      schedules: definitions.schedules.list(),
       events: this.eventService,
       timeZone: this.timeZone,
     })
@@ -469,18 +459,36 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   }
 
   /**
-   * Run the project's upkeep on one loop: ontology maintenance, cron schedules, and `passes`. The
-   * orchestrator is what hosts it.
+   * Run the project's upkeep on one loop: ontology maintenance, cron schedules, lake retention, and
+   * `passes`. The orchestrator is what hosts it.
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
     const loop = new MaintenanceLoop({
-      passes: [ontologyPass(this.ontologyMaintenance), this.cron, ...passes],
+      passes: [
+        ontologyPass(this.ontologyMaintenance),
+        this.cron,
+        ...this.lakeRetentionPasses(),
+        ...passes,
+      ],
       heartbeat: storageHeartbeat(this.projectId, "orchestrator", this.storage),
       onError: this.onMaintenanceFailure,
     })
     loop.start()
 
     return { stop: () => loop.stop() }
+  }
+
+  private lakeRetentionPasses(): readonly MaintenancePass[] {
+    const { automatic, settings } = getLakeRetentionRuntime(this)
+    if (!automatic) return []
+
+    return [
+      lakeRetentionPass({
+        projectId: this.projectId,
+        cleanupEveryMs: settings.cleanupEveryMs,
+        queue: this.queues.lake,
+      }),
+    ]
   }
 
   /**

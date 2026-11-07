@@ -57,7 +57,7 @@ function statusOf(
   return heartbeat === undefined ? "unknown" : "ok"
 }
 
-function isStale(heartbeat: MaintenanceHeartbeatRecord, now: Date): boolean {
+export function isStale(heartbeat: MaintenanceHeartbeatRecord, now: Date): boolean {
   return now.getTime() - heartbeat.beatAt.getTime() > heartbeat.everyMs * STALE_AFTER_BEATS
 }
 

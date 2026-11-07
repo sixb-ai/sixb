@@ -53,7 +53,7 @@ export class SyncWorker extends QueueWorker<
   private readonly lakeWorker?: LakeWorker
 
   constructor(host: SyncWorkerHost, options: SyncWorkerOptions = {}) {
-    const lakeRetention = getLakeRetentionRuntime(host).scheduled
+    const lakeRetention = getLakeRetentionRuntime(host).automatic
     if (host.definitions.syncs.list().length === 0 && !lakeRetention) {
       throw new Error(
         "[SixbSyncWorker] No sync definitions are registered, and lake retention is not scheduled."

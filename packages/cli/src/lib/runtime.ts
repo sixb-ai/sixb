@@ -7,11 +7,7 @@ import {
   getProjectionDispatchDescriptors,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
-import {
-  getLakeRetentionRuntime,
-  LAKE_RETENTION_SCHEDULE_ID,
-  setApiPublicOrigin,
-} from "@sixb/core/internal/runtime"
+import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, getAppliedMarkings } from "@sixb/core/internal/security"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
@@ -172,9 +168,6 @@ export async function startOrchestratorRuntime(
     pipelines: sixb.definitions.pipelines.list(),
     projections,
     workflows: sixb.definitions.workflows.list(),
-    ...(getLakeRetentionRuntime(sixb).scheduled
-      ? { lakeRetention: { scheduleId: LAKE_RETENTION_SCHEDULE_ID } }
-      : {}),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   const dispatchers = {

@@ -240,16 +240,6 @@ describe("compileRoutes", () => {
     ])
   })
 
-  // Reproduce: drop the `lakeRetention` route from compile-routes.ts.
-  test("the built-in lake retention schedule routes to the lake lane", () => {
-    expect(
-      jobsFor(
-        { lakeRetention: { scheduleId: "sixb:lake-retention" } },
-        "schedule.triggered:sixb:lake-retention"
-      )
-    ).toEqual([{ queue: "lake", job: { type: "lake.retention.requested" } }])
-  })
-
   test("dataset projections keep their direct version-scoped route", () => {
     const descriptor: ProjectionDispatchDescriptor = {
       projectionId: "rooms-projection",

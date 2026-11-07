@@ -223,7 +223,7 @@ function resolveAgentApiBaseUrl(value: string | undefined): string {
 
 /** The sync worker also hosts the lake lane, so scheduled lake retention needs it without syncs. */
 export function syncWorkerRequired(sixb: LoadedSixbHost): boolean {
-  return sixb.definitions.syncs.list().length > 0 || getLakeRetentionRuntime(sixb).scheduled
+  return sixb.definitions.syncs.list().length > 0 || getLakeRetentionRuntime(sixb).automatic
 }
 
 /** Explicit model calls can enqueue accounting recovery without a model catalog. */
