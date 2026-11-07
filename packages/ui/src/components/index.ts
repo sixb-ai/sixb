@@ -23,6 +23,7 @@ export { DictationButton, type DictationButtonProps } from "./speech/dictation-b
 export { DictationTextarea, type DictationTextareaProps } from "./speech/dictation-textarea"
 export { DictationWaveform, type DictationWaveformProps } from "./speech/dictation-waveform"
 export { nextTheme, ThemePicker, ThemeSwitcher } from "./theme-switcher"
+export { isInstalledApp, isIOS, PHONE_QUERY } from "./touch/platform"
 export { SheetGestures } from "./touch/sheet-gestures"
 export { TouchViewport } from "./touch/touch-viewport"
 export { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion"

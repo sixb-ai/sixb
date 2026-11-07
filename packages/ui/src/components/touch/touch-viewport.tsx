@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react"
+import { isInstalledApp, isIOS } from "./platform"
 
 /**
  * The page never scales: inputs don't zoom on focus and Android resizes the layout for the
@@ -170,10 +171,7 @@ export function TouchViewport() {
   }, [])
 
   useEffect(() => {
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true
-    if (!standalone) return
+    if (!isInstalledApp()) return
     const prevent = (event: Event) => event.preventDefault()
     document.addEventListener("gesturestart", prevent)
     return () => document.removeEventListener("gesturestart", prevent)
@@ -223,7 +221,7 @@ export function TouchViewport() {
     if (!viewport || !window.matchMedia("(pointer: coarse)").matches) return
     const root = document.documentElement
     const ios = isIOS()
-    const threshold = isStandalone() ? STANDALONE_KEYBOARD_THRESHOLD : KEYBOARD_THRESHOLD
+    const threshold = isInstalledApp() ? STANDALONE_KEYBOARD_THRESHOLD : KEYBOARD_THRESHOLD
     let inset = 0
     let expectedAt = 0
     let touching = false
@@ -284,8 +282,8 @@ export function TouchViewport() {
         expectedAt = 0
         cancelAnimationFrame(riseFrame)
         window.clearTimeout(graceTimer)
-        rememberKeyboard(keyboard)
         const changed = keyboard !== inset
+        if (changed) rememberKeyboard(keyboard)
         setInset(keyboard)
         setOpen(true)
         if (!touching && window.scrollY !== 0) window.scrollTo(0, 0)
@@ -360,6 +358,7 @@ export function TouchViewport() {
       document.removeEventListener("focusin", onFocusIn)
       document.removeEventListener("focusout", onFocusOut)
       document.removeEventListener("touchstart", onTouchStart)
+      viewportProbe?.remove()
       document.removeEventListener("touchend", onTouchEnd)
       document.removeEventListener("touchcancel", onTouchEnd)
       root.style.removeProperty("--keyboard-inset")
@@ -482,40 +481,47 @@ function cubicBezier(x1: number, y1: number, x2: number, y2: number): (progress:
 }
 
 function expectedKeyboard(): number {
-  try {
-    const stored = JSON.parse(localStorage.getItem(KEYBOARD_STORAGE_KEY) ?? "{}") as Record<
-      string,
-      number
-    >
-    const known = stored[keyboardKey()]
-    if (typeof known === "number" && known > KEYBOARD_THRESHOLD) return known
-  } catch {
-    // Storage may be unavailable; fall back to the typical proportion below.
-  }
+  const known = rememberedKeyboards()[keyboardKey()]
+  if (typeof known === "number" && known > KEYBOARD_THRESHOLD) return known
   // An iPhone keyboard with its suggestion bar covers a little under half the screen.
   return Math.round(
     window.screen.height * (window.screen.width > window.screen.height ? 0.55 : 0.47)
   )
 }
 
-function rememberKeyboard(height: number) {
+let keyboards: Record<string, number> | null = null
+
+/** Keyboard heights seen on this device, read from storage once. */
+function rememberedKeyboards(): Record<string, number> {
+  if (keyboards) return keyboards
   try {
-    const stored = JSON.parse(localStorage.getItem(KEYBOARD_STORAGE_KEY) ?? "{}") as Record<
+    keyboards = JSON.parse(localStorage.getItem(KEYBOARD_STORAGE_KEY) ?? "{}") as Record<
       string,
       number
     >
-    // Keyboards differ by field (a number pad is shorter); keep the tallest.
-    if ((stored[keyboardKey()] ?? 0) >= height) return
-    stored[keyboardKey()] = height
-    localStorage.setItem(KEYBOARD_STORAGE_KEY, JSON.stringify(stored))
+  } catch {
+    keyboards = {}
+  }
+  return keyboards
+}
+
+function rememberKeyboard(height: number) {
+  const known = rememberedKeyboards()
+  const key = keyboardKey()
+  // Keyboards differ by field (a number pad is shorter); keep the tallest.
+  if ((known[key] ?? 0) >= height) return
+  known[key] = height
+  try {
+    localStorage.setItem(KEYBOARD_STORAGE_KEY, JSON.stringify(known))
   } catch {
     // The rise simply starts from the estimate next time.
   }
 }
 
-// Keyboards differ by orientation and by browser chrome, both of which change the viewport width.
+// Keyboards differ by orientation, which the width tells apart, and the installed app's differs
+// from the browser's. Heights would not do: iOS shrinks some of them with the keyboard up.
 function keyboardKey(): string {
-  return `${window.innerWidth}x${document.documentElement.clientHeight}`
+  return `${window.innerWidth}${isInstalledApp() ? "-app" : ""}`
 }
 
 let viewportProbe: HTMLElement | null = null
@@ -537,31 +543,13 @@ function appHeight(): number {
   return viewportProbe.offsetHeight
 }
 
-function isStandalone(): boolean {
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  )
-}
-
-function isIOS(): boolean {
-  return (
-    /iP(hone|ad|od)/.test(navigator.userAgent) ||
-    (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent))
-  )
-}
-
 function hasTextFocus(): boolean {
   return opensKeyboard(document.activeElement)
 }
 
-// Selects open a picker rather than the keyboard.
+// Only a field that types text brings the keyboard: a select, date or time field opens a picker.
 function opensKeyboard(target: EventTarget | Element | null): target is HTMLElement {
-  return (
-    isTextEntry(target) &&
-    !(target instanceof HTMLSelectElement) &&
-    !(target as HTMLInputElement).readOnly
-  )
+  return target instanceof HTMLElement && typesText(target)
 }
 
 function isTextEntry(target: EventTarget | Element | null): target is HTMLElement {

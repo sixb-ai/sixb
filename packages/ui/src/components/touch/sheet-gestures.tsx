@@ -1,6 +1,6 @@
 import { useEffect } from "react"
+import { PHONE_QUERY } from "./platform"
 
-const PHONE_QUERY = "(max-width: 767px)"
 // A dialog marked `data-fullscreen` fills a phone's screen rather than rising as a sheet.
 const SHEETS =
   '[data-slot="dialog-content"]:not([data-fullscreen]), [data-slot="alert-dialog-content"]'
@@ -19,6 +19,7 @@ export function SheetGestures() {
     const phone = window.matchMedia(PHONE_QUERY)
     let sheet: HTMLElement | null = null
     let overlay: HTMLElement | null = null
+    let height = 0
     let startY = 0
     let startX = 0
     let offset = 0
@@ -27,7 +28,10 @@ export function SheetGestures() {
     let lastTime = 0
     let velocity = 0
 
+    // Moves are only blocked while a sheet may follow the finger, so every other scroll on the page
+    // starts without waiting on script.
     const reset = () => {
+      if (sheet) document.removeEventListener("touchmove", onMove)
       sheet = null
       overlay = null
       dragging = false
@@ -42,11 +46,14 @@ export function SheetGestures() {
       if (!target || !found) return
       if (target.closest(OWN_DRAG) || scrolledWithin(target, found)) return
       const touch = event.touches[0]
+      reset()
       sheet = found
+      height = found.offsetHeight
       overlay = [...document.querySelectorAll<HTMLElement>(OVERLAYS)].at(-1) ?? null
       startY = lastY = touch.clientY
       startX = touch.clientX
       lastTime = event.timeStamp
+      document.addEventListener("touchmove", onMove, { passive: false })
     }
 
     const onMove = (event: TouchEvent) => {
@@ -67,14 +74,16 @@ export function SheetGestures() {
       lastY = touch.clientY
       lastTime = event.timeStamp
       sheet.style.transform = `translate3d(0, ${offset}px, 0)`
-      if (overlay) overlay.style.opacity = String(Math.max(0, 1 - offset / sheet.offsetHeight))
+      if (overlay) overlay.style.opacity = String(Math.max(0, 1 - offset / height))
     }
 
-    const onEnd = () => {
+    const onEnd = (event: TouchEvent) => {
       if (!sheet || !dragging) return reset()
       const current = sheet
       const currentOverlay = overlay
-      const dismiss = offset > current.offsetHeight * 0.28 || velocity > 0.55
+      // A pull held still before letting go is not a flick, however fast it moved before.
+      const flick = event.timeStamp - lastTime < 80 && velocity > 0.55
+      const dismiss = offset > height * 0.28 || flick
       const settle = "transform 320ms cubic-bezier(0.32, 0.72, 0, 1), opacity 320ms ease"
       current.style.transition = settle
       if (currentOverlay) currentOverlay.style.transition = settle
@@ -96,12 +105,11 @@ export function SheetGestures() {
     }
 
     document.addEventListener("touchstart", onStart, { passive: true })
-    document.addEventListener("touchmove", onMove, { passive: false })
     document.addEventListener("touchend", onEnd)
     document.addEventListener("touchcancel", onEnd)
     return () => {
+      reset()
       document.removeEventListener("touchstart", onStart)
-      document.removeEventListener("touchmove", onMove)
       document.removeEventListener("touchend", onEnd)
       document.removeEventListener("touchcancel", onEnd)
     }
