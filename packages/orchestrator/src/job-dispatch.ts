@@ -6,7 +6,8 @@ import {
 } from "@sixb/core"
 import { reportOrchestratorDispatchFailure } from "@sixb/core/internal/error-reporting"
 import { isSixbError } from "@sixb/core/internal/errors"
-import { retryDelay, sleep } from "./backoff"
+import { backoffDelay, waitUnlessAborted } from "@sixb/core/internal/workers"
+import { RETRY_BACKOFF } from "./retry-backoff"
 
 /** A dispatch writes one run and publishes one job. Past this it hangs: count it as failed. */
 const ATTEMPT_TIMEOUT_MS = 30_000
@@ -88,7 +89,7 @@ export class JobDispatch {
         this.report(job, error, { attempts, dropped: false })
       }
 
-      await sleep(retryDelay(attempts - 1), signal)
+      await waitUnlessAborted(backoffDelay(attempts - 1, RETRY_BACKOFF), signal)
       if (signal.aborted) return
 
       const failure = await attempt(job)
