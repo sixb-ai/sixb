@@ -84,7 +84,7 @@ Constructing the host starts no timers. All of a project's upkeep runs as passes
 
 | Method | Effect |
 | --- | --- |
-| `host.startMaintenance(passes)` | Run ontology maintenance, cron and `passes` on one loop that beats to storage; returns a stop handle. The orchestrator calls it |
+| `host.startMaintenance(passes)` | Run ontology maintenance, cron, lake retention requests and `passes` on one loop that beats to storage; returns a stop handle. The orchestrator calls it |
 | `host.startOntologyMaintenance()` | Run outbox recovery and bounded retention alone on a loop of its own; returns a stop handle |
 | `host.getOntologyOperationalStatus()` | Read the last heartbeat and the outbox from storage. Works in a process that runs no pass |
 
