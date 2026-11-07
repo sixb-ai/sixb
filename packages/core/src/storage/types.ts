@@ -7,6 +7,7 @@ import type { AiUsageStorage } from "./ai-usage"
 import type { ArtifactStorage } from "./artifacts"
 import type { AuthStorage } from "./auth"
 import type { ConnectorConnectionStorage } from "./connector-connections"
+import type { DatasetIngestStorage } from "./dataset-ingest"
 import type { ExecutionStorage } from "./executions"
 import type { FileDownloadGrantStorage } from "./file-download-grants"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
@@ -377,6 +378,7 @@ export interface Storage {
   shareGrants?: ShareGrantStorage
   shareSessions?: ShareSessionStorage
   fileUploadSessions?: FileUploadSessionStore
+  datasetIngest?: DatasetIngestStorage
   fileDownloadGrants?: FileDownloadGrantStorage
   maintenanceHeartbeats?: MaintenanceHeartbeatStorage
   lakeRetentionRuns?: LakeRetentionRunStorage

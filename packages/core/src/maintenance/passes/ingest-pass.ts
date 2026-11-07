@@ -1,0 +1,94 @@
+import { enqueueIngestFlush, ingestStalledSince } from "../../datasets/ingest-flush-job"
+import { reportDatasetIngestFlushFailure } from "../../error-reporting/capability"
+import { captureSixbFailure } from "../../errors/internal"
+import type { Queues } from "../../queues"
+import type { DatasetIngestStorage, DatasetIngestSummary } from "../../storage/dataset-ingest"
+import type { MaintenancePass } from "../loop"
+import { recoveryPass } from "./recovery-pass"
+
+/** How long a refused delivery stays for someone to read and send again. */
+const REJECTED_KEPT_MS = 7 * 24 * 60 * 60_000
+
+export interface IngestPassInput {
+  readonly projectId: string
+  readonly inbox: Pick<DatasetIngestStorage, "summarize" | "purgeRejected">
+  readonly queue: Pick<Queues["lake"], "enqueue">
+  /** Where a dataset whose changes wait with no flush is reported: the host. */
+  readonly reporter: object
+}
+
+/**
+ * The only part of ingestion that runs in the orchestrator, and a safety net: `ingest` queues its
+ * own flush and asks again for a request left open, so changes reach the lake with or without this
+ * pass.
+ *
+ * It recovers a flush that was never queued when no later delivery asks: a queue that refused the
+ * job, or a process that stopped between storing a delivery and queueing it. Each pass queues a flush for every dataset
+ * whose deliveries wait with no flush holding it, under the request the inbox holds, so a request
+ * that already has a job queues nothing more.
+ *
+ * A dataset whose deliveries waited for long with no flush holding it, failing on it or completing
+ * a batch of it is reported once per stall: changes are stored and nothing writes them, such as in
+ * a deployment that runs no lake worker.
+ */
+export function ingestPass(input: IngestPassInput): MaintenancePass {
+  const recovery = new IngestRecovery(input)
+
+  return recoveryPass("ingest", (signal) => recovery.run(signal))
+}
+
+class IngestRecovery {
+  /**
+   * The stall each dataset was last reported for. Memory is enough: it spares `onError` a call per
+   * pass, and a restart that repeats a report keeps its `notificationId`, which comes from the
+   * stall's durable start.
+   */
+  private readonly reported = new Map<string, number>()
+
+  constructor(private readonly input: IngestPassInput) {}
+
+  async run(signal: AbortSignal): Promise<void> {
+    const { inbox, queue, projectId } = this.input
+    const summaries = await inbox.summarize({ projectId })
+    const waiting = summaries.filter((summary) => summary.pendingDeliveries > 0)
+    const now = Date.now()
+
+    await inbox.purgeRejected({ projectId, olderThanMs: REJECTED_KEPT_MS })
+
+    // Before queueing: a queue that is down must not silence the report.
+    for (const summary of waiting) this.reportStalled(summary, now)
+
+    for (const summary of waiting) {
+      signal.throwIfAborted()
+
+      if (summary.leaseExpiresAt === null) {
+        await enqueueIngestFlush(queue, projectId, summary, { source: "ingest-pass" })
+      }
+    }
+  }
+
+  private reportStalled(summary: DatasetIngestSummary, now: number): void {
+    const stalledSince = ingestStalledSince(summary, now)
+    if (stalledSince === null || this.reported.get(summary.datasetId) === stalledSince) return
+
+    this.reported.set(summary.datasetId, stalledSince)
+
+    const minutes = Math.floor((now - stalledSince) / 60_000)
+    const error = new Error(
+      `[Sixb] Dataset '${summary.datasetId}' has ${summary.pendingDeliveries} ingested delivery(ies), and none was written for ${minutes} min. Run a lake worker for this project: \`sixb worker lake\`.`
+    )
+
+    reportDatasetIngestFlushFailure(this.input.reporter, error, {
+      projectId: this.input.projectId,
+      datasetId: summary.datasetId,
+      failure: captureSixbFailure(error, {
+        allowedCodes: ["internal.unexpected", "runtime.cancelled"],
+        defaultCode: "internal.unexpected",
+      }),
+      failureStreak: 0,
+      pendingDeliveries: summary.pendingDeliveries,
+      oldestReceivedAt: summary.oldestReceivedAt?.toISOString() ?? null,
+      subject: `stalled:${new Date(stalledSince).toISOString()}`,
+    })
+  }
+}

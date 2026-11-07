@@ -1,5 +1,5 @@
 import { AgentWorker } from "@sixb/agent-worker"
-import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
+import { getDatasetIngestRuntime, getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
 import type { Worker } from "@sixb/core/internal/workers"
 import { LakeWorker } from "@sixb/lake-worker"
 import { PipelineWorker } from "@sixb/pipeline-worker"
@@ -231,7 +231,7 @@ function resolveAgentApiBaseUrl(value: string | undefined): string {
 }
 
 export function lakeWorkerRequired(sixb: LoadedSixbHost): boolean {
-  return getLakeRetentionRuntime(sixb).automatic
+  return getLakeRetentionRuntime(sixb).automatic || getDatasetIngestRuntime(sixb).enabled
 }
 
 /** Requests stay queued while no worker claims them, which looks like an idle system. */
@@ -239,10 +239,19 @@ export function omittedWorkerWarnings(
   sixb: LoadedSixbHost,
   workerTypes: readonly string[]
 ): readonly string[] {
-  if (workerTypes.includes("lake") || !lakeWorkerRequired(sixb)) return []
+  if (workerTypes.includes("lake")) return []
 
   return [
-    "Lake cleanup needs a lake worker and this group has none: run `sixb worker lake`, or the lake keeps growing.",
+    ...(getLakeRetentionRuntime(sixb).automatic
+      ? [
+          "Lake cleanup needs a lake worker and this group has none: run `sixb worker lake`, or the lake keeps growing.",
+        ]
+      : []),
+    ...(getDatasetIngestRuntime(sixb).enabled
+      ? [
+          "Ingested changes need a lake worker and this group has none: run `sixb worker lake`, or they wait and never reach their dataset.",
+        ]
+      : []),
   ]
 }
 

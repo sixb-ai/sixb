@@ -6758,6 +6758,21 @@ export type GetLakeHealthResponses = {
         code: "partitioned-small-dataset"
         message: string
       }>
+      /**
+       * Ingested changes waiting or refused; null when there are none
+       */
+      ingest: {
+        pendingDeliveries: number
+        pendingChanges: number
+        /**
+         * When the oldest waiting delivery arrived
+         */
+        oldestReceivedAt: string | null
+        /**
+         * Deliveries refused when written, kept for a week to read and send again
+         */
+        rejectedDeliveries: number
+      } | null
     }>
   }
 }
@@ -8898,6 +8913,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "connector.provider_unavailable"
                     | "connector.replacement_required"
                     | "connector.revocation_pending"
+                    | "dataset.change_refused"
                     | "dataset.not_found"
                     | "dataset.version_incompatible"
                     | "dataset.version_not_found"
@@ -11508,6 +11524,7 @@ export type RequestActionErrors = {
       | "connector.provider_unavailable"
       | "connector.replacement_required"
       | "connector.revocation_pending"
+      | "dataset.change_refused"
       | "dataset.not_found"
       | "dataset.version_incompatible"
       | "dataset.version_not_found"
@@ -13368,6 +13385,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "connector.provider_unavailable"
                       | "connector.replacement_required"
                       | "connector.revocation_pending"
+                      | "dataset.change_refused"
                       | "dataset.not_found"
                       | "dataset.version_incompatible"
                       | "dataset.version_not_found"
@@ -15986,6 +16004,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "connector.provider_unavailable"
                 | "connector.replacement_required"
                 | "connector.revocation_pending"
+                | "dataset.change_refused"
                 | "dataset.not_found"
                 | "dataset.version_incompatible"
                 | "dataset.version_not_found"
@@ -16221,6 +16240,7 @@ export type DecideAgentApprovalResponses = {
                 | "connector.provider_unavailable"
                 | "connector.replacement_required"
                 | "connector.revocation_pending"
+                | "dataset.change_refused"
                 | "dataset.not_found"
                 | "dataset.version_incompatible"
                 | "dataset.version_not_found"
@@ -16561,6 +16581,7 @@ export type ListAgentApprovalsResponses = {
                 | "connector.provider_unavailable"
                 | "connector.replacement_required"
                 | "connector.revocation_pending"
+                | "dataset.change_refused"
                 | "dataset.not_found"
                 | "dataset.version_incompatible"
                 | "dataset.version_not_found"
@@ -16899,6 +16920,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "connector.provider_unavailable"
                       | "connector.replacement_required"
                       | "connector.revocation_pending"
+                      | "dataset.change_refused"
                       | "dataset.not_found"
                       | "dataset.version_incompatible"
                       | "dataset.version_not_found"

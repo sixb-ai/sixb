@@ -7,7 +7,7 @@ import {
   getProjectionDispatchDescriptors,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
-import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
+import { getDatasetIngestRuntime, setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, getAppliedMarkings } from "@sixb/core/internal/security"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
@@ -179,7 +179,7 @@ export async function startOrchestratorRuntime(
     workflows: new WorkflowRunDispatcher(sixb),
   }
 
-  const { projectionRuns, pipelineRuns } = sixb.storage
+  const { projectionRuns, pipelineRuns, datasetIngest } = sixb.storage
   if (projections.length > 0 && !projectionRuns) {
     throw new Error("[SixbCLI] Projection dispatch requires storage.projectionRuns.")
   }
@@ -206,6 +206,9 @@ export async function startOrchestratorRuntime(
       lakeStorage: sixb.lakeStorage,
       ...(projectionRuns ? { projectionRuns } : {}),
       ...(pipelineRuns ? { pipelineRuns } : {}),
+      ...(datasetIngest && getDatasetIngestRuntime(sixb).enabled
+        ? { ingest: { inbox: datasetIngest, queue: sixb.queues.lake, reporter: sixb } }
+        : {}),
     })
   )
 

@@ -76,6 +76,10 @@ export {
   runConnectorConnectionStorageContractSuite,
 } from "./connector-connection-storage-contract"
 export {
+  type DatasetIngestStorageContractSuiteOptions,
+  runDatasetIngestStorageContractSuite,
+} from "./dataset-ingest-storage-contract"
+export {
   type EffectiveStorageContractSuiteOptions,
   runEffectiveStorageContractSuite,
 } from "./effective-storage-contract"

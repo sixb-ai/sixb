@@ -125,8 +125,8 @@ class DuckLakeWriteSession implements LakeWriteSession {
     // Synchronous callback: no awaits inside the queue slot. The appender
     // buffers and flushes the whole batch into the staging temp table on close.
     await this.runtime.withAppender(this.stagingTableName, (appender) => {
-      for (const row of batch) {
-        appendDatasetRow(appender, this.input.dataset.schema, row)
+      for (const [index, row] of batch.entries()) {
+        appendDatasetRow(appender, this.input.dataset.schema, row, this.rowsWritten + index)
       }
     })
     // Count only rows actually appended -- commit asserts rowsWritten ===

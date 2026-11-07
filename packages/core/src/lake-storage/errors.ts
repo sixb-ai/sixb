@@ -9,3 +9,24 @@ export class LakeStorageError extends Error {
 export class LakeConcurrencyError extends LakeStorageError {
   override readonly name = "LakeConcurrencyError"
 }
+
+/**
+ * The lake cannot hold a value of a change it stages, such as a decimal past its precision or a
+ * timestamp outside its range, although the value is valid for the dataset's schema. The change
+ * is at fault, not the lake: a provider throws this only when it refuses the value itself, never
+ * for its own state or availability.
+ */
+export class LakeValueRefusedError extends LakeStorageError {
+  override readonly name = "LakeValueRefusedError"
+
+  /** The refused change's position among those the lake was handed, from 0. */
+  readonly changeIndex: number
+
+  constructor(
+    message: string,
+    options: { readonly changeIndex: number; readonly cause?: unknown }
+  ) {
+    super(message, { cause: options.cause })
+    this.changeIndex = options.changeIndex
+  }
+}

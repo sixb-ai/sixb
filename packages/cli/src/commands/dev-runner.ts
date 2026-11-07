@@ -115,6 +115,8 @@ export async function runDevRuntime(options: DevOptions = {}) {
       quiet: true,
       // The orchestrator this process co-hosts owns it.
       ontologyMaintenance: false,
+      // So does the lake worker.
+      ingestFlush: false,
       browser: {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,

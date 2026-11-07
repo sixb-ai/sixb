@@ -1,11 +1,11 @@
 # @sixb/lake-worker
 
-Queue worker for lake upkeep that must not run in the process that asks for it. It consumes the
-`lake` queue, so lake work never takes a slot from the syncs and pipelines that write the lake, and
-the orchestrator never touches the catalog.
+Queue worker for lake work that must not run in the process that asks for it: retention, and
+writing ingested changes. It consumes the `lake` queue, so lake work never takes a slot from the
+syncs and pipelines that write the lake, and the orchestrator never touches the catalog.
 
 You normally do not import it. `sixb worker lake` and `sixb worker-group` construct it for you, and
-`sixb dev` starts it when lake retention runs on its own.
+`sixb dev` starts it when lake retention runs on its own or a dataset can be ingested.
 
 ## What it runs
 
@@ -29,6 +29,27 @@ One run:
 - Never waits for long on the reads of its own process. DuckLake's file deletion gives reads about
   half a minute to end, then leaves the files to the next pass with `hasMore`.
 
+`dataset.ingest.flush.requested`: writes one dataset's ingested changes through
+`getDatasetIngestRuntime(host).flush` (see `packages/core/src/datasets/ingest-flush.ts`). No
+orchestrator is involved: `ingest` queues the job itself, waiting one second at most, and a later
+`ingest` asks again for a request left open for 30 s. The orchestrator's `ingest` pass does the same
+when no other call comes.
+
+- Its id names the flush request (`ingest-flush:<dataset>:<request>`), so the deliveries of one
+  request queue one job.
+- A job takes batches for 30 s, then hands over: it leaves the rest to a new request, never to its
+  own, whose id the queue would ignore. A server embedded with `createSixbServer` has no such job:
+  `ingest` itself flushes until nothing is left (`flushAll`).
+- When another flush holds the dataset, the job tries again a second later, until that flush
+  releases it.
+- A failure retries after 1, 2, 4, 8, 16 and 32 s, then every minute, and the job never fails: the
+  changes stay in the inbox, and the next attempt resumes the batch in flight. The flush reports
+  the fifth failure in a row as `dataset.ingest.flush.failed`.
+- A change refused for what it holds sets its delivery aside, and the rest of the batch goes on:
+  one attempt per refused value, since the lake names its position. It stays for a week, for
+  `sixb lake rejected`. A worker whose definition of the dataset differs from the delivery's
+  refuses nothing: the attempt fails, and retries until they agree.
+
 ## Usage
 
 For custom hosts or focused tests, start it explicitly:
@@ -40,10 +61,11 @@ const worker = new LakeWorker(sixb)
 await worker.start()
 ```
 
-When retention does not run on its own, nothing requests any work and the worker idles, so a
-deployment can always list it.
+When retention does not run on its own and no dataset can be ingested, nothing requests any work
+and the worker idles, so a deployment can always list it.
 
-One job runs at a time by default. Set `--concurrency` on `sixb worker lake`, or
+Four jobs run at once by default, so the flushes of several datasets run together and beside a long
+retention run, of which there is one at a time. Set `--concurrency` on `sixb worker lake`, or
 `SIXB_LAKE_WORKER_CONCURRENCY`.
 
 ## Verification

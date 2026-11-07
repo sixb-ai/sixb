@@ -33,7 +33,9 @@ function lanes(queues = new InMemoryQueues()) {
         await queues.lake.complete({ projectId, jobId: job.id, leaseId })
       }
 
-      return claimed.map(({ job }) => job.payload.intervalStart)
+      return claimed.flatMap(({ job }) =>
+        job.type === "lake.retention.requested" ? [job.payload.intervalStart] : []
+      )
     },
   }
 }

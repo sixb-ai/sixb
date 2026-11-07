@@ -31,6 +31,11 @@ import {
   type ConnectorDefinition,
   isOAuthConnectorDefinition,
 } from "../connectors/types"
+import {
+  createDatasetIngestRuntime,
+  type DatasetIngestRuntime,
+  registerDatasetIngestRuntime,
+} from "../datasets/ingest-flush"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import {
@@ -204,6 +209,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   private readonly connectorService: ConnectorService
   private readonly materializer: OntologyMaterializerContract
   private readonly datasetVersionMarkings: DatasetVersionMarkings
+  private readonly datasetIngest: DatasetIngestRuntime
   private readonly appliedMarkings: AppliedMarkings
   readonly sandboxDefinition?: SandboxDefinition
   readonly definitions: SixbDefinitions
@@ -385,6 +391,19 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     })
     registerLakeRetentionRuntime(this, lakeRetention)
 
+    // `ingest` stores changes in the inbox; a worker writes them to the lake through this.
+    this.datasetIngest = createDatasetIngestRuntime({
+      projectId: this.projectId,
+      inbox: this.storage.datasetIngest,
+      lakeStorage: this.lakeStorage,
+      blobStorage: this.blobStorage,
+      events: this.eventService,
+      queue: this.queues.lake,
+      datasets: definitions.datasets,
+      reporter: this,
+    })
+    registerDatasetIngestRuntime(this, this.datasetIngest)
+
     this.cron = cronPass({
       schedules: definitions.schedules.list(),
       events: this.eventService,
@@ -553,6 +572,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       apiPublicOrigin: () => getApiPublicOrigin(this),
       lakeStorage: this.lakeStorage,
       datasetVersionMarkings: this.datasetVersionMarkings,
+      datasetIngest: this.datasetIngest,
     }
   }
 }

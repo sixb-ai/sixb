@@ -1,5 +1,6 @@
 import type { SixbHostView } from "@sixb/core"
 import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
+import type { DatasetIngestSummary } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
@@ -28,7 +29,19 @@ export function registerLakeRoutes(app: Elysia, host: SixbHostView) {
 
         // The datasets the caller may view, as `/api/datasets` lists them.
         const datasetIds = sixb.datasets.list().map((dataset) => dataset.id)
-        const datasets = datasetIds.length > 0 ? await maintenance.describeStorage(datasetIds) : []
+        if (datasetIds.length === 0) {
+          return LakeHealthResponseSchema.parse({ available: true, cleanup, datasets: [] })
+        }
+
+        const [storage, waiting] = await Promise.all([
+          maintenance.describeStorage(datasetIds),
+          host.storage.datasetIngest?.summarize({ projectId: host.id, datasetIds }) ?? [],
+        ])
+        const waitingById = new Map(waiting.map((summary) => [summary.datasetId, summary]))
+        const datasets = storage.map((dataset) => ({
+          ...dataset,
+          ingest: ingestWaiting(waitingById.get(dataset.datasetId)),
+        }))
 
         return LakeHealthResponseSchema.parse({ available: true, cleanup, datasets })
       } catch (error) {
@@ -45,4 +58,16 @@ export function registerLakeRoutes(app: Elysia, host: SixbHostView) {
       },
     }
   )
+}
+
+/** What waits for a flush, or null when nothing does. */
+function ingestWaiting(summary: DatasetIngestSummary | undefined) {
+  if (!summary || (summary.pendingDeliveries === 0 && summary.rejectedDeliveries === 0)) return null
+
+  return {
+    pendingDeliveries: summary.pendingDeliveries,
+    pendingChanges: summary.pendingChanges,
+    oldestReceivedAt: summary.oldestReceivedAt?.toISOString() ?? null,
+    rejectedDeliveries: summary.rejectedDeliveries,
+  }
 }

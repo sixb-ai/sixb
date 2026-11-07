@@ -273,3 +273,54 @@ export function reportLakeRetentionFailure(
     notificationId: `lake-retention:${input.projectId}:${input.intervalStart}`,
   })
 }
+
+export interface ReportDatasetIngestFlushFailureInput {
+  readonly projectId: string
+  readonly datasetId: string
+  readonly failure: SixbFailure<"internal.unexpected" | "runtime.cancelled">
+  readonly failureStreak: number
+  readonly pendingDeliveries: number
+  readonly oldestReceivedAt: string | null
+  /** What this report is about: the flush that keeps failing, or the delivery none flushed. */
+  readonly subject: string
+}
+
+export function reportDatasetIngestFlushFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportDatasetIngestFlushFailureInput
+): void {
+  const { subject, ...context } = input
+
+  reporter.report(error, {
+    ...context,
+    type: "dataset.ingest.flush.failed",
+    occurredAt: input.failure.at,
+    notificationId: `dataset-ingest:${input.projectId}:${input.datasetId}:${subject}`,
+  })
+}
+
+export interface ReportDatasetIngestRejectionInput {
+  readonly projectId: string
+  readonly datasetId: string
+  readonly deliveryId: string
+  readonly executionId: string
+  readonly changes: number
+  readonly changeIndex: number
+  readonly key: Readonly<Record<string, string>>
+  readonly sequence?: string
+  readonly failure: SixbFailure<"dataset.change_refused">
+}
+
+export function reportDatasetIngestRejection(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportDatasetIngestRejectionInput
+): void {
+  reporter.report(error, {
+    ...input,
+    type: "dataset.ingest.rejected",
+    occurredAt: input.failure.at,
+    notificationId: `dataset-ingest-rejected:${input.projectId}:${input.datasetId}:${input.deliveryId}`,
+  })
+}

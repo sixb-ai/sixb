@@ -1,4 +1,4 @@
-import type { DatasetDefinition, DatasetRow, LakeStorageWithSql } from "@sixb/core"
+import type { DatasetDefinition, DatasetRow, LakeStorageWithSql, MergeChange } from "@sixb/core"
 import type {
   BeginDatasetMergeInput,
   BeginDatasetWriteInput,
@@ -22,6 +22,7 @@ import { DuckLakeRowReader } from "./internal/ducklake-row-reader"
 import { DuckLakeSnapshotReader } from "./internal/ducklake-snapshot-reader"
 import { DuckLakeSqlExecutor } from "./internal/ducklake-sql-executor"
 import { DuckLakeWriteCoordinator } from "./internal/ducklake-write-coordinator"
+import { assertDuckDbHoldsChanges } from "./internal/value-limits"
 import type { DuckLakeStorageOptions } from "./types"
 
 /**
@@ -130,6 +131,13 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
 
   async beginMerge(input: BeginDatasetMergeInput): Promise<LakeMergeSession> {
     return this.writes.beginMerge(input)
+  }
+
+  assertHoldsChanges(
+    dataset: DatasetDefinition,
+    changes: readonly MergeChange<DatasetRow, DatasetRow>[]
+  ): void {
+    assertDuckDbHoldsChanges(dataset, changes)
   }
 
   async getLatestVersion(datasetId: string): Promise<DatasetVersion | null> {

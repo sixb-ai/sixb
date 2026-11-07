@@ -116,6 +116,12 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Connector revocation is pending.",
     retryable: true,
   },
+  // The lake refused one ingested change at flush time; its message says why.
+  "dataset.change_refused": {
+    publicMessage: "The lake refused an ingested change.",
+    retryable: false,
+    explanationIsMessage: true,
+  },
   "dataset.not_found": {
     publicMessage: "Dataset not found.",
     retryable: false,

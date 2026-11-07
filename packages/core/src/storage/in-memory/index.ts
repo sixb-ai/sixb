@@ -12,6 +12,7 @@ import {
   type ConnectorConnectionStorage,
   InMemoryConnectorConnectionStorage,
 } from "../connector-connections"
+import { type DatasetIngestStorage, InMemoryDatasetIngestStorage } from "../dataset-ingest"
 import { StorageTransactionError } from "../errors"
 import { InMemoryExecutionStorage } from "../executions/in-memory"
 import type { ExecutionStorage } from "../executions/types"
@@ -141,6 +142,7 @@ export class InMemoryStorage implements Storage {
   private readonly webhookRunStorage = new InMemoryWebhookRunStorage(this.executionStorage)
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
+  private readonly datasetIngestStorage = new InMemoryDatasetIngestStorage()
   private readonly fileDownloadGrantStorage = new InMemoryFileDownloadGrantStorage()
   private readonly maintenanceHeartbeatStorage = new InMemoryMaintenanceHeartbeatStorage()
   private readonly lakeRetentionRunStorage = new InMemoryLakeRetentionRunStorage()
@@ -164,6 +166,7 @@ export class InMemoryStorage implements Storage {
   readonly shareGrants: ShareGrantStorage
   readonly shareSessions: ShareSessionStorage
   readonly fileUploadSessions: FileUploadSessionStore
+  readonly datasetIngest: DatasetIngestStorage
   readonly fileDownloadGrants: FileDownloadGrantStorage
   readonly maintenanceHeartbeats: MaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: LakeRetentionRunStorage
@@ -201,6 +204,7 @@ export class InMemoryStorage implements Storage {
     this.shareGrants = createOperationScopedFacade(this.shareGrantStorage, scope)
     this.shareSessions = createOperationScopedFacade(this.shareSessionStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
+    this.datasetIngest = createOperationScopedFacade(this.datasetIngestStorage, scope)
     this.fileDownloadGrants = createOperationScopedFacade(this.fileDownloadGrantStorage, scope)
     this.maintenanceHeartbeats = createOperationScopedFacade(
       this.maintenanceHeartbeatStorage,
@@ -418,6 +422,7 @@ export class InMemoryStorage implements Storage {
       shareGrants: this.shareGrantStorage,
       shareSessions: this.shareSessionStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
+      datasetIngest: this.datasetIngestStorage,
       fileDownloadGrants: this.fileDownloadGrantStorage,
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage,
       lakeRetentionRuns: this.lakeRetentionRunStorage,
@@ -453,6 +458,7 @@ export class InMemoryStorage implements Storage {
       shareGrants: this.shareGrantStorage.snapshot(),
       shareSessions: this.shareSessionStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
+      datasetIngest: this.datasetIngestStorage.snapshot(),
       fileDownloadGrants: this.fileDownloadGrantStorage.snapshot(),
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage.snapshot(),
       lakeRetentionRuns: this.lakeRetentionRunStorage.snapshot(),
@@ -483,6 +489,7 @@ export class InMemoryStorage implements Storage {
     this.shareGrantStorage.restore(snapshot.shareGrants)
     this.shareSessionStorage.restore(snapshot.shareSessions)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
+    this.datasetIngestStorage.restore(snapshot.datasetIngest)
     this.fileDownloadGrantStorage.restore(snapshot.fileDownloadGrants)
     this.maintenanceHeartbeatStorage.restore(snapshot.maintenanceHeartbeats)
     this.lakeRetentionRunStorage.restore(snapshot.lakeRetentionRuns)
@@ -513,6 +520,7 @@ export interface InMemoryStorageSnapshot {
   readonly shareGrants: ReturnType<InMemoryShareGrantStorage["snapshot"]>
   readonly shareSessions: ReturnType<InMemoryShareSessionStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
+  readonly datasetIngest: ReturnType<InMemoryDatasetIngestStorage["snapshot"]>
   readonly fileDownloadGrants: ReturnType<InMemoryFileDownloadGrantStorage["snapshot"]>
   readonly maintenanceHeartbeats: ReturnType<InMemoryMaintenanceHeartbeatStorage["snapshot"]>
   readonly lakeRetentionRuns: ReturnType<InMemoryLakeRetentionRunStorage["snapshot"]>

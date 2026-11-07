@@ -20132,6 +20132,36 @@
                               "required": ["code", "message"],
                               "additionalProperties": false
                             }
+                          },
+                          "ingest": {
+                            "type": "object",
+                            "properties": {
+                              "pendingDeliveries": {
+                                "type": "integer"
+                              },
+                              "pendingChanges": {
+                                "type": "integer"
+                              },
+                              "oldestReceivedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true,
+                                "description": "When the oldest waiting delivery arrived"
+                              },
+                              "rejectedDeliveries": {
+                                "type": "integer",
+                                "description": "Deliveries refused when written, kept for a week to read and send again"
+                              }
+                            },
+                            "required": [
+                              "pendingDeliveries",
+                              "pendingChanges",
+                              "oldestReceivedAt",
+                              "rejectedDeliveries"
+                            ],
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "description": "Ingested changes waiting or refused; null when there are none"
                           }
                         },
                         "required": [
@@ -20145,7 +20175,8 @@
                           "inlinedRows",
                           "retainedSnapshots",
                           "partitionBy",
-                          "warnings"
+                          "warnings",
+                          "ingest"
                         ],
                         "additionalProperties": false
                       }
@@ -26203,6 +26234,7 @@
                                               "connector.provider_unavailable",
                                               "connector.replacement_required",
                                               "connector.revocation_pending",
+                                              "dataset.change_refused",
                                               "dataset.not_found",
                                               "dataset.version_incompatible",
                                               "dataset.version_not_found",
@@ -34121,6 +34153,7 @@
                         "connector.provider_unavailable",
                         "connector.replacement_required",
                         "connector.revocation_pending",
+                        "dataset.change_refused",
                         "dataset.not_found",
                         "dataset.version_incompatible",
                         "dataset.version_not_found",
@@ -39372,6 +39405,7 @@
                                                     "connector.provider_unavailable",
                                                     "connector.replacement_required",
                                                     "connector.revocation_pending",
+                                                    "dataset.change_refused",
                                                     "dataset.not_found",
                                                     "dataset.version_incompatible",
                                                     "dataset.version_not_found",
@@ -47102,6 +47136,7 @@
                                           "connector.provider_unavailable",
                                           "connector.replacement_required",
                                           "connector.revocation_pending",
+                                          "dataset.change_refused",
                                           "dataset.not_found",
                                           "dataset.version_incompatible",
                                           "dataset.version_not_found",
@@ -47727,6 +47762,7 @@
                                         "connector.provider_unavailable",
                                         "connector.replacement_required",
                                         "connector.revocation_pending",
+                                        "dataset.change_refused",
                                         "dataset.not_found",
                                         "dataset.version_incompatible",
                                         "dataset.version_not_found",
@@ -48698,6 +48734,7 @@
                                           "connector.provider_unavailable",
                                           "connector.replacement_required",
                                           "connector.revocation_pending",
+                                          "dataset.change_refused",
                                           "dataset.not_found",
                                           "dataset.version_incompatible",
                                           "dataset.version_not_found",
@@ -49597,6 +49634,7 @@
                                                     "connector.provider_unavailable",
                                                     "connector.replacement_required",
                                                     "connector.revocation_pending",
+                                                    "dataset.change_refused",
                                                     "dataset.not_found",
                                                     "dataset.version_incompatible",
                                                     "dataset.version_not_found",

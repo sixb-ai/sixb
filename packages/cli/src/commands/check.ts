@@ -1,5 +1,5 @@
 import { dirname, resolve } from "node:path"
-import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
+import { getLakeRetentionRuntime, ingestStalledSince } from "@sixb/core/internal/runtime"
 import { assertDeclaredEnv } from "../lib/env-config"
 import { errorMessage } from "../lib/errors"
 import { checkRuntimeHealth } from "../lib/health"
@@ -102,13 +102,35 @@ async function lakeWorkerWarnings(
 ): Promise<readonly string[]> {
   if (!storageOk) return []
 
-  const status = await getLakeRetentionRuntime(sixb)
-    .status()
-    .catch(() => null)
+  const [status, stalled] = await Promise.all([
+    getLakeRetentionRuntime(sixb)
+      .status()
+      .catch(() => null),
+    stalledIngestDatasets(sixb),
+  ])
 
-  return status?.state === "no-worker"
-    ? ["Lake cleanup is requested but no lake worker has run it. Run `sixb worker lake`."]
-    : []
+  return [
+    ...(status?.state === "no-worker"
+      ? ["Lake cleanup is requested but no lake worker has run it. Run `sixb worker lake`."]
+      : []),
+    ...(stalled.length > 0
+      ? [
+          `Ingested changes wait and nothing writes them, in ${stalled.join(", ")}. Run \`sixb worker lake\`.`,
+        ]
+      : []),
+  ]
+}
+
+async function stalledIngestDatasets(sixb: LoadedSixbHost): Promise<readonly string[]> {
+  const summaries = await sixb.storage.datasetIngest
+    ?.summarize({ projectId: sixb.id })
+    .catch(() => [])
+
+  return (summaries ?? [])
+    .filter(
+      (summary) => summary.pendingDeliveries > 0 && ingestStalledSince(summary, Date.now()) !== null
+    )
+    .map((summary) => summary.datasetId)
 }
 
 interface MarkingsCheck {

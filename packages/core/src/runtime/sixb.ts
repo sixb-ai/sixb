@@ -17,6 +17,7 @@ import { createConnectorConnectionsRuntime } from "../connectors/connections/exe
 import { type ConnectorRuntime, createConnectorRuntime } from "../connectors/execution"
 import type { ConnectorService } from "../connectors/service"
 import { createDatasetsRuntime, type DatasetsRuntime } from "../datasets/execution"
+import type { DatasetIngestRuntime } from "../datasets/ingest-flush"
 import { createEventsRuntime, type EventsRuntime } from "../events/execution"
 import type { ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
@@ -85,6 +86,7 @@ export interface SixbDependencies {
   readonly apiPublicOrigin: () => string | undefined
   readonly lakeStorage: LakeStorage
   readonly datasetVersionMarkings: DatasetVersionMarkings
+  readonly datasetIngest: DatasetIngestRuntime
 }
 
 export function createBoundSixb<TParams extends Record<string, unknown> = Record<string, unknown>>(
@@ -160,7 +162,8 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       dependencies.definitions.datasets,
       dependencies.lakeStorage,
       dependencies.blobStorage,
-      dependencies.datasetVersionMarkings
+      dependencies.datasetVersionMarkings,
+      dependencies.datasetIngest
     ),
     workflows,
     syncs: createSyncsRuntime(runtime, execution, dependencies.definitions.syncs),

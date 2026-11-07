@@ -123,6 +123,7 @@ Run these from your project root:
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
+| `sixb lake rejected` | Print, as JSON, the [ingested changes](../datasets/ingestion.md#where-it-runs-and-what-can-fail) refused after `ingest` answered, kept for a week. `--dataset <id>` shows one dataset's. |
 | `sixb lake cleanup --dry-run` | Preview which replaced lake versions and files [retention](../datasets/overview.md#storage-maintenance) would remove; without `--dry-run`, remove them now. It keeps what `lakeMaintenance` keeps unless its flags say otherwise. |
 
 `dev` serves the app on port 3000 and the API on 3001. The app runs even without an `app/`
@@ -178,7 +179,7 @@ sixb worker sync --concurrency 2
 sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8
 ```
 
-Agent workers default to 8 concurrent jobs; other types default to 1. The same per-type options work with `sixb dev`.
+Agent workers default to 8 concurrent jobs, lake workers to 4, and other types to 1. The same per-type options work with `sixb dev`.
 
 Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the environment. Command flags take precedence. Replicas multiply the total concurrency.
 

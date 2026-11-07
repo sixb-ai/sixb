@@ -168,10 +168,11 @@ function sixbService(
 }
 
 /**
- * What this config leaves automatic lake retention without. Only the project knows whether it has
- * datasets, and this reads the config alone, so it warns and never stops a deploy.
+ * What this config leaves the lake's background work without: its retention, and the changes
+ * `ingest` stores. Only the project knows whether it has datasets, and this reads the config alone,
+ * so it warns and never stops a deploy.
  */
-export function lakeRetentionChecks(config: DeployConfig): readonly DeployCheck[] {
+export function lakeWorkChecks(config: DeployConfig): readonly DeployCheck[] {
   const { orchestrator, workers } = config.services ?? {}
   const types = typeof workers === "object" ? workers.types : undefined
   const lakeWorkerOmitted = workers === false || (Array.isArray(types) && !types.includes("lake"))
@@ -180,16 +181,30 @@ export function lakeRetentionChecks(config: DeployConfig): readonly DeployCheck[
     ...(orchestrator === false ? ["the orchestrator requests it"] : []),
     ...(lakeWorkerOmitted ? ["a `lake` worker runs it"] : []),
   ]
-  if (missing.length === 0) return []
 
   return [
-    {
-      id: "lake-retention",
-      label: "Lake retention",
-      status: "warning",
-      detail: `Not deployed: ${missing.join(", and ")}.`,
-      remedy: "Deploy them, or a project with datasets keeps every replaced version.",
-    },
+    ...(missing.length > 0
+      ? [
+          {
+            id: "lake-retention",
+            label: "Lake retention",
+            status: "warning" as const,
+            detail: `Not deployed: ${missing.join(", and ")}.`,
+            remedy: "Deploy them, or a project with datasets keeps every replaced version.",
+          },
+        ]
+      : []),
+    ...(lakeWorkerOmitted
+      ? [
+          {
+            id: "dataset-ingestion",
+            label: "Dataset ingestion",
+            status: "warning" as const,
+            detail: "Not deployed: a `lake` worker writes what `ingest` stores.",
+            remedy: "Deploy one, or ingested changes wait and never reach their dataset.",
+          },
+        ]
+      : []),
   ]
 }
 

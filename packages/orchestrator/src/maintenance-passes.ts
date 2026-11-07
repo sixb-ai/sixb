@@ -18,6 +18,8 @@ export interface MaintenancePassesInput {
   readonly projectionRuns?: NonNullable<RecoveryPassesInput["projections"]>["projectionRuns"]
   /** Without it, a pipeline's dataset triggers have only their event. */
   readonly pipelineRuns?: NonNullable<RecoveryPassesInput["triggers"]>["pipelineRuns"]
+  /** When the project can ingest. */
+  readonly ingest?: RecoveryPassesInput["ingest"]
 }
 
 /** The passes the routes call for, for the orchestrator's maintenance loop. */
@@ -29,6 +31,7 @@ export function createMaintenancePasses(input: MaintenancePassesInput): readonly
     lakeStorage,
     projections: projectionsOf(input),
     triggers: triggersOf(input),
+    ingest: input.ingest,
   })
 }
 
