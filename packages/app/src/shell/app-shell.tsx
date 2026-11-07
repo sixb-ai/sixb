@@ -112,7 +112,11 @@ export function AppShell({
           <SidebarTrigger className="-ml-1" />
         </div>
         <div className="relative flex min-h-0 flex-1">
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{children}</div>
+          {/* The page's scroll container: screen motion, scroll restoration and pull to refresh
+              work on it on a phone. */}
+          <div data-app-scroll className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+            {children}
+          </div>
           {agent === undefined ? <AgentDock /> : agent}
         </div>
       </SidebarInset>

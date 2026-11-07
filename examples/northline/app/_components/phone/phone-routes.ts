@@ -3,7 +3,6 @@
  * screen or a pushed one, and where its back button leads when there is no history to return to.
  */
 
-import type { Location, NavigateFunction } from "react-router-dom"
 import { placeFor, places } from "../../_lib/navigation"
 
 /** A tab, named by its first screen, or "more" for every screen without a tab of its own. */
@@ -53,15 +52,6 @@ export function parentPath(pathname: string): string {
   if (query) return path
   const parent = normalizePath(path).replace(/\/[^/]+$/, "") || "/"
   return isRootPath(parent) ? parent : "/"
-}
-
-/** Back follows history inside the app; opened directly on a screen, it climbs to the parent. */
-export function goBack(
-  navigate: NavigateFunction,
-  location: Pick<Location, "key" | "pathname" | "search">
-): void {
-  if (location.key !== "default") navigate(-1)
-  else navigate(parentPath(screenPath(location.pathname, location.search)), { replace: true })
 }
 
 /** The short name of the screen a back button leads to. */

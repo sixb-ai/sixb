@@ -99,6 +99,8 @@ const builtInPageStylesheetPath = join(packageRoot, "src", "pages", "canvas.css"
 const agentStylesheetPath = join(packageRoot, "src", "agent", "agent.css")
 // The artifact viewer's: the document page and the `@source` for its components.
 const artifactsStylesheetPath = join(packageRoot, "src", "artifacts", "artifacts.css")
+// Phone navigation: screen motion and pull to refresh.
+const phoneStylesheetPath = join(packageRoot, "src", "shell", "phone", "phone.css")
 const customAppManifestRoute = "/app.webmanifest"
 const internalAppShellRoute = "/__sixb/generated/app-shell"
 // Files the built-in pages show, such as connector logos, served from the package itself so they
@@ -188,6 +190,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         `@import ${JSON.stringify(stylesheet.sourcePath)};`,
         `@import ${JSON.stringify(agentStylesheetPath)};`,
         `@import ${JSON.stringify(artifactsStylesheetPath)};`,
+        `@import ${JSON.stringify(phoneStylesheetPath)};`,
         "",
       ].join("\n")
     )
@@ -242,6 +245,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         `@import ${JSON.stringify(builtInPageStylesheetPath)};`,
         `@import ${JSON.stringify(agentStylesheetPath)};`,
         `@import ${JSON.stringify(artifactsStylesheetPath)};`,
+        `@import ${JSON.stringify(phoneStylesheetPath)};`,
         "",
       ].join("\n")
     )

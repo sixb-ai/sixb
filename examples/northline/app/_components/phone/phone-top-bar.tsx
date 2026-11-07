@@ -1,14 +1,13 @@
-import { setAgentSurfaceMode } from "@sixb/app"
+import { setAgentSurfaceMode, useBack } from "@sixb/app"
 import { useSidebar } from "@sixb/ui/components"
 import { ChevronLeft, MessageSquareText } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useLocation, useNavigate } from "react-router-dom"
+import { useLocation } from "react-router-dom"
 import { GlobalSearch } from "../global-search"
 import { appScroller } from "./phone-dom"
 import {
   backLabel,
   fallbackTitle,
-  goBack,
   isConversationPath,
   isRootPath,
   screenPath,
@@ -28,7 +27,7 @@ export function PhoneTopBar() {
 
 function TopBar() {
   const location = useLocation()
-  const navigate = useNavigate()
+  const back = useBack()
   const path = screenPath(location.pathname, location.search)
   const home = path === "/"
   // Neither mounts the dock: Home is a chat of its own, and Threads starts new ones on Home.
@@ -52,7 +51,7 @@ function TopBar() {
           {isRootPath(path) ? null : (
             <button
               type="button"
-              onClick={() => goBack(navigate, location)}
+              onClick={back}
               aria-label={`Back to ${backLabel(path)}`}
               className="phone-back phone-glass"
             >
