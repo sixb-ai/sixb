@@ -146,6 +146,40 @@ describe("BullMqQueues (Redis-specific)", () => {
     })
   })
 
+  // Dataset ingestion names a flush job after its request and relies on this: a job that asked
+  // under its own id would queue nothing, so `handOver` always moves to a new request. The contract
+  // leaves how long a provider remembers an id to the provider.
+  describe("job id retention", () => {
+    test("ignores a job id while the job runs and after it completed", async () => {
+      const queues = createTestQueues()
+      const projectId = "project-a"
+      const job = {
+        id: "ingest-flush:raw.people:1",
+        type: "dataset.ingest.flush.requested" as const,
+        payload: { datasetId: "raw.people" },
+      }
+      const claimNext = () => queues.lake.claim({ projectId, workerId: "worker-1" })
+
+      await queues.lake.enqueue({ projectId, jobs: [job] })
+      const [running] = await claimNext()
+      if (!running) throw new Error("expected the job to be claimed")
+
+      await queues.lake.enqueue({ projectId, jobs: [job] })
+      expect(await claimNext()).toEqual([])
+
+      await queues.lake.complete({
+        projectId,
+        jobId: running.job.id,
+        leaseId: running.leaseId,
+      })
+
+      await queues.lake.enqueue({ projectId, jobs: [job] })
+      expect(await claimNext()).toEqual([])
+
+      await queues.close()
+    })
+  })
+
   describe("stalled redelivery", () => {
     // A claim without leaseMs must use the provider's defaultLeaseMs, not a built-in default.
     test("redelivers via BullMQ's stalled check when the lock expires", async () => {

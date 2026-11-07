@@ -711,6 +711,46 @@ test("a flush that spends its budget asks for the next job and leaves the rest",
   ])
 })
 
+test("a flush that spent its budget ends cleanly when the queue refuses the next job", async () => {
+  // Regression proof: call `enqueueIngestFlush` from `requestAgain`; the batch is committed, yet
+  // the attempt then fails and counts against the dataset.
+  jest.useFakeTimers()
+  const lakeStorage = new InMemoryLakeStorage()
+  const { host, storage, queues, ingest, flush } = setup(lakeStorage)
+
+  await ingest(contacts, change.upsert({ id: "1", name: "Ada" }))
+  await ingest(contacts, change.upsert({ id: "2", name: "Grace" }))
+
+  const beginMerge = lakeStorage.beginMerge.bind(lakeStorage)
+  lakeStorage.beginMerge = async (input) => {
+    jest.setSystemTime(new Date(Date.now() + 31_000))
+    queues.lake.enqueue = async () => {
+      throw new Error("queue offline")
+    }
+    return beginMerge(input)
+  }
+
+  // A third delivery after the batch was taken is what the next job has to write.
+  const take = storage.datasetIngest.takeBatch.bind(storage.datasetIngest)
+  storage.datasetIngest.takeBatch = async (input) => {
+    const batch = await take(input)
+    await ingest(contacts, change.upsert({ id: "3", name: "Edsger" }))
+    return batch
+  }
+
+  const warn = console.warn
+  console.warn = () => {}
+  try {
+    expect(await flush(contacts)).toEqual({ kind: "flushed", versions: 1, deliveries: 2 })
+  } finally {
+    console.warn = warn
+  }
+
+  expect(await storage.datasetIngest.summarize({ projectId: host.id })).toMatchObject([
+    { datasetId: contacts.id, pendingDeliveries: 1, failureStreak: 0, leaseExpiresAt: null },
+  ])
+})
+
 test("a flush that keeps failing keeps one request, so an outage queues no more jobs", async () => {
   // Regression proof: move the request in `acquire`; each attempt then lets a delivery open a new
   // request, whose job retries beside the others for as long as the outage lasts.
