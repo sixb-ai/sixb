@@ -1,60 +1,42 @@
 # @sixb/sync-worker
 
-Queue worker helpers for running Sixb sync jobs.
+Worker that runs Sixb syncs.
 
-The sync worker turns one queued sync job into one sync run record and one lake dataset
-version. It is intentionally small: queue polling, retries, scheduling, and run-id
-generation belong to the caller.
+`SyncWorker` claims queued sync runs, reads each sync's source into one lake dataset version, and
+records the run in `storage.syncRuns`. You normally do not import it: `sixb worker sync` and
+`sixb worker-group` construct it for you.
 
-## Responsibilities
+## A run
 
-- look up the sync definition for a queued job
-- create and finalize the sync-run record
-- resolve the sync connector client
-- normalize rows returned by the sync read handler
-- write rows into lake storage and commit the dataset version
-- mark pre-commit failures as `failed` or `cancelled`
+- `RunWorker` claims the run: a job only says which run to look at. See
+  [`packages/core/src/workers/README.md`](../core/src/workers/README.md).
+- `runSyncJob` reads the source from the checkpoint of the last succeeded run, staging rows in a lake
+  session, and validates them as they pass.
+- Just before the commit, it stores what the commit will have read (`prepareCommit`). That write is
+  fenced, so an execution that lost its run stops there.
+- It commits one version, with the run as `producer`, against the latest version it just read, then
+  finishes the run with the new checkpoint and announces the version and the finished run.
 
-## Usage
+A failure before the commit finishes the run as `failed`. A failure at the commit asks the lake
+first, because a commit can land and still answer with an error: if the version is there the run
+succeeds, and if the lake cannot say the run stays open for the next delivery. Losing that guard to
+another writer does not fail the run either: nothing was written, so it reads its source again, up to
+its attempts.
 
-```ts
-import { runSyncJob, type SyncWorkerContext } from "@sixb/sync-worker"
+One run of a sync runs at a time: a queued run waits for the one running, whose end wakes it, and
+triggers join it.
 
-const runtime: SyncWorkerContext = {
-  id: sixb.id,
-  syncRunsStorage,
-  lakeStorage,
-  blobs: sixb.blobs,
-  datasets: sixb.definitions.datasets,
-  syncs: sixb.definitions.syncs,
-  connector: sixb.connector,
-}
+## Recovery
 
-const result = await runSyncJob({
-  runtime,
-  job: {
-    id: "run_123",
-    syncId: "sync-orders",
-    expectedLatestVersionId: "version_001",
-    commitMessage: "sync orders from queue",
-  },
-  signal,
-})
-```
+Nothing of a partial run exists until its commit: rows stay in a session no reader sees, and a crash
+during the commit leaves at most data files no version refers to, which retention removes. So a run
+that resumes has two cases, and one that never prepared a commit has only the second:
 
-`runSyncJob` returns the finalized run id, sync id, dataset id, write mode, timing,
-row count, and committed `DatasetVersion`.
+- Its commit landed, which `findProducedVersion` finds by `producer.runId`. It finishes with the
+  checkpoint and row count it prepared, without reading the source, and announces the version.
+- It did not. It reads again from the same checkpoint, and nothing is written twice.
 
-## Notes
-
-- `job.id` is the sync-run id supplied by the queue layer.
-- `job.expectedLatestVersionId` is forwarded to the lake commit for optimistic
-  concurrency checks.
-- a failed sync-run finalization after a successful lake commit throws a
-  `[SixbSyncWorker]` bookkeeping error so the durable dataset version can be
-  repaired or reconciled.
-- supported sync read results are a single row object, an iterable, or an async
-  iterable.
+A stopped worker writes nothing: the run stays `running` and the next delivery takes it up.
 
 ## Development
 
