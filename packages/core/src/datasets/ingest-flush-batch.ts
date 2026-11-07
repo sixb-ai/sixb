@@ -18,13 +18,9 @@ import type {
 } from "../storage/dataset-ingest"
 import { DatasetValidationError } from "./errors"
 import { datasetDefinitionHash } from "./ingest-flush-job"
+import { findProducedVersion } from "./produced-version"
 import type { DatasetDefinition } from "./types"
 import { writeDataset } from "./write"
-
-/** A version is looked for among this many of the dataset's newest, then four times as many. */
-const LOOKUP_VERSIONS = 200
-/** Clocks of the process that committed and of the database that dated the batch may differ. */
-const LOOKUP_CLOCK_SKEW_MS = 60_000
 
 const CONCURRENCY_ATTEMPTS = 3
 
@@ -139,22 +135,15 @@ export class IngestBatchWriter {
   }
 
   /** A version of this batch among the dataset's newest, dated from when it took its deliveries. */
-  private async findCommitted(batch: DatasetIngestBatch): Promise<DatasetVersion | null> {
-    const oldestPossible = batch.startedAt.getTime() - LOOKUP_CLOCK_SKEW_MS
+  private findCommitted(batch: DatasetIngestBatch): Promise<DatasetVersion | null> {
+    const { lakeStorage, dataset } = this.input
 
-    for (let limit = LOOKUP_VERSIONS; ; limit *= 4) {
-      const { lakeStorage, dataset } = this.input
-      const versions = await lakeStorage.listVersions(dataset.id, limit)
-
-      for (const version of versions) {
-        if (version.producer?.kind === "ingest" && version.producer.runId === batch.flushId) {
-          return version
-        }
-        if (version.createdAt.getTime() < oldestPossible) return null
-      }
-
-      if (versions.length < limit) return null
-    }
+    return findProducedVersion({
+      lakeStorage,
+      datasetId: dataset.id,
+      producer: { kind: "ingest", runId: batch.flushId },
+      since: batch.startedAt,
+    })
   }
 
   /** The change a failed write refuses, if the failure names one. */
