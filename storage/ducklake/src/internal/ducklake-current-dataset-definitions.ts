@@ -2,6 +2,7 @@ import type { DatasetDefinition } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import {
+  type DuckDbRow,
   getBigIntLike,
   getBoolean,
   getOptionalBigIntLike,
@@ -94,73 +95,77 @@ async function readCurrentDatasetCatalogRows(
         )})`
 
   const rows = await input.runtime.query(
-    buildDuckLakeMetadataQuery(
-      input.options,
-      (table) => `
-        SELECT
-          table_meta.table_name,
-          table_tag."value" AS table_comment,
-          column_meta.column_id,
-          column_meta.column_order,
-          column_meta.column_name,
-          column_meta.column_type,
-          CAST(column_meta.nulls_allowed AS BOOLEAN) AS nulls_allowed,
-          column_meta.parent_column,
-          column_tag."value" AS comment,
-          partition_column.partition_key_index,
-          partition_column.transform
-        FROM ${table("ducklake_table")} table_meta
-        JOIN ${table("ducklake_schema")} schema_meta
-          ON schema_meta.schema_id = table_meta.schema_id
-          AND schema_meta.end_snapshot IS NULL
-          AND schema_meta.schema_name = 'main'
-        JOIN ${table("ducklake_column")} column_meta
-          ON column_meta.table_id = table_meta.table_id
-          AND column_meta.end_snapshot IS NULL
-        LEFT JOIN ${table("ducklake_tag")} table_tag
-          ON table_tag.object_id = table_meta.table_id
-          AND table_tag."key" = 'comment'
-          AND table_tag.end_snapshot IS NULL
-        LEFT JOIN ${table("ducklake_column_tag")} column_tag
-          ON column_tag.table_id = column_meta.table_id
-          AND column_tag.column_id = column_meta.column_id
-          AND column_tag."key" = 'comment'
-          AND column_tag.end_snapshot IS NULL
-        LEFT JOIN ${table("ducklake_partition_info")} partition_info
-          ON partition_info.table_id = table_meta.table_id
-          AND partition_info.end_snapshot IS NULL
-        LEFT JOIN ${table("ducklake_partition_column")} partition_column
-          ON partition_column.table_id = table_meta.table_id
-          AND partition_column.partition_id = partition_info.partition_id
-          AND partition_column.column_id = column_meta.column_id
-        WHERE table_meta.end_snapshot IS NULL ${tableNameFilter}
-        ORDER BY table_meta.table_name, column_meta.column_order
-      `
-    )
+    buildDuckLakeMetadataQuery(input.options, (table) => currentColumnsSql(table, tableNameFilter))
   )
 
-  return rows.map((row) => {
-    const partitionKeyIndex = getOptionalBigIntLike(row, "partition_key_index")
+  return rows.map(toCatalogColumnRow)
+}
 
-    return {
-      tableComment: getOptionalString(row, "table_comment"),
-      column: {
-        tableName: getString(row, "table_name"),
-        columnId: getBigIntLike(row, "column_id"),
-        columnOrder: getBigIntLike(row, "column_order"),
-        columnName: getString(row, "column_name"),
-        columnType: getString(row, "column_type"),
-        nullsAllowed: getBoolean(row, "nulls_allowed"),
-        parentColumnId: getOptionalBigIntLike(row, "parent_column"),
-        comment: getOptionalString(row, "comment"),
-      },
-      ...(partitionKeyIndex === undefined
-        ? {}
-        : {
-            partition: { keyIndex: partitionKeyIndex, transform: getString(row, "transform") },
-          }),
-    }
-  })
+/** One row per current column of the main schema's tables that pass `tableNameFilter`. */
+function currentColumnsSql(table: (name: string) => string, tableNameFilter: string): string {
+  return `
+    SELECT
+      table_meta.table_name,
+      table_tag."value" AS table_comment,
+      column_meta.column_id,
+      column_meta.column_order,
+      column_meta.column_name,
+      column_meta.column_type,
+      CAST(column_meta.nulls_allowed AS BOOLEAN) AS nulls_allowed,
+      column_meta.parent_column,
+      column_tag."value" AS comment,
+      partition_column.partition_key_index,
+      partition_column.transform
+    FROM ${table("ducklake_table")} table_meta
+    JOIN ${table("ducklake_schema")} schema_meta
+      ON schema_meta.schema_id = table_meta.schema_id
+      AND schema_meta.end_snapshot IS NULL
+      AND schema_meta.schema_name = 'main'
+    JOIN ${table("ducklake_column")} column_meta
+      ON column_meta.table_id = table_meta.table_id
+      AND column_meta.end_snapshot IS NULL
+    LEFT JOIN ${table("ducklake_tag")} table_tag
+      ON table_tag.object_id = table_meta.table_id
+      AND table_tag."key" = 'comment'
+      AND table_tag.end_snapshot IS NULL
+    LEFT JOIN ${table("ducklake_column_tag")} column_tag
+      ON column_tag.table_id = column_meta.table_id
+      AND column_tag.column_id = column_meta.column_id
+      AND column_tag."key" = 'comment'
+      AND column_tag.end_snapshot IS NULL
+    LEFT JOIN ${table("ducklake_partition_info")} partition_info
+      ON partition_info.table_id = table_meta.table_id
+      AND partition_info.end_snapshot IS NULL
+    LEFT JOIN ${table("ducklake_partition_column")} partition_column
+      ON partition_column.table_id = table_meta.table_id
+      AND partition_column.partition_id = partition_info.partition_id
+      AND partition_column.column_id = column_meta.column_id
+    WHERE table_meta.end_snapshot IS NULL ${tableNameFilter}
+    ORDER BY table_meta.table_name, column_meta.column_order
+  `
+}
+
+function toCatalogColumnRow(row: DuckDbRow): CatalogColumnRow {
+  const partitionKeyIndex = getOptionalBigIntLike(row, "partition_key_index")
+
+  return {
+    tableComment: getOptionalString(row, "table_comment"),
+    column: {
+      tableName: getString(row, "table_name"),
+      columnId: getBigIntLike(row, "column_id"),
+      columnOrder: getBigIntLike(row, "column_order"),
+      columnName: getString(row, "column_name"),
+      columnType: getString(row, "column_type"),
+      nullsAllowed: getBoolean(row, "nulls_allowed"),
+      parentColumnId: getOptionalBigIntLike(row, "parent_column"),
+      comment: getOptionalString(row, "comment"),
+    },
+    ...(partitionKeyIndex === undefined
+      ? {}
+      : {
+          partition: { keyIndex: partitionKeyIndex, transform: getString(row, "transform") },
+        }),
+  }
 }
 
 /** The rows of each dataset table, in table order, skipping tables that hold no dataset. */

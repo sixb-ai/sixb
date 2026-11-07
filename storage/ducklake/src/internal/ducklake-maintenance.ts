@@ -11,15 +11,9 @@ import { getBigIntLike, getOptionalString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
-import { datasetTableIds } from "./ducklake-dataset-table-ref"
+import { type ExpiryPlan, ExpiryWalk } from "./ducklake-expiry-walk"
 import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
-import {
-  countRetainedSnapshots,
-  type DuckLakeTableStorage,
-  partitionWarnings,
-  readTableStorage,
-  tableRowCount,
-} from "./ducklake-storage-stats"
+import { describeDatasetStorage } from "./ducklake-storage-stats"
 import { isSqliteCatalog } from "./ducklake-version-transaction"
 import {
   buildDuckLakeMetadataQuery,
@@ -66,12 +60,6 @@ interface Retention {
   readonly deleteFilesAfterMs: number
   readonly dryRun: boolean
   readonly limit: number
-}
-
-interface ExpiryPlan {
-  readonly expirable: readonly string[]
-  readonly keptVersions: number
-  readonly hasMore: boolean
 }
 
 /**
@@ -177,74 +165,21 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     )
   }
 
-  async describeStorage(datasetIds: readonly string[]): Promise<readonly DatasetStorageHealth[]> {
+  describeStorage(datasetIds: readonly string[]): Promise<readonly DatasetStorageHealth[]> {
     this.connections.assertOpen()
 
-    const requested = new Set(datasetIds)
-    if (requested.size === 0) {
-      return []
-    }
-
-    const described = await this.connections.withAttachedRuntime(async (runtime) => {
-      const tables = (await this.snapshots.listCurrentDatasetTables(runtime)).filter((table) =>
-        requested.has(table.datasetId)
-      )
-
-      return {
-        tables: new Map(tables.map((table) => [table.datasetId, table])),
-        storage: await readTableStorage(this.options, runtime, tables),
-        snapshots: await countRetainedSnapshots(this.options, runtime, tables),
-        definitions: await this.datasets.getDatasetsOnRuntime(
-          runtime,
-          tables.map((table) => table.datasetId)
-        ),
-      }
-    })
-
-    return datasetIds.map((datasetId) => {
-      const table = described.tables.get(datasetId)
-      if (table === undefined) {
-        return unmaterialized(datasetId)
-      }
-
-      // A sequenced dataset also stores its source ordering in a companion table.
-      const tables = datasetTableIds(table).flatMap((tableId) => {
-        const storage = described.storage.get(tableId)
-        return storage === undefined ? [] : [storage]
-      })
-      const sum = (count: (storage: DuckLakeTableStorage) => number) =>
-        tables.reduce((total, storage) => total + count(storage), 0)
-
-      const main = described.storage.get(table.tableId)
-      const rowCount = main === undefined ? 0 : tableRowCount(main)
-      const definition = described.definitions.get(datasetId)
-
-      return {
-        datasetId,
-        materialized: true,
-        rowCount,
-        dataFiles: sum((storage) => storage.dataFiles),
-        smallDataFiles: sum((storage) => storage.smallDataFiles),
-        dataBytes: sum((storage) => storage.dataBytes),
-        deleteFiles: sum((storage) => storage.deleteFiles),
-        inlinedRows: sum((storage) => storage.inlinedRows),
-        retainedSnapshots: described.snapshots.get(datasetId) ?? 0,
-        partitionBy: definition?.partitionBy ?? [],
-        warnings: partitionWarnings(definition, rowCount),
-      }
-    })
+    return describeDatasetStorage(
+      {
+        options: this.options,
+        connections: this.connections,
+        datasets: this.datasets,
+        snapshots: this.snapshots,
+      },
+      datasetIds
+    )
   }
 
-  /**
-   * Which snapshots to expire, from one walk up the history that stops at the retention cutoff,
-   * or once `limit` snapshots are expirable.
-   *
-   * A snapshot holding no version, such as a maintenance commit, expires once it is past the
-   * cutoff. A version expires once the next version of its dataset is past the cutoff too: within
-   * the walk, every version of a dataset but the last. That last one, a dataset's latest version
-   * or one replaced too recently, stays. Each pass starts again from the oldest snapshot left, and
-   * only those kept versions stand before the ones it can expire.
-   */
+  /** Which snapshots to expire, from one walk up the history (see `ExpiryWalk`). */
   private async planExpiry(
     retention: Retention,
     protect: ReadonlySet<string>
@@ -256,30 +191,10 @@ export class DuckLakeMaintenance implements LakeMaintenance {
       head: await this.snapshots.queryHeadSnapshotId(runtime),
     }))
 
-    const expirable: string[] = []
-    let keptVersions = 0
-
-    // The last version seen of each dataset, and for how many datasets a snapshot still is.
-    const lastVersionOf = new Map<string, string>()
-    const datasetsStillLast = new Map<string, number>()
-
-    const supersede = (snapshotId: string) => {
-      const remaining = (datasetsStillLast.get(snapshotId) ?? 1) - 1
-      if (remaining > 0) {
-        datasetsStillLast.set(snapshotId, remaining)
-        return
-      }
-
-      datasetsStillLast.delete(snapshotId)
-      if (protect.has(snapshotId)) {
-        keptVersions++
-      } else {
-        expirable.push(snapshotId)
-      }
-    }
-
+    const walk = new ExpiryWalk({ head, protect, limit: retention.limit })
     let afterSnapshotId: string | undefined
-    while (true) {
+
+    for (;;) {
       const page = await this.connections.withAttachedRuntime((runtime) =>
         this.snapshots.readHistoryPage(runtime, {
           tables,
@@ -289,35 +204,9 @@ export class DuckLakeMaintenance implements LakeMaintenance {
         })
       )
 
-      for (const snapshot of page) {
-        if (!snapshot.beforeCutoff) {
-          return { expirable, keptVersions, hasMore: false }
-        }
-
-        if (snapshot.versionOf.length === 0) {
-          if (snapshot.snapshotId !== head) {
-            expirable.push(snapshot.snapshotId)
-          }
-        } else {
-          datasetsStillLast.set(snapshot.snapshotId, snapshot.versionOf.length)
-
-          for (const datasetId of snapshot.versionOf) {
-            const previous = lastVersionOf.get(datasetId)
-            lastVersionOf.set(datasetId, snapshot.snapshotId)
-            if (previous !== undefined) {
-              supersede(previous)
-            }
-          }
-        }
-
-        if (expirable.length >= retention.limit) {
-          return { expirable, keptVersions, hasMore: true }
-        }
-      }
-
-      if (page.length < HISTORY_PAGE_SIZE) {
-        return { expirable, keptVersions, hasMore: false }
-      }
+      const end = walk.visitPage(page)
+      if (end === "limit") return walk.plan(true)
+      if (end === "cutoff" || page.length < HISTORY_PAGE_SIZE) return walk.plan(false)
 
       afterSnapshotId = page[page.length - 1]?.snapshotId
     }
@@ -518,22 +407,6 @@ function resolveRetention(options: LakeRetentionOptions): Retention {
   }
 
   return { keepVersionsForMs, deleteFilesAfterMs, dryRun: options.dryRun ?? false, limit }
-}
-
-function unmaterialized(datasetId: string): DatasetStorageHealth {
-  return {
-    datasetId,
-    materialized: false,
-    rowCount: 0,
-    dataFiles: 0,
-    smallDataFiles: 0,
-    dataBytes: 0,
-    deleteFiles: 0,
-    inlinedRows: 0,
-    retainedSnapshots: 0,
-    partitionBy: [],
-    warnings: [],
-  }
 }
 
 function protectedSnapshotId(ref: DatasetVersionRef): string {

@@ -1,9 +1,12 @@
 import type { DatasetDefinition } from "@sixb/core"
-import type { DatasetStorageWarning } from "@sixb/core/lake-storage"
+import type { DatasetStorageHealth, DatasetStorageWarning } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { type DuckDbRow, getBigIntLike, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
+import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
+import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { type DatasetTableRef, datasetTableIds } from "./ducklake-dataset-table-ref"
+import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
 import { buildDuckLakeMetadataQuery, quoteIdentifier, quoteSqlString } from "./sql"
 
 /**
@@ -55,6 +58,98 @@ const EMPTY_TABLE_STORAGE: DuckLakeTableStorage = {
   inlinedRows: 0,
   liveInlinedRows: 0,
   inlinedDeletes: 0,
+}
+
+interface StorageDescription {
+  readonly tables: ReadonlyMap<string, DatasetTableRef>
+  readonly storage: ReadonlyMap<bigint, DuckLakeTableStorage>
+  readonly snapshots: ReadonlyMap<string, number>
+  readonly definitions: ReadonlyMap<string, DatasetDefinition>
+}
+
+/** What each dataset holds and how it is stored, in the order asked, from one catalog read. */
+export async function describeDatasetStorage(
+  lake: {
+    readonly options: DuckLakeStorageOptions
+    readonly connections: DuckLakeConnectionManager
+    readonly datasets: DuckLakeDatasetCatalog
+    readonly snapshots: DuckLakeSnapshotReader
+  },
+  datasetIds: readonly string[]
+): Promise<readonly DatasetStorageHealth[]> {
+  const requested = new Set(datasetIds)
+  if (requested.size === 0) {
+    return []
+  }
+
+  const { options, datasets, snapshots } = lake
+  const described = await lake.connections.withAttachedRuntime(
+    async (runtime): Promise<StorageDescription> => {
+      const current = await snapshots.listCurrentDatasetTables(runtime)
+      const tables = current.filter((table) => requested.has(table.datasetId))
+
+      return {
+        tables: new Map(tables.map((table) => [table.datasetId, table])),
+        storage: await readTableStorage(options, runtime, tables),
+        snapshots: await countRetainedSnapshots(options, runtime, tables),
+        definitions: await datasets.getDatasetsOnRuntime(
+          runtime,
+          tables.map((table) => table.datasetId)
+        ),
+      }
+    }
+  )
+
+  return datasetIds.map((datasetId) => describeDataset(datasetId, described))
+}
+
+function describeDataset(datasetId: string, described: StorageDescription): DatasetStorageHealth {
+  const table = described.tables.get(datasetId)
+  if (table === undefined) {
+    return unmaterialized(datasetId)
+  }
+
+  // A sequenced dataset also stores its source ordering in a companion table.
+  const tables = datasetTableIds(table).flatMap((tableId) => {
+    const storage = described.storage.get(tableId)
+    return storage === undefined ? [] : [storage]
+  })
+  const sum = (count: (storage: DuckLakeTableStorage) => number) =>
+    tables.reduce((total, storage) => total + count(storage), 0)
+
+  const main = described.storage.get(table.tableId)
+  const rowCount = main === undefined ? 0 : tableRowCount(main)
+  const definition = described.definitions.get(datasetId)
+
+  return {
+    datasetId,
+    materialized: true,
+    rowCount,
+    dataFiles: sum((storage) => storage.dataFiles),
+    smallDataFiles: sum((storage) => storage.smallDataFiles),
+    dataBytes: sum((storage) => storage.dataBytes),
+    deleteFiles: sum((storage) => storage.deleteFiles),
+    inlinedRows: sum((storage) => storage.inlinedRows),
+    retainedSnapshots: described.snapshots.get(datasetId) ?? 0,
+    partitionBy: definition?.partitionBy ?? [],
+    warnings: partitionWarnings(definition, rowCount),
+  }
+}
+
+function unmaterialized(datasetId: string): DatasetStorageHealth {
+  return {
+    datasetId,
+    materialized: false,
+    rowCount: 0,
+    dataFiles: 0,
+    smallDataFiles: 0,
+    dataBytes: 0,
+    deleteFiles: 0,
+    inlinedRows: 0,
+    retainedSnapshots: 0,
+    partitionBy: [],
+    warnings: [],
+  }
 }
 
 /**
