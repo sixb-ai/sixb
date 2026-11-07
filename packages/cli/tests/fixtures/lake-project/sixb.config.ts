@@ -8,6 +8,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type LakeMaintenanceOptions,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -32,6 +33,7 @@ const things = defineDataset("raw.things", {
 export const lakeFixture = {
   drift: false,
   maintenance: true,
+  lakeMaintenance: undefined as LakeMaintenanceOptions | undefined,
   /** How many retention passes report more to clean up before one reports none. */
   retentionPassesWithMore: 0,
   /** A dataset version a projection applied, or "unreadable" when reading them fails. */
@@ -115,6 +117,7 @@ export function sixb(): SixbHost {
     broker: new InMemoryBroker(),
     storage: createStorage(),
     lakeStorage: lakeFixture.maintenance ? new MaintenanceLakeStorage() : new FixtureLakeStorage(),
+    lakeMaintenance: lakeFixture.lakeMaintenance,
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     datasets: [things],
