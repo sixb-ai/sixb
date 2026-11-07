@@ -3,6 +3,7 @@ import { ChevronLeft } from "lucide-react"
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { useLocation } from "react-router-dom"
+import { useAppMessages } from "../../locale"
 import { useBack } from "./back"
 import { appScroller, isRootPath, normalizePath } from "./routes"
 
@@ -30,6 +31,7 @@ export function PhoneTopBar(props: PhoneTopBarProps) {
 function TopBar({ trailing, title = true, raised = false }: PhoneTopBarProps) {
   const location = useLocation()
   const back = useBack()
+  const messages = useAppMessages()
   const path = normalizePath(location.pathname)
   const heading = usePageHeading(path)
   const scrolled = useScrolled(path)
@@ -47,7 +49,7 @@ function TopBar({ trailing, title = true, raised = false }: PhoneTopBarProps) {
             <button
               type="button"
               onClick={back}
-              aria-label="Back"
+              aria-label={messages.phone.back}
               className="phone-back phone-glass"
             >
               <ChevronLeft aria-hidden="true" strokeWidth={2.2} />

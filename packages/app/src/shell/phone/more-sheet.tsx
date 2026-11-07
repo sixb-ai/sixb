@@ -16,7 +16,7 @@ import { Link, useLocation } from "react-router-dom"
 import { useAppMessages } from "../../locale"
 import { useSections } from "../../sections/sections"
 import { useCurrentUser, useSignOut } from "../../session"
-import { isCurrentItem, type NavEntry, type NavItem } from "../nav-items"
+import { isCurrentItem, isExternal, type NavEntry, type NavItem } from "../nav-items"
 import { initials } from "../user-menu"
 
 const ARTIFACTS_HREF = "/artifacts"
@@ -50,16 +50,29 @@ export function PhoneMoreSheet({ nav, children }: PhoneMoreSheetProps) {
           <AccountCard />
           {moreGroups(nav).map((group, index) => (
             <PhoneMoreGroup key={group.label ?? `group-${index}`} label={group.label}>
-              {group.items.map((item) => (
+              {group.items.flatMap((item) => [
                 <PhoneMoreRow
                   key={item.href}
                   to={item.href}
                   label={item.label}
                   icon={item.icon}
+                  trailing={item.badge}
                   current={isCurrentItem(pathname, item)}
                   onNavigate={close}
-                />
-              ))}
+                />,
+                // A place's own pages follow it, set in as the sidebar sets them under it.
+                ...(item.items ?? []).map((child) => (
+                  <PhoneMoreRow
+                    key={child.href}
+                    to={child.href}
+                    label={child.label}
+                    trailing={child.badge}
+                    current={isCurrentItem(pathname, child)}
+                    onNavigate={close}
+                    nested
+                  />
+                )),
+              ])}
             </PhoneMoreGroup>
           ))}
           {children}
@@ -105,13 +118,15 @@ export function PhoneMoreGroup({
   )
 }
 
-/** One row in the More sheet: an optional icon, the label and a chevron. */
+/** One row in the More sheet: an optional icon, the label and a chevron. A link to another site
+ * opens in a new tab, as the sidebar's do. */
 export function PhoneMoreRow({
   to,
   label,
   icon: Icon,
   current,
   trailing,
+  nested,
   onNavigate,
 }: {
   readonly to: string
@@ -120,26 +135,48 @@ export function PhoneMoreRow({
   readonly current?: boolean
   /** Shown before the chevron, such as a working indicator. */
   readonly trailing?: ReactNode
+  /** One of a place's own pages, set in under it. */
+  readonly nested?: boolean
   readonly onNavigate?: () => void
 }) {
   const { setOpenMobile } = useSidebar()
+  const onClick = onNavigate ?? (() => setOpenMobile(false))
+  const content = (
+    <>
+      {Icon ? (
+        <span className="phone-more-icon" aria-hidden="true">
+          <Icon />
+        </span>
+      ) : null}
+      <span className="phone-more-label">{label}</span>
+      {trailing}
+      <ChevronRight aria-hidden="true" className="phone-more-chevron" />
+    </>
+  )
   return (
     <li>
-      <Link
-        to={to}
-        onClick={onNavigate ?? (() => setOpenMobile(false))}
-        aria-current={current ? "page" : undefined}
-        className="phone-more-row"
-      >
-        {Icon ? (
-          <span className="phone-more-icon" aria-hidden="true">
-            <Icon />
-          </span>
-        ) : null}
-        <span className="phone-more-label">{label}</span>
-        {trailing}
-        <ChevronRight aria-hidden="true" className="phone-more-chevron" />
-      </Link>
+      {isExternal(to) ? (
+        <a
+          href={to}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={onClick}
+          className="phone-more-row"
+          data-nested={nested || undefined}
+        >
+          {content}
+        </a>
+      ) : (
+        <Link
+          to={to}
+          onClick={onClick}
+          aria-current={current ? "page" : undefined}
+          className="phone-more-row"
+          data-nested={nested || undefined}
+        >
+          {content}
+        </Link>
+      )}
     </li>
   )
 }

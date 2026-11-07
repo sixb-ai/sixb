@@ -133,10 +133,14 @@
  */
 
 @media (max-width: 767px) {
+  /* On the document, so pull to refresh, which sits outside the shell, rests under the bar too. */
+  :root:has(.phone-shell) {
+    --phone-top-bar: calc(52px + var(--safe-top));
+  }
+
   .phone-shell {
     --tab-bar-height: 62px;
     --tab-bar-offset: max(12px, calc(var(--safe-bottom) - 10px));
-    --phone-top-bar: calc(52px + var(--safe-top));
     --phone-tab-bar: calc(var(--tab-bar-height) + var(--tab-bar-offset) + 14px);
     /* Shrinks by the on-screen keyboard (TouchViewport), so a composer rides above it. */
     height: var(--app-height);
@@ -516,6 +520,15 @@
     left: 14px;
   }
 
+  .phone-more-row[data-nested] {
+    padding-left: 56px;
+    font-size: 15px;
+  }
+
+  .phone-more-group li + li .phone-more-row[data-nested]::before {
+    left: 56px;
+  }
+
   .phone-more-row:active {
     background: var(--touch-pressed);
     transition-duration: 0ms;
@@ -612,10 +625,13 @@
 
 /* Landscape phones: a compact top bar and tab bar, as iOS does. */
 @media (max-width: 767px) and (max-height: 500px) {
+  :root:has(.phone-shell) {
+    --phone-top-bar: calc(46px + var(--safe-top));
+  }
+
   .phone-shell {
     --tab-bar-height: 50px;
     --tab-bar-offset: max(8px, calc(var(--safe-bottom) - 12px));
-    --phone-top-bar: calc(46px + var(--safe-top));
   }
 
   .phone-top-bar-row {

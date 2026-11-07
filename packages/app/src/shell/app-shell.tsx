@@ -17,12 +17,12 @@ import {
 import { ThemeProvider } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessageSquareText } from "lucide-react"
-import type { CSSProperties, ReactNode } from "react"
+import { type CSSProperties, type ReactNode, useMemo } from "react"
 import { setAgentSurfaceMode } from "../agent/agent-surface-state"
 import { useAppMessages } from "../locale"
 import { AgentDock } from "./agent-dock"
 import { Brand } from "./brand"
-import { type NavEntry, type NavItem, NavItems } from "./nav-items"
+import { isExternal, type NavEntry, type NavItem, NavItems } from "./nav-items"
 import { PhoneMoreSheet } from "./phone/more-sheet"
 import { PhoneTabBar } from "./phone/tab-bar"
 import { PhoneTopBar } from "./phone/top-bar"
@@ -130,7 +130,7 @@ function AppShellFrame({
 }: Omit<AppShellProps, "defaultOpen">) {
   const { isMobile } = useSidebar()
   const appMessages = useAppMessages()
-  const places = isNavData(nav) ? withPhoneTabs(nav) : null
+  const places = useMemo(() => (isNavData(nav) ? withPhoneTabs(nav) : null), [nav])
   const phone = isMobile && places !== null
 
   return (
@@ -204,9 +204,9 @@ function withPhoneTabs(nav: readonly NavEntry[]): {
   readonly nav: readonly NavEntry[]
   readonly tabs: readonly NavItem[]
 } {
-  const items = nav.flatMap((entry): readonly NavItem[] =>
-    "group" in entry ? entry.items : [entry]
-  )
+  const items = nav
+    .flatMap((entry): readonly NavItem[] => ("group" in entry ? entry.items : [entry]))
+    .filter((item) => !isExternal(item.href))
   const marked = items.filter((item) => item.tab)
   const tabs = (marked.length ? marked : items.filter((item) => item.icon)).slice(0, 4)
   const tab = (item: NavItem): NavItem => (tabs.includes(item) ? { ...item, tab: true } : item)

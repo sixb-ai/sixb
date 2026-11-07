@@ -2,14 +2,16 @@ import { useSidebar } from "@sixb/ui/components"
 import { Ellipsis } from "lucide-react"
 import { type CSSProperties, useEffect } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { isCurrentItem, type NavItem } from "../nav-items"
+import { useAppMessages } from "../../locale"
+import { isCurrentItem, isExternal, type NavItem } from "../nav-items"
 import { appScroller, normalizePath } from "./routes"
 
 // Each tab keeps the screen it was left on, as native tab bars do; More is "".
 const lastPathByTab = new Map<string, string>()
 
 export interface PhoneTabBarProps {
-  /** The places the bar holds, up to four; More, for everything else, follows them. */
+  /** The places the bar holds, up to four; More, for everything else, follows them. A link to
+   * another site is never a tab. */
   readonly items: readonly NavItem[]
 }
 
@@ -23,8 +25,9 @@ export function PhoneTabBar({ items }: PhoneTabBarProps) {
   const location = useLocation()
   const navigate = useNavigate()
   const { isMobile, openMobile, setOpenMobile } = useSidebar()
+  const messages = useAppMessages()
   const path = normalizePath(location.pathname)
-  const tabs = items.slice(0, 4)
+  const tabs = items.filter((item) => !isExternal(item.href)).slice(0, 4)
   const current = tabs.find((item) => isCurrentItem(path, item))?.href ?? ""
 
   useEffect(() => {
@@ -53,7 +56,7 @@ export function PhoneTabBar({ items }: PhoneTabBarProps) {
   return (
     <nav
       className="phone-tab-bar"
-      aria-label="Primary"
+      aria-label={messages.phone.tabs}
       style={{ "--tab-index": index, "--tab-count": tabs.length + 1 } as CSSProperties}
     >
       <span className="phone-tab-lens" aria-hidden="true" />
@@ -79,7 +82,7 @@ export function PhoneTabBar({ items }: PhoneTabBarProps) {
       <button
         type="button"
         onClick={() => setOpenMobile(!openMobile)}
-        aria-label="More"
+        aria-label={messages.phone.more}
         aria-current={moreActive ? "page" : undefined}
         aria-haspopup="dialog"
         aria-expanded={openMobile}

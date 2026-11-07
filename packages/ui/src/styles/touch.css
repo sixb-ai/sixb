@@ -2,7 +2,8 @@
  * Touch and phone foundations. On a phone an app should feel installed: no zooming, no grey tap
  * flashes, no text selection on controls, controls sized for a finger, dialogs that rise from the
  * bottom as sheets, and nothing under the notch, the home indicator or the keyboard. Wider screens
- * and mouse pointers are untouched: every rule is scoped to touch or to phone widths.
+ * and mouse pointers are untouched: every rule is scoped to touch or to phone widths, except the
+ * room left for an installed app's status bar and its corrected height, which are no-ops elsewhere.
  *
  * `TouchViewport` publishes `--keyboard-inset` and `html[data-keyboard]`; `SheetGestures` lets a
  * sheet be pulled down. A dialog that should fill a phone's screen instead of rising as a sheet,
@@ -92,24 +93,27 @@ html[data-keyboard] {
    its content below, and the page beside the sidebar and a sheet from the side start below it. The
    inset is zero everywhere else, the desktop app included, whose sidebar clears the window controls
    on its own. A transparent top border makes the room, so it adds to the element's own padding and
-   moves what is positioned inside it, such as a close button. Without specificity, so a phone
-   shell, which clears it with its own bars, or an app can take it back. */
-:where(
-    [data-slot="sidebar-inner"],
-    [data-slot="sidebar"][data-mobile],
-    [data-slot="sidebar-inset"],
-    [data-slot="sheet-content"]:is([data-side="left"], [data-side="right"], [data-side="top"]),
-    [data-slot="drawer-content"]:is(
-        [data-vaul-drawer-direction="left"],
-        [data-vaul-drawer-direction="right"],
-        [data-vaul-drawer-direction="top"]
-      )
-  ) {
-  border-top: env(safe-area-inset-top, 0px) solid transparent;
+   moves what is positioned inside it, such as a close button. In the base layer, so a phone shell,
+   which clears it with its own bars, or a utility such as a floating sidebar's border takes over. */
+@layer base {
+  :where(
+      [data-slot="sidebar-inner"],
+      [data-slot="sidebar"][data-mobile],
+      [data-slot="sidebar-inset"],
+      [data-slot="sheet-content"]:is([data-side="left"], [data-side="right"], [data-side="top"]),
+      [data-slot="drawer-content"]:is(
+          [data-vaul-drawer-direction="left"],
+          [data-vaul-drawer-direction="right"],
+          [data-vaul-drawer-direction="top"]
+        )
+    ) {
+    border-top: env(safe-area-inset-top, 0px) solid transparent;
+  }
 }
 
 /* Under the status bar iOS reports 100svh and 100dvh short by its height, so the fixed sidebar takes
-   the corrected height and reaches the bottom of the screen. */
+   the corrected height and reaches the bottom of the screen. Outside a layer, to win over the
+   sidebar's own `h-svh`. */
 :where([data-slot="sidebar-container"]) {
   height: var(--viewport-height);
 }
