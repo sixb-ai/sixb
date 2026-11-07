@@ -1,7 +1,7 @@
 import { cn } from "@sixb/ui/lib/utils"
 import type { LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
-import { formatDateTime, StatusBadge } from "./ui"
+import { formatTime, StatusBadge } from "./ui"
 
 export interface TimelineEntry {
   readonly id: string
@@ -74,7 +74,7 @@ export function Timeline({
                   {entry.action}
                 </span>
                 <time className="pt-0.5 text-[13px] whitespace-nowrap text-muted-foreground tabular-nums">
-                  {timeLabel(entry.at)}
+                  {entry.at ? formatTime(entry.at) : ""}
                 </time>
               </li>
             ))}
@@ -86,10 +86,10 @@ export function Timeline({
 }
 
 function time(value: string | Date | undefined): number {
-  if (!value) return 0
-  return value instanceof Date ? value.getTime() : new Date(value).getTime()
+  return value ? new Date(value).getTime() : 0
 }
 
+/** A day heading; another year's days carry the year, so two Octobers never share a group. */
 function dayLabel(value: string | Date | undefined): string {
   if (!value) return "Undated"
   const date = new Date(value)
@@ -98,16 +98,10 @@ function dayLabel(value: string | Date | undefined): string {
   yesterday.setDate(today.getDate() - 1)
   if (date.toDateString() === today.toDateString()) return "Today"
   if (date.toDateString() === yesterday.toDateString()) return "Yesterday"
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date)
-}
-
-function timeLabel(value: string | Date | undefined): string {
-  if (!value) return ""
-  const date = new Date(value)
-  const sameYear = date.getFullYear() === new Date().getFullYear()
-  const today = date.toDateString() === new Date().toDateString()
-  if (today) return new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(date)
-  return sameYear
-    ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date)
-    : formatDateTime(date)
+  const sameYear = date.getFullYear() === today.getFullYear()
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+  }).format(date)
 }

@@ -15,8 +15,8 @@ import {
 import type { ComponentType, PropsWithChildren } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { Quote } from "../../ontology/quote"
-import { ServiceCase } from "../../ontology/service-case"
 import { threadPath, useRecentThreads } from "../_lib/agent-threads"
+import { openServiceCases } from "../_lib/service-cases"
 import { GlobalSearch } from "./global-search"
 import { NorthlineMark } from "./northline-mark"
 import { OperationsAssistant } from "./operations-assistant"
@@ -24,12 +24,6 @@ import { SidebarOrMoreSheet } from "./phone/phone-shell"
 import { PhoneTabBar } from "./phone/phone-tab-bar"
 import { PhoneTopBar } from "./phone/phone-top-bar"
 import { PullToRefresh } from "./phone/pull-to-refresh"
-
-const openCases = objects(ServiceCase)
-  .query()
-  .where((serviceCase) =>
-    serviceCase.and(serviceCase.p.status.neq("closed"), serviceCase.p.status.neq("cancelled"))
-  )
 
 const quotesWithCustomer = objects(Quote)
   .query()
@@ -127,7 +121,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
 
 function NorthlineNav() {
   const { pathname } = useLocation()
-  const openCaseCount = useObjectsCount(openCases)
+  const openCaseCount = useObjectsCount(openServiceCases)
   const quoteCount = useObjectsCount(quotesWithCustomer)
   const counts = { openCases: openCaseCount.data, quotesWithCustomer: quoteCount.data }
 

@@ -23,7 +23,8 @@ const allCases = objects(ServiceCase)
   .expand(ServiceCase.l.customer)
   .expand(ServiceCase.l.facility)
   .expand(ServiceCase.l.equipment)
-  .orderBy(ServiceCase.p.responseDeadline, "asc")
+  // Newest first, so past the limit the oldest cases drop; the page sorts by urgency itself.
+  .orderBy(ServiceCase.p.detectedAt, "desc")
   .limit(100)
 
 const views = [

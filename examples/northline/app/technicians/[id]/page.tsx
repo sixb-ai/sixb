@@ -11,7 +11,7 @@ import { ServiceVisit } from "../../../ontology/service-visit"
 import { Technician } from "../../../ontology/technician"
 import { WorkOrder } from "../../../ontology/work-order"
 import { EquipmentPicture } from "../../_components/equipment-picture"
-import { NextStepCard, pillClass } from "../../_components/next-step"
+import { ErrorLine, NextStepCard, pillClass } from "../../_components/next-step"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
@@ -28,30 +28,39 @@ import {
 } from "../../_components/ui"
 import type { QueryRow } from "../../_lib/query-types"
 
-const visitsQuery = objects(ServiceVisit)
-  .query()
-  .expand(ServiceVisit.l.technician)
-  .expand(ServiceVisit.l.workOrder, (workOrder) =>
-    workOrder
-      .expand(WorkOrder.l.serviceCase, (serviceCase) =>
-        serviceCase.expand(ServiceCase.l.customer).expand(ServiceCase.l.facility)
-      )
-      .expand(WorkOrder.l.equipment)
-  )
-  .orderBy(ServiceVisit.p.scheduledStart, "asc")
-  .limit(100)
+const techniciansQuery = objects(Technician).query()
 
-const notesQuery = objects(FieldNote)
-  .query()
-  .expand(FieldNote.l.visit)
-  .expand(FieldNote.l.author)
-  .orderBy(FieldNote.p.recordedAt, "desc")
-  .limit(100)
-const techniciansBaseQuery = objects(Technician).query()
+function technicianQuery(id: string) {
+  return techniciansQuery.where((technician) => technician.p.id.eq(id))
+}
 
-type VisitRow = QueryRow<typeof visitsQuery>
-type NoteRow = QueryRow<typeof notesQuery>
-type TechnicianRow = QueryRow<typeof techniciansBaseQuery>
+/** One technician's visits, newest first, with the case and unit each one serves. */
+function visitsQuery(technicianId: string) {
+  return technicianQuery(technicianId)
+    .traverse(ServiceVisit.l.technician, { direction: "incoming" })
+    .expand(ServiceVisit.l.workOrder, (workOrder) =>
+      workOrder
+        .expand(WorkOrder.l.serviceCase, (serviceCase) =>
+          serviceCase.expand(ServiceCase.l.customer).expand(ServiceCase.l.facility)
+        )
+        .expand(WorkOrder.l.equipment)
+    )
+    .orderBy(ServiceVisit.p.scheduledStart, "desc")
+    .limit(100)
+}
+
+/** The notes one technician wrote, newest first. */
+function notesQuery(technicianId: string) {
+  return technicianQuery(technicianId)
+    .traverse(FieldNote.l.author, { direction: "incoming" })
+    .expand(FieldNote.l.visit)
+    .orderBy(FieldNote.p.recordedAt, "desc")
+    .limit(100)
+}
+
+type VisitRow = QueryRow<ReturnType<typeof visitsQuery>>
+type NoteRow = QueryRow<ReturnType<typeof notesQuery>>
+type TechnicianRow = QueryRow<typeof techniciansQuery>
 type VisitWorkOrder = NonNullable<VisitRow["links"]["workOrder"]>
 type VisitServiceCase = NonNullable<VisitWorkOrder["links"]["serviceCase"]>
 type VisitEquipment = NonNullable<VisitWorkOrder["links"]["equipment"]>
@@ -74,20 +83,11 @@ export default function TechnicianWorkspacePage() {
   const { id = "" } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const requestedVisit = searchParams.get("visit")
-  const technicianQuery = useMemo(
-    () => techniciansBaseQuery.where((technician) => technician.p.id.eq(id)),
-    [id]
-  )
-  const technicianResult = useObjectsQuery(technicianQuery)
-  const visitsResult = useObjectsQuery(visitsQuery)
-  const notesResult = useObjectsQuery(notesQuery)
+  const technicianResult = useObjectsQuery(useMemo(() => technicianQuery(id), [id]))
+  const visitsResult = useObjectsQuery(useMemo(() => visitsQuery(id), [id]))
+  const notesResult = useObjectsQuery(useMemo(() => notesQuery(id), [id]))
   const technician = technicianResult.data?.objects[0]
-  const technicianVisits = (visitsResult.data?.objects ?? [])
-    .filter((visit) => visit.links.technician?.primaryId === id)
-    .sort(
-      (left, right) =>
-        timestamp(right.properties.scheduledStart) - timestamp(left.properties.scheduledStart)
-    )
+  const technicianVisits = visitsResult.data?.objects ?? []
   const activeVisit = technicianVisits.find(
     (visit) => !["completed", "cancelled"].includes(visit.properties.status)
   )
@@ -97,55 +97,10 @@ export default function TechnicianWorkspacePage() {
   const workOrder = visit?.links.workOrder
   const serviceCase = workOrder?.links.serviceCase
   const equipment = workOrder?.links.equipment
-  const technicianNotes = (notesResult.data?.objects ?? []).filter(
-    (note) => note.links.author?.primaryId === id
-  )
+  const technicianNotes = notesResult.data?.objects ?? []
   const visitNotes = visit
     ? technicianNotes.filter((note) => note.links.visit?.primaryId === visit.primaryId)
     : []
-  const [finding, setFinding] = useState("")
-  const [disposition, setDisposition] = useState<Disposition>("quote_required")
-  const [workPerformed, setWorkPerformed] = useState("")
-  // What was typed belongs to one visit: opening another starts the form over, so a diagnosis is
-  // never recorded against the wrong visit.
-  const [formVisitId, setFormVisitId] = useState(visit?.primaryId)
-  if (formVisitId !== visit?.primaryId) {
-    setFormVisitId(visit?.primaryId)
-    setFinding("")
-    setDisposition("quote_required")
-    setWorkPerformed("")
-  }
-
-  const startVisit = useActionRunMutation<{
-    serviceCase: { objectTypeId: "ServiceCase"; primaryId: string }
-    workOrder: { objectTypeId: "WorkOrder"; primaryId: string }
-  }>({
-    actionId: "start-service-visit",
-    subject: { objectType: ServiceVisit, primaryId: visit?.primaryId ?? "" },
-    invalidateOnCommit: true,
-  })
-  const recordDiagnosis = useActionRunMutation<{
-    serviceCase: { objectTypeId: "ServiceCase"; primaryId: string }
-    equipment: { objectTypeId: "Equipment"; primaryId: string }
-    technician: { objectTypeId: "Technician"; primaryId: string }
-    disposition: Disposition
-    finding: string
-  }>({
-    actionId: "record-diagnosis",
-    subject: { objectType: ServiceVisit, primaryId: visit?.primaryId ?? "" },
-    invalidateOnCommit: true,
-  })
-  const completeVisit = useActionRunMutation<{
-    serviceCase: { objectTypeId: "ServiceCase"; primaryId: string }
-    workOrder: { objectTypeId: "WorkOrder"; primaryId: string }
-    equipment: { objectTypeId: "Equipment"; primaryId: string }
-    workPerformed: string
-    disposition: "resolved" | "follow_up_required" | "awaiting_parts"
-  }>({
-    actionId: "complete-service-visit",
-    subject: { objectType: ServiceVisit, primaryId: visit?.primaryId ?? "" },
-    invalidateOnCommit: true,
-  })
 
   return (
     <QueryState
@@ -167,48 +122,6 @@ export default function TechnicianWorkspacePage() {
               serviceCase={serviceCase}
               equipment={equipment}
               notes={visitNotes}
-              finding={finding}
-              disposition={disposition}
-              workPerformed={workPerformed}
-              setFinding={setFinding}
-              setDisposition={setDisposition}
-              setWorkPerformed={setWorkPerformed}
-              starting={startVisit.isPending}
-              recording={recordDiagnosis.isPending}
-              completing={completeVisit.isPending}
-              onStart={() =>
-                startVisit.mutate({
-                  serviceCase: {
-                    objectTypeId: "ServiceCase",
-                    primaryId: serviceCase.primaryId,
-                  },
-                  workOrder: { objectTypeId: "WorkOrder", primaryId: workOrder.primaryId },
-                })
-              }
-              onRecordDiagnosis={() =>
-                recordDiagnosis.mutate({
-                  serviceCase: {
-                    objectTypeId: "ServiceCase",
-                    primaryId: serviceCase.primaryId,
-                  },
-                  equipment: { objectTypeId: "Equipment", primaryId: equipment.primaryId },
-                  technician: { objectTypeId: "Technician", primaryId: technician.primaryId },
-                  disposition,
-                  finding: finding.trim(),
-                })
-              }
-              onComplete={() =>
-                completeVisit.mutate({
-                  serviceCase: {
-                    objectTypeId: "ServiceCase",
-                    primaryId: serviceCase.primaryId,
-                  },
-                  workOrder: { objectTypeId: "WorkOrder", primaryId: workOrder.primaryId },
-                  equipment: { objectTypeId: "Equipment", primaryId: equipment.primaryId },
-                  workPerformed: workPerformed.trim(),
-                  disposition: "resolved",
-                })
-              }
             />
           ) : (
             <TechnicianProfile
@@ -347,7 +260,6 @@ function VisitWorkspace({
   serviceCase,
   equipment,
   notes,
-  ...action
 }: {
   technician: TechnicianRow
   visit: VisitRow
@@ -356,7 +268,7 @@ function VisitWorkspace({
   serviceCase: VisitServiceCase
   equipment: VisitEquipment
   notes: readonly NoteRow[]
-} & VisitActionProps) {
+}) {
   return (
     <>
       <VisitHero
@@ -368,7 +280,15 @@ function VisitWorkspace({
 
       <div className="flex flex-wrap items-start gap-5">
         <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-5">
-          <VisitAction visit={visit} {...action} />
+          {/* Keyed by visit: what was typed for one visit never carries over to the next. */}
+          <VisitAction
+            key={visit.primaryId}
+            technician={technician}
+            visit={visit}
+            workOrder={workOrder}
+            serviceCase={serviceCase}
+            equipment={equipment}
+          />
 
           <Section title="Visit activity" description="Arrival, findings and work, newest first">
             <Timeline entries={activityEntries([visit], notes)} />
@@ -467,36 +387,45 @@ function VisitHero({
   )
 }
 
-interface VisitActionProps {
-  finding: string
-  disposition: Disposition
-  workPerformed: string
-  setFinding: (value: string) => void
-  setDisposition: (value: Disposition) => void
-  setWorkPerformed: (value: string) => void
-  starting: boolean
-  recording: boolean
-  completing: boolean
-  onStart: () => void
-  onRecordDiagnosis: () => void
-  onComplete: () => void
-}
-
 function VisitAction({
+  technician,
   visit,
-  finding,
-  disposition,
-  workPerformed,
-  setFinding,
-  setDisposition,
-  setWorkPerformed,
-  starting,
-  recording,
-  completing,
-  onStart,
-  onRecordDiagnosis,
-  onComplete,
-}: { visit: VisitRow } & VisitActionProps) {
+  workOrder,
+  serviceCase,
+  equipment,
+}: {
+  technician: TechnicianRow
+  visit: VisitRow
+  workOrder: VisitWorkOrder
+  serviceCase: VisitServiceCase
+  equipment: VisitEquipment
+}) {
+  const [finding, setFinding] = useState("")
+  const [disposition, setDisposition] = useState<Disposition>("quote_required")
+  const [workPerformed, setWorkPerformed] = useState("")
+  const subject = { objectType: ServiceVisit, primaryId: visit.primaryId }
+  const caseRef = { objectTypeId: "ServiceCase", primaryId: serviceCase.primaryId } as const
+  const workOrderRef = { objectTypeId: "WorkOrder", primaryId: workOrder.primaryId } as const
+  const equipmentRef = { objectTypeId: "Equipment", primaryId: equipment.primaryId } as const
+  const startVisit = useActionRunMutation<{
+    serviceCase: typeof caseRef
+    workOrder: typeof workOrderRef
+  }>({ actionId: "start-service-visit", subject, invalidateOnCommit: true })
+  const recordDiagnosis = useActionRunMutation<{
+    serviceCase: typeof caseRef
+    equipment: typeof equipmentRef
+    technician: { objectTypeId: "Technician"; primaryId: string }
+    disposition: Disposition
+    finding: string
+  }>({ actionId: "record-diagnosis", subject, invalidateOnCommit: true })
+  const completeVisit = useActionRunMutation<{
+    serviceCase: typeof caseRef
+    workOrder: typeof workOrderRef
+    equipment: typeof equipmentRef
+    workPerformed: string
+    disposition: "resolved" | "follow_up_required" | "awaiting_parts"
+  }>({ actionId: "complete-service-visit", subject, invalidateOnCommit: true })
+
   if (visit.properties.status === "scheduled") {
     return (
       <NextStepCard
@@ -506,13 +435,16 @@ function VisitAction({
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
-            disabled={starting}
-            onClick={onStart}
+            disabled={startVisit.isPending}
+            onClick={() => startVisit.mutate({ serviceCase: caseRef, workOrder: workOrderRef })}
             className={pillClass("primary", "max-sm:h-11 max-sm:w-full")}
           >
-            {starting ? "Starting…" : "Start visit"}
+            {startVisit.isPending ? "Starting…" : "Start visit"}
           </button>
         </div>
+        {startVisit.isError ? (
+          <ErrorLine>The visit could not be started. Try again.</ErrorLine>
+        ) : null}
       </NextStepCard>
     )
   }
@@ -566,13 +498,24 @@ function VisitAction({
           </fieldset>
 
           <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border/70 pt-5">
+            {recordDiagnosis.isError ? (
+              <ErrorLine>The diagnosis could not be recorded. Try again.</ErrorLine>
+            ) : null}
             <button
               type="button"
-              disabled={recording || !finding.trim()}
-              onClick={onRecordDiagnosis}
+              disabled={recordDiagnosis.isPending || !finding.trim()}
+              onClick={() =>
+                recordDiagnosis.mutate({
+                  serviceCase: caseRef,
+                  equipment: equipmentRef,
+                  technician: { objectTypeId: "Technician", primaryId: technician.primaryId },
+                  disposition,
+                  finding: finding.trim(),
+                })
+              }
               className={pillClass("primary", "max-sm:h-11 max-sm:w-full")}
             >
-              {recording ? "Recording…" : "Record diagnosis"}
+              {recordDiagnosis.isPending ? "Recording…" : "Record diagnosis"}
             </button>
           </div>
         </div>
@@ -607,13 +550,24 @@ function VisitAction({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border/70 pt-5">
+            {completeVisit.isError ? (
+              <ErrorLine>The visit could not be completed. Try again.</ErrorLine>
+            ) : null}
             <button
               type="button"
-              disabled={completing || !workPerformed.trim()}
-              onClick={onComplete}
+              disabled={completeVisit.isPending || !workPerformed.trim()}
+              onClick={() =>
+                completeVisit.mutate({
+                  serviceCase: caseRef,
+                  workOrder: workOrderRef,
+                  equipment: equipmentRef,
+                  workPerformed: workPerformed.trim(),
+                  disposition: "resolved",
+                })
+              }
               className={pillClass("primary", "max-sm:h-11 max-sm:w-full")}
             >
-              {completing ? "Completing…" : "Complete visit"}
+              {completeVisit.isPending ? "Completing…" : "Complete visit"}
             </button>
           </div>
         </div>
@@ -806,8 +760,4 @@ function visitStage(visit: VisitRow): string {
     return "complete"
   }
   return visit.properties.startedAt ? "diagnosis" : "on_site"
-}
-
-function timestamp(value: string | Date | undefined): number {
-  return value ? new Date(value).getTime() : 0
 }

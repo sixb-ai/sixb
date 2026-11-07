@@ -1,3 +1,4 @@
+import { useCurrentUser } from "@sixb/app"
 import { useActionRunMutation, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
@@ -18,7 +19,7 @@ import { Quote } from "../../../ontology/quote"
 import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { WorkOrder } from "../../../ontology/work-order"
-import { NextStepCard, PillButton, PillLink } from "../../_components/next-step"
+import { ErrorLine, NextStepCard, PillButton, PillLink } from "../../_components/next-step"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
@@ -49,36 +50,52 @@ const serviceCaseBase = objects(ServiceCase)
   .expand(ServiceCase.l.appliedContract)
   .expand(ServiceCase.l.originatingAlarms)
 
-const allWorkOrders = objects(WorkOrder)
-  .query()
-  .expand(WorkOrder.l.serviceCase)
-  .expand(WorkOrder.l.equipment)
-  .expand(WorkOrder.l.assignee)
-  .limit(100)
+// The case's own records, each followed from the case by the server.
+function caseWorkOrders(caseId: string) {
+  return objects(ServiceCase)
+    .query()
+    .where((serviceCase) => serviceCase.p.id.eq(caseId))
+    .traverse(WorkOrder.l.serviceCase, { direction: "incoming" })
+}
 
-const allVisits = objects(ServiceVisit)
-  .query()
-  .expand(ServiceVisit.l.workOrder)
-  .expand(ServiceVisit.l.technician)
-  .limit(100)
+function workOrdersQuery(caseId: string) {
+  return caseWorkOrders(caseId)
+    .expand(WorkOrder.l.equipment)
+    .expand(WorkOrder.l.assignee)
+    .limit(100)
+}
 
-const allNotes = objects(FieldNote)
-  .query()
-  .expand(FieldNote.l.visit)
-  .expand(FieldNote.l.author)
-  .limit(100)
+function visitsQuery(caseId: string) {
+  return caseWorkOrders(caseId)
+    .traverse(ServiceVisit.l.workOrder, { direction: "incoming" })
+    .expand(ServiceVisit.l.workOrder)
+    .expand(ServiceVisit.l.technician)
+    .limit(100)
+}
 
-const allQuotes = objects(Quote)
-  .query()
-  .expand(Quote.l.serviceCase)
-  .expand(Quote.l.originatingVisit)
-  .limit(100)
+function notesQuery(caseId: string) {
+  return caseWorkOrders(caseId)
+    .traverse(ServiceVisit.l.workOrder, { direction: "incoming" })
+    .traverse(FieldNote.l.visit, { direction: "incoming" })
+    .expand(FieldNote.l.visit)
+    .expand(FieldNote.l.author)
+    .limit(100)
+}
+
+function quotesQuery(caseId: string) {
+  return objects(ServiceCase)
+    .query()
+    .where((serviceCase) => serviceCase.p.id.eq(caseId))
+    .traverse(Quote.l.serviceCase, { direction: "incoming" })
+    .expand(Quote.l.originatingVisit)
+    .limit(100)
+}
 
 type ServiceCaseRow = QueryRow<typeof serviceCaseBase>
-type WorkOrderRow = QueryRow<typeof allWorkOrders>
-type VisitRow = QueryRow<typeof allVisits>
-type NoteRow = QueryRow<typeof allNotes>
-type QuoteRow = QueryRow<typeof allQuotes>
+type WorkOrderRow = QueryRow<ReturnType<typeof workOrdersQuery>>
+type VisitRow = QueryRow<ReturnType<typeof visitsQuery>>
+type NoteRow = QueryRow<ReturnType<typeof notesQuery>>
+type QuoteRow = QueryRow<ReturnType<typeof quotesQuery>>
 
 const stages = [
   { id: "new", label: "New" },
@@ -92,30 +109,21 @@ const stages = [
 
 export default function ServiceCaseDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
+  const user = useCurrentUser()
   const caseQuery = useMemo(
     () => serviceCaseBase.where((serviceCase) => serviceCase.p.id.eq(id)),
     [id]
   )
   const serviceCaseResult = useObjectsQuery(caseQuery)
-  const workOrdersResult = useObjectsQuery(allWorkOrders)
-  const visitsResult = useObjectsQuery(allVisits)
-  const notesResult = useObjectsQuery(allNotes)
-  const quotesResult = useObjectsQuery(allQuotes)
+  const workOrdersResult = useObjectsQuery(useMemo(() => workOrdersQuery(id), [id]))
+  const visitsResult = useObjectsQuery(useMemo(() => visitsQuery(id), [id]))
+  const notesResult = useObjectsQuery(useMemo(() => notesQuery(id), [id]))
+  const quotesResult = useObjectsQuery(useMemo(() => quotesQuery(id), [id]))
   const serviceCase = serviceCaseResult.data?.objects[0]
-  const workOrders = (workOrdersResult.data?.objects ?? []).filter(
-    (workOrder) => workOrder.links.serviceCase?.primaryId === id
-  )
-  const workOrderIds = new Set(workOrders.map((workOrder) => workOrder.primaryId))
-  const visits = (visitsResult.data?.objects ?? []).filter((visit) =>
-    workOrderIds.has(visit.links.workOrder?.primaryId ?? "")
-  )
-  const visitIds = new Set(visits.map((visit) => visit.primaryId))
-  const notes = (notesResult.data?.objects ?? []).filter((note) =>
-    visitIds.has(note.links.visit?.primaryId ?? "")
-  )
-  const quotes = (quotesResult.data?.objects ?? []).filter(
-    (quote) => quote.links.serviceCase?.primaryId === id
-  )
+  const workOrders = workOrdersResult.data?.objects ?? []
+  const visits = visitsResult.data?.objects ?? []
+  const notes = notesResult.data?.objects ?? []
+  const quotes = quotesResult.data?.objects ?? []
   const openQuote = quotes.find((quote) =>
     ["internal_review", "sent"].includes(quote.properties.status)
   )
@@ -162,11 +170,13 @@ export default function ServiceCaseDetailPage() {
       primary: (
         <PillButton
           disabled={acknowledge.isPending}
-          onClick={() => acknowledge.mutate({ operatorName: "Alex Dawson" })}
+          // Signed out, the action records the dispatch desk as the owner.
+          onClick={() => acknowledge.mutate({ operatorName: user?.displayName })}
         >
           {acknowledge.isPending ? "Acknowledging…" : "Acknowledge"}
         </PillButton>
       ),
+      error: acknowledge.isError ? "The case could not be acknowledged. Try again." : undefined,
     }
   } else if (serviceCase && status === "triage") {
     next = {
@@ -210,6 +220,7 @@ export default function ServiceCaseDetailPage() {
           {verify.isPending ? "Verifying…" : "Verify recovery"}
         </PillButton>
       ),
+      error: verify.isError ? "Recovery could not be verified. Try again." : undefined,
     }
   } else if (serviceCase && status === "resolved") {
     next = {
@@ -223,6 +234,7 @@ export default function ServiceCaseDetailPage() {
           {close.isPending ? "Closing…" : "Close case"}
         </PillButton>
       ),
+      error: close.isError ? "The case could not be closed. Try again." : undefined,
     }
   } else if (serviceCase && workspaceHref && status !== "closed" && status !== "cancelled") {
     next = {
@@ -301,6 +313,7 @@ export default function ServiceCaseDetailPage() {
                       </PillLink>
                     ) : null}
                   </div>
+                  {next.error ? <ErrorLine>{next.error}</ErrorLine> : null}
                 </NextStepCard>
               ) : null}
 
@@ -338,6 +351,8 @@ interface NextStep {
   readonly title: string
   readonly detail: string
   readonly primary: ReactNode
+  /** Why the primary action did not go through. */
+  readonly error?: string
 }
 
 function Diagnosis({ note }: { note: NoteRow }) {

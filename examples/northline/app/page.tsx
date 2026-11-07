@@ -1,5 +1,5 @@
 import { Composer, useAgentConversation, useCurrentUser } from "@sixb/app"
-import { useObjectsQuery } from "@sixb/client/hooks"
+import { useObjectsCount, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { cn } from "@sixb/ui/lib/utils"
 import { Fragment, type ReactNode } from "react"
@@ -25,10 +25,14 @@ import {
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
 import type { QueryRow } from "./_lib/query-types"
-import { caseDecision, useCasesWithFieldWorkDone } from "./_lib/service-cases"
+import {
+  caseDecision,
+  openServiceCases,
+  openWorkOrders,
+  useCasesWithFieldWorkDone,
+} from "./_lib/service-cases"
 
-const casesQuery = objects(ServiceCase)
-  .query()
+const casesQuery = openServiceCases
   .expand(ServiceCase.l.customer)
   .expand(ServiceCase.l.equipment)
   .orderBy(ServiceCase.p.responseDeadline, "asc")
@@ -38,8 +42,7 @@ const equipmentQuery = objects(Equipment).query().limit(200)
 
 const quotesQuery = objects(Quote).query().limit(100)
 
-const workOrdersQuery = objects(WorkOrder)
-  .query()
+const workOrdersQuery = openWorkOrders
   .expand(WorkOrder.l.assignee)
   .orderBy(WorkOrder.p.scheduledStart, "asc")
   .limit(100)
@@ -48,7 +51,14 @@ const alarmsQuery = objects(BuildingAlarm)
   .query()
   .expand(BuildingAlarm.l.equipment)
   .orderBy(BuildingAlarm.p.observedAt, "desc")
-  .limit(5)
+  .limit(1)
+
+// Widget headers count every record, past the rows a widget loads.
+const allCases = objects(ServiceCase).query()
+const allQuotes = objects(Quote).query()
+const activeAlarms = objects(BuildingAlarm)
+  .query()
+  .where((alarm) => alarm.p.status.eq("active"))
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(50)
 
@@ -72,10 +82,11 @@ export default function NorthlineHomePage() {
   const fieldWorkDone = useCasesWithFieldWorkDone()
   const alarms = useObjectsQuery(alarmsQuery, { staleTime: 30_000 })
   const technicians = useObjectsQuery(techniciansQuery, { staleTime: 30_000 })
+  const caseTotal = useObjectsCount(allCases)
+  const quoteTotal = useObjectsCount(allQuotes)
+  const activeAlarmCount = useObjectsCount(activeAlarms)
 
-  const open = (cases.data?.objects ?? []).filter(
-    (item) => !["closed", "cancelled"].includes(item.properties.status ?? "")
-  )
+  const open = cases.data?.objects ?? []
   const countStatus = (...statuses: string[]) =>
     open.filter((item) => statuses.includes(item.properties.status ?? "")).length
   // Before a technician is on site: new, being triaged, or dispatched and on the way.
@@ -111,11 +122,7 @@ export default function NorthlineHomePage() {
 
   // The same jobs Dispatch schedules today: everything not finished, on-site work first.
   const todaysWork = (workOrders.data?.objects ?? [])
-    .filter(
-      (item) =>
-        !["completed", "cancelled"].includes(item.properties.status) &&
-        isToday(item.properties.scheduledStart)
-    )
+    .filter((item) => isToday(item.properties.scheduledStart))
     .sort(
       (left, right) =>
         Number(right.properties.status === "on_site") - Number(left.properties.status === "on_site")
@@ -135,7 +142,7 @@ export default function NorthlineHomePage() {
           {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}
         </h1>
         <p className="mt-2 min-h-6 max-w-3xl text-[15px] leading-normal text-pretty text-muted-foreground">
-          {cases.isLoading || quotes.isLoading ? null : (
+          {!cases.data || quotes.isLoading ? null : (
             <Summary
               parts={[
                 decisionRows.length > 0 ? (
@@ -157,7 +164,7 @@ export default function NorthlineHomePage() {
                     {atRisk.length} {atRisk.length === 1 ? "case is" : "cases are"} at risk
                   </Link>
                 ) : null,
-                sentQuotes.length > 0 ? (
+                quotes.data && sentQuotes.length > 0 ? (
                   <Fragment key="quotes">
                     <Link className={cn(summaryLink, "text-foreground")} to="/quotes">
                       {sentQuotes.length} {sentQuotes.length === 1 ? "quote is" : "quotes are"}
@@ -187,7 +194,7 @@ export default function NorthlineHomePage() {
             label="View service cases"
             title="Service cases"
             size="medium"
-            meta={cases.isLoading ? null : `${cases.data?.objects.length ?? 0} total`}
+            meta={caseTotal.data === undefined ? null : `${caseTotal.data} total`}
           >
             <WidgetState loading={cases.isLoading} error={cases.isError} label="service cases">
               <div className="mt-auto pt-4">
@@ -295,7 +302,7 @@ export default function NorthlineHomePage() {
             loading={alarms.isLoading}
             error={alarms.isError}
             alarm={alarms.data?.objects[0]}
-            count={alarms.data?.objects.length ?? 0}
+            active={activeAlarmCount.data}
           />
 
           <Widget
@@ -303,7 +310,7 @@ export default function NorthlineHomePage() {
             label="View cases waiting on a decision"
             title="Needs you"
             size="medium"
-            meta={cases.isLoading ? null : `${decisionRows.length} waiting`}
+            meta={cases.data ? `${decisionRows.length} waiting` : null}
           >
             <WidgetState loading={cases.isLoading} error={cases.isError} label="decisions">
               {decisionRows.length === 0 ? (
@@ -325,7 +332,7 @@ export default function NorthlineHomePage() {
             label="View today’s schedule"
             title="Today’s schedule"
             size="medium"
-            meta={workOrders.isLoading ? null : `${todaysWork.length} jobs`}
+            meta={workOrders.data ? `${todaysWork.length} jobs` : null}
           >
             <WidgetState loading={workOrders.isLoading} error={workOrders.isError} label="jobs">
               {todaysWork.length === 0 ? (
@@ -370,7 +377,7 @@ export default function NorthlineHomePage() {
             label="View quotes"
             title="Quotes"
             size="medium"
-            meta={quotes.isLoading ? null : `${quoteRows.length} total`}
+            meta={quoteTotal.data === undefined ? null : `${quoteTotal.data} total`}
           >
             <WidgetState loading={quotes.isLoading} error={quotes.isError} label="quotes">
               <div className="mt-auto pt-4">
@@ -417,7 +424,7 @@ export default function NorthlineHomePage() {
             label="View equipment"
             title="Equipment"
             size="medium"
-            meta={equipment.isLoading ? null : `${units.length} units`}
+            meta={equipment.data ? `${units.length} units` : null}
           >
             <WidgetState loading={equipment.isLoading} error={equipment.isError} label="equipment">
               <div className="mt-auto pt-4">
@@ -469,12 +476,12 @@ function AlarmWidget({
   loading,
   error,
   alarm,
-  count,
+  active,
 }: {
   loading: boolean
   error: boolean
   alarm: AlarmRow | undefined
-  count: number
+  active: number | undefined
 }) {
   const equipment = alarm?.links.equipment
   return (
@@ -483,7 +490,7 @@ function AlarmWidget({
       label="View the latest alarm"
       title="Latest alarm"
       size="large"
-      meta={loading ? null : `${count} recent`}
+      meta={active === undefined ? null : `${active} active`}
       className="pb-0"
     >
       <WidgetState loading={loading} error={error} label="alarms">

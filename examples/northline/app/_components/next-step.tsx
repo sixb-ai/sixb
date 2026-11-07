@@ -67,3 +67,12 @@ export function NextStepCard({
     </section>
   )
 }
+
+/** Why an action did not go through, under its buttons. */
+export function ErrorLine({ children }: { children: ReactNode }) {
+  return (
+    <p role="alert" className="text-[13.5px] text-destructive">
+      {children}
+    </p>
+  )
+}

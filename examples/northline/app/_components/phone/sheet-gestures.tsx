@@ -114,14 +114,14 @@ export function SheetGestures() {
 function springBack(sheet: HTMLElement, overlay: HTMLElement | null) {
   sheet.style.transform = ""
   if (overlay) overlay.style.opacity = ""
-  sheet.addEventListener(
-    "transitionend",
-    () => {
-      sheet.style.transition = ""
-      if (overlay) overlay.style.transition = ""
-    },
-    { once: true }
-  )
+  // A child's transition bubbles up too; only the sheet's own spring finishing counts.
+  const finish = (event: TransitionEvent) => {
+    if (event.target !== sheet) return
+    sheet.removeEventListener("transitionend", finish)
+    sheet.style.transition = ""
+    if (overlay) overlay.style.transition = ""
+  }
+  sheet.addEventListener("transitionend", finish)
 }
 
 /** Whether anything between the touch and the sheet is scrolled away from its top. */

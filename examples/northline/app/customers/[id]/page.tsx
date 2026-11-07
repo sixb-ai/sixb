@@ -33,33 +33,42 @@ import {
 import type { QueryRow } from "../../_lib/query-types"
 import { quotePath } from "../../_lib/quotes"
 
-const customerBase = objects(CustomerAccount).query()
-const facilitiesQuery = objects(Facility).query().expand(Facility.l.customer).limit(100)
-const equipmentQuery = objects(Equipment).query().expand(Equipment.l.facility).limit(200)
-const casesQuery = objects(ServiceCase)
-  .query()
-  .expand(ServiceCase.l.customer)
-  .expand(ServiceCase.l.facility)
-  .expand(ServiceCase.l.equipment)
-  .limit(100)
-const contractsQuery = objects(ServiceContract)
-  .query()
-  .expand(ServiceContract.l.customer)
-  .expand(ServiceContract.l.coveredFacilities, { limit: 10 })
-  .limit(100)
-const visitsQuery = objects(ServiceVisit)
-  .query()
-  .expand(ServiceVisit.l.technician)
-  .expand(ServiceVisit.l.workOrder, (workOrder) => workOrder.expand(WorkOrder.l.serviceCase))
-  .limit(100)
-const quotesQuery = objects(Quote).query().expand(Quote.l.customer).limit(100)
+/** A customer and the records that belong to it, each followed from the customer by the server. */
+function customerQueries(id: string) {
+  const customer = objects(CustomerAccount)
+    .query()
+    .where((account) => account.p.id.eq(id))
+  const facilities = customer.traverse(Facility.l.customer, { direction: "incoming" })
+  const cases = customer.traverse(ServiceCase.l.customer, { direction: "incoming" })
+  return {
+    customer,
+    facilities: facilities.limit(100),
+    equipment: facilities
+      .traverse(Equipment.l.facility, { direction: "incoming" })
+      .expand(Equipment.l.facility)
+      .limit(200),
+    cases: cases.expand(ServiceCase.l.facility).expand(ServiceCase.l.equipment).limit(100),
+    contracts: customer
+      .traverse(ServiceContract.l.customer, { direction: "incoming" })
+      .expand(ServiceContract.l.coveredFacilities, { limit: 10 })
+      .limit(100),
+    visits: cases
+      .traverse(WorkOrder.l.serviceCase, { direction: "incoming" })
+      .traverse(ServiceVisit.l.workOrder, { direction: "incoming" })
+      .expand(ServiceVisit.l.technician)
+      .expand(ServiceVisit.l.workOrder, (workOrder) => workOrder.expand(WorkOrder.l.serviceCase))
+      .limit(100),
+    quotes: customer.traverse(Quote.l.customer, { direction: "incoming" }).limit(100),
+  }
+}
 
-type FacilityRow = QueryRow<typeof facilitiesQuery>
-type EquipmentRow = QueryRow<typeof equipmentQuery>
-type CaseRow = QueryRow<typeof casesQuery>
-type ContractRow = QueryRow<typeof contractsQuery>
-type VisitRow = QueryRow<typeof visitsQuery>
-type QuoteRow = QueryRow<typeof quotesQuery>
+type CustomerQueries = ReturnType<typeof customerQueries>
+type FacilityRow = QueryRow<CustomerQueries["facilities"]>
+type EquipmentRow = QueryRow<CustomerQueries["equipment"]>
+type CaseRow = QueryRow<CustomerQueries["cases"]>
+type ContractRow = QueryRow<CustomerQueries["contracts"]>
+type VisitRow = QueryRow<CustomerQueries["visits"]>
+type QuoteRow = QueryRow<CustomerQueries["quotes"]>
 
 const contractTypes: Record<string, string> = {
   full_service: "Full service",
@@ -69,39 +78,27 @@ const contractTypes: Record<string, string> = {
 
 export default function CustomerDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
-  const customerQuery = useMemo(() => customerBase.where((customer) => customer.p.id.eq(id)), [id])
-  const customerResult = useObjectsQuery(customerQuery)
-  const facilitiesResult = useObjectsQuery(facilitiesQuery)
-  const equipmentResult = useObjectsQuery(equipmentQuery)
-  const casesResult = useObjectsQuery(casesQuery)
-  const contractsResult = useObjectsQuery(contractsQuery)
-  const visitsResult = useObjectsQuery(visitsQuery)
-  const quotesResult = useObjectsQuery(quotesQuery)
+  const queries = useMemo(() => customerQueries(id), [id])
+  const customerResult = useObjectsQuery(queries.customer)
+  const facilitiesResult = useObjectsQuery(queries.facilities)
+  const equipmentResult = useObjectsQuery(queries.equipment)
+  const casesResult = useObjectsQuery(queries.cases)
+  const contractsResult = useObjectsQuery(queries.contracts)
+  const visitsResult = useObjectsQuery(queries.visits)
+  const quotesResult = useObjectsQuery(queries.quotes)
 
   const customer = customerResult.data?.objects[0]
-  const facilities = (facilitiesResult.data?.objects ?? []).filter(
-    (facility) => facility.links.customer?.primaryId === id
-  )
-  const facilityIds = new Set(facilities.map((facility) => facility.primaryId))
-  const equipment = (equipmentResult.data?.objects ?? []).filter((asset) =>
-    facilityIds.has(asset.links.facility?.primaryId ?? "")
-  )
-  const cases = (casesResult.data?.objects ?? []).filter(
-    (serviceCase) => serviceCase.links.customer?.primaryId === id
-  )
-  const caseIds = new Set(cases.map((serviceCase) => serviceCase.primaryId))
+  const facilities = facilitiesResult.data?.objects ?? []
+  const equipment = equipmentResult.data?.objects ?? []
+  const cases = casesResult.data?.objects ?? []
   const activeCases = cases
     .filter((serviceCase) => !["closed", "cancelled"].includes(serviceCase.properties.status))
     .sort((left, right) => casePriority(right.properties) - casePriority(left.properties))
-  const contracts = (contractsResult.data?.objects ?? [])
-    .filter((contract) => contract.links.customer?.primaryId === id)
-    .sort((left, right) => Number(isCurrent(right)) - Number(isCurrent(left)))
-  const visits = (visitsResult.data?.objects ?? []).filter((visit) =>
-    caseIds.has(visit.links.workOrder?.links.serviceCase?.primaryId ?? "")
+  const contracts = [...(contractsResult.data?.objects ?? [])].sort(
+    (left, right) => Number(isCurrent(right)) - Number(isCurrent(left))
   )
-  const quotes = (quotesResult.data?.objects ?? []).filter(
-    (quote) => quote.links.customer?.primaryId === id
-  )
+  const visits = visitsResult.data?.objects ?? []
+  const quotes = quotesResult.data?.objects ?? []
   const slaRisks = activeCases.filter((serviceCase) => isCaseAtRisk(serviceCase.properties)).length
   const loading =
     customerResult.isLoading ||
