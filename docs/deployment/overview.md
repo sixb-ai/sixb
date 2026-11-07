@@ -66,12 +66,12 @@ Run each needed command as a separate managed process or container:
 | `bun sixb api` | Serve the HTTP API, WebSockets, and API docs. |
 | `bun sixb app` | Serve your app, with its built-in pages. |
 | `bun sixb orchestrator` | Run cron schedules, dispatch event-triggered work, and keep the project healthy. |
-| `bun sixb worker-group` | Run workers for the project's registered work. |
+| `bun sixb worker-group` | Run workers for the project's registered work, [lake cleanup](../datasets/overview.md#storage-maintenance) included. |
 | `bun sixb rules` | Evaluate rules, if used. |
 
 `app` serves the built bundle without loading `sixb.config.ts`, so it needs only the API's public origin, not the project's secrets or database access.
 
-Keep the orchestrator running even when the project has no schedules: it delivers events that could not be delivered when they were saved, repairs triggers that were lost, and purges expired records. Start workers and rules before the orchestrator. On shutdown, stop producers before workers.
+Keep the orchestrator running even when the project has no schedules: it delivers events that could not be delivered when they were saved, repairs triggers that were lost, purges expired records, and requests lake cleanup. Start workers and rules before the orchestrator. On shutdown, stop producers before workers.
 
 In development, `bun sixb dev` starts these services together. Use the separate commands in production so your process manager can restart and scale them independently.
 

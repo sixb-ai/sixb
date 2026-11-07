@@ -193,6 +193,7 @@ sixb worker sync
 sixb worker pipeline
 sixb worker projection
 sixb worker workflow
+sixb worker lake
 
 # Development with custom entry and app port
 sixb dev --entry examples/mac-os/sixb.config.ts --port 8080
@@ -376,12 +377,13 @@ The lake is opened only when a role actually does lake work — API dataset rout
 pipeline jobs, projection jobs, and lake jobs. Write paths re-validate their target dataset through the lake
 provider's `createDataset` before committing, so drift still fails clearly even between deploys.
 
-Use `sixb lake cleanup` to run one retention pass on providers with lake maintenance. A version
-stays readable for `--keep-versions-for` (7 days by default) after a newer version replaced it,
-and the files only expired versions read are deleted `--delete-files-after` (7 days) later. Each
-dataset's latest version and the version each projection applied, read from the project's
-storage, are always kept; the report counts the second ones as kept versions. A pass expires and
-deletes at most 1,000 of each: when it says more is due, run it again. Start with `--dry-run`.
+The orchestrator requests lake retention every `cleanupEvery` and a `lake` worker runs it. Use
+`sixb lake cleanup` to run it now, on providers with lake maintenance. A version stays readable for
+`--keep-versions-for` after a newer version replaced it, and the files only expired versions read
+are deleted `--delete-files-after` later; both default to the project's `lakeMaintenance`. Each
+dataset's latest version and the version each projection applied, read from the project's storage,
+are always kept; the report counts the second ones as kept versions. The command runs passes until
+none is left. Start with `--dry-run`, which measures one pass.
 
 ### Production topologies
 
@@ -395,6 +397,7 @@ sixb orchestrator
 sixb worker sync
 sixb worker pipeline
 sixb worker projection
+sixb worker lake
 SIXB_API_PUBLIC_ORIGIN=https://api.example.com sixb worker agent
 ```
 
@@ -404,12 +407,14 @@ SIXB_API_PUBLIC_ORIGIN=https://api.example.com sixb worker agent
 ```bash
 sixb api
 sixb orchestrator
-sixb worker-group sync pipeline projection
+sixb worker-group sync pipeline projection lake
 ```
 
 `sixb worker-group` with no positional types starts every registered queue worker type in one
-process, including the agent worker when agents and agent storage are configured. Agent workers
-require the API origin through `--api-public-origin` or `SIXB_API_PUBLIC_ORIGIN`.
+process, including the agent worker when agents and agent storage are configured, and the lake
+worker when lake retention runs on its own. A list that leaves `lake` out starts with a warning:
+nothing else consumes that queue. Agent workers require the API origin through
+`--api-public-origin` or `SIXB_API_PUBLIC_ORIGIN`.
 
 `sixb dev` uses separated local ports by default:
 

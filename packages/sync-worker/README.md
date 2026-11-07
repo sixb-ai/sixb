@@ -56,23 +56,6 @@ row count, and committed `DatasetVersion`.
 - supported sync read results are a single row object, an iterable, or an async
   iterable.
 
-## Lake lane
-
-`SyncWorker` also hosts a `LakeWorker` on the `lake` queue lane whenever the host schedules lake
-retention (`lakeMaintenance` on, a lake provider with `maintenance`, and at least one dataset). It
-starts then even when the project has no syncs, and runs beside the sync lane, so a sync never
-delays lake work and lake work never takes a sync slot. It claims two jobs at a time.
-
-A `lake.retention.requested` job runs one occurrence of the built-in schedule:
-
-- An occurrence older than one `cleanupEvery` completes without work: a later one covers it, so a
-  backlog left by a stopped worker runs once.
-- Otherwise it runs retention passes while one reports more, rebuilding the protected versions
-  (those projections applied) before each pass, with a 1 s pause between passes. It starts no
-  pass after min(½ `cleanupEvery`, 10 min); the next occurrence continues.
-- A failure retries through the queue a minute later. The third failure fails the job and is
-  reported to `onError` as `lake.retention.failed`; shutdown releases the job instead.
-
 ## Development
 
 ```bash

@@ -88,8 +88,9 @@ tested build there, in a server image for example, makes a deploy independent of
 
 ### Maintenance
 
-DuckLake keeps every snapshot, and every file a snapshot reads, until retention removes them.
-`lakeStorage.maintenance` implements core's `LakeMaintenance`:
+DuckLake keeps every snapshot, and every file a snapshot reads, until retention removes them. The
+framework runs retention on its own, as `lakeMaintenance` configures it, and `sixb lake cleanup`
+runs it now. `lakeStorage.maintenance` implements core's `LakeMaintenance`:
 
 ```ts
 const report = await lakeStorage.maintenance.applyRetention({
