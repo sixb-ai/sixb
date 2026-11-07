@@ -33,6 +33,7 @@ function CommandDialog({
   className,
   showCloseButton = true,
   shouldFilter,
+  fullscreen = false,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
@@ -40,6 +41,8 @@ function CommandDialog({
   className?: string
   showCloseButton?: boolean
   shouldFilter?: boolean
+  /** On a phone, fill the screen instead of rising as a sheet, as a search does. */
+  fullscreen?: boolean
 }) {
   const messages = useUiMessages()
   return (
@@ -51,6 +54,7 @@ function CommandDialog({
       <DialogContent
         className={cn("overflow-hidden p-0", className)}
         showCloseButton={showCloseButton}
+        data-fullscreen={fullscreen ? "" : undefined}
       >
         <Command
           shouldFilter={shouldFilter}

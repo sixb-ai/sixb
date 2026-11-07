@@ -870,6 +870,9 @@ export function Composer({
           <div
             data-dragging={draggingFiles || undefined}
             data-expanded={expanded || undefined}
+            // The composer focuses itself on arrival and after each answer; on a phone that raises
+            // the keyboard only after a tap on it (TouchViewport).
+            data-focus-on-tap=""
             className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px]"
           >
             {/* The draft on one line, to tell when it stops fitting there. */}

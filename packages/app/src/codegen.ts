@@ -558,6 +558,7 @@ import {
   SixbEventsProvider,
 } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
+import { PhoneFoundations } from "@sixb/app/pages"
 ${sectionsImport}${toolViewsImport}import { activityRoutePaths, routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
@@ -1020,6 +1021,7 @@ function App({ basename }: StartAppOptions) {
       <ProjectLocale shared={Boolean(basename)}>
         ${sectionsStart}
         <BrowserRouter basename={basename}>
+          <PhoneFoundations />
           <ActivityPageView />
           <RefusedFrameReporter />
           <SharedDocumentLinkInterceptor basename={basename} />

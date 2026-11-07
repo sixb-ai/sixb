@@ -3,22 +3,19 @@ import type { ComponentProps } from "react"
 import { NavigationMotion } from "./navigation-motion"
 import { PhoneMoreSheet } from "./phone-more-sheet"
 import { ScrollRestoration } from "./scroll-restoration"
-import { SheetGestures } from "./sheet-gestures"
 import { SwipeBack } from "./swipe-back"
-import { ViewportController } from "./viewport-controller"
 
 /**
- * The viewport, keyboard, scroll and gesture handling that makes the app behave like an installed
- * one on a phone. Each part renders nothing and checks for itself whether it applies, so this sits
- * once at the root and stays mounted across every page, the full-screen ones included.
+ * The scroll, motion and back gesture handling that makes the app behave like an installed one on
+ * a phone; the keyboard and sheets come from the framework. Each part renders nothing and checks
+ * for itself whether it applies, so this sits once at the root and stays mounted across every page,
+ * the full-screen ones included.
  */
 export function PhoneBehaviors() {
   return (
     <>
-      <ViewportController />
       <ScrollRestoration />
       <NavigationMotion />
-      <SheetGestures />
       <SwipeBack />
     </>
   )

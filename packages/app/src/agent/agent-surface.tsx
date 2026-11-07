@@ -268,6 +268,8 @@ export function AgentSurface({
       <aside
         data-agent-surface={presentation}
         data-agent-surface-resizing={resizing ? "" : undefined}
+        // On a phone the dock rests on the keyboard, rising into place as it opens (TouchViewport).
+        data-keyboard-overlay={presentation === "dock" ? "" : undefined}
         aria-label={surfaceTitle}
         aria-hidden={!visible}
         inert={!visible}

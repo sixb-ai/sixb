@@ -1,0 +1,420 @@
+/*
+ * Touch and phone foundations. On a phone an app should feel installed: no zooming, no grey tap
+ * flashes, no text selection on controls, controls sized for a finger, dialogs that rise from the
+ * bottom as sheets, and nothing under the notch, the home indicator or the keyboard. Wider screens
+ * and mouse pointers are untouched: every rule is scoped to touch or to phone widths.
+ *
+ * `TouchViewport` publishes `--keyboard-inset` and `html[data-keyboard]`; `SheetGestures` lets a
+ * sheet be pulled down. A dialog that should fill a phone's screen instead of rising as a sheet,
+ * such as a search, carries `data-fullscreen`.
+ */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  /* The height an app lays itself out in, less the keyboard while it is up. In an installed app iOS
+     gets one measure wrong by the status bar's height, which one depending on whether the app
+     draws under it: 100vh counts the status bar when the app starts below it, and 100dvh can
+     leave it out when the app draws under it. The smaller of the two corrected is right either
+     way, and in a browser it is 100dvh. */
+  --viewport-height: min(100vh, 100dvh + env(safe-area-inset-top, 0px));
+  --app-height: calc(var(--viewport-height) - var(--keyboard-inset));
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Translucent tones for touch chrome, as plain rgb(): Tailwind's compiler mangles color-mix()
+     (it keeps an opaque fallback and drops all but one translucent value per rule). */
+  --touch-hairline: rgb(23 23 23 / 0.1);
+  --touch-edge: rgb(23 23 23 / 0.09);
+  --touch-grabber: rgb(23 23 23 / 0.18);
+  --touch-fill: rgb(23 23 23 / 0.065);
+  --touch-pressed: rgb(23 23 23 / 0.07);
+  --touch-chevron: rgb(23 23 23 / 0.28);
+  --touch-glass: rgb(250 250 250 / 0.8);
+  --touch-destructive-pressed: rgb(220 38 38 / 0.08);
+
+  /* Glass: a bright translucent body, a hairline rim, a specular top edge and a soft, wide shadow
+     that lifts it off the page. The lens marks the current item in a glass control. */
+  --glass-fill: rgb(255 255 255 / 0.66);
+  --glass-rim: rgb(0 0 0 / 0.07);
+  --glass-shine: rgb(255 255 255 / 0.95);
+  --glass-lens: rgb(0 0 0 / 0.065);
+  --glass-shadow: 0 10px 34px -10px rgb(0 0 0 / 0.22), 0 2px 8px -2px rgb(0 0 0 / 0.08);
+  --glass-blur: blur(22px) saturate(1.9) brightness(1.04);
+}
+
+.dark {
+  --touch-hairline: rgb(241 241 241 / 0.12);
+  --touch-edge: rgb(241 241 241 / 0.1);
+  --touch-grabber: rgb(241 241 241 / 0.24);
+  --touch-fill: rgb(241 241 241 / 0.09);
+  --touch-pressed: rgb(241 241 241 / 0.1);
+  --touch-chevron: rgb(241 241 241 / 0.3);
+  --touch-glass: rgb(13 13 14 / 0.78);
+  --touch-destructive-pressed: rgb(248 113 113 / 0.12);
+
+  --glass-fill: rgb(38 38 40 / 0.62);
+  --glass-rim: rgb(255 255 255 / 0.11);
+  --glass-shine: rgb(255 255 255 / 0.16);
+  --glass-lens: rgb(255 255 255 / 0.12);
+  --glass-shadow: 0 12px 36px -10px rgb(0 0 0 / 0.7), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+  --glass-blur: blur(22px) saturate(1.6) brightness(0.92);
+}
+
+/* In the desktop app the window controls sit over the top edge, so a narrow window keeps clear of
+   them as a phone keeps clear of the notch. */
+html[data-sixb-desktop] {
+  --safe-top: var(--sixb-desktop-controls-height, 0px);
+}
+
+/* Registered so it can animate. TouchViewport sets the keyboard's height in the frame the keyboard
+   starts to move, and whatever rides on it follows on the keyboard's own curves, measured on iOS
+   26: a long, settling rise, started a couple of frames in so nothing falls behind (the negative
+   delay), and a quick drop that trails iOS's late report, which never covers anything. */
+@property --keyboard-inset {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+html {
+  transition: --keyboard-inset 160ms ease;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html[data-keyboard] {
+  transition: --keyboard-inset 450ms cubic-bezier(0.2, 1, 0.25, 1) -33ms;
+}
+
+/* Double-tap zoom off everywhere. In the base layer, so `touch-none` and friends still win. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    touch-action: manipulation;
+  }
+}
+
+/* Touch: controls behave like controls. */
+@media (hover: none) and (pointer: coarse) {
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"],
+  [data-slot="button"],
+  a:not(.prose a),
+  label,
+  img,
+  svg {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* A pressed control dims, as native buttons do, and recovers gently on release. */
+  :is([data-slot="button"], [data-slot="tabs-trigger"], [data-slot="toggle"]) {
+    transition-property: opacity, color, background-color, border-color, box-shadow;
+  }
+
+  :is([data-slot="button"], [data-slot="tabs-trigger"], [data-slot="toggle"]):active:not(:disabled) {
+    opacity: 0.6;
+    transition-duration: 0ms;
+  }
+
+  /* iOS zooms into any text field under 16px, and Android renders it cramped. Fields set larger on
+     purpose, such as an inline title, keep their size. */
+  input:not(
+      [type="checkbox"],
+      [type="radio"],
+      [type="range"],
+      [type="file"],
+      [type="color"],
+      [type="button"],
+      [type="submit"],
+      [type="reset"],
+      [type="image"],
+      [class*="text-[17"],
+      [class*="text-[18"],
+      [class*="text-[19"],
+      [class*="text-[2"],
+      [class*="text-[3"],
+      [class*="text-lg"],
+      [class*="text-xl"],
+      [class*="text-2xl"],
+      [class*="text-3xl"]
+    ),
+  textarea:not(
+      [class*="text-[17"],
+      [class*="text-[18"],
+      [class*="text-[19"],
+      [class*="text-[2"],
+      [class*="text-[3"],
+      [class*="text-lg"],
+      [class*="text-xl"],
+      [class*="text-2xl"],
+      [class*="text-3xl"]
+    ),
+  select {
+    font-size: 16px;
+  }
+}
+
+/* Phone layouts: finger-sized controls. */
+@media (max-width: 767px) and (pointer: coarse) {
+  /* Fields and primary buttons share the native 44px row height. */
+  [data-slot="input"],
+  [data-slot="select-trigger"],
+  [data-slot="native-select"],
+  [data-slot="input-group"],
+  :is([data-slot="button"], button[data-variant], a[data-variant])[data-size="default"],
+  :is([data-slot="button"], button[data-variant], a[data-variant])[data-size="icon"] {
+    min-height: 44px;
+  }
+
+  :is([data-slot="button"], button[data-variant], a[data-variant])[data-size="icon"] {
+    min-width: 44px;
+  }
+
+  :is([data-slot="button"], button[data-variant], a[data-variant]):is(
+      [data-size="lg"],
+      [data-size="icon-lg"]
+    ) {
+    min-height: 48px;
+  }
+
+  :is([data-slot="button"], button[data-variant], a[data-variant])[data-size="sm"] {
+    min-height: 36px;
+  }
+
+  :is([data-slot="button"], button[data-variant], a[data-variant])[data-size="icon-sm"] {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  [data-slot="tabs-trigger"] {
+    min-height: 36px;
+  }
+
+  /* Menus and pickers read as native lists. */
+  :is(
+      [data-slot="dropdown-menu-item"],
+      [data-slot="dropdown-menu-checkbox-item"],
+      [data-slot="dropdown-menu-radio-item"],
+      [data-slot="dropdown-menu-sub-trigger"],
+      [data-slot="select-item"],
+      [data-slot="command-item"],
+      [data-slot="context-menu-item"]
+    ) {
+    min-height: 44px;
+    font-size: 15px;
+  }
+
+  [data-slot="dropdown-menu-content"],
+  [data-slot="select-content"],
+  [data-slot="popover-content"] {
+    border-radius: 14px;
+  }
+
+  /* Small controls keep their look but take a finger-sized touch area. */
+  @layer base {
+    :is(
+        [data-slot="button"],
+        button[data-variant][data-size],
+        [data-slot="checkbox"],
+        [data-slot="switch"],
+        [data-slot="radio-group-item"],
+        [data-slot="toggle"]
+      ) {
+      position: relative;
+    }
+  }
+
+  :is([data-slot="button"], button[data-variant]):is(
+      [data-size="sm"],
+      [data-size="xs"],
+      [data-size="icon-sm"],
+      [data-size="icon-xs"]
+    )::after,
+  :is(
+      [data-slot="checkbox"],
+      [data-slot="switch"],
+      [data-slot="radio-group-item"],
+      [data-slot="toggle"]
+    )::after {
+    position: absolute;
+    inset-block: min(0px, calc((100% - 44px) / 2));
+    inset-inline: min(0px, calc((100% - 44px) / 2));
+    content: "";
+  }
+}
+
+/* Phone overlays: every dialog presents as an iOS sheet, a card floating just inside the screen's
+   edges that rises from the bottom and, while typing, rests just above the keyboard. */
+@media (max-width: 767px) {
+  :root {
+    --sheet-gap: max(8px, calc(var(--safe-bottom) - 26px));
+  }
+
+  :is(
+      [data-slot="dialog-overlay"],
+      [data-slot="alert-dialog-overlay"],
+      [data-slot="sheet-overlay"],
+      [data-slot="drawer-overlay"]
+    ) {
+    background: rgb(0 0 0 / 0.3);
+  }
+
+  /* Dialogs and bottom drawers float as one sheet shape above the home indicator and keyboard. */
+  :is(
+      [data-slot="dialog-content"]:not([data-fullscreen]),
+      [data-slot="alert-dialog-content"],
+      [data-slot="drawer-content"][data-vaul-drawer-direction="bottom"]
+    ) {
+    right: 8px;
+    bottom: calc(var(--keyboard-inset) + var(--sheet-gap));
+    left: 8px;
+    max-height: calc(var(--app-height) - var(--safe-top) - var(--sheet-gap) - 12px);
+    border: 0;
+    border-radius: 32px;
+    box-shadow:
+      0 12px 48px rgb(0 0 0 / 0.18),
+      0 0 0 0.5px var(--glass-rim);
+  }
+
+  :is([data-slot="dialog-content"]:not([data-fullscreen]), [data-slot="alert-dialog-content"]) {
+    top: auto;
+    width: auto;
+    max-width: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-top: 28px;
+    padding-bottom: 1.5rem;
+    /* Undo the centring translate; Tailwind's translate utilities read these variables. */
+    --tw-translate-x: 0px;
+    --tw-translate-y: 0px;
+    transform: none;
+    animation: sheet-in 460ms var(--ease-sheet);
+  }
+
+  :is(
+      [data-slot="dialog-content"]:not([data-fullscreen]),
+      [data-slot="alert-dialog-content"]
+    )[class~="p-0"] {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  :is(
+      [data-slot="dialog-content"]:not([data-fullscreen]),
+      [data-slot="alert-dialog-content"]
+    )[data-state="closed"] {
+    animation: sheet-out 260ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  }
+
+  html[data-keyboard]
+    :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]):not([class~="p-0"]) {
+    padding-bottom: 16px;
+  }
+
+  /* The grabber says the sheet can be pulled down (SheetGestures). */
+  :is(
+      [data-slot="dialog-content"]:not([data-fullscreen]),
+      [data-slot="alert-dialog-content"]
+    )::before {
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    z-index: 1;
+    width: 36px;
+    height: 5px;
+    margin-left: -18px;
+    border-radius: 999px;
+    background: var(--touch-grabber);
+    content: "";
+  }
+
+  [data-slot="dialog-close"] {
+    top: 14px;
+    right: 14px;
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--touch-pressed);
+    color: var(--muted-foreground);
+    opacity: 1;
+  }
+
+  [data-slot="dialog-close"]::after {
+    position: absolute;
+    inset: -7px;
+    content: "";
+  }
+
+  /* Actions stack full width at the bottom of a sheet, the primary one last, nearest the thumb. */
+  :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) {
+    flex-direction: column-reverse;
+    gap: 10px;
+  }
+
+  :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"])
+    > :is(button, a, [data-slot="button"]) {
+    width: 100%;
+    min-height: 48px;
+    border-radius: 14px;
+    font-size: 16px;
+  }
+
+  /* Side sheets clear the notch and the home indicator. */
+  [data-slot="sheet-content"] {
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  /* The drawer extends its background below itself for overscroll; a floating card has no edge to
+     hide. */
+  [data-slot="drawer-content"][data-vaul-drawer-direction="bottom"]::after {
+    display: none;
+  }
+
+  [data-slot="drawer-content"] > div:first-child:empty {
+    width: 36px;
+    height: 5px;
+    margin-top: 7px;
+    background: var(--touch-grabber);
+  }
+
+  /* Toasts drop in as banners do: a rounded card over the top of the screen. */
+  [data-sonner-toaster] [data-sonner-toast] {
+    min-height: 52px;
+    padding: 14px 16px;
+    border-radius: 20px;
+    font-size: 15px;
+    box-shadow:
+      0 12px 32px -12px rgb(0 0 0 / 0.25),
+      0 0 0 0.5px var(--glass-rim);
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+@keyframes sheet-out {
+  to {
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) {
+    animation-duration: 1ms !important;
+  }
+}

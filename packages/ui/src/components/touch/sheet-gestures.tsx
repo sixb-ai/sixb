@@ -1,16 +1,16 @@
 import { useEffect } from "react"
-import { PHONE_QUERY, scrolledWithin } from "./phone-dom"
 
-// Search fills the screen on phones rather than rising as a sheet (see phone-navigation.css).
+const PHONE_QUERY = "(max-width: 767px)"
+// A dialog marked `data-fullscreen` fills a phone's screen rather than rising as a sheet.
 const SHEETS =
-  '[data-slot="dialog-content"]:not(.northline-search), [data-slot="alert-dialog-content"]'
+  '[data-slot="dialog-content"]:not([data-fullscreen]), [data-slot="alert-dialog-content"]'
 const OVERLAYS = '[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"]'
 // Controls that own vertical drags themselves.
 const OWN_DRAG = 'input, textarea, select, [contenteditable="true"], [role="slider"]'
 
 /**
- * On phones every dialog presents as a sheet from the bottom of the screen (see phone-shell.css).
- * This lets each one be pulled down to dismiss, as native sheets are: the sheet follows the finger
+ * On phones every dialog presents as a sheet from the bottom of the screen (touch.css). This lets
+ * each one be pulled down to dismiss, as native sheets are: the sheet follows the finger
  * once its content is scrolled to the top, and a long or quick pull closes it the way Escape
  * would, so a dialog that refuses Escape simply springs back.
  */
@@ -121,4 +121,13 @@ function springBack(sheet: HTMLElement, overlay: HTMLElement | null) {
     if (overlay) overlay.style.transition = ""
   }
   sheet.addEventListener("transitionend", finish)
+}
+
+/** Whether anything from `target` up to `container` is scrolled away from its top. */
+function scrolledWithin(target: Element, container: HTMLElement): boolean {
+  for (let node: Element | null = target; node; node = node.parentElement) {
+    if (node.scrollTop > 0) return true
+    if (node === container) return false
+  }
+  return false
 }
