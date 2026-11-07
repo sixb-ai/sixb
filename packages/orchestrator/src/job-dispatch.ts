@@ -6,12 +6,10 @@ import {
 } from "@sixb/core"
 import { reportOrchestratorDispatchFailure } from "@sixb/core/internal/error-reporting"
 import { isSixbError } from "@sixb/core/internal/errors"
+import { retryDelay, sleep } from "./backoff"
 
 /** A dispatch writes one run and publishes one job. Past this it hangs: count it as failed. */
 const ATTEMPT_TIMEOUT_MS = 30_000
-
-const RETRY_INITIAL_DELAY_MS = 250
-const RETRY_MAX_DELAY_MS = 10_000
 
 /** About five minutes of backoff: long enough that a retrying job is worth telling someone about. */
 const REPORT_AFTER_ATTEMPTS = 36
@@ -154,23 +152,4 @@ async function attempt(job: DispatchJob): Promise<{ readonly error: unknown } | 
   } finally {
     clearTimeout(timer)
   }
-}
-
-function retryDelay(retry: number): number {
-  return Math.min(RETRY_INITIAL_DELAY_MS * 2 ** retry, RETRY_MAX_DELAY_MS)
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve()
-
-  return new Promise((resolve) => {
-    const finish = () => {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", finish)
-      resolve()
-    }
-
-    const timer = setTimeout(finish, ms)
-    signal.addEventListener("abort", finish, { once: true })
-  })
 }

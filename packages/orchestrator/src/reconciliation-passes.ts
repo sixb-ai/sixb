@@ -22,12 +22,13 @@ export interface ReconciliationPassesInput {
   readonly projectId: string
   readonly routes: OrchestratorRoutes
   readonly dispatchers: OrchestratorDispatchers
-  /** The lake's change feed, which every pass here reads through one reader. */
-  readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince">
+  readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince"> &
+    ProjectionReconciliationPorts["lakeStorage"] &
+    DatasetTriggerReconciliationPorts["lakeStorage"]
   /** Required when the routes contain projections. */
-  readonly projections?: ProjectionReconciliationPorts
+  readonly projectionRuns?: ProjectionReconciliationPorts["projectionRuns"]
   /** Without it, a pipeline's dataset triggers have only their event. */
-  readonly datasetTriggers?: DatasetTriggerReconciliationPorts
+  readonly pipelineRuns?: DatasetTriggerReconciliationPorts["pipelineRuns"]
 }
 
 /**
@@ -55,7 +56,7 @@ function projectionPass(
   const descriptors = projectionDescriptors(input.projectId, input.routes)
   if (descriptors.length === 0) return null
 
-  if (!input.projections) {
+  if (!input.projectionRuns) {
     throw createSixbError(
       "internal.unexpected",
       "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
@@ -69,7 +70,8 @@ function projectionPass(
   }
 
   const reconciler = new ProjectionDispatchReconciler({
-    ...input.projections,
+    lakeStorage: input.lakeStorage,
+    projectionRuns: input.projectionRuns,
     projectId: input.projectId,
     dispatcher: requireDispatcher(input, "projections"),
     descriptors,
@@ -79,7 +81,7 @@ function projectionPass(
 
   return everyMs({
     id: "projections",
-    intervalMs: reconciler.intervalMs,
+    intervalMs: INTERVAL_MS,
     budgetMs: PASS_BUDGET_MS,
     run: (signal) => reconciler.pass(signal),
   })
@@ -90,10 +92,11 @@ function datasetTriggerPass(
   feed: LakeChangeFeed
 ): MaintenancePass | null {
   const triggers = datasetTriggers(input.routes)
-  if (triggers.length === 0 || !input.datasetTriggers) return null
+  if (triggers.length === 0 || !input.pipelineRuns) return null
 
   const reconciler = new DatasetTriggerReconciler({
-    ...input.datasetTriggers,
+    lakeStorage: input.lakeStorage,
+    pipelineRuns: input.pipelineRuns,
     projectId: input.projectId,
     dispatcher: requireDispatcher(input, "pipelines"),
     triggers,
@@ -103,7 +106,7 @@ function datasetTriggerPass(
 
   return everyMs({
     id: "triggers",
-    intervalMs: reconciler.intervalMs,
+    intervalMs: INTERVAL_MS,
     budgetMs: PASS_BUDGET_MS,
     run: (signal) => reconciler.pass(signal),
   })

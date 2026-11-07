@@ -51,6 +51,7 @@ afterEach(() => {
 })
 
 const PROJECT_ID = "test-project"
+const INTERVAL_MS = 30_000
 
 const Invoice = defineObjectType({
   id: "Invoice",
@@ -840,6 +841,7 @@ describe("OrchestratorWorker", () => {
     await new ProjectionDispatchReconciler({
       projectId: PROJECT_ID,
       feed: testFeed(lakeStorage),
+      intervalMs: INTERVAL_MS,
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
       lakeStorage,
@@ -869,6 +871,7 @@ describe("OrchestratorWorker", () => {
     const reconciler = new ProjectionDispatchReconciler({
       projectId: PROJECT_ID,
       feed: testFeed(lakeStorage),
+      intervalMs: INTERVAL_MS,
       dispatcher,
       descriptors: [descriptor],
       lakeStorage,
@@ -914,6 +917,7 @@ describe("OrchestratorWorker", () => {
       descriptors: [invoiceProjectionDescriptor()],
       projectionRuns: noProjectionRuns,
       feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
+      intervalMs: INTERVAL_MS,
       lakeStorage: {
         async listVersions() {
           return [schemaVersion, dataVersion]
@@ -948,6 +952,7 @@ describe("OrchestratorWorker", () => {
       descriptors: [descriptor],
       projectionRuns: noProjectionRuns,
       feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
+      intervalMs: INTERVAL_MS,
       lakeStorage: {
         async listVersions() {
           return [schemaVersion]
@@ -1180,9 +1185,9 @@ describe("OrchestratorWorker", () => {
     })
   })
 
-  // Reproduce: drop `directJobStart` from `consumeLiveJobs`; the occurrence emitted before this
-  // start is not read, as a job in retry at the last shutdown would not be.
-  test("a restart reads cron occurrences again, and starts only what was not dispatched", async () => {
+  // Reproduce: subscribe `schedule.triggered` from `earliest` in `consumeLiveJobs`; a new consumer
+  // of an existing schedule would then start one run per retained occurrence.
+  test("a restart leaves past cron occurrences alone", async () => {
     const daily = defineSchedule("daily-restart").cron("0 2 * * *")
     const sync = defineSync("sync-restart")
       .when(daily)
@@ -1192,18 +1197,25 @@ describe("OrchestratorWorker", () => {
     const routes = compileRoutes({ schedules: [daily], syncs: [sync], pipelines: [] })
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
-    const [event] = await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
+    await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
 
     await startWorker(eventRuntime, queues, routes)
-
-    await waitFor(async () => {
-      const jobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "test" })
-      return jobs.length === 1 && jobs[0]!.job.payload.runId.includes(event!.id)
+    const later = "2026-04-19T02:00:00.000Z"
+    const [after] = await eventRuntime.append({
+      events: [makeScheduleTriggeredEvent(daily.id, later)],
     })
+
+    const claimed: { job: { payload: { runId: string } } }[] = []
+    await waitFor(async () => {
+      claimed.push(...(await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "test" })))
+      return claimed.length > 0
+    })
+    expect(claimed).toHaveLength(1)
+    expect(claimed[0]!.job.payload.runId).toContain(after!.id)
   })
 
-  // Reproduce: pass `{ types: [eventType] }` in `consumeLiveJobs` for every type; the commit from
-  // before the start is delivered and dispatched.
+  // Reproduce: subscribe from `earliest` in `consumeLiveJobs`; the commit from before the start is
+  // delivered and dispatched.
   test("a restart leaves past dataset commits to the projections pass", async () => {
     const routes = compileRoutes({
       schedules: [],
@@ -1344,8 +1356,8 @@ describe("OrchestratorWorker", () => {
         pipelines: createTestPipelineRunDispatcher(new InMemoryQueues()),
       },
       lakeStorage,
-      projections: { lakeStorage, projectionRuns: noProjectionRuns },
-      datasetTriggers: { lakeStorage, pipelineRuns: storage.pipelineRuns },
+      projectionRuns: noProjectionRuns,
+      pipelineRuns: storage.pipelineRuns,
     })
     const feed = spyOn(lakeStorage, "listLatestVersionsSince")
 

@@ -8,7 +8,6 @@ import type {
   PipelineDispatcherPort,
 } from "./types"
 
-const INTERVAL_MS = 30_000
 const STEP_PAGE_SIZE = 500
 
 /** How far back a dataset's versions are read to get past those that changed nothing. */
@@ -26,6 +25,8 @@ interface DatasetTriggerReconcilerInput extends DatasetTriggerReconciliationPort
   readonly dispatcher: PipelineDispatcherPort
   readonly triggers: readonly DatasetTrigger[]
   readonly feed: LakeChangeFeed
+  /** Pause between passes, which also leaves a commit's event that long to arrive first. */
+  readonly intervalMs: number
 }
 
 /** The newest version that would have fired `updated()`, and every version from it to the latest. */
@@ -84,13 +85,11 @@ export function datasetTriggers(routes: OrchestratorRoutes): readonly DatasetTri
  * so a restart needs no stored cursor.
  */
 export class DatasetTriggerReconciler {
-  readonly intervalMs: number
   private readonly triggersByDatasetId: ReadonlyMap<string, readonly DatasetTrigger[]>
   private readonly unsettled: Map<string, DatasetTrigger>
   private readonly changes: LakeChangeReader
 
   constructor(private readonly input: DatasetTriggerReconcilerInput) {
-    this.intervalMs = input.intervalMs ?? INTERVAL_MS
     this.triggersByDatasetId = groupByDataset(input.triggers)
     this.unsettled = new Map(input.triggers.map((trigger) => [triggerKey(trigger), trigger]))
     this.changes = input.feed.subscribe({
@@ -153,10 +152,11 @@ export class DatasetTriggerReconciler {
     if (counted && hasRead(counted, pipeline.stepsOfCounted, trigger, change)) return true
 
     // Its event is most likely on its way: firing now would start a second run beside its own.
-    if (now - change.version.createdAt.getTime() < this.intervalMs) return false
+    if (now - change.version.createdAt.getTime() < this.input.intervalMs) return false
 
+    // Unsettled still: the next pass sees this run, and a stop can cancel it.
     await this.dispatch(trigger, change.version, latest)
-    return true
+    return false
   }
 
   private async dispatch(
