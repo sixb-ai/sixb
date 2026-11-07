@@ -45,7 +45,7 @@ export const DATASET_INGEST_MAX_CHANGES = 10_000
 /** Failures in a row after which the dataset is reported. Flushes go on trying. */
 const REPORT_AT_FAILURE_STREAK = 5
 
-/** A version is looked for among this many of the dataset's newest. */
+/** A version is looked for among this many of the dataset's newest, then four times as many. */
 const LOOKUP_VERSIONS = 200
 /** Clocks of the process that committed and of the database that dated the batch may differ. */
 const LOOKUP_CLOCK_SKEW_MS = 60_000
@@ -392,24 +392,20 @@ class DatasetIngestFlush {
 
   /** A version of this batch among the dataset's newest, dated from when it took its deliveries. */
   private async findCommitted(batch: DatasetIngestBatch): Promise<DatasetVersion | null> {
-    const versions = await this.dependencies.lakeStorage.listVersions(
-      this.datasetId,
-      LOOKUP_VERSIONS
-    )
     const oldestPossible = batch.startedAt.getTime() - LOOKUP_CLOCK_SKEW_MS
 
-    for (const version of versions) {
-      if (version.producer?.kind === "ingest" && version.producer.runId === batch.flushId) {
-        return version
+    for (let limit = LOOKUP_VERSIONS; ; limit *= 4) {
+      const versions = await this.dependencies.lakeStorage.listVersions(this.datasetId, limit)
+
+      for (const version of versions) {
+        if (version.producer?.kind === "ingest" && version.producer.runId === batch.flushId) {
+          return version
+        }
+        if (version.createdAt.getTime() < oldestPossible) return null
       }
-      if (version.createdAt.getTime() < oldestPossible) return null
+
+      if (versions.length < limit) return null
     }
-
-    if (versions.length < LOOKUP_VERSIONS) return null
-
-    throw new Error(
-      `[Sixb] Dataset '${this.datasetId}' committed more than ${LOOKUP_VERSIONS} versions since flush '${batch.flushId}' started; cannot tell whether it committed.`
-    )
   }
 
   /** The change a failed write refuses, if the failure names one. */
