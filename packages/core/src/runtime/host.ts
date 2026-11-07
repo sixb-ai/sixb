@@ -59,17 +59,17 @@ import type {
   OntologyOperationalStatus,
   SixbReadiness,
 } from "../maintenance"
+import { storageHeartbeat } from "../maintenance/heartbeat"
 import {
-  createLakeRetentionRuntime,
   getLakeRetentionRuntime,
   type LakeMaintenanceOptions,
+  LakeRetention,
   registerLakeRetentionRuntime,
 } from "../maintenance/lake-retention"
-import { lakeRetentionPass } from "../maintenance/lake-retention-pass"
-import { storageHeartbeat } from "../maintenance/heartbeat"
 import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
 import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
 import { cronPass } from "../maintenance/passes/cron-pass"
+import { lakeRetentionPass } from "../maintenance/passes/lake-retention-pass"
 import { ontologyPass } from "../maintenance/passes/ontology-pass"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { ModelCatalogInput } from "../models"
@@ -375,7 +375,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       createVectorIndexingRuntime(this.hostContext, this.materializer)
     )
 
-    const lakeRetention = createLakeRetentionRuntime({
+    const lakeRetention = new LakeRetention({
       projectId: this.projectId,
       options: options.lakeMaintenance,
       lakeStorage: this.lakeStorage,

@@ -5,8 +5,8 @@ import type {
   LakeRetentionReport,
 } from "../src/lake-storage"
 import {
-  createLakeRetentionRuntime,
   type LakeMaintenanceOptions,
+  LakeRetention,
   resolveLakeMaintenanceSettings,
 } from "../src/maintenance/lake-retention"
 import { InMemoryLakeRetentionRunStorage } from "../src/storage/lake-retention-runs"
@@ -71,7 +71,7 @@ function runtime(input: {
   datasetCount?: number
   lakeRetentionRuns?: InMemoryLakeRetentionRunStorage
 }) {
-  return createLakeRetentionRuntime({
+  return new LakeRetention({
     projectId: "project",
     options: input.options,
     lakeStorage: { maintenance: input.maintenance },

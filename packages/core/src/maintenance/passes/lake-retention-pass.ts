@@ -1,6 +1,6 @@
-import type { Queues } from "../queues"
-import type { LakeRetentionStatus } from "./lake-retention-status"
-import type { MaintenancePass } from "./loop"
+import type { Queues } from "../../queues"
+import type { LakeRetentionStatus } from "../lake-retention-status"
+import type { MaintenancePass } from "../loop"
 
 export const LAKE_RETENTION_PASS_ID = "lake-retention"
 

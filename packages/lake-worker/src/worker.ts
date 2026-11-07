@@ -1,6 +1,6 @@
 import { reportLakeRetentionFailure } from "@sixb/core/internal/error-reporting"
 import { captureSixbFailure } from "@sixb/core/internal/errors"
-import { getLakeRetentionRuntime, type LakeRetentionRuntime } from "@sixb/core/internal/runtime"
+import { getLakeRetentionRuntime, type LakeRetention } from "@sixb/core/internal/runtime"
 import { QueueWorker, type QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import type { LakeRetentionReport } from "@sixb/core/lake-storage"
 import type { ClaimedQueueJob, LakeQueueJob, Queues } from "@sixb/core/queues"
@@ -20,7 +20,7 @@ export interface LakeWorkerOptions {
 /** Consumes the `lake` queue, so lake work never takes a slot from the runs that write the lake. */
 export class LakeWorker extends QueueWorker<LakeQueueJob, typeof FAILURE_CODES> {
   private readonly host: LakeWorkerHost
-  private readonly retention: LakeRetentionRuntime
+  private readonly retention: LakeRetention
 
   constructor(host: LakeWorkerHost, options: LakeWorkerOptions = {}) {
     super({

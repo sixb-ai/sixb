@@ -5,6 +5,7 @@ import type {
   LakeStorage,
 } from "../lake-storage"
 import { RuntimeError } from "../runtime/errors"
+import { waitUnlessAborted } from "../shared/backoff"
 import { parseDuration } from "../shared/duration"
 import type { LakeRetentionRunRecord, Storage } from "../storage"
 import type { OntologySourceStorage } from "../storage/ontology/sources"
@@ -40,28 +41,6 @@ export interface LakeRetentionPassOptions {
   /** Starts no pass once this long has passed since the first one. */
   readonly budgetMs?: number
   readonly signal?: AbortSignal
-}
-
-/** Internal entry point for the worker, the CLI and the API. */
-export interface LakeRetentionRuntime {
-  readonly settings: LakeMaintenanceSettings
-  /** Whether retention runs on its own: enabled, a provider with maintenance, and datasets. */
-  readonly automatic: boolean
-  /** Null when the lake storage provider has no maintenance. */
-  readonly maintenance: LakeMaintenance | null
-  /**
-   * Runs passes while one reports more to do, protecting the versions projections applied as they
-   * are at each pass. A dry run is one pass. The report adds the passes up.
-   */
-  apply(options: LakeRetentionPassOptions): Promise<LakeRetentionReport>
-  /**
-   * Runs what the `lake-retention` pass requested for the interval starting at `intervalStart`,
-   * within a budget, and records it. Null when retention was turned off since, or the interval is
-   * over: the next request covers it, so a backlog left by a stopped worker runs once.
-   */
-  runRequested(intervalStart: string, signal: AbortSignal): Promise<LakeRetentionReport | null>
-  /** What durable state says about automatic retention, whichever process asks. */
-  status(): Promise<LakeRetentionStatus>
 }
 
 const DEFAULT_RETENTION = "7d"
@@ -105,33 +84,118 @@ export function resolveLakeMaintenanceSettings(
   }
 }
 
-export function createLakeRetentionRuntime(input: {
+interface LakeRetentionInput {
   readonly projectId: string
   readonly options: LakeMaintenanceOptions | undefined
   readonly lakeStorage: Pick<LakeStorage, "maintenance">
   readonly storage: Pick<Storage, "lakeRetentionRuns" | "maintenanceHeartbeats">
   readonly sources: Pick<OntologySourceStorage, "listActive">
   readonly datasetCount: number
-}): LakeRetentionRuntime {
-  const settings = resolveLakeMaintenanceSettings(input.options)
-  const maintenance = input.lakeStorage.maintenance ?? null
+}
 
-  if (input.options?.enabled === true && maintenance === null) {
-    throw new RuntimeError(
-      "[Sixb] lakeMaintenance.enabled is true, but the lake storage provider has no maintenance. " +
-        "Remove the option, or use a provider that supports it, such as DuckLake."
-    )
+/** Retention for one project: the entry point of the worker, the CLI and the API. */
+export class LakeRetention {
+  readonly settings: LakeMaintenanceSettings
+  /** Null when the lake storage provider has no maintenance. */
+  readonly maintenance: LakeMaintenance | null
+  /** Whether retention runs on its own: enabled, a provider with maintenance, and datasets. */
+  readonly automatic: boolean
+
+  constructor(private readonly input: LakeRetentionInput) {
+    this.settings = resolveLakeMaintenanceSettings(input.options)
+    this.maintenance = input.lakeStorage.maintenance ?? null
+
+    if (input.options?.enabled === true && this.maintenance === null) {
+      throw new RuntimeError(
+        "[Sixb] lakeMaintenance.enabled is true, but the lake storage provider has no maintenance. " +
+          "Remove the option, or use a provider that supports it, such as DuckLake."
+      )
+    }
+
+    // Syncs, pipelines and the SDK write registered datasets only, so a project without datasets
+    // writes nothing to the lake.
+    this.automatic = this.settings.enabled && this.maintenance !== null && input.datasetCount > 0
   }
 
-  // Syncs, pipelines and the SDK write registered datasets only, so a project without datasets
-  // writes nothing to the lake.
-  const automatic = settings.enabled && maintenance !== null && input.datasetCount > 0
+  /**
+   * Runs passes while one reports more to do, protecting the versions projections applied as they
+   * are at each pass. A dry run is one pass. The report adds the passes up.
+   */
+  async apply(options: LakeRetentionPassOptions): Promise<LakeRetentionReport> {
+    if (this.maintenance === null) {
+      throw new RuntimeError("[Sixb] The lake storage provider has no maintenance.")
+    }
 
-  // Objects hold the rows of the version each projection applied, and their markings are read
-  // from it: the lake keeps those versions too. Read before every pass, since a projection may
-  // apply a version between two of them.
-  const protect = async (): Promise<readonly DatasetVersionRef[]> => {
-    const applied = await input.sources.listActive({ projectId: input.projectId })
+    return runRetentionPasses({
+      maintenance: this.maintenance,
+      protect: () => this.protect(),
+      options,
+    })
+  }
+
+  /**
+   * Runs what the `lake-retention` pass requested for the interval starting at `intervalStart`,
+   * within a budget, and records it. Null when retention was turned off since, or the interval is
+   * over: the next request covers it, so a backlog left by a stopped worker runs once.
+   */
+  async runRequested(
+    intervalStart: string,
+    signal: AbortSignal
+  ): Promise<LakeRetentionReport | null> {
+    const { settings } = this
+    const intervalOver = Date.now() - Date.parse(intervalStart) >= settings.cleanupEveryMs
+    if (!this.automatic || intervalOver) return null
+
+    const startedAt = new Date()
+    await this.recordRun({ startedAt, finishedAt: null, failed: false })
+
+    const finish = (failed: boolean) =>
+      this.recordRun({ startedAt, finishedAt: new Date(), failed })
+
+    try {
+      const report = await this.apply({
+        keepVersionsForMs: settings.keepVersionsForMs,
+        deleteFilesAfterMs: settings.deleteFilesAfterMs,
+        budgetMs: Math.min(settings.cleanupEveryMs / 2, MAX_RUN_BUDGET_MS),
+        signal,
+      })
+      await finish(false)
+
+      return report
+    } catch (error) {
+      // Shutdown returns the job to the queue: that is no failed run.
+      await finish(!signal.aborted)
+      throw error
+    }
+  }
+
+  /** What durable state says about automatic retention, whichever process asks. */
+  async status(): Promise<LakeRetentionStatus> {
+    const { projectId, storage } = this.input
+    const [heartbeats, lastRun] = await Promise.all([
+      storage.maintenanceHeartbeats?.list({ projectId }) ?? [],
+      storage.lakeRetentionRuns?.getLast({ projectId }) ?? null,
+    ])
+
+    // Only the orchestrator's loop requests retention: an embedded server's says nothing of it.
+    const heartbeat = heartbeats.find(({ owner }) => owner === "orchestrator") ?? null
+
+    return lakeRetentionStatus({
+      settings: this.settings,
+      automatic: this.automatic,
+      heartbeat,
+      lastRun,
+      now: new Date(),
+    })
+  }
+
+  /**
+   * Objects hold the rows of the version each projection applied, and their markings are read from
+   * it: the lake keeps those versions too. Read before every pass, since a projection may apply a
+   * version between two of them.
+   */
+  private async protect(): Promise<readonly DatasetVersionRef[]> {
+    const applied = await this.input.sources.listActive({ projectId: this.input.projectId })
 
     return applied.map(({ datasetVersion }) => ({
       datasetId: datasetVersion.datasetId,
@@ -139,80 +203,24 @@ export function createLakeRetentionRuntime(input: {
     }))
   }
 
-  const apply = async (options: LakeRetentionPassOptions): Promise<LakeRetentionReport> => {
-    if (maintenance === null) {
-      throw new RuntimeError("[Sixb] The lake storage provider has no maintenance.")
-    }
+  /** The run happened whatever this says, so a failed write costs the Console its account. */
+  private async recordRun(run: Omit<LakeRetentionRunRecord, "projectId">): Promise<void> {
+    const { projectId, storage } = this.input
 
-    return runRetentionPasses({ maintenance, protect, options })
-  }
-
-  // The run happened whatever this says, so a failed write costs the Console its account, no more.
-  const recordRun = async (run: Omit<LakeRetentionRunRecord, "projectId">): Promise<void> => {
-    const { projectId } = input
-
-    await input.storage.lakeRetentionRuns
-      ?.record({ ...run, projectId })
-      .catch((failure: unknown) => {
-        console.error("[Sixb] Could not record a lake retention run:", failure)
-      })
-  }
-
-  return {
-    settings,
-    automatic,
-    maintenance,
-    apply,
-
-    async runRequested(intervalStart, signal) {
-      const intervalOver = Date.now() - Date.parse(intervalStart) >= settings.cleanupEveryMs
-      if (!automatic || intervalOver) return null
-
-      const startedAt = new Date()
-      await recordRun({ startedAt, finishedAt: null, failed: false })
-
-      const finish = (failed: boolean) => recordRun({ startedAt, finishedAt: new Date(), failed })
-
-      try {
-        const report = await apply({
-          keepVersionsForMs: settings.keepVersionsForMs,
-          deleteFilesAfterMs: settings.deleteFilesAfterMs,
-          budgetMs: Math.min(settings.cleanupEveryMs / 2, MAX_RUN_BUDGET_MS),
-          signal,
-        })
-        await finish(false)
-
-        return report
-      } catch (error) {
-        // Shutdown returns the job to the queue: that is no failed run.
-        await finish(!signal.aborted)
-        throw error
-      }
-    },
-
-    async status() {
-      const projectId = input.projectId
-      const [heartbeats, lastRun] = await Promise.all([
-        input.storage.maintenanceHeartbeats?.list({ projectId }) ?? [],
-        input.storage.lakeRetentionRuns?.getLast({ projectId }) ?? null,
-      ])
-
-      // Only the orchestrator's loop requests retention: an embedded server's says nothing of it.
-      const heartbeat = heartbeats.find(({ owner }) => owner === "orchestrator") ?? null
-
-      return lakeRetentionStatus({ settings, automatic, heartbeat, lastRun, now: new Date() })
-    },
+    await storage.lakeRetentionRuns?.record({ ...run, projectId }).catch((failure: unknown) => {
+      console.error("[Sixb] Could not record a lake retention run:", failure)
+    })
   }
 }
 
 // Associates each host with its runtime, as the vector indexing runtime does.
-const runtimes = new WeakMap<object, LakeRetentionRuntime>()
+const runtimes = new WeakMap<object, LakeRetention>()
 
-export function registerLakeRetentionRuntime(host: object, runtime: LakeRetentionRuntime): void {
+export function registerLakeRetentionRuntime(host: object, runtime: LakeRetention): void {
   runtimes.set(host, runtime)
 }
 
-export function getLakeRetentionRuntime(host: object): LakeRetentionRuntime {
+export function getLakeRetentionRuntime(host: object): LakeRetention {
   const runtime = runtimes.get(host)
   if (!runtime) {
     throw new Error("[Sixb] Lake retention requires a configured Sixb host.")
@@ -251,7 +259,7 @@ async function runRetentionPasses(input: {
       return total
     }
 
-    await pause(PASS_PAUSE_MS, options.signal)
+    await waitUnlessAborted(PASS_PAUSE_MS, options.signal)
   }
 }
 
@@ -285,25 +293,4 @@ function durationOption(field: keyof LakeMaintenanceOptions, value: unknown): nu
   }
 
   return durationMs
-}
-
-function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason)
-      return
-    }
-
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort)
-      resolve()
-    }, ms)
-
-    const onAbort = () => {
-      clearTimeout(timer)
-      reject(signal?.reason)
-    }
-
-    signal?.addEventListener("abort", onAbort, { once: true })
-  })
 }
