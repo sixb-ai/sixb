@@ -15,6 +15,7 @@ function heartbeat(
 ): MaintenanceHeartbeatRecord {
   return {
     projectId,
+    owner: "orchestrator",
     beatAt,
     everyMs: 30_000,
     passes: pass

@@ -246,8 +246,8 @@ describe("SixbHost.startMaintenance", () => {
     await settle()
     await maintenance.stop()
 
-    const heartbeat = await sixb.storage.maintenanceHeartbeats?.get({ projectId })
-    return heartbeat?.passes.map((pass) => pass.id)
+    const heartbeats = await sixb.storage.maintenanceHeartbeats?.list({ projectId })
+    return heartbeats?.flatMap((heartbeat) => heartbeat.passes.map((pass) => pass.id))
   }
 
   // Reproduce: drop `lakeRetentionPasses()` from `SixbHost.startMaintenance`.

@@ -192,10 +192,13 @@ export function createLakeRetentionRuntime(input: {
 
     async status() {
       const projectId = input.projectId
-      const [heartbeat, lastRun] = await Promise.all([
-        input.storage.maintenanceHeartbeats?.get({ projectId }) ?? null,
+      const [heartbeats, lastRun] = await Promise.all([
+        input.storage.maintenanceHeartbeats?.list({ projectId }) ?? [],
         input.storage.lakeRetentionRuns?.getLast({ projectId }) ?? null,
       ])
+
+      // Only the orchestrator's loop requests retention: an embedded server's says nothing of it.
+      const heartbeat = heartbeats.find(({ owner }) => owner === "orchestrator") ?? null
 
       return lakeRetentionStatus({ settings, automatic, heartbeat, lastRun, now: new Date() })
     },
