@@ -105,17 +105,20 @@ export class CronPass implements MaintenancePass {
     now: Date
   ): Promise<void> {
     const occurrenceAtIso = occurrenceAt.toISOString()
+    const occurrenceKey = `${schedule.id}:${occurrenceAtIso}`
 
     const emit = this.options.events.emit(
       {
         events: [
           {
             type: "schedule.triggered",
+            // Two processes that fire one occurrence store one event, so one run starts.
+            idempotencyKey: occurrenceKey,
             payload: {
               scheduleId: schedule.id,
               occurrenceAt: occurrenceAtIso,
               triggeredAt: now.toISOString(),
-              occurrenceKey: `${schedule.id}:${occurrenceAtIso}`,
+              occurrenceKey,
             },
           },
         ],

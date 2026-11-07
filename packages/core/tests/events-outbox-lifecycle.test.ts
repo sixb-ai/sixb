@@ -92,9 +92,7 @@ test("a late broker acknowledgement cannot settle a lease reclaimed after shutdo
     await completed.promise
     await next.stop()
     expect(settlements).toBe(1)
-    const events = await service.read()
-    expect(events).toHaveLength(2)
-    expect(events[0]?.id).toBe(events[1]?.id)
+    expect(await service.read()).toHaveLength(1)
     expect((await storage.ontology.outbox.summarize({ projectId: "project" })).pendingCount).toBe(0)
   } finally {
     release.resolve()
@@ -137,9 +135,7 @@ test("publication survives a failed storage acknowledgement and replays with the
   })
   try {
     await retry.drain()
-    const events = await service.read()
-    expect(events).toHaveLength(2)
-    expect(events[0]?.id).toBe(events[1]?.id)
+    expect(await service.read()).toHaveLength(1)
     expect((await storage.ontology.outbox.summarize({ projectId: "project" })).pendingCount).toBe(0)
   } finally {
     await retry.stop()

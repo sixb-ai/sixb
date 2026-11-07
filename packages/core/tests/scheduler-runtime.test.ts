@@ -271,6 +271,27 @@ describe("SchedulerRuntime", () => {
   // Guards the `MAX_TIMER_DELAY_MS` clamp in `armTimer`. To prove it still guards, drop the
   // `Math.min(..., MAX_TIMER_DELAY_MS)` and this test fails: Node coerces the oversized delay to
   // 1ms, so the timer fires immediately, finds nothing due, and re-arms forever.
+  // Reproduce: drop `idempotencyKey` from `emitOccurrence`; each scheduler stores its own event.
+  test("two schedulers on one broker fire an occurrence once", async () => {
+    const start = new Date("2026-01-01T00:00:30.000Z")
+    const clock = createTestClock(start)
+    const events = createEvents()
+    const schedules = [defineSchedule("minutely").cron("* * * * *")]
+    const first = new SchedulerRuntime({ schedules, events, now: clock.now })
+    const second = new SchedulerRuntime({ schedules, events, now: clock.now })
+    await first.start()
+    await second.start()
+
+    clock.advance(30_000)
+    jest.advanceTimersByTime(30_000)
+    await flushAsync()
+
+    expect(await firedOccurrences(events)).toEqual(["minutely@2026-01-01T00:01:00.000Z"])
+
+    await first.stop()
+    await second.stop()
+  })
+
   // Reproduce: await the emits alone in `CronPass.run`; the hung emit holds the pass's slot, so the
   // next occurrence never fires.
   test("an emit that never settles does not hold the next occurrence", async () => {

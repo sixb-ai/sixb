@@ -359,7 +359,7 @@ function deviceEvent(
   name: string
 ): OntologyMaterializationEvent {
   const context = {
-    id: `${type}:${objectTypeId}:${primaryId}`,
+    id: `${type}:${objectTypeId}:${primaryId}:${name}`,
     schemaVersion: 1 as const,
     projectId: "project-a",
     occurredAt: "2026-05-20T10:00:00.000Z",
