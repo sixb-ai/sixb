@@ -79,12 +79,12 @@ alone.
 
 ### Pinned DuckDB and DuckLake builds
 
-`@duckdb/node-api` is pinned to an exact version (DuckDB 1.5.6), and the provider refuses to
-attach with any DuckLake extension build but `ac7595b0`. DuckDB's extension repository serves one
-build per DuckDB version and can replace it, so without the check a deploy would run whatever
-build it downloaded that day. A runtime that loads another build fails before attaching, naming
-both builds. Keep the tested build in the image's DuckDB extension directory
-(`duckdb.config.extension_directory`) to make deploys independent of the repository.
+`@duckdb/node-api` is pinned to an exact version (DuckDB 1.5.6), and the provider is tested against
+DuckLake extension build `ac7595b0`. DuckDB's extension repository serves one build per DuckDB
+version and can replace it, so a new host, over HTTPS or plain HTTP, may get another build than
+the existing ones. The lake still opens: the provider logs a warning naming both builds, once per
+process. An extension already in the extension directory is never downloaded again, so keeping the
+tested build there, in a server image for example, makes a deploy independent of the repository.
 
 ### Maintenance
 

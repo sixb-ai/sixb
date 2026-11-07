@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -65,40 +65,74 @@ describe("DuckLakeStorage catalog options", () => {
     }
   })
 
-  // Regression proof: remove assertDuckLakeExtensionVersion from setupDuckLake. The lake then
-  // attaches with whatever DuckLake build the runtime reports.
-  test("refuses a DuckLake extension build it is not pinned to, before attaching", async () => {
-    const runtime = await createDuckDbRuntime()
+  // Regression proof: throw in warnOnUntestedDuckLakeBuild instead of warning. The lake then never
+  // attaches, as on every new host the day DuckDB replaced the build it serves.
+  test("warns once about a DuckLake build it is not tested against, and attaches", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
     const statements: string[] = []
 
     // The real runtime, except that it reports another DuckLake build, as DuckDB would after its
     // extension repository replaced the build a deploy downloads.
-    const otherBuild: DuckDbRuntime = Object.create(runtime, {
-      run: {
-        value: (sql: string) => {
-          statements.push(sql)
-          return runtime.run(sql)
+    const withOtherBuild = (runtime: DuckDbRuntime): DuckDbRuntime =>
+      Object.create(runtime, {
+        run: {
+          value: (sql: string) => {
+            statements.push(sql)
+            return runtime.run(sql)
+          },
         },
-      },
-      query: {
-        value: async (sql: string) =>
-          sql.includes("duckdb_extensions()")
-            ? [{ extension_version: "0123abcd" }]
-            : runtime.query(sql),
-      },
-    })
+        query: {
+          value: async (sql: string) =>
+            sql.includes("duckdb_extensions()")
+              ? [{ extension_version: "0123abcd" }]
+              : runtime.query(sql),
+        },
+      })
+
+    const first = await createDuckDbRuntime()
+    const second = await createDuckDbRuntime()
 
     try {
-      const setup = setupDuckLake(otherBuild, {
+      for (const [runtime, name] of [
+        [first, "first"],
+        [second, "second"],
+      ] as const) {
+        await setupDuckLake(withOtherBuild(runtime), {
+          catalog: { type: "duckdb", path: join(rootDir, `${name}.ducklake`) },
+          dataPath: join(rootDir, name),
+        })
+      }
+
+      expect(statements.filter((sql) => sql.startsWith("ATTACH"))).toHaveLength(2)
+
+      const warnings = warn.mock.calls.map(([message]) => String(message))
+      expect(warnings.filter((message) => message.includes("0123abcd"))).toEqual([
+        expect.stringContaining(
+          "DuckLake extension build '0123abcd' is loaded, but this provider is tested against build"
+        ),
+      ])
+    } finally {
+      warn.mockRestore()
+      await first.close()
+      await second.close()
+    }
+  })
+
+  // Goes red the day DuckDB replaces the build it serves: the signal to test the new one and move
+  // DUCKLAKE_EXTENSION_VERSION, while projects keep running with the warning.
+  test("says nothing about the DuckLake build it is tested against", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const runtime = await createDuckDbRuntime()
+
+    try {
+      await setupDuckLake(runtime, {
         catalog: { type: "duckdb", path: join(rootDir, "metadata.ducklake") },
         dataPath: join(rootDir, "data"),
       })
 
-      expect(String(await setup.catch((error) => error))).toContain(
-        "DuckLake extension build '0123abcd' is loaded, but this provider requires build"
-      )
-      expect(statements.some((sql) => sql.startsWith("ATTACH"))).toBe(false)
+      expect(warn).not.toHaveBeenCalled()
     } finally {
+      warn.mockRestore()
       await runtime.close()
     }
   })
