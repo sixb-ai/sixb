@@ -3,6 +3,7 @@ import { pathPart } from "../http"
 import { listAllCursor } from "../pagination"
 import type {
   PipedriveCursorPage,
+  PipedriveDeletedRecord,
   PipedrivePerson,
   PipedrivePersonGetOptions,
   PipedrivePersonInput,
@@ -25,6 +26,11 @@ export interface PersonsResource {
     id: number,
     input: Partial<PipedrivePersonInput>
   ): Promise<PipedriveResponse<PipedrivePerson>>
+  /**
+   * `DELETE /persons/{id}`. Pipedrive marks the person deleted and removes it for good after
+   * 30 days.
+   */
+  delete(id: number): Promise<PipedriveResponse<PipedriveDeletedRecord>>
   /** `GET /persons/search` */
   search(options: PipedrivePersonSearchOptions): Promise<PipedriveSearchResponse>
 }
@@ -45,6 +51,9 @@ export function personsResource(http: PipedriveHttp): PersonsResource {
     },
     update(id, input) {
       return http.patch("v2", `persons/${pathPart(id, "person id")}`, input)
+    },
+    delete(id) {
+      return http.delete("v2", `persons/${pathPart(id, "person id")}`)
     },
     search(options) {
       return http.get("v2", "persons/search", options)

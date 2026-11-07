@@ -3,6 +3,7 @@ import { pathPart } from "../http"
 import { listAllCursor } from "../pagination"
 import type {
   PipedriveCursorPage,
+  PipedriveDeletedRecord,
   PipedriveOrganization,
   PipedriveOrganizationGetOptions,
   PipedriveOrganizationInput,
@@ -30,6 +31,11 @@ export interface OrganizationsResource {
     id: number,
     input: Partial<PipedriveOrganizationInput>
   ): Promise<PipedriveResponse<PipedriveOrganization>>
+  /**
+   * `DELETE /organizations/{id}`. Pipedrive marks the organization deleted and removes it for good
+   * after 30 days.
+   */
+  delete(id: number): Promise<PipedriveResponse<PipedriveDeletedRecord>>
   /** `GET /organizations/search` */
   search(options: PipedriveOrganizationSearchOptions): Promise<PipedriveSearchResponse>
 }
@@ -50,6 +56,9 @@ export function organizationsResource(http: PipedriveHttp): OrganizationsResourc
     },
     update(id, input) {
       return http.patch("v2", `organizations/${pathPart(id, "organization id")}`, input)
+    },
+    delete(id) {
+      return http.delete("v2", `organizations/${pathPart(id, "organization id")}`)
     },
     search(options) {
       return http.get("v2", "organizations/search", options)

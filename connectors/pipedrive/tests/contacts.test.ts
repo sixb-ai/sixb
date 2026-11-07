@@ -12,7 +12,7 @@ describe("pipedrive persons and organizations", () => {
   test.each([
     ["persons", { name: "Buyer Person", org_id: 42 }],
     ["organizations", { name: "Buyer Organization", label_ids: [10, 20] }],
-  ] as const)("%s create and update hit exact v2 paths and methods", async (resource, input) => {
+  ] as const)("%s writes hit exact v2 paths and methods", async (resource, input) => {
     const calls: { method: string; path: string; body?: unknown }[] = []
     mockFetch((request, init) => {
       calls.push({
@@ -26,10 +26,13 @@ describe("pipedrive persons and organizations", () => {
     const client = await pipedrive({ apiToken: "pd-token" }).connect(CONTEXT)
     await client[resource].create(input)
     await client[resource].update(123, { name: "Updated" })
+    const deleted = await client[resource].delete(123)
 
     expect(calls).toEqual([
       { method: "POST", path: `/api/v2/${resource}`, body: input },
       { method: "PATCH", path: `/api/v2/${resource}/123`, body: { name: "Updated" } },
+      { method: "DELETE", path: `/api/v2/${resource}/123`, body: undefined },
     ])
+    expect(deleted.data).toEqual({ id: 123 })
   })
 })
