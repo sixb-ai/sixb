@@ -44,7 +44,7 @@ export function everyMs(input: IntervalPassInput): MaintenancePass {
 export interface MaintenanceHeartbeat {
   /** The longest the loop waits between two beats. Defaults to 30 seconds. */
   readonly everyMs?: number
-  write(beat: Omit<MaintenanceHeartbeatRecord, "projectId">): Promise<void>
+  write(beat: Omit<MaintenanceHeartbeatRecord, "projectId" | "owner">): Promise<void>
 }
 
 export interface MaintenanceFailure {
@@ -97,6 +97,7 @@ export class MaintenanceLoop {
   private nextBeatAt: Date | null = null
   private beating: Promise<void> | null = null
   private beatPending = false
+  private consecutiveBeatFailures = 0
 
   constructor(private readonly options: MaintenanceLoopOptions) {
     assertUniquePassIds(options.passes)
@@ -295,8 +296,13 @@ export class MaintenanceLoop {
         everyMs: this.beatEveryMs,
         passes: this.states.map(passHealth),
       })
+      this.consecutiveBeatFailures = 0
     } catch (error) {
-      this.report(error, { passId: "heartbeat", consecutiveFailures: 1 })
+      this.consecutiveBeatFailures += 1
+      this.report(error, {
+        passId: "heartbeat",
+        consecutiveFailures: this.consecutiveBeatFailures,
+      })
     }
   }
 

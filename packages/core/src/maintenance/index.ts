@@ -10,10 +10,8 @@ export { everyMs, MaintenanceLoop } from "./loop"
 export { OntologyMaintenance } from "./ontology-maintenance"
 export type {
   MaintenancePassStatus,
-  OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
   OntologyMaintenanceOptions,
-  OntologyMaintenanceSnapshot,
   OntologyOperationalStatus,
   OutboxSummary,
   SixbReadiness,

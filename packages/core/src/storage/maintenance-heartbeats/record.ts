@@ -1,4 +1,8 @@
-import type { MaintenanceHeartbeatRecord, MaintenancePassHealth } from "./types"
+import type {
+  MaintenanceHeartbeatRecord,
+  MaintenanceLoopOwner,
+  MaintenancePassHealth,
+} from "./types"
 
 /** The stored form of `passes`: what `parseMaintenanceHeartbeatRow` reads back. */
 export function serializeMaintenancePasses(passes: readonly MaintenancePassHealth[]): string {
@@ -17,10 +21,16 @@ export function parseMaintenanceHeartbeatRow(row: {
 
   return {
     projectId: String(row.projectId),
+    owner: parseOwner(row.owner, row.projectId),
     beatAt: new Date(row.beatAt as Date | string),
     everyMs: Number(row.everyMs),
     passes: passes.map((pass) => parsePass(pass, row.projectId)),
   }
+}
+
+function parseOwner(value: unknown, projectId: unknown): MaintenanceLoopOwner {
+  if (value === "orchestrator" || value === "embedded") return value
+  throw corrupt(projectId, "owner is unknown")
 }
 
 function parsePass(value: unknown, projectId: unknown): MaintenancePassHealth {

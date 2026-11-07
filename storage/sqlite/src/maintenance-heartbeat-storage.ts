@@ -16,30 +16,33 @@ export class SqliteMaintenanceHeartbeatStorage implements MaintenanceHeartbeatSt
   async record(heartbeat: MaintenanceHeartbeatRecord): Promise<void> {
     this.db
       .query(
-        `INSERT INTO maintenance_heartbeats (project_id, beat_at, every_ms, passes)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT (project_id) DO UPDATE SET
+        `INSERT INTO maintenance_heartbeats (project_id, owner, beat_at, every_ms, passes)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, owner) DO UPDATE SET
            beat_at = excluded.beat_at,
            every_ms = excluded.every_ms,
            passes = excluded.passes`
       )
       .run(
         heartbeat.projectId,
+        heartbeat.owner,
         heartbeat.beatAt.toISOString(),
         heartbeat.everyMs,
         serializeMaintenancePasses(heartbeat.passes)
       )
   }
 
-  async get(input: { readonly projectId: string }): Promise<MaintenanceHeartbeatRecord | null> {
-    const row = this.db
+  async list(input: {
+    readonly projectId: string
+  }): Promise<readonly MaintenanceHeartbeatRecord[]> {
+    const rows = this.db
       .query(
-        `SELECT project_id AS projectId, beat_at AS beatAt, every_ms AS everyMs, passes
+        `SELECT project_id AS projectId, owner, beat_at AS beatAt, every_ms AS everyMs, passes
          FROM maintenance_heartbeats
          WHERE project_id = ?`
       )
-      .get(input.projectId)
+      .all(input.projectId)
 
-    return row ? parseMaintenanceHeartbeatRow(row as Record<string, unknown>) : null
+    return rows.map((row) => parseMaintenanceHeartbeatRow(row as Record<string, unknown>))
   }
 }

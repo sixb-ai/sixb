@@ -16,7 +16,7 @@ const principal = { type: "user", id: "usr_sweep" } as const
 describe("OntologyMaintenance abandoned upload sweep", () => {
   test("aborts the provider upload, retires the session, then reaps it", async () => {
     const blobs = new DirectUploadBlobStorage()
-    const { storage, maintenance } = setup(blobs)
+    const { storage, maintenance, errors } = setup(blobs)
     await abandoned(storage, "upload_abandoned", 10 * MINUTE_MS)
     await storage.fileUploadSessions.create({
       id: "upload_live",
@@ -37,7 +37,7 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
       },
     ])
     expect(await listed(storage)).toEqual([])
-    expect(maintenance.getSnapshot().lastError).toBeNull()
+    expect(errors).toEqual([])
     // Aborted, not deleted: it stays until the terminal TTL, like any retired session.
     expect(await storage.fileUploadSessions.cleanupExpired(new Date())).toBe(0)
     expect(
@@ -62,19 +62,19 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
 
   test("keeps a session whose provider abort fails within the grace period", async () => {
     const blobs = new DirectUploadBlobStorage({ fail: true })
-    const { storage, maintenance } = setup(blobs)
+    const { storage, maintenance, errors } = setup(blobs)
     await abandoned(storage, "upload_retry", 6 * MINUTE_MS)
 
     await maintenance.runNow()
 
     // Still pending and still listed, so the next pass retries the abort.
     expect((await listed(storage)).map((s) => s.id)).toEqual(["upload_retry"])
-    expect(maintenance.getSnapshot().lastError).toContain("provider abort failed")
+    expect(errors.join()).toContain("provider abort failed")
   })
 
   test("retires a session whose provider abort keeps failing past the grace period", async () => {
     const blobs = new DirectUploadBlobStorage({ fail: true })
-    const { storage, maintenance } = setup(blobs)
+    const { storage, maintenance, errors } = setup(blobs)
     await abandoned(storage, "upload_given_up", 60 * MINUTE_MS)
 
     await maintenance.runNow()
@@ -82,22 +82,22 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
     expect(blobs.attempts).toBe(1)
     expect(await listed(storage)).toEqual([])
     // Giving up is still reported: the parts now depend on the bucket lifecycle rule.
-    expect(maintenance.getSnapshot().lastError).toContain("provider abort failed")
+    expect(errors.join()).toContain("provider abort failed")
   })
 
   test("retires sessions directly when blob storage cannot abort uploads", async () => {
-    const { storage, maintenance } = setup(new InMemoryBlobStorage())
+    const { storage, maintenance, errors } = setup(new InMemoryBlobStorage())
     await abandoned(storage, "upload_no_provider", 10 * MINUTE_MS)
 
     await maintenance.runNow()
 
     expect(await listed(storage)).toEqual([])
-    expect(maintenance.getSnapshot().lastError).toBeNull()
+    expect(errors).toEqual([])
   })
 
   test("treats a session another instance retired first as done", async () => {
     const blobs = new DirectUploadBlobStorage()
-    const { storage, maintenance } = setup(blobs)
+    const { storage, maintenance, errors } = setup(blobs)
     await abandoned(storage, "upload_raced", 10 * MINUTE_MS)
     // Another API instance's pass retires the row while ours is aborting the provider upload.
     blobs.onAbort = () => storage.fileUploadSessions.abort("upload_raced")
@@ -105,7 +105,7 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
     await maintenance.runNow()
 
     expect(blobs.aborted).toHaveLength(1)
-    expect(maintenance.getSnapshot().lastError).toBeNull()
+    expect(errors).toEqual([])
   })
 
   test("retires at most cleanupLimit sessions per pass, oldest expiry first", async () => {
@@ -124,15 +124,20 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
 function setup(blobStorage: BlobStorage, options: { readonly cleanupLimit?: number } = {}) {
   const storage = new InMemoryStorage()
   const events = new DomainEventService({ projectId: "project", broker: new InMemoryBroker() })
+  const errors: string[] = []
   const maintenance = new OntologyMaintenance({
     projectId: "project",
     storage,
     dispatcher: new OntologyOutboxDispatcher({ projectId: "project", storage, events }),
     blobStorage,
     options: { intervalMs: 60_000, ...options },
-    onError: () => {},
+    onError: (error) => errors.push(...failureMessages(error)),
   })
-  return { storage, maintenance }
+  return { storage, maintenance, errors }
+}
+
+function failureMessages(error: unknown): readonly string[] {
+  return error instanceof AggregateError ? error.errors.flatMap(failureMessages) : [String(error)]
 }
 
 function listed(storage: InMemoryStorage) {

@@ -13,12 +13,14 @@ describe("expired frame grants", () => {
   test("a maintenance pass deletes them once they expire", async () => {
     const storage = new InMemoryStorage()
     const events = new DomainEventService({ projectId, broker: new InMemoryBroker() })
+    const errors: unknown[] = []
     const maintenance = new OntologyMaintenance({
       projectId,
       storage,
       dispatcher: new OntologyOutboxDispatcher({ projectId, storage, events }),
       options: { intervalMs: 60_000 },
       now: () => now,
+      onError: (error) => errors.push(error),
     })
     const owner = { type: "user", id: "usr_owner" } as const
     await storage.artifacts.create({
@@ -52,7 +54,7 @@ describe("expired frame grants", () => {
 
     await maintenance.runNow()
 
-    expect(maintenance.getSnapshot().lastError).toBeNull()
+    expect(errors).toEqual([])
     const remaining = await Promise.all(
       ["a", "b"].map((seed) =>
         storage.artifacts.findFrameGrant({ projectId, tokenHash: tokenHash(seed) })
