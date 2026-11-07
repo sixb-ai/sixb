@@ -24,7 +24,7 @@ import {
   getProjectionDispatchDescriptors,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
-import { startTestPipelineRun } from "@sixb/core/testing"
+import { startTestPipelineRun, startTestRun } from "@sixb/core/testing"
 import { compileRoutesWithDiagnostics, createMaintenancePasses } from "@sixb/orchestrator"
 import type { DuckLakeStorage } from "../src"
 import { createLocalDuckLakeStorage } from "./test-utils"
@@ -206,7 +206,7 @@ describe("dataset triggers on DuckLake", () => {
 
     const { runs } = await storage.pipelineRuns.list({ projectId: "project", statuses: ["queued"] })
     const runId = runs[0]!.id
-    await storage.pipelineRuns.start({ id: runId, projectId: "project" })
+    await startTestRun(storage.pipelineRuns, { id: runId, projectId: "project" })
     const write = await lake.beginWrite({
       dataset: report,
       mode: "snapshot",
