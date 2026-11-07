@@ -16,9 +16,10 @@ export function registerLakeRoutes(app: Elysia, host: SixbHostView) {
       const sixb = requireRequestSixb(context)
 
       try {
-        const { settings, maintenance } = getLakeRetentionRuntime(host)
+        const retention = getLakeRetentionRuntime(host)
+        const { settings, maintenance } = retention
         const cleanup = {
-          enabled: settings.enabled,
+          ...(await retention.status()),
           keepVersionsFor: settings.keepVersionsFor,
           deleteFilesAfter: settings.deleteFilesAfter,
           cleanupEvery: settings.cleanupEvery,
@@ -37,7 +38,7 @@ export function registerLakeRoutes(app: Elysia, host: SixbHostView) {
     {
       response: { 200: LakeHealthResponseSchema, 400: ErrorResponseSchema },
       detail: {
-        summary: "Describe how the lake stores each dataset, and its retention settings",
+        summary: "Describe how the lake stores each dataset, and what its retention does",
         tags: [OPENAPI_TAGS.datasets.name],
         operationId: "getLakeHealth",
         security: accessTokenSecurityRequirement("getLakeHealth"),

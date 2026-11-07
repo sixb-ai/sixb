@@ -22,7 +22,13 @@ export const DatasetStorageHealthSchema = z.object({
 export const LakeHealthResponseSchema = z.object({
   available: z.boolean().describe("Whether the lake storage provider supports maintenance"),
   cleanup: z.object({
-    enabled: z.boolean().describe("Whether retention runs on its schedule"),
+    state: z
+      .enum(["off", "idle", "not-requested", "no-worker", "failing", "running"])
+      .describe(
+        "What actually happens: `not-requested` when no orchestrator asks, `no-worker` when no lake worker runs what it asks"
+      ),
+    requestedAt: z.string().nullable().describe("When the orchestrator last asked for cleanup"),
+    lastRunAt: z.string().nullable().describe("When a lake worker last finished a cleanup"),
     keepVersionsFor: z.string(),
     deleteFilesAfter: z.string(),
     cleanupEvery: z.string(),

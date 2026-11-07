@@ -15,10 +15,13 @@ import {
   PanelRow,
   PanelSkeleton,
   Pill,
+  type Tone,
+  useFormat,
   useNumbers,
 } from "../../section-ui"
 import { type DataMessages, useDataMessages } from "./messages"
 
+type Cleanup = GetLakeHealthResponse["cleanup"]
 type DatasetStorage = GetLakeHealthResponse["datasets"][number]
 
 /** Console › Lake health: how each dataset is stored, and the lake's automatic cleanup. */
@@ -65,28 +68,51 @@ export function ConsoleLakeHealthPage() {
   )
 }
 
-function CleanupSection({ cleanup }: { readonly cleanup: GetLakeHealthResponse["cleanup"] }) {
+/** How each state reads, from what durable state says rather than from the settings. */
+const CLEANUP_TONES: Record<Cleanup["state"], Tone> = {
+  off: "muted",
+  idle: "muted",
+  "not-requested": "warn",
+  "no-worker": "warn",
+  failing: "error",
+  running: "ok",
+}
+
+function CleanupSection({ cleanup }: { readonly cleanup: Cleanup }) {
   const messages = useDataMessages().lakeHealth
+  const format = useFormat()
+
+  const when = (timestamp: string | null) =>
+    timestamp === null ? messages.never : format.relative(timestamp)
 
   return (
     <PageSection title={messages.cleanupTitle} description={messages.cleanupDescription}>
       <Panel>
         <Facts
           items={[
-            {
-              label: messages.status,
-              value: cleanup.enabled ? (
-                <Pill tone="ok">{messages.on(cleanup.cleanupEvery)}</Pill>
-              ) : (
-                <Pill tone="muted">{messages.off}</Pill>
-              ),
-            },
+            { label: messages.status, value: <CleanupState cleanup={cleanup} /> },
+            { label: messages.lastRequested, value: when(cleanup.requestedAt) },
+            { label: messages.lastRun, value: when(cleanup.lastRunAt) },
             { label: messages.keepVersionsFor, value: cleanup.keepVersionsFor },
             { label: messages.deleteFilesAfter, value: cleanup.deleteFilesAfter },
           ]}
         />
       </Panel>
     </PageSection>
+  )
+}
+
+/** The state as a pill, over what it means. */
+function CleanupState({ cleanup }: { readonly cleanup: Cleanup }) {
+  const { states, stateNotes, on } = useDataMessages().lakeHealth
+
+  return (
+    <span className="flex flex-col items-start gap-1.5">
+      <Pill tone={CLEANUP_TONES[cleanup.state]}>
+        {cleanup.state === "running" ? on(cleanup.cleanupEvery) : states[cleanup.state]}
+      </Pill>
+      <span className="text-muted-foreground">{stateNotes[cleanup.state]}</span>
+    </span>
   )
 }
 

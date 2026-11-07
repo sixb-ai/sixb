@@ -419,8 +419,10 @@ describe("a dataset version's details", () => {
 })
 
 describe("Lake health", () => {
-  const cleanup = {
-    enabled: true,
+  const cleanup: GetLakeHealthResponse["cleanup"] = {
+    state: "running",
+    requestedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    lastRunAt: new Date(Date.now() - 4 * 60_000).toISOString(),
     keepVersionsFor: "7d",
     deleteFilesAfter: "7d",
     cleanupEvery: "1h",
@@ -434,7 +436,7 @@ describe("Lake health", () => {
   }
 
   // Reproduce: list inlined rows at zero, or drop the warnings list, in lake-health.tsx.
-  test("shows each dataset's storage, its warnings, and the cleanup schedule", () => {
+  test("shows each dataset's storage, its warnings, and what cleanup does", () => {
     const { view } = renderHealth({
       available: true,
       cleanup,
@@ -470,7 +472,9 @@ describe("Lake health", () => {
       ],
     })
 
-    expect(view.getByText("On, every 1h")).toBeDefined()
+    expect(view.getByText("Running, every 1h")).toBeDefined()
+    expect(view.getByText("5 minutes ago")).toBeDefined()
+    expect(view.getByText("4 minutes ago")).toBeDefined()
     expect(view.getByRole("link", { name: "raw.events" }).getAttribute("href")).toBe(
       "/console/datasets/raw.events"
     )
@@ -493,11 +497,36 @@ describe("Lake health", () => {
   test("says when automatic cleanup is off", () => {
     const { view } = renderHealth({
       available: true,
-      cleanup: { ...cleanup, enabled: false },
+      cleanup: { ...cleanup, state: "off", requestedAt: null, lastRunAt: null },
       datasets: [],
     })
 
     expect(view.getByText("Off")).toBeDefined()
+    expect(view.getAllByText("Never")).toHaveLength(2)
     expect(view.getByText("No datasets")).toBeDefined()
+  })
+
+  // Reproduce: show `on(cleanup.cleanupEvery)` for every state in lake-health.tsx. The page then
+  // says cleanup runs while the lake grows.
+  test("names what is missing instead of claiming that cleanup runs", () => {
+    const expected = [
+      ["not-requested", "Not running", "the orchestrator is not running"],
+      ["no-worker", "Waiting for a lake worker", "no lake worker has run it"],
+      ["failing", "Failing", "The last attempt failed"],
+    ] as const
+
+    for (const [state, label, note] of expected) {
+      const { view } = renderHealth({
+        available: true,
+        cleanup: { ...cleanup, state },
+        datasets: [],
+      })
+
+      expect(view.getByText(label)).toBeDefined()
+      expect(view.getByText(new RegExp(note))).toBeDefined()
+      expect(view.queryByText("Running, every 1h")).toBeNull()
+
+      view.unmount()
+    }
   })
 })
