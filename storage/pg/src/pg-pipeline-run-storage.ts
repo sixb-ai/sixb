@@ -367,6 +367,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       ownerIds: input.pipelineIds,
       projectId: input.projectId,
       ownerIdFor: (row) => row.pipeline_id,
+      excludedStatus: input.excludedStatus,
     })
 
     return {
@@ -390,6 +391,12 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     if (input.pipelineRunId) {
       whereClauses.push(`pipeline_run_id = $${index++}`)
       params.push(input.pipelineRunId)
+    }
+
+    if (input.pipelineRunIds) {
+      const placeholders = input.pipelineRunIds.map(() => `$${index++}`)
+      whereClauses.push(`pipeline_run_id IN (${placeholders.join(", ") || "NULL"})`)
+      params.push(...input.pipelineRunIds)
     }
 
     if (input.pipelineId) {

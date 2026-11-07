@@ -425,6 +425,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
       ownerIds: input.pipelineIds,
       projectId: input.projectId,
       ownerIdFor: (row) => row.pipeline_id,
+      excludedStatus: input.excludedStatus,
     })
 
     return {
@@ -447,6 +448,12 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
     if (input.pipelineRunId) {
       whereClauses.push("pipeline_run_id = ?")
       args.push(input.pipelineRunId)
+    }
+
+    if (input.pipelineRunIds) {
+      const placeholders = input.pipelineRunIds.map(() => "?")
+      whereClauses.push(`pipeline_run_id IN (${placeholders.join(", ") || "NULL"})`)
+      args.push(...input.pipelineRunIds)
     }
 
     if (input.pipelineId) {
