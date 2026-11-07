@@ -120,9 +120,9 @@ const pass = everyMs({
 - **Passes never wait for each other.** Each has at most one run in flight, and a run that hangs costs the others nothing.
 - **A run has a budget.** Past it the run's signal aborts and the run counts as a failure, then as one more per further budget. It keeps its slot until it ends: starting another beside it would break "one run at a time". A run that stops on the abort should throw, or return having done nothing it needs recorded.
 - **A failure is the pass's own.** Throw from `run`. The loop counts it, reports it as `maintenance.pass.failed` and runs the pass again when it is next due. A pass that wants to do all it can collects its failures and throws an `AggregateError` at the end.
-- **Nothing durable but the heartbeat.** The loop rewrites one row per project: when it beat, how often it promises to, and each pass's last success and consecutive failures. Whatever a pass remembers, such as a change-feed cursor, stays in memory, and its first run after a restart rebuilds it.
+- **Nothing durable but the heartbeat.** The loop rewrites one row per project and owner: when it beat, how often it promises to, and each pass's last success and consecutive failures. Whatever a pass remembers, such as a change-feed cursor, stays in memory, and its first run after a restart rebuilds it.
 
-`/api/status` turns the row into `ok`, `degraded` (the beat is older than two intervals, or a pass failed twice in a row, or the outbox is stuck) or `unknown` (no loop ever beat).
+`/api/status` turns a row into `ok`, `degraded` (the beat is older than two intervals, or a pass failed twice in a row, or the outbox is stuck) or `unknown` (no loop ever beat). The orchestrator's row decides whenever one exists, so an embedded loop cannot speak for it.
 
 Release connector, blob, broker, and logger resources with `host.closeConnectors()`,
 `host.closeBlobs()`, `host.closeBroker()`, and `host.closeLogger()`.

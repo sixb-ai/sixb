@@ -60,23 +60,30 @@ jobs are safe to replay through their deterministic run/job identities.
 
 | Subscription | While running | After process restart |
 | --- | --- | --- |
-| `schedule.triggered` | Retry each job | Replay retained history |
+| `schedule.triggered` | Retry each job | Live tail |
 | `dataset.version.committed` to projections | Retry each job | Live tail: the `projections` pass reads the lake |
 | Event schedules | Retry each job | Replay retained history |
 
-A stop abandons the retries. Nothing is lost by it: retained history brings a cron occurrence or an
-event schedule back at the next start, whether it was retrying or still unread, and the
-`projections` pass covers a commit. Run ids come from the event id, so what was already dispatched
-starts nothing, except a trigger that had joined another run: it has no run of its own, so a restart
-can add one run per schedule.
+A stop abandons the retries, and whatever the subscription had not read yet. Event schedules read
+it again at the next start, and the `projections` pass covers a commit. Cron does not: a restart
+starts at the live tail on purpose. Reading `schedule.triggered` from the start would scan two days
+of the stream on every start, and start one run per retained occurrence for any consumer a deploy
+adds to an existing schedule, because its run ids are new.
 
 What can still be lost:
 
 | Case | Lost | What repairs it |
 | --- | --- | --- |
-| A failure about one event | That trigger, reported with `dropped: true` | Nothing: it is a defect to fix. A restart replays the event and reports it again |
+| A failure about one event | That trigger, reported with `dropped: true` | Nothing: it is a defect to fix. For an event schedule, a restart replays the event and reports it again |
+| A stop while a cron job is retrying, or while the subscription is paused on a backlog | Those occurrences | The next occurrence |
+| A stop while the broker refuses a cron occurrence | That occurrence | The next one |
+| A broker outage that outlasts cron occurrences | All but the one in hand: the `cron` pass retries that one until the broker accepts it, then counts on from then | The next occurrence |
+| A cron occurrence that falls while no orchestrator runs | That occurrence | The next one. It was never emitted |
 | An outage, or a stop, longer than retention (two days by default) | What retention dropped | Projections and `dataset.updated()` pipelines: their passes. Otherwise nothing |
-| A cron occurrence that falls while no orchestrator runs | That occurrence | The next one. It was never emitted, so there is nothing to replay |
+
+The cap of 64 is per event type, not per target: one target that always fails with an unclassified
+error on a per-minute cron fills the slots in about an hour, and the other cron targets then wait
+behind it. It shows as `orchestrator.dispatch.failed` with `dropped: false` long before that.
 
 There is no durable consumer registry, definition signature, cursor table, or new application
 configuration.
@@ -151,7 +158,7 @@ own failure count. See `packages/core/docs/runtime-lifecycle.md`.
 | Pass | When | Does |
 | --- | --- | --- |
 | `ontology` | 60 s | Delivers outbox rows left undelivered by a crash or a failed publish, dispatches pending vector indexing, and purges expired outbox rows, superseded sources, abandoned uploads and expired grants |
-| `cron` | Each occurrence, to the second | Emits `schedule.triggered`, which the direct route consumes like any other event |
+| `cron` | Each occurrence, to the second | Appends `schedule.triggered`, which the direct route consumes like any other event. An occurrence the broker refuses fails the pass and is retried every 10 seconds |
 | `projections` | 30 s, with projection routes | See above |
 | `triggers` | 30 s, with dataset-triggered pipelines | See above |
 
@@ -161,6 +168,9 @@ as the idempotency key lets the broker store one, within its window of two minut
 `sixb deploy` runs one.
 
 The loop writes a heartbeat to storage, which is how `/api/status` in another process knows it runs.
+Each owner has its own row: the orchestrator's decides whenever one exists, so a server embedded with
+`createSixbServer` cannot speak for an orchestrator that died. A project that drops its orchestrator
+for an embedded server keeps a stale row, and reads `degraded`, until that row is deleted.
 
 ## Usage (co-hosted in `sixb dev`)
 
@@ -179,8 +189,8 @@ no manual wiring is needed there.
 - Projection reconciliation repairs a missed dataset event by admitting the latest data-bearing
   version. It is not an event replay log and does not materialize every intermediate version.
 - Publication recovery requires a repeated dispatch. The projection run sweep supplies one;
-  event schedules can replay retained events. Direct cron dispatch has no restart catch-up, and an
-  occurrence that falls while no orchestrator runs is not fired later.
+  event schedules can replay retained events. A run left `queued` by cron has none until the next
+  occurrence joins it.
 - The change-feed cursor is process memory, so each start pays one latest-version lookup per
   projected dataset before it tails the feed.
 - Broker progress is process-local. Retention can still overtake a slow consumer; backpressure

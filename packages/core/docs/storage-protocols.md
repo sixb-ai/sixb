@@ -59,9 +59,10 @@ Size the disk with `ontology_commits` in mind: the pre-0.1 line has no purge for
 
 ## Maintenance heartbeat
 
-`maintenance_heartbeats` holds one row per project. The maintenance loop rewrites it whole, at start,
-as each pass ends and every 30 seconds, so a pass the code no longer runs leaves it. Two loops on one
-project overwrite each other's row; nothing else depends on there being one.
+`maintenance_heartbeats` holds one row per project and owner, `orchestrator` or `embedded`. A loop
+rewrites its row whole, at start, as each pass ends and every 30 seconds, so a pass the code no longer
+runs leaves it. Nothing purges a row: a project that stops using an orchestrator deletes its row, or
+`/api/status` keeps reading it as stale.
 
 ## Sequenced dataset writes
 
