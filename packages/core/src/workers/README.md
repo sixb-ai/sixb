@@ -114,9 +114,16 @@ without a token. After that a delivery finds it settled, and only `republishLost
 
 ### Jobs that never come back
 
-A delivery can only recover a run it reaches. `republishLostRuns` is the pass that brings a job to
-syncs, pipelines and workflows that have none: queued runs whose job was lost, and running runs whose
-lease lapsed, which covers one handed back. Being wrong about a job being lost costs a delivery that
+A delivery can only recover a run it reaches. `republishLostRuns` is the orchestrator's `runs` pass,
+every 30 seconds on its maintenance loop. It brings a job to syncs, pipelines and workflows that have
+none: queued runs whose job was lost, and running runs whose lease lapsed, which covers one handed
+back. A job on its way gets 30 seconds first, so a clean shutdown publishes nothing beside the job
+that came back.
+
+It asks each store for those runs alone (`listLost`), from the `(project_id, status, ...)` index:
+queued and running rows are few however long the history, so a project with nothing lost reads no
+row, and live runs cannot use up its limit. Running runs come first, because queued ones may only be
+waiting for a sibling. Being wrong about a job being lost costs a delivery that
 finds the run held or finished.
 
 ### Limits

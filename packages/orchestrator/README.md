@@ -16,16 +16,14 @@ job-ID idempotency contract.
 
 A Sync or Pipeline dispatch whose own run does not exist yet joins a run of the same Sync or
 Pipeline that is still queued; it queues its own run only when none waits. A queued run reads the
-latest inputs when it starts, so it covers the trigger. The joining trigger publishes a job of its
-own for that run, `<joined run id>:join:<own run id>`, because the run's own job may be settled and
-its id ignored by the provider; once a job has started the run, the others complete without work.
-Replaying a joining trigger publishes the same job, but once the joined run has started the replay
-finds no run of its own and queues one more. Workflow dispatch never joins: each run carries its
-trigger's input.
+latest inputs when it starts, so it covers the trigger. Joining triggers share one more job for
+that run, `<joined run id>:join`, because the run's own job may be settled and its id ignored by
+the provider; once a job has started the run, the others complete without work. Replaying a joining
+trigger publishes the same job, but once the joined run has started the replay finds no run of its
+own and queues one more. Workflow dispatch never joins: each run carries its trigger's input.
 
-The Sync and Pipeline workers keep `queued` meaning "a job will start it": a job that fails before
-starting its run retries twice (250 ms, then 500 ms) and then fails the run, which has committed
-nothing yet.
+The workers keep `queued` meaning "a job will start it": a job that fails before starting its run
+retries with the run still queued, and the `runs` pass brings a job to a run that has none.
 
 ## Dispatching
 
@@ -80,6 +78,8 @@ What can still be lost:
 | A broker outage that outlasts cron occurrences | All but the one in hand: the `cron` pass retries that one until the broker accepts it, then counts on from then | The next occurrence |
 | A cron occurrence that falls while no orchestrator runs | That occurrence | The next one. It was never emitted |
 | An outage, or a stop, longer than retention (two days by default) | What retention dropped | Projections and `dataset.updated()` pipelines: their passes. Otherwise nothing |
+| A queue that loses a job: an in-memory queue with its process, a Redis flush or failover | Nothing: the run is durable | The `runs` pass publishes a job for a queued run, and for a running run whose lease lapsed |
+| A run of an older version whose worker is gone | The rest of that run, which ends `cancelled` after 24 h | The `runs` pass ends it. For `dataset.updated()` pipelines a cancelled run does not count as having read, so the `triggers` pass fires again |
 
 The cap of 64 is per event type, not per target: one target that always fails with an unclassified
 error on a per-minute cron fills the slots in about an hour, and the other cron targets then wait
@@ -131,7 +131,7 @@ what a run read, so the answer needs no record of its own.
 | --- | --- |
 | Queued or running | Nothing yet. The trigger stays unsettled, because the run may have read before the change |
 | Failed | What it read counts as read, so a failure is not retried |
-| Cancelled | Does not count: the run before it decides, and with none, it fires. Only a stopping worker cancels a run |
+| Cancelled | Does not count: the run before it decides, and with none, it fires. A worker stopping cancels nothing: a run is cancelled by a decision, or by the `runs` pass when its older version's worker is gone |
 | None | Nothing: a first run stays the user's or the next event's call |
 
 - A change is the newest version that would fire `updated()`. A later version that changed nothing
@@ -140,6 +140,8 @@ what a run read, so the answer needs no record of its own.
   covers the versions that existed when it started.
 - A commit younger than one interval is left to its event.
 - A dispatch goes through `PipelineRunDispatcher`, so it joins a run that is still queued.
+- A run that lost its job stays active here, and the `runs` pass recovers that same run, so the two
+  never start a second one. If that pass ends it instead, it is cancelled, which fires once.
 
 An idle pass reads the shared feed and looks at no pipeline. The triggers of a dataset that moved
 cost one read of its latest version, one read of the latest runs and one of their steps, whatever
@@ -162,6 +164,7 @@ own failure count. See `packages/core/docs/runtime-lifecycle.md`.
 | `projections` | 30 s, with projection routes | See above |
 | `triggers` | 30 s, with dataset-triggered pipelines | See above |
 | `ingest` | 30 s, when a dataset can be ingested | The only part of ingestion here, and a safety net: `ingest` queues its own flush, and asks again when a request stays open for 30 s. Queues the flush of every dataset whose deliveries wait with no flush holding it, under the request the inbox holds, so a request that has a job queues nothing more. Reports a dataset nothing wrote for 10 minutes, once per stall, as `dataset.ingest.flush.failed`, and purges refused deliveries after a week |
+| `runs` | 30 s, with syncs, pipelines or workflows | `republishLostRuns`: see [run recovery](../core/src/workers/README.md#jobs-that-never-come-back). A run whose job is on its way stays out for 30 s. Idle, that is one query per primitive through its status index, reading no finished run |
 | `lake-retention` | Each `cleanupEvery` from the epoch, when retention runs on its own | Enqueues `lake.retention.requested` on the `lake` queue, under the interval as job id. A lake worker runs it: one slow catalog write here would stall the project's other upkeep |
 
 Outbox rows are claimed under a lease, so passes in two processes never claim the same row together.
@@ -190,9 +193,8 @@ no manual wiring is needed there.
 
 - The `projections` pass repairs a missed dataset event by admitting the latest data-bearing
   version. It is not an event replay log and does not materialize every intermediate version.
-- Publication recovery requires a repeated dispatch. The projection run sweep supplies one;
-  event schedules can replay retained events. A run left `queued` by cron has none until the next
-  occurrence joins it.
+- Publication recovery requires a repeated dispatch or the `runs` pass. The projection run sweep
+  supplies the first, and event schedules can replay retained events.
 - The change-feed cursor is process memory, so each start pays one latest-version lookup per
   projected dataset before it tails the feed.
 - Broker progress is process-local. Retention can still overtake a slow consumer; backpressure
