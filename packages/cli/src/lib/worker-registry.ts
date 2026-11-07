@@ -1,4 +1,5 @@
 import { AgentWorker } from "@sixb/agent-worker"
+import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
 import type { Worker } from "@sixb/core/internal/workers"
 import { PipelineWorker } from "@sixb/pipeline-worker"
 import { ProjectionWorker } from "@sixb/projection-worker"
@@ -177,7 +178,7 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
 export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly WorkerType[] {
   const workerTypes: WorkerType[] = []
 
-  if (sixb.definitions.syncs.list().length > 0) {
+  if (syncWorkerRequired(sixb)) {
     workerTypes.push("sync")
   }
 
@@ -218,6 +219,11 @@ function resolveAgentApiBaseUrl(value: string | undefined): string {
     throw new Error(`[SixbWorker] The agent worker ${AGENT_ORIGIN_REQUIRED}.`)
   }
   return apiBaseUrl
+}
+
+/** The sync worker also hosts the lake lane, so scheduled lake retention needs it without syncs. */
+export function syncWorkerRequired(sixb: LoadedSixbHost): boolean {
+  return sixb.definitions.syncs.list().length > 0 || getLakeRetentionRuntime(sixb).scheduled
 }
 
 /** Explicit model calls can enqueue accounting recovery without a model catalog. */

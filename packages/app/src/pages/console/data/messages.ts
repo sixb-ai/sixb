@@ -119,6 +119,39 @@ export const en = {
       hidden: { sync: "A sync", pipeline: "A pipeline" },
     },
   },
+  lakeHealth: {
+    title: "Lake health",
+    description: "How the lake stores each dataset, and how it cleans up after itself.",
+    unavailableTitle: "This lake storage has no maintenance",
+    unavailableDescription:
+      "Its provider neither describes how datasets are stored nor removes replaced versions. DuckLake does both.",
+    cleanupTitle: "Automatic cleanup",
+    cleanupDescription:
+      "Removes replaced versions and the files only they read. The versions projections applied are always kept.",
+    status: "Status",
+    on: (every: string) => `On, every ${every}`,
+    off: "Off",
+    keepVersionsFor: "Keeps replaced versions for",
+    deleteFilesAfter: "Deletes unread files after",
+    datasetsTitle: "Datasets",
+    datasetsDescription:
+      "Compaction merges small files and inlined rows after the writes that leave them.",
+    emptyTitle: "No datasets",
+    emptyDescription: "A sync or pipeline declares the dataset it writes.",
+    notWritten: "Not written yet",
+    files: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} file`, other: `${formatted} files` }),
+    smallFiles: (formatted: string) => `${formatted} small`,
+    deleteFiles: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} delete file`, other: `${formatted} delete files` }),
+    inlinedRows: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} inlined row`, other: `${formatted} inlined rows` }),
+    snapshots: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} snapshot`, other: `${formatted} snapshots` }),
+    partitionedBy: (columns: string) => `Partitioned by ${columns}`,
+    warnings: (count: number) =>
+      plural("en", count, { one: "1 warning", other: `${count} warnings` }),
+  },
   pipelines: {
     title: "Pipelines",
     description: "Pipelines turn datasets into new ones, one step after another.",
@@ -294,6 +327,45 @@ export const fr: Translation<DataMessages> = {
       ingest: "Ingérée directement",
       hidden: { sync: "Une synchronisation", pipeline: "Un pipeline" },
     },
+  },
+  lakeHealth: {
+    title: "Santé du lac",
+    description: "Comment le lac stocke chaque jeu de données, et comment il se nettoie.",
+    unavailableTitle: "Ce stockage de lac n’a pas de maintenance",
+    unavailableDescription:
+      "Son fournisseur ne décrit pas le stockage des jeux de données et ne supprime pas les versions remplacées. DuckLake fait les deux.",
+    cleanupTitle: "Nettoyage automatique",
+    cleanupDescription:
+      "Supprime les versions remplacées et les fichiers qu’elles seules lisent. Les versions appliquées par les projections sont toujours conservées.",
+    status: "État",
+    on: (every: string) => `Activé, toutes les ${every}`,
+    off: "Désactivé",
+    keepVersionsFor: "Conserve les versions remplacées",
+    deleteFilesAfter: "Supprime les fichiers non lus après",
+    datasetsTitle: "Jeux de données",
+    datasetsDescription:
+      "La compaction fusionne les petits fichiers et les lignes en ligne après les écritures qui les laissent.",
+    emptyTitle: "Aucun jeu de données",
+    emptyDescription: "Une synchronisation ou un pipeline déclare le jeu de données qu’il écrit.",
+    notWritten: "Pas encore écrit",
+    files: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} fichier`, other: `${formatted} fichiers` }),
+    smallFiles: (formatted: string) => `${formatted} petits`,
+    deleteFiles: (count: number, formatted: string) =>
+      plural("fr", count, {
+        one: `${formatted} fichier de suppression`,
+        other: `${formatted} fichiers de suppression`,
+      }),
+    inlinedRows: (count: number, formatted: string) =>
+      plural("fr", count, {
+        one: `${formatted} ligne dans le catalogue`,
+        other: `${formatted} lignes dans le catalogue`,
+      }),
+    snapshots: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} instantané`, other: `${formatted} instantanés` }),
+    partitionedBy: (columns: string) => `Partitionné par ${columns}`,
+    warnings: (count: number) =>
+      plural("fr", count, { one: "1 avertissement", other: `${count} avertissements` }),
   },
   pipelines: {
     title: "Pipelines",

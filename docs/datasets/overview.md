@@ -161,6 +161,31 @@ The caller needs a view grant on the dataset. Columns it is not cleared for are 
 metadata. A version names its producer's run, and lists its inputs, only as far as the caller may
 view them.
 
+## Storage maintenance
+
+Each write adds a version, and a replaced version keeps its files. Sixb removes them on a schedule, in every project:
+
+```ts
+export const sixb = createSixb({
+  // ...providers
+  lakeMaintenance: { keepVersionsFor: "14d", cleanupEvery: "6h" },
+})
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Run cleanup on its schedule. |
+| `keepVersionsFor` | `"7d"` | How long a version stays readable after a newer one replaced it. At least `"1h"`. |
+| `deleteFilesAfter` | `"7d"` | How long a file no kept version reads stays in storage. At least `"1h"`. |
+| `cleanupEvery` | `"1h"` | How often cleanup runs. It must divide an hour or a day (`15m`, `1h`, `6h`, `1d`), or be `1w`. |
+
+- The latest version of each dataset, and the versions projections applied, are always kept.
+- Cleanup runs in the `sync` worker, requested by the scheduler through the orchestrator. A deployment that names its worker `types` must include `sync`.
+- Small files are merged by the lake provider itself after the writes that leave them.
+- Console › Lake health shows how each dataset is stored, with warnings such as a partitioned small dataset.
+- `sixb lake cleanup --dry-run` measures what one pass would remove; without `--dry-run` it cleans up now.
+- Cleanup needs a lake provider that supports it, such as DuckLake. Otherwise nothing runs.
+
 ## File location
 
 Export definitions from `datasets/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.

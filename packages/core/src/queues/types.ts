@@ -215,11 +215,28 @@ export type VectorIndexingQueueJob = QueueJob<
   { readonly indexingId: string }
 >
 
+/** One occurrence of the built-in lake retention schedule; its payload says which. */
+export interface LakeRetentionRequestedQueueJob
+  extends QueueJob<
+    "lake.retention.requested",
+    {
+      readonly occurrenceAt: string
+    }
+  > {}
+
+export type LakeQueueJob = LakeRetentionRequestedQueueJob
+
 export interface Queues {
   readonly vectorIndexing: Queue<
     VectorIndexingQueueJob,
     "internal.unexpected" | "runtime.cancelled"
   >
+  /**
+   * Lake work the framework runs in a worker rather than in the process that asks for it, such as
+   * the retention of replaced dataset versions and their files. SyncWorker hosts this lane, apart
+   * from `syncRuns`, so lake work never waits behind a sync or takes its slot.
+   */
+  readonly lake: Queue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: Queue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
   readonly pipelines: Queue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: Queue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>

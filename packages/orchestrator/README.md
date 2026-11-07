@@ -88,6 +88,13 @@ behind it. It shows as `orchestrator.dispatch.failed` with `dropped: false` long
 There is no durable consumer registry, definition signature, cursor table, or new application
 configuration.
 
+Lake retention is the one direct job with no durable run behind it. The host adds a built-in
+cron schedule, `sixb:lake-retention`, beside the project's own schedules (never into
+`definitions.schedules`) when lake maintenance is on. Its `schedule.triggered` events become
+`lake.retention.requested` jobs on the `lake` lane, under the occurrence key as job ID, so a replayed
+occurrence enqueues nothing more. SyncWorker runs them; the orchestrator never touches the lake,
+since one slow catalog write there would stall every route's dispatch.
+
 Projection admission has an event path and a recovery path:
 
 ```text

@@ -1,3 +1,4 @@
+import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
 import { parseDurationMs } from "../lib/duration"
 import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
@@ -23,26 +24,20 @@ export async function runLakeCleanup(options: LakeCleanupOptions = {}) {
   const sixb = await withTask("lake cleanup", "Loading project", () => loadSixbFromEntry(entry))
 
   try {
-    const maintenance = sixb.lakeStorage.maintenance
-    if (maintenance === undefined) {
+    if (sixb.lakeStorage.maintenance === undefined) {
       throw new Error("[SixbCLI] Configured lake storage does not support retention cleanup.")
     }
 
-    // Objects hold the rows of the version each projection applied, and their markings are read
-    // from it: the lake keeps those versions too. Without them, cleanup does not run.
-    const applied = await sixb.storage.ontology.sources.listActive({ projectId: sixb.projectId })
+    // The same passes as the scheduled retention, without its time budget: they keep the versions
+    // projections applied, and run until none reports more. A dry run measures one pass.
     const report = await withTask(
       "lake cleanup",
       options.dryRun ? "Measuring" : "Cleaning up",
       () =>
-        maintenance.applyRetention({
+        getLakeRetentionRuntime(sixb).apply({
           dryRun: options.dryRun ?? false,
           keepVersionsForMs,
           deleteFilesAfterMs,
-          protect: applied.map(({ datasetVersion }) => ({
-            datasetId: datasetVersion.datasetId,
-            versionId: datasetVersion.versionId,
-          })),
         })
     )
 

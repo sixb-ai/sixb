@@ -20,6 +20,7 @@ import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider } from "../logging"
 import type { ObservabilityOptions } from "../logging/service"
 import type { OntologyMaintenanceOptions } from "../maintenance"
+import type { LakeMaintenanceOptions } from "../maintenance/lake-retention"
 import type { ModelCatalogInput } from "../models"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinition } from "../projections/types"
@@ -54,6 +55,8 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   broker: Broker
   storage: Storage
   lakeStorage: LakeStorage
+  /** Automatic retention of replaced dataset versions and their files. On by default. */
+  lakeMaintenance?: LakeMaintenanceOptions
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory<TParams>
@@ -137,6 +140,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     broker: options.broker,
     storage: options.storage,
     lakeStorage: options.lakeStorage,
+    lakeMaintenance: options.lakeMaintenance,
     blobStorage: options.blobStorage,
     queues: options.queues,
     sandboxes: options.sandboxes,

@@ -6681,6 +6681,81 @@ export type ListDatasetRowsResponses = {
 
 export type ListDatasetRowsResponse = ListDatasetRowsResponses[keyof ListDatasetRowsResponses]
 
+export type GetLakeHealthData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/lake/health"
+}
+
+export type GetLakeHealthErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type GetLakeHealthError = GetLakeHealthErrors[keyof GetLakeHealthErrors]
+
+export type GetLakeHealthResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * Whether the lake storage provider supports maintenance
+     */
+    available: boolean
+    cleanup: {
+      /**
+       * Whether retention runs on its schedule
+       */
+      enabled: boolean
+      keepVersionsFor: string
+      deleteFilesAfter: string
+      cleanupEvery: string
+    }
+    datasets: Array<{
+      datasetId: string
+      /**
+       * Whether the dataset has a table in the lake
+       */
+      materialized: boolean
+      rowCount: number
+      /**
+       * Data files its current rows are read from
+       */
+      dataFiles: number
+      /**
+       * Data files small enough that compaction merges them
+       */
+      smallDataFiles: number
+      dataBytes: number
+      /**
+       * Files listing deleted rows, until compaction
+       */
+      deleteFiles: number
+      /**
+       * Rows kept in the catalog rather than in files
+       */
+      inlinedRows: number
+      /**
+       * Commits still in the dataset's history
+       */
+      retainedSnapshots: number
+      partitionBy: Array<string>
+      warnings: Array<{
+        code: "partitioned-small-dataset"
+        message: string
+      }>
+    }>
+  }
+}
+
+export type GetLakeHealthResponse = GetLakeHealthResponses[keyof GetLakeHealthResponses]
+
 export type ListSyncsData = {
   body?: never
   path?: never

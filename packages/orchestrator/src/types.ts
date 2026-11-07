@@ -63,11 +63,17 @@ export interface PipelineRunDispatchJobTemplate {
   readonly payload: { readonly pipelineId: string }
 }
 
+/** The built-in retention schedule's job: a worker runs it, never the orchestrator. */
+export interface LakeRetentionJobTemplate {
+  readonly type: "lake.retention.requested"
+}
+
 export type OrchestratorJob =
   | { readonly queue: "syncRuns"; readonly job: SyncRunDispatchJobTemplate }
   | { readonly queue: "pipelines"; readonly job: PipelineRunDispatchJobTemplate }
   | { readonly queue: "projections"; readonly job: ProjectionDispatchJobTemplate }
   | { readonly queue: "workflows"; readonly job: WorkflowRunDispatchJobTemplate }
+  | { readonly queue: "lake"; readonly job: LakeRetentionJobTemplate }
 
 export type OrchestratorEventScheduleTarget =
   | { readonly queue: "syncRuns"; readonly syncId: string }
@@ -97,6 +103,8 @@ export interface CompileRoutesParams {
   readonly pipelines: readonly PipelineDefinition[]
   readonly projections?: readonly RoutableProjectionDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
+  /** The built-in lake retention schedule, when the project runs it. */
+  readonly lakeRetention?: { readonly scheduleId: string }
 }
 
 export type ScheduleConsumerKind = "sync" | "pipeline" | "workflow"

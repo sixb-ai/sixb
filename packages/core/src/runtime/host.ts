@@ -59,6 +59,13 @@ import type {
   OntologyOperationalStatus,
   SixbReadiness,
 } from "../maintenance"
+import {
+  createLakeRetentionRuntime,
+  LAKE_RETENTION_SCHEDULE_ID,
+  type LakeMaintenanceOptions,
+  lakeRetentionSchedule,
+  registerLakeRetentionRuntime,
+} from "../maintenance/lake-retention"
 import { storageHeartbeat } from "../maintenance/heartbeat"
 import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
 import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
@@ -136,6 +143,8 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   broker: Broker
   storage: Storage
   lakeStorage: LakeStorage
+  /** Automatic retention of replaced dataset versions and their files. On by default. */
+  lakeMaintenance?: LakeMaintenanceOptions
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory<TParams>
@@ -365,8 +374,29 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       this,
       createVectorIndexingRuntime(this.hostContext, this.materializer)
     )
+
+    // The built-in schedule sits beside the project's own, never among them: user code cannot
+    // read it from `sixb.schedules` or point a trigger at it.
+    if (definitions.schedules.getById(LAKE_RETENTION_SCHEDULE_ID)) {
+      throw new RuntimeError(
+        `[Sixb] Schedule id '${LAKE_RETENTION_SCHEDULE_ID}' is reserved for lake maintenance. Rename the schedule.`
+      )
+    }
+
+    const lakeRetention = createLakeRetentionRuntime({
+      projectId: this.projectId,
+      options: options.lakeMaintenance,
+      lakeStorage: this.lakeStorage,
+      sources: this.storage.ontology.sources,
+      datasetCount: definitions.datasets.list().length,
+    })
+    registerLakeRetentionRuntime(this, lakeRetention)
+
     this.cron = cronPass({
-      schedules: definitions.schedules.list(),
+      schedules: [
+        ...definitions.schedules.list(),
+        ...(lakeRetention.scheduled ? [lakeRetentionSchedule(lakeRetention.settings)] : []),
+      ],
       events: this.eventService,
       timeZone: this.timeZone,
     })

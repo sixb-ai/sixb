@@ -442,21 +442,27 @@ export function lakeCleanupView({
   deleteFilesAfter: string
   report: LakeRetentionReport
 }): string {
+  // A dry run measures one pass: when more remain, what the run would clean is more than it counts.
+  const measuredOnePass = report.dryRun && report.hasMore
+  const atLeast = (count: number) => (measuredOnePass ? `${count}+` : String(count))
+
   return screen(
     header(report.dryRun ? "lake cleanup --dry-run" : "lake cleanup", projectId),
     rows([
       { label: "Keep versions for", value: keepVersionsFor },
       { label: "Delete files after", value: deleteFilesAfter },
-      { label: "Expired versions", value: String(report.expiredVersions) },
+      { label: "Expired versions", value: atLeast(report.expiredVersions) },
       { label: "Kept versions", value: String(report.keptVersions) },
-      { label: "Deleted files", value: String(report.deletedFiles) },
-      { label: "Orphaned files", value: String(report.orphanedFiles) },
+      { label: "Deleted files", value: atLeast(report.deletedFiles) },
+      { label: "Orphaned files", value: atLeast(report.orphanedFiles) },
     ]),
     headline(
       "ok",
       report.dryRun ? "Lake cleanup dry run complete" : "Lake cleanup complete",
       report.dryRun
-        ? "nothing was deleted"
+        ? measuredOnePass
+          ? "nothing was deleted; one pass measured, more remain"
+          : "nothing was deleted"
         : report.hasMore
           ? "more is due: run it again"
           : undefined

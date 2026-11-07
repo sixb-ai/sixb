@@ -7,7 +7,11 @@ import {
   getProjectionDispatchDescriptors,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
-import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
+import {
+  getLakeRetentionRuntime,
+  LAKE_RETENTION_SCHEDULE_ID,
+  setApiPublicOrigin,
+} from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, getAppliedMarkings } from "@sixb/core/internal/security"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
@@ -28,7 +32,7 @@ import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 import { stopQuietly } from "./role-lifecycle"
 import type { WorkerConcurrency } from "./worker-registry"
-import { agentRuntimeRequired, agentWorkerRequired } from "./worker-registry"
+import { agentRuntimeRequired, agentWorkerRequired, syncWorkerRequired } from "./worker-registry"
 
 export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -168,6 +172,9 @@ export async function startOrchestratorRuntime(
     pipelines: sixb.definitions.pipelines.list(),
     projections,
     workflows: sixb.definitions.workflows.list(),
+    ...(getLakeRetentionRuntime(sixb).scheduled
+      ? { lakeRetention: { scheduleId: LAKE_RETENTION_SCHEDULE_ID } }
+      : {}),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   const dispatchers = {
@@ -312,7 +319,7 @@ export async function startSixbRuntime(
         await workflowWorker.start()
       }
 
-      if (sixb.definitions.syncs.list().length > 0) {
+      if (syncWorkerRequired(sixb)) {
         syncWorker = new SyncWorker(sixb, { concurrency: options.workerConcurrency?.sync })
         await syncWorker.start()
       }

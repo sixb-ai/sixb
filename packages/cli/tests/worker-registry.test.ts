@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
+  col,
+  defineDataset,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type LakeMaintenanceOptions,
   type ModelCatalogInput,
   SixbHost,
 } from "@sixb/core"
+import type { LakeMaintenance } from "@sixb/core/lake-storage"
 import { SixbCliError } from "../src/lib/errors"
 import {
   agentRuntimeRequired,
@@ -223,3 +227,45 @@ for (const capability of ["aiUsage", "aiCosts", "aiLimits"] as const) {
     expect(resolveRegisteredWorkerTypes(host)).not.toContain("agent")
   })
 }
+
+describe("lake retention", () => {
+  class MaintainedLakeStorage extends InMemoryLakeStorage {
+    readonly maintenance: LakeMaintenance = {
+      applyRetention: async () => {
+        throw new Error("not run here")
+      },
+      describeStorage: async () => [],
+    }
+  }
+
+  const rooms = defineDataset("raw.rooms", { schema: [col("id", "string")] })
+
+  function host(lakeMaintenance?: LakeMaintenanceOptions) {
+    return new SixbHost({
+      id: "lake",
+      ontology: [],
+      datasets: [rooms],
+      storage: new InMemoryStorage(),
+      broker: new InMemoryBroker(),
+      queues: new InMemoryQueues(),
+      blobStorage: new InMemoryBlobStorage(),
+      lakeStorage: new MaintainedLakeStorage(),
+      lakeMaintenance,
+    })
+  }
+
+  // Reproduce: select `sync` from registered syncs alone in resolveRegisteredWorkerTypes.
+  test("selects the sync worker for a project with datasets and no syncs", async () => {
+    const sixb = host()
+
+    expect(resolveRegisteredWorkerTypes(sixb)).toContain("sync")
+
+    const worker = createWorkerForType(sixb, "sync")
+    await worker.start()
+    await worker.stop()
+  })
+
+  test("selects no sync worker when lake retention is off", () => {
+    expect(resolveRegisteredWorkerTypes(host({ enabled: false }))).not.toContain("sync")
+  })
+})
