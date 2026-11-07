@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
-import { Composer } from "./composer"
+import { Composer, type ComposerProps } from "./composer"
 import { ThreadsButton } from "./threads-button"
 import { Transcript, type TranscriptProps } from "./transcript"
 
@@ -17,7 +17,8 @@ export interface ConversationPanelProps {
   readonly readOnly?: boolean
   readonly agent: Agent | undefined
   readonly transcript: TranscriptProps
-  readonly composer: ConversationComposerProps
+  /** The conversation's composer, and the page's choices for a conversation not created yet. */
+  readonly composer: ConversationComposerProps & Pick<ComposerProps, "newThreadControls">
   readonly messagesLoading: boolean
   readonly messagesError: string | null
   /** The selected durable thread, or null while composing a new one. */

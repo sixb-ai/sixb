@@ -34,6 +34,7 @@ import {
 import {
   type ClipboardEvent,
   type KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -146,6 +147,11 @@ export interface ComposerProps {
   readonly contextMeter?: ContextMeterProps
   /** Where a new conversation runs, where there's a choice; "waiting" until that's known. */
   readonly newThreadPlace?: NewThreadPlace | "waiting"
+  /**
+   * The page's own choices for the conversation the next message creates, such as its repository,
+   * at the end of the line under the input.
+   */
+  readonly newThreadControls?: ReactNode
 }
 
 type ComposerAttachment =
@@ -226,6 +232,7 @@ export function Composer({
   commands = [],
   contextMeter,
   newThreadPlace,
+  newThreadControls,
 }: ComposerProps) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
@@ -1009,12 +1016,23 @@ export function Composer({
             )}
           </div>
         </div>
-        {newThreadPlace ? (
+        {newThreadPlace || newThreadControls ? (
           // Its height held from the first render: the composer doesn't move when the place arrives.
-          <div data-slot="composer-place" className="mt-1.5 flex h-7 min-w-0 items-center pl-3.5">
-            {newThreadPlace === "waiting" ? null : (
+          <div
+            data-slot="composer-place"
+            className="mt-1.5 flex h-7 min-w-0 items-center gap-2 px-3.5"
+          >
+            {newThreadPlace && newThreadPlace !== "waiting" ? (
               <ComposerPlace place={newThreadPlace} disabled={disabled || pending} />
-            )}
+            ) : null}
+            {newThreadControls ? (
+              <div
+                data-slot="composer-new-thread-controls"
+                className="ml-auto flex min-w-0 items-center"
+              >
+                {newThreadControls}
+              </div>
+            ) : null}
           </div>
         ) : null}
         <span className="sr-only" aria-live="polite">

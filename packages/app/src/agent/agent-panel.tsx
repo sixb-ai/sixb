@@ -3,6 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { type ReactNode, useCallback, useState } from "react"
 import { AgentChat } from "./agent-chat"
 import { useRegisteredAgentContext } from "./agent-context-provider"
+import type { AgentThreadSandboxParams } from "./types"
 
 export interface AgentPanelProps {
   /** Omitted uses AgentContextProvider; provided is the complete controlled ambient list. */
@@ -29,6 +30,13 @@ export interface AgentPanelProps {
   readonly className?: string
   /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
   readonly welcomeContent?: ReactNode
+  /**
+   * The sandbox the conversation the next message creates works in, as the project's sandbox
+   * declares its params, such as a repository and a branch.
+   */
+  readonly newThreadSandbox?: AgentThreadSandboxParams
+  /** Under the input of a new conversation, on the right: the page's choices for it. */
+  readonly newThreadControls?: ReactNode
 }
 
 /** Embeddable chat that never reads or changes the host application's route. */
@@ -47,6 +55,8 @@ export function AgentPanel({
   compact = true,
   className,
   welcomeContent,
+  newThreadSandbox,
+  newThreadControls,
 }: AgentPanelProps) {
   const registeredContext = useRegisteredAgentContext()
   const ambientContext = context === undefined ? registeredContext : context
@@ -73,6 +83,8 @@ export function AgentPanel({
       composerPlaceholder={composerPlaceholder}
       dictation={dictation}
       welcomeContent={welcomeContent}
+      newThreadSandbox={newThreadSandbox}
+      newThreadControls={newThreadControls}
       onNavigateHome={() => {
         changeThread(null)
         onNewThread?.()
