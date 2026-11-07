@@ -439,6 +439,24 @@ models: {
 
 Pass `dictation={false}` to `AgentPanel`, `AgentSurface` or `AgentChatPage` to hide it.
 
+### Start a conversation in a sandbox
+
+When your [sandbox](../sandboxes/overview.md#configure-the-environment) declares `params`, such as
+a repository and a branch, a chat can start each conversation in one. Pass the params as
+`newThreadSandbox` and your own picker as `newThreadControls`, which shows under the input until
+the first message:
+
+```tsx
+<AgentPanel
+  newThreadSandbox={repository ? { repositoryId: repository.id, branch } : undefined}
+  newThreadControls={<RepositoryPicker value={repository} onChange={setRepository} />}
+/>
+```
+
+The first message creates the conversation with those params; changing them afterwards has no
+effect on it. A conversation with a sandbox runs in the cloud, so the desktop app does not offer a
+folder for it. `useAgentConversation` takes `newThreadSandbox` too.
+
 ### Build your own chat
 
 `AgentPanel` is assembled from parts that `@sixb/app` exports, so a chat with its own layout keeps
