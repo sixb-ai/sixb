@@ -75,7 +75,8 @@ any error, so a run stays auditable after the fact.
 
 ### Durability under failure
 
-Workers claim jobs with a **lease** (default 15 minutes). On each outcome:
+Workers claim jobs with a **lease** of one minute, renewed while the job runs, so a worker that
+dies gives its job back within about a minute. On each outcome:
 
 - **success** — the job is completed and removed from the queue.
 - **execution error** — the run records its failure and the job fails. An error

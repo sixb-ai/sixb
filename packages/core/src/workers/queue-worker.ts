@@ -46,7 +46,11 @@ export type QueueWorkerFailureDecision<TFailureCode extends SixbErrorCode = neve
       readonly failure?: SixbFailure<TFailureCode>
     }
 
-const DEFAULT_LEASE_MS = 15 * 60_000
+/**
+ * Renewed every third of itself while the job runs, so its length is only how long a worker that
+ * died holds its job: the same minute webhooks, agents and the dataset inbox use.
+ */
+const DEFAULT_LEASE_MS = 60_000
 const DEFAULT_CLAIM_LIMIT = 1
 const CLAIM_FAILURE_DELAY_MS = 1_000
 const MAX_CONSECUTIVE_CLAIM_FAILURES = 5

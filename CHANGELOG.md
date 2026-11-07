@@ -91,6 +91,8 @@ Sixb packages are versioned independently. Each release entry names the packages
 - A stopped worker no longer ends a run: it stays `running` and the next delivery resumes it, so
   `*.run.finished` with `cancelled` stops firing at deploys. A run that loses its worker five times
   ends `failed`. `attempt` joins the sync and pipeline run APIs, and the Console run rows.
+- A worker that dies gives its job back after a minute, not 15: the lease of syncs, pipelines,
+  projections, workflows and lake jobs is renewed while they run, so only a lost worker waits it out.
 - One run of a sync runs at a time: a queued run waits for the running one, and triggers join it.
   Datasets stay multi-writer.
 - Runs left behind are picked up, by the orchestrator's new `runs` pass. A queued run whose job was
