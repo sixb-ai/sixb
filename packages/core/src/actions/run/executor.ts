@@ -1,6 +1,7 @@
 import { reportRunFailure } from "../../error-reporting/capability"
 import { createSixbError, type SixbCodedError } from "../../errors/internal"
 import type { RequestClient } from "../../execution/request-client"
+import { PendingTasks } from "../../pending-tasks"
 import type { ActionRunRecord } from "../../storage"
 import {
   type ActionRunRequestPayload,
@@ -50,7 +51,7 @@ interface HeldRunId {
  * execute its run without holding the host.
  */
 export class ActionRunExecutor {
-  private readonly inFlight = new Set<Promise<void>>()
+  private readonly inFlight = new PendingTasks()
   /** Run ids held by a request of this process, until it ends. */
   private readonly held = new Map<string, HeldRunId>()
   private stopping = false
@@ -81,7 +82,7 @@ export class ActionRunExecutor {
       )
     }
     const requested = this.dispatch(request)
-    this.track(requested)
+    this.inFlight.track(requested)
     return requested
   }
 
@@ -91,30 +92,13 @@ export class ActionRunExecutor {
    */
   async drain(timeoutMs: number): Promise<void> {
     this.stopping = true
-    const deadline = Date.now() + Math.max(0, timeoutMs)
     // A request that ends starts its run's effects before it settles, so they are tracked by the
-    // time the wait for the request returns: wait again until nothing is left.
-    while (this.inFlight.size > 0) {
-      if (!(await settleWithin([...this.inFlight], deadline - Date.now()))) {
-        console.error(
-          `[Sixb] Stopped waiting after ${timeoutMs} ms for ${this.inFlight.size} in-flight Action run(s).`
-        )
-        return
-      }
-    }
-  }
+    // time the wait for the request returns: `drain` waits again until nothing is left.
+    if (await this.inFlight.drain(timeoutMs)) return
 
-  /** Track work until it settles. Whoever started it handles how it ends; this only waits. */
-  private track(work: Promise<unknown>): void {
-    const settled: Promise<void> = work
-      .then(
-        () => undefined,
-        () => undefined
-      )
-      .finally(() => {
-        this.inFlight.delete(settled)
-      })
-    this.inFlight.add(settled)
+    console.error(
+      `[Sixb] Stopped waiting after ${timeoutMs} ms for ${this.inFlight.size} in-flight Action run(s).`
+    )
   }
 
   private async dispatch(request: ActionRunRequest): Promise<ActionRunRecord> {
@@ -214,7 +198,7 @@ export class ActionRunExecutor {
    * response.
    */
   private startEffects(run: PendingActionRun, effects: () => Promise<void>): void {
-    this.track(
+    this.inFlight.track(
       new Promise<void>((resolve) => setImmediate(resolve))
         .then(effects)
         .catch((error: unknown) => {
@@ -307,21 +291,4 @@ export async function drainActionRuns(host: object, timeoutMs: number): Promise<
 
 function findActionRunExecutor(owner: object): ActionRunExecutor | undefined {
   return (owner as ActionRunExecutorOwner)[actionRunExecutorKey]
-}
-
-async function settleWithin(
-  promises: readonly Promise<unknown>[],
-  timeoutMs: number
-): Promise<boolean> {
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      Promise.allSettled(promises).then(() => true),
-      new Promise<false>((resolve) => {
-        timeout = setTimeout(() => resolve(false), timeoutMs)
-      }),
-    ])
-  } finally {
-    if (timeout) clearTimeout(timeout)
-  }
 }
