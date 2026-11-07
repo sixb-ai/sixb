@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   type AgentRunFailureCode,
   type QueueWorkflowRunInput,
+  type RunExecution,
   type SixbFailure,
-  type StartWorkflowRunInput,
   WorkflowRunError,
   type WorkflowRunFailureCode,
 } from "@sixb/core/storage"
@@ -11,6 +11,7 @@ import {
   createTestAgentExecution,
   createTestAutomaticWorkflowExecution,
   createTestWorkflowExecution,
+  startTestRun,
 } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { PgWorkflowRunStorage } from "../src/pg-workflow-run-storage"
@@ -85,7 +86,7 @@ describe("PgWorkflowRunStorage", () => {
 
   test("requires a queued run linked to its matching workflow execution", async () => {
     await expect(
-      root.workflowRuns.start({ id: "wf-run-missing", projectId: "my-app" })
+      startTestRun(root.workflowRuns, { id: "wf-run-missing", projectId: "my-app" })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
     const executionId = await createTestWorkflowExecution(root.executions, {
@@ -484,15 +485,6 @@ describe("PgWorkflowRunStorage", () => {
     })
 
     await expect(
-      storage.workflowRuns.start({
-        id: "wf-run-1",
-        projectId: "my-app",
-        workflowId: "reconcile-transaction",
-        input: {},
-      })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
-
-    await expect(
       storage.workflowRuns.finish({
         id: "missing",
         projectId: "my-app",
@@ -626,7 +618,7 @@ describe("PgWorkflowRunStorage", () => {
       executionToken: "workflow-exec-old",
     })
 
-    const reclaimed = await storage.workflowRuns.reclaim({
+    const { run: reclaimed } = await storage.workflowRuns.startOrReclaim({
       id: "wf-run-fenced",
       projectId: "my-app",
       execution: {
@@ -742,7 +734,11 @@ type TestQueueWorkflowRunInput = Omit<QueueWorkflowRunInput, "executionId"> & {
   readonly executionId?: string
 }
 
-type TestStartWorkflowRunInput = StartWorkflowRunInput & {
+type TestStartWorkflowRunInput = {
+  readonly id: string
+  readonly projectId: string
+  readonly startedAt?: Date
+  readonly execution?: RunExecution
   readonly workflowId?: string
   readonly input?: QueueWorkflowRunInput["input"]
 }
@@ -750,7 +746,7 @@ type TestStartWorkflowRunInput = StartWorkflowRunInput & {
 function createWorkflowRunStorage(root: PostgresStorage) {
   const workflowRuns = root.workflowRuns
   const queue = workflowRuns.queue.bind(workflowRuns)
-  const start = workflowRuns.start.bind(workflowRuns)
+  const start = (input: Parameters<typeof startTestRun>[1]) => startTestRun(workflowRuns, input)
   const queueFixture = async (input: TestQueueWorkflowRunInput) => {
     const executionId = await createTestWorkflowExecution(root.executions, {
       projectId: input.projectId,

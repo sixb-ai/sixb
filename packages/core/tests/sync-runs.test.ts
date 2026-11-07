@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { startTestRun } from "@sixb/core/testing"
 import { InMemoryStorage } from "../src"
 import type { QueueSyncRunInput, SixbFailure, SyncRunFailureCode } from "../src/storage"
 import { SyncRunError } from "../src/storage"
@@ -29,7 +30,7 @@ async function startSyncRun(storage: InMemoryStorage, input: TestStartSyncRunInp
     executionId,
     queuedAt: startedAt,
   })
-  return storage.syncRuns.start({ id: input.id, projectId: input.projectId, startedAt })
+  return startTestRun(storage.syncRuns, { id: input.id, projectId: input.projectId, startedAt })
 }
 
 const FAILURE: SixbFailure<SyncRunFailureCode> = {
@@ -290,6 +291,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
+    await storage.syncRuns.finish({ id: "run-orders-a", projectId: "my-app", status: "cancelled" })
     await startSyncRun(storage, {
       id: "run-orders-z",
       projectId: "my-app",

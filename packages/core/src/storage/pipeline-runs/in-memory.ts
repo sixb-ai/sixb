@@ -2,6 +2,16 @@ import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
 import type { ExecutionStorage } from "../executions"
 import {
+  type ClaimRunInput,
+  type ConfirmRunExecutionInput,
+  holdsRun,
+  laterLease,
+  mayFinishRun,
+  planRunClaim,
+  type ReleaseRunExecutionInput,
+  type RunClaim,
+} from "../run-claim"
+import {
   cloneRecord,
   compareStartedAt,
   hasEmptyStatuses,
@@ -29,7 +39,6 @@ import type {
   PipelineRunStorage,
   PipelineStepRunRecord,
   QueuePipelineRunInput,
-  StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./types"
 import { PIPELINE_RUN_FAILURE_CODES } from "./types"
@@ -104,6 +113,8 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
       const next: PipelineRunRecord = {
         ...existing,
         status: "queued",
+        attempt: 0,
+        execution: undefined,
         queuedAt,
         startedAt: undefined,
         finishedAt: undefined,
@@ -120,6 +131,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
       executionId: input.executionId,
       pipelineId: input.pipelineId,
       status: "queued",
+      attempt: 0,
       queuedAt,
     }
 
@@ -127,28 +139,51 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     return cloneRecord(record)
   }
 
-  async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
-    const key = storageKey(input.projectId, input.id)
-    const existing = this.runs.get(key)
-    if (!existing) {
-      throw new PipelineRunError(
-        `[Sixb] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
-    if (existing.status !== "queued") {
-      throw new PipelineRunError(
-        `[Sixb] Pipeline run '${input.id}' cannot start from status '${existing.status}'.`
-      )
-    }
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<PipelineRunRecord>> {
+    const existing = this.requireExistingPipelineRun(input.projectId, input.id)
 
-    const next: PipelineRunRecord = {
+    const plan = planRunClaim(cloneRecord(existing), input)
+    if (!plan.take) return plan.claim
+
+    const { outcome, startedAt, attempt, execution } = plan
+    const run = this.writeRun({
       ...existing,
       status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
+      startedAt,
+      attempt,
+      execution,
       error: undefined,
-    }
-    this.runs.set(key, cloneRecord(next))
-    return cloneRecord(next)
+    })
+    return { outcome, run }
+  }
+
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<PipelineRunRecord> {
+    const existing = this.requireHeldPipelineRun(input.projectId, input.id, input.executionToken)
+
+    return this.writeRun({
+      ...existing,
+      execution: {
+        token: input.executionToken,
+        queueLeaseExpiresAt: laterLease(
+          existing.execution?.queueLeaseExpiresAt,
+          input.queueLeaseExpiresAt
+        ),
+      },
+    })
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    const existing = this.runs.get(storageKey(input.projectId, input.id))
+    if (existing?.status !== "running" || existing.execution?.token !== input.executionToken) return
+
+    this.writeRun({
+      ...existing,
+      execution: {
+        token: input.executionToken,
+        queueLeaseExpiresAt: new Date(input.releasedAt ?? new Date()),
+      },
+      attempt: input.spentAttempt ? existing.attempt : existing.attempt - 1,
+    })
   }
 
   async finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
@@ -158,9 +193,12 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
         `[Sixb] Pipeline run '${input.id}' cannot finish from status '${existing.status}'.`
       )
     }
+    if (!mayFinishRun(existing, input)) throw staleExecution(input.id)
+
     const base: PipelineRunRecord = {
       ...existing,
       status: input.status,
+      execution: undefined,
       finishedAt: new Date(input.finishedAt ?? new Date()),
     }
 
@@ -177,12 +215,13 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
             error: normalizeError(input.error),
           }
 
-    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
-    return cloneRecord(next)
+    return this.writeRun(next)
   }
 
   async startStep(input: StartPipelineStepRunInput): Promise<PipelineStepRunRecord> {
     const pipelineRun = this.requireRunningPipelineRun(input.projectId, input.pipelineRunId)
+    if (!holdsRun(pipelineRun, input.executionToken)) throw staleExecution(input.pipelineRunId)
+
     if (pipelineRun.pipelineId !== input.pipelineId) {
       throw new PipelineRunError(
         `[Sixb] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipelineId}'.`
@@ -190,7 +229,8 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     }
 
     const key = storageKey(input.projectId, input.id)
-    if (this.steps.has(key)) {
+    const earlier = this.steps.get(key)
+    if (earlier && earlier.status !== "running") {
       throw new PipelineRunError(
         `[Sixb] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -205,7 +245,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
       datasetId: input.datasetId,
       mode: input.mode,
       status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
+      startedAt: earlier?.startedAt ?? new Date(input.startedAt ?? new Date()),
       inputs: cloneRecord(input.inputs),
     }
 
@@ -217,6 +257,11 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     assertNonNegativeInteger(input.rowsWritten, "rowsWritten")
 
     const existing = this.requireRunningStepRun(input.projectId, input.id)
+
+    const pipelineRun = this.requireExistingPipelineRun(input.projectId, existing.pipelineRunId)
+    if (!holdsRun(pipelineRun, input.executionToken)) {
+      throw staleExecution(existing.pipelineRunId)
+    }
 
     if (input.status === "succeeded" && input.output.datasetId !== existing.datasetId) {
       throw new PipelineRunError(
@@ -352,6 +397,19 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     return record
   }
 
+  private requireHeldPipelineRun(projectId: string, id: string, token: string): PipelineRunRecord {
+    const existing = this.requireExistingPipelineRun(projectId, id)
+    if (existing.status !== "running" || existing.execution?.token !== token) {
+      throw staleExecution(id)
+    }
+    return existing
+  }
+
+  private writeRun(run: PipelineRunRecord): PipelineRunRecord {
+    this.runs.set(storageKey(run.projectId, run.id), cloneRecord(run))
+    return cloneRecord(run)
+  }
+
   private requireRunningPipelineRun(projectId: string, id: string): PipelineRunRecord {
     const record = this.requireExistingPipelineRun(projectId, id)
     if (record.status !== "running") {
@@ -379,6 +437,12 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
 
     return record
   }
+}
+
+function staleExecution(id: string): PipelineRunError {
+  return new PipelineRunError(
+    `[Sixb] Execution token is no longer current on pipeline run '${id}'.`
+  )
 }
 
 export interface InMemoryPipelineRunStorageSnapshot {

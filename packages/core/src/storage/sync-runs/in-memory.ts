@@ -3,6 +3,15 @@ import type { SixbFailure } from "../../errors/types"
 import { cloneJsonValue, type JsonValue } from "../../json"
 import type { ExecutionStorage } from "../executions"
 import {
+  type ClaimRunInput,
+  type ConfirmRunExecutionInput,
+  laterLease,
+  mayFinishRun,
+  planRunClaim,
+  type ReleaseRunExecutionInput,
+  type RunClaim,
+} from "../run-claim"
+import {
   compareStartedAt,
   hasEmptyStatuses,
   latestStartedAtByOwnerId,
@@ -20,8 +29,8 @@ import type {
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  PrepareSyncRunCommitInput,
   QueueSyncRunInput,
-  StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunRecord,
   SyncRunStorage,
@@ -95,6 +104,9 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       const next: SyncRunRecord = {
         ...existing,
         status: "queued",
+        attempt: 0,
+        execution: undefined,
+        commitPreparedAt: undefined,
         queuedAt,
         startedAt: undefined,
         finishedAt: undefined,
@@ -115,6 +127,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       datasetId: input.datasetId,
       mode: input.mode,
       status: "queued",
+      attempt: 0,
       queuedAt,
       expectedLatestVersionId: input.expectedLatestVersionId,
       commitMessage: input.commitMessage,
@@ -124,45 +137,81 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     return cloneSyncRunRecord(record)
   }
 
-  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
-    const key = syncRunKey(input.projectId, input.id)
-    const existing = this.rows.get(key)
-    if (!existing) {
-      throw new SyncRunError(
-        `[Sixb] Sync run '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
-    if (existing.status !== "queued") {
-      throw new SyncRunError(
-        `[Sixb] Sync run '${input.id}' cannot start from status '${existing.status}'.`
-      )
-    }
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<SyncRunRecord>> {
+    const existing = this.requireRun(input.projectId, input.id)
 
-    const next: SyncRunRecord = {
+    const sibling = [...this.rows.values()].find(
+      (run) =>
+        run.projectId === input.projectId &&
+        run.syncId === existing.syncId &&
+        run.id !== existing.id &&
+        run.status === "running"
+    )
+    const plan = planRunClaim(cloneSyncRunRecord(existing), input, sibling)
+    if (!plan.take) return plan.claim
+
+    const { outcome, startedAt, attempt, execution } = plan
+    const run = this.write({
       ...existing,
       status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
+      startedAt,
+      attempt,
+      execution,
       error: undefined,
-    }
-    this.rows.set(key, structuredClone(next))
-    return cloneSyncRunRecord(next)
+    })
+    return { outcome, run }
+  }
+
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<SyncRunRecord> {
+    const existing = this.requireHeldRun(input.projectId, input.id, input.executionToken)
+
+    return this.write({
+      ...existing,
+      execution: {
+        token: input.executionToken,
+        queueLeaseExpiresAt: laterLease(
+          existing.execution?.queueLeaseExpiresAt,
+          input.queueLeaseExpiresAt
+        ),
+      },
+    })
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    const existing = this.rows.get(syncRunKey(input.projectId, input.id))
+    if (existing?.status !== "running" || existing.execution?.token !== input.executionToken) return
+
+    this.write({
+      ...existing,
+      execution: {
+        token: input.executionToken,
+        queueLeaseExpiresAt: new Date(input.releasedAt ?? new Date()),
+      },
+      attempt: input.spentAttempt ? existing.attempt : existing.attempt - 1,
+    })
+  }
+
+  async prepareCommit(input: PrepareSyncRunCommitInput): Promise<SyncRunRecord> {
+    const existing = this.requireHeldRun(input.projectId, input.id, input.executionToken)
+
+    return this.write({
+      ...existing,
+      rowsRead: input.rowsRead,
+      checkpoint: normalizeCheckpoint(input.checkpoint),
+      commitPreparedAt: new Date(input.preparedAt ?? new Date()),
+    })
   }
 
   async finish(input: FinishSyncRunInput): Promise<SyncRunRecord> {
-    const key = syncRunKey(input.projectId, input.id)
-    const existing = this.rows.get(key)
-
-    if (!existing) {
-      throw new SyncRunError(
-        `[Sixb] Sync run '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
+    const existing = this.requireRun(input.projectId, input.id)
 
     if (!canFinishSyncRun(existing.status, input)) {
       throw new SyncRunError(
         `[Sixb] Sync run '${input.id}' cannot finish from status '${existing.status}'.`
       )
     }
+
+    if (!mayFinishRun(existing, input)) throw staleExecution(input.id)
 
     if (input.status === "succeeded") {
       if (input.output && input.output.datasetId !== existing.datasetId) {
@@ -180,6 +229,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     const base: SyncRunRecord = {
       ...existing,
       status: input.status,
+      execution: undefined,
       finishedAt: new Date(input.finishedAt ?? new Date()),
     }
 
@@ -200,8 +250,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
             checkpoint: undefined,
           }
 
-    this.rows.set(key, structuredClone(next))
-    return cloneSyncRunRecord(next)
+    return this.write(next)
   }
 
   async getById(params: { projectId: string; id: string }): Promise<SyncRunRecord | null> {
@@ -256,6 +305,31 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       runs: runs.map(cloneSyncRunRecord),
     }
   }
+
+  private requireRun(projectId: string, id: string): SyncRunRecord {
+    const existing = this.rows.get(syncRunKey(projectId, id))
+    if (!existing) {
+      throw new SyncRunError(`[Sixb] Sync run '${id}' not found for project '${projectId}'.`)
+    }
+    return existing
+  }
+
+  private requireHeldRun(projectId: string, id: string, token: string): SyncRunRecord {
+    const existing = this.requireRun(projectId, id)
+    if (existing.status !== "running" || existing.execution?.token !== token) {
+      throw staleExecution(id)
+    }
+    return existing
+  }
+
+  private write(run: SyncRunRecord): SyncRunRecord {
+    this.rows.set(syncRunKey(run.projectId, run.id), structuredClone(run))
+    return cloneSyncRunRecord(run)
+  }
+}
+
+function staleExecution(id: string): SyncRunError {
+  return new SyncRunError(`[Sixb] Execution token is no longer current on sync run '${id}'.`)
 }
 
 export type InMemorySyncRunStorageSnapshot = Map<string, SyncRunRecord>

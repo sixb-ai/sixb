@@ -1,5 +1,12 @@
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
+import type {
+  ClaimRunInput,
+  ConfirmRunExecutionInput,
+  ReleaseRunExecutionInput,
+  RunClaim,
+  RunExecution,
+} from "../run-claim"
 
 export type PipelineRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 export type PipelineStepRunStatus = Exclude<PipelineRunStatus, "queued">
@@ -19,6 +26,10 @@ export interface PipelineRunRecord {
   readonly executionId: string
   readonly pipelineId: string
   readonly status: PipelineRunStatus
+  /** Executions this run has used up. 0 until one takes it. */
+  readonly attempt: number
+  /** Absent unless a worker holds the run. */
+  readonly execution?: RunExecution
   readonly queuedAt: Date
   readonly startedAt?: Date
   readonly finishedAt?: Date
@@ -52,16 +63,11 @@ export interface QueuePipelineRunInput {
   readonly queuedAt?: Date
 }
 
-export interface StartPipelineRunInput {
-  readonly id: string
-  readonly projectId: string
-  readonly startedAt?: Date
-}
-
 export type FinishPipelineRunInput =
   | {
       readonly id: string
       readonly projectId: string
+      readonly executionToken?: string
       readonly status: "succeeded"
       readonly finishedAt?: Date
       readonly output?: DatasetVersionRef
@@ -69,6 +75,7 @@ export type FinishPipelineRunInput =
   | {
       readonly id: string
       readonly projectId: string
+      readonly executionToken?: string
       readonly status: "failed"
       readonly finishedAt?: Date
       readonly error: SixbFailure<PipelineRunFailureCode>
@@ -76,6 +83,7 @@ export type FinishPipelineRunInput =
   | {
       readonly id: string
       readonly projectId: string
+      readonly executionToken?: string
       readonly status: "cancelled"
       readonly finishedAt?: Date
       readonly error?: SixbFailure<PipelineRunFailureCode>
@@ -84,6 +92,7 @@ export type FinishPipelineRunInput =
 export interface StartPipelineStepRunInput {
   readonly id: string
   readonly projectId: string
+  readonly executionToken?: string
   readonly pipelineRunId: string
   readonly pipelineId: string
   readonly stepId: string
@@ -97,6 +106,7 @@ export type FinishPipelineStepRunInput =
   | {
       readonly id: string
       readonly projectId: string
+      readonly executionToken?: string
       readonly status: "succeeded"
       readonly finishedAt?: Date
       readonly output: DatasetVersionRef
@@ -105,6 +115,7 @@ export type FinishPipelineStepRunInput =
   | {
       readonly id: string
       readonly projectId: string
+      readonly executionToken?: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
       readonly rowsWritten?: number
@@ -164,8 +175,17 @@ export interface ListPipelineStepRunsResult {
 
 export interface PipelineRunStorage {
   queue(input: QueuePipelineRunInput): Promise<PipelineRunRecord>
-  start(input: StartPipelineRunInput): Promise<PipelineRunRecord>
+  /** Takes the run for one execution, or says why this delivery cannot. */
+  startOrReclaim(input: ClaimRunInput): Promise<RunClaim<PipelineRunRecord>>
+  /** Projects a renewed queue lease onto the run. */
+  confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<PipelineRunRecord>
+  /** Hands the run back. Does nothing once the token no longer holds a running run. */
+  releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
   finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord>
+  /**
+   * Starting a step an earlier execution left running starts it over on the inputs given. It keeps
+   * the time it first started, the earliest its output can have landed.
+   */
   startStep(input: StartPipelineStepRunInput): Promise<PipelineStepRunRecord>
   finishStep(input: FinishPipelineStepRunInput): Promise<PipelineStepRunRecord>
   getById(params: { projectId: string; id: string }): Promise<PipelineRunRecord | null>
