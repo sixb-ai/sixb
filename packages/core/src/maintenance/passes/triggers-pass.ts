@@ -1,12 +1,10 @@
 import { createHash } from "node:crypto"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
+import type { DatasetVersion, LakeStorage } from "../../lake-storage"
+import type { PipelineRunDispatchPort } from "../../pipelines/run-dispatch"
+import type { PipelineRunRecord, PipelineRunStorage, PipelineStepRunRecord } from "../../storage"
+import type { MaintenancePass } from "../loop"
 import type { LakeChangeFeed, LakeChangeReader } from "./lake-change-feed"
-import type {
-  DatasetTriggerReconciliationPorts,
-  OrchestratorRoutes,
-  PipelineDispatcherPort,
-} from "./types"
+import { RECOVERY_INTERVAL_MS, recoveryPass } from "./recovery-pass"
 
 const STEP_PAGE_SIZE = 500
 
@@ -20,13 +18,15 @@ export interface DatasetTrigger {
   readonly datasetId: string
 }
 
-interface DatasetTriggerReconcilerInput extends DatasetTriggerReconciliationPorts {
+export interface TriggersPassInput {
   readonly projectId: string
-  readonly dispatcher: PipelineDispatcherPort
+  readonly dispatcher: PipelineRunDispatchPort
   readonly triggers: readonly DatasetTrigger[]
   readonly feed: LakeChangeFeed
-  /** Pause between passes, which also leaves a commit's event that long to arrive first. */
-  readonly intervalMs: number
+  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "listVersions">
+  /** What each pipeline last read. */
+  readonly pipelineRuns: Pick<PipelineRunStorage, "listLatestByPipelineIds" | "listSteps">
+  readonly now?: () => number
 }
 
 /** The newest version that would have fired `updated()`, and every version from it to the latest. */
@@ -41,29 +41,6 @@ interface PipelineReads {
   /** The newest run that was not cancelled: what counts as having read. */
   readonly counted: PipelineRunRecord | undefined
   readonly stepsOfCounted: readonly PipelineStepRunRecord[]
-}
-
-/** Every pipeline's `events.dataset(x).updated()` trigger, once per pipeline and dataset. */
-export function datasetTriggers(routes: OrchestratorRoutes): readonly DatasetTrigger[] {
-  const triggers = new Map<string, DatasetTrigger>()
-
-  for (const route of routes.values()) {
-    if (route.eventType !== "dataset.version.committed") continue
-
-    for (const { schedule, targets } of route.eventSchedules ?? []) {
-      const datasetId = schedule.trigger.source.datasetId
-      if (datasetId === undefined) continue
-
-      for (const target of targets) {
-        if (target.queue !== "pipelines") continue
-
-        const trigger = { pipelineId: target.pipelineId, scheduleId: schedule.id, datasetId }
-        triggers.set(triggerKey(trigger), trigger)
-      }
-    }
-  }
-
-  return [...triggers.values()]
 }
 
 /**
@@ -84,12 +61,21 @@ export function datasetTriggers(routes: OrchestratorRoutes): readonly DatasetTri
  * of the datasets that moved stay unsettled until a run covers them. Every trigger starts unsettled,
  * so a restart needs no stored cursor.
  */
-export class DatasetTriggerReconciler {
+export function triggersPass(input: TriggersPassInput): MaintenancePass {
+  const recovery = new TriggerRecovery(input)
+
+  return recoveryPass("triggers", (signal) => recovery.run(signal))
+}
+
+class TriggerRecovery {
   private readonly triggersByDatasetId: ReadonlyMap<string, readonly DatasetTrigger[]>
   private readonly unsettled: Map<string, DatasetTrigger>
   private readonly changes: LakeChangeReader
 
-  constructor(private readonly input: DatasetTriggerReconcilerInput) {
+  private readonly now: () => number
+
+  constructor(private readonly input: TriggersPassInput) {
+    this.now = input.now ?? Date.now
     this.triggersByDatasetId = groupByDataset(input.triggers)
     this.unsettled = new Map(input.triggers.map((trigger) => [triggerKey(trigger), trigger]))
     this.changes = input.feed.subscribe({
@@ -98,20 +84,20 @@ export class DatasetTriggerReconciler {
     })
   }
 
-  async pass(signal: AbortSignal, now = Date.now()): Promise<void> {
+  async run(signal: AbortSignal): Promise<void> {
     // Read first: anything the checks below read after this is in the next read too.
     for (const { datasetId } of await this.changes.read()) {
       this.markUnsettled(this.triggersByDatasetId.get(datasetId) ?? [])
     }
 
-    if (this.unsettled.size > 0) await this.settle(signal, now)
+    if (this.unsettled.size > 0) await this.settle(signal)
   }
 
   private markUnsettled(triggers: readonly DatasetTrigger[]): void {
     for (const trigger of triggers) this.unsettled.set(triggerKey(trigger), trigger)
   }
 
-  private async settle(signal: AbortSignal, now: number): Promise<void> {
+  private async settle(signal: AbortSignal): Promise<void> {
     const triggers = [...this.unsettled.values()]
     const reads = await this.readPipelines(triggers)
     const changes = await this.readChanges(triggers)
@@ -121,7 +107,7 @@ export class DatasetTriggerReconciler {
       signal.throwIfAborted()
 
       try {
-        const settled = await this.settleTrigger(trigger, reads, changes, now)
+        const settled = await this.settleTrigger(trigger, reads, changes)
         if (settled) this.unsettled.delete(triggerKey(trigger))
       } catch (error) {
         failures.push(dispatchFailure(trigger, error))
@@ -129,7 +115,7 @@ export class DatasetTriggerReconciler {
     }
 
     if (failures.length > 0) {
-      throw new AggregateError(failures, "[SixbOrchestrator] Dataset trigger recovery failed.")
+      throw new AggregateError(failures, "[Sixb] The triggers pass failed.")
     }
   }
 
@@ -137,8 +123,7 @@ export class DatasetTriggerReconciler {
   private async settleTrigger(
     trigger: DatasetTrigger,
     reads: ReadonlyMap<string, PipelineReads>,
-    changes: ReadonlyMap<string, DatasetChange | null>,
-    now: number
+    changes: ReadonlyMap<string, DatasetChange | null>
   ): Promise<boolean> {
     const pipeline = reads.get(trigger.pipelineId)
     if (!pipeline) return true
@@ -152,7 +137,7 @@ export class DatasetTriggerReconciler {
     if (counted && hasRead(counted, pipeline.stepsOfCounted, trigger, change)) return true
 
     // Its event is most likely on its way: firing now would start a second run beside its own.
-    if (now - change.version.createdAt.getTime() < this.input.intervalMs) return false
+    if (this.now() - change.version.createdAt.getTime() < RECOVERY_INTERVAL_MS) return false
 
     // Unsettled still: the next pass sees this run, and a stop can cancel it.
     await this.dispatch(trigger, change.version, latest)
@@ -320,7 +305,7 @@ function recoveredRunId(
 
 function dispatchFailure(trigger: DatasetTrigger, error: unknown): Error {
   return new Error(
-    `[SixbOrchestrator] Dataset trigger recovery failed (pipelineId=${trigger.pipelineId}, datasetId=${trigger.datasetId}).`,
+    `[Sixb] The triggers pass could not dispatch (pipelineId=${trigger.pipelineId}, datasetId=${trigger.datasetId}).`,
     { cause: error }
   )
 }

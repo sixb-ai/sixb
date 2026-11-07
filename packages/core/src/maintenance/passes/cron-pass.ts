@@ -1,7 +1,8 @@
-import type { DomainEventLog } from "../events"
-import type { MaintenancePass } from "../maintenance/loop"
-import { nextCronOccurrence } from "../schedules/next-occurrence"
-import type { CronScheduleDefinition } from "../schedules/types"
+import type { DomainEventLog } from "../../events"
+import { nextCronOccurrence } from "../../schedules/next-occurrence"
+import type { CronScheduleDefinition, ScheduleDefinition } from "../../schedules/types"
+import { rejectOnAbort } from "../../shared/backoff"
+import type { MaintenancePass } from "../loop"
 
 /** Matches the `onError` flush budget: long enough for a healthy broker, short enough to shut down. */
 const APPEND_BUDGET_MS = 5_000
@@ -9,10 +10,17 @@ const APPEND_BUDGET_MS = 5_000
 /** How long an occurrence the broker refused waits for its next try. */
 const RETRY_DELAY_MS = 10_000
 
-export interface CronPassOptions {
+export interface CronPassInput {
+  readonly schedules: readonly ScheduleDefinition[]
+  readonly events: DomainEventLog
+  /** Evaluates cron schedules that set no time zone of their own. Defaults to UTC. */
+  readonly timeZone?: string
+  readonly now?: () => Date
+}
+
+interface CronOccurrencesInput {
   readonly schedules: readonly CronScheduleDefinition[]
   readonly events: DomainEventLog
-  /** Evaluates cron schedules that set no time zone of their own. Undefined means UTC. */
   readonly timeZone: string | undefined
   readonly now: () => Date
 }
@@ -32,15 +40,31 @@ interface NextOccurrence {
  * until the broker accepts it. Its occurrence key makes that safe. The occurrences that fell
  * meanwhile are not caught up: the next one counts from the moment it went through.
  */
-export class CronPass implements MaintenancePass {
-  readonly id = "cron"
-  readonly budgetMs = APPEND_BUDGET_MS
+export function cronPass(input: CronPassInput): MaintenancePass {
+  const occurrences = new CronOccurrences({
+    schedules: input.schedules.filter(isCronSchedule),
+    events: input.events,
+    // `undefined` keeps the arithmetic UTC path; an explicit "UTC" would go through Intl.
+    timeZone: input.timeZone === "UTC" ? undefined : input.timeZone,
+    now: input.now ?? (() => new Date()),
+  })
+
+  return {
+    id: "cron",
+    budgetMs: APPEND_BUDGET_MS,
+    nextRunAt: (now) => occurrences.nextDueAt(now),
+    run: (signal) => occurrences.fireDue(signal),
+    onLoopStopped: () => occurrences.stop(),
+  }
+}
+
+class CronOccurrences {
   private occurrences: Map<string, NextOccurrence> | null = null
   private readonly pendingAppends = new Set<Promise<void>>()
 
-  constructor(private readonly options: CronPassOptions) {}
+  constructor(private readonly options: CronOccurrencesInput) {}
 
-  nextRunAt(now: Date): Date | null {
+  nextDueAt(now: Date): Date | null {
     this.occurrences ??= this.firstOccurrences(now)
 
     const times = [...this.occurrences.values()].map((next) => dueAt(next).getTime())
@@ -48,11 +72,11 @@ export class CronPass implements MaintenancePass {
   }
 
   /** Each schedule fires on its own, so one that fails costs the others nothing. */
-  async run(signal: AbortSignal): Promise<void> {
+  async fireDue(signal: AbortSignal): Promise<void> {
     const now = this.options.now()
 
     const results = await Promise.allSettled(
-      this.options.schedules.map((schedule) => this.fireDue(schedule, now, signal))
+      this.options.schedules.map((schedule) => this.fireSchedule(schedule, now, signal))
     )
 
     const failures = results.flatMap((result) =>
@@ -63,22 +87,20 @@ export class CronPass implements MaintenancePass {
     }
   }
 
-  /** Forgets the next occurrences, so a later start counts them from then. */
-  reset(): void {
-    this.occurrences = null
-  }
-
   /**
-   * Waits for appends a run stopped waiting for, so shutdown does not return mid-delivery. Bounded
-   * on purpose: an append that never settles would turn a provider stall into a process that cannot
-   * shut down. Losing the wait is recoverable; losing shutdown is not.
+   * Forgets the next occurrences, so a later start counts them from then, and waits for appends a
+   * run stopped waiting for, so shutdown does not return mid-delivery. Bounded on purpose: an
+   * append that never settles would turn a provider stall into a process that cannot shut down.
+   * Losing the wait is recoverable; losing shutdown is not.
    */
-  async drainAppends(timeoutMs = APPEND_BUDGET_MS): Promise<void> {
+  async stop(): Promise<void> {
+    this.occurrences = null
+
     if (this.pendingAppends.size === 0) return
 
     let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = new Promise<false>((resolve) => {
-      timer = setTimeout(() => resolve(false), timeoutMs)
+      timer = setTimeout(() => resolve(false), APPEND_BUDGET_MS)
     })
 
     const drained = await Promise.race([
@@ -89,7 +111,7 @@ export class CronPass implements MaintenancePass {
 
     if (!drained) {
       console.error(
-        `[Sixb] Timed out after ${timeoutMs}ms waiting for ${this.pendingAppends.size} schedule append(s) to settle.`
+        `[Sixb] Timed out after ${APPEND_BUDGET_MS}ms waiting for ${this.pendingAppends.size} schedule append(s) to settle.`
       )
     }
   }
@@ -105,7 +127,7 @@ export class CronPass implements MaintenancePass {
     return occurrences
   }
 
-  private async fireDue(
+  private async fireSchedule(
     schedule: CronScheduleDefinition,
     now: Date,
     signal: AbortSignal
@@ -126,8 +148,8 @@ export class CronPass implements MaintenancePass {
 
   /**
    * An append that hangs must not hold the pass past its budget, so this stops waiting when the
-   * signal aborts. The append stays tracked for `drainAppends()`, and the retry that follows
-   * carries the same key.
+   * signal aborts. The append stays tracked for `stop()`, and the retry that follows carries the
+   * same key.
    */
   private async appendOccurrence(
     schedule: CronScheduleDefinition,
@@ -161,7 +183,7 @@ export class CronPass implements MaintenancePass {
     const tracked = settled.finally(() => this.pendingAppends.delete(tracked))
     this.pendingAppends.add(tracked)
 
-    await Promise.race([append, aborted(signal)])
+    await Promise.race([append, rejectOnAbort(signal)])
   }
 
   /**
@@ -207,9 +229,6 @@ function dueAt(next: NextOccurrence): Date {
   return next.retryAt ?? next.at
 }
 
-function aborted(signal: AbortSignal): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    if (signal.aborted) reject(signal.reason)
-    else signal.addEventListener("abort", () => reject(signal.reason), { once: true })
-  })
+function isCronSchedule(schedule: ScheduleDefinition): schedule is CronScheduleDefinition {
+  return schedule.trigger.type === "cron"
 }

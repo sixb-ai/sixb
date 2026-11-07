@@ -16,7 +16,7 @@ import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
 import {
   type CompileRoutesDiagnostic,
   compileRoutesWithDiagnostics,
-  createReconciliationPasses,
+  createMaintenancePasses,
   OrchestratorWorker,
 } from "@sixb/orchestrator"
 import { PipelineWorker } from "@sixb/pipeline-worker"
@@ -197,7 +197,7 @@ export async function startOrchestratorRuntime(
 
   // Runs with or without routes: every project commits events, and cron emits what routes consume.
   const maintenance = sixb.startMaintenance(
-    createReconciliationPasses({
+    createMaintenancePasses({
       projectId: sixb.id,
       routes,
       dispatchers,

@@ -1,60 +1,40 @@
 import { createSixbError } from "@sixb/core/internal/errors"
-import { everyMs, type MaintenancePass } from "@sixb/core/internal/maintenance"
+import {
+  type DatasetTrigger,
+  type MaintenancePass,
+  type RecoveryPassesInput,
+  recoveryPasses,
+} from "@sixb/core/internal/maintenance"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
-import type { LakeStorage } from "@sixb/core/lake-storage"
-import { DatasetTriggerReconciler, datasetTriggers } from "./dataset-trigger-reconciler"
-import { LakeChangeFeed } from "./lake-change-feed"
-import { ProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
-import type {
-  DatasetTriggerReconciliationPorts,
-  OrchestratorDispatchers,
-  OrchestratorRoutes,
-  ProjectionReconciliationPorts,
-} from "./types"
+import type { OrchestratorDispatchers, OrchestratorRoutes } from "./types"
 import { requireDispatcher } from "./worker"
 
-const INTERVAL_MS = 30_000
-
-// A first pass looks every dataset up, and later ones read what changed: only a hung call gets here.
-const PASS_BUDGET_MS = 5 * 60_000
-
-export interface ReconciliationPassesInput {
+export interface MaintenancePassesInput {
   readonly projectId: string
   readonly routes: OrchestratorRoutes
   readonly dispatchers: OrchestratorDispatchers
-  readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince"> &
-    ProjectionReconciliationPorts["lakeStorage"] &
-    DatasetTriggerReconciliationPorts["lakeStorage"]
+  readonly lakeStorage: RecoveryPassesInput["lakeStorage"]
   /** Required when the routes contain projections. */
-  readonly projectionRuns?: ProjectionReconciliationPorts["projectionRuns"]
+  readonly projectionRuns?: NonNullable<RecoveryPassesInput["projections"]>["projectionRuns"]
   /** Without it, a pipeline's dataset triggers have only their event. */
-  readonly pipelineRuns?: DatasetTriggerReconciliationPorts["pipelineRuns"]
+  readonly pipelineRuns?: NonNullable<RecoveryPassesInput["triggers"]>["pipelineRuns"]
 }
 
-/**
- * The passes that repair what the event path can lose, for the orchestrator's maintenance loop. A
- * route with nothing to repair adds no pass, so an idle project pays for none.
- */
-export function createReconciliationPasses(
-  input: ReconciliationPassesInput
-): readonly MaintenancePass[] {
-  const feed = new LakeChangeFeed({
-    lakeStorage: input.lakeStorage,
-    projectId: input.projectId,
-    freshForMs: INTERVAL_MS,
+/** The passes the routes call for, for the orchestrator's maintenance loop. */
+export function createMaintenancePasses(input: MaintenancePassesInput): readonly MaintenancePass[] {
+  const { projectId, lakeStorage } = input
+
+  return recoveryPasses({
+    projectId,
+    lakeStorage,
+    projections: projectionsOf(input),
+    triggers: triggersOf(input),
   })
-
-  return [projectionPass(input, feed), datasetTriggerPass(input, feed)].filter(
-    (pass) => pass !== null
-  )
 }
 
-function projectionPass(
-  input: ReconciliationPassesInput,
-  feed: LakeChangeFeed
-): MaintenancePass | null {
+function projectionsOf(input: MaintenancePassesInput): RecoveryPassesInput["projections"] {
   const descriptors = projectionDescriptors(input.projectId, input.routes)
-  if (descriptors.length === 0) return null
+  if (descriptors.length === 0) return undefined
 
   if (!input.projectionRuns) {
     throw createSixbError(
@@ -69,47 +49,45 @@ function projectionPass(
     )
   }
 
-  const reconciler = new ProjectionDispatchReconciler({
-    lakeStorage: input.lakeStorage,
-    projectionRuns: input.projectionRuns,
-    projectId: input.projectId,
-    dispatcher: requireDispatcher(input, "projections"),
+  return {
     descriptors,
-    feed,
-    intervalMs: INTERVAL_MS,
-  })
-
-  return everyMs({
-    id: "projections",
-    intervalMs: INTERVAL_MS,
-    budgetMs: PASS_BUDGET_MS,
-    run: (signal) => reconciler.pass(signal),
-  })
+    projectionRuns: input.projectionRuns,
+    dispatcher: requireDispatcher(input, "projections"),
+  }
 }
 
-function datasetTriggerPass(
-  input: ReconciliationPassesInput,
-  feed: LakeChangeFeed
-): MaintenancePass | null {
+function triggersOf(input: MaintenancePassesInput): RecoveryPassesInput["triggers"] {
   const triggers = datasetTriggers(input.routes)
-  if (triggers.length === 0 || !input.pipelineRuns) return null
+  if (triggers.length === 0 || !input.pipelineRuns) return undefined
 
-  const reconciler = new DatasetTriggerReconciler({
-    lakeStorage: input.lakeStorage,
-    pipelineRuns: input.pipelineRuns,
-    projectId: input.projectId,
-    dispatcher: requireDispatcher(input, "pipelines"),
+  return {
     triggers,
-    feed,
-    intervalMs: INTERVAL_MS,
-  })
+    pipelineRuns: input.pipelineRuns,
+    dispatcher: requireDispatcher(input, "pipelines"),
+  }
+}
 
-  return everyMs({
-    id: "triggers",
-    intervalMs: INTERVAL_MS,
-    budgetMs: PASS_BUDGET_MS,
-    run: (signal) => reconciler.pass(signal),
-  })
+/** Every pipeline's `events.dataset(x).updated()` trigger, once per pipeline and dataset. */
+export function datasetTriggers(routes: OrchestratorRoutes): readonly DatasetTrigger[] {
+  const triggers = new Map<string, DatasetTrigger>()
+
+  for (const route of routes.values()) {
+    if (route.eventType !== "dataset.version.committed") continue
+
+    for (const { schedule, targets } of route.eventSchedules ?? []) {
+      const datasetId = schedule.trigger.source.datasetId
+      if (datasetId === undefined) continue
+
+      for (const target of targets) {
+        if (target.queue !== "pipelines") continue
+
+        const trigger = { pipelineId: target.pipelineId, scheduleId: schedule.id, datasetId }
+        triggers.set(`${trigger.pipelineId}\u0000${trigger.datasetId}`, trigger)
+      }
+    }
+  }
+
+  return [...triggers.values()]
 }
 
 function projectionDescriptors(

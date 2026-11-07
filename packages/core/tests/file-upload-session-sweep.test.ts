@@ -7,7 +7,7 @@ import {
   InMemoryBlobStorage,
 } from "../src/blob-storage"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
-import { OntologyMaintenance } from "../src/maintenance"
+import { OntologyMaintenance } from "../src/maintenance/ontology-maintenance"
 import { DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS } from "../src/storage"
 
 const MINUTE_MS = 60_000

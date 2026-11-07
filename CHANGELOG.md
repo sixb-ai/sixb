@@ -23,6 +23,8 @@ Sixb packages are versioned independently. Each release entry names the packages
   error, so a process manager left on it shows up. Remove that process. During the rollout, stop the
   old scheduler before the new orchestrator starts, or occurrences due in between fire twice.
   `sixb deploy` does this for you: it stops every service of the old release first.
+- `sixb.scheduler` and the `SchedulerController` type are gone: nothing outside tests called them.
+  Cron runs in the orchestrator's maintenance loop, through `host.startMaintenance()`.
 - `services.scheduler` is no longer a `sixb deploy` setting. Remove it. A deployment with
   `orchestrator: false` runs no cron.
 - `sixb api` no longer delivers events left undelivered or purges expired records: run

@@ -1,5 +1,5 @@
 export { compileRoutesWithDiagnostics } from "./compile-routes"
-export { createReconciliationPasses } from "./reconciliation-passes"
+export { createMaintenancePasses } from "./maintenance-passes"
 export type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,

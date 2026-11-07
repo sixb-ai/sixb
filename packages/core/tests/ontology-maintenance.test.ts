@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
 import { InMemoryBroker, InMemoryStorage } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
-import { OntologyMaintenance } from "../src/maintenance"
+import { OntologyMaintenance } from "../src/maintenance/ontology-maintenance"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import {
   claimProjectionExecution,

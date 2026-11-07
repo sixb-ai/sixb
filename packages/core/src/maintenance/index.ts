@@ -1,13 +1,6 @@
-export { storageHeartbeat } from "./heartbeat"
-export type {
-  IntervalPassInput,
-  MaintenanceFailure,
-  MaintenanceHeartbeat,
-  MaintenanceLoopOptions,
-  MaintenancePass,
-} from "./loop"
-export { everyMs, MaintenanceLoop } from "./loop"
-export { OntologyMaintenance } from "./ontology-maintenance"
+export type { MaintenancePass } from "./loop"
+export { type RecoveryPassesInput, recoveryPasses } from "./passes/recovery-passes"
+export type { DatasetTrigger } from "./passes/triggers-pass"
 export type {
   MaintenancePassStatus,
   OntologyMaintenanceHandle,

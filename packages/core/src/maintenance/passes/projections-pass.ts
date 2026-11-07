@@ -1,19 +1,27 @@
-import { createSixbError } from "@sixb/core/internal/errors"
-import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
-import type { DatasetLatestVersionSummary, DatasetVersion } from "@sixb/core/lake-storage"
-import type { ListProjectionRunsInput, ProjectionRunRecord } from "@sixb/core/storage"
+import { createSixbError } from "../../errors/internal"
+import type { DatasetLatestVersionSummary, DatasetVersion, LakeStorage } from "../../lake-storage"
+import type { ProjectionRunDispatchPort } from "../../projections/run-dispatch"
+import type { ProjectionDispatchDescriptor } from "../../projections/types"
+import type {
+  ListProjectionRunsInput,
+  ProjectionRunRecord,
+  ProjectionRunStorage,
+} from "../../storage"
+import type { MaintenancePass } from "../loop"
 import type { LakeChangeFeed, LakeChangeReader } from "./lake-change-feed"
-import type { ProjectionDispatcherPort, ProjectionReconciliationPorts } from "./types"
+import { RECOVERY_INTERVAL_MS, recoveryPass } from "./recovery-pass"
 
 const STUCK_RUN_PAGE_SIZE = 100
 
-interface ProjectionDispatchReconcilerInput extends ProjectionReconciliationPorts {
+export interface ProjectionsPassInput {
   readonly projectId: string
-  readonly dispatcher: ProjectionDispatcherPort
+  readonly dispatcher: ProjectionRunDispatchPort
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
   readonly feed: LakeChangeFeed
-  /** Pause between passes, which also counts a run as stuck once it stayed `queued` for longer. */
-  readonly intervalMs: number
+  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
+  /** Source of runs whose queue publication was lost. */
+  readonly projectionRuns: Pick<ProjectionRunStorage, "list">
+  readonly now?: () => number
 }
 
 /**
@@ -29,13 +37,21 @@ interface ProjectionDispatchReconcilerInput extends ProjectionReconciliationPort
  * Lost publications: runs `queued` for longer than one interval, or failed with a retryable
  * enqueue error, are dispatched again, and the dispatcher republishes the same run and job.
  */
-export class ProjectionDispatchReconciler {
+export function projectionsPass(input: ProjectionsPassInput): MaintenancePass {
+  const recovery = new ProjectionRecovery(input)
+
+  return recoveryPass("projections", (signal) => recovery.run(signal))
+}
+
+class ProjectionRecovery {
   private readonly descriptorsByDatasetId: ReadonlyMap<string, ProjectionDispatchDescriptor[]>
   /** Projections whose latest data version must be looked up rather than taken from the feed. */
   private readonly unverified: Set<string>
   private readonly changes: LakeChangeReader
+  private readonly now: () => number
 
-  constructor(private readonly input: ProjectionDispatchReconcilerInput) {
+  constructor(private readonly input: ProjectionsPassInput) {
+    this.now = input.now ?? Date.now
     this.descriptorsByDatasetId = groupByDataset(input.descriptors)
     this.unverified = new Set(input.descriptors.map((descriptor) => descriptor.projectionId))
     this.changes = input.feed.subscribe({
@@ -51,66 +67,82 @@ export class ProjectionDispatchReconciler {
    * One pass does all it can, then throws what failed, so that the loop counts it. A projection
    * that could not be dispatched stays unverified, and the next pass looks it up.
    */
-  async pass(signal: AbortSignal, now = Date.now()): Promise<void> {
-    const failures: Error[] = []
-
-    await this.reconcileTriggers(signal, failures)
-    await this.republishStuckRuns(signal, now, failures)
+  async run(signal: AbortSignal): Promise<void> {
+    const failures = [
+      ...(await this.dispatchMissedVersions(signal)),
+      ...(await this.republishStuckRuns(signal)),
+    ]
 
     if (failures.length > 0) {
-      throw new AggregateError(failures, "[SixbOrchestrator] Projection reconciliation failed.")
+      throw new AggregateError(failures, "[Sixb] The projections pass failed.")
     }
   }
 
-  private async reconcileTriggers(signal: AbortSignal, failures: Error[]): Promise<void> {
+  private async dispatchMissedVersions(signal: AbortSignal): Promise<readonly Error[]> {
     let versions: readonly DatasetLatestVersionSummary[]
+
     try {
       versions = await this.changes.read()
     } catch (error) {
-      failures.push(
-        new Error(
-          `[SixbOrchestrator] Projection dispatch reconciliation could not read the lake change feed (projectId=${this.input.projectId}).`,
-          { cause: error }
-        )
+      const unread = new Error(
+        `[Sixb] The projections pass could not read the lake change feed (projectId=${this.input.projectId}).`,
+        { cause: error }
       )
+
       // Look everything up instead. Nothing counts as verified: a lookup only covers the feed's
       // gap when it follows a successful read.
-      await this.reconcileLatest(this.input.descriptors, signal, failures)
-      return
+      const { failures } = await this.dispatchLatest(this.input.descriptors, signal)
+
+      return [unread, ...failures]
     }
+
+    const failures = await this.dispatchChanged(versions, signal)
+
+    // Lookups follow the feed read, so a commit racing them is in the next read.
+    const unverified = this.input.descriptors.filter(({ projectionId }) =>
+      this.unverified.has(projectionId)
+    )
+    const looked = await this.dispatchLatest(unverified, signal)
+
+    for (const projectionId of looked.verified) this.unverified.delete(projectionId)
+
+    return [...failures, ...looked.failures]
+  }
+
+  /** A projection that could not be dispatched goes back to being looked up. */
+  private async dispatchChanged(
+    versions: readonly DatasetLatestVersionSummary[],
+    signal: AbortSignal
+  ): Promise<readonly Error[]> {
+    const failures: Error[] = []
 
     for (const version of versions) {
       for (const descriptor of this.descriptorsByDatasetId.get(version.datasetId) ?? []) {
         if (this.unverified.has(descriptor.projectionId)) continue
+
         try {
           await this.dispatch(descriptor, version, signal)
         } catch (error) {
-          failures.push(reconciliationFailure(descriptor, error))
+          failures.push(dispatchFailure(descriptor, error))
           this.unverified.add(descriptor.projectionId)
         }
       }
     }
-    // Lookups follow the feed read, so a commit racing them is in the next read.
-    const verified = await this.reconcileLatest(
-      this.input.descriptors.filter((descriptor) => this.unverified.has(descriptor.projectionId)),
-      signal,
-      failures
-    )
-    for (const projectionId of verified) this.unverified.delete(projectionId)
+
+    return failures
   }
 
-  /**
-   * Dispatches each projection's latest data version; returns the projections that succeeded.
-   * Projections of one dataset share its lookup.
-   */
-  private async reconcileLatest(
+  /** Dispatches each projection's latest data version. Projections of one dataset share its lookup. */
+  private async dispatchLatest(
     descriptors: readonly ProjectionDispatchDescriptor[],
-    signal: AbortSignal,
-    failures: Error[]
-  ): Promise<readonly string[]> {
-    const reconciled: string[] = []
+    signal: AbortSignal
+  ): Promise<{ readonly verified: readonly string[]; readonly failures: readonly Error[] }> {
+    const verified: string[] = []
+    const failures: Error[] = []
+
     for (const [datasetId, siblings] of groupByDataset(descriptors)) {
       let version: DatasetVersion | null
+
       try {
         version = await findLatestDataVersion({
           lakeStorage: this.input.lakeStorage,
@@ -118,19 +150,21 @@ export class ProjectionDispatchReconciler {
           datasetId,
         })
       } catch (error) {
-        failures.push(...siblings.map((descriptor) => reconciliationFailure(descriptor, error)))
+        failures.push(...siblings.map((descriptor) => dispatchFailure(descriptor, error)))
         continue
       }
+
       for (const descriptor of siblings) {
         try {
           if (version) await this.dispatch(descriptor, version, signal)
-          reconciled.push(descriptor.projectionId)
+          verified.push(descriptor.projectionId)
         } catch (error) {
-          failures.push(reconciliationFailure(descriptor, error))
+          failures.push(dispatchFailure(descriptor, error))
         }
       }
     }
-    return reconciled
+
+    return { verified, failures }
   }
 
   private async dispatch(
@@ -150,39 +184,31 @@ export class ProjectionDispatchReconciler {
     })
   }
 
-  private async republishStuckRuns(
-    signal: AbortSignal,
-    now: number,
-    failures: Error[]
-  ): Promise<void> {
-    let runs: ProjectionRunRecord[]
+  private async republishStuckRuns(signal: AbortSignal): Promise<readonly Error[]> {
+    let runs: readonly ProjectionRunRecord[]
+
     try {
-      const [queued, enqueueFailed] = await Promise.all([
-        this.listRuns({
-          statuses: ["queued"],
-          // Younger runs may still be in their first publication.
-          startedBefore: new Date(now - this.input.intervalMs),
-        }),
-        this.listRuns({ statuses: ["failed"], errorCodes: ["queue.enqueue_failed"] }),
-      ])
-      runs = [...queued, ...enqueueFailed.filter((run) => run.error?.retryable)]
+      runs = await this.listStuckRuns()
     } catch (error) {
-      failures.push(
+      return [
         new Error(
-          `[SixbOrchestrator] Projection run recovery could not list stuck runs (projectId=${this.input.projectId}).`,
+          `[Sixb] The projections pass could not list stuck runs (projectId=${this.input.projectId}).`,
           { cause: error }
-        )
-      )
-      return
+        ),
+      ]
     }
+
+    const failures: Error[] = []
 
     for (const run of runs) {
       const descriptor = this.input.descriptors.find(
         (candidate) => candidate.projectionId === run.identity.projectionId
       )
+
       // A run admitted under another definition revision belongs to an earlier deployment; the
       // current revision is reconciled from the lake instead.
       if (!descriptor || !admittedUnder(run, descriptor)) continue
+
       try {
         signal.throwIfAborted()
         await this.input.dispatcher.dispatch({
@@ -193,12 +219,28 @@ export class ProjectionDispatchReconciler {
       } catch (error) {
         failures.push(
           new Error(
-            `[SixbOrchestrator] Projection run recovery failed (projectionId=${descriptor.projectionId}, runId=${run.id}).`,
+            `[Sixb] The projections pass could not republish a run (projectionId=${descriptor.projectionId}, runId=${run.id}).`,
             { cause: error }
           )
         )
       }
     }
+
+    return failures
+  }
+
+  /** Runs `queued` for longer than one interval, or failed with a retryable enqueue error. */
+  private async listStuckRuns(): Promise<readonly ProjectionRunRecord[]> {
+    const [queued, enqueueFailed] = await Promise.all([
+      this.listRuns({
+        statuses: ["queued"],
+        // Younger runs may still be in their first publication.
+        startedBefore: new Date(this.now() - RECOVERY_INTERVAL_MS),
+      }),
+      this.listRuns({ statuses: ["failed"], errorCodes: ["queue.enqueue_failed"] }),
+    ])
+
+    return [...queued, ...enqueueFailed.filter((run) => run.error?.retryable)]
   }
 
   private async listRuns(
@@ -219,9 +261,9 @@ export class ProjectionDispatchReconciler {
   }
 }
 
-function reconciliationFailure(descriptor: ProjectionDispatchDescriptor, error: unknown): Error {
+function dispatchFailure(descriptor: ProjectionDispatchDescriptor, error: unknown): Error {
   return new Error(
-    `[SixbOrchestrator] Projection dispatch reconciliation failed (projectionId=${descriptor.projectionId}, datasetId=${descriptor.datasetId}).`,
+    `[Sixb] The projections pass could not dispatch (projectionId=${descriptor.projectionId}, datasetId=${descriptor.datasetId}).`,
     { cause: error }
   )
 }
@@ -254,7 +296,7 @@ function groupByDataset(
 }
 
 async function findLatestDataVersion(input: {
-  readonly lakeStorage: ProjectionReconciliationPorts["lakeStorage"]
+  readonly lakeStorage: ProjectionsPassInput["lakeStorage"]
   readonly projectId: string
   readonly datasetId: string
 }): Promise<DatasetVersion | null> {
@@ -269,7 +311,7 @@ async function findLatestDataVersion(input: {
     if (visited.has(version.versionId)) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbOrchestrator] Dataset '${input.datasetId}' version ancestry contains a cycle at '${version.versionId}'.`,
+        `[Sixb] Dataset '${input.datasetId}' version ancestry contains a cycle at '${version.versionId}'.`,
         {
           details: {
             projectId: input.projectId,
@@ -286,7 +328,7 @@ async function findLatestDataVersion(input: {
     if (!version) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbOrchestrator] Dataset '${input.datasetId}' schema version references missing parent '${parentVersionId}'.`,
+        `[Sixb] Dataset '${input.datasetId}' schema version references missing parent '${parentVersionId}'.`,
         {
           details: {
             projectId: input.projectId,

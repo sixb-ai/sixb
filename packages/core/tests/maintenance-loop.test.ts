@@ -6,7 +6,7 @@ import {
   MaintenanceLoop,
   type MaintenanceLoopOptions,
   type MaintenancePass,
-} from "../src/maintenance"
+} from "../src/maintenance/loop"
 
 const START = new Date("2026-11-07T12:00:00.000Z")
 const SECOND = 1_000

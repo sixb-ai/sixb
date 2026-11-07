@@ -29,16 +29,21 @@ import {
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
+import {
+  LakeChangeFeed,
+  type LakeChangeFeedInput,
+} from "../../core/src/maintenance/passes/lake-change-feed"
+import {
+  type ProjectionsPassInput,
+  projectionsPass,
+} from "../../core/src/maintenance/passes/projections-pass"
 import { compileRoutes } from "../src/compile-routes"
-import { LakeChangeFeed, type LakeChangeFeedInput } from "../src/lake-change-feed"
-import { ProjectionDispatchReconciler } from "../src/projection-dispatch-reconciler"
-import { createReconciliationPasses } from "../src/reconciliation-passes"
+import { createMaintenancePasses } from "../src/maintenance-passes"
 import type {
   OrchestratorRoutes,
   PipelineDispatcherPort,
   ProjectionDispatcherPort,
   ProjectionDispatchInput,
-  ProjectionReconciliationPorts,
   SyncDispatcherPort,
   WorkflowDispatcherPort,
   WorkflowDispatchInput,
@@ -51,7 +56,6 @@ afterEach(() => {
 })
 
 const PROJECT_ID = "test-project"
-const INTERVAL_MS = 30_000
 
 const Invoice = defineObjectType({
   id: "Invoice",
@@ -439,7 +443,7 @@ async function noLakeChanges() {
   return { cursor: "0", versions: [] }
 }
 
-const noProjectionRuns: ProjectionReconciliationPorts["projectionRuns"] = {
+const noProjectionRuns: ProjectionsPassInput["projectionRuns"] = {
   async list() {
     return { runs: [], hasMore: false, total: 0 }
   },
@@ -838,15 +842,14 @@ describe("OrchestratorWorker", () => {
     const version = await commitInvoiceDatasetVersion(lakeStorage)
     const dispatches: ProjectionDispatchInput[] = []
 
-    await new ProjectionDispatchReconciler({
+    await projectionsPass({
       projectId: PROJECT_ID,
       feed: testFeed(lakeStorage),
-      intervalMs: INTERVAL_MS,
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
       lakeStorage,
       projectionRuns: noProjectionRuns,
-    }).pass(signal)
+    }).run(signal)
 
     expect(dispatches[0]).toMatchObject({
       datasetVersion: {
@@ -868,21 +871,20 @@ describe("OrchestratorWorker", () => {
       attempts += 1
       if (attempts === 1) throw new Error("queue unavailable")
     })
-    const reconciler = new ProjectionDispatchReconciler({
+    const pass = projectionsPass({
       projectId: PROJECT_ID,
       feed: testFeed(lakeStorage),
-      intervalMs: INTERVAL_MS,
       dispatcher,
       descriptors: [descriptor],
       lakeStorage,
       projectionRuns: noProjectionRuns,
     })
 
-    const failure = await reconciler.pass(signal).catch((error) => error)
+    const failure = await pass.run(signal).catch((error) => error)
     expect(failure).toBeInstanceOf(AggregateError)
 
-    await reconciler.pass(signal)
-    await reconciler.pass(signal)
+    await pass.run(signal)
+    await pass.run(signal)
 
     // The failed lookup is retried once; nothing changed after it succeeded.
     expect(attempts).toBe(2)
@@ -911,13 +913,12 @@ describe("OrchestratorWorker", () => {
     }
     const dispatches: ProjectionDispatchInput[] = []
 
-    await new ProjectionDispatchReconciler({
+    await projectionsPass({
       projectId: PROJECT_ID,
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
       projectionRuns: noProjectionRuns,
       feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
-      intervalMs: INTERVAL_MS,
       lakeStorage: {
         async listVersions() {
           return [schemaVersion, dataVersion]
@@ -929,7 +930,7 @@ describe("OrchestratorWorker", () => {
           return versionId === dataVersion.versionId ? dataVersion : null
         },
       },
-    }).pass(signal)
+    }).run(signal)
 
     expect(dispatches[0]?.datasetVersion.versionId).toBe(dataVersion.versionId)
   })
@@ -946,13 +947,12 @@ describe("OrchestratorWorker", () => {
       rowsChanged: true,
       lineageChanged: true,
     }
-    const failure = await new ProjectionDispatchReconciler({
+    const failure = await projectionsPass({
       projectId: PROJECT_ID,
       dispatcher: createTestProjectionDispatcher([]),
       descriptors: [descriptor],
       projectionRuns: noProjectionRuns,
       feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
-      intervalMs: INTERVAL_MS,
       lakeStorage: {
         async listVersions() {
           return [schemaVersion]
@@ -965,15 +965,14 @@ describe("OrchestratorWorker", () => {
         },
       },
     })
-      .pass(signal)
+      .run(signal)
       .catch((error) => error)
 
     expect(failure.errors).toHaveLength(1)
     expect(failure.errors[0].cause).toMatchObject({
       code: "internal.unexpected",
       retryable: false,
-      message:
-        "[SixbOrchestrator] Dataset 'raw.invoices' version ancestry contains a cycle at 'schema-cycle'.",
+      message: "[Sixb] Dataset 'raw.invoices' version ancestry contains a cycle at 'schema-cycle'.",
       details: {
         projectId: PROJECT_ID,
         datasetId: rawInvoices.id,
@@ -1320,7 +1319,7 @@ describe("OrchestratorWorker", () => {
   ])("reconciliation rejects $name structurally", ({ routes, error }) => {
     expect(
       thrownBy(() =>
-        createReconciliationPasses({
+        createMaintenancePasses({
           projectId: PROJECT_ID,
           routes,
           dispatchers: { projections: createTestProjectionDispatcher([]) },
@@ -1330,7 +1329,7 @@ describe("OrchestratorWorker", () => {
     ).toMatchObject({ code: "internal.unexpected", retryable: false, ...error })
   })
 
-  // Reproduce: create a `LakeChangeFeed` per pass in `createReconciliationPasses`; it counts two.
+  // Reproduce: create a `LakeChangeFeed` per pass in `createMaintenancePasses`; it counts two.
   test("projections and dataset triggers read the lake's feed with one query", async () => {
     const updated = defineSchedule("raw.updated.shared").on(events.dataset(rawInvoices).updated())
     const pipeline = definePipeline("shared-feed-pipeline")
@@ -1343,7 +1342,7 @@ describe("OrchestratorWorker", () => {
       )
     const lakeStorage = new InMemoryLakeStorage()
     const storage = new InMemoryStorage()
-    const passes = createReconciliationPasses({
+    const passes = createMaintenancePasses({
       projectId: PROJECT_ID,
       routes: compileRoutes({
         schedules: [updated],
@@ -1368,7 +1367,7 @@ describe("OrchestratorWorker", () => {
   })
 
   test("adds no pass for a project with nothing to reconcile", () => {
-    const passes = createReconciliationPasses({
+    const passes = createMaintenancePasses({
       projectId: PROJECT_ID,
       routes: new Map(),
       dispatchers: {},
