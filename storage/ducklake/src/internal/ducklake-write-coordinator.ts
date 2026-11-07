@@ -29,6 +29,7 @@ import {
   applyDatasetRowsFromRelation,
   assertDatasetWriteMode,
   type CommitRowCount,
+  LARGE_TABLE_ROWS,
 } from "./dataset-row-commit"
 import { applyDatasetMergeFromRelation } from "./dataset-row-merge"
 import { getBigIntLike } from "./duckdb-row"
@@ -88,7 +89,18 @@ interface DuckLakeCommitVersionOutcomeRuntimeInput extends DuckLakeCommitVersion
 export interface DuckLakeApplyChangesContext {
   readonly previousRowCount?: number
   readonly validatedPrimaryKeyColumns?: readonly string[]
+  /**
+   * The snapshot is expected to replace every row, as the version it builds on did: it replaces
+   * them without the join that would find which rows changed (see `uncomparedReplacementStreak`).
+   */
+  readonly expectReplacement: boolean
 }
+
+/**
+ * A keyed snapshot over a version that replaced every row skips comparing its rows this many
+ * times in a row, then compares them again in case far fewer change now.
+ */
+const RECHECK_REPLACEMENT_EVERY = 8
 
 /**
  * Owns the durable DuckLake transaction for a staged Sixb write.
@@ -198,6 +210,7 @@ export class DuckLakeWriteCoordinator {
             ...input,
             runtime: commitRuntime,
             previousRowCount: context.previousRowCount,
+            expectReplacement: context.expectReplacement,
           }),
       })
     )
@@ -345,9 +358,11 @@ export class DuckLakeWriteCoordinator {
         parent: latestVersion,
       })
 
+      const uncomparedReplacements = uncomparedReplacementStreak(input, latestVersion)
       const changeResult = await input.applyChanges(input.runtime, {
         previousRowCount: latestVersion?.rowCount,
         validatedPrimaryKeyColumns: latestVersion?.validatedPrimaryKeyColumns,
+        expectReplacement: uncomparedReplacements !== undefined,
       })
       input.signal?.throwIfAborted()
 
@@ -365,21 +380,23 @@ export class DuckLakeWriteCoordinator {
       }
 
       const commitId = randomUUID()
-      await this.setCommitMetadata(
-        input,
+      const rowChanges = changeResult.insertedRows + changeResult.deletedRows
+      await this.setCommitMetadata(input, {
         commitId,
-        commitRowCount(input, changeResult, latestVersion),
+        rowCount: commitRowCount(input, changeResult, latestVersion),
+        rowChanges,
+        uncomparedReplacements: changeResult.dataChangeExpected
+          ? uncomparedReplacements
+          : undefined,
         lineage,
-        {
-          rowsChanged: parent === null || changeResult.changedTableRows,
-          lineageChanged: hasDatasetLineageChanges(parent, {
-            datasetId: input.dataset.id,
-            schema: input.dataset.schema,
-            producer: input.producer,
-            lineage,
-          }),
-        }
-      )
+        rowsChanged: parent === null || rowChanges > 0,
+        lineageChanged: hasDatasetLineageChanges(parent, {
+          datasetId: input.dataset.id,
+          schema: input.dataset.schema,
+          producer: input.producer,
+          lineage,
+        }),
+      })
 
       await commitVersionTransaction(
         input.runtime,
@@ -491,6 +508,7 @@ export class DuckLakeWriteCoordinator {
     input: DuckLakeCommitWriteInput & {
       readonly runtime: DuckDbQueryRuntime
       readonly previousRowCount?: number
+      readonly expectReplacement: boolean
     }
   ): Promise<ApplyDatasetRowsResult> {
     const mode = input.write.mode ?? "snapshot"
@@ -501,6 +519,7 @@ export class DuckLakeWriteCoordinator {
       mode,
       sourceRelationSql: quoteIdentifier(input.stagingTableName),
       previousRowCount: input.previousRowCount,
+      expectReplacement: input.expectReplacement,
     })
 
     if (result.sourceRowCount !== input.rowsWritten) {
@@ -514,17 +533,25 @@ export class DuckLakeWriteCoordinator {
 
   private async setCommitMetadata(
     input: DuckLakeCommitVersionOutcomeRuntimeInput,
-    commitId: string,
-    rowCount: CommitRowCount,
-    lineage: DatasetVersionLineage | undefined,
-    changed: Pick<DatasetVersion, "rowsChanged" | "lineageChanged">
+    commit: Pick<DatasetVersion, "rowsChanged" | "lineageChanged"> & {
+      readonly commitId: string
+      readonly rowCount: CommitRowCount
+      /** Rows the commit inserts and deletes in the dataset table (see the change reader). */
+      readonly rowChanges: number
+      readonly uncomparedReplacements: number | undefined
+      readonly lineage: DatasetVersionLineage | undefined
+    }
   ): Promise<void> {
+    const { commitId, rowCount, rowChanges, uncomparedReplacements, lineage } = commit
+
     // DuckLake stores this JSON on the snapshot it creates for the current
     // transaction. Version id, timestamp, and data-change detection still come
     // from DuckLake itself. commitId is only a transaction correlation token so
     // concurrent writers do not accidentally hydrate each other's snapshots.
     // Every keyed data path either replaces the baseline or validates its uniqueness before this
-    // marker is persisted. Merge commits can therefore avoid repeating that full-table audit.
+    // marker is persisted: a snapshot that writes only its difference checks that the table holds
+    // exactly the rows the difference accounts for, and replaces them otherwise. Merge commits can
+    // therefore avoid repeating that full-table audit.
     const validatedPrimaryKeyColumns = getDatasetPrimaryKeyColumns(input.dataset)
     const metadata: SixbCommitMetadata = {
       kind: "datasetVersion",
@@ -534,12 +561,14 @@ export class DuckLakeWriteCoordinator {
       producer: input.producer ? structuredClone(input.producer) : undefined,
       inputs: input.inputs ? structuredClone(input.inputs) : undefined,
       ...(rowCount.kind === "exact" ? { rowCount: rowCount.value } : {}),
+      rowChanges,
+      ...(uncomparedReplacements === undefined ? {} : { uncomparedReplacements }),
       ...(validatedPrimaryKeyColumns !== null
         ? { validatedPrimaryKeyColumns: [...validatedPrimaryKeyColumns] }
         : {}),
       ...(lineage === undefined ? {} : { lineage: encodeLineage(lineage) }),
-      rowsChanged: changed.rowsChanged,
-      lineageChanged: changed.lineageChanged,
+      rowsChanged: commit.rowsChanged,
+      lineageChanged: commit.lineageChanged,
     }
 
     await input.runtime.run(
@@ -763,8 +792,11 @@ export class DuckLakeWriteCoordinator {
  * Whether a version must claim its table so that a concurrent commit cannot build on it unseen.
  *
  * DuckLake commits a transaction on top of snapshots committed since it began unless one of them
- * altered the table or deleted rows it held. Only the earlier commit decides: a claim protects the
- * version that makes it from concurrent commits that land after it, never the reverse. A commit
+ * conflicts with it. Inserting rows conflicts with a commit that deleted rows of the table or
+ * altered it; deleting rows, with one that inserted rows or altered it, or that deleted rows of the
+ * same file (or any inlined rows). Two commits that only insert never conflict, nor two that only
+ * delete from different files. Only the earlier commit decides: a claim protects the version that
+ * makes it from concurrent commits that land after it, never the reverse. A commit
  * that builds on a version it did not see keeps that version's rows, but stores the lineage of
  * the parent it read. For lineage, that is only wrong when the unseen version's stored lineage
  * carries dependencies: rows that depend on their own columns only add nothing to any lineage, so
@@ -775,8 +807,10 @@ export class DuckLakeWriteCoordinator {
  * - A version that changes no rows claims: it is also how it gets a snapshot.
  * - A write into an empty table claims, whatever it holds. It deletes nothing, so a snapshot that
  *   also read the table empty would delete nothing either, and keep the rows it replaces.
- * - A snapshot that deleted rows needs no claim: any concurrent change to the table conflicts with
- *   its deletes.
+ * - A snapshot that changes rows needs no claim: it both inserts and deletes rows, so any
+ *   concurrent change to the table's rows conflicts with it. One that replaced every row does;
+ *   one that wrote only the rows that differ rewrites an unchanged row when it would only insert
+ *   or only delete (see `applyKeyedSnapshot`), rather than claim.
  * - A keyed append or merge claims. DuckLake has no primary key: two writes that insert one new
  *   key both commit unless the earlier one claims.
  * - An unkeyed append into a table with rows claims when the lineage it stores carries a
@@ -802,6 +836,36 @@ function mustClaimTable(
 }
 
 /**
+ * Whether a keyed snapshot should replace every row without first joining them with the table,
+ * and if so, the how-manyth in a row it is.
+ *
+ * The join finds which rows changed, so that a few changed rows are all that is written; when
+ * most rows change, it is a cost on top of the replacement that follows (a tenth of the write
+ * with a million rows). In a large table (`LARGE_TABLE_ROWS`), a version that replaced the rows
+ * of a non-empty table inserted and deleted more rows than it holds, which a difference never
+ * does: its next snapshot is expected to replace them too. Every `RECHECK_REPLACEMENT_EVERY`th
+ * one compares again. The count travels with the versions (`uncomparedReplacements`), so every
+ * process writing the dataset decides the same.
+ */
+function uncomparedReplacementStreak(
+  input: DuckLakeCommitVersionOutcomeRuntimeInput,
+  parent: DuckLakeVersionSummary | null | undefined
+): number | undefined {
+  const replaced =
+    input.mode === "snapshot" &&
+    parent?.rowChanges !== undefined &&
+    parent.rowCount !== undefined &&
+    parent.rowCount >= LARGE_TABLE_ROWS &&
+    parent.rowChanges > parent.rowCount
+  if (!replaced) {
+    return undefined
+  }
+
+  const streak = (parent.uncomparedReplacements ?? 0) + 1
+  return streak < RECHECK_REPLACEMENT_EVERY ? streak : undefined
+}
+
+/**
  * Whether a version must fail on any snapshot committed since its transaction began, rather than
  * commit on top of one that does not conflict with it. A version that did not claim its table (see
  * `mustClaimTable`) can only be built on unseen by a commit that records nothing of its parent but
@@ -816,7 +880,7 @@ function mustCommitOnReadSnapshot(
   input: DuckLakeCommitVersionOutcomeRuntimeInput,
   changeResult: ApplyDatasetRowsResult
 ): boolean {
-  if (!changeResult.changedTableRows) {
+  if (changeResult.insertedRows + changeResult.deletedRows === 0) {
     return true
   }
 
