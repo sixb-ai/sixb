@@ -484,6 +484,7 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
           pendingDeliveries: counts?.pendingDeliveries ?? 0,
           pendingChanges: counts?.pendingChanges ?? 0,
           oldestReceivedAt: counts?.oldestReceivedAt ?? null,
+          flushStartedAt: state?.flushStartedAt ?? null,
           request: state?.request ?? 0,
           leaseExpiresAt: leased ? state.leaseExpiresAt : null,
           failureStreak: state?.failureStreak ?? 0,

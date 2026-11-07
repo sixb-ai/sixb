@@ -73,7 +73,7 @@ to the run. Whoever takes over asks the lake: `findProducedVersion` looks up the
 `producer.runId` (and `stepId`), the way an ingest flush finds its batch.
 
 The version must still be there. Retention keeps every version back to the earliest commit a live
-run or a waiting inbox may have left unrecorded (`LakeRetention.keepVersionsForMs`), or a resumed run
+run or a flush in flight may have left unrecorded (`LakeRetention.keepVersionsForMs`), or a resumed run
 would miss its own commit, and write it twice.
 
 A commit can also land and answer with an error: a connection lost during `COMMIT`, or a query after

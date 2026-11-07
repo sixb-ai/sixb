@@ -47,6 +47,8 @@ export interface DatasetIngestSummary {
   readonly pendingDeliveries: number
   readonly pendingChanges: number
   readonly oldestReceivedAt: Date | null
+  /** When the flush in flight first took its deliveries: a version it committed is no older. */
+  readonly flushStartedAt: Date | null
   /** The current flush request: a request for these deliveries names it. */
   readonly request: number
   /** Set while a flush holds the dataset. */

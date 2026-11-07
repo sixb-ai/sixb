@@ -514,26 +514,39 @@ describe("what retention keeps for a commit nobody recorded", () => {
     expect(passes[0]?.keepVersionsForMs).toBeGreaterThanOrEqual(72 * HOUR)
   })
 
-  test("keeps versions back to the oldest change an inbox holds", async () => {
-    const summarize = async () => [
-      {
-        datasetId: "crm.contacts",
-        pendingDeliveries: 1,
-        pendingChanges: 1,
-        oldestReceivedAt: threeDaysAgo,
-        request: 0,
-        leaseExpiresAt: null,
-        failureStreak: 0,
-        lastFlushedAt: null,
-        rejectedDeliveries: 0,
-      },
-    ]
+  describe("with changes in an inbox", () => {
+    const summary = {
+      datasetId: "crm.contacts",
+      pendingDeliveries: 1,
+      pendingChanges: 1,
+      oldestReceivedAt: threeDaysAgo,
+      flushStartedAt: null,
+      request: 0,
+      leaseExpiresAt: null,
+      failureStreak: 0,
+      lastFlushedAt: null,
+      rejectedDeliveries: 0,
+    }
 
-    const { passes, apply } = passAsked({
-      datasetIngest: { summarize } as unknown as DatasetIngestStorage,
+    const inboxOf = (flushStartedAt: Date | null) =>
+      ({
+        summarize: async () => [{ ...summary, flushStartedAt }],
+      }) as unknown as DatasetIngestStorage
+
+    test("keeps versions back to when a flush in flight took its batch", async () => {
+      const { passes, apply } = passAsked({ datasetIngest: inboxOf(threeDaysAgo) })
+      await apply()
+
+      expect(passes[0]?.keepVersionsForMs).toBeGreaterThanOrEqual(72 * HOUR)
     })
-    await apply()
 
-    expect(passes[0]?.keepVersionsForMs).toBeGreaterThanOrEqual(72 * HOUR)
+    // A delivery no flush took has no commit to lose. Basing the floor on `oldestReceivedAt`
+    // instead fails this: one delivery nothing can write would stop retention for the project.
+    test("is not held back by a change no flush took", async () => {
+      const { passes, apply } = passAsked({ datasetIngest: inboxOf(null) })
+      await apply()
+
+      expect(passes[0]?.keepVersionsForMs).toBeLessThan(72 * HOUR)
+    })
   })
 })

@@ -254,8 +254,9 @@ export function getLakeRetentionRuntime(host: object): LakeRetention {
 
 /**
  * The earliest time a commit nobody has recorded yet can date from: what running syncs prepared,
- * when running pipelines started, and the oldest change an inbox still holds, which a flush may
- * have committed before it died. A sync that never prepared a commit has none to lose.
+ * when running pipelines started, and when a flush in flight took its batch, which it may have
+ * committed before it died. A sync that never prepared a commit has none to lose, and neither has
+ * a change no flush took, so a delivery nothing can write holds no retention back.
  */
 async function oldestUnrecordedCommit(
   projectId: string,
@@ -272,7 +273,7 @@ async function oldestUnrecordedCommit(
   const times = [
     ...(syncs?.runs ?? []).map((run) => run.commitPreparedAt),
     ...(pipelines?.runs ?? []).map((run) => run.startedAt),
-    ...(inbox ?? []).map((summary) => summary.oldestReceivedAt),
+    ...(inbox ?? []).map((summary) => summary.flushStartedAt),
   ].flatMap((time) => (time ? [time.getTime()] : []))
 
   return times.length > 0 ? new Date(Math.min(...times)) : null
