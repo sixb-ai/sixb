@@ -277,7 +277,9 @@ export function TouchViewport() {
     // The keyboard's real height, a few frames into its rise, or its leaving.
     const onViewportChange = () => {
       if (!ios) return
-      const keyboard = measured()
+      // Only a focused field brings a keyboard. An installed app can open with the visible area a
+      // status bar short of the screen, which would otherwise read as a keyboard.
+      const keyboard = hasTextFocus() ? measured() : 0
       if (keyboard > 0) {
         expectedAt = 0
         cancelAnimationFrame(riseFrame)
