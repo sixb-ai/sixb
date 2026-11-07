@@ -291,7 +291,9 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     input: ListLatestPipelineRunsInput
   ): Promise<ListLatestPipelineRunsResult> {
     const runs = latestStartedAtByOwnerId(
-      [...this.runs.values()].filter((record) => record.projectId === input.projectId),
+      [...this.runs.values()].filter(
+        (record) => record.projectId === input.projectId && record.status !== input.excludedStatus
+      ),
       input.pipelineIds,
       (record) => record.pipelineId
     )
@@ -317,6 +319,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
       .filter((record) =>
         input.pipelineRunId ? record.pipelineRunId === input.pipelineRunId : true
       )
+      .filter((record) => input.pipelineRunIds?.includes(record.pipelineRunId) ?? true)
       .filter((record) => (input.pipelineId ? record.pipelineId === input.pipelineId : true))
       .filter((record) => (input.stepId ? record.stepId === input.stepId : true))
       .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))

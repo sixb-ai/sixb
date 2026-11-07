@@ -17,7 +17,8 @@ import {
   type ProjectionDispatchDescriptor,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
-import { ProjectionDispatchReconciler } from "../src/projection-dispatch-reconciler"
+import { LakeChangeFeed } from "../src/maintenance/passes/lake-change-feed"
+import { projectionsPass } from "../src/maintenance/passes/projections-pass"
 
 const Invoice = defineObjectType({
   id: "Invoice",
@@ -39,7 +40,7 @@ const archiveProjection = defineProjection("invoice-archive-projection", Invoice
 
 const INTERVAL_MS = 30_000
 
-function createReconciliation(projections = [invoiceProjection]) {
+function createScene(projections = [invoiceProjection]) {
   const storage = new InMemoryStorage()
   const lakeStorage = new InMemoryLakeStorage()
   const queues = new InMemoryQueues()
@@ -57,19 +58,27 @@ function createReconciliation(projections = [invoiceProjection]) {
   const dispatcher = new ProjectionRunDispatcher(host)
   const lookups: string[] = []
   const feed = { failures: 0 }
-  const createReconciler = (descriptors = getProjectionDispatchDescriptors(host)) =>
-    new ProjectionDispatchReconciler({
+  const createPass = (descriptors = getProjectionDispatchDescriptors(host)) => {
+    let now = Date.now()
+
+    const pass = projectionsPass({
       projectId: host.id,
       dispatcher,
       descriptors,
-      lakeStorage: {
-        async listLatestVersionsSince(input) {
-          if (feed.failures > 0) {
-            feed.failures -= 1
-            throw new Error("catalog unavailable")
-          }
-          return lakeStorage.listLatestVersionsSince(input)
+      feed: new LakeChangeFeed({
+        projectId: host.id,
+        freshForMs: 0,
+        lakeStorage: {
+          async listLatestVersionsSince(input) {
+            if (feed.failures > 0) {
+              feed.failures -= 1
+              throw new Error("catalog unavailable")
+            }
+            return lakeStorage.listLatestVersionsSince(input)
+          },
         },
+      }),
+      lakeStorage: {
         listVersions: (datasetId, limit) => lakeStorage.listVersions(datasetId, limit),
         getVersion: (datasetId, versionId) => lakeStorage.getVersion(datasetId, versionId),
         getLatestVersion(datasetId) {
@@ -78,8 +87,16 @@ function createReconciliation(projections = [invoiceProjection]) {
         },
       },
       projectionRuns: storage.projectionRuns,
-      intervalMs: INTERVAL_MS,
+      now: () => now,
     })
+
+    return {
+      run(signal: AbortSignal, at = Date.now()) {
+        now = at
+        return pass.run(signal)
+      },
+    }
+  }
 
   return {
     host,
@@ -87,7 +104,7 @@ function createReconciliation(projections = [invoiceProjection]) {
     lookups,
     queues,
     dispatcher,
-    createReconciler,
+    createPass,
     async commit(id: string) {
       await lakeStorage.createDataset(invoices)
       const write = await lakeStorage.beginWrite({ dataset: invoices, mode: "snapshot" })
@@ -150,18 +167,20 @@ function pinned(version: { datasetId: string; versionId: string; createdAt: Date
   }
 }
 
+const signal = new AbortController().signal
+
 describe("ProjectionDispatchReconciler", () => {
   test("dispatches a commit whose event was dropped and only reads the feed while idle", async () => {
     // Red check: skip the change-feed versions in reconcileTriggers; the commit is never admitted.
-    const reconciliation = createReconciliation()
-    const reconciler = reconciliation.createReconciler()
-    await reconciler.pass()
+    const reconciliation = createScene()
+    const pass = reconciliation.createPass()
+    await pass.run(signal)
 
     const version = await reconciliation.commit("invoice-1")
     reconciliation.lookups.length = 0
-    await reconciler.pass()
-    await reconciler.pass()
-    await reconciler.pass()
+    await pass.run(signal)
+    await pass.run(signal)
+    await pass.run(signal)
 
     expect(await reconciliation.runVersions()).toEqual([
       { versionId: version.versionId, status: "queued" },
@@ -170,12 +189,12 @@ describe("ProjectionDispatchReconciler", () => {
   })
 
   test("a restart admits the latest commit made while no orchestrator ran", async () => {
-    const reconciliation = createReconciliation()
-    await reconciliation.createReconciler().pass()
+    const reconciliation = createScene()
+    await reconciliation.createPass().run(signal)
     await reconciliation.commit("invoice-1")
     const latest = await reconciliation.commit("invoice-2")
 
-    await reconciliation.createReconciler().pass()
+    await reconciliation.createPass().run(signal)
 
     expect(await reconciliation.runVersions()).toEqual([
       { versionId: latest.versionId, status: "queued" },
@@ -184,10 +203,10 @@ describe("ProjectionDispatchReconciler", () => {
 
   test("looks a dataset up once for every projection that reads it", async () => {
     // Red check: look each projection's dataset up on its own; the restart reads it twice.
-    const reconciliation = createReconciliation([invoiceProjection, archiveProjection])
+    const reconciliation = createScene([invoiceProjection, archiveProjection])
     const version = await reconciliation.commit("invoice-1")
 
-    await reconciliation.createReconciler().pass()
+    await reconciliation.createPass().run(signal)
 
     expect(reconciliation.lookups).toEqual([invoices.id])
     expect(await reconciliation.runVersions()).toEqual([
@@ -198,17 +217,17 @@ describe("ProjectionDispatchReconciler", () => {
 
   test("keeps reconciling while the change feed fails", async () => {
     // Red check: treat lookups made without a feed read as verified; the second commit is missed.
-    const reconciliation = createReconciliation()
+    const reconciliation = createScene()
     const first = await reconciliation.commit("invoice-1")
-    const reconciler = reconciliation.createReconciler()
+    const pass = reconciliation.createPass()
     reconciliation.feed.failures = 1
-    await quietly(() => reconciler.pass())
+    await pass.run(signal).catch((error) => error)
     expect(await reconciliation.runVersions()).toEqual([
       { versionId: first.versionId, status: "queued" },
     ])
 
     const second = await reconciliation.commit("invoice-2")
-    await reconciler.pass()
+    await pass.run(signal)
 
     expect(await reconciliation.runVersions()).toContainEqual({
       versionId: second.versionId,
@@ -218,22 +237,22 @@ describe("ProjectionDispatchReconciler", () => {
 
   test("republishes a run left queued by a lost publication", async () => {
     // Red check: return early from republishStuckRuns; the stranded run never reaches the queue.
-    const reconciliation = createReconciliation()
+    const reconciliation = createScene()
     const stranded = await reconciliation.commit("invoice-1")
     await reconciliation.failNextPublish()
     await expect(reconciliation.dispatcher.dispatch(pinned(stranded))).rejects.toThrow(
       "queue unavailable"
     )
     const latest = await reconciliation.commit("invoice-2")
-    const reconciler = reconciliation.createReconciler()
+    const pass = reconciliation.createPass()
 
     const now = Date.now()
-    await reconciler.pass(now)
+    await pass.run(signal, now)
     const strandedRunId = await reconciliation.runIdFor(stranded.versionId)
     const latestRunId = await reconciliation.runIdFor(latest.versionId)
     expect(await reconciliation.publishedRunIds()).toEqual([latestRunId])
 
-    await reconciler.pass(now + INTERVAL_MS + 1_000)
+    await pass.run(signal, now + INTERVAL_MS + 1_000)
     expect(await reconciliation.publishedRunIds()).toEqual([strandedRunId])
     expect(await reconciliation.runVersions()).toContainEqual({
       versionId: stranded.versionId,
@@ -242,7 +261,7 @@ describe("ProjectionDispatchReconciler", () => {
   })
 
   test("requeues a run whose publication failed retryably", async () => {
-    const reconciliation = createReconciliation()
+    const reconciliation = createScene()
     const stranded = await reconciliation.commit("invoice-1")
     await reconciliation.failNextPublish()
     await expect(reconciliation.dispatcher.dispatch(pinned(stranded))).rejects.toThrow(
@@ -252,7 +271,7 @@ describe("ProjectionDispatchReconciler", () => {
     await reconciliation.failEnqueue(strandedRunId)
     await reconciliation.commit("invoice-2")
 
-    await reconciliation.createReconciler().pass()
+    await reconciliation.createPass().run(signal)
 
     expect(await reconciliation.runVersions()).toContainEqual({
       versionId: stranded.versionId,
@@ -262,7 +281,7 @@ describe("ProjectionDispatchReconciler", () => {
   })
 
   test("leaves a stranded run of an earlier projection revision alone", async () => {
-    const reconciliation = createReconciliation()
+    const reconciliation = createScene()
     const stranded = await reconciliation.commit("invoice-1")
     await reconciliation.failNextPublish()
     await expect(reconciliation.dispatcher.dispatch(pinned(stranded))).rejects.toThrow(
@@ -275,18 +294,8 @@ describe("ProjectionDispatchReconciler", () => {
         ({ ...descriptor, projectionRevision: "revised" }) as ProjectionDispatchDescriptor
     )
 
-    await reconciliation.createReconciler(revised).pass(Date.now() + INTERVAL_MS + 1_000)
+    await reconciliation.createPass(revised).run(signal, Date.now() + INTERVAL_MS + 1_000)
 
     expect(await reconciliation.publishedRunIds()).not.toContain(strandedRunId)
   })
 })
-
-async function quietly<T>(run: () => Promise<T>): Promise<T> {
-  const originalError = console.error
-  console.error = () => {}
-  try {
-    return await run()
-  } finally {
-    console.error = originalError
-  }
-}

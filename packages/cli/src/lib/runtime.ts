@@ -16,6 +16,7 @@ import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
 import {
   type CompileRoutesDiagnostic,
   compileRoutesWithDiagnostics,
+  createMaintenancePasses,
   OrchestratorWorker,
 } from "@sixb/orchestrator"
 import { PipelineWorker } from "@sixb/pipeline-worker"
@@ -73,10 +74,6 @@ export interface RuntimeApiServer {
 
 export interface RunningRulesRuntime {
   readonly rulesWorker: RulesWorker | null
-  stop(): Promise<void>
-}
-
-export interface RunningSchedulerRuntime {
   stop(): Promise<void>
 }
 
@@ -161,18 +158,6 @@ export async function startRulesRuntime(sixb: LoadedSixbHost): Promise<RunningRu
   }
 }
 
-export async function startSchedulerRuntime(
-  sixb: LoadedSixbHost
-): Promise<RunningSchedulerRuntime> {
-  await sixb.scheduler.start()
-
-  return {
-    async stop() {
-      await stopQuietly(() => sixb.scheduler.stop())
-    },
-  }
-}
-
 export async function startOrchestratorRuntime(
   sixb: LoadedSixbHost
 ): Promise<RunningOrchestratorRuntime> {
@@ -185,37 +170,48 @@ export async function startOrchestratorRuntime(
     workflows: sixb.definitions.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
-  let orchestratorWorker: OrchestratorWorker | null = null
+  const dispatchers = {
+    syncs: new SyncRunDispatcher(sixb),
+    pipelines: new PipelineRunDispatcher(sixb),
+    projections: new ProjectionRunDispatcher(sixb),
+    workflows: new WorkflowRunDispatcher(sixb),
+  }
 
+  const { projectionRuns, pipelineRuns } = sixb.storage
+  if (projections.length > 0 && !projectionRuns) {
+    throw new Error("[SixbCLI] Projection dispatch requires storage.projectionRuns.")
+  }
+
+  let orchestratorWorker: OrchestratorWorker | null = null
   if (routes.size > 0) {
-    const projectionRuns = sixb.storage.projectionRuns
-    if (projections.length > 0 && !projectionRuns) {
-      throw new Error("[SixbCLI] Projection dispatch requires storage.projectionRuns.")
-    }
-    const projectionReconciliation =
-      projections.length > 0 && projectionRuns
-        ? { lakeStorage: sixb.lakeStorage, projectionRuns }
-        : undefined
     orchestratorWorker = new OrchestratorWorker({
       projectId: sixb.id,
       events: sixb.events,
       queues: sixb.queues,
       routes,
-      dispatchers: {
-        syncs: new SyncRunDispatcher(sixb),
-        pipelines: new PipelineRunDispatcher(sixb),
-        projections: new ProjectionRunDispatcher(sixb),
-        workflows: new WorkflowRunDispatcher(sixb),
-      },
-      ...(projectionReconciliation ? { projectionReconciliation } : {}),
+      dispatchers,
+      reporter: sixb,
     })
     await orchestratorWorker.start()
   }
+
+  // Runs with or without routes: every project commits events, and cron emits what routes consume.
+  const maintenance = sixb.startMaintenance(
+    createMaintenancePasses({
+      projectId: sixb.id,
+      routes,
+      dispatchers,
+      lakeStorage: sixb.lakeStorage,
+      ...(projectionRuns ? { projectionRuns } : {}),
+      ...(pipelineRuns ? { pipelineRuns } : {}),
+    })
+  )
 
   return {
     orchestratorWorker,
     warnings,
     async stop() {
+      await stopQuietly(() => maintenance.stop())
       await stopQuietly(() => orchestratorWorker?.stop() ?? Promise.resolve())
     },
   }
@@ -230,29 +226,26 @@ export async function startOrchestratorRuntime(
  *   3. PipelineWorker (claims from queues)
  *   4. WorkflowWorker (claims from queues)
  *   5. SyncWorker (claims from queues)
- *   6. Orchestrator (subscribes to events and enqueues jobs)
- *   7. Scheduler (emits schedule.triggered)
- *   8. API server, when this process serves it
- *   9. AgentWorker (claims from queues; its turns call the API)
+ *   6. Orchestrator (subscribes to events, enqueues jobs, runs cron and the maintenance loop)
+ *   7. API server, when this process serves it
+ *   8. AgentWorker (claims from queues; its turns call the API)
  *
  * Shutdown order (producers before consumers):
  *   1. AgentWorker (ends its turns while the API still answers them)
  *   2. API server
- *   3. Scheduler
- *   4. Orchestrator (drains pending dispatches)
- *   5. SyncWorker
- *   6. WorkflowWorker
- *   7. PipelineWorker
- *   8. ProjectionWorker
- *   9. RulesWorker (drains pending evaluations)
- *   10. Runtime providers (connectors, broker)
+ *   3. Orchestrator (stops cron, drains pending dispatches)
+ *   4. SyncWorker
+ *   5. WorkflowWorker
+ *   6. PipelineWorker
+ *   7. ProjectionWorker
+ *   8. RulesWorker (drains pending evaluations)
+ *   9. Runtime providers (connectors, broker)
  */
 export async function startSixbRuntime(
   sixb: LoadedSixbHost,
   options: StartSixbRuntimeOptions = {}
 ): Promise<RunningSixbRuntime> {
   let rulesRuntime: RunningRulesRuntime | null = null
-  let schedulerRuntime: RunningSchedulerRuntime | null = null
   let orchestratorRuntime: RunningOrchestratorRuntime | null = null
   let rulesWorker: RulesWorker | null = null
   let syncWorker: SyncWorker | null = null
@@ -266,7 +259,6 @@ export async function startSixbRuntime(
   async function stop() {
     await stopQuietly(() => agentWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => options.api?.stop() ?? Promise.resolve())
-    await stopQuietly(() => schedulerRuntime?.stop() ?? Promise.resolve())
     await stopQuietly(() => orchestratorRuntime?.stop() ?? Promise.resolve())
     await stopQuietly(() => syncWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => workflowWorker?.stop() ?? Promise.resolve())
@@ -328,8 +320,6 @@ export async function startSixbRuntime(
       orchestratorRuntime = await startOrchestratorRuntime(sixb)
       orchestratorWorker = orchestratorRuntime.orchestratorWorker
       warnings.push(...orchestratorRuntime.warnings)
-
-      schedulerRuntime = await startSchedulerRuntime(sixb)
     }
 
     await options.api?.start()

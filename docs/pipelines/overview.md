@@ -53,7 +53,7 @@ export const campaignsUpdated = defineSchedule("campaigns-updated")
   .on(events.dataset(rawCampaigns).updated())
 ```
 
-Import the schedule and attach it to the pipeline with `.when()`:
+Import the schedule and attach it to the pipeline with `.when()`. If the update's event is lost, the orchestrator notices within two minutes that the pipeline has not read the new version and runs it. A failed run counts as having read what it read, so it is not retried; a pipeline that never ran waits for you or the next update.
 
 ```ts
 // pipelines/campaigns.ts

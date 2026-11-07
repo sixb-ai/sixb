@@ -1,10 +1,10 @@
+import { type BackoffPolicy, backoffDelay, waitUnlessAborted } from "../shared/backoff"
 import { WorkerUnhealthyError } from "./errors"
 
 // The budget rides out ~80s of continuous failure (0.1s -> 30s backoffs) before the worker is
 // declared unhealthy, so a transient infra outage does not kill an otherwise healthy process.
 const MAX_RESTARTS = 10
-const RESTART_BACKOFF_MS = 100
-const MAX_RESTART_BACKOFF_MS = 30_000
+const RESTART_BACKOFF: BackoffPolicy = { initialMs: 100, maxMs: 30_000 }
 const STABLE_RUN_MS = 60_000
 
 /** Base worker lifecycle with bounded restart supervision. */
@@ -64,22 +64,9 @@ export abstract class Worker {
         throw new WorkerUnhealthyError(this.constructor.name, restartCount, { cause: failure })
       }
 
-      const delayMs = Math.min(RESTART_BACKOFF_MS * 2 ** restartCount, MAX_RESTART_BACKOFF_MS)
+      const delayMs = backoffDelay(restartCount, RESTART_BACKOFF)
       restartCount += 1
-      await waitForAbort(delayMs, signal)
+      await waitUnlessAborted(delayMs, signal)
     }
   }
-}
-
-async function waitForAbort(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(finish, ms)
-    function finish(): void {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", finish)
-      resolve()
-    }
-    signal.addEventListener("abort", finish, { once: true })
-  })
 }

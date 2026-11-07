@@ -315,7 +315,7 @@ async function main(): Promise<void> {
 
     case "scheduler": {
       const { runScheduler } = await import("./commands/scheduler")
-      await runScheduler({ entry: getFlag("entry"), noMigrate: hasFlag("no-migrate") })
+      await runScheduler()
       break
     }
 

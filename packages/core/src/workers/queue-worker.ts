@@ -1,6 +1,7 @@
 import { captureSixbFailure } from "../errors/internal"
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { ClaimedQueueJob, Queue, QueueJob } from "../queues"
+import { waitUnlessAborted } from "../shared/backoff"
 import { WorkerAbortError } from "./errors"
 import {
   createQueueDelivery,
@@ -283,22 +284,9 @@ export function isAbortError(error: unknown): boolean {
 }
 
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  await waitUnlessAborted(ms, signal)
+
   if (signal.aborted) {
     throw new WorkerAbortError("Worker runtime aborted.")
   }
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort)
-      resolve()
-    }, ms)
-
-    const onAbort = () => {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", onAbort)
-      reject(new WorkerAbortError("Worker runtime aborted."))
-    }
-
-    signal.addEventListener("abort", onAbort, { once: true })
-  })
 }

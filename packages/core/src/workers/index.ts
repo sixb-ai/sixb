@@ -1,3 +1,8 @@
+export {
+  type BackoffPolicy,
+  backoffDelay,
+  waitUnlessAborted,
+} from "../shared/backoff"
 export { WorkerAbortError, WorkerUnhealthyError } from "./errors"
 export type { QueueDelivery, QueueDeliveryState, QueueSettlementResult } from "./queue-delivery"
 export { QueueDeliveryLeaseLostError } from "./queue-delivery"

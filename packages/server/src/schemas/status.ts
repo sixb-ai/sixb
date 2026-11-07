@@ -14,32 +14,26 @@ export const ReadinessResponseSchema = z.object({
 })
 
 const MaintenanceSummarySchema = z.object({
-  running: z.boolean(),
-  intervalMs: z.number().int().positive(),
-  lastStartedAt: z.string().nullable(),
-  lastCompletedAt: z.string().nullable(),
-  lastDurationMs: z.number().nonnegative().nullable(),
-  consecutiveFailures: z.number().int().nonnegative(),
-  lastError: z.string().nullable(),
-  outbox: z
-    .object({
-      pendingCount: z.number().int().nonnegative(),
-      oldestPendingAt: z.string().nullable(),
-      retryingCount: z.number().int().nonnegative(),
-      maxAttempts: z.number().int().nonnegative(),
+  owner: z.enum(["orchestrator", "embedded"]).nullable(),
+  beatAt: z.string().nullable(),
+  stale: z.boolean(),
+  passes: z.array(
+    z.object({
+      id: z.string(),
+      lastSucceededAt: z.string().nullable(),
+      consecutiveFailures: z.number().int().nonnegative(),
     })
-    .nullable(),
-  cleanup: z
-    .object({
-      publishedOutboxRowsDeleted: z.number().int().nonnegative(),
-      terminalSourceRowsDeleted: z.number().int().nonnegative(),
-      terminalSourceMaterializationsDeleted: z.number().int().nonnegative(),
-    })
-    .nullable(),
+  ),
+  outbox: z.object({
+    pendingCount: z.number().int().nonnegative(),
+    oldestPendingAt: z.string().nullable(),
+    retryingCount: z.number().int().nonnegative(),
+    maxAttempts: z.number().int().nonnegative(),
+  }),
 })
 
 export const StatusResponseSchema = z.object({
-  status: z.enum(["ok", "degraded"]),
+  status: z.enum(["ok", "degraded", "unknown"]),
   objectTypes: z.number().int().nonnegative(),
   maintenance: MaintenanceSummarySchema,
 })

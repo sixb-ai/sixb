@@ -64,6 +64,8 @@ export async function runApi(options: ApiOptions = {}) {
       port: topology.apiPort,
       hostname: topology.apiHost,
       quiet: true,
+      // `sixb orchestrator` owns it.
+      ontologyMaintenance: false,
       browser: {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,
@@ -85,6 +87,9 @@ export async function runApi(options: ApiOptions = {}) {
           { label: "events", value: apiEventsUrl(topology) },
         ],
         storage: migration.summary,
+        warnings: [
+          "This process runs no upkeep. Keep `sixb orchestrator` running, even with no schedules: it delivers events left undelivered, purges expired records, and runs cron.",
+        ],
       })
     )
 

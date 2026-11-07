@@ -88,6 +88,11 @@ export interface SixbServerOptions {
   trustedProxies?: readonly string[]
   /** Where requests spend their time: a `Server-Timing` header and a log of slow requests. */
   timing?: SixbRequestTimingOptions
+  /**
+   * Whether this server delivers the events a commit left undelivered and purges expired records,
+   * every minute. Defaults to true; set it to false when an orchestrator runs for the project.
+   */
+  ontologyMaintenance?: boolean
 }
 
 export function createSixbServer(options: SixbServerOptions): SixbServer {
@@ -108,6 +113,7 @@ export class SixbServer {
   private readonly timing: SixbRequestTimingOptions
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
+  private readonly hostsOntologyMaintenance: boolean
   private maintenance: OntologyMaintenanceHandle | null = null
   private stopSweeper: (() => void) | null = null
 
@@ -117,6 +123,7 @@ export class SixbServer {
     this.hostname = options.hostname ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
     this.timing = options.timing ?? {}
+    this.hostsOntologyMaintenance = options.ontologyMaintenance ?? true
     this.apiBrowserPolicy = resolveApiBrowserPolicy(options.browser)
     // URLs the API hands to third parties, such as file download URLs, name this origin.
     if (this.apiBrowserPolicy.publicOrigin) {
@@ -191,7 +198,11 @@ export class SixbServer {
     // needs them waits for them; reading them now spares that read the wait.
     warmAppliedMarkings(this.hostRuntime)
 
-    const maintenance = await this.hostRuntime.startOntologyMaintenance()
+    this.hostRuntime.prepareReadiness()
+
+    const maintenance = this.hostsOntologyMaintenance
+      ? await this.hostRuntime.startOntologyMaintenance()
+      : null
     this.maintenance = maintenance
 
     try {
@@ -206,7 +217,7 @@ export class SixbServer {
       this.app = null
       this.bunServer = null
       this.maintenance = null
-      await maintenance.stop()
+      await maintenance?.stop()
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`[SixbServer] Failed to listen on ${this.hostname}:${this.port}: ${message}`)
     }

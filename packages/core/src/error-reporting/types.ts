@@ -170,6 +170,36 @@ export interface SixbVectorIndexingFailedContext
 }
 
 /**
+ * One pass of the maintenance loop failed, or ran past its budget. It runs again when it is next
+ * due, so one report is a blip; `consecutiveFailures` is the field to alert on. `heartbeat` as
+ * `passId` means the loop could not write its heartbeat.
+ */
+export interface SixbMaintenancePassFailedContext
+  extends SixbFailureContext<"maintenance.pass.failed"> {
+  readonly failure: SixbFailure<"internal.unexpected">
+  readonly passId: string
+  readonly consecutiveFailures: number
+}
+
+/**
+ * A job of an event could not be dispatched, and `dropped` says what became of it.
+ *
+ * True: the failure is about this event, such as a mapper that throws, so retrying cannot help and
+ * this trigger is gone. False: the job has failed for minutes and keeps retrying. An outage reads
+ * like this. So does a defect that no retry will fix, so a job that stays here wants a look.
+ */
+export interface SixbOrchestratorDispatchFailedContext
+  extends SixbFailureContext<"orchestrator.dispatch.failed"> {
+  readonly failure: SixbFailure<"internal.unexpected">
+  readonly eventId: string
+  readonly eventType: string
+  /** What the job starts, such as `pipeline:daily-sales`. */
+  readonly target: string
+  readonly attempts: number
+  readonly dropped: boolean
+}
+
+/**
  * Context supplied to the global Sixb error handler, discriminated by `type`.
  * Failure notifications never change the outcome of the operation they observe.
  */
@@ -179,6 +209,8 @@ export type SixbErrorContext =
   | SixbRunFailedContext
   | SixbEventDeliveryFailedContext
   | SixbRuleEvaluationFailedContext
+  | SixbMaintenancePassFailedContext
+  | SixbOrchestratorDispatchFailedContext
 
 /** Observes runtime failures without changing their outcome. */
 export type SixbErrorHandler = (error: Error, context: SixbErrorContext) => void | Promise<void>

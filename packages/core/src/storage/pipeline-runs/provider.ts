@@ -15,7 +15,7 @@ export async function assertPipelineRunExecution(input: {
     projectId: input.projectId,
     executionId: input.executionId,
     primitive: { kind: "pipeline", id: input.pipelineId, runId: input.runId },
-    sourceTypes: ["execution", "schedule", "event"],
+    sourceTypes: ["execution", "schedule", "event", "datasetVersion"],
   })
   if (!execution) {
     throw new PipelineRunError(

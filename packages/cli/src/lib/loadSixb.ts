@@ -17,13 +17,14 @@ const REQUIRED_HOST_PROPERTIES = [
   "blobStorage",
   "queues",
   "auth",
-  "scheduler",
 ] as const
 
 const REQUIRED_LIFECYCLE_METHODS = [
   "withScope",
+  "startMaintenance",
   "startOntologyMaintenance",
   "getOntologyOperationalStatus",
+  "prepareReadiness",
   "checkReadiness",
   "closeLogger",
   "closeConnectors",
@@ -103,9 +104,7 @@ function isSixbHost(value: unknown): value is LoadedSixbHost {
     isRecord(value.logging) &&
     hasMethods(value.logging, ["startExecution", "read", "tail"]) &&
     isRecord(value.blobStorage) &&
-    hasMethods(value.blobStorage, ["put", "open", "stat"]) &&
-    isRecord(value.scheduler) &&
-    hasMethods(value.scheduler, ["start", "stop"])
+    hasMethods(value.blobStorage, ["put", "open", "stat"])
   )
 }
 

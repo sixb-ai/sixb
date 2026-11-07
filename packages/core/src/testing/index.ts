@@ -109,6 +109,10 @@ export {
   runLakeStorageContractSuite,
 } from "./lake-storage-contract"
 export {
+  type MaintenanceHeartbeatStorageContractSuiteOptions,
+  runMaintenanceHeartbeatStorageContractSuite,
+} from "./maintenance-heartbeat-storage-contract"
+export {
   type MaterializationFailureBoundary,
   type MaterializationFailureContractSuiteOptions,
   runMaterializationFailureContractSuite,
@@ -146,6 +150,10 @@ export {
   queueTestPipelineRun,
   startTestPipelineRun,
 } from "./pipeline-execution"
+export {
+  type PipelineRunReadContractSuiteOptions,
+  runPipelineRunReadContractSuite,
+} from "./pipeline-run-read-contract"
 export {
   claimTestProjectionRun,
   queueTestProjectionRun,

@@ -51,8 +51,7 @@ bun add @sixb/cli
 | `sixb service-account token list <service-account-id>` | List service-account tokens |
 | `sixb service-account token create <service-account-id>` | Create a service-account token |
 | `sixb service-account token revoke <service-account-id> <token-id>` | Revoke a service-account token |
-| `sixb scheduler` | Start the production scheduler event producer |
-| `sixb orchestrator` | Start the production event-to-queue dispatcher |
+| `sixb orchestrator` | Start the production orchestrator: cron schedules, event dispatch and upkeep |
 | `sixb rules` | Start rules evaluation |
 | `sixb worker <type>` | Start a production queue worker (one queue type per process) |
 | `sixb worker-group [types...]` | Co-host several queue workers in one process (constrained resources) |
@@ -188,7 +187,6 @@ sixb build
 # Recommended production process layout
 sixb api
 sixb app
-sixb scheduler
 sixb orchestrator
 sixb rules
 sixb worker sync
@@ -346,7 +344,7 @@ pm2 start ecosystem.config.cjs
 ```
 
 `sixb lake check` is the single place that attaches the lake and validates every dataset
-definition during deploy. Service commands (`api`, `scheduler`, `orchestrator`, `rules`, `worker`,
+definition during deploy. Service commands (`api`, `orchestrator`, `rules`, `worker`,
 `worker-group`) do not open the lake catalog at startup, so starting them together does not
 stampede shared infrastructure.
 
@@ -360,7 +358,7 @@ to call.
 
 ### Storage migrations
 
-Roles that read or write through the storage schema (`api`, `scheduler`, `orchestrator`, `rules`,
+Roles that read or write through the storage schema (`api`, `orchestrator`, `rules`,
 `worker`, `worker-group`) bring it up to date themselves at startup, and print the migration steps
 they applied. `app` does not: it serves a browser bundle and holds no DDL grant.
 
@@ -393,7 +391,6 @@ Both layouts are valid; choose based on the deployment's Postgres/DuckLake conne
 
 ```bash
 sixb api
-sixb scheduler
 sixb orchestrator
 sixb worker sync
 sixb worker pipeline
@@ -406,7 +403,6 @@ SIXB_API_PUBLIC_ORIGIN=https://api.example.com sixb worker agent
 
 ```bash
 sixb api
-sixb scheduler
 sixb orchestrator
 sixb worker-group sync pipeline projection
 ```

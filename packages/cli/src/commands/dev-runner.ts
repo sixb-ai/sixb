@@ -113,6 +113,8 @@ export async function runDevRuntime(options: DevOptions = {}) {
       port: topology.apiPort,
       hostname: topology.apiHost,
       quiet: true,
+      // The orchestrator this process co-hosts owns it.
+      ontologyMaintenance: false,
       browser: {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,

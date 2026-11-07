@@ -43,6 +43,10 @@ export {
 } from "./artifacts/record"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"
 export { createFileUploadId, createUploadExpiresAt } from "./file-upload-sessions/utils"
+export {
+  parseMaintenanceHeartbeatRow,
+  serializeMaintenancePasses,
+} from "./maintenance-heartbeats/record"
 export { canRequeuePipelineRunAfterEnqueueFailure } from "./pipeline-runs/idempotency"
 export { canFinishPipelineRun } from "./pipeline-runs/transitions"
 export { projectionRunObjectTypesVisible, zeroProjectionRunProgress } from "./projection-runs/types"

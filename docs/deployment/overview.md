@@ -65,20 +65,19 @@ Run each needed command as a separate managed process or container:
 | --- | --- |
 | `bun sixb api` | Serve the HTTP API, WebSockets, and API docs. |
 | `bun sixb app` | Serve your app, with its built-in pages. |
-| `bun sixb orchestrator` | Dispatch event-triggered work. |
+| `bun sixb orchestrator` | Run cron schedules, dispatch event-triggered work, and keep the project healthy. |
 | `bun sixb worker-group` | Run workers for the project's registered work. |
-| `bun sixb scheduler` | Run cron schedules, if used. |
 | `bun sixb rules` | Evaluate rules, if used. |
 
 `app` serves the built bundle without loading `sixb.config.ts`, so it needs only the API's public origin, not the project's secrets or database access.
 
-Keep at least one API process running for event recovery and maintenance. Start workers and rules before the orchestrator and scheduler. On shutdown, stop producers before workers.
+Keep the orchestrator running even when the project has no schedules: it delivers events that could not be delivered when they were saved, repairs triggers that were lost, and purges expired records. Start workers and rules before the orchestrator. On shutdown, stop producers before workers.
 
 In development, `bun sixb dev` starts these services together. Use the separate commands in production so your process manager can restart and scale them independently.
 
 ## Migrations
 
-API, worker, scheduler, orchestrator, and rules processes apply storage migrations at startup. If your release step already ran them, pass `--no-migrate` or set `SIXB_SKIP_MIGRATION=1` on those processes.
+API, worker, orchestrator, and rules processes apply storage migrations at startup. If your release step already ran them, pass `--no-migrate` or set `SIXB_SKIP_MIGRATION=1` on those processes.
 
 PostgreSQL serializes concurrent migrations. With SQLite, run migrations separately before starting multiple processes against the same file.
 
@@ -86,7 +85,9 @@ PostgreSQL serializes concurrent migrations. With SQLite, run migrations separat
 
 API and browser services can run multiple replicas. Queue workers can also scale through replicas or [concurrency settings](../cli/overview.md#worker-options).
 
-Run only **one orchestrator, one scheduler, and one rules process** per project. Multiple instances can duplicate work.
+Run only **one orchestrator and one rules process** per project. Multiple instances can duplicate work. Two orchestrators overlapping during a rollout are safe: the broker keeps one event per cron occurrence, within its window of two minutes by default.
+
+`GET /api/status` reports whether the orchestrator keeps up: `degraded` when it stopped reporting or one of its passes keeps failing, `unknown` when it never reported, which is what a deployment with no orchestrator shows.
 
 Configure your platform's health checks against the API:
 

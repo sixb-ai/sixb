@@ -12,7 +12,6 @@ const SERVICES = {
   api: "http",
   app: "http",
   orchestrator: "singleton",
-  scheduler: "singleton",
   rules: "singleton",
   workers: "workers",
 } as const satisfies Record<DeployServiceName, "http" | "singleton" | "workers">

@@ -1015,6 +1015,8 @@ export type {
   SixbErrorHandler,
   SixbEventDeliveryFailedContext,
   SixbFailedRun,
+  SixbMaintenancePassFailedContext,
+  SixbOrchestratorDispatchFailedContext,
   SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
   SixbRunFailureByKind,
@@ -1038,11 +1040,12 @@ export type {
 } from "./lineage/types"
 export type { LogsRuntime } from "./logging/execution"
 export type {
-  OntologyMaintenanceCleanupSnapshot,
+  MaintenancePass,
+  MaintenancePassStatus,
   OntologyMaintenanceHandle,
   OntologyMaintenanceOptions,
-  OntologyMaintenanceSnapshot,
   OntologyOperationalStatus,
+  OutboxSummary,
   SixbReadiness,
 } from "./maintenance"
 export type {
@@ -1098,7 +1101,6 @@ export type {
   ObjectWhereClause,
   OntologyDocumentInput,
   OntologySource,
-  SchedulerController,
   Sixb,
   SixbDefinitions,
   SixbHostOptions,

@@ -69,6 +69,10 @@ export const sixb = createSixb({
       failure = `event delivery failed with ${context.failure.code} after ${context.attempts} attempt(s)`
     } else if (context.type === "vector.indexing.failed") {
       failure = `vector profile '${context.profile}' on '${context.objectTypeId}:${context.primaryId}' failed with ${context.failure.code}`
+    } else if (context.type === "maintenance.pass.failed") {
+      failure = `maintenance pass '${context.passId}' failed ${context.consecutiveFailures} time(s) in a row`
+    } else if (context.type === "orchestrator.dispatch.failed") {
+      failure = `'${context.target}' for event ${context.eventId} ${context.dropped ? "dropped" : "still retrying"} after ${context.attempts} attempt(s)`
     } else {
       failure = `${context.source} rule evaluation failed with ${context.failure.code}`
     }

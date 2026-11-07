@@ -1,5 +1,6 @@
 import type { SixbErrorCode } from "../errors/types"
 import type { ClaimedQueueJob, Queue, QueueJob, QueueJobFailure } from "../queues"
+import { waitUnlessAborted } from "../shared/backoff"
 import { WorkerAbortError } from "./errors"
 
 export type QueueDeliveryState = "active" | "lost" | "settled"
@@ -201,7 +202,7 @@ class ManagedQueueDelivery<TJob extends QueueJob, TFailureCode extends SixbError
       }
 
       const delayMs = this.renewLease ? Math.min(this.renewalIntervalMs, remainingMs) : remainingMs
-      await sleep(delayMs, this.stopController.signal).catch(() => {})
+      await waitUnlessAborted(delayMs, this.stopController.signal).catch(() => {})
       if (this.stopController.signal.aborted || this.currentState !== "active") return
       if (Date.now() >= this.leaseExpiresAtTimestamp) {
         this.markLost()
@@ -296,17 +297,4 @@ function parseLeaseExpiration(value: string): number {
     throw new Error(`[SixbQueueWorker] Invalid queue lease expiration '${value}'.`)
   }
   return timestamp
-}
-
-async function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(finish, ms)
-    function finish(): void {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", finish)
-      resolve()
-    }
-    signal.addEventListener("abort", finish, { once: true })
-  })
 }
