@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { DeployStatus } from "@sixb/core/deploy"
@@ -113,6 +113,83 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean): Pr
 }
 
 describe("supervisor", () => {
+  // `sixb deploy` writes the new manifest, stops the unit, and starts it again. Reproduce: leave
+  // out the stop in `shutdown`; the old process survives its supervisor and the check fails.
+  test("a release that drops a service leaves no process of it behind", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-upgrade-"))
+    const pidFile = join(root, "scheduler.pid")
+    const service = (name: string, args: string[]) => ({
+      name,
+      processName: `northline-${name}`,
+      command: process.execPath,
+      args,
+      env: {},
+      instances: 1,
+      killTimeoutMs: 2_000,
+      restartDelayMs: 100,
+    })
+    const keepRunning = ["-e", "setInterval(() => {}, 1_000)"]
+    const writesItsPid = [
+      "-e",
+      `await Bun.write(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1_000)`,
+    ]
+    const manifest: ProcessManifest = {
+      version: 1,
+      name: "northline",
+      cwd: root,
+      runDir: join(root, "run"),
+      logDir: join(root, "run", "logs"),
+      releasePath: join(root, "release.json"),
+      services: [service("orchestrator", keepRunning), service("scheduler", writesItsPid)],
+    }
+    const manifestPath = join(root, "processes.json")
+    await writeFile(manifestPath, JSON.stringify(manifest))
+
+    const isAlive = (pid: number) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    const supervise = () =>
+      Bun.spawn([process.execPath, helper, "supervise", "--manifest", manifestPath], {
+        stdout: "ignore",
+        stderr: "ignore",
+      })
+
+    const previous = supervise()
+    let next: ReturnType<typeof supervise> | undefined
+    cleanups.push(async () => {
+      previous.kill("SIGKILL")
+      next?.kill("SIGKILL")
+      await rm(root, { recursive: true, force: true })
+    })
+
+    const pid = await until(
+      async () => Number(await readFile(pidFile, "utf8")),
+      (value) => value > 0
+    )
+    expect(isAlive(pid)).toBe(true)
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ ...manifest, services: [service("orchestrator", keepRunning)] })
+    )
+    previous.kill("SIGTERM")
+    await previous.exited
+    expect(isAlive(pid)).toBe(false)
+
+    next = supervise()
+    const running = await until(
+      () => status(manifestPath),
+      (value) => value.processes.some((entry) => entry.status === "running")
+    )
+
+    expect(running.processes.map((entry) => entry.service)).toEqual(["orchestrator"])
+  }, 20_000)
+
   test("runs every instance, restarts what exits, logs its output, and reports the release", async () => {
     const { manifestPath } = await startSupervisor()
 
