@@ -338,6 +338,7 @@ describe("createCustomApp.start", () => {
     await writeFile(join(outdir, "chunk-ab12cd34.js.br"), brotliCompressSync(javascript))
     await writeFile(join(outdir, "chunk-ab12cd34.css"), stylesheet)
     await writeFile(join(outdir, "chunk-ab12cd34.css.gz"), gzipSync(stylesheet))
+    await writeFile(join(outdir, "sixb-service-worker.js"), "// worker\n")
 
     const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
@@ -373,6 +374,12 @@ describe("createCustomApp.start", () => {
 
       const shell = await fetch(`http://127.0.0.1:${port}/`)
       expect(shell.headers.get("cache-control")).toBe("no-store")
+
+      // The service worker is checked on every launch, so a deploy reaches installed apps at once.
+      const worker = await fetch(`http://127.0.0.1:${port}/sixb-service-worker.js`)
+      expect(worker.status).toBe(200)
+      expect(worker.headers.get("cache-control")).toBe("no-cache")
+      expect(worker.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
     } finally {
       await server.stop()
     }

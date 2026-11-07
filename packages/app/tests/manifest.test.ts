@@ -356,6 +356,20 @@ describe("custom app metadata and manifest generation", () => {
     expect(builtManifest.name).toBe("Built PWA")
     expect(builtManifest.icons[0].src).toBe("/icon-192.png")
     expect(await readFile(join(outdir, "icon-192.png"), "utf-8")).toBe("fixture png")
+
+    // The launch screen: the app's icon in the middle, loaded before the first paint, and the tag
+    // without which iOS ignores the launch image.
+    expect(builtHtml).toContain('<img class="sixb-loading-icon" src="/favicon.svg"')
+    expect(builtHtml).toContain('<link rel="preload" as="image" href="/favicon.svg">')
+    expect(builtHtml).toContain('<meta name="apple-mobile-web-app-capable" content="yes" />')
+
+    // The service worker keeps what the shell opens with, under a version named by the shell.
+    const worker = await readFile(join(outdir, "sixb-service-worker.js"), "utf-8")
+    const precache = JSON.parse(worker.match(/const PRECACHE = (\[.*\])/)?.[1] ?? "[]")
+    expect(precache).toContain(`/${scriptFile}`)
+    expect(precache).toContain("/favicon.svg")
+    expect(precache).not.toContain("/app.webmanifest")
+    expect(worker).toMatch(/const CACHE = CACHE_PREFIX \+ "[a-f0-9]{16}"/)
   }, 30_000)
 
   // Regression proof: drop `!options.projectPages` from defaultShell in codegen and the second

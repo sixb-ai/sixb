@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
@@ -7,6 +8,8 @@ import {
   gzip as gzipCallback,
   constants as zlibConstants,
 } from "node:zlib"
+import { renderServiceWorker, SERVICE_WORKER_PATH } from "./service-worker"
+import { LAUNCH_ICON_SIZE } from "./shell/phone/launch"
 
 const STATIC_ASSET_ORIGIN = "https://sixb-static.invalid"
 const brotliCompress = promisify(brotliCompressCallback)
@@ -93,6 +96,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
     .replace(sourceEntryPattern, "")
     .replace("</head>", `  ${assetTags}</head>`)
   await writeFile(join(outdir, "index.html"), html, "utf-8")
+  await writeServiceWorker(outdir, html)
 
   const outputs = [...result.outputs]
   if (options.sharedEntryPath && options.sharedScriptEntryPath) {
@@ -350,24 +354,63 @@ export function restoreAppStaticUrls(html: string): string {
 const THEME_BOOTSTRAP =
   'try{var t=localStorage.getItem("sixb-theme");if(t==="dark"||t==="light")document.documentElement.classList.add(t)}catch(e){}'
 
+/**
+ * What shows while the app loads: the app's own background with its icon in the middle, as a
+ * native app's launch screen does, so opening the installed app runs from iOS's launch image
+ * (drawn to match, see `startup-image.ts`) to this to the app without a flash. The app's
+ * stylesheet loads before the body paints, so `--background` is the app's colour in either theme.
+ * On a cold start iOS can report the viewport a status bar short, so the shell takes the corrected
+ * `--viewport-height` to centre its icon where the launch image has it, and the page behind it takes
+ * its colour. A spinner joins the icon only once loading takes long enough to notice.
+ */
 function withLoadingShell(html: string): string {
+  const icon = html.match(/<link\s+rel=["']icon["']\s+href=["']([^"']+)["']/)?.[1]
   const styles = `<style data-sixb-loading-shell>
-      .sixb-loading-shell{position:fixed;inset:0;display:grid;place-items:center;background:#fff;color:#71717a}
-      .sixb-loading-spinner{width:1.25rem;height:1.25rem;border:2px solid currentColor;border-right-color:transparent;border-radius:9999px;animation:sixb-loading-spin .7s linear infinite}
-      html.dark .sixb-loading-shell{background:#09090b;color:#a1a1aa}
-      @media(prefers-color-scheme:dark){html:not(.light) .sixb-loading-shell{background:#09090b;color:#a1a1aa}}
-      @media(prefers-reduced-motion:reduce){.sixb-loading-spinner{animation-duration:1.5s}}
+      .sixb-loading-shell{position:fixed;top:0;left:0;width:100%;height:var(--viewport-height,100vh);display:grid;place-items:center;background:var(--background,#fff);color:var(--muted-foreground,#71717a)}
+      html:has(.sixb-loading-shell){background:var(--background,#fff)}
+      .sixb-loading-icon{width:${LAUNCH_ICON_SIZE}px;height:${LAUNCH_ICON_SIZE}px;object-fit:contain}
+      .sixb-loading-spinner{width:1.25rem;height:1.25rem;border:2px solid currentColor;border-right-color:transparent;border-radius:9999px;opacity:0;animation:sixb-loading-spin .7s linear infinite,sixb-loading-show .2s ease-out .8s forwards}
+      .sixb-loading-icon+.sixb-loading-spinner{position:absolute;top:calc(50% + ${LAUNCH_ICON_SIZE / 2 + 24}px);left:calc(50% - .625rem)}
+      @media(prefers-color-scheme:dark){html:not(.light):not(.dark):has(.sixb-loading-shell),html:not(.light):not(.dark) .sixb-loading-shell{background:#09090b;color:#a1a1aa}}
+      @media(prefers-reduced-motion:reduce){.sixb-loading-spinner{animation-duration:1.5s,.2s}}
       @keyframes sixb-loading-spin{to{transform:rotate(360deg)}}
+      @keyframes sixb-loading-show{to{opacity:1}}
     </style>
-    <script data-sixb-theme>${THEME_BOOTSTRAP}</script>`
-  const root =
-    '<div id="root"><div class="sixb-loading-shell" role="status" aria-label="Loading application"><span class="sixb-loading-spinner" aria-hidden="true"></span></div></div>'
+    <script data-sixb-theme>${THEME_BOOTSTRAP}</script>${
+      // Decoded by the first paint, so the icon is there as iOS fades from its launch image.
+      icon ? `\n    <link rel="preload" as="image" href="${icon}">` : ""
+    }`
+  const iconTag = icon
+    ? `<img class="sixb-loading-icon" src="${icon}" alt="" width="${LAUNCH_ICON_SIZE}" height="${LAUNCH_ICON_SIZE}">`
+    : ""
+  const root = `<div id="root"><div class="sixb-loading-shell" role="status" aria-label="Loading application">${iconTag}<span class="sixb-loading-spinner" aria-hidden="true"></span></div></div>`
 
   if (!html.includes('<div id="root"></div>') || !html.includes("</head>")) {
     throw new Error("[SixbCustomApp] Generated app shell is missing its root or head element.")
   }
 
   return html.replace("</head>", `${styles}\n  </head>`).replace('<div id="root"></div>', root)
+}
+
+/**
+ * Writes the service worker for this build. Its version is the shell's own hash, which names every
+ * entry file, so any change to the app replaces what devices keep. It saves the shell's stylesheet,
+ * script and icons up front; the rest is saved as the app loads it.
+ */
+async function writeServiceWorker(outdir: string, html: string): Promise<void> {
+  const version = createHash("sha256").update(html).digest("hex").slice(0, 16)
+  const precache = [
+    ...new Set(
+      [...html.matchAll(/<(?:script|link)\b[^>]*\s(?:src|href)=["'](\/[^"'/][^"']*)["']/g)]
+        .map((match) => match[1])
+        .filter((path): path is string => path !== undefined && path !== "/app.webmanifest")
+    ),
+  ]
+  await writeFile(
+    join(outdir, SERVICE_WORKER_PATH.slice(1)),
+    renderServiceWorker({ version, precache }),
+    "utf-8"
+  )
 }
 
 const extensionlessSourceImportPlugin: Bun.BunPlugin = {

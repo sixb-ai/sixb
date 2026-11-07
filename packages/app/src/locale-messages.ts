@@ -13,6 +13,10 @@ export const en = {
     title: "Something went wrong",
     sharedDetail: "This shared page could not be displayed.",
   },
+  offline: {
+    title: "You're offline",
+    detail: "The app opens as soon as you're connected again.",
+  },
   apiUnavailable: {
     title: "Can't reach the Sixb API",
     detail: (apiBaseUrl: string) =>
@@ -105,6 +109,10 @@ export const fr: Translation<AppMessages> = {
   error: {
     title: "Une erreur est survenue",
     sharedDetail: "Cette page partagée n’a pas pu être affichée.",
+  },
+  offline: {
+    title: "Vous êtes hors ligne",
+    detail: "L’application s’ouvre dès que vous êtes de nouveau connecté.",
   },
   apiUnavailable: {
     title: "Impossible de joindre l’API Sixb",
