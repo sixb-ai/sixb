@@ -34,6 +34,8 @@ export const lakeFixture = {
   drift: false,
   maintenance: true,
   lakeMaintenance: undefined as LakeMaintenanceOptions | undefined,
+  /** Whether storage says the orchestrator asks for retention, with no worker answering. */
+  unansweredRequest: false,
   /** How many retention passes report more to clean up before one reports none. */
   retentionPassesWithMore: 0,
   /** A dataset version a projection applied, or "unreadable" when reading them fails. */
@@ -85,8 +87,21 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
   }
 }
 
+function unansweredBeat() {
+  const now = new Date()
+
+  return {
+    projectId: "cli-lake-project",
+    beatAt: now,
+    everyMs: 30_000,
+    passes: [{ id: "lake-retention", lastSucceededAt: now, consecutiveFailures: 0 }],
+  }
+}
+
 function createStorage(): InMemoryStorage {
   const storage = new InMemoryStorage()
+  if (lakeFixture.unansweredRequest) void storage.maintenanceHeartbeats.record(unansweredBeat())
+
   const versionId = lakeFixture.appliedVersion
   if (!versionId) return storage
 
