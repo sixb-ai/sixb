@@ -141,7 +141,8 @@ A delivery can only recover a run it reaches. `republishLostRuns` is the orchest
 every 30 seconds on its maintenance loop. It brings a job to syncs, pipelines and workflows that have
 none: queued runs whose job was lost, and running runs whose lease lapsed, which covers one handed
 back. Projections join it, queued and lapsed. A job on its way gets 30 seconds first, so a clean
-shutdown publishes nothing beside the job that came back.
+shutdown publishes nothing beside the job that came back. It is the only way back, so a deployment
+with no orchestrator leaves a lost run where it is, and a sync's later runs wait behind it.
 
 It asks each store for those runs alone (`listLost`), from the `(project_id, status, ...)` index:
 queued and running rows are few however long the history, so a project with nothing lost reads no

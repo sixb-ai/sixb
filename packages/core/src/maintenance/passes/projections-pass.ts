@@ -24,7 +24,7 @@ export interface ProjectionsPassInput {
  * current position, and routes may have changed since the last process), and any projection
  * whose dispatch failed. A restart repeats that first pass, so the cursor needs no storage.
  *
- * Runs that lost their publication are the `runs` pass's (see `republishLostProjectionRuns`).
+ * Runs that lost their publication are the `runs` pass's (see `republishQueuedProjectionRuns`).
  */
 export function projectionsPass(input: ProjectionsPassInput): MaintenancePass {
   const recovery = new ProjectionRecovery(input)
