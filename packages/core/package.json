@@ -251,6 +251,12 @@
       "import": "./dist/events/index.js",
       "default": "./dist/events/index.js"
     },
+    "./internal/dataset-ingest-storage-provider": {
+      "types": "./dist/storage/dataset-ingest/provider.d.ts",
+      "bun": "./src/storage/dataset-ingest/provider.ts",
+      "import": "./dist/storage/dataset-ingest/provider.js",
+      "default": "./dist/storage/dataset-ingest/provider.js"
+    },
     "./internal/execution-storage": {
       "types": "./dist/storage/executions/provider.d.ts",
       "bun": "./src/storage/executions/provider.ts",

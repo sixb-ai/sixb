@@ -93,6 +93,8 @@ Pass `onError` to `createSixb()`. `reportError` is your monitoring integration. 
 | `maintenance.pass.failed` | A background pass of the orchestrator failed. It runs again on its own; alert on `consecutiveFailures`. |
 | `orchestrator.dispatch.failed` | A scheduled or event-triggered run could not be dispatched. `dropped: true`: this event can never start it, often a mapper that throws, and the trigger is gone. `dropped: false`: it has failed for five minutes and keeps retrying. `target` names the run. |
 | `lake.retention.failed` | One automatic lake cleanup failed. The next one, `cleanupEvery` later, tries again. |
+| `dataset.ingest.flush.failed` | Changes `ingest` stored wait: writing them to the dataset failed five times in a row, or nothing wrote them for 10 minutes. They stay stored, and writing goes on trying. |
+| `dataset.ingest.rejected` | One `ingest` call's changes were refused when written to the dataset. The context names the call (`deliveryId`, `executionId`), the refused change's key and sequence, and why. |
 
 Notifications may be repeated, and a process crash can prevent delivery. Use `notificationId` to deduplicate alerts. The callback does not change the operation's outcome.
 

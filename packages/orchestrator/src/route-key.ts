@@ -13,6 +13,8 @@ export function routeKeyForEvent(event: StoredDomainEvent): OrchestratorRouteKey
       return `schedule.triggered:${event.payload.scheduleId}`
     case "dataset.version.committed":
       return `dataset.version.committed:${event.payload.datasetId}`
+    case "dataset.ingest.queued":
+      return "dataset.ingest.queued"
     default:
       return null
   }

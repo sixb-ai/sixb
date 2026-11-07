@@ -5,7 +5,7 @@ Queue worker for lake upkeep that must not run in the process that asks for it. 
 the orchestrator never touches the catalog.
 
 You normally do not import it. `sixb worker lake` and `sixb worker-group` construct it for you, and
-`sixb dev` starts it when lake retention runs on its own.
+`sixb dev` starts it when lake retention runs on its own or a dataset can be ingested.
 
 ## What it runs
 
@@ -29,6 +29,17 @@ One run:
 - Never waits for long on the reads of its own process. DuckLake's file deletion gives reads about
   half a minute to end, then leaves the files to the next pass with `hasMore`.
 
+`dataset.ingest.flush.requested`: writes one dataset's ingested changes through
+`getDatasetIngestRuntime(host).flush` (see `packages/core/src/datasets/ingest-flush.ts`).
+
+- Its id names the flush request (`ingest-flush:<dataset>:<request>`), so the deliveries of one
+  request queue one job.
+- When another flush holds the dataset, the job tries again a second later, until that flush
+  releases it.
+- A failure retries after 1, 2, 5, 15 and 30 s, then every minute, and the job never fails: the
+  changes stay in the inbox, and the next attempt resumes the batch in flight. The flush reports
+  the fifth failure in a row as `dataset.ingest.flush.failed`.
+
 ## Usage
 
 For custom hosts or focused tests, start it explicitly:
@@ -40,10 +51,11 @@ const worker = new LakeWorker(sixb)
 await worker.start()
 ```
 
-When retention does not run on its own, nothing requests any work and the worker idles, so a
-deployment can always list it.
+When retention does not run on its own and no dataset can be ingested, nothing requests any work
+and the worker idles, so a deployment can always list it.
 
-One job runs at a time by default. Set `--concurrency` on `sixb worker lake`, or
+Four jobs run at once by default, so the flushes of several datasets run together and beside a long
+retention run, of which there is one at a time. Set `--concurrency` on `sixb worker lake`, or
 `SIXB_LAKE_WORKER_CONCURRENCY`.
 
 ## Verification

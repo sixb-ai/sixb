@@ -169,6 +169,10 @@ export const DATASET_EVENT_DEFINITIONS = defineEventGroup<DatasetEvent>({
     topic: "datasets",
     partitionKey: (payload) => payload.datasetId,
   },
+  "dataset.ingest.queued": {
+    topic: "datasets",
+    partitionKey: (payload) => payload.datasetId,
+  },
 })
 
 // One stream per member, so their events stay in order. An invitation has no member yet.

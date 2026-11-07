@@ -2,8 +2,16 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryBlobStorage } from "../blob-storage"
 import { InMemoryBroker } from "../broker"
 import { change, col, type DatasetDefinition, defineDataset, type MergeChange } from "../datasets"
+import { getDatasetIngestRuntime } from "../datasets/ingest-flush"
 import { writeDataset } from "../datasets/write"
-import type { DatasetMergeCommitResult, DatasetRow, LakeStorage } from "../lake-storage"
+import { createTestingScope } from "../execution/scopes"
+import {
+  type DatasetMergeCommitResult,
+  type DatasetRow,
+  DatasetSequenceConflictError,
+  datasetSequenceChange,
+  type LakeStorage,
+} from "../lake-storage"
 import { InMemoryQueues } from "../queues"
 import { SixbHost } from "../runtime/host"
 import { InMemoryStorage } from "../storage"
@@ -42,6 +50,26 @@ async function rows(storage: LakeStorage, definition: DatasetDefinition = datase
   const result: DatasetRow[] = []
   for await (const row of storage.readRows({ datasetId: definition.id })) result.push(row)
   return result
+}
+
+/**
+ * A tie refuses the merge with a DatasetSequenceConflictError naming the change it refused, so a
+ * caller holding many changes refuses exactly that one.
+ *
+ * Reproduce: throw a plain LakeStorageError, or leave out the content, in
+ * `reconcileDatasetSequences`; every tie assertion below fails.
+ */
+async function expectConflict(
+  storage: LakeStorage,
+  changes: readonly MergeChange<DatasetRow, DatasetRow>[],
+  refused: MergeChange<DatasetRow, DatasetRow>
+) {
+  const error = await merge(storage, changes).catch((caught) => caught)
+  const { key, sequence, content } = datasetSequenceChange(dataset, refused)
+
+  expect(error).toBeInstanceOf(DatasetSequenceConflictError)
+  expect(error).toMatchObject({ datasetId: dataset.id, key, sequence, content })
+  expect(String(error)).toContain("conflicting content")
 }
 
 export function runDatasetSequenceContract<TStorage extends LakeStorage>(
@@ -144,8 +172,10 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
         )
       }))
 
-    test("ingests through the bound SDK and preserves execution provenance", async () => {
+    test("ingests through the test SDK and preserves execution and flush provenance", async () => {
       // Regression proof: remove ingest from DuckLake's producer parser; reopen loses provenance.
+      // The flush id must survive too: a flush that resumes finds its version by it. Drop
+      // \`flushIngestionInline\` from createTestSixb, and nothing is written.
       let storage = await options.createStorage()
       const broker = new InMemoryBroker()
       try {
@@ -160,17 +190,65 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
           blobStorage: new InMemoryBlobStorage(),
         })
         const sixb = createTestSixb(host)
-        const result = await sixb.datasets.ingest(dataset, { changes: [upsert(8)] })
-        expect(result.outcome).toBe("created")
+        await sixb.datasets.ingest(dataset, { changes: [upsert(8)] })
+
+        const committed = await storage.getLatestVersion(dataset.id)
         if (options.reopen) storage = await options.reopen(storage)
         expect((await storage.getLatestVersion(dataset.id))?.producer).toEqual({
           kind: "ingest",
           id: sixb.execution.id,
+          runId: expect.stringMatching(/^flush_/),
         })
         expect((await rows(storage)).map((row) => row.name)).toEqual(["Sam"])
         expect(await host.events.read()).toMatchObject([
-          { type: "dataset.version.committed", payload: { versionId: result.version?.versionId } },
+          { type: "dataset.ingest.queued", payload: { datasetId: dataset.id } },
+          { type: "dataset.version.committed", payload: { versionId: committed?.versionId } },
         ])
+      } finally {
+        await options.teardown?.(storage)
+      }
+    })
+    test("writes many deliveries as one version, and resumes a flush that died after it", async () => {
+      // Regression proof: start a resumed batch as a new one in `DatasetIngestFlush.commit`; the
+      // resumed flush writes the batch again as no change, and the version is never announced.
+      const storage = await options.createStorage()
+      try {
+        const inbox = new InMemoryStorage()
+        const host = new SixbHost({
+          id: "ingest-flush-contract",
+          ontology: [],
+          datasets: [dataset],
+          lakeStorage: storage,
+          broker: new InMemoryBroker(),
+          storage: inbox,
+          queues: new InMemoryQueues(),
+          blobStorage: new InMemoryBlobStorage(),
+        })
+        // Not the test SDK, which writes each call at once: these wait for one flush.
+        const sixb = host.withScope(createTestingScope({ projectId: host.id }))
+        for (let index = 0; index < 50; index += 1) {
+          await sixb.datasets.ingest(dataset, { changes: [upsert(index + 1, `Sam ${index}`)] })
+        }
+
+        // The flush commits, then dies before it deletes its batch.
+        const complete = inbox.datasetIngest.complete
+        inbox.datasetIngest.complete = async () => {
+          throw new Error("worker stopped")
+        }
+        const died = await getDatasetIngestRuntime(host)
+          .flush(dataset.id, new AbortController().signal)
+          .catch((error) => error)
+        inbox.datasetIngest.complete = complete
+        expect(died).toBeInstanceOf(Error)
+
+        const resumed = await getDatasetIngestRuntime(host).flush(
+          dataset.id,
+          new AbortController().signal
+        )
+
+        expect(resumed).toEqual({ kind: "flushed", versions: 1, deliveries: 50 })
+        expect(await storage.listVersions(dataset.id)).toHaveLength(1)
+        expect((await rows(storage)).map((row) => row.name)).toEqual(["Sam 49"])
       } finally {
         await options.teardown?.(storage)
       }
@@ -210,9 +288,11 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
           "unchanged"
         )
         expect((await merge(storage, [upsert("09007199254740993")])).outcome).toBe("unchanged")
-        await expect(
-          merge(storage, [upsert("1", "other", "other"), upsert("9007199254740993", "conflict")])
-        ).rejects.toThrow("conflicting content")
+        await expectConflict(
+          storage,
+          [upsert("1", "other", "other"), upsert("9007199254740993", "conflict")],
+          upsert("9007199254740993", "conflict")
+        )
         expect((await storage.getLatestVersion(dataset.id))?.versionId).toBe(
           first.version?.versionId
         )
@@ -222,9 +302,11 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
           upsert("9007199254740994", "stale"),
         ])
         expect((await rows(storage))[0]?.name).toBe("newest")
-        await expect(
-          merge(storage, [upsert("9007199254740996", "a"), upsert("9007199254740996", "b")])
-        ).rejects.toThrow("conflicting content")
+        await expectConflict(
+          storage,
+          [upsert("9007199254740996", "a"), upsert("9007199254740996", "b")],
+          upsert("9007199254740996", "b")
+        )
         expect((await rows(storage))[0]?.name).toBe("newest")
       }))
 
@@ -240,8 +322,12 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
         expect(
           (await merge(storage, [change.delete({ id: "42" }, { sequence: "9" })])).outcome
         ).toBe("unchanged")
-        await expect(merge(storage, [upsert(9)])).rejects.toThrow("conflicting content")
+        await expectConflict(storage, [upsert(9)], upsert(9))
         await merge(storage, [upsert(10)])
+        expect(await rows(storage)).toHaveLength(1)
+        // A delete at an upsert's sequence is refused with no content.
+        const tombstone = change.delete({ id: "42" }, { sequence: 10 })
+        await expectConflict(storage, [tombstone], tombstone)
         expect(await rows(storage)).toHaveLength(1)
         expect((await merge(storage, [change.delete({ id: "42" }, { sequence: 9 })])).outcome).toBe(
           "unchanged"

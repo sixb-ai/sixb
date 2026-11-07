@@ -47,6 +47,10 @@ verification fails. Verify signatures using the provider's documented method and
 The example uses the [`people` dataset](../datasets/source-ordering.md). See
 [ingesting changes](../datasets/ingestion.md) for dataset updates and deletes.
 
+`ingest` returns once the changes are stored, before they are in the dataset. A handler that
+needs the data afterwards triggers that work from the new version instead: see
+[react to new data](../datasets/ingestion.md#react-to-new-data).
+
 ## Register the URL
 
 Register your webhook's URL with the external service:

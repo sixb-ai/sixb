@@ -455,6 +455,7 @@ describe("Lake health", () => {
           warnings: [
             { code: "partitioned-small-dataset", message: "Partitioned below a million rows." },
           ],
+          ingest: null,
         },
         {
           datasetId: "raw.drafts",
@@ -468,6 +469,7 @@ describe("Lake health", () => {
           retainedSnapshots: 0,
           partitionBy: [],
           warnings: [],
+          ingest: null,
         },
       ],
     })
@@ -487,6 +489,37 @@ describe("Lake health", () => {
     expect(view.getByText("1 warning")).toBeDefined()
     expect(view.getByText("Partitioned below a million rows.")).toBeDefined()
     expect(view.getByText("Not written yet")).toBeDefined()
+  })
+
+  // Reproduce: drop `IngestWaiting` from the dataset row in lake-health.tsx.
+  test("shows the ingested changes that wait for a flush, and how long", () => {
+    const { view } = renderHealth({
+      available: true,
+      cleanup,
+      datasets: [
+        {
+          datasetId: "raw.crm.people",
+          materialized: false,
+          rowCount: 0,
+          dataFiles: 0,
+          smallDataFiles: 0,
+          dataBytes: 0,
+          deleteFiles: 0,
+          inlinedRows: 0,
+          retainedSnapshots: 0,
+          partitionBy: [],
+          warnings: [],
+          ingest: {
+            pendingDeliveries: 12,
+            pendingChanges: 1_250,
+            oldestReceivedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+          },
+        },
+      ],
+    })
+
+    expect(view.getByText("1,250 ingested changes waiting")).toBeDefined()
+    expect(view.getByText("oldest received 3 minutes ago")).toBeDefined()
   })
 
   test("says so when the lake storage has no maintenance", () => {

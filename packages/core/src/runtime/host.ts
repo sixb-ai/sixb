@@ -31,6 +31,7 @@ import {
   type ConnectorDefinition,
   isOAuthConnectorDefinition,
 } from "../connectors/types"
+import { createDatasetIngestRuntime, registerDatasetIngestRuntime } from "../datasets/ingest-flush"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import {
@@ -384,6 +385,20 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       datasetCount: definitions.datasets.list().length,
     })
     registerLakeRetentionRuntime(this, lakeRetention)
+
+    // `ingest` stores changes in the inbox; a worker writes them to the lake through this.
+    registerDatasetIngestRuntime(
+      this,
+      createDatasetIngestRuntime({
+        projectId: this.projectId,
+        inbox: this.storage.datasetIngest,
+        lakeStorage: this.lakeStorage,
+        blobStorage: this.blobStorage,
+        events: this.eventService,
+        datasets: definitions.datasets,
+        reporter: this,
+      })
+    )
 
     this.cron = cronPass({
       schedules: definitions.schedules.list(),

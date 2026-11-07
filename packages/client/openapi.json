@@ -20132,6 +20132,26 @@
                               "required": ["code", "message"],
                               "additionalProperties": false
                             }
+                          },
+                          "ingest": {
+                            "type": "object",
+                            "properties": {
+                              "pendingDeliveries": {
+                                "type": "integer"
+                              },
+                              "pendingChanges": {
+                                "type": "integer"
+                              },
+                              "oldestReceivedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "When the oldest waiting delivery arrived"
+                              }
+                            },
+                            "required": ["pendingDeliveries", "pendingChanges", "oldestReceivedAt"],
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "description": "Ingested changes waiting for a flush to write them; null when none wait"
                           }
                         },
                         "required": [
@@ -20145,7 +20165,8 @@
                           "inlinedRows",
                           "retainedSnapshots",
                           "partitionBy",
-                          "warnings"
+                          "warnings",
+                          "ingest"
                         ],
                         "additionalProperties": false
                       }
@@ -26203,6 +26224,7 @@
                                               "connector.provider_unavailable",
                                               "connector.replacement_required",
                                               "connector.revocation_pending",
+                                              "dataset.change_refused",
                                               "dataset.not_found",
                                               "dataset.version_incompatible",
                                               "dataset.version_not_found",
@@ -34121,6 +34143,7 @@
                         "connector.provider_unavailable",
                         "connector.replacement_required",
                         "connector.revocation_pending",
+                        "dataset.change_refused",
                         "dataset.not_found",
                         "dataset.version_incompatible",
                         "dataset.version_not_found",
@@ -39372,6 +39395,7 @@
                                                     "connector.provider_unavailable",
                                                     "connector.replacement_required",
                                                     "connector.revocation_pending",
+                                                    "dataset.change_refused",
                                                     "dataset.not_found",
                                                     "dataset.version_incompatible",
                                                     "dataset.version_not_found",
@@ -47102,6 +47126,7 @@
                                           "connector.provider_unavailable",
                                           "connector.replacement_required",
                                           "connector.revocation_pending",
+                                          "dataset.change_refused",
                                           "dataset.not_found",
                                           "dataset.version_incompatible",
                                           "dataset.version_not_found",
@@ -47727,6 +47752,7 @@
                                         "connector.provider_unavailable",
                                         "connector.replacement_required",
                                         "connector.revocation_pending",
+                                        "dataset.change_refused",
                                         "dataset.not_found",
                                         "dataset.version_incompatible",
                                         "dataset.version_not_found",
@@ -48698,6 +48724,7 @@
                                           "connector.provider_unavailable",
                                           "connector.replacement_required",
                                           "connector.revocation_pending",
+                                          "dataset.change_refused",
                                           "dataset.not_found",
                                           "dataset.version_incompatible",
                                           "dataset.version_not_found",
@@ -49597,6 +49624,7 @@
                                                     "connector.provider_unavailable",
                                                     "connector.replacement_required",
                                                     "connector.revocation_pending",
+                                                    "dataset.change_refused",
                                                     "dataset.not_found",
                                                     "dataset.version_incompatible",
                                                     "dataset.version_not_found",
@@ -59950,6 +59978,7 @@
                 "workflow.intervention.cancelled",
                 "workflow.intervention.expired",
                 "dataset.version.committed",
+                "dataset.ingest.queued",
                 "rule.triggered",
                 "rule.resolved",
                 "user.joined",
@@ -63450,6 +63479,7 @@
                                   "workflow.intervention.cancelled",
                                   "workflow.intervention.expired",
                                   "dataset.version.committed",
+                                  "dataset.ingest.queued",
                                   "rule.triggered",
                                   "rule.resolved",
                                   "user.joined",

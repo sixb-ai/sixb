@@ -1,5 +1,6 @@
 import type { DuckDBValue } from "@duckdb/node-api"
 import type { DatasetColumnDefinition, DatasetRow, DatasetSchema, FileRef } from "@sixb/core"
+import { LakeValueRefusedError } from "@sixb/core/lake-storage"
 import { normalizeDuckDbDecimalValue } from "./duckdb-decimal"
 import type { DuckDbAppender } from "./duckdb-runtime"
 
@@ -12,7 +13,17 @@ export function appendDatasetRow(
   row: DatasetRow
 ): void {
   for (const column of schema.columns) {
-    appendColumnValue(appender, column, row[column.name] ?? null)
+    try {
+      appendColumnValue(appender, column, row[column.name] ?? null)
+    } catch (error) {
+      // DuckDB converts the value as it appends it: a value its column type cannot hold, such as
+      // a timestamp outside its range or an integer past 64 bits, fails here.
+      if (error instanceof LakeValueRefusedError) throw error
+      throw new LakeValueRefusedError(
+        `[SixbDuckLake] Column '${column.name}' cannot hold the value: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      )
+    }
   }
 
   appender.endRow()

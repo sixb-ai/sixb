@@ -17,6 +17,14 @@ export const DatasetStorageHealthSchema = z.object({
   retainedSnapshots: z.number().int().describe("Commits still in the dataset's history"),
   partitionBy: z.array(z.string()),
   warnings: z.array(DatasetStorageWarningSchema),
+  ingest: z
+    .object({
+      pendingDeliveries: z.number().int(),
+      pendingChanges: z.number().int(),
+      oldestReceivedAt: z.string().datetime().describe("When the oldest waiting delivery arrived"),
+    })
+    .nullable()
+    .describe("Ingested changes waiting for a flush to write them; null when none wait"),
 })
 
 export const LakeHealthResponseSchema = z.object({
