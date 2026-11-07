@@ -401,6 +401,12 @@
       "import": "./dist/scheduler/index.js",
       "default": "./dist/scheduler/index.js"
     },
+    "./internal/maintenance": {
+      "types": "./dist/maintenance/index.d.ts",
+      "bun": "./src/maintenance/index.ts",
+      "import": "./dist/maintenance/index.js",
+      "default": "./dist/maintenance/index.js"
+    },
     "./internal/schedules": {
       "types": "./dist/schedules/index.d.ts",
       "bun": "./src/schedules/index.ts",

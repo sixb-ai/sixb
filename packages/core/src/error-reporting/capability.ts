@@ -2,11 +2,15 @@ import { SixbErrorReporter } from "./reporter"
 import {
   type ReportActionPhaseFailureInput,
   type ReportEventDeliveryFailureInput,
+  type ReportMaintenancePassFailureInput,
+  type ReportOrchestratorDispatchFailureInput,
   type ReportRuleEvaluationFailureInput,
   type ReportRunFailureInput,
   type ReportVectorIndexingFailureInput,
   reportActionPhaseFailure as reportActionPhaseFailureWith,
   reportEventDeliveryFailure as reportEventDeliveryFailureWith,
+  reportMaintenancePassFailure as reportMaintenancePassFailureWith,
+  reportOrchestratorDispatchFailure as reportOrchestratorDispatchFailureWith,
   reportRuleEvaluationFailure as reportRuleEvaluationFailureWith,
   reportRunFailure as reportRunFailureWith,
   reportVectorIndexingFailure as reportVectorIndexingFailureWith,
@@ -48,6 +52,8 @@ export function shareSixbErrorReporter(source: object, target: object): void {
 export type {
   ReportActionPhaseFailureInput,
   ReportEventDeliveryFailureInput,
+  ReportMaintenancePassFailureInput,
+  ReportOrchestratorDispatchFailureInput,
   ReportRuleEvaluationFailureInput,
   ReportRunFailureInput,
   ReportVectorIndexingFailureInput,
@@ -75,6 +81,22 @@ export function reportEventDeliveryFailure(
   input: ReportEventDeliveryFailureInput
 ): void {
   reportEventDeliveryFailureWith(resolveSixbErrorReporter(host), error, input)
+}
+
+export function reportMaintenancePassFailure(
+  host: unknown,
+  error: unknown,
+  input: ReportMaintenancePassFailureInput
+): void {
+  reportMaintenancePassFailureWith(resolveSixbErrorReporter(host), error, input)
+}
+
+export function reportOrchestratorDispatchFailure(
+  host: unknown,
+  error: unknown,
+  input: ReportOrchestratorDispatchFailureInput
+): void {
+  reportOrchestratorDispatchFailureWith(resolveSixbErrorReporter(host), error, input)
 }
 
 export function reportRuleEvaluationFailure(

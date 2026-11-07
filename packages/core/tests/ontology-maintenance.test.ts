@@ -218,13 +218,69 @@ describe("OntologyMaintenance", () => {
     })
 
     expect(await maintenance.getOperationalStatus()).toMatchObject({
-      status: "ok",
-      maintenance: { lastStartedAt: null, outbox: { pendingCount: 1 } },
+      status: "unknown",
+      maintenance: { beatAt: null, outbox: { pendingCount: 1 } },
     })
 
     // Nothing delivers it: two intervals later, the event shows that no process recovers it.
     nowMs += 120_001
     expect(await maintenance.getOperationalStatus()).toMatchObject({ status: "degraded" })
+  })
+
+  // Reproduce: leave the heartbeat read out of `getOperationalStatus`; the second maintenance sees
+  // no beat and stays `unknown` whatever the first one does.
+  test("tells another process when passes fail, and when they stop", async () => {
+    const storage = new InMemoryStorage()
+    const cleanupTerminal = storage.ontology.sources.cleanupTerminal
+    let failing = false
+    storage.ontology.sources.cleanupTerminal = async (input) => {
+      if (failing) throw new Error("catalog unavailable")
+      return cleanupTerminal.call(storage.ontology.sources, input)
+    }
+    let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
+    const now = () => new Date(nowMs)
+    const running = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher: new CountingDispatcher(storage),
+      now,
+      onError: () => {},
+    })
+    const reader = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher: new CountingDispatcher(storage),
+      now,
+    })
+    expect((await reader.getOperationalStatus()).status).toBe("unknown")
+
+    await running.runNow()
+    expect(await reader.getOperationalStatus()).toMatchObject({
+      status: "ok",
+      maintenance: { passes: [{ id: "ontology", consecutiveFailures: 0 }] },
+    })
+
+    failing = true
+    await running.runNow()
+    await running.runNow()
+    expect(await reader.getOperationalStatus()).toMatchObject({
+      status: "degraded",
+      maintenance: {
+        stale: false,
+        passes: [{ consecutiveFailures: 2, lastError: "Error: catalog unavailable" }],
+      },
+    })
+
+    failing = false
+    await running.runNow()
+    expect((await reader.getOperationalStatus()).status).toBe("ok")
+
+    // Nothing runs a pass any more: no failure, no pending event, and still not `ok`.
+    nowMs += 60_001
+    expect(await reader.getOperationalStatus()).toMatchObject({
+      status: "degraded",
+      maintenance: { stale: true },
+    })
   })
 
   test("purges published rows only once they are older than the retention", async () => {

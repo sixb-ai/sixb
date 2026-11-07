@@ -13,7 +13,7 @@ export interface OntologyMaintenanceOptions {
    * candidates are deleted in larger batches until none is left or the pass reaches `intervalMs`.
    */
   readonly cleanupLimit?: number
-  /** Warn after this shutdown grace period, then wait for active operations. Defaults to 30 seconds. */
+  /** Report after this shutdown grace period, then wait for active operations. Defaults to 30 seconds. */
   readonly shutdownTimeoutMs?: number
 }
 
@@ -24,6 +24,14 @@ export interface OntologyMaintenanceCleanupSnapshot {
   readonly terminalSourceMaterializationsDeleted: number
 }
 
+export interface OutboxSummary {
+  readonly pendingCount: number
+  readonly oldestPendingAt: string | null
+  readonly retryingCount: number
+  readonly maxAttempts: number
+}
+
+/** What the last pass in this process did. Only the process that runs passes has one. */
 export interface OntologyMaintenanceSnapshot {
   readonly running: boolean
   readonly intervalMs: number
@@ -32,12 +40,7 @@ export interface OntologyMaintenanceSnapshot {
   readonly lastDurationMs: number | null
   readonly consecutiveFailures: number
   readonly lastError: string | null
-  readonly outbox: {
-    readonly pendingCount: number
-    readonly oldestPendingAt: string | null
-    readonly retryingCount: number
-    readonly maxAttempts: number
-  } | null
+  readonly outbox: OutboxSummary | null
   readonly cleanup: OntologyMaintenanceCleanupSnapshot | null
 }
 
@@ -45,9 +48,24 @@ export interface OntologyMaintenanceHandle {
   stop(): Promise<void>
 }
 
+export interface MaintenancePassStatus {
+  readonly id: string
+  readonly lastSucceededAt: string | null
+  readonly consecutiveFailures: number
+  readonly lastError: string | null
+}
+
 export interface OntologyOperationalStatus {
-  readonly status: "ok" | "degraded"
-  readonly maintenance: OntologyMaintenanceSnapshot
+  /** `unknown`: no maintenance loop ever reported, so nothing says one runs. */
+  readonly status: "ok" | "degraded" | "unknown"
+  readonly maintenance: {
+    /** When the maintenance loop last reported. Null when it never did. */
+    readonly beatAt: string | null
+    /** The loop stopped reporting: it stopped, or it cannot reach storage. */
+    readonly stale: boolean
+    readonly passes: readonly MaintenancePassStatus[]
+    readonly outbox: OutboxSummary
+  }
 }
 
 export interface SixbReadiness {

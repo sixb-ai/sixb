@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { isDeepStrictEqual } from "node:util"
 import { reportRunFailure } from "../error-reporting/capability"
 import { createSixbError, toSixbFailure } from "../errors/internal"
 import type { SixbFailure } from "../errors/types"
@@ -20,6 +21,7 @@ import type { PipelineDefinition } from "./types"
 export type AutomaticPipelineExecutionSource =
   | { readonly type: "schedule"; readonly eventId: string }
   | { readonly type: "event"; readonly eventId: string }
+  | { readonly type: "datasetVersion"; readonly datasetId: string; readonly versionId: string }
 
 export interface AutomaticPipelineRunDispatchInput extends PipelineRunRequestOptions {
   readonly pipelineId: string
@@ -330,7 +332,9 @@ function createPipelineRunId(runId: string | undefined): string {
 function assertAutomaticDispatchInput(input: AutomaticPipelineRunDispatchInput): void {
   assertNonBlank(input.pipelineId, "Pipeline id")
   assertNonBlank(input.runId, "Pipeline run id")
-  assertNonBlank(input.source.eventId, "Pipeline source event id")
+  if (input.source.type !== "datasetVersion") {
+    assertNonBlank(input.source.eventId, "Pipeline source event id")
+  }
   assertNonBlank(input.correlationId, "Pipeline correlation id")
 }
 
@@ -343,8 +347,7 @@ async function assertAutomaticExecutionIdentity(
   const execution = await storage.executions.getById({ projectId, id: run.executionId })
   if (
     !execution ||
-    execution.source.type !== input.source.type ||
-    execution.source.eventId !== input.source.eventId ||
+    !isDeepStrictEqual(execution.source, input.source) ||
     execution.correlationId !== input.correlationId ||
     execution.requestedBy !== undefined
   ) {
