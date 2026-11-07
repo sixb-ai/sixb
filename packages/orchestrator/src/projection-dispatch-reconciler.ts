@@ -1,12 +1,8 @@
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
-import type {
-  DatasetLatestVersionSummary,
-  DatasetVersion,
-  LatestVersionsSince,
-} from "@sixb/core/lake-storage"
+import type { DatasetLatestVersionSummary, DatasetVersion } from "@sixb/core/lake-storage"
 import type { ListProjectionRunsInput, ProjectionRunRecord } from "@sixb/core/storage"
-import { readChangeFeed } from "./lake-change-feed"
+import type { LakeChangeFeed, LakeChangeReader } from "./lake-change-feed"
 import type { ProjectionDispatcherPort, ProjectionReconciliationPorts } from "./types"
 
 const INTERVAL_MS = 30_000
@@ -16,13 +12,14 @@ interface ProjectionDispatchReconcilerInput extends ProjectionReconciliationPort
   readonly projectId: string
   readonly dispatcher: ProjectionDispatcherPort
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
+  readonly feed: LakeChangeFeed
 }
 
 /**
  * Recovers what the live `dataset.version.committed` path can lose, at a cost that follows what
  * changed rather than the lake's history.
  *
- * Missed triggers: each pass reads the lake's change feed from an in-memory cursor and dispatches
+ * Missed triggers: each pass reads the lake's change feed, whose cursor is memory, and dispatches
  * the newest data version of each changed dataset. A projection the feed cannot vouch for is
  * looked up directly instead: every projection on the first pass (the cursor starts at the lake's
  * current position, and routes may have changed since the last process), and any projection
@@ -36,12 +33,19 @@ export class ProjectionDispatchReconciler {
   private readonly descriptorsByDatasetId: ReadonlyMap<string, ProjectionDispatchDescriptor[]>
   /** Projections whose latest data version must be looked up rather than taken from the feed. */
   private readonly unverified: Set<string>
-  private cursor: string | null = null
+  private readonly changes: LakeChangeReader
 
   constructor(private readonly input: ProjectionDispatchReconcilerInput) {
     this.intervalMs = input.intervalMs ?? INTERVAL_MS
     this.descriptorsByDatasetId = groupByDataset(input.descriptors)
     this.unverified = new Set(input.descriptors.map((descriptor) => descriptor.projectionId))
+    this.changes = input.feed.subscribe({
+      datasetIds: this.descriptorsByDatasetId.keys(),
+      // The cursor is no longer a position in this lake: verify everything against current state.
+      onCursorLost: () => {
+        for (const descriptor of input.descriptors) this.unverified.add(descriptor.projectionId)
+      },
+    })
   }
 
   /**
@@ -60,9 +64,9 @@ export class ProjectionDispatchReconciler {
   }
 
   private async reconcileTriggers(signal: AbortSignal, failures: Error[]): Promise<void> {
-    let changes: LatestVersionsSince
+    let versions: readonly DatasetLatestVersionSummary[]
     try {
-      changes = await this.readFeed()
+      versions = await this.changes.read()
     } catch (error) {
       failures.push(
         new Error(
@@ -76,7 +80,7 @@ export class ProjectionDispatchReconciler {
       return
     }
 
-    for (const version of changes.versions) {
+    for (const version of versions) {
       for (const descriptor of this.descriptorsByDatasetId.get(version.datasetId) ?? []) {
         if (this.unverified.has(descriptor.projectionId)) continue
         try {
@@ -94,22 +98,6 @@ export class ProjectionDispatchReconciler {
       failures
     )
     for (const projectionId of verified) this.unverified.delete(projectionId)
-    this.cursor = changes.cursor
-  }
-
-  private readFeed(): Promise<LatestVersionsSince> {
-    return readChangeFeed({
-      lakeStorage: this.input.lakeStorage,
-      projectId: this.input.projectId,
-      cursor: this.cursor,
-      datasetIds: [...this.descriptorsByDatasetId.keys()],
-      // The cursor is no longer a position in this lake: verify everything against current state.
-      onCursorLost: () => {
-        for (const descriptor of this.input.descriptors) {
-          this.unverified.add(descriptor.projectionId)
-        }
-      },
-    })
   }
 
   /**

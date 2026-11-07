@@ -17,6 +17,7 @@ import {
   type ProjectionDispatchDescriptor,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
+import { LakeChangeFeed } from "../src/lake-change-feed"
 import { ProjectionDispatchReconciler } from "../src/projection-dispatch-reconciler"
 
 const Invoice = defineObjectType({
@@ -62,14 +63,20 @@ function createReconciliation(projections = [invoiceProjection]) {
       projectId: host.id,
       dispatcher,
       descriptors,
-      lakeStorage: {
-        async listLatestVersionsSince(input) {
-          if (feed.failures > 0) {
-            feed.failures -= 1
-            throw new Error("catalog unavailable")
-          }
-          return lakeStorage.listLatestVersionsSince(input)
+      feed: new LakeChangeFeed({
+        projectId: host.id,
+        freshForMs: 0,
+        lakeStorage: {
+          async listLatestVersionsSince(input) {
+            if (feed.failures > 0) {
+              feed.failures -= 1
+              throw new Error("catalog unavailable")
+            }
+            return lakeStorage.listLatestVersionsSince(input)
+          },
         },
+      }),
+      lakeStorage: {
         listVersions: (datasetId, limit) => lakeStorage.listVersions(datasetId, limit),
         getVersion: (datasetId, versionId) => lakeStorage.getVersion(datasetId, versionId),
         getLatestVersion(datasetId) {

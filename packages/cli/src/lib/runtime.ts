@@ -201,6 +201,7 @@ export async function startOrchestratorRuntime(
       projectId: sixb.id,
       routes,
       dispatchers,
+      lakeStorage: sixb.lakeStorage,
       ...(projectionRuns ? { projections: { lakeStorage: sixb.lakeStorage, projectionRuns } } : {}),
       ...(pipelineRuns ? { datasetTriggers: { lakeStorage: sixb.lakeStorage, pipelineRuns } } : {}),
     })
