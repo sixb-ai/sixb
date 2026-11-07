@@ -32,6 +32,7 @@ import {
 import { buildDuckLakeMetadataQuery, duckLakeMetadataTableName, quoteSqlString } from "./sql"
 import {
   changesTouchTables,
+  maintainsTable,
   parseCommitMetadata,
   parseTableDataChange,
   parseVersionId,
@@ -68,7 +69,7 @@ interface SnapshotCandidateQueryInput {
   readonly table: DatasetTableRef
   readonly exactSnapshotId?: string
   readonly beforeSnapshotId?: string
-  /** Inclusive lower bound. */
+  /** Inclusive lower bound, on top of the table's creation. */
   readonly fromSnapshotId?: string
   readonly limit: number
 }
@@ -95,6 +96,20 @@ export interface DuckLakeHistorySnapshot {
   readonly versionOf: readonly string[]
 }
 
+/** A dataset's history between two of its versions, as a change read plans over it. */
+export interface DuckLakeChangeRange {
+  /** Its versions from the first one to the last one, both included, oldest first. */
+  readonly versions: readonly DatasetSnapshotRow[]
+  /** DuckLake maintenance commits on the dataset table in between, oldest first. */
+  readonly maintenanceSnapshotIds: readonly string[]
+  /**
+   * Every catalog snapshot in between is still there, retention expired none of them, and each
+   * one naming the dataset's tables is a version or a maintenance commit: none altered them
+   * outside Sixb, such as a column dropped and added again.
+   */
+  readonly complete: boolean
+}
+
 /** What a commit needs of the version it builds on. */
 export interface DuckLakeVersionSummary {
   readonly datasetId: string
@@ -104,6 +119,7 @@ export interface DuckLakeVersionSummary {
   readonly inputs?: readonly DatasetVersionRef[]
   readonly lineage?: DatasetVersionLineage
   readonly rowCount?: number
+  readonly uncomparedReplacements?: number
   readonly validatedPrimaryKeyColumns?: readonly string[]
 }
 
@@ -122,10 +138,6 @@ const FEED_PAGE_SIZE = 512
 // dataset's most recent snapshots. It first reads only a few of them: each carries the commit
 // metadata of its version, whose lineage may be large.
 const SHORT_READ_BATCH_SIZE = 8
-
-// A change read between two versions of identical rows skips comparing them. Consumers read changes
-// for every version they apply, so few versions usually stand between the two.
-const UNCHANGED_ROWS_WALK_LIMIT = 32
 
 // The bulk catalog scan shares one descending walk of recent snapshots across
 // all requested datasets, so its cost is bounded by this window rather than by
@@ -197,60 +209,6 @@ export class DuckLakeSnapshotReader {
       }
 
       return this.getVersionForTableRef(runtime, tableRef, snapshotId)
-    })
-  }
-
-  /**
-   * Whether a version holds exactly the rows of an earlier version of the dataset: every version
-   * committed after that one, up to this one, changed no rows.
-   *
-   * Reads the snapshots that name the dataset's tables between the two, from metadata only. More
-   * than `UNCHANGED_ROWS_WALK_LIMIT` of them, or one that is no Sixb version, such as a change
-   * made outside Sixb, reads as false: the caller compares the rows instead.
-   */
-  async holdsRowsOf(
-    datasetId: string,
-    versionId: string,
-    earlierVersionId: string
-  ): Promise<boolean> {
-    const snapshotId = parseVersionId(versionId)
-    const earlierSnapshotId = parseVersionId(earlierVersionId)
-    if (snapshotId === earlierSnapshotId) {
-      return true
-    }
-    if (BigInt(snapshotId) < BigInt(earlierSnapshotId)) {
-      return false
-    }
-
-    this.connections.assertOpen()
-
-    return this.connections.withAttachedRuntime(async (runtime) => {
-      const tableRef = await resolveDatasetTableRef(this.options, runtime, datasetId)
-      if (!tableRef) {
-        return false
-      }
-
-      // Newest first: this version, the snapshots between, then the earlier version itself.
-      const candidates = await this.querySnapshotCandidates(runtime, {
-        table: tableRef,
-        beforeSnapshotId: String(BigInt(snapshotId) + 1n),
-        fromSnapshotId: earlierSnapshotId,
-        limit: UNCHANGED_ROWS_WALK_LIMIT + 1,
-      })
-      if (
-        candidates[0]?.snapshotId !== snapshotId ||
-        candidates[candidates.length - 1]?.snapshotId !== earlierSnapshotId
-      ) {
-        return false
-      }
-
-      return candidates
-        .slice(0, -1)
-        .every(
-          (candidate) =>
-            this.candidateToSnapshotRow(datasetId, tableRef.tableId, candidate)?.rowsChanged ===
-            false
-        )
     })
   }
 
@@ -820,6 +778,9 @@ export class DuckLakeSnapshotReader {
       inputs: row.metadata?.inputs,
       ...storedLineage(tableRef.datasetId, row),
       ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
+      ...(row.metadata?.uncomparedReplacements !== undefined
+        ? { uncomparedReplacements: row.metadata.uncomparedReplacements }
+        : {}),
       ...(row.metadata?.validatedPrimaryKeyColumns !== undefined
         ? { validatedPrimaryKeyColumns: row.metadata.validatedPrimaryKeyColumns }
         : {}),
@@ -906,6 +867,75 @@ export class DuckLakeSnapshotReader {
   ): Promise<DatasetVersion | null> {
     const [latest] = await this.listVersionsForTableRef(runtime, tableRef, 1)
     return latest ?? null
+  }
+
+  /** The snapshot row of one version, with its Sixb commit metadata, and without its parent. */
+  async getSnapshotRow(
+    runtime: DuckDbQueryRuntime,
+    tableRef: DatasetTableRef,
+    snapshotId: string
+  ): Promise<DatasetSnapshotRow | null> {
+    return this.getSnapshotRowForTableRef(runtime, tableRef, snapshotId, { includeParent: false })
+  }
+
+  /**
+   * The dataset's versions and the table's maintenance commits from one version to a later one,
+   * or null when more than `limit` snapshots name the dataset's tables in between. It reads the
+   * snapshots of that range only, and counts the catalog's to tell whether any was expired.
+   */
+  async readChangeRange(
+    runtime: DuckDbQueryRuntime,
+    tableRef: DatasetTableRef,
+    fromSnapshotId: string,
+    toSnapshotId: string,
+    limit: number
+  ): Promise<DuckLakeChangeRange | null> {
+    assertDuckLakeSnapshotId(fromSnapshotId)
+    assertDuckLakeSnapshotId(toSnapshotId)
+
+    const candidates = await this.querySnapshotCandidates(runtime, {
+      table: tableRef,
+      fromSnapshotId,
+      beforeSnapshotId: (BigInt(toSnapshotId) + 1n).toString(),
+      limit: limit + 1,
+    })
+    if (candidates.length > limit) {
+      return null
+    }
+
+    const versions: DatasetSnapshotRow[] = []
+    const maintenanceSnapshotIds: string[] = []
+    let alteredOutsideSixb = false
+    for (const candidate of [...candidates].reverse()) {
+      if (
+        candidate.metadata?.kind === "compaction" ||
+        maintainsTable(candidate.changesMade, tableRef.tableId)
+      ) {
+        maintenanceSnapshotIds.push(candidate.snapshotId)
+        continue
+      }
+
+      const version = this.candidateToSnapshotRow(tableRef.datasetId, tableRef.tableId, candidate)
+      if (version) {
+        versions.push(version)
+      } else {
+        alteredOutsideSixb = true
+      }
+    }
+
+    // Snapshot ids are consecutive, so a missing one was expired: it may have held a version.
+    const [count] = await runtime.query(`
+      SELECT count(*) AS snapshot_count
+      FROM ${duckLakeMetadataTableName(this.options, "ducklake_snapshot")}
+      WHERE snapshot_id >= ${fromSnapshotId} AND snapshot_id <= ${toSnapshotId}
+    `)
+    const expected = BigInt(toSnapshotId) - BigInt(fromSnapshotId) + 1n
+    const complete =
+      !alteredOutsideSixb &&
+      count !== undefined &&
+      getBigIntLike(count, "snapshot_count") === expected
+
+    return { versions, maintenanceSnapshotIds, complete }
   }
 
   private async getLatestSnapshotRowForTableRef(
