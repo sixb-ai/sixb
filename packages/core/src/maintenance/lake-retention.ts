@@ -5,20 +5,20 @@ import type {
   LakeStorage,
 } from "../lake-storage"
 import { RuntimeError } from "../runtime/errors"
-import { defineSchedule } from "../schedules/builders"
-import type { CronScheduleDefinition } from "../schedules/types"
 import { parseDuration } from "../shared/duration"
+import type { Storage } from "../storage"
 import type { OntologySourceStorage } from "../storage/ontology/sources"
+import { type LakeRetentionStatus, lakeRetentionStatus } from "./lake-retention-status"
 
 /** Automatic retention of replaced dataset versions and the files only they read. */
 export interface LakeMaintenanceOptions {
-  /** Run retention on a schedule. Default: true. */
+  /** Run retention automatically. Default: true. */
   readonly enabled?: boolean
   /** How long a version stays readable once a newer one replaced it. Default: "7d", at least "1h". */
   readonly keepVersionsFor?: string
   /** How long a file no kept version reads stays in storage. Default: "7d", at least "1h". */
   readonly deleteFilesAfter?: string
-  /** How often retention runs: a duration that divides an hour or a day. Default: "1h". */
+  /** How often retention runs, such as "15m", "6h" or "1d". Default: "1h". */
   readonly cleanupEvery?: string
 }
 
@@ -45,8 +45,8 @@ export interface LakeRetentionPassOptions {
 /** Internal entry point for the worker, the CLI and the API; it never exposes the providers. */
 export interface LakeRetentionRuntime {
   readonly settings: LakeMaintenanceSettings
-  /** Whether the built-in schedule runs: enabled, a provider with maintenance, and datasets. */
-  readonly scheduled: boolean
+  /** Whether retention runs on its own: enabled, a provider with maintenance, and datasets. */
+  readonly automatic: boolean
   /** Null when the lake storage provider has no maintenance. */
   readonly maintenance: LakeMaintenance | null
   /**
@@ -55,14 +55,14 @@ export interface LakeRetentionRuntime {
    */
   apply(options: LakeRetentionPassOptions): Promise<LakeRetentionReport>
   /**
-   * Runs one occurrence of the built-in schedule within its budget. Null when the occurrence is
-   * older than one interval: a later one covers it, so a backlog of occurrences runs once.
+   * Runs what the `lake-retention` pass requested for one interval, within a budget, and records how
+   * it ended. Null when that interval is over: the next one's request covers it, so a backlog left
+   * by a stopped worker runs once.
    */
-  runOccurrence(occurrenceAt: string, signal: AbortSignal): Promise<LakeRetentionReport | null>
+  runRequested(requestedAt: string, signal: AbortSignal): Promise<LakeRetentionReport | null>
+  /** What durable state says about automatic retention, whichever process asks. */
+  status(): Promise<LakeRetentionStatus>
 }
-
-/** The built-in schedule's id. A project's own schedule cannot take it. */
-export const LAKE_RETENTION_SCHEDULE_ID = "sixb:lake-retention"
 
 const DEFAULT_RETENTION = "7d"
 const DEFAULT_CLEANUP_EVERY = "1h"
@@ -74,13 +74,8 @@ const MIN_RETENTION_MS = 60 * 60_000
 // catalog room for the writes that run beside it.
 const PASS_PAUSE_MS = 1_000
 
-// One occurrence never holds a worker for longer: the next occurrence continues.
-const MAX_OCCURRENCE_BUDGET_MS = 10 * 60_000
-
-const MINUTE_MS = 60_000
-const HOUR_MS = 60 * MINUTE_MS
-const DAY_MS = 24 * HOUR_MS
-const WEEK_MS = 7 * DAY_MS
+// A requested run never holds a worker for longer: the next interval's run continues.
+const MAX_RUN_BUDGET_MS = 10 * 60_000
 
 export function resolveLakeMaintenanceSettings(
   options: LakeMaintenanceOptions | undefined
@@ -98,7 +93,6 @@ export function resolveLakeMaintenanceSettings(
 
   const cleanupEvery = options?.cleanupEvery ?? DEFAULT_CLEANUP_EVERY
   const cleanupEveryMs = durationOption("cleanupEvery", cleanupEvery)
-  cleanupCron(cleanupEvery, cleanupEveryMs)
 
   return {
     enabled,
@@ -111,17 +105,11 @@ export function resolveLakeMaintenanceSettings(
   }
 }
 
-/** The schedule that requests retention every `cleanupEvery`, in the project's time zone. */
-export function lakeRetentionSchedule(settings: LakeMaintenanceSettings): CronScheduleDefinition {
-  return defineSchedule(LAKE_RETENTION_SCHEDULE_ID).cron(
-    cleanupCron(settings.cleanupEvery, settings.cleanupEveryMs)
-  )
-}
-
 export function createLakeRetentionRuntime(input: {
   readonly projectId: string
   readonly options: LakeMaintenanceOptions | undefined
   readonly lakeStorage: Pick<LakeStorage, "maintenance">
+  readonly storage: Pick<Storage, "lakeRetentionRuns" | "maintenanceHeartbeats">
   readonly sources: Pick<OntologySourceStorage, "listActive">
   readonly datasetCount: number
 }): LakeRetentionRuntime {
@@ -137,7 +125,7 @@ export function createLakeRetentionRuntime(input: {
 
   // Syncs, pipelines and the SDK write registered datasets only, so a project without datasets
   // writes nothing to the lake.
-  const scheduled = settings.enabled && maintenance !== null && input.datasetCount > 0
+  const automatic = settings.enabled && maintenance !== null && input.datasetCount > 0
 
   // Objects hold the rows of the version each projection applied, and their markings are read
   // from it: the lake keeps those versions too. Read before every pass, since a projection may
@@ -159,28 +147,49 @@ export function createLakeRetentionRuntime(input: {
     return runRetentionPasses({ maintenance, protect, options })
   }
 
+  // The run happened whatever this says, so a failed write costs the Console its account, no more.
+  const recordRun = async (failed: boolean): Promise<void> => {
+    const run = { projectId: input.projectId, finishedAt: new Date(), failed }
+
+    await input.storage.lakeRetentionRuns?.record(run).catch((failure: unknown) => {
+      console.error("[Sixb] Could not record a lake retention run:", failure)
+    })
+  }
+
   return {
     settings,
-    scheduled,
+    automatic,
     maintenance,
     apply,
 
-    async runOccurrence(occurrenceAt, signal) {
-      const occurrenceMs = Date.parse(occurrenceAt)
-      if (Number.isNaN(occurrenceMs)) {
-        throw new RuntimeError(`[Sixb] Lake retention occurrence '${occurrenceAt}' is not a date.`)
-      }
+    async runRequested(requestedAt, signal) {
+      if (Date.now() - Date.parse(requestedAt) >= settings.cleanupEveryMs) return null
 
-      if (Date.now() - occurrenceMs > settings.cleanupEveryMs) {
-        return null
-      }
+      try {
+        const report = await apply({
+          keepVersionsForMs: settings.keepVersionsForMs,
+          deleteFilesAfterMs: settings.deleteFilesAfterMs,
+          budgetMs: Math.min(settings.cleanupEveryMs / 2, MAX_RUN_BUDGET_MS),
+          signal,
+        })
+        await recordRun(false)
 
-      return apply({
-        keepVersionsForMs: settings.keepVersionsForMs,
-        deleteFilesAfterMs: settings.deleteFilesAfterMs,
-        budgetMs: Math.min(settings.cleanupEveryMs / 2, MAX_OCCURRENCE_BUDGET_MS),
-        signal,
-      })
+        return report
+      } catch (error) {
+        // Shutdown returns the job to the queue: that is no failed run.
+        if (!signal.aborted) await recordRun(true)
+        throw error
+      }
+    },
+
+    async status() {
+      const projectId = input.projectId
+      const [heartbeat, lastRun] = await Promise.all([
+        input.storage.maintenanceHeartbeats?.get({ projectId }) ?? null,
+        input.storage.lakeRetentionRuns?.getLast({ projectId }) ?? null,
+      ])
+
+      return lakeRetentionStatus({ settings, automatic, heartbeat, lastRun, now: new Date() })
     },
   }
 }
@@ -264,34 +273,6 @@ function durationOption(field: keyof LakeMaintenanceOptions, value: unknown): nu
   }
 
   return durationMs
-}
-
-/**
- * Cron only fires at minutes, hours and weekdays, so the interval has to divide an hour or a day,
- * or be a week. Anything else would drift against the clock.
- */
-function cleanupCron(cleanupEvery: string, cleanupEveryMs: number): string {
-  if (cleanupEveryMs < HOUR_MS && HOUR_MS % cleanupEveryMs === 0) {
-    const minutes = cleanupEveryMs / MINUTE_MS
-    return minutes === 1 ? "* * * * *" : `*/${minutes} * * * *`
-  }
-
-  if (cleanupEveryMs < DAY_MS && DAY_MS % cleanupEveryMs === 0 && cleanupEveryMs % HOUR_MS === 0) {
-    const hours = cleanupEveryMs / HOUR_MS
-    return hours === 1 ? "0 * * * *" : `0 */${hours} * * *`
-  }
-
-  if (cleanupEveryMs === DAY_MS) {
-    return "0 0 * * *"
-  }
-
-  if (cleanupEveryMs === WEEK_MS) {
-    return "0 0 * * 1"
-  }
-
-  throw new RuntimeError(
-    `[Sixb] lakeMaintenance.cleanupEvery must divide an hour or a day, such as 15m, 1h, 6h or 1d; received "${cleanupEvery}".`
-  )
 }
 
 function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {

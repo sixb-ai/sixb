@@ -108,14 +108,14 @@ async function start(sixb: SixbHost, options?: ConstructorParameters<typeof Sync
   return worker
 }
 
-async function enqueueRetention(queues: InMemoryQueues, occurrenceAt: string) {
+async function enqueueRetention(queues: InMemoryQueues, requestedAt: string) {
   await queues.lake.enqueue({
     projectId: PROJECT_ID,
     jobs: [
       {
-        id: `sixb:lake-retention:${occurrenceAt}`,
+        id: `lake-retention:${requestedAt}`,
         type: "lake.retention.requested",
-        payload: { occurrenceAt },
+        payload: { requestedAt },
       },
     ],
   })
@@ -155,16 +155,6 @@ async function eventually(predicate: () => boolean, turns = 500): Promise<void> 
     await new Promise<void>((resolve) => setImmediate(resolve))
   }
   throw new Error("Condition not reached.")
-}
-
-async function quietly<T>(run: () => Promise<T>): Promise<T> {
-  const warn = console.warn
-  console.warn = () => {}
-  try {
-    return await run()
-  } finally {
-    console.warn = warn
-  }
 }
 
 describe("SyncWorker lake lane", () => {
@@ -227,51 +217,94 @@ describe("SyncWorker lake lane", () => {
     for (const pass of lakeStorage.passes) pass.resolve()
   })
 
-  // Reproduce: return `{ kind: "fail" }` on the first error in lake-worker.ts.
-  test("retries a failed run a minute later, and reports the third failure once", async () => {
-    jest.useFakeTimers()
+  // Reproduce: return `{ kind: "retry" }` from onExecutionError in lake-worker.ts; the job then runs
+  // again and the failure goes unreported.
+  test("reports a failed run once and leaves the next interval to try again", async () => {
     const errors: SixbErrorContext[] = []
     const { sixb, lakeStorage, queues } = createHost({ errors })
-    let retries = 0
-    const retry = queues.lake.retry.bind(queues.lake)
-    queues.lake.retry = async (input) => {
-      await retry(input)
-      retries += 1
+    const failed: string[] = []
+    const fail = queues.lake.fail.bind(queues.lake)
+    queues.lake.fail = async (input) => {
+      await fail(input)
+      failed.push(input.jobId)
     }
     await start(sixb)
-    const occurrenceAt = new Date().toISOString()
+    const requestedAt = new Date().toISOString()
 
-    await quietly(async () => {
-      await enqueueRetention(queues, occurrenceAt)
-      await eventually(() => lakeStorage.passes.length === 1)
+    await enqueueRetention(queues, requestedAt)
+    await eventually(() => lakeStorage.passes.length === 1)
+    lakeStorage.passes[0]!.reject(new Error("catalog unreachable"))
+    await eventually(() => failed.length === 1)
 
-      for (const attempt of [1, 2]) {
-        lakeStorage.passes[attempt - 1]!.reject(new Error("catalog unreachable"))
-        await eventually(() => retries === attempt)
-
-        jest.advanceTimersByTime(MINUTE - 1)
-        await eventually(() => false, 50).catch(() => {})
-        expect(lakeStorage.passes).toHaveLength(attempt)
-
-        jest.advanceTimersByTime(1)
-        await eventually(() => lakeStorage.passes.length === attempt + 1)
-      }
-
-      expect(errors).toEqual([])
-      lakeStorage.passes[2]!.reject(new Error("catalog unreachable"))
-      await eventually(() => errors.length === 1)
-    })
-
-    expect(retries).toBe(2)
+    expect(failed).toEqual([`lake-retention:${requestedAt}`])
     expect(errors).toEqual([
       expect.objectContaining({
         type: "lake.retention.failed",
         projectId: PROJECT_ID,
-        occurrenceAt,
-        attempt: 3,
-        notificationId: `lake-retention:${PROJECT_ID}:${occurrenceAt}`,
+        requestedAt,
+        notificationId: `lake-retention:${PROJECT_ID}:${requestedAt}`,
         failure: expect.objectContaining({ code: "internal.unexpected" }),
       }),
     ])
+  })
+
+  // On a short interval the run after a failure can land past the interval, which used to complete
+  // the job without a report. Reproduce: retry in onExecutionError and skip past the interval.
+  test("reports the failure of a run that outlasted its interval", async () => {
+    jest.useFakeTimers()
+    const errors: SixbErrorContext[] = []
+    const { sixb, lakeStorage, queues } = createHost({
+      errors,
+      lakeMaintenance: { cleanupEvery: "2m" },
+    })
+    await start(sixb)
+
+    await enqueueRetention(queues, new Date().toISOString())
+    await eventually(() => lakeStorage.passes.length === 1)
+
+    jest.advanceTimersByTime(3 * MINUTE)
+    lakeStorage.passes[0]!.reject(new Error("catalog unreachable"))
+    await eventually(() => errors.length === 1)
+
+    expect(errors[0]?.type).toBe("lake.retention.failed")
+  })
+
+  test("skips a backlog's old requests without running them", async () => {
+    const { sixb, lakeStorage, queues } = createHost()
+    const completed: string[] = []
+    const complete = queues.lake.complete.bind(queues.lake)
+    queues.lake.complete = async (input) => {
+      await complete(input)
+      completed.push(input.jobId)
+    }
+    await start(sixb)
+    const old = new Date(Date.now() - 2 * 60 * MINUTE).toISOString()
+    const current = new Date().toISOString()
+
+    await enqueueRetention(queues, old)
+    await enqueueRetention(queues, current)
+
+    await eventually(() => lakeStorage.passes.length === 1)
+    lakeStorage.passes[0]!.resolve()
+    await eventually(() => completed.length === 2)
+
+    expect(lakeStorage.passes).toHaveLength(1)
+  })
+
+  // Reproduce: fail the job in onAbortError in lake-worker.ts.
+  test("returns the job to the queue on shutdown, without reporting a failure", async () => {
+    const errors: SixbErrorContext[] = []
+    const { sixb, lakeStorage, queues } = createHost({ errors })
+    const worker = await start(sixb)
+    const requestedAt = new Date().toISOString()
+
+    await enqueueRetention(queues, requestedAt)
+    await eventually(() => lakeStorage.passes.length === 1)
+
+    const stopping = worker.stop()
+    lakeStorage.passes[0]!.resolve()
+    await stopping
+
+    expect(errors).toEqual([])
   })
 })

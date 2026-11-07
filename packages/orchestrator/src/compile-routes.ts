@@ -102,13 +102,6 @@ export function compileRoutesWithDiagnostics(params: CompileRoutesParams): Compi
     })
   }
 
-  if (params.lakeRetention) {
-    addScheduleRouteJob(routes, params.lakeRetention.scheduleId, {
-      queue: "lake",
-      job: { type: "lake.retention.requested" },
-    })
-  }
-
   return { routes, diagnostics }
 }
 

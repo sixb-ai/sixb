@@ -99,7 +99,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           {
             id: "lake-retention:2026-11-05T10:00:00.000Z",
             type: "lake.retention.requested" as const,
-            payload: { occurrenceAt: "2026-11-05T10:00:00.000Z" },
+            payload: { requestedAt: "2026-11-05T10:00:00.000Z" },
           },
         ]
         await queues.lake.enqueue({ projectId: "project-a", jobs })
@@ -115,7 +115,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           limit: 2,
         })
         expect(claimed).toHaveLength(1)
-        expect(claimed[0]!.job.payload).toEqual({ occurrenceAt: "2026-11-05T10:00:00.000Z" })
+        expect(claimed[0]!.job.payload).toEqual({ requestedAt: "2026-11-05T10:00:00.000Z" })
       })
     })
 

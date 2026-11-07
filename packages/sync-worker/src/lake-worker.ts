@@ -10,10 +10,6 @@ const FAILURE_CODES = ["internal.unexpected", "runtime.cancelled"] as const
 /** Two at a time, so lake work behind a long retention pass does not wait for it. */
 const LAKE_CONCURRENCY = 2
 
-/** A failed run is tried this many times in all, a minute apart, before it is reported. */
-const MAX_ATTEMPTS = 3
-const RETRY_DELAY_MS = 60_000
-
 export interface LakeWorkerHost {
   readonly id: string
   readonly queues: Pick<Queues, "lake">
@@ -38,40 +34,30 @@ export class LakeWorker extends QueueWorker<LakeQueueJob, typeof FAILURE_CODES> 
   }
 
   protected async execute(claimed: ClaimedQueueJob<LakeQueueJob>, signal: AbortSignal) {
-    const { occurrenceAt } = claimed.job.payload
-    const report = await this.retention.runOccurrence(occurrenceAt, signal)
+    const report = await this.retention.runRequested(claimed.job.payload.requestedAt, signal)
 
     if (report && changedAnything(report)) {
       console.info(
-        `[SixbSyncWorker] Lake retention expired ${report.expiredVersions} version(s) and deleted ` +
+        `[SixbLakeWorker] Lake retention expired ${report.expiredVersions} version(s) and deleted ` +
           `${report.deletedFiles + report.orphanedFiles} file(s)` +
           (report.hasMore ? "; the next run continues." : ".")
       )
     }
   }
 
+  /** The next interval's request is the retry, so a run that fails is reported once and ends. */
   protected override onExecutionError(
     claimed: ClaimedQueueJob<LakeQueueJob>,
     error: unknown
   ): QueueWorkerFailureDecision<(typeof FAILURE_CODES)[number]> {
-    const { job } = claimed
-
-    if (job.attempt < MAX_ATTEMPTS) {
-      console.warn(
-        `[SixbSyncWorker] Lake retention failed (attempt ${job.attempt} of ${MAX_ATTEMPTS}); retrying in a minute.`,
-        error
-      )
-      return { kind: "retry", availableAt: new Date(Date.now() + RETRY_DELAY_MS).toISOString() }
-    }
-
     const failure = captureSixbFailure(error, {
       allowedCodes: FAILURE_CODES,
       defaultCode: "internal.unexpected",
     })
+
     reportLakeRetentionFailure(this.host, error, {
       projectId: this.host.id,
-      occurrenceAt: job.payload.occurrenceAt,
-      attempt: job.attempt,
+      requestedAt: claimed.job.payload.requestedAt,
       failure,
     })
 

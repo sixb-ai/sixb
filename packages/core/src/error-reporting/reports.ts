@@ -257,8 +257,7 @@ export function reportVectorIndexingFailure(
 
 export interface ReportLakeRetentionFailureInput {
   readonly projectId: string
-  readonly occurrenceAt: string
-  readonly attempt: number
+  readonly requestedAt: string
   readonly failure: SixbFailure<"internal.unexpected" | "runtime.cancelled">
 }
 
@@ -271,6 +270,6 @@ export function reportLakeRetentionFailure(
     ...input,
     type: "lake.retention.failed",
     occurredAt: input.failure.at,
-    notificationId: `lake-retention:${input.projectId}:${input.occurrenceAt}`,
+    notificationId: `lake-retention:${input.projectId}:${input.requestedAt}`,
   })
 }

@@ -350,30 +350,6 @@ async function enqueueDirectJob(
       })
       return
     }
-    case "lake": {
-      if (sourceEvent.type !== "schedule.triggered") {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbOrchestrator] Lake retention route received unsupported event '${sourceEvent.type}'.`,
-          { details: { projectId: options.projectId, sourceEventType: sourceEvent.type } }
-        )
-      }
-
-      // The occurrence names the job, so a redelivered trigger queues nothing more. A worker
-      // runs it; the orchestrator never writes the lake.
-      await options.queues.lake.enqueue({
-        projectId: options.projectId,
-        jobs: [
-          {
-            id: sourceEvent.payload.occurrenceKey,
-            type: item.job.type,
-            payload: { occurrenceAt: sourceEvent.payload.occurrenceAt },
-            metadata,
-          },
-        ],
-      })
-      return
-    }
   }
 }
 
