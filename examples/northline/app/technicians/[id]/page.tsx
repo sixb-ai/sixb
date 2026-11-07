@@ -15,6 +15,7 @@ import { ErrorLine, NextStepCard, pillClass } from "../../_components/next-step"
 import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
+  Breadcrumb,
   CaseClockText,
   Fact,
   formatDateTime,
@@ -26,7 +27,7 @@ import {
   StatusIndicator,
 } from "../../_components/ui"
 import type { QueryRow } from "../../_lib/query-types"
-import { caseClock } from "../../_lib/service-cases"
+import { caseClock, casePath } from "../../_lib/service-cases"
 import { currentWork } from "../../_lib/technicians"
 
 const techniciansQuery = objects(Technician).query()
@@ -153,13 +154,7 @@ function TechnicianHeader({
   const completed = visits.filter((visit) => visit.properties.status === "completed").length
   return (
     <header className="flex flex-col gap-4">
-      <nav className="flex items-center gap-2 text-[14px] text-muted-foreground">
-        <Link to="/technicians" className="text-primary hover:underline">
-          Technicians
-        </Link>
-        <ChevronRight className="size-3.5" aria-hidden="true" />
-        <span className="truncate">{technician.properties.name}</span>
-      </nav>
+      <Breadcrumb to="/technicians" label="Technicians" current={technician.properties.name} />
 
       <div className="flex items-start justify-between gap-6 max-md:flex-col max-md:gap-4">
         <div className="flex min-w-0 items-center gap-4">
@@ -181,10 +176,7 @@ function TechnicianHeader({
         </div>
         <div className="flex shrink-0 items-center gap-2.5 md:pt-2">
           <StatusBadge value={technician.properties.availability} />
-          <a
-            href={`mailto:${technician.properties.email}`}
-            className="inline-flex h-10 items-center gap-2 rounded-full bg-black/[0.05] px-5 text-[14px] font-semibold transition-colors hover:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:bg-white/[0.08]"
-          >
+          <a href={`mailto:${technician.properties.email}`} className={pillClass("secondary")}>
             <Mail className="size-4" strokeWidth={1.8} aria-hidden="true" /> Email
           </a>
         </div>
@@ -371,10 +363,7 @@ function VisitHero({
           </Fact>
           <Fact label="Scheduled">{formatDateTime(visit.properties.scheduledStart)}</Fact>
           <Fact label="Service case">
-            <Link
-              to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}
-              className="text-primary hover:underline"
-            >
+            <Link to={casePath(serviceCase.primaryId)} className="text-primary hover:underline">
               {serviceCase.properties.number}
             </Link>
           </Fact>

@@ -1,6 +1,8 @@
 import { Skeleton } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
+import { ChevronRight } from "lucide-react"
 import type { PropsWithChildren, ReactNode } from "react"
+import { Link } from "react-router-dom"
 import { type CaseClockFields, caseClock } from "../_lib/service-cases"
 
 const critical = new Set([
@@ -186,6 +188,24 @@ export function Row({ label, children }: PropsWithChildren<{ label: string }>) {
 }
 
 /** A white card on the page ground. Rows inside use `px-6` and a hairline between them. */
+/** The way back from a record to its list: "Service cases › SC-1042". */
+export function Breadcrumb({ to, label, current }: { to: string; label: string; current: string }) {
+  return (
+    <nav
+      aria-label="Breadcrumb"
+      className="flex items-center gap-2 text-[14px] text-muted-foreground"
+    >
+      <Link to={to} className="text-primary hover:underline">
+        {label}
+      </Link>
+      <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="truncate tabular-nums" aria-current="page">
+        {current}
+      </span>
+    </nav>
+  )
+}
+
 export function Section({
   title,
   description,

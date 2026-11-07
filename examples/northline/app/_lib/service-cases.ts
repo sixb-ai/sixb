@@ -22,6 +22,11 @@ export const openWorkOrders: ClientObjectQueryBuilder<typeof WorkOrder> = object
     workOrder.and(workOrder.p.status.neq("completed"), workOrder.p.status.neq("cancelled"))
   )
 
+/** A case's page; without a case, the list of them. */
+export function casePath(primaryId: string | undefined): string {
+  return primaryId ? `/service-cases/${encodeURIComponent(primaryId)}` : "/service-cases"
+}
+
 /** Closed and cancelled cases are finished; every other status is open. */
 export function isCaseOpen(status: string | undefined): boolean {
   return status !== "closed" && status !== "cancelled"

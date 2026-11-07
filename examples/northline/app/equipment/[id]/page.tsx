@@ -9,8 +9,10 @@ import { BuildingAlarm } from "../../../ontology/building-alarm"
 import { Equipment } from "../../../ontology/equipment"
 import { ServiceCase } from "../../../ontology/service-case"
 import { EquipmentPicture } from "../../_components/equipment-picture"
+import { decisionRingClass } from "../../_components/next-step"
 import { TelemetryChart, type TelemetryPoint } from "../../_components/telemetry-chart"
 import {
+  Breadcrumb,
   CaseClockText,
   Fact,
   formatDate,
@@ -21,7 +23,7 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../../_components/ui"
-import { isCaseOpen } from "../../_lib/service-cases"
+import { casePath, isCaseOpen } from "../../_lib/service-cases"
 
 /** A unit, its alarms and its cases, newest first, each followed from the unit by the server. */
 function equipmentQueries(id: string) {
@@ -79,13 +81,7 @@ export default function EquipmentDetailPage() {
     >
       {equipment ? (
         <div className="flex flex-col gap-6">
-          <nav className="flex items-center gap-2 text-[14px] text-muted-foreground">
-            <Link to="/equipment" className="text-primary hover:underline">
-              Equipment
-            </Link>
-            <ChevronRight className="size-3.5" />
-            <span>{equipment.properties.name}</span>
-          </nav>
+          <Breadcrumb to="/equipment" label="Equipment" current={equipment.properties.name} />
 
           <header className="flex flex-wrap items-stretch gap-7">
             <Hero name={equipment.properties.name} type={equipment.properties.equipmentType} />
@@ -139,8 +135,8 @@ export default function EquipmentDetailPage() {
 
           {activeCase ? (
             <Link
-              to={`/service-cases/${encodeURIComponent(activeCase.primaryId)}`}
-              className="group flex items-center gap-4 rounded-[20px] bg-card px-6 py-4 shadow-[0_0_0_1.5px_var(--primary)] transition-shadow hover:shadow-[0_0_0_1.5px_var(--primary),0_10px_28px_color-mix(in_srgb,var(--primary)_12%,transparent)]"
+              to={casePath(activeCase.primaryId)}
+              className={cn(decisionRingClass, "group flex items-center gap-4 px-6 py-4")}
             >
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-[12px] font-semibold text-primary">Open service case</span>
@@ -233,7 +229,7 @@ export default function EquipmentDetailPage() {
                         className="border-t border-border/70 first:border-t-0"
                       >
                         <Link
-                          to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}
+                          to={casePath(serviceCase.primaryId)}
                           className="group flex items-center justify-between gap-3 py-3"
                         >
                           <span className="flex min-w-0 flex-col gap-0.5">

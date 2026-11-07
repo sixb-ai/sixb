@@ -12,6 +12,7 @@ import { Technician } from "../ontology/technician"
 import { WorkOrder } from "../ontology/work-order"
 import { EquipmentPicture } from "./_components/equipment-picture"
 import { Widget, WidgetBreakdown, WidgetMetric, WidgetState } from "./_components/home/widget"
+import { pillClass } from "./_components/next-step"
 import {
   CaseClockText,
   formatMoney,
@@ -27,6 +28,7 @@ import {
   type CaseView,
   caseClock,
   caseDecision,
+  casePath,
   casePriority,
   inCaseView,
   openServiceCases,
@@ -543,12 +545,10 @@ function DecisionRow({ item, decision }: { item: CaseRow; decision: string | und
         </span>
       </span>
       <Link
-        to={`/service-cases/${encodeURIComponent(item.primaryId)}`}
-        className={cn(
-          "relative z-20 inline-flex h-8 shrink-0 items-center rounded-full px-3.5 text-[13px] font-semibold transition-colors",
-          item.properties.status === "triage"
-            ? "bg-primary text-primary-foreground hover:bg-primary/90"
-            : "bg-black/[0.05] text-foreground hover:bg-black/[0.08] dark:bg-white/[0.08]"
+        to={casePath(item.primaryId)}
+        className={pillClass(
+          item.properties.status === "triage" ? "primary" : "secondary",
+          "relative z-20 h-8 shrink-0 px-3.5 text-[13px]"
         )}
       >
         {decision}

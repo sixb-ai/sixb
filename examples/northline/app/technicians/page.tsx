@@ -13,6 +13,7 @@ import {
   initials,
   PageHeader,
   QueryState,
+  Section,
   StatusBadge,
 } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
@@ -126,7 +127,7 @@ export default function TechniciansPage() {
         />
       </PageHeader>
 
-      <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
+      <Section className="overflow-hidden">
         <QueryState
           loading={technicians.isLoading || workOrders.isLoading}
           error={technicians.isError || workOrders.isError}
@@ -145,7 +146,7 @@ export default function TechniciansPage() {
             ))}
           </ul>
         </QueryState>
-      </section>
+      </Section>
     </div>
   )
 }

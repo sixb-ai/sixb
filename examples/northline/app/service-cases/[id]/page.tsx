@@ -1,17 +1,7 @@
 import { useCurrentUser } from "@sixb/app"
 import { useActionRunMutation, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { cn } from "@sixb/ui/lib/utils"
-import {
-  Check,
-  ChevronRight,
-  ClipboardCheck,
-  FileText,
-  Radio,
-  ShieldCheck,
-  Truck,
-  Wrench,
-} from "lucide-react"
+import { Check, FileText, Radio, Truck } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
 import { Link, useParams } from "react-router-dom"
 import { FieldNote } from "../../../ontology/field-note"
@@ -19,10 +9,13 @@ import { Quote } from "../../../ontology/quote"
 import { ServiceCase } from "../../../ontology/service-case"
 import { ServiceVisit } from "../../../ontology/service-visit"
 import { WorkOrder } from "../../../ontology/work-order"
+import { CustomerCard } from "../../_components/customer-card"
+import { EquipmentPicture } from "../../_components/equipment-picture"
 import { ErrorLine, NextStepCard, PillButton, PillLink } from "../../_components/next-step"
 import { StageRail } from "../../_components/stage-rail"
-import { Timeline, type TimelineEntry } from "../../_components/timeline"
+import { quoteEntry, Timeline, type TimelineEntry, visitEntries } from "../../_components/timeline"
 import {
+  Breadcrumb,
   CaseClockText,
   Fact,
   formatCoverageHours,
@@ -37,7 +30,6 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../../_components/ui"
-import { equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
 import { isQuoteOpen, quotePath } from "../../_lib/quotes"
 import { caseClock, caseDecision, isCaseOpen } from "../../_lib/service-cases"
@@ -79,6 +71,7 @@ function notesQuery(caseId: string) {
     .traverse(FieldNote.l.visit, { direction: "incoming" })
     .expand(FieldNote.l.visit)
     .expand(FieldNote.l.author)
+    .orderBy(FieldNote.p.recordedAt, "desc")
     .limit(100)
 }
 
@@ -153,9 +146,7 @@ export default function ServiceCaseDetailPage() {
         currentVisit ? `?visit=${encodeURIComponent(currentVisit.primaryId)}` : ""
       }`
     : undefined
-  const latestDiagnosis = [...notes]
-    .filter((note) => note.properties.noteType === "diagnostic")
-    .sort((left, right) => time(right.properties.recordedAt) - time(left.properties.recordedAt))[0]
+  const latestDiagnosis = notes.find((note) => note.properties.noteType === "diagnostic")
 
   const status = serviceCase?.properties.status
   const clock = caseClock(serviceCase?.properties ?? {})
@@ -248,13 +239,11 @@ export default function ServiceCaseDetailPage() {
       {serviceCase ? (
         <div className="flex flex-col gap-6">
           <header className="flex flex-col gap-4">
-            <nav className="flex items-center gap-2 text-[14px] text-muted-foreground">
-              <Link to="/service-cases" className="text-primary hover:underline">
-                Service cases
-              </Link>
-              <ChevronRight className="size-3.5" />
-              <span className="tabular-nums">{serviceCase.properties.number}</span>
-            </nav>
+            <Breadcrumb
+              to="/service-cases"
+              label="Service cases"
+              current={serviceCase.properties.number}
+            />
             <div className="flex items-start justify-between gap-6 max-md:flex-col max-md:gap-3">
               <div className="flex min-w-0 flex-col gap-2">
                 <h1 className="text-[34px] leading-[1.06] font-semibold tracking-[-0.03em] text-balance sm:text-[40px]">
@@ -325,7 +314,10 @@ export default function ServiceCaseDetailPage() {
 
             <aside className="flex min-w-0 flex-[1_1_320px] flex-col gap-5">
               <EquipmentCard serviceCase={serviceCase} />
-              <CustomerCard serviceCase={serviceCase} />
+              <CustomerCard
+                customer={serviceCase.links.customer}
+                facility={serviceCase.links.facility}
+              />
               <WorkCard
                 workOrders={workOrders}
                 visits={visits}
@@ -363,24 +355,17 @@ function Diagnosis({ note }: { note: NoteRow }) {
 function EquipmentCard({ serviceCase }: { serviceCase: ServiceCaseRow }) {
   const equipment = serviceCase.links.equipment
   if (!equipment) return null
-  const illustration = equipmentIllustration(
-    equipment.properties.name,
-    equipment.properties.equipmentType
-  )
   return (
-    <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
-      {illustration ? (
-        <div className="flex h-44 items-center justify-center bg-muted">
-          <img
-            src={illustration.src}
-            alt={`${equipment.properties.name} illustration`}
-            className={cn(
-              "size-full",
-              illustration.contain ? "object-contain p-4" : "object-cover"
-            )}
-          />
-        </div>
-      ) : null}
+    <Section className="overflow-hidden">
+      <div className="flex h-44 items-center justify-center bg-muted">
+        <EquipmentPicture
+          name={equipment.properties.name}
+          type={equipment.properties.equipmentType}
+          inset="p-4"
+          iconClassName="size-14 text-foreground/35"
+          alt={`${equipment.properties.name} illustration`}
+        />
+      </div>
       <div className="flex flex-col gap-3 px-6 py-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -407,40 +392,6 @@ function EquipmentCard({ serviceCase }: { serviceCase: ServiceCaseRow }) {
           Readings and history
         </Link>
       </div>
-    </section>
-  )
-}
-
-function CustomerCard({ serviceCase }: { serviceCase: ServiceCaseRow }) {
-  const customer = serviceCase.links.customer
-  const facility = serviceCase.links.facility
-  return (
-    <Section title="Customer">
-      <dl className="flex flex-col px-6 pb-4">
-        {customer ? (
-          <Row label={customer.properties.name ?? "Customer"}>
-            <Link
-              to={`/customers/${encodeURIComponent(customer.primaryId)}`}
-              className="text-primary hover:underline"
-            >
-              {humanize(customer.properties.serviceTier ?? "standard")}
-            </Link>
-          </Row>
-        ) : null}
-        {customer?.properties.primaryContactName ? (
-          <Row label={customer.properties.primaryContactName}>Primary contact</Row>
-        ) : null}
-        {facility ? (
-          <Row label={facility.properties.name ?? "Facility"}>
-            {[facility.properties.city, facility.properties.state].filter(Boolean).join(", ")}
-          </Row>
-        ) : null}
-      </dl>
-      {facility?.properties.accessNotes ? (
-        <p className="mx-6 mb-5 rounded-[12px] bg-muted px-3.5 py-3 text-[13.5px] leading-5 text-foreground/80">
-          {facility.properties.accessNotes}
-        </p>
-      ) : null}
     </Section>
   )
 }
@@ -578,29 +529,7 @@ function timelineEntries(
       source: "Field service",
       status: workOrder.properties.status,
     })),
-    ...visits.flatMap((visit) => [
-      {
-        id: `${visit.primaryId}-start`,
-        at: visit.properties.startedAt ?? visit.properties.scheduledStart,
-        icon: Wrench,
-        title: `${visit.properties.number} ${visit.properties.startedAt ? "started" : "scheduled"}`,
-        detail: visit.links.technician?.properties.name,
-        source: "Field service",
-      },
-      ...(visit.properties.completedAt
-        ? [
-            {
-              id: `${visit.primaryId}-complete`,
-              at: visit.properties.completedAt,
-              icon: ClipboardCheck,
-              title: `${visit.properties.number} completed`,
-              detail: visit.properties.workPerformed,
-              source: "Field service",
-              status: visit.properties.completionDisposition,
-            },
-          ]
-        : []),
-    ]),
+    ...visits.flatMap((visit) => visitEntries(visit, visit.links.technician?.properties.name)),
     ...notes.map((note) => ({
       id: note.primaryId,
       at: note.properties.recordedAt,
@@ -609,15 +538,7 @@ function timelineEntries(
       detail: note.properties.body,
       source: note.links.author?.properties.name ?? "Field service",
     })),
-    ...quotes.map((quote) => ({
-      id: quote.primaryId,
-      at: quote.properties.decisionAt ?? quote.properties.sourceUpdatedAt,
-      icon: ShieldCheck,
-      title: `${quote.properties.number} · ${formatMoney(quote.properties.amount)}`,
-      detail: quote.properties.scope,
-      source: "Business system",
-      status: quote.properties.status,
-    })),
+    ...quotes.map(quoteEntry),
     ...(serviceCase.properties.resolvedAt
       ? [
           {
@@ -641,9 +562,4 @@ function caseHeadline(title: string, equipmentName: string | undefined): string 
     : title
   const normalized = withoutEquipment.replaceAll("-", " ").replace(/\.$/, "")
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
-}
-
-function time(value: string | Date | undefined): number {
-  if (!value) return 0
-  return value instanceof Date ? value.getTime() : new Date(value).getTime()
 }

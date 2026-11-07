@@ -1,7 +1,9 @@
 import { cn } from "@sixb/ui/lib/utils"
-import type { LucideIcon } from "lucide-react"
+import { ClipboardCheck, type LucideIcon, ShieldCheck, Wrench } from "lucide-react"
 import type { ReactNode } from "react"
-import { formatTime, StatusBadge } from "./ui"
+import { Link } from "react-router-dom"
+import { quotePath } from "../_lib/quotes"
+import { formatMoney, formatTime, StatusBadge } from "./ui"
 
 export interface TimelineEntry {
   readonly id: string
@@ -82,6 +84,81 @@ export function Timeline({
         </div>
       ))}
     </div>
+  )
+}
+
+interface VisitFields {
+  readonly primaryId: string
+  readonly properties: {
+    readonly number: string
+    readonly scheduledStart?: string | Date
+    readonly startedAt?: string | Date
+    readonly completedAt?: string | Date
+    readonly workPerformed?: string
+    readonly completionDisposition?: string
+  }
+}
+
+/** A visit's start and, once done, its completion; `detail` says who went or for which case. */
+export function visitEntries(visit: VisitFields, detail?: string): TimelineEntry[] {
+  const { number, scheduledStart, startedAt, completedAt } = visit.properties
+  const entries: TimelineEntry[] = [
+    {
+      id: `${visit.primaryId}-start`,
+      at: startedAt ?? scheduledStart,
+      icon: Wrench,
+      title: `${number} ${startedAt ? "started" : "scheduled"}`,
+      detail,
+      source: "Field service",
+    },
+  ]
+  if (completedAt) {
+    entries.push({
+      id: `${visit.primaryId}-complete`,
+      at: completedAt,
+      icon: ClipboardCheck,
+      title: `${number} completed`,
+      detail: visit.properties.workPerformed,
+      source: "Field service",
+      status: visit.properties.completionDisposition,
+    })
+  }
+  return entries
+}
+
+interface QuoteFields {
+  readonly primaryId: string
+  readonly properties: {
+    readonly number: string
+    readonly amount: number
+    readonly scope: string
+    readonly status: string
+    readonly decisionAt?: string | Date
+    readonly sourceUpdatedAt?: string | Date
+  }
+}
+
+/** A quote at its latest moment: decided, or last updated in the business system. */
+export function quoteEntry(quote: QuoteFields): TimelineEntry {
+  const { number, amount, scope, status, decisionAt, sourceUpdatedAt } = quote.properties
+  return {
+    id: quote.primaryId,
+    at: decisionAt ?? sourceUpdatedAt,
+    icon: ShieldCheck,
+    title: `${number} · ${formatMoney(amount)}`,
+    detail: scope,
+    source: "Business system",
+    status,
+    action: <TimelineLink to={quotePath(quote.primaryId)}>Open quote</TimelineLink>,
+  }
+}
+
+/** A link under an entry, such as to the record it is about. */
+export function TimelineLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link to={to} className="w-fit text-[13px] font-medium text-primary hover:underline">
+      {children}
+    </Link>
   )
 }
 

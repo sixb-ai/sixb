@@ -12,6 +12,7 @@ import { Search } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { quotePath } from "../_lib/quotes"
+import { casePath } from "../_lib/service-cases"
 
 interface GlobalSearchProps {
   /** The sidebar's search row by default; `toolbar` is the phone top bar's icon button. */
@@ -111,7 +112,7 @@ export function GlobalSearch({ placement = "sidebar" }: GlobalSearchProps) {
 
 function resultPath(objectTypeId: string, primaryId: string): string {
   const encoded = encodeURIComponent(primaryId)
-  if (objectTypeId === "ServiceCase") return `/service-cases/${encoded}`
+  if (objectTypeId === "ServiceCase") return casePath(primaryId)
   if (objectTypeId === "Equipment") return `/equipment/${encoded}`
   if (objectTypeId === "CustomerAccount") return `/customers/${encoded}`
   if (objectTypeId === "Technician") return `/technicians/${encoded}`

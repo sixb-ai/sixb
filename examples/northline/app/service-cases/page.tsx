@@ -5,12 +5,13 @@ import { ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
-import { EquipmentPicture } from "../_components/equipment-picture"
+import { EquipmentThumb } from "../_components/equipment-picture"
 import { SearchField, ViewPills } from "../_components/list-controls"
-import { CaseClockText, PageHeader, QueryState, StatusBadge } from "../_components/ui"
+import { CaseClockText, PageHeader, QueryState, Section, StatusBadge } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
 import {
   type CaseView,
+  casePath,
   casePriority,
   caseViews,
   inCaseView,
@@ -90,7 +91,7 @@ export default function ServiceCasesPage() {
         />
       </PageHeader>
 
-      <section className="overflow-hidden rounded-[20px] bg-card shadow-[var(--shadow-card)]">
+      <Section className="overflow-hidden">
         <QueryState
           loading={query.isLoading}
           error={query.isError}
@@ -103,7 +104,7 @@ export default function ServiceCasesPage() {
             ))}
           </ul>
         </QueryState>
-      </section>
+      </Section>
     </div>
   )
 }
@@ -115,18 +116,15 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
   return (
     <li className="border-t border-border/70 first:border-t-0">
       <Link
-        to={`/service-cases/${encodeURIComponent(serviceCase.primaryId)}`}
+        to={casePath(serviceCase.primaryId)}
         className="group grid grid-cols-[3.5rem_minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none max-sm:grid-cols-[3rem_minmax(0,1fr)] max-sm:items-start max-sm:gap-x-3.5 max-sm:gap-y-2.5 sm:px-6 dark:hover:bg-white/[0.03]"
       >
         {/* On a phone the state and clock move under the text, which gets the full width. */}
-        <span className="relative flex size-14 items-center justify-center overflow-hidden rounded-[14px] bg-muted max-sm:size-12 max-sm:rounded-[12px]">
-          <EquipmentPicture
-            name={equipment?.properties.name}
-            type={equipment?.properties.equipmentType}
-            inset="p-1.5"
-            iconClassName="size-6 text-foreground/55"
-          />
-        </span>
+        <EquipmentThumb
+          name={equipment?.properties.name}
+          type={equipment?.properties.equipmentType}
+          className="size-14 rounded-[14px] max-sm:size-12 max-sm:rounded-[12px]"
+        />
         <span className="flex min-w-0 flex-col gap-1">
           <span className="flex min-w-0 items-center gap-2 max-sm:items-baseline">
             <span className="shrink-0 text-[13px] font-semibold text-muted-foreground tabular-nums">
