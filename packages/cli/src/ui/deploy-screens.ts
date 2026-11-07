@@ -20,15 +20,18 @@ import {
   section,
   stack,
   table,
+  warnings as warningLines,
 } from "./layout"
 import { glyph, tone } from "./theme"
 
 export function deployReleaseView({
   release,
   configPath,
+  warnings = [],
 }: {
   release: DeployRelease
   configPath: string
+  warnings?: readonly string[]
 }): string {
   const steps = [
     ...(release.steps.env ? [{ label: "env", commands: [release.steps.env] }] : []),
@@ -93,6 +96,7 @@ export function deployReleaseView({
         origins.size > 0 ? tone.muted("plus the public origins above") : null
       )
     ),
+    warningLines(warnings),
     headline("idle", "Nothing was deployed", "--json prints the full release")
   )
 }
@@ -107,11 +111,13 @@ export function deployCompleteView({
   release,
   seconds,
   keptEnv = false,
+  warnings = [],
 }: {
   release: DeployRelease
   seconds?: number
   /** The deploy couldn't update the server's `.env`, so this release runs on its current values. */
   keptEnv?: boolean
+  warnings?: readonly string[]
 }): string {
   const urls = release.services.flatMap((service) =>
     service.http ? [{ label: service.name, value: service.http.publicOrigin }] : []
@@ -129,7 +135,8 @@ export function deployCompleteView({
           "This release runs on the server's current .env, not on the latest values. Deploy again to update them.",
           tone.muted
         )
-      : null
+      : null,
+    warningLines(warnings)
   )
 }
 

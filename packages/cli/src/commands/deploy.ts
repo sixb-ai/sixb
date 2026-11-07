@@ -10,7 +10,7 @@ import type {
   DeployRelease,
 } from "@sixb/core/deploy"
 import { loadDeployConfig } from "../lib/deploy-config"
-import { buildDeployRelease } from "../lib/deploy-release"
+import { buildDeployRelease, lakeRetentionChecks } from "../lib/deploy-release"
 import {
   commitHasProjectFile,
   deployer,
@@ -68,7 +68,13 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
       envFromSource,
     })
     if (options.json) return writeJson(release)
-    await renderStatic(deployReleaseView({ release, configPath: relative(cwd, path) || path }))
+    await renderStatic(
+      deployReleaseView({
+        release,
+        configPath: relative(cwd, path) || path,
+        warnings: configWarnings(config),
+      })
+    )
     return
   }
 
@@ -118,6 +124,7 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
       release,
       seconds: (Date.now() - deployStartedAt) / 1000,
       keptEnv: progress.state.keptEnv,
+      warnings: configWarnings(config),
     })
   )
 }
@@ -130,9 +137,10 @@ export async function runDeployCheck(options: { readonly json?: boolean; readonl
     envFromSource: Boolean((await loadEnvConfig(cwd))?.source),
   })
   const projectPath = await projectPathOf(cwd)
-  const checks = await withTask("deploy check", `Checking ${location(config)}`, () =>
+  const targetChecks = await withTask("deploy check", `Checking ${location(config)}`, () =>
     config.target.check(release, { name: config.name, projectPath })
   )
+  const checks = [...targetChecks, ...lakeRetentionChecks(config)]
   if (options.json) writeJson(checks)
   else
     await renderStatic(deployChecksView({ name: config.name, location: location(config), checks }))
@@ -298,6 +306,12 @@ async function publicKeys(value: string): Promise<string[]> {
   const file = Bun.file(value)
   if (await file.exists()) return [(await file.text()).trim()]
   return [value]
+}
+
+function configWarnings(config: DeployConfig): readonly string[] {
+  return lakeRetentionChecks(config).map(
+    (check) => `${check.label}: ${check.detail} ${check.remedy}`
+  )
 }
 
 function blocksDeploy(check: DeployCheck): boolean {
