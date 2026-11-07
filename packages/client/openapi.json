@@ -20001,6 +20001,161 @@
         }
       }
     },
+    "/api/lake/health": {
+      "get": {
+        "summary": "Describe how the lake stores each dataset, and its retention settings",
+        "tags": ["Datasets"],
+        "operationId": "getLakeHealth",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean",
+                      "description": "Whether the lake storage provider supports maintenance"
+                    },
+                    "cleanup": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "description": "Whether retention runs on its schedule"
+                        },
+                        "keepVersionsFor": {
+                          "type": "string"
+                        },
+                        "deleteFilesAfter": {
+                          "type": "string"
+                        },
+                        "cleanupEvery": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "keepVersionsFor",
+                        "deleteFilesAfter",
+                        "cleanupEvery"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "datasets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "datasetId": {
+                            "type": "string"
+                          },
+                          "materialized": {
+                            "type": "boolean",
+                            "description": "Whether the dataset has a table in the lake"
+                          },
+                          "rowCount": {
+                            "type": "integer"
+                          },
+                          "dataFiles": {
+                            "type": "integer",
+                            "description": "Data files its current rows are read from"
+                          },
+                          "smallDataFiles": {
+                            "type": "integer",
+                            "description": "Data files small enough that compaction merges them"
+                          },
+                          "dataBytes": {
+                            "type": "integer"
+                          },
+                          "deleteFiles": {
+                            "type": "integer",
+                            "description": "Files listing deleted rows, until compaction"
+                          },
+                          "inlinedRows": {
+                            "type": "integer",
+                            "description": "Rows kept in the catalog rather than in files"
+                          },
+                          "retainedSnapshots": {
+                            "type": "integer",
+                            "description": "Commits still in the dataset's history"
+                          },
+                          "partitionBy": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "warnings": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": ["partitioned-small-dataset"]
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["code", "message"],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "datasetId",
+                          "materialized",
+                          "rowCount",
+                          "dataFiles",
+                          "smallDataFiles",
+                          "dataBytes",
+                          "deleteFiles",
+                          "inlinedRows",
+                          "retainedSnapshots",
+                          "partitionBy",
+                          "warnings"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["available", "cleanup", "datasets"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/syncs": {
       "get": {
         "summary": "List registered syncs",

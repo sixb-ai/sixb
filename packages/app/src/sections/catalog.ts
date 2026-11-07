@@ -78,6 +78,12 @@ export const sectionCatalog: readonly SectionDefinition[] = [
         details: [{ path: "/console/datasets/:datasetId", exportName: "ConsoleDatasetPage" }],
       },
       {
+        id: "lake-health",
+        path: "/console/lake-health",
+        exportName: "ConsoleLakeHealthPage",
+        group: "data",
+      },
+      {
         id: "pipelines",
         path: "/console/pipelines",
         exportName: "ConsolePipelinesPage",

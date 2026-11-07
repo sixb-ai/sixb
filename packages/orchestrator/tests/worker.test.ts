@@ -530,6 +530,42 @@ describe("OrchestratorWorker", () => {
     ])
   })
 
+  // Reproduce: give the lake job no id in worker.ts; the redelivered occurrence queues a second.
+  test("lake retention queues one lake job per occurrence of its schedule", async () => {
+    const routes = compileRoutes({
+      schedules: [],
+      syncs: [],
+      pipelines: [],
+      lakeRetention: { scheduleId: "sixb:lake-retention" },
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    await startWorker(eventRuntime, queues, routes)
+
+    const first = makeScheduleTriggeredEvent("sixb:lake-retention", "2026-11-05T10:00:00.000Z")
+    const second = makeScheduleTriggeredEvent("sixb:lake-retention", "2026-11-05T11:00:00.000Z")
+    // The first occurrence arrives twice, as a redelivered trigger would.
+    await eventRuntime.append({ events: [first, first, second] })
+
+    const claimed: { id: string; payload: unknown }[] = []
+    await waitFor(async () => {
+      const jobs = await queues.lake.claim({ projectId: PROJECT_ID, workerId: "lake", limit: 10 })
+      claimed.push(...jobs.map(({ job }) => ({ id: job.id, payload: job.payload })))
+      return claimed.some((job) => job.id.endsWith("11:00:00.000Z"))
+    })
+
+    expect(claimed).toEqual([
+      {
+        id: "sixb:lake-retention:2026-11-05T10:00:00.000Z",
+        payload: { occurrenceAt: "2026-11-05T10:00:00.000Z" },
+      },
+      {
+        id: "sixb:lake-retention:2026-11-05T11:00:00.000Z",
+        payload: { occurrenceAt: "2026-11-05T11:00:00.000Z" },
+      },
+    ])
+  })
+
   // Events reach a subscription in publication order, so once the edge is dispatched, the earlier
   // events have been judged too.
   test("event schedules fire only on their own project's false-to-true transitions", async () => {

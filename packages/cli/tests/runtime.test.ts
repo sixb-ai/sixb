@@ -31,6 +31,7 @@ import {
 } from "@sixb/core"
 import { reportEventDeliveryFailure } from "@sixb/core/internal/error-reporting"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
+import type { LakeMaintenance, LakeRetentionOptions } from "@sixb/core/lake-storage"
 import { createTestSixb } from "@sixb/core/testing"
 import {
   migrateRuntimeStorage,
@@ -484,6 +485,67 @@ describe("startSixbRuntime", () => {
     )
 
     expect(run?.status).toBe("succeeded")
+
+    await runtime.stop()
+  })
+
+  // Reproduce: start the co-hosted sync worker for registered syncs only in lib/runtime.ts, or
+  // leave `lakeRetention` out of its compileRoutes call.
+  test("co-hosts lake retention without syncs, from schedule to worker", async () => {
+    const passes: LakeRetentionOptions[] = []
+    const lakeStorage = new (class extends InMemoryLakeStorage {
+      readonly maintenance: LakeMaintenance = {
+        applyRetention: async (options = {}) => {
+          passes.push(options)
+          return {
+            dryRun: false,
+            keepVersionsForMs: 0,
+            deleteFilesAfterMs: 0,
+            expiredVersions: 0,
+            keptVersions: 0,
+            deletedFiles: 0,
+            orphanedFiles: 0,
+            hasMore: false,
+          }
+        },
+        describeStorage: async () => [],
+      }
+    })()
+    const sixb = new SixbHost({
+      id: "cli-with-lake-retention",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      datasets: [rawOrdersDataset],
+    })
+
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
+    expect(runtime.syncWorker).not.toBeNull()
+
+    // What the scheduler emits for the built-in schedule's next occurrence.
+    const occurrenceAt = new Date().toISOString()
+    await sixb.events.append({
+      events: [
+        {
+          type: "schedule.triggered",
+          payload: {
+            scheduleId: "sixb:lake-retention",
+            occurrenceAt,
+            triggeredAt: occurrenceAt,
+            occurrenceKey: `sixb:lake-retention:${occurrenceAt}`,
+          },
+        },
+      ],
+    })
+
+    await waitFor(
+      async () => passes.length,
+      (count) => count === 1
+    )
+    expect(passes[0]).toMatchObject({ keepVersionsForMs: 7 * 24 * 60 * 60_000, dryRun: false })
 
     await runtime.stop()
   })
