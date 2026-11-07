@@ -236,6 +236,8 @@ export interface SixbDatasetIngestRejectedContext
   readonly deliveryId: string
   /** The execution that called `ingest`. */
   readonly executionId: string
+  /** How many changes the delivery held. `sixb lake rejected` shows all of them. */
+  readonly changes: number
   /** The refused change's position in the delivery, from 0. */
   readonly changeIndex: number
   /** The refused change's primary key. */

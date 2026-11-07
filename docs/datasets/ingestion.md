@@ -23,7 +23,7 @@ within a second, so many webhooks give a few versions instead of one each.
 | --- | --- |
 | Input | Iterable or async iterable of complete-row upserts and primary-key deletes |
 | Cancellation | Optional `signal: AbortSignal`, until the changes are stored |
-| Validation | Registered schema, primary key, source sequence, and referenced blobs; errors throw from `ingest` |
+| Validation | Registered schema, primary key, source sequence, referenced blobs, and values the lake cannot hold, such as a date DuckDB does not read; errors throw from `ingest` |
 | Result | `{ deliveryId, changes }`: the id that names this call's changes in failure reports (`null` when there were none), and their count |
 | Order | Changes apply in the order `ingest` calls stored them, as one call after another would |
 | Downstream work | Each new version emits `dataset.version.committed`; pipelines and projections run asynchronously |
@@ -83,4 +83,5 @@ Ingestion updates source data. Existing pipelines and projections determine the 
 | The lake or blob storage is unavailable | Retried until it succeeds; `dataset.ingest.flush.failed` reaches `onError` at the fifth failure in a row |
 | The queue refuses the write or is down | `ingest` still succeeds, after waiting one second at most: the changes are stored, and the next `ingest` after 30 seconds asks again, as the orchestrator does on its own |
 | Changes wait 10 minutes and nothing writes them | The orchestrator reports `dataset.ingest.flush.failed` to `onError` |
-| A stored change is refused when written: no longer valid for the schema, a deleted blob, a value the lake cannot hold, or a source sequence another call holds with other content | That call's changes are dropped and `dataset.ingest.rejected` names it and the refused change; the other calls' changes are written |
+| A stored change is refused when written: no longer valid for the schema, a deleted blob, a value the lake cannot hold that `ingest` could not tell, or a source sequence another call holds with other content | That call's changes stay aside for a week, whole, and `dataset.ingest.rejected` names it and the refused change; the other calls' changes are written. `sixb lake rejected` prints them to fix and send again, and Console › Lake health counts them |
+| A rollout runs a lake worker older than the API, and the worker refuses what the API stored | Nothing is refused: the changes stay stored and writing goes on trying until the worker runs the same code |

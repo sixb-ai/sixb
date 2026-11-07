@@ -8,6 +8,7 @@ import type {
   DatasetIngestDelivery,
   DatasetIngestFlushRequest,
   DatasetIngestLease,
+  DatasetIngestRejection,
   DatasetIngestStorage,
   DatasetIngestSummary,
   TakeDatasetIngestBatchInput,
@@ -45,6 +46,15 @@ export interface DatasetIngestPendingCounts {
   readonly pendingDeliveries: number
   readonly pendingChanges: number
   readonly oldestReceivedAt: Date | null
+  readonly rejectedDeliveries: number
+}
+
+export interface DatasetIngestRejectionRecord {
+  readonly delivery: DatasetIngestDelivery
+  readonly rejectedAt: Date
+  readonly reason: string
+  /** `encodeDatasetIngestChanges` text. */
+  readonly changes: string
 }
 
 /** Database-specific row access used by the shared inbox state machine. */
@@ -54,7 +64,7 @@ export interface DatasetIngestPersistence {
   lockState(projectId: string, datasetId: string): Promise<DatasetIngestState>
   writeState(projectId: string, state: DatasetIngestState): Promise<void>
   insertDelivery(projectId: string, record: DatasetIngestDeliveryRecord): Promise<string>
-  /** Deliveries no flush has taken, in inbox order, at most `limit`. */
+  /** Deliveries no flush has taken and none refused, in inbox order, at most `limit`. */
   listUntaken(
     projectId: string,
     datasetId: string,
@@ -80,12 +90,20 @@ export interface DatasetIngestPersistence {
     page: { readonly afterId: string | null; readonly limit: number }
   ): Promise<readonly { readonly delivery: DatasetIngestDelivery; readonly changes: string }[]>
   deleteFlush(projectId: string, datasetId: string, flushId: string): Promise<void>
-  deleteDeliveries(
+  /** Moves a delivery out of its flush and marks it refused. */
+  rejectDelivery(
     projectId: string,
     datasetId: string,
     flushId: string,
-    deliveryIds: readonly string[]
+    deliveryId: string,
+    rejection: { readonly rejectedAt: Date; readonly reason: string }
   ): Promise<void>
+  listRejected(
+    projectId: string,
+    datasetId: string | undefined,
+    limit: number
+  ): Promise<readonly DatasetIngestRejectionRecord[]>
+  deleteRejected(projectId: string, before: Date): Promise<void>
   listStates(
     projectId: string,
     datasetIds: readonly string[] | undefined
@@ -344,18 +362,42 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
   async reject(input: {
     readonly lease: DatasetIngestLease
     readonly flushId: string
-    readonly deliveryIds: readonly string[]
+    readonly deliveryId: string
+    readonly reason: string
   }): Promise<void> {
-    const { lease, flushId } = input
+    const { lease, flushId, deliveryId, reason } = input
 
     await this.backend.transaction(async (persistence) => {
       await lockFlushState(persistence, lease, flushId)
-      await persistence.deleteDeliveries(
-        lease.projectId,
-        lease.datasetId,
-        flushId,
-        input.deliveryIds
-      )
+      await persistence.rejectDelivery(lease.projectId, lease.datasetId, flushId, deliveryId, {
+        rejectedAt: await persistence.now(),
+        reason,
+      })
+    })
+  }
+
+  async listRejected(input: {
+    readonly projectId: string
+    readonly datasetId?: string
+    readonly limit: number
+  }): Promise<readonly DatasetIngestRejection[]> {
+    const records = await this.backend.read((persistence) =>
+      persistence.listRejected(input.projectId, input.datasetId, input.limit)
+    )
+
+    return records.map((record) => ({
+      ...record,
+      changes: decodeDatasetIngestChanges(record.changes),
+    }))
+  }
+
+  async purgeRejected(input: {
+    readonly projectId: string
+    readonly olderThanMs: number
+  }): Promise<void> {
+    await this.backend.transaction(async (persistence) => {
+      const now = await persistence.now()
+      await persistence.deleteRejected(input.projectId, new Date(now.getTime() - input.olderThanMs))
     })
   }
 
@@ -446,6 +488,7 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
           leaseExpiresAt: leased ? state.leaseExpiresAt : null,
           failureStreak: state?.failureStreak ?? 0,
           lastFlushedAt: state?.lastFlushedAt ?? null,
+          rejectedDeliveries: counts?.rejectedDeliveries ?? 0,
         }
       })
     })

@@ -71,6 +71,12 @@ Sixb packages are versioned independently. Each release entry names the packages
   both warn when it is missing, and until then changes wait, shown in Console › Lake health. No
   orchestrator is needed for webhooks to reach the lake. Keep it on all the same: it reports changes
   that wait, and asks again for a write the queue lost when no other `ingest` call comes.
+- `ingest` refuses, by throwing, a value the lake cannot hold when it can tell, such as a date
+  DuckDB does not read. One found later sets its call aside for a week: `sixb lake rejected` prints
+  it, and Console › Lake health counts it. Nothing else behind it waits.
+- During a rollout, a lake worker older than the API keeps retrying what it would refuse, until it
+  runs the same code. Finish the rollout: changes wait for it. Rolling back past a definition leaves
+  the same wait, until you roll forward.
 - Storage gains `dataset_ingest_deliveries` and `dataset_ingest_state`: migrate before starting the
   new services. `onError` gains `dataset.ingest.flush.failed` and `dataset.ingest.rejected`, and the
   error catalog `dataset.change_refused`. `@sixb/core/lake-storage` exports `LakeValueRefusedError`

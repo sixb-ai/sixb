@@ -180,6 +180,11 @@ export const en = {
         other: `${formatted} ingested changes waiting`,
       }),
     oldest: (relative: string) => `oldest received ${relative}`,
+    rejected: (count: number, formatted: string) =>
+      plural("en", count, {
+        one: `${formatted} delivery refused, kept for a week: sixb lake rejected`,
+        other: `${formatted} deliveries refused, kept for a week: sixb lake rejected`,
+      }),
   },
   pipelines: {
     title: "Pipelines",
@@ -425,6 +430,11 @@ export const fr: Translation<DataMessages> = {
         other: `${formatted} modifications ingérées en attente`,
       }),
     oldest: (relative: string) => `la plus ancienne reçue ${relative}`,
+    rejected: (count: number, formatted: string) =>
+      plural("fr", count, {
+        one: `${formatted} livraison refusée, conservée une semaine : sixb lake rejected`,
+        other: `${formatted} livraisons refusées, conservées une semaine : sixb lake rejected`,
+      }),
   },
   pipelines: {
     title: "Pipelines",

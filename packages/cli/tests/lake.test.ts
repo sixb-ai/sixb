@@ -2,6 +2,7 @@ import { afterEach, describe, expect, jest, test } from "bun:test"
 import { resolve } from "node:path"
 import { runLakeCheck } from "../src/commands/lake-check"
 import { runLakeCleanup } from "../src/commands/lake-cleanup"
+import { runLakeRejected } from "../src/commands/lake-rejected"
 import { lakeFixture } from "./fixtures/lake-project/sixb.config"
 import { MISDECLARED_MARKINGS_MESSAGE } from "./fixtures/shared/createMisdeclaredMarkingsSixb"
 import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
@@ -19,6 +20,7 @@ afterEach(() => {
     unansweredRequest: false,
     retentionPassesWithMore: 0,
     appliedVersion: undefined,
+    rejectedRow: undefined,
   })
   lakeFixture.events = []
 })
@@ -59,6 +61,35 @@ describe("sixb lake check", () => {
     const result = await runInProcess(() => runLakeCheck({ entry: misdeclared }))
 
     expect(String(result.error)).toContain(MISDECLARED_MARKINGS_MESSAGE)
+  })
+})
+
+describe("sixb lake rejected", () => {
+  // Reproduce: print a count instead of the deliveries in commands/lake-rejected.ts; the changes a
+  // refused call held can then only be read from the database.
+  test("prints what was refused, whole, and closes providers", async () => {
+    lakeFixture.rejectedRow = { id: "row-1", name: "unstorable" }
+
+    const result = await runInProcess(() => runLakeRejected({ entry }))
+
+    expect(result.error).toBeUndefined()
+    expect(JSON.parse(result.output)).toMatchObject([
+      {
+        delivery: { datasetId: "raw.things" },
+        reason: "Refused by the fixture.",
+        changes: [{ kind: "upsert", row: { id: "row-1", name: "unstorable" } }],
+      },
+    ])
+    expect(lakeFixture.events).toEqual([closed])
+  })
+
+  // Reproduce: drop `datasetId` from the call in commands/lake-rejected.ts.
+  test("narrows to one dataset", async () => {
+    lakeFixture.rejectedRow = { id: "row-1" }
+
+    const result = await runInProcess(() => runLakeRejected({ entry, dataset: "raw.others" }))
+
+    expect(JSON.parse(result.output)).toEqual([])
   })
 })
 

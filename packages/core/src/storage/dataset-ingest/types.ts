@@ -55,6 +55,16 @@ export interface DatasetIngestSummary {
   readonly failureStreak: number
   /** When a flush last completed a batch of this dataset. */
   readonly lastFlushedAt: Date | null
+  /** Deliveries refused when they were written, kept for someone to read and send again. */
+  readonly rejectedDeliveries: number
+}
+
+/** A delivery the lake or its schema refused after `ingest` answered, and all it held. */
+export interface DatasetIngestRejection {
+  readonly delivery: DatasetIngestDelivery
+  readonly rejectedAt: Date
+  readonly reason: string
+  readonly changes: readonly DatasetIngestChange[]
 }
 
 export interface AppendDatasetIngestDeliveryInput {
@@ -134,12 +144,26 @@ export interface DatasetIngestStorage {
   /** The batch is in the lake: deletes its deliveries and resets the failure streak. */
   complete(input: { readonly lease: DatasetIngestLease; readonly flushId: string }): Promise<void>
 
-  /** Deletes deliveries the lake refused. The batch keeps the others. */
+  /**
+   * Sets a refused delivery aside, whole and out of the way of what follows. The batch keeps the
+   * others.
+   */
   reject(input: {
     readonly lease: DatasetIngestLease
     readonly flushId: string
-    readonly deliveryIds: readonly string[]
+    readonly deliveryId: string
+    readonly reason: string
   }): Promise<void>
+
+  /** The newest rejected deliveries first, of one dataset or of every dataset. */
+  listRejected(input: {
+    readonly projectId: string
+    readonly datasetId?: string
+    readonly limit: number
+  }): Promise<readonly DatasetIngestRejection[]>
+
+  /** Deletes the rejected deliveries set aside longer ago than this. */
+  purgeRejected(input: { readonly projectId: string; readonly olderThanMs: number }): Promise<void>
 
   /** Releases the lease after a failed attempt and counts it. The batch stays in flight. */
   fail(input: { readonly lease: DatasetIngestLease }): Promise<{ readonly failureStreak: number }>
@@ -154,7 +178,10 @@ export interface DatasetIngestStorage {
    */
   handOver(input: { readonly lease: DatasetIngestLease }): Promise<{ readonly request: number }>
 
-  /** Datasets with pending deliveries or a flush in progress. All of them without `datasetIds`. */
+  /**
+   * Datasets with pending or rejected deliveries or a flush in progress. All of them without
+   * `datasetIds`.
+   */
   summarize(input: {
     readonly projectId: string
     readonly datasetIds?: readonly string[]

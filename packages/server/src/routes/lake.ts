@@ -62,11 +62,12 @@ export function registerLakeRoutes(app: Elysia, host: SixbHostView) {
 
 /** What waits for a flush, or null when nothing does. */
 function ingestWaiting(summary: DatasetIngestSummary | undefined) {
-  if (!summary?.oldestReceivedAt || summary.pendingDeliveries === 0) return null
+  if (!summary || (summary.pendingDeliveries === 0 && summary.rejectedDeliveries === 0)) return null
 
   return {
     pendingDeliveries: summary.pendingDeliveries,
     pendingChanges: summary.pendingChanges,
-    oldestReceivedAt: summary.oldestReceivedAt.toISOString(),
+    oldestReceivedAt: summary.oldestReceivedAt?.toISOString() ?? null,
+    rejectedDeliveries: summary.rejectedDeliveries,
   }
 }

@@ -391,7 +391,12 @@ class DatasetIngestFlush {
       )
     }
 
-    await this.inbox.reject({ lease, flushId: batch.flushId, deliveryIds: [delivery.id] })
+    await this.inbox.reject({
+      lease,
+      flushId: batch.flushId,
+      deliveryId: delivery.id,
+      reason: refused.message,
+    })
 
     const sequence = dataset.sequenceBy === undefined ? undefined : sequenceOf(dataset, value)
     reportDatasetIngestRejection(this.dependencies.reporter, refused.cause, {
@@ -399,6 +404,7 @@ class DatasetIngestFlush {
       datasetId: dataset.id,
       deliveryId: delivery.id,
       executionId: delivery.executionId,
+      changes: delivery.changeCount,
       changeIndex,
       key: keyOf(dataset, value),
       ...(sequence === undefined ? {} : { sequence }),

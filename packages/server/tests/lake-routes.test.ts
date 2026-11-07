@@ -193,6 +193,7 @@ describe("GET /api/lake/health", () => {
             pendingDeliveries: 1,
             pendingChanges: 2,
             oldestReceivedAt: delivery.receivedAt.toISOString(),
+            rejectedDeliveries: 0,
           },
         },
       ],

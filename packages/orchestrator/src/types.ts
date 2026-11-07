@@ -122,7 +122,7 @@ export interface CompileRoutesResult {
 }
 
 export interface IngestReconciliationPorts {
-  readonly inbox: Pick<DatasetIngestStorage, "summarize">
+  readonly inbox: Pick<DatasetIngestStorage, "summarize" | "purgeRejected">
   readonly queue: Pick<Queues["lake"], "enqueue">
   /** Where a dataset whose changes wait with no flush is reported: the host. */
   readonly reporter: object

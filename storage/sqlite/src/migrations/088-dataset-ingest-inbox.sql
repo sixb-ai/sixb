@@ -1,5 +1,6 @@
 -- Changes `sixb.datasets.ingest` stored and no flush has written to the lake yet. A flush tags the
--- deliveries it takes with its id, writes them as one dataset version, then deletes them.
+-- deliveries it takes with its id, writes them as one dataset version, then deletes them. One
+-- refused when written stays, marked, until the orchestrator purges it.
 CREATE TABLE dataset_ingest_deliveries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id TEXT NOT NULL,
@@ -10,7 +11,9 @@ CREATE TABLE dataset_ingest_deliveries (
   change_count INTEGER NOT NULL CHECK (change_count > 0),
   definition_hash TEXT NOT NULL,
   changes TEXT NOT NULL,
-  flush_id TEXT
+  flush_id TEXT,
+  rejected_at TEXT,
+  rejection TEXT
 );
 CREATE INDEX dataset_ingest_deliveries_by_flush
   ON dataset_ingest_deliveries (project_id, dataset_id, flush_id, id);

@@ -513,6 +513,7 @@ describe("Lake health", () => {
             pendingDeliveries: 12,
             pendingChanges: 1_250,
             oldestReceivedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+            rejectedDeliveries: 0,
           },
         },
       ],
@@ -520,6 +521,39 @@ describe("Lake health", () => {
 
     expect(view.getByText("1,250 ingested changes waiting")).toBeDefined()
     expect(view.getByText("oldest received 3 minutes ago")).toBeDefined()
+  })
+
+  // Reproduce: leave `messages.rejected` out of IngestWaiting in lake-health.tsx.
+  test("says when deliveries were refused, with nothing waiting", () => {
+    const { view } = renderHealth({
+      available: true,
+      cleanup,
+      datasets: [
+        {
+          datasetId: "raw.crm.people",
+          materialized: false,
+          rowCount: 0,
+          dataFiles: 0,
+          smallDataFiles: 0,
+          dataBytes: 0,
+          deleteFiles: 0,
+          inlinedRows: 0,
+          retainedSnapshots: 0,
+          partitionBy: [],
+          warnings: [],
+          ingest: {
+            pendingDeliveries: 0,
+            pendingChanges: 0,
+            oldestReceivedAt: null,
+            rejectedDeliveries: 2,
+          },
+        },
+      ],
+    })
+
+    expect(
+      view.getByText("2 deliveries refused, kept for a week: sixb lake rejected")
+    ).toBeDefined()
   })
 
   test("says so when the lake storage has no maintenance", () => {

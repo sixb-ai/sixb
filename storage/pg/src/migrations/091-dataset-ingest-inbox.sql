@@ -1,5 +1,6 @@
 -- Changes `sixb.datasets.ingest` stored and no flush has written to the lake yet. A flush tags the
--- deliveries it takes with its id, writes them as one dataset version, then deletes them.
+-- deliveries it takes with its id, writes them as one dataset version, then deletes them. One
+-- refused when written stays, marked, until the orchestrator purges it.
 CREATE TABLE dataset_ingest_deliveries (
   id BIGSERIAL,
   project_id TEXT NOT NULL,
@@ -12,6 +13,8 @@ CREATE TABLE dataset_ingest_deliveries (
   -- Text, not JSONB: nothing reads inside it, and JSONB refuses strings JSON allows.
   changes TEXT NOT NULL,
   flush_id TEXT,
+  rejected_at TIMESTAMPTZ,
+  rejection TEXT,
   -- Led by the dataset, so no plan for one dataset walks the deliveries of another.
   PRIMARY KEY (project_id, dataset_id, id)
 );

@@ -24,8 +24,13 @@ function summary(
     leaseExpiresAt: null,
     failureStreak: 0,
     lastFlushedAt: null,
+    rejectedDeliveries: 0,
     ...input,
   }
+}
+
+function inboxOf(summaries: readonly DatasetIngestSummary[]) {
+  return { summarize: async () => summaries, purgeRejected: async () => {} }
 }
 
 async function queuedFlushes(queues: InMemoryQueues): Promise<string[]> {
@@ -36,15 +41,13 @@ async function queuedFlushes(queues: InMemoryQueues): Promise<string[]> {
 // Reproduce: skip the enqueue in `pass` (ingest-reconciler.ts); the waiting dataset gets no job.
 test("queues a flush for each dataset whose deliveries wait with no flush holding it", async () => {
   const queues = new InMemoryQueues()
-  const inbox = {
-    summarize: async () => [
-      summary({ datasetId: "crm.people", request: 4 }),
-      // A flush holds this one: it writes the deliveries itself.
-      summary({ datasetId: "crm.orgs", leaseExpiresAt: new Date(Date.now() + MINUTE) }),
-      // A lease whose flush has finished and found nothing pending.
-      summary({ datasetId: "crm.deals", pendingDeliveries: 0 }),
-    ],
-  }
+  const inbox = inboxOf([
+    summary({ datasetId: "crm.people", request: 4 }),
+    // A flush holds this one: it writes the deliveries itself.
+    summary({ datasetId: "crm.orgs", leaseExpiresAt: new Date(Date.now() + MINUTE) }),
+    // A lease whose flush has finished and found nothing pending.
+    summary({ datasetId: "crm.deals", pendingDeliveries: 0 }),
+  ])
 
   const reconciler = new IngestReconciler({
     projectId: PROJECT_ID,
@@ -63,7 +66,7 @@ test("asks for a request's flush again without queueing a second job", async () 
   const reconciler = new IngestReconciler({
     projectId: PROJECT_ID,
     queue: queues.lake,
-    inbox: { summarize: async () => [summary({ datasetId: "crm.people", request: 4 })] },
+    inbox: inboxOf([summary({ datasetId: "crm.people", request: 4 })]),
     reporter: {},
   })
 
@@ -83,13 +86,33 @@ test("fails the pass when the queue refuses, for the loop to count and report", 
         throw new Error("queue offline")
       },
     },
-    inbox: { summarize: async () => [summary({ datasetId: "crm.people" })] },
+    inbox: inboxOf([summary({ datasetId: "crm.people" })]),
     reporter: {},
   })
 
   const failure = await reconciler.pass(signal).catch((error) => error)
 
   expect(failure).toEqual(new Error("queue offline"))
+})
+
+// Reproduce: drop `purgeRejected` from `pass`; refused deliveries then stay for good.
+test("purges the refused deliveries past a week", async () => {
+  const purged: number[] = []
+  const reconciler = new IngestReconciler({
+    projectId: PROJECT_ID,
+    queue: new InMemoryQueues().lake,
+    inbox: {
+      summarize: async () => [],
+      purgeRejected: async ({ olderThanMs }) => {
+        purged.push(olderThanMs)
+      },
+    },
+    reporter: {},
+  })
+
+  await reconciler.pass(signal)
+
+  expect(purged).toEqual([7 * 24 * 60 * MINUTE])
 })
 
 // Reproduce: report after queueing in `pass`; a queue that is down then silences the report.
@@ -106,14 +129,9 @@ test("reports a stall even when the queue refuses", async () => {
         throw new Error("queue offline")
       },
     },
-    inbox: {
-      summarize: async () => [
-        summary({
-          datasetId: "crm.people",
-          oldestReceivedAt: new Date(Date.now() - 11 * MINUTE),
-        }),
-      ],
-    },
+    inbox: inboxOf([
+      summary({ datasetId: "crm.people", oldestReceivedAt: new Date(Date.now() - 11 * MINUTE) }),
+    ]),
     reporter: host,
   })
 
@@ -138,6 +156,7 @@ test("reports a dataset whose changes nothing wrote for 10 minutes, once per sta
   const lastFlushedAt = ago(11)
   let pass = 0
   const inbox = {
+    purgeRejected: async () => {},
     summarize: async () => {
       pass += 1
       return [

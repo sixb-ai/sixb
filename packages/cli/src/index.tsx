@@ -376,6 +376,12 @@ async function main(): Promise<void> {
       break
     }
 
+    case "lake:rejected": {
+      const { runLakeRejected } = await import("./commands/lake-rejected")
+      await runLakeRejected({ entry: getFlag("entry"), dataset: getFlag("dataset") })
+      break
+    }
+
     case "lake:cleanup": {
       const { runLakeCleanup } = await import("./commands/lake-cleanup")
       await runLakeCleanup({

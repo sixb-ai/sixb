@@ -305,6 +305,7 @@ export interface ReportDatasetIngestRejectionInput {
   readonly datasetId: string
   readonly deliveryId: string
   readonly executionId: string
+  readonly changes: number
   readonly changeIndex: number
   readonly key: Readonly<Record<string, string>>
   readonly sequence?: string

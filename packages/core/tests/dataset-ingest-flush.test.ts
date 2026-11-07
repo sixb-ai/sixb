@@ -447,7 +447,34 @@ test("two deliveries the lake refuses never hold the dataset back", async () => 
   await flush(contacts).catch(() => {})
 
   expect((await rows(contacts)).map((row) => row.id)).toEqual(["4"])
-  expect(await storage.datasetIngest.summarize({ projectId: host.id })).toEqual([])
+  expect(await storage.datasetIngest.summarize({ projectId: host.id })).toMatchObject([
+    { datasetId: contacts.id, pendingDeliveries: 0, rejectedDeliveries: 3 },
+  ])
+})
+
+test("a refused delivery keeps everything it held, and its report says how much", async () => {
+  // Regression proof: delete the delivery in `reject`, as it once did; of a call of 3 changes with
+  // one bad value, the other 2 are then stored nowhere.
+  const lakeStorage = new RefusingLakeStorage((name) => name === "unstorable")
+  const { host, storage, scope, flush, reported } = setup(lakeStorage)
+  const changes = [
+    change.upsert({ id: "1", name: "Ada" }),
+    change.upsert({ id: "2", name: "unstorable" }),
+    change.upsert({ id: "3", name: "Grace" }),
+  ]
+  const { deliveryId } = await scope().datasets.ingest(contacts, { changes })
+
+  await flush(contacts)
+
+  const rejected = await storage.datasetIngest.listRejected({ projectId: host.id, limit: 10 })
+  expect(rejected).toHaveLength(1)
+  expect(rejected[0]?.delivery.id).toBe(deliveryId ?? "")
+  expect(rejected[0]?.changes).toEqual(changes)
+  expect(rejected[0]?.reason).toContain("cannot hold")
+
+  expect((await reported()).filter((report) => report.type === "dataset.ingest.rejected")).toEqual([
+    expect.objectContaining({ deliveryId, changes: 3, changeIndex: 1, key: { id: "2" } }),
+  ])
 })
 
 test("a lake error about its own state is retried, never refused, even for a lone delivery", async () => {

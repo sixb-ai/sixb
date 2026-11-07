@@ -214,23 +214,36 @@ function IngestWaiting({ waiting }: { readonly waiting: NonNullable<DatasetStora
   const messages = useDataMessages().lakeHealth
   const numbers = useNumbers()
   const format = useFormat()
-  const stalled = Date.now() - Date.parse(waiting.oldestReceivedAt) >= STALLED_AFTER_MS
+  const { oldestReceivedAt, pendingChanges, rejectedDeliveries } = waiting
+  const stalled =
+    oldestReceivedAt !== null && Date.now() - Date.parse(oldestReceivedAt) >= STALLED_AFTER_MS
+  const needsAttention = stalled || rejectedDeliveries > 0
 
   // Like a warning: one wrapping line beside its icon, so a narrow row keeps it readable.
   return (
     <p
       className={cn(
         "flex items-start gap-1.5 text-[0.8125rem] leading-5",
-        stalled ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"
+        needsAttention ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"
       )}
     >
       <Inbox aria-hidden className="mt-0.5 size-3.5 shrink-0" />
       <span>
-        <span className="tabular-nums">
-          {messages.waiting(waiting.pendingChanges, numbers.count(waiting.pendingChanges))}
-        </span>
-        {" · "}
-        <span>{messages.oldest(format.relative(waiting.oldestReceivedAt))}</span>
+        {oldestReceivedAt === null ? null : (
+          <>
+            <span className="tabular-nums">
+              {messages.waiting(pendingChanges, numbers.count(pendingChanges))}
+            </span>
+            {" · "}
+            <span>{messages.oldest(format.relative(oldestReceivedAt))}</span>
+          </>
+        )}
+        {oldestReceivedAt !== null && rejectedDeliveries > 0 ? " · " : null}
+        {rejectedDeliveries > 0 ? (
+          <span className="tabular-nums">
+            {messages.rejected(rejectedDeliveries, numbers.count(rejectedDeliveries))}
+          </span>
+        ) : null}
       </span>
     </p>
   )

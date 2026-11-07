@@ -9,6 +9,9 @@ const INTERVAL_MS = 30_000
 /** Deliveries waiting this long with no flush progress, and no flush running or failing, stall. */
 const STALLED_AFTER_MS = 10 * 60_000
 
+/** How long a refused delivery stays for someone to read and send again. */
+const REJECTED_KEPT_MS = 7 * 24 * 60 * 60_000
+
 interface IngestReconcilerInput extends IngestReconciliationPorts {
   readonly projectId: string
 }
@@ -46,6 +49,8 @@ export class IngestReconciler {
     const summaries = await inbox.summarize({ projectId })
     const waiting = summaries.filter((summary) => summary.pendingDeliveries > 0)
     const now = Date.now()
+
+    await inbox.purgeRejected({ projectId, olderThanMs: REJECTED_KEPT_MS })
 
     // Before queueing: a queue that is down must not silence the report.
     for (const summary of waiting) this.reportStalled(summary, now)
