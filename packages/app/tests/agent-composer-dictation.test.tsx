@@ -22,6 +22,7 @@ installDom([
   "FocusEvent",
   "PointerEvent",
   "MutationObserver",
+  "ResizeObserver",
   "getComputedStyle",
   "requestAnimationFrame",
   "cancelAnimationFrame",

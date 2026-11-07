@@ -409,8 +409,7 @@ export function Composer({
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
   // render a scrollbar in browsers configured to always show scroll bars.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes
-  useLayoutEffect(() => {
+  const measure = () => {
     const el = textareaRef.current
     if (!el) return
     if (!expanded) inlineWidthRef.current = el.clientWidth
@@ -421,7 +420,34 @@ export function Composer({
     el.style.height = "auto"
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden"
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
-  }, [value, attachments.length, contextEntries.length, expanded])
+  }
+  const measureRef = useRef(measure)
+  measureRef.current = measure
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes
+  useLayoutEffect(measure, [value, attachments.length, contextEntries.length, expanded])
+
+  // The row's width changes without the text changing: the model label settles after the first
+  // render, or the window resizes. A height measured at the old width would keep a wrapped
+  // placeholder's two lines.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    let width = el.clientWidth
+    let frame = 0
+    // Measuring resizes the textarea, so it waits a frame rather than resize inside the callback.
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => measureRef.current())
+    })
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [])
 
   const submit = () => {
     if (!canSend) return
