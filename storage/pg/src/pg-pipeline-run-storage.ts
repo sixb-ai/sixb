@@ -4,9 +4,13 @@ import { assertPipelineRunExecution } from "@sixb/core/internal/pipeline-run-sto
 import {
   canFinishPipelineRun,
   canRequeuePipelineRunAfterEnqueueFailure,
+  holdsRun,
+  mayFinishRun,
 } from "@sixb/core/internal/storage"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
+  ClaimRunInput,
+  ConfirmRunExecutionInput,
   ExecutionStorage,
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
@@ -20,15 +24,34 @@ import type {
   PipelineRunStorage,
   PipelineStepRunRecord,
   QueuePipelineRunInput,
-  StartPipelineRunInput,
+  ReleaseRunExecutionInput,
+  RunClaim,
   StartPipelineStepRunInput,
 } from "@sixb/core/storage"
 import { PIPELINE_RUN_FAILURE_CODES, PipelineRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
+import {
+  claimPgRun,
+  confirmPgRunExecution,
+  lockPgRun,
+  type PgRunExecutionColumns,
+  type PgRunTable,
+  pgRunExecutionFields,
+  releasePgRun,
+} from "./run-claim-sql"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
+
+const PIPELINE_RUNS: PgRunTable<PipelineRunDatabaseRow, PipelineRunRecord> = {
+  name: "pipeline_runs",
+  returning: "*",
+  toRun: rowToPipelineRunRecord,
+  notFound: (projectId, id) =>
+    new PipelineRunError(`[SixbPg] Pipeline run '${id}' not found for project '${projectId}'.`),
+  staleExecution,
+}
 
 export class PgPipelineRunStorage implements PipelineRunStorage {
   constructor(
@@ -97,6 +120,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       const [updated] = await tx<PipelineRunDatabaseRow[]>`
         UPDATE pipeline_runs
         SET status = ${"queued"}, queued_at = ${input.queuedAt ?? new Date()},
+            attempt = ${0}, execution_token = ${null}, execution_queue_lease_expires_at = ${null},
             started_at = ${null}, finished_at = ${null}, output_dataset_id = ${null},
             output_version_id = ${null}, error = ${null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -106,39 +130,21 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     })
   }
 
-  async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
-    const [updated] = await this.sql<PipelineRunDatabaseRow[]>`
-      UPDATE pipeline_runs
-      SET status = ${"running"}, started_at = ${input.startedAt ?? new Date()},
-          error = ${null}
-      WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"queued"}
-      RETURNING *
-    `
-    if (updated) return rowToPipelineRunRecord(updated)
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<PipelineRunRecord>> {
+    return runPgTransaction(this.sql, (tx) => claimPgRun(tx, PIPELINE_RUNS, input))
+  }
 
-    const existing = await this.getById({ projectId: input.projectId, id: input.id })
-    if (!existing) {
-      throw new PipelineRunError(
-        `[SixbPg] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
-    throw new PipelineRunError(
-      `[SixbPg] Pipeline run '${input.id}' cannot start from status '${existing.status}'.`
-    )
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<PipelineRunRecord> {
+    return runPgTransaction(this.sql, (tx) => confirmPgRunExecution(tx, PIPELINE_RUNS, input))
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    await releasePgRun(this.sql, PIPELINE_RUNS, input)
   }
 
   async finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      const [existing] = await tx<PipelineRunDatabaseRow[]>`
-        SELECT * FROM pipeline_runs
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-      `
-
-      if (!existing) {
-        throw new PipelineRunError(
-          `[SixbPg] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
-        )
-      }
+      const existing = await lockPgRun(tx, PIPELINE_RUNS, input.projectId, input.id)
 
       if (!canFinishPipelineRun(existing.status, input)) {
         throw new PipelineRunError(
@@ -146,12 +152,16 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
         )
       }
 
+      if (!mayFinishRun(existing, input)) throw staleExecution(input.id)
+
       const [updated] =
         input.status === "succeeded"
           ? await tx<PipelineRunDatabaseRow[]>`
               UPDATE pipeline_runs
               SET
                 status = ${input.status},
+                execution_token = ${null},
+                execution_queue_lease_expires_at = ${null},
                 finished_at = ${input.finishedAt ?? new Date()},
                 output_dataset_id = ${input.output?.datasetId ?? null},
                 output_version_id = ${input.output?.versionId ?? null},
@@ -163,6 +173,8 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
               UPDATE pipeline_runs
               SET
                 status = ${input.status},
+                execution_token = ${null},
+                execution_queue_lease_expires_at = ${null},
                 finished_at = ${input.finishedAt ?? new Date()},
                 output_dataset_id = ${null},
                 output_version_id = ${null},
@@ -177,16 +189,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
   async startStep(input: StartPipelineStepRunInput): Promise<PipelineStepRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      const [pipelineRun] = await tx<PipelineRunDatabaseRow[]>`
-        SELECT * FROM pipeline_runs
-        WHERE project_id = ${input.projectId} AND id = ${input.pipelineRunId}
-      `
-
-      if (!pipelineRun) {
-        throw new PipelineRunError(
-          `[SixbPg] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
-        )
-      }
+      const pipelineRun = await lockPgRun(tx, PIPELINE_RUNS, input.projectId, input.pipelineRunId)
 
       if (pipelineRun.status !== "running") {
         throw new PipelineRunError(
@@ -194,11 +197,21 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
         )
       }
 
-      if (pipelineRun.pipeline_id !== input.pipelineId) {
+      if (!holdsRun(pipelineRun, input.executionToken)) throw staleExecution(input.pipelineRunId)
+
+      if (pipelineRun.pipelineId !== input.pipelineId) {
         throw new PipelineRunError(
-          `[SixbPg] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
+          `[SixbPg] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipelineId}'.`
         )
       }
+
+      const [restarted] = await tx<PipelineStepRunDatabaseRow[]>`
+        UPDATE pipeline_step_runs
+        SET inputs = ${JSON.stringify(input.inputs)}::text::jsonb
+        WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"running"}
+        RETURNING *
+      `
+      if (restarted) return rowToPipelineStepRunRecord(restarted)
 
       try {
         const [row] = await tx<PipelineStepRunDatabaseRow[]>`
@@ -260,6 +273,16 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
         throw new PipelineRunError(
           `[SixbPg] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
+      }
+
+      const pipelineRun = await lockPgRun(
+        tx,
+        PIPELINE_RUNS,
+        input.projectId,
+        existing.pipeline_run_id
+      )
+      if (!holdsRun(pipelineRun, input.executionToken)) {
+        throw staleExecution(existing.pipeline_run_id)
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
@@ -436,6 +459,12 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
   }
 }
 
+function staleExecution(id: string): PipelineRunError {
+  return new PipelineRunError(
+    `[SixbPg] Execution token is no longer current on pipeline run '${id}'.`
+  )
+}
+
 function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord {
   return {
     id: row.id,
@@ -443,6 +472,7 @@ function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord 
     executionId: row.execution_id,
     pipelineId: row.pipeline_id,
     status: row.status,
+    ...pgRunExecutionFields(row),
     queuedAt: new Date(row.queued_at),
     startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
@@ -493,7 +523,7 @@ function assertOptionalNonNegativeInteger(value: number | undefined, fieldName: 
   }
 }
 
-interface PipelineRunDatabaseRow {
+interface PipelineRunDatabaseRow extends PgRunExecutionColumns {
   project_id: string
   id: string
   execution_id: string

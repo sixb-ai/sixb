@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
+import { holdsRun, mayFinishRun } from "@sixb/core/internal/storage"
 import {
   assertWorkflowAgentNodeRunExecution,
   assertWorkflowRunExecution,
@@ -7,6 +8,7 @@ import {
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
+  ClaimRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
   ConfirmWorkflowRunExecutionOwnershipInput,
   CreateWorkflowAgentNodeRunInput,
@@ -24,11 +26,11 @@ import type {
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
   ReclaimWorkflowAgentNodeRunInput,
-  ReclaimWorkflowRunInput,
+  ReleaseRunExecutionInput,
   ResumeWorkflowRunInput,
+  RunClaim,
   StartWorkflowAgentNodeRunInput,
   StartWorkflowNodeRunInput,
-  StartWorkflowRunInput,
   WaitWorkflowNodeRunInput,
   WaitWorkflowRunInput,
   WorkflowAgentNodeRunRecord,
@@ -44,6 +46,14 @@ import {
   WorkflowRunError,
 } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
+import {
+  claimSqliteRun,
+  confirmSqliteRunExecution,
+  releaseSqliteRun,
+  type SqliteRunExecutionColumns,
+  type SqliteRunTable,
+  sqliteRunExecutionFields,
+} from "./run-claim-sql"
 import {
   appendRunListFilters,
   hasEmptyStatuses,
@@ -64,6 +74,17 @@ export interface SqliteWorkflowRunStorageOptions {
   path?: string
   /** Internal shared connection used by bundled SqliteStorage. */
   connection?: SqliteStoreConnection
+}
+
+const WORKFLOW_RUNS: SqliteRunTable<WorkflowRunDatabaseRow, WorkflowRunRecord> = {
+  name: "workflow_runs",
+  toRun: rowToWorkflowRunRecord,
+  notFound: (projectId, id) =>
+    new WorkflowRunError(`[SixbSqlite] Workflow run '${id}' not found for project '${projectId}'.`),
+  staleExecution: (id) =>
+    new WorkflowRunError(
+      `[SixbSqlite] Execution token is no longer current on workflow run '${id}'.`
+    ),
 }
 
 export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
@@ -134,89 +155,18 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
     return this.requireWorkflowRun(input.projectId, input.id)
   }
 
-  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
-    const startedAt = input.startedAt ?? new Date()
-
-    return this.db.transaction(() => {
-      const existing = this.db
-        .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.id) as WorkflowRunDatabaseRow | null
-
-      if (!existing || existing.status !== "queued") {
-        throw new WorkflowRunError(
-          existing
-            ? `[SixbSqlite] Workflow run '${input.id}' cannot start from status '${existing.status}'.`
-            : `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
-        )
-      }
-
-      this.db
-        .query(
-          `
-          UPDATE workflow_runs
-          SET
-            status = ?,
-            started_at = ?,
-            finished_at = NULL,
-            error = NULL,
-            attempt = attempt + 1,
-            execution_token = ?, execution_queue_lease_expires_at = ?
-          WHERE project_id = ? AND id = ?
-        `
-        )
-        .run(
-          "running",
-          startedAt.toISOString(),
-          input.execution?.token ?? null,
-          input.execution?.queueLeaseExpiresAt.toISOString() ?? null,
-          input.projectId,
-          input.id
-        )
-
-      return this.requireWorkflowRun(input.projectId, input.id)
-    })()
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<WorkflowRunRecord>> {
+    return this.db.transaction(() => claimSqliteRun(this.db, WORKFLOW_RUNS, input))()
   }
 
-  async reclaim(input: ReclaimWorkflowRunInput): Promise<WorkflowRunRecord> {
-    return this.db.transaction(() => {
-      const row = this.requireStatus(input.projectId, input.id, "running")
-      this.db
-        .query(`
-        UPDATE workflow_runs SET attempt = ?, execution_token = ?,
-          execution_queue_lease_expires_at = ? WHERE project_id = ? AND id = ?
-      `)
-        .run(
-          row.attempt + 1,
-          input.execution.token,
-          input.execution.queueLeaseExpiresAt.toISOString(),
-          input.projectId,
-          input.id
-        )
-      return this.requireWorkflowRun(input.projectId, input.id)
-    })()
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    releaseSqliteRun(this.db, WORKFLOW_RUNS, input)
   }
 
   async confirmExecutionOwnership(
     input: ConfirmWorkflowRunExecutionOwnershipInput
   ): Promise<WorkflowRunRecord> {
-    return this.db.transaction(() => {
-      const row = this.requireStatus(input.projectId, input.id, "running")
-      assertSqliteWorkflowRunOwnership(row, input.executionToken)
-      const current = row.execution_queue_lease_expires_at
-        ? new Date(row.execution_queue_lease_expires_at)
-        : input.queueLeaseExpiresAt
-      this.db
-        .query(`
-        UPDATE workflow_runs SET execution_queue_lease_expires_at = ?
-        WHERE project_id = ? AND id = ?
-      `)
-        .run(
-          new Date(Math.max(current.getTime(), input.queueLeaseExpiresAt.getTime())).toISOString(),
-          input.projectId,
-          input.id
-        )
-      return this.requireWorkflowRun(input.projectId, input.id)
-    })()
+    return this.db.transaction(() => confirmSqliteRunExecution(this.db, WORKFLOW_RUNS, input))()
   }
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
@@ -236,7 +186,9 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           `[SixbSqlite] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
-      assertSqliteWorkflowRunOwnership(existing, input.executionToken)
+      if (!mayFinishRun(rowToWorkflowRunRecord(existing), input)) {
+        throw WORKFLOW_RUNS.staleExecution(input.id)
+      }
 
       this.db
         .query(
@@ -334,7 +286,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
             status = ?,
             finished_at = NULL,
             error = NULL
-            , attempt = attempt + 1, execution_token = ?, execution_queue_lease_expires_at = ?
+            , attempt = 1, execution_token = ?, execution_queue_lease_expires_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -1002,15 +954,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
-    attempt: row.attempt,
-    ...(row.execution_token && row.execution_queue_lease_expires_at
-      ? {
-          execution: {
-            token: row.execution_token,
-            queueLeaseExpiresAt: new Date(row.execution_queue_lease_expires_at),
-          },
-        }
-      : {}),
+    ...sqliteRunExecutionFields(row),
   }
 }
 
@@ -1052,7 +996,7 @@ function canFinishWorkflowRun(
   )
 }
 
-interface WorkflowRunDatabaseRow {
+interface WorkflowRunDatabaseRow extends SqliteRunExecutionColumns {
   project_id: string
   id: string
   execution_id: string
@@ -1064,9 +1008,6 @@ interface WorkflowRunDatabaseRow {
   started_at: string
   finished_at: string | null
   error: string | null
-  attempt: number
-  execution_token: string | null
-  execution_queue_lease_expires_at: string | null
 }
 
 interface WorkflowNodeRunDatabaseRow {
@@ -1148,9 +1089,5 @@ function rowToWorkflowAgentNodeRunRecord(
 }
 
 function assertSqliteWorkflowRunOwnership(row: WorkflowRunDatabaseRow, token?: string): void {
-  if (row.execution_token !== (token ?? null)) {
-    throw new WorkflowRunError(
-      `[SixbSqlite] Execution token is no longer current on workflow run '${row.id}'.`
-    )
-  }
+  if (!holdsRun(rowToWorkflowRunRecord(row), token)) throw WORKFLOW_RUNS.staleExecution(row.id)
 }

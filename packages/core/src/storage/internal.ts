@@ -50,6 +50,15 @@ export {
 export { canRequeuePipelineRunAfterEnqueueFailure } from "./pipeline-runs/idempotency"
 export { canFinishPipelineRun } from "./pipeline-runs/transitions"
 export { projectionRunObjectTypesVisible, zeroProjectionRunProgress } from "./projection-runs/types"
+export {
+  type ClaimableRun,
+  hasLapsedLease,
+  holdsRun,
+  laterLease,
+  mayFinishRun,
+  planRunClaim,
+  type RunClaimPlan,
+} from "./run-claim"
 export { canRequeueSyncRunAfterEnqueueFailure } from "./sync-runs/idempotency"
 export { canFinishSyncRun } from "./sync-runs/transitions"
 export {

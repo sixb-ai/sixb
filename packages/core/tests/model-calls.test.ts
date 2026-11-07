@@ -4,6 +4,7 @@ import { emptyGrantIndex } from "../src/authorization"
 import type { FileRef } from "../src/blob-storage/types"
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 import { createModelCallsRuntime, type ModelCallRunVisibility } from "../src/models/calls"
+import { startTestRun } from "../src/testing"
 import { createTestAgentExecution } from "../src/testing/agent-execution"
 import { createTestWorkflowExecution } from "../src/testing/workflow-execution"
 
@@ -112,7 +113,7 @@ async function seed() {
     executionId: workflowExecution,
     input: {},
   })
-  await storage.workflowRuns.start({ projectId, id: "review_run" })
+  await startTestRun(storage.workflowRuns, { projectId, id: "review_run" })
   await storage.workflowRuns.nodes.start({
     projectId,
     id: "review_run:node:0",

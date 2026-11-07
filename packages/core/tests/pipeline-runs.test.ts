@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { startTestRun } from "@sixb/core/testing"
 import { InMemoryStorage } from "../src"
 import type { PipelineRunFailureCode, QueuePipelineRunInput, SixbFailure } from "../src/storage"
 import { PipelineRunError } from "../src/storage"
@@ -29,7 +30,7 @@ async function startPipelineRun(storage: InMemoryStorage, input: TestStartPipeli
     executionId,
     queuedAt: startedAt,
   })
-  return storage.pipelineRuns.start({ id: input.id, projectId: input.projectId, startedAt })
+  return startTestRun(storage.pipelineRuns, { id: input.id, projectId: input.projectId, startedAt })
 }
 
 const FAILURE: SixbFailure<PipelineRunFailureCode> = {

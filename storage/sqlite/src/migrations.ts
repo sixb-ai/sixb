@@ -320,6 +320,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("086-maintenance-heartbeats", maintenanceHeartbeatsSql),
     sqliteSql("087-lake-retention-runs", lakeRetentionRunsSql),
     sqliteSql("088-dataset-ingest-inbox", datasetIngestInboxSql),
+    sqliteSql("089-run-recovery", runRecoverySql),
   ],
 })
 
@@ -735,3 +736,4 @@ import maintenanceHeartbeatsSql from "./migrations/086-maintenance-heartbeats.sq
 }
 import lakeRetentionRunsSql from "./migrations/087-lake-retention-runs.sql" with { type: "text" }
 import datasetIngestInboxSql from "./migrations/088-dataset-ingest-inbox.sql" with { type: "text" }
+import runRecoverySql from "./migrations/089-run-recovery.sql" with { type: "text" }

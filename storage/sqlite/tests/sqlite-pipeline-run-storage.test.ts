@@ -5,7 +5,7 @@ import {
   type PipelineRunStorage,
   type SixbFailure,
 } from "@sixb/core/storage"
-import { createTestPipelineExecution, startTestPipelineRun } from "@sixb/core/testing"
+import { createTestPipelineExecution, startTestPipelineRun, startTestRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 
 const FAILURE: SixbFailure<PipelineRunFailureCode> = {
@@ -328,13 +328,6 @@ describe("SqlitePipelineRunStorage", () => {
       projectId: "my-app",
       pipelineId: "customers",
     })
-
-    await expect(
-      storage.start({
-        id: "piperun_1",
-        projectId: "my-app",
-      })
-    ).rejects.toBeInstanceOf(PipelineRunError)
 
     await expect(
       storage.finish({

@@ -3,8 +3,8 @@ import { InMemoryStorage } from "../src"
 import {
   type AgentRunFailureCode,
   type QueueWorkflowRunInput,
+  type RunExecution,
   type SixbFailure,
-  type StartWorkflowRunInput,
   WorkflowRunError,
   type WorkflowRunFailureCode,
 } from "../src/storage"
@@ -12,13 +12,18 @@ import {
   createTestAgentExecution,
   createTestAutomaticWorkflowExecution,
   createTestWorkflowExecution,
+  startTestRun,
 } from "../src/testing"
 
 type TestQueueWorkflowRunInput = Omit<QueueWorkflowRunInput, "executionId"> & {
   readonly executionId?: string
 }
 
-type TestStartWorkflowRunInput = StartWorkflowRunInput & {
+type TestStartWorkflowRunInput = {
+  readonly id: string
+  readonly projectId: string
+  readonly startedAt?: Date
+  readonly execution?: RunExecution
   readonly workflowId?: string
   readonly input?: QueueWorkflowRunInput["input"]
 }
@@ -27,7 +32,7 @@ function createWorkflowRunStorage() {
   const root = new InMemoryStorage()
   const storage = root.workflowRuns!
   const queue = storage.queue.bind(storage)
-  const start = storage.start.bind(storage)
+  const start = (input: Parameters<typeof startTestRun>[1]) => startTestRun(storage, input)
   const queueFixture = async (input: TestQueueWorkflowRunInput) => {
     const executionId = await createTestWorkflowExecution(root.executions, {
       projectId: input.projectId,
@@ -83,7 +88,7 @@ describe("InMemoryWorkflowRunStorage", () => {
     const storage = root.workflowRuns!
 
     await expect(
-      storage.start({ id: "wf-run-missing", projectId: "my-app" })
+      startTestRun(storage, { id: "wf-run-missing", projectId: "my-app" })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
     await root.executions.create({
@@ -599,15 +604,6 @@ describe("InMemoryWorkflowRunStorage", () => {
     })
 
     await expect(
-      storage.start({
-        id: "wf-run-1",
-        projectId: "my-app",
-        workflowId: "reconcile-transaction",
-        input: {},
-      })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
-
-    await expect(
       storage.finish({
         id: "missing",
         projectId: "my-app",
@@ -771,7 +767,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       executionToken: "workflow-exec-old",
     })
 
-    const reclaimed = await storage.reclaim({
+    const { run: reclaimed } = await storage.startOrReclaim({
       id: "wf-run-fenced",
       projectId: "my-app",
       execution: {

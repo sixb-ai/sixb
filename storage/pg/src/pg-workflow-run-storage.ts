@@ -1,5 +1,6 @@
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
+import { holdsRun, mayFinishRun } from "@sixb/core/internal/storage"
 import {
   assertWorkflowAgentNodeRunExecution,
   assertWorkflowRunExecution,
@@ -7,6 +8,7 @@ import {
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
+  ClaimRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
   ConfirmWorkflowRunExecutionOwnershipInput,
   CreateWorkflowAgentNodeRunInput,
@@ -24,11 +26,11 @@ import type {
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
   ReclaimWorkflowAgentNodeRunInput,
-  ReclaimWorkflowRunInput,
+  ReleaseRunExecutionInput,
   ResumeWorkflowRunInput,
+  RunClaim,
   StartWorkflowAgentNodeRunInput,
   StartWorkflowNodeRunInput,
-  StartWorkflowRunInput,
   WaitWorkflowNodeRunInput,
   WaitWorkflowRunInput,
   WorkflowAgentNodeRunRecord,
@@ -45,9 +47,27 @@ import {
 } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
+import {
+  claimPgRun,
+  confirmPgRunExecution,
+  type PgRunExecutionColumns,
+  type PgRunTable,
+  pgRunExecutionFields,
+  releasePgRun,
+} from "./run-claim-sql"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
+
+const WORKFLOW_RUNS: PgRunTable<WorkflowRunDatabaseRow, WorkflowRunRecord> = {
+  name: "workflow_runs",
+  returning: "*",
+  toRun: rowToWorkflowRunRecord,
+  notFound: (projectId, id) =>
+    new WorkflowRunError(`[SixbPg] Workflow run '${id}' not found for project '${projectId}'.`),
+  staleExecution: (id) =>
+    new WorkflowRunError(`[SixbPg] Execution token is no longer current on workflow run '${id}'.`),
+}
 
 export class PgWorkflowRunStorage implements WorkflowRunStorage {
   readonly nodes: PgWorkflowNodeRunStorage
@@ -109,74 +129,18 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     }
   }
 
-  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const startedAt = input.startedAt ?? new Date()
-      const [existing] = await tx<WorkflowRunDatabaseRow[]>`
-        SELECT * FROM workflow_runs
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        FOR UPDATE
-      `
-
-      if (!existing || existing.status !== "queued") {
-        throw new WorkflowRunError(
-          existing
-            ? `[SixbPg] Workflow run '${input.id}' cannot start from status '${existing.status}'.`
-            : `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
-        )
-      }
-
-      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
-        UPDATE workflow_runs
-        SET
-          status = ${"running"},
-          started_at = ${startedAt},
-          finished_at = ${null},
-          error = ${null},
-          attempt = attempt + 1,
-          execution_token = ${input.execution?.token ?? null},
-          execution_queue_lease_expires_at = ${input.execution?.queueLeaseExpiresAt ?? null}
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-
-      return rowToWorkflowRunRecord(updated)
-    })
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<WorkflowRunRecord>> {
+    return runPgTransaction(this.sql, (tx) => claimPgRun(tx, WORKFLOW_RUNS, input))
   }
 
-  async reclaim(input: ReclaimWorkflowRunInput): Promise<WorkflowRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existing = await lockWorkflowRun(tx, input.projectId, input.id, "running")
-      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
-        UPDATE workflow_runs SET
-          attempt = ${Number(existing.attempt) + 1},
-          execution_token = ${input.execution.token},
-          execution_queue_lease_expires_at = ${input.execution.queueLeaseExpiresAt}
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-      return rowToWorkflowRunRecord(updated)
-    })
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    await releasePgRun(this.sql, WORKFLOW_RUNS, input)
   }
 
   async confirmExecutionOwnership(
     input: ConfirmWorkflowRunExecutionOwnershipInput
   ): Promise<WorkflowRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existing = await lockWorkflowRun(tx, input.projectId, input.id, "running")
-      assertWorkflowRunExecutionOwnership(existing, input.executionToken)
-      const current = existing.execution_queue_lease_expires_at
-        ? new Date(existing.execution_queue_lease_expires_at)
-        : input.queueLeaseExpiresAt
-      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
-        UPDATE workflow_runs SET execution_queue_lease_expires_at = ${new Date(
-          Math.max(current.getTime(), input.queueLeaseExpiresAt.getTime())
-        )}
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-      return rowToWorkflowRunRecord(updated)
-    })
+    return runPgTransaction(this.sql, (tx) => confirmPgRunExecution(tx, WORKFLOW_RUNS, input))
   }
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
@@ -198,7 +162,9 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
-      assertWorkflowRunExecutionOwnership(existing, input.executionToken)
+      if (!mayFinishRun(rowToWorkflowRunRecord(existing), input)) {
+        throw WORKFLOW_RUNS.staleExecution(input.id)
+      }
 
       const [updated] =
         input.status === "succeeded"
@@ -294,7 +260,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           status = ${"running"},
           finished_at = ${null},
           error = ${null},
-          attempt = attempt + 1,
+          attempt = ${1},
           execution_token = ${input.execution?.token ?? null},
           execution_queue_lease_expires_at = ${input.execution?.queueLeaseExpiresAt ?? null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -842,15 +808,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
-    attempt: Number(row.attempt),
-    ...(row.execution_token && row.execution_queue_lease_expires_at
-      ? {
-          execution: {
-            token: row.execution_token,
-            queueLeaseExpiresAt: new Date(row.execution_queue_lease_expires_at),
-          },
-        }
-      : {}),
+    ...pgRunExecutionFields(row),
   }
 }
 
@@ -890,7 +848,7 @@ function canFinishWorkflowRun(
   )
 }
 
-interface WorkflowRunDatabaseRow {
+interface WorkflowRunDatabaseRow extends PgRunExecutionColumns {
   project_id: string
   id: string
   execution_id: string
@@ -902,9 +860,6 @@ interface WorkflowRunDatabaseRow {
   started_at: Date | string
   finished_at: Date | string | null
   error: JsonValue | null
-  attempt: number | string
-  execution_token: string | null
-  execution_queue_lease_expires_at: Date | string | null
 }
 
 interface WorkflowNodeRunDatabaseRow {
@@ -1032,11 +987,7 @@ async function lockWorkflowRun(
 }
 
 function assertWorkflowRunExecutionOwnership(row: WorkflowRunDatabaseRow, token?: string): void {
-  if (row.execution_token !== (token ?? null)) {
-    throw new WorkflowRunError(
-      `[SixbPg] Execution token is no longer current on workflow run '${row.id}'.`
-    )
-  }
+  if (!holdsRun(rowToWorkflowRunRecord(row), token)) throw WORKFLOW_RUNS.staleExecution(row.id)
 }
 
 async function assertWorkflowNodeParentExecutionOwnership(

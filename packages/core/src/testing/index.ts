@@ -175,6 +175,17 @@ export {
   type QueueContractSuiteOptions,
   runQueueContractSuite,
 } from "./queues-contract"
+export { claimTestRun, startTestRun, testRunExecution } from "./run-claim"
+export {
+  type RunClaimStorageContractStorage,
+  type RunClaimStorageContractSuiteOptions,
+  runRunClaimStorageContractSuite,
+} from "./run-claim-storage-contract"
+export {
+  RecoveryGate,
+  type RunRecoveryFixture,
+  runRunRecoveryContractSuite,
+} from "./run-recovery-contract"
 export {
   runSandboxCredentialsContractSuite,
   type SandboxCredentialsContractSuiteOptions,

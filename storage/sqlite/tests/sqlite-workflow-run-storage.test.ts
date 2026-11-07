@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   type AgentRunFailureCode,
   type QueueWorkflowRunInput,
+  type RunExecution,
   type SixbFailure,
-  type StartWorkflowRunInput,
   WorkflowRunError,
   type WorkflowRunFailureCode,
 } from "@sixb/core/storage"
@@ -11,6 +11,7 @@ import {
   createTestAgentExecution,
   createTestAutomaticWorkflowExecution,
   createTestWorkflowExecution,
+  startTestRun,
 } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { SqliteWorkflowRunStorage } from "../src/workflow-run-storage"
@@ -84,7 +85,7 @@ describe("SqliteWorkflowRunStorage", () => {
 
   test("requires a queued run linked to its matching workflow execution", async () => {
     await expect(
-      root.workflowRuns.start({ id: "wf-run-missing", projectId: "my-app" })
+      startTestRun(root.workflowRuns, { id: "wf-run-missing", projectId: "my-app" })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
     const executionId = await createTestWorkflowExecution(root.executions, {
@@ -480,15 +481,6 @@ describe("SqliteWorkflowRunStorage", () => {
     })
 
     await expect(
-      storage.start({
-        id: "wf-run-1",
-        projectId: "my-app",
-        workflowId: "reconcile-transaction",
-        input: {},
-      })
-    ).rejects.toBeInstanceOf(WorkflowRunError)
-
-    await expect(
       storage.finish({
         id: "missing",
         projectId: "my-app",
@@ -683,7 +675,11 @@ type TestQueueWorkflowRunInput = Omit<QueueWorkflowRunInput, "executionId"> & {
   readonly executionId?: string
 }
 
-type TestStartWorkflowRunInput = StartWorkflowRunInput & {
+type TestStartWorkflowRunInput = {
+  readonly id: string
+  readonly projectId: string
+  readonly startedAt?: Date
+  readonly execution?: RunExecution
   readonly workflowId?: string
   readonly input?: QueueWorkflowRunInput["input"]
 }
@@ -691,7 +687,7 @@ type TestStartWorkflowRunInput = StartWorkflowRunInput & {
 function createWorkflowRunStorage(root: SqliteStorage) {
   const storage = root.workflowRuns
   const queue = storage.queue.bind(storage)
-  const start = storage.start.bind(storage)
+  const start = (input: Parameters<typeof startTestRun>[1]) => startTestRun(storage, input)
   const queueFixture = async (input: TestQueueWorkflowRunInput) => {
     const executionId = await createTestWorkflowExecution(root.executions, {
       projectId: input.projectId,

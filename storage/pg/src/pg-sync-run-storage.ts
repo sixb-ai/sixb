@@ -1,25 +1,52 @@
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
-import { canFinishSyncRun, canRequeueSyncRunAfterEnqueueFailure } from "@sixb/core/internal/storage"
+import {
+  canFinishSyncRun,
+  canRequeueSyncRunAfterEnqueueFailure,
+  mayFinishRun,
+} from "@sixb/core/internal/storage"
 import { assertSyncRunExecution } from "@sixb/core/internal/sync-run-storage-provider"
 import type {
+  ClaimRunInput,
+  ConfirmRunExecutionInput,
   ExecutionStorage,
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  PrepareSyncRunCommitInput,
   QueueSyncRunInput,
-  StartSyncRunInput,
+  ReleaseRunExecutionInput,
+  RunClaim,
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
 import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
+import {
+  claimPgRun,
+  confirmPgRunExecution,
+  lockHeldPgRun,
+  lockPgRun,
+  type PgRunExecutionColumns,
+  type PgRunTable,
+  pgRunExecutionFields,
+  releasePgRun,
+} from "./run-claim-sql"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
-import { type PgStoreClient, runPgTransaction } from "./transactions"
+import { lockAdvisoryKeys, type PgStoreClient, runPgTransaction } from "./transactions"
+
+const SYNC_RUNS: PgRunTable<DatabaseRow, SyncRunRecord> = {
+  name: "sync_runs",
+  returning: "*, checkpoint IS NOT NULL AS checkpoint_present",
+  toRun: rowToSyncRunRecord,
+  notFound: (projectId, id) =>
+    new SyncRunError(`[SixbPg] Sync run '${id}' not found for project '${projectId}'.`),
+  staleExecution,
+}
 
 export class PgSyncRunStorage implements SyncRunStorage {
   constructor(
@@ -91,7 +118,9 @@ export class PgSyncRunStorage implements SyncRunStorage {
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE sync_runs
         SET status = ${"queued"}, queued_at = ${input.queuedAt ?? new Date()},
-            started_at = ${null}, finished_at = ${null}, rows_read = ${null},
+            attempt = ${0}, execution_token = ${null}, execution_queue_lease_expires_at = ${null},
+            commit_prepared_at = ${null}, started_at = ${null}, finished_at = ${null},
+            rows_read = ${null},
             output_version_id = ${null}, error = ${null}, checkpoint = ${null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
@@ -100,53 +129,66 @@ export class PgSyncRunStorage implements SyncRunStorage {
     })
   }
 
-  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
-    const [updated] = await this.sql<DatabaseRow[]>`
-      UPDATE sync_runs
-      SET status = ${"running"}, started_at = ${input.startedAt ?? new Date()},
-          error = ${null}
-      WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"queued"}
-      RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
-    `
-    if (updated) return rowToSyncRunRecord(updated)
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<SyncRunRecord>> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const { syncId } = await lockPgRun(tx, SYNC_RUNS, input.projectId, input.id)
 
-    const existing = await this.getById({ projectId: input.projectId, id: input.id })
-    if (!existing) {
-      throw new SyncRunError(
-        `[SixbPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
-    throw new SyncRunError(
-      `[SixbPg] Sync run '${input.id}' cannot start from status '${existing.status}'.`
-    )
+      // Two queued runs of one Sync would each see the other not running yet.
+      await lockAdvisoryKeys(tx, [syncRunsLockKey(input.projectId, syncId)])
+
+      const [sibling] = await tx<DatabaseRow[]>`
+        SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
+        WHERE project_id = ${input.projectId} AND sync_id = ${syncId}
+          AND status = ${"running"} AND id <> ${input.id}
+        LIMIT 1
+      `
+      return claimPgRun(tx, SYNC_RUNS, input, sibling && rowToSyncRunRecord(sibling))
+    })
+  }
+
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<SyncRunRecord> {
+    return runPgTransaction(this.sql, (tx) => confirmPgRunExecution(tx, SYNC_RUNS, input))
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    await releasePgRun(this.sql, SYNC_RUNS, input)
+  }
+
+  async prepareCommit(input: PrepareSyncRunCommitInput): Promise<SyncRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      await lockHeldPgRun(tx, SYNC_RUNS, input)
+
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE sync_runs
+        SET rows_read = ${input.rowsRead},
+            checkpoint = ${serializeCheckpoint(input.checkpoint)}::text::jsonb,
+            commit_prepared_at = ${input.preparedAt ?? new Date()}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
+      `
+      return rowToSyncRunRecord(updated)
+    })
   }
 
   async finish(input: FinishSyncRunInput): Promise<SyncRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      const [existing] = await tx<DatabaseRow[]>`
-        SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-      `
+      const record = await lockPgRun(tx, SYNC_RUNS, input.projectId, input.id)
 
-      if (!existing) {
+      if (!canFinishSyncRun(record.status, input)) {
         throw new SyncRunError(
-          `[SixbPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Sync run '${input.id}' cannot finish from status '${record.status}'.`
         )
       }
 
-      if (!canFinishSyncRun(existing.status, input)) {
-        throw new SyncRunError(
-          `[SixbPg] Sync run '${input.id}' cannot finish from status '${existing.status}'.`
-        )
-      }
+      if (!mayFinishRun(record, input)) throw staleExecution(input.id)
 
       if (input.status === "succeeded") {
-        if (input.output && input.output.datasetId !== existing.dataset_id) {
+        if (input.output && input.output.datasetId !== record.datasetId) {
           throw new SyncRunError(
-            `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
+            `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${record.datasetId}'.`
           )
         }
-        if (!input.output && input.rowsRead !== 0 && existing.mode !== "merge") {
+        if (!input.output && input.rowsRead !== 0 && record.mode !== "merge") {
           throw new SyncRunError(
             `[SixbPg] Sync run '${input.id}' may omit its output with rows read only for an initial merge no-op.`
           )
@@ -159,6 +201,8 @@ export class PgSyncRunStorage implements SyncRunStorage {
               UPDATE sync_runs
               SET
                 status = ${input.status},
+                execution_token = ${null},
+                execution_queue_lease_expires_at = ${null},
                 finished_at = ${input.finishedAt ?? new Date()},
                 rows_read = ${input.rowsRead},
                 output_version_id = ${input.output?.versionId ?? null},
@@ -171,8 +215,10 @@ export class PgSyncRunStorage implements SyncRunStorage {
               UPDATE sync_runs
               SET
                 status = ${input.status},
+                execution_token = ${null},
+                execution_queue_lease_expires_at = ${null},
                 finished_at = ${input.finishedAt ?? new Date()},
-                rows_read = ${input.rowsRead ?? existing.rows_read ?? null},
+                rows_read = ${input.rowsRead ?? record.rowsRead ?? null},
                 output_version_id = ${null},
                 error = ${input.error === undefined ? null : serializeSixbFailure(input.error, SYNC_RUN_FAILURE_CODES)}::text::jsonb,
                 checkpoint = ${null}
@@ -266,6 +312,14 @@ export class PgSyncRunStorage implements SyncRunStorage {
   }
 }
 
+function staleExecution(id: string): SyncRunError {
+  return new SyncRunError(`[SixbPg] Execution token is no longer current on sync run '${id}'.`)
+}
+
+function syncRunsLockKey(projectId: string, syncId: string): string {
+  return `sync-runs:${JSON.stringify([projectId, syncId])}`
+}
+
 function serializeCheckpoint(checkpoint: JsonValue | undefined): string | null {
   return checkpoint !== undefined ? JSON.stringify(checkpoint) : null
 }
@@ -279,6 +333,8 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
     datasetId: row.dataset_id,
     mode: row.mode,
     status: row.status,
+    ...pgRunExecutionFields(row),
+    commitPreparedAt: row.commit_prepared_at ? new Date(row.commit_prepared_at) : undefined,
     queuedAt: new Date(row.queued_at),
     startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
@@ -306,7 +362,7 @@ function hasCheckpoint(row: DatabaseRow): boolean {
   )
 }
 
-interface DatabaseRow {
+interface DatabaseRow extends PgRunExecutionColumns {
   project_id: string
   id: string
   execution_id: string
@@ -314,6 +370,7 @@ interface DatabaseRow {
   dataset_id: string
   mode: SyncRunRecord["mode"]
   status: SyncRunRecord["status"]
+  commit_prepared_at: Date | string | null
   queued_at: Date | string
   started_at: Date | string | null
   finished_at: Date | string | null
