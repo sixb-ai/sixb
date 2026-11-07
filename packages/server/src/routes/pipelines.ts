@@ -29,6 +29,7 @@ function serializePipelineRun(run: PipelineRunRecord) {
     projectId: run.projectId,
     pipelineId: run.pipelineId,
     status: run.status,
+    attempt: run.attempt,
     queuedAt: toIsoString(run.queuedAt),
     startedAt: run.startedAt ? toIsoString(run.startedAt) : undefined,
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,

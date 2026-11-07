@@ -63,6 +63,8 @@ export const PipelineRunSchema = z.object({
   projectId: z.string(),
   pipelineId: z.string(),
   status: PipelineRunStatusSchema,
+  /** How many executions took the run: above one, it resumed after losing its worker. */
+  attempt: z.number(),
   queuedAt: z.string(),
   startedAt: z.string().optional(),
   finishedAt: z.string().optional(),

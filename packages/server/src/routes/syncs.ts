@@ -30,6 +30,7 @@ function serializeSyncRun(run: SyncRunRecord) {
     datasetId: run.datasetId,
     mode: run.mode,
     status: run.status,
+    attempt: run.attempt,
     queuedAt: toIsoString(run.queuedAt),
     startedAt: run.startedAt ? toIsoString(run.startedAt) : undefined,
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
