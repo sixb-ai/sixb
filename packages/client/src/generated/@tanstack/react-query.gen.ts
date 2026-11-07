@@ -2710,7 +2710,7 @@ export const getLakeHealthQueryKey = (options?: Options<GetLakeHealthData>) =>
   createQueryKey("getLakeHealth", options)
 
 /**
- * Describe how the lake stores each dataset, and its retention settings
+ * Describe how the lake stores each dataset, and what its retention does
  */
 export const getLakeHealthOptions = (options?: Options<GetLakeHealthData>) =>
   queryOptions<

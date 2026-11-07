@@ -1800,7 +1800,7 @@ export const listDatasetRows = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Describe how the lake stores each dataset, and its retention settings
+ * Describe how the lake stores each dataset, and what its retention does
  */
 export const getLakeHealth = <ThrowOnError extends boolean = false>(
   options?: Options<GetLakeHealthData, ThrowOnError>

@@ -6710,9 +6710,17 @@ export type GetLakeHealthResponses = {
     available: boolean
     cleanup: {
       /**
-       * Whether retention runs on its schedule
+       * What actually happens: `not-requested` when no orchestrator asks, `no-worker` when no lake worker runs what it asks
        */
-      enabled: boolean
+      state: "off" | "idle" | "not-requested" | "no-worker" | "failing" | "running"
+      /**
+       * When the orchestrator last asked for cleanup
+       */
+      requestedAt: string | null
+      /**
+       * When a lake worker last finished a cleanup
+       */
+      lastRunAt: string | null
       keepVersionsFor: string
       deleteFilesAfter: string
       cleanupEvery: string

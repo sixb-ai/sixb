@@ -104,7 +104,7 @@ const url = "http://localhost/api/lake/health"
 
 describe("GET /api/lake/health", () => {
   // Reproduce: describe `host.definitions.datasets.list()` in routes/lake.ts.
-  test("describes the datasets the caller may view, with the retention settings", async () => {
+  test("describes the datasets the caller may view, with what retention does", async () => {
     const lakeStorage = new MaintainedLakeStorage()
     const { app, storage } = await createApp({
       lakeStorage,
@@ -118,7 +118,9 @@ describe("GET /api/lake/health", () => {
     expect(await response.json()).toEqual({
       available: true,
       cleanup: {
-        enabled: true,
+        state: "not-requested",
+        requestedAt: null,
+        lastRunAt: null,
         keepVersionsFor: "3d",
         deleteFilesAfter: "7d",
         cleanupEvery: "30m",
@@ -126,6 +128,38 @@ describe("GET /api/lake/health", () => {
       datasets: [health(invoices.id)],
     })
     expect(lakeStorage.described).toEqual([[invoices.id]])
+  })
+
+  // Reproduce: answer `state: "running"` from `settings.enabled` in routes/lake.ts.
+  test("says what durable state says about retention, not what the settings ask for", async () => {
+    const { app, storage } = await createApp({ lakeStorage: new MaintainedLakeStorage() })
+    const headers = await seedSession(storage, "usr_staff", [staff.id])
+    const requestedAt = new Date()
+
+    await storage.maintenanceHeartbeats?.record({
+      projectId,
+      beatAt: new Date(),
+      everyMs: 30_000,
+      passes: [
+        {
+          id: "lake-retention",
+          lastSucceededAt: requestedAt,
+          consecutiveFailures: 0,
+          lastError: null,
+        },
+      ],
+    })
+    await storage.lakeRetentionRuns?.record({ projectId, finishedAt: requestedAt, failed: false })
+
+    const response = await app.fetch(new Request(url, { headers }))
+
+    expect(await response.json()).toMatchObject({
+      cleanup: {
+        state: "running",
+        requestedAt: requestedAt.toISOString(),
+        lastRunAt: requestedAt.toISOString(),
+      },
+    })
   })
 
   test("asks the provider nothing when the caller may view no dataset", async () => {

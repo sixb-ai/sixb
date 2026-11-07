@@ -129,8 +129,28 @@ export const en = {
     cleanupDescription:
       "Removes replaced versions and the files only they read. The versions projections applied are always kept.",
     status: "Status",
-    on: (every: string) => `On, every ${every}`,
-    off: "Off",
+    on: (every: string) => `Running, every ${every}`,
+    states: {
+      off: "Off",
+      idle: "Nothing to clean",
+      "not-requested": "Not running",
+      "no-worker": "Waiting for a lake worker",
+      failing: "Failing",
+    },
+    stateNotes: {
+      off: "The project turned it off. Replaced versions stay until someone cleans up by hand.",
+      idle: "No dataset writes to this lake yet.",
+      running: "The orchestrator requests it and a lake worker runs it.",
+      "not-requested":
+        "Nothing is asking for cleanup: the orchestrator is not running. Replaced versions stay until it does.",
+      "no-worker":
+        "Cleanup is requested, but no lake worker has run it. Replaced versions stay until one does.",
+      failing:
+        "The last attempt failed, and the next one tries again. The details went to the project's error handler.",
+    },
+    lastRequested: "Last requested",
+    lastRun: "Last run",
+    never: "Never",
     keepVersionsFor: "Keeps replaced versions for",
     deleteFilesAfter: "Deletes unread files after",
     datasetsTitle: "Datasets",
@@ -338,8 +358,28 @@ export const fr: Translation<DataMessages> = {
     cleanupDescription:
       "Supprime les versions remplacées et les fichiers qu’elles seules lisent. Les versions appliquées par les projections sont toujours conservées.",
     status: "État",
-    on: (every: string) => `Activé, toutes les ${every}`,
-    off: "Désactivé",
+    on: (every: string) => `En marche, toutes les ${every}`,
+    states: {
+      off: "Désactivé",
+      idle: "Rien à nettoyer",
+      "not-requested": "À l’arrêt",
+      "no-worker": "En attente d’un worker du lac",
+      failing: "En échec",
+    },
+    stateNotes: {
+      off: "Le projet l’a désactivé. Les versions remplacées restent jusqu’à un nettoyage manuel.",
+      idle: "Aucun jeu de données n’écrit encore dans ce lac.",
+      running: "L’orchestrateur le demande et un worker du lac l’exécute.",
+      "not-requested":
+        "Rien ne demande le nettoyage : l’orchestrateur ne tourne pas. Les versions remplacées restent en attendant.",
+      "no-worker":
+        "Le nettoyage est demandé, mais aucun worker du lac ne l’a exécuté. Les versions remplacées restent en attendant.",
+      failing:
+        "La dernière tentative a échoué et la suivante réessaiera. Le détail est parti vers le gestionnaire d’erreurs du projet.",
+    },
+    lastRequested: "Dernière demande",
+    lastRun: "Dernière exécution",
+    never: "Jamais",
     keepVersionsFor: "Conserve les versions remplacées",
     deleteFilesAfter: "Supprime les fichiers non lus après",
     datasetsTitle: "Jeux de données",

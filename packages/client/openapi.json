@@ -20003,7 +20003,7 @@
     },
     "/api/lake/health": {
       "get": {
-        "summary": "Describe how the lake stores each dataset, and its retention settings",
+        "summary": "Describe how the lake stores each dataset, and what its retention does",
         "tags": ["Datasets"],
         "operationId": "getLakeHealth",
         "security": [
@@ -20029,9 +20029,27 @@
                     "cleanup": {
                       "type": "object",
                       "properties": {
-                        "enabled": {
-                          "type": "boolean",
-                          "description": "Whether retention runs on its schedule"
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "idle",
+                            "not-requested",
+                            "no-worker",
+                            "failing",
+                            "running"
+                          ],
+                          "description": "What actually happens: `not-requested` when no orchestrator asks, `no-worker` when no lake worker runs what it asks"
+                        },
+                        "requestedAt": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "When the orchestrator last asked for cleanup"
+                        },
+                        "lastRunAt": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "When a lake worker last finished a cleanup"
                         },
                         "keepVersionsFor": {
                           "type": "string"
@@ -20044,7 +20062,9 @@
                         }
                       },
                       "required": [
-                        "enabled",
+                        "state",
+                        "requestedAt",
+                        "lastRunAt",
                         "keepVersionsFor",
                         "deleteFilesAfter",
                         "cleanupEvery"
