@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { change, col, type DatasetRow, defineDataset } from "@sixb/core"
+import { change, col, type DatasetDefinition, type DatasetRow, defineDataset } from "@sixb/core"
 import type { DatasetChanges, DatasetRowChange, DatasetWriteMode } from "@sixb/core/lake-storage"
 import { runLakeChangesContractSuite } from "@sixb/core/testing"
 import type { DuckLakeStorage } from "../src"
@@ -203,6 +203,13 @@ interface ChangeReaderInternals {
   readonly changes: {
     compareFeed(...args: unknown[]): Promise<boolean>
   }
+  readonly compaction: {
+    commitMaintenance(
+      dataset: DatasetDefinition,
+      calls: readonly string[],
+      movesUnreported: boolean
+    ): Promise<boolean>
+  }
   readonly connections: {
     attachedRuntime(): Promise<DuckDbRuntime>
     withExclusiveAttached<T>(run: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T>
@@ -234,6 +241,39 @@ describe("DuckLakeStorage changes from the change feed", () => {
     await storage.close()
     await rm(rootDir, { recursive: true, force: true })
   })
+
+  // Regression proof: in readChangeRange, look only for DuckLake's marks of maintenance. A flush of
+  // deletes alone bears none: the range then reads as altered outside Sixb, and the read compares
+  // in full.
+  test("reads the feed across a compaction that flushed deletes alone", async () => {
+    const first = (await snapshot(seedRows)).versionId
+
+    const merge = await storage.beginMerge({ dataset: accounts })
+    await merge.writeChanges([change.delete({ id: "a5" })])
+    const deleted = (await merge.commit()).version!.versionId
+
+    await internals(storage).compaction.commitMaintenance(
+      accounts,
+      [
+        `CALL ducklake_flush_inlined_data('sixb_lake', table_name => ${quoteSqlString(encodeDatasetTableName(accounts.id))})`,
+      ],
+      true
+    )
+
+    const rows = edited(await currentRows(), { rename: ["a1"] })
+    const last = (await snapshot(rows)).versionId
+
+    const compareFeed = spyOn(internals(storage).changes, "compareFeed")
+    for (const [from, to] of [
+      [first, last],
+      [deleted, last],
+    ] as const) {
+      expect(await changesBetween(from, to)).toEqual(await expectedChanges(from, to))
+    }
+
+    expect(compareFeed).toHaveBeenCalledTimes(2)
+    expect(await compareFeed.mock.results.at(-1)?.value).toBe(true)
+  }, 60_000)
 
   // Regression proof: in compareFeed, stop cancelling rows by row id. A key changed twice then
   // shows up as a change. Or in planFeedRead, read one range across the maintenance commit: it

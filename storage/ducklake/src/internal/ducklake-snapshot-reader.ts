@@ -907,7 +907,10 @@ export class DuckLakeSnapshotReader {
     const maintenanceSnapshotIds: string[] = []
     let alteredOutsideSixb = false
     for (const candidate of [...candidates].reverse()) {
-      if (maintainsTable(candidate.changesMade, tableRef.tableId)) {
+      if (
+        candidate.metadata?.kind === "compaction" ||
+        maintainsTable(candidate.changesMade, tableRef.tableId)
+      ) {
         maintenanceSnapshotIds.push(candidate.snapshotId)
         continue
       }
