@@ -44,7 +44,7 @@ async function runProcess(stateDir: string, primitive: string, phase: string): P
 /** A lease and a queue's grace only pass with time. What the time is is not what this is about. */
 function ageRuns(stateDir: string): void {
   const database = new Database(join(stateDir, "storage", "storage.sqlite"))
-  const past = new Date(0).toISOString()
+  const past = new Date(Date.now() - 60 * 60_000).toISOString()
 
   database.run("UPDATE sync_runs SET execution_queue_lease_expires_at = ?", [past])
   database.run("UPDATE pipeline_runs SET queued_at = ?", [past])
