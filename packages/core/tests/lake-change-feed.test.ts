@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { DatasetLatestVersionSummary, LatestVersionsSince } from "@sixb/core/lake-storage"
-import { LakeChangeFeed } from "../src/lake-change-feed"
+import { LakeChangeFeed } from "../src/maintenance/passes/lake-change-feed"
 
 const FRESH_FOR_MS = 30_000
 

@@ -25,8 +25,6 @@ import type {
   AutomaticWorkflowRunDispatchInput,
   WorkflowRunDispatchPort,
 } from "@sixb/core/internal/workflows"
-import type { LakeStorage } from "@sixb/core/lake-storage"
-import type { PipelineRunStorage, ProjectionRunStorage } from "@sixb/core/storage"
 
 export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
@@ -120,18 +118,6 @@ export type CompileRoutesDiagnostic =
 export interface CompileRoutesResult {
   readonly routes: OrchestratorRoutes
   readonly diagnostics: readonly CompileRoutesDiagnostic[]
-}
-
-export interface ProjectionReconciliationPorts {
-  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
-  /** Source of runs whose queue publication was lost. */
-  readonly projectionRuns: Pick<ProjectionRunStorage, "list">
-}
-
-export interface DatasetTriggerReconciliationPorts {
-  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "listVersions">
-  /** What each pipeline last read. */
-  readonly pipelineRuns: Pick<PipelineRunStorage, "listLatestByPipelineIds" | "listSteps">
 }
 
 export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput

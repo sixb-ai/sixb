@@ -1,9 +1,9 @@
-import { createSixbError } from "@sixb/core/internal/errors"
+import { createSixbError } from "../../errors/internal"
 import type {
   DatasetLatestVersionSummary,
   LakeStorage,
   LatestVersionsSince,
-} from "@sixb/core/lake-storage"
+} from "../../lake-storage"
 
 export interface LakeChangeFeedInput {
   readonly lakeStorage: Pick<LakeStorage, "listLatestVersionsSince">
@@ -105,7 +105,7 @@ export class LakeChangeFeed {
 
     throw createSixbError(
       "internal.unexpected",
-      "[SixbOrchestrator] Lake change feed rejected a null cursor.",
+      "[Sixb] Lake change feed rejected a null cursor.",
       { details: { projectId: this.input.projectId } }
     )
   }

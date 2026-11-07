@@ -19,23 +19,23 @@ afterEach(() => {
   jest.useRealTimers()
 })
 
-// The host wiring only: SchedulerRuntime's own timing, idempotence and shutdown semantics are
-// proven in scheduler-runtime.test.ts.
-test("SixbHost.scheduler emits its schedules to the host's events until stopped", async () => {
+// The host wiring only: the cron pass's own timing, idempotence and shutdown semantics are proven
+// in cron-pass.test.ts.
+test("startMaintenance emits the host's schedules to its events until stopped", async () => {
   const sixb = new SixbHost({
     ontology: [Stub],
     schedules: [defineSchedule("hourly").cron("0 * * * *")],
     ...createTestRuntimeDeps(),
   })
 
-  await sixb.scheduler.start()
+  const maintenance = sixb.startMaintenance([])
   jest.advanceTimersByTime(60 * MINUTE)
 
   const fired = await sixb.events.read({ types: ["schedule.triggered"] })
   expect(fired).toHaveLength(1)
   expect((fired[0] as StoredScheduleTriggeredEvent).payload.scheduleId).toBe("hourly")
 
-  await sixb.scheduler.stop()
+  await maintenance.stop()
   jest.advanceTimersByTime(120 * MINUTE)
 
   expect(await sixb.events.read({ types: ["schedule.triggered"] })).toHaveLength(1)

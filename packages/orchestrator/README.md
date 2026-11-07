@@ -88,7 +88,7 @@ behind it. It shows as `orchestrator.dispatch.failed` with `dropped: false` long
 There is no durable consumer registry, definition signature, cursor table, or new application
 configuration.
 
-Projection admission has an event path and a reconciliation path:
+Projection admission has an event path and a recovery path:
 
 ```text
 dataset.version.committed --> ProjectionRunDispatcher -> durable execution + run -> queue
@@ -123,7 +123,7 @@ how long a lost event or publication waits for repair.
 
 `dataset.version.committed` is written after the commit, so a pipeline on
 `events.dataset(x).updated()` can miss it the same ways a projection can. Pipelines admit no run per
-version, so the `triggers` pass (`dataset-trigger-reconciler.ts`) asks a different question: does
+version, so the `triggers` pass asks a different question: does
 the dataset hold a change the pipeline's last run did not read? `pipeline_step_runs.inputs` holds
 what a run read, so the answer needs no record of its own.
 
@@ -186,7 +186,7 @@ no manual wiring is needed there.
 
 ## Limitations (V1)
 
-- Projection reconciliation repairs a missed dataset event by admitting the latest data-bearing
+- The `projections` pass repairs a missed dataset event by admitting the latest data-bearing
   version. It is not an event replay log and does not materialize every intermediate version.
 - Publication recovery requires a repeated dispatch. The projection run sweep supplies one;
   event schedules can replay retained events. A run left `queued` by cron has none until the next

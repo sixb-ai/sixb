@@ -20,6 +20,8 @@ export interface MaintenancePass {
    */
   nextRunAt(now: Date, lastFinishedAt: Date | null): Date | null
   run(signal: AbortSignal): Promise<void>
+  /** Called once the loop stopped and this pass's last run ended, for what a run left behind. */
+  onLoopStopped?(): Promise<void>
 }
 
 export interface IntervalPassInput {
@@ -153,6 +155,8 @@ export class MaintenanceLoop {
       this.reportShutdownOverrun()
     }
     await settled
+
+    await Promise.all(this.states.map((state) => state.pass.onLoopStopped?.()))
   }
 
   private tick(): void {

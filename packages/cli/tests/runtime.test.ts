@@ -875,10 +875,6 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    sixb.scheduler.start = async () => {
-      calls.push("scheduler:start")
-    }
-
     const runtime = await startRulesRuntime(sixb)
 
     expect(runtime.rulesWorker).not.toBeNull()
@@ -907,10 +903,6 @@ describe("split production runtime roles", () => {
       schedules: [daily],
       workflows: [workflow],
     })
-    sixb.scheduler.start = async () => {
-      calls.push("scheduler:start")
-    }
-
     const runtime = await startOrchestratorRuntime(sixb)
 
     expect(runtime.orchestratorWorker).not.toBeNull()
@@ -922,7 +914,7 @@ describe("split production runtime roles", () => {
     expect(calls).toEqual([])
   })
 
-  // Reproduce: drop `this.scheduler.pass` from `SixbHost.startMaintenance`; the timer has nothing
+  // Reproduce: drop `this.cron` from `SixbHost.startMaintenance`; the timer has nothing
   // to fire for and no occurrence is emitted.
   test("fires cron occurrences on the second, with no scheduler process", async () => {
     const queues = new InMemoryQueues()

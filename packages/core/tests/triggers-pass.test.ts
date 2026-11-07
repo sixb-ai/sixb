@@ -16,14 +16,12 @@ import {
 import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { queueTestPipelineRun, startTestPipelineRun } from "@sixb/core/testing"
-import { compileRoutes } from "../src/compile-routes"
+import { LakeChangeFeed } from "../src/maintenance/passes/lake-change-feed"
 import {
   type DatasetTrigger,
-  DatasetTriggerReconciler,
-  datasetTriggers,
-} from "../src/dataset-trigger-reconciler"
-import { LakeChangeFeed } from "../src/lake-change-feed"
-import type { DatasetTriggerReconciliationPorts } from "../src/types"
+  type TriggersPassInput,
+  triggersPass,
+} from "../src/maintenance/passes/triggers-pass"
 
 const INTERVAL_MS = 30_000
 
@@ -84,7 +82,7 @@ function createScene() {
 
   /** Storage's facade takes no spies, so the reads are counted on their way through. */
   const reads = { latestRuns: 0, steps: 0 }
-  const pipelineRuns: DatasetTriggerReconciliationPorts["pipelineRuns"] = {
+  const pipelineRuns: TriggersPassInput["pipelineRuns"] = {
     listLatestByPipelineIds(input) {
       reads.latestRuns += 1
       return storage.pipelineRuns.listLatestByPipelineIds(input)
@@ -95,16 +93,26 @@ function createScene() {
     },
   }
 
-  const createReconciler = (triggers: readonly DatasetTrigger[] = [TRIGGER]) =>
-    new DatasetTriggerReconciler({
+  const createPass = (triggers: readonly DatasetTrigger[] = [TRIGGER]) => {
+    let now = Date.now()
+
+    const pass = triggersPass({
       projectId: "project",
       dispatcher,
       triggers,
       lakeStorage,
       pipelineRuns,
-      intervalMs: INTERVAL_MS,
       feed: new LakeChangeFeed({ lakeStorage, projectId: "project", freshForMs: 0 }),
+      now: () => now,
     })
+
+    return {
+      run(signal: AbortSignal, at = Date.now()) {
+        now = at
+        return pass.run(signal)
+      },
+    }
+  }
 
   /** One that sees every commit as old enough that its event should have arrived. */
   const later = () => Date.now() + 2 * INTERVAL_MS
@@ -176,7 +184,7 @@ function createScene() {
     lakeStorage,
     dispatcher,
     reads,
-    createReconciler,
+    createPass,
     later,
     commit,
     commitSameRows,
@@ -197,10 +205,10 @@ describe("DatasetTriggerReconciler", () => {
     const first = await scene.commit("order-1")
     await scene.run("last", "succeeded", [first])
     const second = await scene.commit("order-2")
-    const reconciler = scene.createReconciler()
+    const pass = scene.createPass()
 
-    await reconciler.pass(signal, scene.later())
-    await reconciler.pass(signal, scene.later())
+    await pass.run(signal, scene.later())
+    await pass.run(signal, scene.later())
 
     const queued = await queuedRuns(scene.storage)
     expect(queued).toHaveLength(1)
@@ -222,12 +230,12 @@ describe("DatasetTriggerReconciler", () => {
     const scene = createScene()
     const first = await scene.commit("order-1")
     await scene.run("last", "succeeded", [first])
-    const reconciler = scene.createReconciler()
-    await reconciler.pass(signal, scene.later())
+    const pass = scene.createPass()
+    await pass.run(signal, scene.later())
     expect(await queuedRuns(scene.storage)).toEqual([])
 
     await scene.commit("order-2")
-    await reconciler.pass(signal, scene.later())
+    await pass.run(signal, scene.later())
 
     expect(await queuedRuns(scene.storage)).toHaveLength(1)
   })
@@ -236,10 +244,10 @@ describe("DatasetTriggerReconciler", () => {
     const scene = createScene()
     const first = await scene.commit("order-1")
     await scene.run("last", "succeeded", [first])
-    await scene.createReconciler().pass(signal, scene.later())
+    await scene.createPass().run(signal, scene.later())
     await scene.commit("order-2")
 
-    await scene.createReconciler().pass(signal, scene.later())
+    await scene.createPass().run(signal, scene.later())
 
     expect(await queuedRuns(scene.storage)).toHaveLength(1)
   })
@@ -250,7 +258,7 @@ describe("DatasetTriggerReconciler", () => {
     const newest = await scene.commit("order-2")
     await scene.run("last", "succeeded", [newest])
 
-    await scene.createReconciler().pass(signal, scene.later())
+    await scene.createPass().run(signal, scene.later())
 
     expect(await queuedRuns(scene.storage)).toEqual([])
   })
@@ -267,9 +275,9 @@ describe("DatasetTriggerReconciler", () => {
         pipelineId: buildReport.id,
       })
       await scene.commit("order-2")
-      const reconciler = scene.createReconciler()
+      const pass = scene.createPass()
 
-      await reconciler.pass(signal, scene.later())
+      await pass.run(signal, scene.later())
       expect((await queuedRuns(scene.storage)).map((run) => run.id)).toEqual(["waiting"])
 
       await scene.storage.pipelineRuns.start({ id: "waiting", projectId: "project" })
@@ -289,7 +297,7 @@ describe("DatasetTriggerReconciler", () => {
         status: "succeeded",
       })
 
-      await reconciler.pass(signal, scene.later())
+      await pass.run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toHaveLength(1)
     })
@@ -300,7 +308,7 @@ describe("DatasetTriggerReconciler", () => {
       await scene.run("in-flight", "running")
       await scene.commit("order-2")
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toEqual([])
     })
@@ -311,7 +319,7 @@ describe("DatasetTriggerReconciler", () => {
       const version = await scene.commit("order-1")
       await scene.run("failed", "failed", [version])
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toEqual([])
     })
@@ -321,7 +329,7 @@ describe("DatasetTriggerReconciler", () => {
       await scene.commit("order-1")
       await scene.run("failed-early", "failed")
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toEqual([])
     })
@@ -332,7 +340,7 @@ describe("DatasetTriggerReconciler", () => {
       await scene.run("failed", "failed", [read])
       await scene.commit("order-2")
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toHaveLength(1)
     })
@@ -345,7 +353,7 @@ describe("DatasetTriggerReconciler", () => {
       const unread = await scene.commit("order-2")
       await scene.run("stopped", "cancelled", [unread])
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toHaveLength(1)
     })
@@ -356,7 +364,7 @@ describe("DatasetTriggerReconciler", () => {
       await scene.run("finished", "succeeded", [version])
       await scene.run("stopped", "cancelled", [version])
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toEqual([])
     })
@@ -366,7 +374,7 @@ describe("DatasetTriggerReconciler", () => {
       await scene.commit("order-1")
       await scene.run("stopped", "cancelled")
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toHaveLength(1)
     })
@@ -377,8 +385,8 @@ describe("DatasetTriggerReconciler", () => {
       const scene = createScene()
       await scene.commit("order-1")
       await scene.run("stopped", "cancelled")
-      const reconciler = scene.createReconciler()
-      await reconciler.pass(signal, scene.later())
+      const pass = scene.createPass()
+      await pass.run(signal, scene.later())
       const [recovered] = await queuedRuns(scene.storage)
 
       tick()
@@ -390,7 +398,7 @@ describe("DatasetTriggerReconciler", () => {
       })
       // Reproduce: return true after `dispatch` in `settleTrigger`; with no new commit, nothing
       // looks at this trigger again.
-      await reconciler.pass(signal, scene.later())
+      await pass.run(signal, scene.later())
 
       const [next] = await queuedRuns(scene.storage)
       expect(next?.id).toBeDefined()
@@ -401,7 +409,7 @@ describe("DatasetTriggerReconciler", () => {
       const scene = createScene()
       await scene.commit("order-1")
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toEqual([])
     })
@@ -415,7 +423,7 @@ describe("DatasetTriggerReconciler", () => {
       await scene.run("last", "succeeded", [version])
       await scene.commitSameRows("order-1", "provenance-only")
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toEqual([])
     })
@@ -429,7 +437,7 @@ describe("DatasetTriggerReconciler", () => {
       await scene.commit("order-2")
       await scene.commitSameRows("order-2", "provenance-only")
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toHaveLength(1)
     })
@@ -441,7 +449,7 @@ describe("DatasetTriggerReconciler", () => {
       const noOp = await scene.commitSameRows("order-2", "provenance-only")
       await scene.run("last", "succeeded", [noOp])
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toEqual([])
     })
@@ -453,7 +461,7 @@ describe("DatasetTriggerReconciler", () => {
       const newest = await scene.commit("order-2")
       await scene.run("mixed", "succeeded", [older, newest])
 
-      await scene.createReconciler().pass(signal, scene.later())
+      await scene.createPass().run(signal, scene.later())
 
       expect(await queuedRuns(scene.storage)).toHaveLength(1)
     })
@@ -465,12 +473,12 @@ describe("DatasetTriggerReconciler", () => {
     const first = await scene.commit("order-1")
     await scene.run("last", "succeeded", [first])
     const second = await scene.commit("order-2")
-    const reconciler = scene.createReconciler()
+    const pass = scene.createPass()
 
-    await reconciler.pass(signal, second.createdAt.getTime() + INTERVAL_MS - 1)
+    await pass.run(signal, second.createdAt.getTime() + INTERVAL_MS - 1)
     expect(await queuedRuns(scene.storage)).toEqual([])
 
-    await reconciler.pass(signal, second.createdAt.getTime() + INTERVAL_MS)
+    await pass.run(signal, second.createdAt.getTime() + INTERVAL_MS)
     expect(await queuedRuns(scene.storage)).toHaveLength(1)
   })
 
@@ -479,16 +487,16 @@ describe("DatasetTriggerReconciler", () => {
     const first = await scene.commit("order-1")
     await scene.run("last", "succeeded", [first])
     await scene.commit("order-2")
-    const reconciler = scene.createReconciler()
+    const pass = scene.createPass()
 
     const dispatch = spyOn(scene.dispatcher, "dispatch")
     dispatch.mockRejectedValueOnce(new Error("queue unavailable"))
-    const failure = await reconciler.pass(signal, scene.later()).catch((error) => error)
+    const failure = await pass.run(signal, scene.later()).catch((error) => error)
 
     expect(failure).toBeInstanceOf(AggregateError)
     expect(failure.errors[0].message).toContain(`pipelineId=${buildReport.id}`)
 
-    await reconciler.pass(signal, scene.later())
+    await pass.run(signal, scene.later())
     expect(await queuedRuns(scene.storage)).toHaveLength(1)
   })
 
@@ -496,13 +504,13 @@ describe("DatasetTriggerReconciler", () => {
     const scene = createScene()
     const first = await scene.commit("order-1")
     await scene.run("last", "succeeded", [first])
-    const reconciler = scene.createReconciler()
-    await reconciler.pass(signal, scene.later())
+    const pass = scene.createPass()
+    await pass.run(signal, scene.later())
     await scene.commit("order-2")
 
     const feed = spyOn(scene.lakeStorage, "listLatestVersionsSince")
     feed.mockResolvedValueOnce(null)
-    await reconciler.pass(signal, scene.later())
+    await pass.run(signal, scene.later())
 
     expect(await queuedRuns(scene.storage)).toHaveLength(1)
   })
@@ -514,16 +522,16 @@ describe("DatasetTriggerReconciler", () => {
       const scene = createScene()
       const version = await scene.commit("order-1")
       await scene.run("last", "succeeded", [version])
-      const reconciler = scene.createReconciler()
-      await reconciler.pass(signal, scene.later())
+      const pass = scene.createPass()
+      await pass.run(signal, scene.later())
 
       expect(scene.reads).toEqual({ latestRuns: 1, steps: 1 })
 
       const feed = spyOn(scene.lakeStorage, "listLatestVersionsSince")
       const latest = spyOn(scene.lakeStorage, "getLatestVersion")
 
-      await reconciler.pass(signal, scene.later())
-      await reconciler.pass(signal, scene.later())
+      await pass.run(signal, scene.later())
+      await pass.run(signal, scene.later())
 
       expect(feed).toHaveBeenCalledTimes(2)
       expect(latest).not.toHaveBeenCalled()
@@ -539,56 +547,14 @@ describe("DatasetTriggerReconciler", () => {
         ...TRIGGER,
         pipelineId: index === 0 ? buildReport.id : `other-${index}`,
       }))
-      const reconciler = scene.createReconciler(triggers)
+      const pass = scene.createPass(triggers)
 
       const latest = spyOn(scene.lakeStorage, "getLatestVersion")
 
-      await reconciler.pass(signal, scene.later())
+      await pass.run(signal, scene.later())
 
       expect(latest).toHaveBeenCalledTimes(1)
       expect(scene.reads).toEqual({ latestRuns: 1, steps: 1 })
     })
-  })
-})
-
-describe("datasetTriggers", () => {
-  test("lists a pipeline's dataset schedules, and leaves out everything else", () => {
-    const syncOnly = definePipeline("cron-only")
-      .when(daily)
-      .then(
-        definePipelineStep("copy")
-          .inputs({ orders })
-          .output(report)
-          .run(() => {})
-      )
-
-    const routes = compileRoutes({
-      schedules: [ordersUpdated, daily],
-      syncs: [],
-      pipelines: [buildReport, syncOnly],
-    })
-
-    expect(datasetTriggers(routes)).toEqual([TRIGGER])
-  })
-
-  test("names a pipeline once per dataset, however many schedules name both", () => {
-    const again = defineSchedule("orders.updated.again").on(events.dataset(orders).updated())
-    const twice = definePipeline("twice")
-      .when(ordersUpdated)
-      .when(again)
-      .then(
-        definePipelineStep("copy")
-          .inputs({ orders })
-          .output(report)
-          .run(() => {})
-      )
-
-    const routes = compileRoutes({
-      schedules: [ordersUpdated, again],
-      syncs: [],
-      pipelines: [twice],
-    })
-
-    expect(datasetTriggers(routes)).toHaveLength(1)
   })
 })

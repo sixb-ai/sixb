@@ -1101,7 +1101,6 @@ export type {
   ObjectWhereClause,
   OntologyDocumentInput,
   OntologySource,
-  SchedulerController,
   Sixb,
   SixbDefinitions,
   SixbHostOptions,

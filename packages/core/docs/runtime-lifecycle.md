@@ -85,18 +85,14 @@ Constructing the host starts no timers. All of a project's upkeep runs as passes
 | Method | Effect |
 | --- | --- |
 | `host.startMaintenance(passes)` | Run ontology maintenance, cron and `passes` on one loop that beats to storage; returns a stop handle. The orchestrator calls it |
-| `host.scheduler.start()` | Run cron alone on a loop of its own, for a host with no orchestrator |
-| `host.scheduler.stop()` | Stop it |
 | `host.startOntologyMaintenance()` | Run outbox recovery and bounded retention alone on a loop of its own; returns a stop handle |
 | `host.getOntologyOperationalStatus()` | Read the last heartbeat and the outbox from storage. Works in a process that runs no pass |
 
 ```ts
 const host = await createSixb({ /* providers */ })
 
-await host.scheduler.start()
 const maintenance = await host.startOntologyMaintenance()
 // ... on shutdown
-await host.scheduler.stop()
 await maintenance.stop()
 ```
 
@@ -111,11 +107,11 @@ const pass = everyMs({
   id: "ingest",
   intervalMs: 30_000,
   budgetMs: 60_000,
-  run: (signal) => reconcile(signal),
+  run: (signal) => recover(signal),
 })
 ```
 
-`everyMs` covers an interval. A pass with a due time of its own, like `cron`, implements `MaintenancePass` and answers `nextRunAt(now, lastFinishedAt)`. To add one to the orchestrator, return it from `createReconciliationPasses` in `@sixb/orchestrator`.
+Every pass is a function that returns a `MaintenancePass`, in `packages/core/src/maintenance/passes/`. `everyMs` covers an interval, and `recoveryPass` the 30-second rhythm of the passes that repair what the event path can lose. A pass with a due time of its own, like `cron`, answers `nextRunAt(now, lastFinishedAt)`. To add one to the orchestrator, return it from `recoveryPasses`, or from `startMaintenance` for one that needs no routes.
 
 - **Passes never wait for each other.** Each has at most one run in flight, and a run that hangs costs the others nothing.
 - **A run has a budget.** Past it the run's signal aborts and the run counts as a failure, then as one more per further budget. It keeps its slot until it ends: starting another beside it would break "one run at a time". A run that stops on the abort should throw, or return having done nothing it needs recorded.

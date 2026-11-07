@@ -25,7 +25,7 @@ import {
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
 import { startTestPipelineRun } from "@sixb/core/testing"
-import { compileRoutesWithDiagnostics, createReconciliationPasses } from "@sixb/orchestrator"
+import { compileRoutesWithDiagnostics, createMaintenancePasses } from "@sixb/orchestrator"
 import type { DuckLakeStorage } from "../src"
 import { createLocalDuckLakeStorage } from "./test-utils"
 
@@ -145,14 +145,14 @@ describe("dataset triggers on DuckLake", () => {
   }
 
   /** The passes `sixb orchestrator` would run: fresh ones start as a restart does. */
-  function reconciliationPasses() {
+  function maintenancePasses() {
     const { routes } = compileRoutesWithDiagnostics({
       schedules: [ordersUpdated],
       syncs: [],
       pipelines: [buildReport],
       projections: getProjectionDispatchDescriptors(host),
     })
-    return createReconciliationPasses({
+    return createMaintenancePasses({
       projectId: "project",
       routes,
       dispatchers: {
@@ -166,7 +166,7 @@ describe("dataset triggers on DuckLake", () => {
   }
 
   function triggersPass() {
-    const pass = reconciliationPasses().find((candidate) => candidate.id === "triggers")
+    const pass = maintenancePasses().find((candidate) => candidate.id === "triggers")
     if (!pass) throw new Error("Expected the triggers pass.")
     return pass
   }
@@ -216,7 +216,7 @@ describe("dataset triggers on DuckLake", () => {
     const output = await write.commit()
     await storage.pipelineRuns.finish({ id: runId, projectId: "project", status: "succeeded" })
 
-    const passes = reconciliationPasses()
+    const passes = maintenancePasses()
     await Promise.all(passes.map((pass) => pass.run(signal)))
 
     const admitted = await storage.projectionRuns.list({ projectId: "project" })

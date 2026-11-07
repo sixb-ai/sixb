@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker, InMemoryStorage } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
-import { OntologyMaintenance } from "../src/maintenance"
+import { OntologyMaintenance } from "../src/maintenance/ontology-maintenance"
 
 const projectId = "project"
 const now = new Date("2026-10-17T12:00:00.000Z")

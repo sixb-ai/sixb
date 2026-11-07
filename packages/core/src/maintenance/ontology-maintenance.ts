@@ -8,7 +8,8 @@ import {
   type Storage,
 } from "../storage"
 import { storageHeartbeat } from "./heartbeat"
-import { everyMs, type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "./loop"
+import { type MaintenanceFailure, MaintenanceLoop } from "./loop"
+import { ontologyPass } from "./passes/ontology-pass"
 import { operationalStatus } from "./status"
 import type {
   OntologyMaintenanceHandle,
@@ -20,8 +21,6 @@ const DEFAULT_INTERVAL_MS = 60_000
 const DEFAULT_RETENTION_MS = 24 * 60 * 60_000
 const DEFAULT_CLEANUP_LIMIT = 1_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
-// Every step is bounded, by a page count or by `intervalMs`, so only a call that hangs reaches this.
-const PASS_BUDGET_MS = 5 * 60_000
 // An event undelivered this many intervals after it was saved has been missed by that many passes.
 const PENDING_LIMIT_INTERVALS = 2
 // A request that passed the expiry gate may still be finishing blob I/O, and the API clock may
@@ -49,8 +48,8 @@ interface OntologyMaintenanceDependencies {
 
 /**
  * Catch-up and retention. The process that commits delivers its own events right away; a pass
- * delivers what it left behind. The orchestrator runs `pass` on its loop; `start()` runs it on a
- * loop of its own, for an embedded host with no orchestrator.
+ * delivers what it left behind. The orchestrator runs `ontologyPass` on its loop; `start()` runs it
+ * on a loop of its own, for an embedded host with no orchestrator.
  */
 export class OntologyMaintenance {
   private readonly projectId: string
@@ -58,7 +57,7 @@ export class OntologyMaintenance {
   private readonly dispatcher: OntologyOutboxDispatcher
   private readonly vectorIndexing: VectorIndexingDispatcher | undefined
   private readonly blobStorage: BlobStorage | undefined
-  private readonly intervalMs: number
+  readonly intervalMs: number
   private readonly publishedOutboxRetentionMs: number
   private readonly terminalSourceRetentionMs: number
   private readonly cleanupLimit: number
@@ -66,8 +65,6 @@ export class OntologyMaintenance {
   private readonly owners = new Set<symbol>()
   private readonly loop: MaintenanceLoop
   private stopping: Promise<void> | null = null
-
-  readonly pass: MaintenancePass
 
   constructor(dependencies: OntologyMaintenanceDependencies) {
     assertNonblank(dependencies.projectId, "projectId")
@@ -92,14 +89,8 @@ export class OntologyMaintenance {
     )
     this.now = dependencies.now ?? (() => new Date())
 
-    this.pass = everyMs({
-      id: "ontology",
-      intervalMs: this.intervalMs,
-      budgetMs: PASS_BUDGET_MS,
-      run: (signal) => this.runPass(signal),
-    })
     this.loop = new MaintenanceLoop({
-      passes: [this.pass],
+      passes: [ontologyPass(this)],
       heartbeat: storageHeartbeat(this.projectId, "embedded", this.storage),
       onError:
         dependencies.onError ??
@@ -160,7 +151,7 @@ export class OntologyMaintenance {
     })
   }
 
-  private async runPass(signal: AbortSignal): Promise<void> {
+  async runPass(signal: AbortSignal): Promise<void> {
     const failures: unknown[] = []
 
     await captureFailure(() => this.dispatcher.drain(), failures)

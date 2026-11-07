@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { InMemoryBroker } from "../src"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { DomainEventService } from "../src/events"
-import type { MaintenanceFailure } from "../src/maintenance"
-import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
+import { type MaintenanceFailure, MaintenanceLoop } from "../src/maintenance/loop"
+import { type CronPassInput, cronPass } from "../src/maintenance/passes/cron-pass"
 import { defineSchedule } from "../src/schedules"
 
 const PROJECT = "test"
@@ -39,7 +39,26 @@ async function flushAsync(): Promise<void> {
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 
-describe("SchedulerRuntime", () => {
+/** The pass on a loop of its own, as the orchestrator runs it beside the others. */
+function createCron(
+  input: CronPassInput & {
+    readonly onError?: (error: unknown, failure: MaintenanceFailure) => void
+  }
+) {
+  const { onError, ...pass } = input
+  const loop = new MaintenanceLoop({
+    passes: [cronPass(pass)],
+    onError: onError ?? (() => {}),
+    now: input.now,
+  })
+
+  return {
+    start: async () => loop.start(),
+    stop: () => loop.stop(),
+  }
+}
+
+describe("cronPass", () => {
   beforeEach(() => {
     jest.useFakeTimers()
   })
@@ -51,7 +70,7 @@ describe("SchedulerRuntime", () => {
   test("emits each occurrence with its schedule id and key, then re-arms for the next", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
-    const runtime = new SchedulerRuntime({
+    const runtime = createCron({
       schedules: [defineSchedule("hourly").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
@@ -86,7 +105,7 @@ describe("SchedulerRuntime", () => {
     // Proven by removal: drop `?? this.timeZone` from the scheduler; both fire at 08:00 UTC.
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T00:00:00Z"))
-    const runtime = new SchedulerRuntime({
+    const runtime = createCron({
       schedules: [
         defineSchedule("project-morning").cron("0 8 * * *"),
         defineSchedule("tokyo-morning").cron("0 8 * * *", { timezone: "Asia/Tokyo" }),
@@ -111,7 +130,7 @@ describe("SchedulerRuntime", () => {
   test("emits every schedule due at the same instant", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:00:00Z"))
-    const runtime = new SchedulerRuntime({
+    const runtime = createCron({
       schedules: [
         defineSchedule("every-15").cron("*/15 * * * *"),
         defineSchedule("hourly").cron("0 * * * *"),
@@ -137,22 +156,10 @@ describe("SchedulerRuntime", () => {
     await runtime.stop()
   })
 
-  test("duplicate schedule ids throws SchedulerValidationError", async () => {
-    const runtime = new SchedulerRuntime({
-      schedules: [
-        defineSchedule("dup").cron("0 * * * *"),
-        defineSchedule("dup").cron("*/5 * * * *"),
-      ],
-      events: createEvents(),
-    })
-
-    await expect(runtime.start()).rejects.toThrow(SchedulerValidationError)
-  })
-
   test("start() is idempotent", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:00:00Z"))
-    const runtime = new SchedulerRuntime({
+    const runtime = createCron({
       schedules: [defineSchedule("s1").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
@@ -172,7 +179,7 @@ describe("SchedulerRuntime", () => {
   test("stop() prevents further events", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
-    const runtime = new SchedulerRuntime({
+    const runtime = createCron({
       schedules: [defineSchedule("s1").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
@@ -188,7 +195,7 @@ describe("SchedulerRuntime", () => {
   })
 
   test("no schedules arms no timer", async () => {
-    const runtime = new SchedulerRuntime({ schedules: [], events: createEvents() })
+    const runtime = createCron({ schedules: [], events: createEvents() })
 
     await runtime.start()
     expect(jest.getTimerCount()).toBe(0)
@@ -200,7 +207,7 @@ describe("SchedulerRuntime", () => {
   test("a late timer catches up every missed occurrence", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:00:00Z"))
-    const runtime = new SchedulerRuntime({
+    const runtime = createCron({
       schedules: [defineSchedule("hourly").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
@@ -230,7 +237,7 @@ describe("SchedulerRuntime", () => {
     events.append = (input) =>
       refusing ? Promise.reject(new Error("broker unavailable")) : append(input)
     const failures: MaintenanceFailure[] = []
-    const scheduler = new SchedulerRuntime({
+    const scheduler = createCron({
       schedules: [defineSchedule("hourly").cron("0 * * * *")],
       events,
       now: clock.now,
@@ -275,7 +282,7 @@ describe("SchedulerRuntime", () => {
       const refused = event?.type === "schedule.triggered" && event.payload.scheduleId === "bad"
       return refused ? Promise.reject(new Error("too large")) : append(input)
     }
-    const scheduler = new SchedulerRuntime({
+    const scheduler = createCron({
       schedules: [
         defineSchedule("bad").cron("* * * * *"),
         defineSchedule("good").cron("* * * * *"),
@@ -301,8 +308,8 @@ describe("SchedulerRuntime", () => {
     const clock = createTestClock(start)
     const events = createEvents()
     const schedules = [defineSchedule("minutely").cron("* * * * *")]
-    const first = new SchedulerRuntime({ schedules, events, now: clock.now })
-    const second = new SchedulerRuntime({ schedules, events, now: clock.now })
+    const first = createCron({ schedules, events, now: clock.now })
+    const second = createCron({ schedules, events, now: clock.now })
     await first.start()
     await second.start()
 
@@ -331,7 +338,7 @@ describe("SchedulerRuntime", () => {
       return new Promise(() => {})
     }
     const failures: MaintenanceFailure[] = []
-    const scheduler = new SchedulerRuntime({
+    const scheduler = createCron({
       schedules: [defineSchedule("minutely").cron("* * * * *")],
       events,
       now: clock.now,
@@ -370,7 +377,7 @@ describe("SchedulerRuntime", () => {
     }) as unknown as typeof globalThis.setTimeout
 
     try {
-      const runtime = new SchedulerRuntime({
+      const runtime = createCron({
         schedules: [schedule],
         events: eventsRuntime,
         now: clock.now,
@@ -409,7 +416,7 @@ describe("SchedulerRuntime", () => {
     }
 
     try {
-      const runtime = new SchedulerRuntime({
+      const runtime = createCron({
         schedules: [unreachable, healthy],
         events: eventsRuntime,
         now: clock.now,

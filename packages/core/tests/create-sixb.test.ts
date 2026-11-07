@@ -430,9 +430,9 @@ export const MyEquipment = defineObjectType({
           at: new Date("2026-05-20T10:00:00.000Z"),
         })
 
-      await host.scheduler.start()
+      const maintenance = host.startMaintenance([])
       jest.advanceTimersByTime(60 * 60_000)
-      await host.scheduler.stop()
+      await maintenance.stop()
 
       // Runtime shutdown tracks the non-blocking outbox notifications before closing the broker.
       await host.closeBroker()
@@ -449,7 +449,6 @@ export const MyEquipment = defineObjectType({
       ).records.map((record) => record.name)
       expect(brokerRecordNames).toEqual(eventTypes)
     } finally {
-      await host.scheduler.stop()
       jest.useRealTimers()
     }
   })

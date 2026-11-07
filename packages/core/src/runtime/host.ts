@@ -53,17 +53,17 @@ import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider } from "../logging"
 import { LoggingService, type ObservabilityOptions } from "../logging/service"
-import {
-  type MaintenanceFailure,
-  MaintenanceLoop,
-  type MaintenancePass,
-  OntologyMaintenance,
-  type OntologyMaintenanceHandle,
-  type OntologyMaintenanceOptions,
-  type OntologyOperationalStatus,
-  type SixbReadiness,
-  storageHeartbeat,
+import type {
+  OntologyMaintenanceHandle,
+  OntologyMaintenanceOptions,
+  OntologyOperationalStatus,
+  SixbReadiness,
 } from "../maintenance"
+import { storageHeartbeat } from "../maintenance/heartbeat"
+import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
+import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
+import { cronPass } from "../maintenance/passes/cron-pass"
+import { ontologyPass } from "../maintenance/passes/ontology-pass"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { ModelCatalogInput } from "../models"
 import { bindEmbeddingModels } from "../models/execution/embedding"
@@ -85,7 +85,6 @@ import {
   sandboxCredentialIssue,
 } from "../sandboxes/configuration"
 import { SandboxError } from "../sandboxes/errors"
-import { SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
 import type {
   GroupDefinition,
@@ -209,7 +208,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly queues: Queues
   readonly sandboxes?: Pick<SandboxFactory, "create" | "resume">
   readonly projectRoot: string
-  readonly scheduler: SchedulerRuntime
+  private readonly cron: MaintenancePass
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TParams>) {
@@ -366,11 +365,10 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       this,
       createVectorIndexingRuntime(this.hostContext, this.materializer)
     )
-    this.scheduler = new SchedulerRuntime({
+    this.cron = cronPass({
       schedules: definitions.schedules.list(),
       events: this.eventService,
       timeZone: this.timeZone,
-      onError: this.onMaintenanceFailure,
     })
   }
 
@@ -446,18 +444,13 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
     const loop = new MaintenanceLoop({
-      passes: [this.ontologyMaintenance.pass, this.scheduler.pass, ...passes],
+      passes: [ontologyPass(this.ontologyMaintenance), this.cron, ...passes],
       heartbeat: storageHeartbeat(this.projectId, "orchestrator", this.storage),
       onError: this.onMaintenanceFailure,
     })
     loop.start()
 
-    return {
-      stop: async () => {
-        await loop.stop()
-        await this.scheduler.stop()
-      },
-    }
+    return { stop: () => loop.stop() }
   }
 
   /**
