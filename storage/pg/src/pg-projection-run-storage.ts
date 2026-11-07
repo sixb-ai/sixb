@@ -38,6 +38,7 @@ import type {
   FailProjectionRunEnqueueInput,
   FindSupersedingProjectionRunInput,
   FinishProjectionRunInput,
+  ListLapsedProjectionRunsInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
@@ -206,6 +207,19 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       `
       return rowToProjectionRunRecord(updated)
     })
+  }
+
+  /** Starts from `(project_id, status, ...)`: running rows are few however long the history. */
+  async listLapsed(input: ListLapsedProjectionRunsInput): Promise<readonly ProjectionRunRecord[]> {
+    const rows = await this.sql<DatabaseRow[]>`
+      SELECT * FROM projection_runs
+      WHERE project_id = ${input.projectId} AND status = ${"running"}
+        AND execution_queue_lease_expires_at <= ${input.lapsedBy}
+      ORDER BY execution_queue_lease_expires_at
+      LIMIT ${input.limit}
+    `
+
+    return rows.map(rowToProjectionRunRecord)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

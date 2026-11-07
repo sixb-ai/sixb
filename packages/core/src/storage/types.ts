@@ -217,6 +217,7 @@ export type {
   FinishProjectionRunInput,
   LinkProjectionRunRecord,
   LinkProjectionTarget,
+  ListLapsedProjectionRunsInput,
   ListProjectionRunsInput,
   ListProjectionRunsResult,
   LockProjectionRunForMaterializationInput,

@@ -272,6 +272,12 @@ export interface ListLatestProjectionRunsResult {
   readonly runs: readonly ProjectionRunRecord[]
 }
 
+export interface ListLapsedProjectionRunsInput {
+  readonly projectId: string
+  readonly lapsedBy: Date
+  readonly limit: number
+}
+
 export interface ProjectionRunStorage {
   queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord>
   startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim>
@@ -279,6 +285,8 @@ export interface ProjectionRunStorage {
   confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<ProjectionRunRecord>
   /** Lets the lease lapse, so the next delivery need not wait. Attempts here are not limited. */
   releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
+  /** Running runs whose lease ended by `lapsedBy`, longest lost first. */
+  listLapsed(input: ListLapsedProjectionRunsInput): Promise<readonly ProjectionRunRecord[]>
   failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord>
   /** Transactionally fences the current execution before ontology materialization writes. */
   lockForMaterialization(

@@ -7,6 +7,7 @@ export type {
   FinishProjectionRunInput,
   LinkProjectionRunRecord,
   LinkProjectionTarget,
+  ListLapsedProjectionRunsInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,

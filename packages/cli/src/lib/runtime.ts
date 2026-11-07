@@ -227,9 +227,12 @@ export async function startOrchestratorRuntime(
 
 /** A project with none of these has no run a worker can lose, and pays for no look at them. */
 function hasRecoverableRuns({ definitions }: LoadedSixbHost): boolean {
-  return [definitions.syncs, definitions.pipelines, definitions.workflows].some(
-    (registry) => registry.list().length > 0
-  )
+  return [
+    definitions.syncs,
+    definitions.pipelines,
+    definitions.workflows,
+    definitions.projections,
+  ].some((registry) => registry.list().length > 0)
 }
 
 /**
