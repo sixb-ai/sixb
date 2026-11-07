@@ -150,18 +150,20 @@ function pinned(version: { datasetId: string; versionId: string; createdAt: Date
   }
 }
 
+const signal = new AbortController().signal
+
 describe("ProjectionDispatchReconciler", () => {
   test("dispatches a commit whose event was dropped and only reads the feed while idle", async () => {
     // Red check: skip the change-feed versions in reconcileTriggers; the commit is never admitted.
     const reconciliation = createReconciliation()
     const reconciler = reconciliation.createReconciler()
-    await reconciler.pass()
+    await reconciler.pass(signal)
 
     const version = await reconciliation.commit("invoice-1")
     reconciliation.lookups.length = 0
-    await reconciler.pass()
-    await reconciler.pass()
-    await reconciler.pass()
+    await reconciler.pass(signal)
+    await reconciler.pass(signal)
+    await reconciler.pass(signal)
 
     expect(await reconciliation.runVersions()).toEqual([
       { versionId: version.versionId, status: "queued" },
@@ -171,11 +173,11 @@ describe("ProjectionDispatchReconciler", () => {
 
   test("a restart admits the latest commit made while no orchestrator ran", async () => {
     const reconciliation = createReconciliation()
-    await reconciliation.createReconciler().pass()
+    await reconciliation.createReconciler().pass(signal)
     await reconciliation.commit("invoice-1")
     const latest = await reconciliation.commit("invoice-2")
 
-    await reconciliation.createReconciler().pass()
+    await reconciliation.createReconciler().pass(signal)
 
     expect(await reconciliation.runVersions()).toEqual([
       { versionId: latest.versionId, status: "queued" },
@@ -187,7 +189,7 @@ describe("ProjectionDispatchReconciler", () => {
     const reconciliation = createReconciliation([invoiceProjection, archiveProjection])
     const version = await reconciliation.commit("invoice-1")
 
-    await reconciliation.createReconciler().pass()
+    await reconciliation.createReconciler().pass(signal)
 
     expect(reconciliation.lookups).toEqual([invoices.id])
     expect(await reconciliation.runVersions()).toEqual([
@@ -202,13 +204,13 @@ describe("ProjectionDispatchReconciler", () => {
     const first = await reconciliation.commit("invoice-1")
     const reconciler = reconciliation.createReconciler()
     reconciliation.feed.failures = 1
-    await quietly(() => reconciler.pass())
+    await reconciler.pass(signal).catch((error) => error)
     expect(await reconciliation.runVersions()).toEqual([
       { versionId: first.versionId, status: "queued" },
     ])
 
     const second = await reconciliation.commit("invoice-2")
-    await reconciler.pass()
+    await reconciler.pass(signal)
 
     expect(await reconciliation.runVersions()).toContainEqual({
       versionId: second.versionId,
@@ -228,12 +230,12 @@ describe("ProjectionDispatchReconciler", () => {
     const reconciler = reconciliation.createReconciler()
 
     const now = Date.now()
-    await reconciler.pass(now)
+    await reconciler.pass(signal, now)
     const strandedRunId = await reconciliation.runIdFor(stranded.versionId)
     const latestRunId = await reconciliation.runIdFor(latest.versionId)
     expect(await reconciliation.publishedRunIds()).toEqual([latestRunId])
 
-    await reconciler.pass(now + INTERVAL_MS + 1_000)
+    await reconciler.pass(signal, now + INTERVAL_MS + 1_000)
     expect(await reconciliation.publishedRunIds()).toEqual([strandedRunId])
     expect(await reconciliation.runVersions()).toContainEqual({
       versionId: stranded.versionId,
@@ -252,7 +254,7 @@ describe("ProjectionDispatchReconciler", () => {
     await reconciliation.failEnqueue(strandedRunId)
     await reconciliation.commit("invoice-2")
 
-    await reconciliation.createReconciler().pass()
+    await reconciliation.createReconciler().pass(signal)
 
     expect(await reconciliation.runVersions()).toContainEqual({
       versionId: stranded.versionId,
@@ -275,18 +277,8 @@ describe("ProjectionDispatchReconciler", () => {
         ({ ...descriptor, projectionRevision: "revised" }) as ProjectionDispatchDescriptor
     )
 
-    await reconciliation.createReconciler(revised).pass(Date.now() + INTERVAL_MS + 1_000)
+    await reconciliation.createReconciler(revised).pass(signal, Date.now() + INTERVAL_MS + 1_000)
 
     expect(await reconciliation.publishedRunIds()).not.toContain(strandedRunId)
   })
 })
-
-async function quietly<T>(run: () => Promise<T>): Promise<T> {
-  const originalError = console.error
-  console.error = () => {}
-  try {
-    return await run()
-  } finally {
-    console.error = originalError
-  }
-}

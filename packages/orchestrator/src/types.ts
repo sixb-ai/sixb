@@ -26,7 +26,7 @@ import type {
   WorkflowRunDispatchPort,
 } from "@sixb/core/internal/workflows"
 import type { LakeStorage } from "@sixb/core/lake-storage"
-import type { ProjectionRunStorage } from "@sixb/core/storage"
+import type { PipelineRunStorage, ProjectionRunStorage } from "@sixb/core/storage"
 
 export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
@@ -136,6 +136,20 @@ export interface ProjectionReconciliationPorts {
   readonly intervalMs?: number
 }
 
+export interface DatasetTriggerReconciliationPorts {
+  readonly lakeStorage: Pick<
+    LakeStorage,
+    "getLatestVersion" | "listVersions" | "listLatestVersionsSince"
+  >
+  /** What each pipeline last read. */
+  readonly pipelineRuns: Pick<PipelineRunStorage, "listLatestByPipelineIds" | "listSteps">
+  /**
+   * Pause between passes, which also leaves a commit's event that long to arrive first. Defaults
+   * to 30 s.
+   */
+  readonly intervalMs?: number
+}
+
 export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput
 export type WorkflowDispatcherPort = WorkflowRunDispatchPort
 export type SyncDispatchInput = AutomaticSyncRunDispatchInput
@@ -162,6 +176,6 @@ export interface OrchestratorRuntimeOptions {
   readonly queues: Queues
   readonly routes: OrchestratorRoutes
   readonly dispatchers: OrchestratorDispatchers
-  /** Required when the compiled routes contain projections. */
-  readonly projectionReconciliation?: ProjectionReconciliationPorts
+  /** Where a job that keeps failing is reported: the host. */
+  readonly reporter: object
 }
