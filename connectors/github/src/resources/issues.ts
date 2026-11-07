@@ -68,10 +68,14 @@ export function createRepositoryIssuesApi(
 
     list: (options) => listIssues(context, path, options, applyRepositoryIssueParams),
 
-    async get(issueNumber: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssue> {
+    async get(
+      issueNumber: number,
+      options?: GitHubRequestOptions & GitHubBodyFormatOptions
+    ): Promise<GitHubIssue> {
       return readJson<GitHubIssue>(
         await context.http.get(issuePath(path, issueNumber), {
           headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
         })
       )
     },
@@ -104,12 +108,15 @@ export function createRepositoryIssuesApi(
         headers: bodyFormatHeaders(options?.bodyFormat),
         signal: options?.signal,
       })
-      // GitHub answers 404 for an issue without a parent, the same as for a missing issue.
-      if (response.status === 404) {
-        await response.body?.cancel()
-        return null
-      }
-      return readJson<GitHubIssue>(response)
+      if (response.status !== 404) return readJson<GitHubIssue>(response)
+
+      // GitHub answers 404 both for an issue without a parent and for an issue it can't find, as
+      // with a wrong repository or a token that lost access. Only the first is "no parent".
+      await response.body?.cancel()
+      await readJson<GitHubIssue>(
+        await context.http.get(issuePath(path, issueNumber), { signal: options?.signal })
+      )
+      return null
     },
 
     async update(issueNumber: number, patch: UpdateIssueInput): Promise<GitHubIssue> {
@@ -124,7 +131,9 @@ export function createRepositoryIssuesApi(
   }
 }
 
-async function listIssues<TOptions extends GitHubPaginationOptions & GitHubBodyFormatOptions>(
+async function listIssues<
+  TOptions extends GitHubPaginationOptions & GitHubRequestOptions & GitHubBodyFormatOptions,
+>(
   context: GitHubHttpContext,
   path: string,
   options: TOptions | undefined,
@@ -136,6 +145,7 @@ async function listIssues<TOptions extends GitHubPaginationOptions & GitHubBodyF
   return readPage<GitHubIssue>(
     await context.http.get(resolvePagePath(withQuery(path, params), options), {
       headers: bodyFormatHeaders(options?.bodyFormat),
+      signal: options?.signal,
     }),
     context.apiBaseUrl
   )

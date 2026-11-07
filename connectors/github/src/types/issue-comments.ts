@@ -7,7 +7,10 @@ import type {
 } from "./common"
 import type { GitHubSortDirection } from "./repos"
 
-export interface ListIssueCommentsOptions extends GitHubPaginationOptions, GitHubBodyFormatOptions {
+export interface ListIssueCommentsOptions
+  extends GitHubPaginationOptions,
+    GitHubRequestOptions,
+    GitHubBodyFormatOptions {
   /** Only show comments updated at or after this ISO 8601 timestamp. */
   readonly since?: string
 }
@@ -37,6 +40,7 @@ export interface GitHubIssueComment {
   readonly node_id: string
   readonly url: string
   readonly html_url: string
+  /** Absent with `bodyFormat` `text` or `html`, which return only `body_text` or `body_html`. */
   readonly body: string
   /** With `bodyFormat` `text` or `full`. */
   readonly body_text?: string | null
@@ -63,7 +67,10 @@ export interface RepositoryIssueCommentsApi {
     options?: ListRepositoryIssueCommentsOptions
   ): Promise<GitHubPage<GitHubIssueComment>>
   create(issueNumber: number, input: CreateIssueCommentInput): Promise<GitHubIssueComment>
-  get(commentId: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssueComment>
+  get(
+    commentId: number,
+    options?: GitHubRequestOptions & GitHubBodyFormatOptions
+  ): Promise<GitHubIssueComment>
   update(commentId: number, input: UpdateIssueCommentInput): Promise<GitHubIssueComment>
   delete(commentId: number): Promise<void>
 }

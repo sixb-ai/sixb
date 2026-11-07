@@ -874,18 +874,29 @@ describe("github connector", () => {
     expect(failure).toBeInstanceOf(GitHubApiError)
   })
 
-  // Reproduce: drop the 404 branch in `issues.parent()`; the first call then throws.
-  test("reads an issue's parent, null without one, and throws on other failures", async () => {
-    record((request) => {
-      const number = request.url.pathname.split("/")[5]
+  // Reproduce: drop the 404 branch in `issues.parent()` and the first call throws; return null
+  // without reading the issue and the missing issue resolves instead of throwing.
+  test("reads an issue's parent, null without one, and throws for a missing issue or other failures", async () => {
+    const calls = record((request) => {
+      const [, , , , , number, parent] = request.url.pathname.split("/")
       if (number === "289183") return json({ number: 289180, title: "Claude agent" })
-      if (number === "334519") return json({ message: "No parent issue found" }, { status: 404 })
+      if (number === "334519") {
+        return parent
+          ? json({ message: "No parent issue found" }, { status: 404 })
+          : json({ number: 334519 })
+      }
+      if (number === "404") return json({ message: "Not Found" }, { status: 404 })
       return json({ message: "Forbidden" }, { status: 403 })
     })
     const issues = (await connect()).repo(webRepo).issues
 
     expect(await issues.parent(334519)).toBeNull()
+    expect(calls.map(({ url }) => url.pathname)).toEqual([
+      "/repos/acme/web/issues/334519/parent",
+      "/repos/acme/web/issues/334519",
+    ])
     expect(await issues.parent(289183)).toMatchObject({ number: 289180 })
+    expect(await issues.parent(404).catch((caught) => caught)).toMatchObject({ status: 404 })
     expect(await issues.parent(1).catch((caught) => caught)).toBeInstanceOf(GitHubApiError)
   })
 
@@ -1045,6 +1056,10 @@ describe("github connector", () => {
     ["milestones.get", (r, signal) => r.milestones.get(3, { signal })],
     ["issues.timeline", (r, signal) => r.issues.timeline(7, { signal })],
     ["issues.parent", (r, signal) => r.issues.parent(7, { signal })],
+    ["issues.get", (r, signal) => r.issues.get(7, { signal })],
+    ["issues.list", (r, signal) => r.issues.list({ signal })],
+    ["issues.comments.list", (r, signal) => r.issues.comments.list(7, { signal })],
+    ["issues.comments.get", (r, signal) => r.issues.comments.get(99, { signal })],
     ["issues.subIssues.list", (r, signal) => r.issues.subIssues.list(7, { signal })],
     [
       "issues.dependencies.blockedBy",
@@ -1337,6 +1352,42 @@ describe("github connector", () => {
       expect((issuePage as Error).message).toContain("Refusing an attachment URL")
       expect(refused).toBeInstanceOf(GitHubApiError)
       expect(refused).toMatchObject({ status: 404 })
+    })
+
+    // Reproduce: return `readContent(...)` directly in `download()`; the sign-in page resolves.
+    test("refuses a web page in place of the attachment", async () => {
+      record(
+        () =>
+          new Response("<html>Sign in</html>", {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          })
+      )
+      const attachments = (await connect()).attachments
+
+      const error: unknown = await attachments
+        .download({ downloadUrl: `https://github.com/user-attachments/assets/${image}` })
+        .catch((caught) => caught)
+
+      expect((error as Error).message).toContain('bodyFormat: "full"')
+    })
+
+    // Reproduce: map only api.github.com in `githubWebHost()`, or reject any port in `classify()`.
+    test("finds GitHub Enterprise Cloud attachments, and an Enterprise Server's on its own port", async () => {
+      const cloud = (await connect("https://api.acme.ghe.com/")).attachments
+      const server = (await connect("https://ghe.corp:8443/api/v3/")).attachments
+
+      const fromCloud = cloud.find({
+        body: `https://acme.ghe.com/user-attachments/assets/${image}`,
+      })
+      const fromServer = server.find({
+        body: [
+          `https://ghe.corp:8443/user-attachments/assets/${image}`,
+          `https://ghe.corp:9999/user-attachments/assets/${video}`,
+        ].join("\n"),
+      })
+
+      expect(fromCloud.map(({ id }) => id)).toEqual([image])
+      expect(fromServer.map(({ id }) => id)).toEqual([image])
     })
 
     test("finds an Enterprise Server's attachments on its own host only", async () => {

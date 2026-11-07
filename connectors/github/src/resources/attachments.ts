@@ -72,7 +72,16 @@ export function createGitHubAttachmentsApi(context: GitHubHttpContext): GitHubAt
 
       // Plain fetch, without the token: a signed link carries its own credential, and GitHub's
       // public links redirect to storage that would reject a second one.
-      return readContent(await fetch(url, { signal: options?.signal }))
+      const response = await readContent(await fetch(url, { signal: options?.signal }))
+
+      // A private repository's plain link leads to GitHub's sign-in page, not the file.
+      if (response.headers.get("content-type")?.toLowerCase().startsWith("text/html")) {
+        await response.body?.cancel()
+        throw new Error(
+          '[SixbGitHub] GitHub answered with a web page instead of the attachment. In a private repository, read the body with bodyFormat: "full" and pass body_html to find(), so it downloads from the signed link.'
+        )
+      }
+      return response
     },
   }
 }
@@ -87,7 +96,8 @@ interface ClassifiedLink {
 }
 
 function classify(url: URL, webHost: string): ClassifiedLink | null {
-  if (url.protocol !== "https:" || url.username || url.password || url.port) return null
+  // The host includes any port, so a link matches only the configured host's own port.
+  if (url.protocol !== "https:" || url.username || url.password) return null
   const path = url.pathname
 
   if (url.host === webHost) {
@@ -161,7 +171,15 @@ function fileName(segment: string): string {
   }
 }
 
-/** The web host serving attachments for the configured API: github.com, or the Enterprise host. */
+/**
+ * The web host serving attachments for the configured API: github.com for api.github.com,
+ * `<name>.ghe.com` for GitHub Enterprise Cloud's `api.<name>.ghe.com`, and an Enterprise Server's
+ * own host, port included.
+ */
 function githubWebHost(apiBaseUrl: URL): string {
-  return apiBaseUrl.host === "api.github.com" ? GITHUB_COM : apiBaseUrl.host
+  if (apiBaseUrl.host === "api.github.com") return GITHUB_COM
+  if (apiBaseUrl.hostname.startsWith("api.") && apiBaseUrl.hostname.endsWith(".ghe.com")) {
+    return apiBaseUrl.host.slice("api.".length)
+  }
+  return apiBaseUrl.host
 }

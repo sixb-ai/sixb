@@ -224,10 +224,15 @@ for (const attachment of gh.attachments.find(issue)) {
 ```
 
 `bodyFormat` is accepted by `issues.get()`, every issue list, `issues.comments.get()` and
-`issues.comments.list()`: `raw` (the default) returns the Markdown in `body`, `text` adds
-`body_text`, `html` returns only `body_html`, and `full` returns all three. `download()` refuses
-links outside GitHub's attachment hosts and never sends the token. With an Enterprise Server base
-URL, only attachments on that server's host are found.
+`issues.comments.list()`: `raw` (the default) returns the Markdown in `body`, `text` returns only
+`body_text`, `html` returns only `body_html`, and `full` returns all three. Only `raw` and `full`
+include `body`, so code that reads `body` should ask for one of them. These calls also accept a
+`signal`.
+
+`download()` refuses links outside GitHub's attachment hosts, never sends the token, and throws when
+GitHub answers with a web page instead of the file, as a private repository's plain link does.
+With a GitHub Enterprise Cloud base URL (`api.<name>.ghe.com`) attachments are found on
+`<name>.ghe.com`; with an Enterprise Server base URL, only on that server's host and port.
 
 Branch calls accept a `signal` to abort the request. `branches.list()` returns every
 branch unless `protected` is set: `true` keeps only branches protected by branch protection
@@ -309,8 +314,9 @@ for (const entry of (await repo.issues.timeline(42, { pageSize: 100 })).items) {
 issues, with `total_blocked_by` and `total_blocking`) and, for a sub-issue, `parent_issue_url`.
 `issues.subIssues.list(number)` returns its sub-issues, `issues.parent(number)` its parent or
 `null`, and `issues.dependencies.blockedBy(number)` and `.blocking(number)` the issues on either
-side. GitHub answers a missing issue the same way as an issue without a parent, so `parent()`
-returns `null` for both.
+side. GitHub answers a missing issue the same way as an issue without a parent, so on that answer
+`parent()` checks the issue itself: `null` when it exists, `GitHubApiError` (404) when it doesn't
+or the token can't see it.
 
 **Comments across a repository.** `issues.comments.listForRepository()` returns the comments on
 every issue and pull request in a repository, oldest first unless `sort` (`created` or `updated`)

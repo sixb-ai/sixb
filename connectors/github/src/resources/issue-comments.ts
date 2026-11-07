@@ -11,7 +11,7 @@ import {
   withQuery,
 } from "../http"
 import type { GitHubBodyFormatOptions } from "../types/attachments"
-import type { GitHubPage, GitHubRepositoryTarget } from "../types/common"
+import type { GitHubPage, GitHubRepositoryTarget, GitHubRequestOptions } from "../types/common"
 import type {
   CreateIssueCommentInput,
   GitHubIssueComment,
@@ -40,6 +40,7 @@ export function createRepositoryIssueCommentsApi(
       return readPage<GitHubIssueComment>(
         await context.http.get(resolvePagePath(path, options), {
           headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
         }),
         context.apiBaseUrl
       )
@@ -67,10 +68,14 @@ export function createRepositoryIssueCommentsApi(
       return readJson<GitHubIssueComment>(await context.http.post(path, { body: input.body }))
     },
 
-    async get(commentId: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssueComment> {
+    async get(
+      commentId: number,
+      options?: GitHubRequestOptions & GitHubBodyFormatOptions
+    ): Promise<GitHubIssueComment> {
       return readJson<GitHubIssueComment>(
         await context.http.get(commentPath(commentsPath, commentId), {
           headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
         })
       )
     },

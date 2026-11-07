@@ -21,7 +21,10 @@ export type GitHubIssueState = "open" | "closed" | "all"
 export type GitHubIssueSort = "created" | "updated" | "comments"
 export type GitHubIssueStateReason = "completed" | "not_planned" | "duplicate" | "reopened" | null
 
-interface ListAssignedIssuesOptions extends GitHubPaginationOptions, GitHubBodyFormatOptions {
+interface ListAssignedIssuesOptions
+  extends GitHubPaginationOptions,
+    GitHubRequestOptions,
+    GitHubBodyFormatOptions {
   readonly filter?: GitHubIssueFilter
   readonly state?: GitHubIssueState
   readonly labels?: readonly string[]
@@ -44,6 +47,7 @@ export interface ListOrganizationIssuesOptions extends ListAssignedIssuesOptions
 
 export interface ListRepositoryIssuesOptions
   extends GitHubPaginationOptions,
+    GitHubRequestOptions,
     GitHubBodyFormatOptions {
   readonly milestone?: string | number
   readonly state?: GitHubIssueState
@@ -135,6 +139,7 @@ export interface GitHubIssue {
   readonly html_url: string
   readonly number: number
   readonly title: string
+  /** Absent with `bodyFormat` `text` or `html`, which return only `body_text` or `body_html`. */
   readonly body: string | null
   /** With `bodyFormat` `text` or `full`. */
   readonly body_text?: string | null
@@ -203,7 +208,10 @@ export interface RepositoryIssuesApi {
   readonly dependencies: RepositoryIssueDependenciesApi
   /** List one page of this repository's issues. GitHub may include pull requests. */
   list(options?: ListRepositoryIssuesOptions): Promise<GitHubPage<GitHubIssue>>
-  get(issueNumber: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssue>
+  get(
+    issueNumber: number,
+    options?: GitHubRequestOptions & GitHubBodyFormatOptions
+  ): Promise<GitHubIssue>
   create(input: CreateIssueInput): Promise<GitHubIssue>
   update(issueNumber: number, patch: UpdateIssueInput): Promise<GitHubIssue>
   /** List one page of an issue's or pull request's timeline: its comments and events, oldest first. */

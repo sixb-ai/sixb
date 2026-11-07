@@ -1,8 +1,9 @@
 import type { GitHubRequestOptions } from "./common"
 
 /**
- * How GitHub returns an issue's or comment's body: `raw` is the Markdown in `body` (the default),
- * `text` adds `body_text`, `html` returns `body_html` without `body`, and `full` returns all three.
+ * How GitHub returns an issue's or comment's body: `raw` returns the Markdown in `body` (the
+ * default), `text` returns `body_text` instead of `body`, `html` returns `body_html` instead of
+ * `body`, and `full` returns all three. Only `raw` and `full` include `body`.
  */
 export type GitHubBodyFormat = "raw" | "text" | "html" | "full"
 
