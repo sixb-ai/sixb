@@ -25,18 +25,21 @@ Sixb packages are versioned independently. Each release entry names the packages
   `sixb deploy` does this for you: it stops every service of the old release first.
 - `services.scheduler` is no longer a `sixb deploy` setting. Remove it. A deployment with
   `orchestrator: false` runs no cron.
-- `createSixbServer` keeps delivering undelivered events and purging expired records. Pass
-  `ontologyMaintenance: false` to it if your process also runs an orchestrator; `sixb api` does.
+- `sixb api` no longer delivers events left undelivered or purges expired records: run
+  `sixb orchestrator`, even with no schedules. It warns at startup. `sixb deploy` runs one unless
+  `services.orchestrator` is `false`.
+- `createSixbServer` keeps doing that work. Pass `ontologyMaintenance: false` to it if your process
+  also runs an orchestrator.
 - `/api/status` reads a heartbeat the orchestrator writes to storage. `status` can now be `unknown`,
-  and `maintenance` holds `beatAt`, `stale`, `passes` and `outbox` instead of the last pass of the
-  process that answered. Regenerate clients.
+  and `maintenance` holds `owner`, `beatAt`, `stale`, `passes` and `outbox` instead of the last pass
+  of the process that answered. Regenerate clients.
 - Storage gains `maintenance_heartbeats`: migrate before starting the new services.
 - `onError` gains `maintenance.pass.failed` and `orchestrator.dispatch.failed`.
 - An automatic dispatch that fails no longer holds the routes behind it. An outage retries until it
   ends, and a failure about one event, such as a mapper that throws, is reported and dropped.
   `packages/orchestrator/README.md` lists what can be lost.
-- A restart of the orchestrator replays the retained `schedule.triggered` events, so an occurrence
-  it had not dispatched is not lost. A cron run that had joined another may run once more.
+- A cron occurrence the broker refuses is retried until accepted, and fails the `cron` pass
+  meanwhile, instead of being reported once and lost.
 - `onError`'s `orchestrator.dispatch.failed` carries `dropped`, and `InMemoryBroker` now honors
   `idempotencyKey`, as Redis and NATS do.
 
