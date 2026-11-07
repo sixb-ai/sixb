@@ -79,6 +79,7 @@ import {
   PanelRow,
   PanelSkeleton,
   Pill,
+  SkeletonText,
   useFormat,
 } from "../section-ui"
 import {
@@ -522,7 +523,11 @@ export function SettingsMembersPage() {
       ) : tab === "groups" ? (
         <Panel footer={messages.groups.footnote}>
           {optionsQuery.isPending || membersQuery.isPending ? (
-            <PanelSkeleton rows={3} />
+            <PanelSkeleton
+              rows={3}
+              interactive
+              trailing={<ChevronRight className="size-4 text-muted-foreground/60" />}
+            />
           ) : groups.length === 0 ? (
             <PanelEmpty
               icon={UsersRound}
@@ -566,7 +571,7 @@ export function SettingsMembersPage() {
           ) : null}
           <div className="overflow-hidden rounded-2xl border border-border/80 bg-card">
             {membersQuery.isPending || invitationsQuery.isPending ? (
-              <PanelSkeleton rows={4} />
+              <PeopleSkeleton rows={4} />
             ) : membersQuery.isError ? (
               <PanelEmpty
                 tone="error"
@@ -773,6 +778,10 @@ export function SettingsMembersPage() {
 // Signed-in activity is recorded about once a minute, so a few minutes reads as now.
 const ACTIVE_NOW_MS = 5 * 60_000
 
+// Who, groups, last active, menu: shared by the rows and their skeleton.
+const peopleRowClass =
+  "grid grid-cols-[minmax(0,1fr)_32px] items-center gap-4 border-t border-border/60 px-[18px] py-3 text-sm first:border-t-0 md:grid-cols-[minmax(220px,1.6fr)_minmax(180px,1.2fr)_140px_32px]"
+
 /**
  * One person in the People table: who, their groups, when they were last here, and their
  * actions. A member's row opens their details; an invitation's has none to open.
@@ -808,13 +817,7 @@ function PeopleRow({
     </>
   )
   return (
-    <div
-      className={cn(
-        "grid grid-cols-[minmax(0,1fr)_32px] items-center gap-4 border-t border-border/60 px-[18px] py-3 text-sm first:border-t-0 md:grid-cols-[minmax(220px,1.6fr)_minmax(180px,1.2fr)_140px_32px]",
-        invited && "bg-muted/30",
-        onOpen && "hover:bg-muted/40"
-      )}
-    >
+    <div className={cn(peopleRowClass, invited && "bg-muted/30", onOpen && "hover:bg-muted/40")}>
       {onOpen ? (
         <button
           type="button"
@@ -830,6 +833,36 @@ function PeopleRow({
       <span className="hidden text-[0.8125rem] md:block">{status}</span>
       <span className="flex justify-end">{menu}</span>
     </div>
+  )
+}
+
+/** The People table while it loads, laid out like `PeopleRow`. */
+function PeopleSkeleton({ rows }: { readonly rows: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} aria-hidden className={peopleRowClass}>
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="size-[34px] shrink-0 animate-pulse rounded-[10px] bg-muted" />
+            <span className="flex min-w-0 flex-col leading-[1.3]">
+              <span>
+                <SkeletonText className="h-3 w-32" />
+              </span>
+              <span className="text-[0.78rem]">
+                <SkeletonText className="w-44 bg-muted/70" />
+              </span>
+            </span>
+          </span>
+          <span className="hidden min-w-0 md:flex">
+            <SkeletonText className="h-6 w-20 rounded-[7px]" />
+          </span>
+          <span className="hidden text-[0.8125rem] md:block">
+            <SkeletonText className="w-16" />
+          </span>
+          <span className="size-8" />
+        </div>
+      ))}
+    </>
   )
 }
 

@@ -20,8 +20,8 @@ import {
   MetaDot,
   Panel,
   PanelEmpty,
-  PanelSkeleton,
   Pill,
+  SkeletonText,
   useLoadFailure,
   useNumbers,
 } from "../../section-ui"
@@ -69,27 +69,41 @@ export function SettingsActivityThreadPage() {
     [setSearchParams, location.state]
   )
 
-  if (!thread || threadQuery.isError) {
+  if (threadQuery.isError) {
     return (
-      <SectionPage
-        section="settings"
-        page="activity"
-        back={back}
-        title={threadQuery.error ? failure.title : messages.thread.untitled}
-      >
+      <SectionPage section="settings" page="activity" back={back} title={failure.title}>
         <Panel>
-          {threadQuery.error ? (
-            <PanelEmpty
-              tone="error"
-              icon={Bot}
-              title={failure.title}
-              description={failure.description}
-            />
-          ) : (
-            <PanelSkeleton rows={2} />
-          )}
+          <PanelEmpty
+            tone="error"
+            icon={Bot}
+            title={failure.title}
+            description={failure.description}
+          />
         </Panel>
       </SectionPage>
+    )
+  }
+
+  // While it loads, the conversation's header holds its place; the transcript loads in its own.
+  if (!thread) {
+    return (
+      <SectionWorkspace section="settings" page="activity">
+        <WorkspaceHeader
+          back={back}
+          icon={<IconTile icon={Bot} />}
+          title={<SkeletonText className="h-3 w-48" />}
+          meta={
+            <span>
+              <SkeletonText className="w-36 bg-muted/70" />
+            </span>
+          }
+          actions={
+            <span className="max-sm:hidden">
+              <Pill tone="muted">{messages.thread.readOnly}</Pill>
+            </span>
+          }
+        />
+      </SectionWorkspace>
     )
   }
 

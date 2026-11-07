@@ -14,7 +14,7 @@ import { Link } from "react-router-dom"
 import { threadPathFromLink } from "../../agent/thread-navigation"
 import { useCurrentUser } from "../../session"
 import { notify } from "../section-page"
-import { apiErrorMessage, Panel, PanelEmpty, PanelSkeleton, Pill, useFormat } from "../section-ui"
+import { apiErrorMessage, Panel, PanelEmpty, Pill, SkeletonText, useFormat } from "../section-ui"
 import {
   ADDED,
   isMemoryNote,
@@ -34,6 +34,10 @@ type Change = Revision["changes"][number]
 type MemoryMessages = ReturnType<typeof useSettingsMessages>["memory"]
 
 const PAGE_SIZE = 20
+
+// The card a change opens in, and its skeleton.
+const changeCardClass =
+  "min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)] md:sticky md:top-4"
 
 /**
  * Every save to the repo, newest first and by day, beside what the one chosen did to each file: the
@@ -68,13 +72,7 @@ export function MemoryHistory({
     return groups
   }, [revisions, day])
 
-  if (historyQuery.isPending) {
-    return (
-      <Panel>
-        <PanelSkeleton rows={4} />
-      </Panel>
-    )
-  }
+  if (historyQuery.isPending) return <MemoryHistorySkeleton />
   if (historyQuery.isError) {
     return (
       <Panel>
@@ -139,6 +137,74 @@ export function MemoryHistory({
       ) : (
         <p className="text-sm text-muted-foreground">{messages.chooseChange}</p>
       )}
+    </div>
+  )
+}
+
+/** The history while it loads, laid out like it: a day of changes beside the newest one. */
+export function MemoryHistorySkeleton() {
+  const messages = useSettingsMessages().memory
+  return (
+    <div aria-hidden className="grid min-w-0 items-start gap-8 md:grid-cols-[20rem_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col">
+        <h3 className="mb-1.5 pl-7 text-xs">
+          <SkeletonText className="w-14 bg-muted/70" />
+        </h3>
+        <ol className="relative before:absolute before:top-3 before:bottom-3 before:left-[11px] before:w-px before:bg-border">
+          {["w-44", "w-56", "w-36", "w-48"].map((width) => (
+            <li key={width} className="relative">
+              <span className="absolute top-[13px] left-2 size-[7px] rounded-full bg-muted-foreground/40 ring-4 ring-background" />
+              <div className="ml-5 w-[calc(100%-1.25rem)] px-2.5 py-2">
+                <div className="text-sm leading-5">
+                  <SkeletonText className={cn("h-3", width)} />
+                </div>
+                <div className="mt-0.5 text-[0.8125rem]">
+                  <SkeletonText className="w-52 bg-muted/70" />
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-6 pl-7 text-xs text-muted-foreground/80">{messages.historyKept}</p>
+      </div>
+      <section className={changeCardClass}>
+        <header className="border-b border-border px-5 py-4">
+          <h3 className="text-[0.9375rem] leading-6">
+            <SkeletonText className="h-3 w-56" />
+          </h3>
+          <p className="mt-0.5 text-[0.8125rem]">
+            <SkeletonText className="w-40 bg-muted/70" />
+          </p>
+        </header>
+        <FileChangesSkeleton files={1} />
+      </section>
+    </div>
+  )
+}
+
+/** A change's files while their versions load: each one's name over a few lines. */
+function FileChangesSkeleton({ files }: { readonly files: number }) {
+  return (
+    <div aria-hidden className="divide-y divide-border">
+      {Array.from({ length: files }, (_, index) => (
+        <section key={index}>
+          <header className="flex items-baseline gap-2.5 px-5 pt-4 pb-1">
+            <h3 className="text-sm">
+              <SkeletonText className="h-3 w-28" />
+            </h3>
+            <span className="text-xs">
+              <SkeletonText className="w-24 bg-muted/70" />
+            </span>
+          </header>
+          <div className="px-3 pt-1 pb-3 text-[0.875rem] leading-6">
+            {["w-64", "w-80", "w-52"].map((width) => (
+              <div key={width} className="border-l-2 border-transparent py-0.5 pr-3 pl-3">
+                <SkeletonText className={width} />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }
@@ -276,7 +342,7 @@ function ChangeDetail({
   const failed = afterQuery.error ?? beforeQuery.error
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)] md:sticky md:top-4">
+    <section className={changeCardClass}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
         <div className="min-w-0">
           <h3 className="text-[0.9375rem] leading-6 font-semibold">{revision.message}</h3>
@@ -299,7 +365,7 @@ function ChangeDetail({
         ) : null}
       </header>
       {afterQuery.isPending || beforeQuery.isPending ? (
-        <PanelSkeleton rows={2} />
+        <FileChangesSkeleton files={revision.changes.length} />
       ) : failed ? (
         <PanelEmpty
           tone="error"

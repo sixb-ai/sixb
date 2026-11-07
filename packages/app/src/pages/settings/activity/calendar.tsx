@@ -5,7 +5,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
-import { PageSection, Panel, PanelEmpty, PanelSkeleton } from "../../section-ui"
+import { PageSection, Panel, PanelEmpty } from "../../section-ui"
 import { useActivityMessages } from "./messages"
 import { activityQueryKey, activityYearGrid, utcDay } from "./period"
 
@@ -141,12 +141,16 @@ export function ActivityCalendar({
       }
     >
       <Panel footer={messages.hint}>
-        {query.isPending ? (
-          <PanelSkeleton rows={2} />
-        ) : query.isError ? (
+        {query.isError ? (
           <PanelEmpty tone="error" icon={CalendarDays} title={messages.unavailable} />
         ) : (
-          <div ref={scroller} className="overflow-x-auto px-4 py-4">
+          // The grid needs only the year: while its days load, it shows them blank.
+          <div
+            ref={scroller}
+            inert={query.isPending}
+            aria-busy={query.isPending}
+            className="overflow-x-auto px-4 py-4"
+          >
             <div className="min-w-[720px]">
               <div
                 aria-hidden
@@ -178,7 +182,10 @@ export function ActivityCalendar({
                 </div>
 
                 <div
-                  className="grid flex-1 grid-flow-col grid-rows-7 gap-[3px]"
+                  className={cn(
+                    "grid flex-1 grid-flow-col grid-rows-7 gap-[3px]",
+                    query.isPending && "animate-pulse"
+                  )}
                   style={{ gridTemplateColumns: `repeat(${weeks}, minmax(0, 1fr))` }}
                 >
                   {cells.map((day, index) => {

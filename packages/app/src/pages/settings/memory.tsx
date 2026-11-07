@@ -30,7 +30,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { notify, SectionPage } from "../section-page"
-import { Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "../section-ui"
+import { Panel, PanelEmpty, SkeletonText, useLoadFailure } from "../section-ui"
 import { EntryEditor, ForgetDialog, summary, useMemorySave } from "./memory-editors"
 import { insertMemoryEntry, memoryEntries, memoryToday } from "./memory-entries"
 import {
@@ -45,7 +45,7 @@ import {
   sortMemoryPaths,
   words,
 } from "./memory-files"
-import { MemoryHistory } from "./memory-history"
+import { MemoryHistory, MemoryHistorySkeleton } from "./memory-history"
 import { NoteDocument } from "./memory-note"
 import { useSettingsMessages } from "./messages"
 
@@ -185,9 +185,11 @@ export function SettingsMemoryPage() {
       </div>
 
       {repoQuery.isPending ? (
-        <Panel>
-          <PanelSkeleton rows={4} />
-        </Panel>
+        tab === "history" ? (
+          <MemoryHistorySkeleton />
+        ) : (
+          <MemoriesSkeleton />
+        )
       ) : repoQuery.isError ? (
         <Panel>
           <MemoryUnavailable repo={repo} error={repoQuery.error} />
@@ -332,6 +334,46 @@ function MemoriesView({
           file={file}
           revisions={revisionsQuery.data?.revisions ?? []}
         />
+      </div>
+    </div>
+  )
+}
+
+/** The notes and the open one while the memory loads, laid out like `MemoriesView`. */
+function MemoriesSkeleton() {
+  return (
+    <div aria-hidden className="grid min-w-0 gap-8 md:grid-cols-[13.5rem_minmax(0,1fr)] md:gap-10">
+      <div className="hidden min-w-0 flex-col gap-px md:flex">
+        {["w-24", "w-32", "w-20"].map((width) => (
+          <div key={width} className="flex h-8 items-center gap-2.5 px-2.5">
+            <span className="size-3.5 shrink-0 animate-pulse rounded-sm bg-muted" />
+            <SkeletonText className={width} />
+          </div>
+        ))}
+      </div>
+      <div className="min-w-0">
+        <div className="mb-6 h-9 animate-pulse rounded-md bg-muted md:hidden" />
+        <h2 className="text-[1.375rem] leading-8">
+          <SkeletonText className="h-5 w-48" />
+        </h2>
+        <div className="mt-1 text-[0.8125rem]">
+          <SkeletonText className="w-72 bg-muted/70" />
+        </div>
+        {/* As a note's first memories read: under no heading of their own. */}
+        <div className="h-5" />
+        {["w-full", "w-4/5", "w-11/12", "w-3/5"].map((width) => (
+          <div
+            key={width}
+            className="grid grid-cols-[16px_minmax(0,40rem)] gap-x-3.5 py-[5px] md:grid-cols-[16px_minmax(0,40rem)_minmax(0,1fr)]"
+          >
+            <span className="mt-[11px] ml-[5px] size-[5px] rounded-full bg-muted" />
+            <p className="m-0 text-base leading-[1.65]">
+              <SkeletonText className={width} />
+            </p>
+            {/* A phone shows each memory's actions on a line of their own. */}
+            <div className="col-start-2 h-[26px] md:hidden" />
+          </div>
+        ))}
       </div>
     </div>
   )

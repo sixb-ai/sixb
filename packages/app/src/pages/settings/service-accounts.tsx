@@ -53,6 +53,7 @@ import {
   type AuthGroupOption,
   type CreatedTokenState,
   FormError,
+  GhostButtonSkeleton,
   GroupChips,
   GroupPicker,
   maskId,
@@ -216,7 +217,11 @@ export function ServiceAccountsTab({
     <>
       <Panel>
         {optionsQuery.isPending || accountsQuery.isPending ? (
-          <PanelSkeleton rows={3} />
+          <PanelSkeleton
+            rows={3}
+            interactive
+            trailing={<ChevronRight className="size-4 text-muted-foreground/60" />}
+          />
         ) : accountsQuery.isError ? (
           <PanelEmpty
             tone="error"
@@ -355,7 +360,7 @@ export function ServiceAccountsTab({
                   ) : null}
                   <Panel>
                     {selectedTokens?.loading ? (
-                      <PanelSkeleton rows={1} />
+                      <PanelSkeleton rows={1} trailing={<GhostButtonSkeleton className="w-12" />} />
                     ) : (
                       <TokenRows
                         tokens={selectedTokens?.tokens ?? []}

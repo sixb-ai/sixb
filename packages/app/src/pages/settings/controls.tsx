@@ -28,7 +28,16 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import { type ReactNode, type SubmitEvent, useEffect, useMemo, useState } from "react"
-import { CopyButton, Field, IconTile, MetaDot, PanelRow, Pill, useFormat } from "../section-ui"
+import {
+  CopyButton,
+  Field,
+  IconTile,
+  MetaDot,
+  PanelRow,
+  Pill,
+  SkeletonText,
+  useFormat,
+} from "../section-ui"
 import { useSettingsMessages } from "./messages"
 
 export type AuthGroupOption = GetAuthAccessManagementOptionsResponse["groups"][number]
@@ -487,6 +496,15 @@ export function TokenRows({
         </button>
       ) : null}
     </>
+  )
+}
+
+/** A small ghost button, such as Revoke, while its row loads: its box, with a line for its label. */
+export function GhostButtonSkeleton({ className }: { readonly className: string }) {
+  return (
+    <span aria-hidden className="flex h-8 items-center px-3">
+      <SkeletonText className={className} />
+    </span>
   )
 }
 
