@@ -64,9 +64,11 @@ What stays specific, and why:
   the materializer fences its commits with that token, a claim also asserts the run's immutable
   identity, and a replay answers from the run's outcome. A run that fails transiently retries without
   a cap, because each attempt keeps its candidate and its progress, so a hand-back spends nothing. A
-  queued projection run is republished by the orchestrator's reconciler, which knows whether its
-  revision still applies.
-- **Agents** share `RunOwnedElsewhereError`, and end a lost run instead of claiming it.
+  queued projection run is republished through its dispatcher, which knows whether its revision still
+  applies (`republishQueuedProjectionRuns`).
+- **Agents** share `RunOwnedElsewhereError`, and end a lost run instead of claiming it. Their repair
+  loop stays in the agent worker: a lost run ends, children and held approvals with it, so it holds
+  no lane's shape, and republishing queued runs alone would save the `runs` pass nothing.
 - **Webhooks** have no queue, so the API process renews a lease of its own while the handler runs:
   60 s, every 15 s, the numbers of a dataset flush. It survives three lost renewals, so a database
   blip does not run a live handler twice, and it ends well before most providers retry. A retry
@@ -138,8 +140,8 @@ stopped for longer has its runs end. A job still in such a queue can reach its r
 A delivery can only recover a run it reaches. `republishLostRuns` is the orchestrator's `runs` pass,
 every 30 seconds on its maintenance loop. It brings a job to syncs, pipelines and workflows that have
 none: queued runs whose job was lost, and running runs whose lease lapsed, which covers one handed
-back. Projections join it for lapsed leases. A job on its way gets 30 seconds first, so a clean shutdown publishes nothing beside the job
-that came back.
+back. Projections join it, queued and lapsed. A job on its way gets 30 seconds first, so a clean
+shutdown publishes nothing beside the job that came back.
 
 It asks each store for those runs alone (`listLost`), from the `(project_id, status, ...)` index:
 queued and running rows are few however long the history, so a project with nothing lost reads no

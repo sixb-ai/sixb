@@ -67,6 +67,7 @@ export class ProjectionWorker extends RunWorker<
       workerId: `projection-worker-${host.id}`,
       claimLimit: options.concurrency,
       runs: projectionRunsStorage,
+      executions: host.storage.executions,
       maxAttempts: Number.POSITIVE_INFINITY,
     })
     this.host = host
@@ -106,25 +107,17 @@ export class ProjectionWorker extends RunWorker<
       )
     }
 
-    return { outcome: "woken", run }
+    return { outcome: "deferred", run }
   }
 
   protected async executeRun(
     claim: HeldRunClaim<ProjectionRunRecord>,
-    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
+    _claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
     const { run } = claim
 
-    const durableExecution = await this.host.storage.executions.getById({
-      projectId: this.host.id,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw new Error(
-        `[SixbProjectionWorker] Projection run '${run.id}' references missing execution '${run.executionId}'.`
-      )
-    }
+    const durableExecution = await this.requireExecution(run)
     const execution = bindDurablePrimitiveExecution(this.host, {
       execution: durableExecution,
       primitive: { kind: "projection", id: run.identity.projectionId, runId: run.id },

@@ -2,16 +2,9 @@ import { createSixbError } from "../../errors/internal"
 import type { DatasetLatestVersionSummary, DatasetVersion, LakeStorage } from "../../lake-storage"
 import type { ProjectionRunDispatchPort } from "../../projections/run-dispatch"
 import type { ProjectionDispatchDescriptor } from "../../projections/types"
-import type {
-  ListProjectionRunsInput,
-  ProjectionRunRecord,
-  ProjectionRunStorage,
-} from "../../storage"
 import type { MaintenancePass } from "../loop"
 import type { LakeChangeFeed, LakeChangeReader } from "./lake-change-feed"
-import { RECOVERY_INTERVAL_MS, recoveryPass } from "./recovery-pass"
-
-const STUCK_RUN_PAGE_SIZE = 100
+import { recoveryPass } from "./recovery-pass"
 
 export interface ProjectionsPassInput {
   readonly projectId: string
@@ -19,9 +12,6 @@ export interface ProjectionsPassInput {
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
   readonly feed: LakeChangeFeed
   readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
-  /** Source of runs whose queue publication was lost. */
-  readonly projectionRuns: Pick<ProjectionRunStorage, "list">
-  readonly now?: () => number
 }
 
 /**
@@ -34,8 +24,7 @@ export interface ProjectionsPassInput {
  * current position, and routes may have changed since the last process), and any projection
  * whose dispatch failed. A restart repeats that first pass, so the cursor needs no storage.
  *
- * Lost publications: runs `queued` for longer than one interval, or failed with a retryable
- * enqueue error, are dispatched again, and the dispatcher republishes the same run and job.
+ * Runs that lost their publication are the `runs` pass's (see `republishLostProjectionRuns`).
  */
 export function projectionsPass(input: ProjectionsPassInput): MaintenancePass {
   const recovery = new ProjectionRecovery(input)
@@ -48,10 +37,8 @@ class ProjectionRecovery {
   /** Projections whose latest data version must be looked up rather than taken from the feed. */
   private readonly unverified: Set<string>
   private readonly changes: LakeChangeReader
-  private readonly now: () => number
 
   constructor(private readonly input: ProjectionsPassInput) {
-    this.now = input.now ?? Date.now
     this.descriptorsByDatasetId = groupByDataset(input.descriptors)
     this.unverified = new Set(input.descriptors.map((descriptor) => descriptor.projectionId))
     this.changes = input.feed.subscribe({
@@ -68,10 +55,7 @@ class ProjectionRecovery {
    * that could not be dispatched stays unverified, and the next pass looks it up.
    */
   async run(signal: AbortSignal): Promise<void> {
-    const failures = [
-      ...(await this.dispatchMissedVersions(signal)),
-      ...(await this.republishStuckRuns(signal)),
-    ]
+    const failures = await this.dispatchMissedVersions(signal)
 
     if (failures.length > 0) {
       throw new AggregateError(failures, "[Sixb] The projections pass failed.")
@@ -183,103 +167,12 @@ class ProjectionRecovery {
       metadata: { dispatchSource: "lake-reconciliation" },
     })
   }
-
-  private async republishStuckRuns(signal: AbortSignal): Promise<readonly Error[]> {
-    let runs: readonly ProjectionRunRecord[]
-
-    try {
-      runs = await this.listStuckRuns()
-    } catch (error) {
-      return [
-        new Error(
-          `[Sixb] The projections pass could not list stuck runs (projectId=${this.input.projectId}).`,
-          { cause: error }
-        ),
-      ]
-    }
-
-    const failures: Error[] = []
-
-    for (const run of runs) {
-      const descriptor = this.input.descriptors.find(
-        (candidate) => candidate.projectionId === run.identity.projectionId
-      )
-
-      // A run admitted under another definition revision belongs to an earlier deployment; the
-      // current revision is reconciled from the lake instead.
-      if (!descriptor || !admittedUnder(run, descriptor)) continue
-
-      try {
-        signal.throwIfAborted()
-        await this.input.dispatcher.dispatch({
-          projectionId: descriptor.projectionId,
-          datasetVersion: structuredClone(run.identity.datasetVersion),
-          metadata: { dispatchSource: "run-recovery" },
-        })
-      } catch (error) {
-        failures.push(
-          new Error(
-            `[Sixb] The projections pass could not republish a run (projectionId=${descriptor.projectionId}, runId=${run.id}).`,
-            { cause: error }
-          )
-        )
-      }
-    }
-
-    return failures
-  }
-
-  /** Runs `queued` for longer than one interval, or failed with a retryable enqueue error. */
-  private async listStuckRuns(): Promise<readonly ProjectionRunRecord[]> {
-    const [queued, enqueueFailed] = await Promise.all([
-      this.listRuns({
-        statuses: ["queued"],
-        // Younger runs may still be in their first publication.
-        startedBefore: new Date(this.now() - RECOVERY_INTERVAL_MS),
-      }),
-      this.listRuns({ statuses: ["failed"], errorCodes: ["queue.enqueue_failed"] }),
-    ])
-
-    return [...queued, ...enqueueFailed.filter((run) => run.error?.retryable)]
-  }
-
-  private async listRuns(
-    filter: Omit<ListProjectionRunsInput, "projectId" | "limit" | "offset" | "order">
-  ): Promise<ProjectionRunRecord[]> {
-    const runs: ProjectionRunRecord[] = []
-    for (let offset = 0; ; offset += STUCK_RUN_PAGE_SIZE) {
-      const page = await this.input.projectionRuns.list({
-        ...filter,
-        projectId: this.input.projectId,
-        order: "asc",
-        limit: STUCK_RUN_PAGE_SIZE,
-        offset,
-      })
-      runs.push(...page.runs)
-      if (!page.hasMore) return runs
-    }
-  }
 }
 
 function dispatchFailure(descriptor: ProjectionDispatchDescriptor, error: unknown): Error {
   return new Error(
     `[Sixb] The projections pass could not dispatch (projectionId=${descriptor.projectionId}, datasetId=${descriptor.datasetId}).`,
     { cause: error }
-  )
-}
-
-function admittedUnder(
-  run: ProjectionRunRecord,
-  descriptor: ProjectionDispatchDescriptor
-): boolean {
-  const { identity } = run
-  return (
-    identity.datasetVersion.datasetId === descriptor.datasetId &&
-    identity.projectionKind === descriptor.projectionKind &&
-    identity.protocol === descriptor.protocol &&
-    identity.ontologyRevision === descriptor.ontologyRevision &&
-    identity.projectionRevision === descriptor.projectionRevision &&
-    identity.ownershipHash === descriptor.ownershipHash
   )
 }
 

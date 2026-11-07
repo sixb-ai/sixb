@@ -6,6 +6,7 @@ import {
   recoveryPasses,
 } from "@sixb/core/internal/maintenance"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
+import type { Storage } from "@sixb/core/storage"
 import type { OrchestratorDispatchers, OrchestratorRoutes } from "./types"
 import { requireDispatcher } from "./worker"
 
@@ -14,8 +15,8 @@ export interface MaintenancePassesInput {
   readonly routes: OrchestratorRoutes
   readonly dispatchers: OrchestratorDispatchers
   readonly lakeStorage: RecoveryPassesInput["lakeStorage"]
-  /** Required when the routes contain projections. */
-  readonly projectionRuns?: NonNullable<RecoveryPassesInput["projections"]>["projectionRuns"]
+  /** Required when the routes contain projections: what proves a project's routes are durable. */
+  readonly projectionRuns?: NonNullable<Storage["projectionRuns"]>
   /** Without it, a pipeline's dataset triggers have only their event. */
   readonly pipelineRuns?: NonNullable<RecoveryPassesInput["triggers"]>["pipelineRuns"]
   /** When the project can ingest. */
@@ -28,13 +29,15 @@ export interface MaintenancePassesInput {
 export function createMaintenancePasses(input: MaintenancePassesInput): readonly MaintenancePass[] {
   const { projectId, lakeStorage } = input
 
+  const projections = projectionsOf(input)
+
   return recoveryPasses({
     projectId,
     lakeStorage,
-    projections: projectionsOf(input),
+    projections,
     triggers: triggersOf(input),
     ingest: input.ingest,
-    runs: input.runs,
+    runs: input.runs && { ...input.runs, projections },
   })
 }
 
@@ -55,11 +58,7 @@ function projectionsOf(input: MaintenancePassesInput): RecoveryPassesInput["proj
     )
   }
 
-  return {
-    descriptors,
-    projectionRuns: input.projectionRuns,
-    dispatcher: requireDispatcher(input, "projections"),
-  }
+  return { descriptors, dispatcher: requireDispatcher(input, "projections") }
 }
 
 function triggersOf(input: MaintenancePassesInput): RecoveryPassesInput["triggers"] {
