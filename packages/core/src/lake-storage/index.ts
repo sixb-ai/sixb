@@ -24,6 +24,13 @@ export { InMemoryLakeStorage } from "./in-memory"
 export type { LineageAtCommitInput } from "./lineage"
 export { lineageAtCommit, resolveStepLineage } from "./lineage"
 export type {
+  DatasetStorageHealth,
+  DatasetStorageWarning,
+  LakeMaintenance,
+  LakeRetentionOptions,
+  LakeRetentionReport,
+} from "./maintenance"
+export type {
   BeginDatasetMergeInput,
   CommitDatasetMergeInput,
   DatasetMergeCommitResult,

@@ -11,7 +11,12 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
+import {
+  type LakeMaintenance,
+  type LakeRetentionOptions,
+  type LakeRetentionReport,
+  LakeStorageError,
+} from "@sixb/core/lake-storage"
 
 const Room = defineObjectType({
   id: "Room",
@@ -27,6 +32,8 @@ const things = defineDataset("raw.things", {
 export const lakeFixture = {
   drift: false,
   maintenance: true,
+  /** Whether the retention pass reports more to clean up. */
+  retentionHasMore: false,
   /** A dataset version a projection applied, or "unreadable" when reading them fails. */
   appliedVersion: undefined as string | undefined,
   events: [] as Record<string, unknown>[],
@@ -53,23 +60,25 @@ class FixtureLakeStorage extends InMemoryLakeStorage {
 }
 
 class MaintenanceLakeStorage extends FixtureLakeStorage {
-  async runMaintenance(options?: {
-    readonly dryRun?: boolean
-    readonly expireOlderThan?: string
-    readonly deleteOlderThan?: string
-    readonly protect?: readonly { readonly datasetId: string; readonly versionId: string }[]
-  }) {
-    lakeFixture.events.push({ type: "lake:maintenance", ...options })
+  readonly maintenance: LakeMaintenance = {
+    async applyRetention(options?: LakeRetentionOptions): Promise<LakeRetentionReport> {
+      lakeFixture.events.push({ type: "lake:retention", ...options })
 
-    return {
-      dryRun: options?.dryRun ?? false,
-      expireOlderThan: options?.expireOlderThan ?? "7 days",
-      deleteOlderThan: options?.deleteOlderThan ?? options?.expireOlderThan ?? "7 days",
-      snapshots: 2,
-      keptSnapshots: 5,
-      oldFiles: 3,
-      orphanedFiles: 4,
-    }
+      return {
+        dryRun: options?.dryRun ?? false,
+        keepVersionsForMs: options?.keepVersionsForMs ?? 0,
+        deleteFilesAfterMs: options?.deleteFilesAfterMs ?? 0,
+        expiredVersions: 2,
+        keptVersions: 5,
+        deletedFiles: 3,
+        orphanedFiles: 4,
+        hasMore: lakeFixture.retentionHasMore,
+      }
+    },
+
+    async describeStorage() {
+      return []
+    },
   }
 }
 

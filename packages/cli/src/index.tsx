@@ -381,8 +381,8 @@ async function main(): Promise<void> {
       await runLakeCleanup({
         entry: getFlag("entry"),
         dryRun: hasFlag("dry-run"),
-        expireOlderThan: getFlag("expire-older-than"),
-        deleteOlderThan: getFlag("delete-older-than"),
+        keepVersionsFor: getFlag("keep-versions-for"),
+        deleteFilesAfter: getFlag("delete-files-after"),
       })
       break
     }

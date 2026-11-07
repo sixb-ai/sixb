@@ -77,42 +77,114 @@ DuckDB's own `INSTALL` downloads the extension over plain HTTP, as before.
 With `custom_extension_repository` set, DuckDB installs from that repository
 alone.
 
+### Pinned DuckDB and DuckLake builds
+
+`@duckdb/node-api` is pinned to an exact version (DuckDB 1.5.6), and the provider is tested against
+DuckLake extension build `ac7595b0`. DuckDB's extension repository serves one build per DuckDB
+version and can replace it, so a new host, over HTTPS or plain HTTP, may get another build than
+the existing ones. The lake still opens: the provider logs a warning naming both builds, once per
+process. An extension already in the extension directory is never downloaded again, so keeping the
+tested build there, in a server image for example, makes a deploy independent of the repository.
+
 ### Maintenance
 
-DuckLake keeps historical snapshots and deleted files until maintenance runs.
-Maintenance is operator-driven: run it on demand from the CLI or call
-`runMaintenance()` directly. It expires snapshots, reclaims deleted file blocks,
-and removes orphaned files through DuckLake's explicit maintenance functions,
-keeping seven days of snapshots/files by default.
-
-Run it from the CLI (preview with `--dry-run`):
-
-```bash
-sixb lake cleanup --dry-run
-sixb lake cleanup --expire-older-than "14 days" --delete-older-than "14 days"
-```
-
-Or run it directly against the provider:
+DuckLake keeps every snapshot, and every file a snapshot reads, until retention removes them.
+`lakeStorage.maintenance` implements core's `LakeMaintenance`:
 
 ```ts
-const report = await lakeStorage.runMaintenance({
-  dryRun: true,
-  expireOlderThan: "7 days",
+const report = await lakeStorage.maintenance.applyRetention({
+  keepVersionsForMs: 7 * 24 * 60 * 60 * 1000, // default; at least 1 hour
+  deleteFilesAfterMs: 7 * 24 * 60 * 60 * 1000, // default; at least 1 hour
   protect: [{ datasetId: "invoices", versionId: "ducklake:42" }],
 })
+// { expiredVersions, keptVersions, deletedFiles, orphanedFiles, hasMore, ... }
+
+const health = await lakeStorage.maintenance.describeStorage(["invoices"])
+// [{ dataFiles, smallDataFiles, deleteFiles, inlinedRows, retainedSnapshots, warnings, ... }]
 ```
 
-Expiring a snapshot removes the version it holds. Two kinds of versions are kept whatever their
-age, and the snapshots holding them are reported as `keptSnapshots`: each dataset's latest
-version, so a dataset idle longer than the retention stays readable, and the versions passed as
-`protect`. `sixb lake cleanup` protects the version each projection applied.
+`sixb lake cleanup` runs one pass, protecting the version each projection applied.
+
+**What expires.** A version's age counts from the commit that replaced it, not its own: a version
+expires once a newer version of its dataset has been there for `keepVersionsForMs`. A pipeline
+step resolves its inputs' latest versions when it starts and reads them by id, so whatever it
+resolved stays readable for that long, with nothing recorded. Each dataset's latest version and
+the `protect` versions never expire; protected ones past retention are reported as
+`keptVersions`. Snapshots holding no version (maintenance commits, catalog-only changes) expire
+once they are older than `keepVersionsForMs`, except the newest snapshot.
+
+**One pass is bounded.** The pass walks the history oldest first, 512 snapshots per catalog
+query, and stops at the retention cutoff or once `limit` (1,000) snapshots are expirable, which
+it expires by id in one call. It then deletes the files DuckLake scheduled at least
+`deleteFilesAfterMs` ago, oldest first and about `limit` at most (files one commit scheduled go
+together). `hasMore` says another pass has work. Orphaned files, which no catalog row knows, are
+searched only on a pass with no backlog left, since the search lists the whole data path. Expiry
+is catalog-only and takes no lock on reads; only file deletion waits for this provider's reads,
+for as long as the deletion itself.
+
+Two passes may overlap, from two processes on a PostgreSQL catalog: the step that loses a race
+for the same rows or files yields, and the report says `hasMore`. A provider whose passes yield
+three times in a row throws a `LakeStorageError` naming the step and its last error, since no
+race explains that.
+
+`deleteFilesAfterMs` is at least an hour, for both deletions. A write in another process puts its
+files in the data path before it commits, where no catalog row knows them yet: deleting orphans
+younger than that left a committed version unreadable. Reads in other processes are not waited
+for either.
+
+On a SQLite catalog, DuckLake `ac7595b0` compares schedule times as text, which tells only whole
+dates apart. Files there go by the date they are stored under, with no `limit`, once every file of
+that date is due: on an active lake, up to a day after `deleteFilesAfterMs`.
+
+### Automatic Compaction
+
+Small writes leave small storage behind: a write of up to 10 rows is inlined in the catalog, a
+larger one writes a Parquet file, and replacing rows of a file adds a delete file. The provider
+compacts a dataset on its own, in the process that wrote, after the commits that need it. Nothing
+is configured.
+
+- **When.** After a dataset's first commit in a provider, then after every 8th, the provider reads
+  the dataset's catalog rows (three or four queries, no data). A pass runs only past a threshold:
+  1,000 rows or deletes inlined in the catalog, a data file with a tenth of its rows deleted, or
+  16 files under 1 MiB.
+- **What.** A first maintenance commit flushes what the catalog holds to files. A second rewrites
+  the files with a tenth of their rows deleted, then merges files under 1 MiB, at most 256 per
+  pass. A backlog takes several passes, one after the other.
+- **Never a version.** DuckLake records these commits as `inline_flush`, `rewrite_delete` and
+  `merge_adjacent`, which change no rows: they are not versions, the change feed skips them, and
+  every retained version reads the same rows through the new files. Whoever runs them, by hand
+  included, the rule is the same, but for a flush of deletes alone: DuckLake records it as a plain
+  delete, so only the provider's own commits, which say they are compaction, are told apart.
+- **Never in a write's way.** The version is committed and returned first; the commit only
+  schedules the check. One compaction runs per dataset at a time; commits meanwhile get one more
+  pass. A failure goes to a `[SixbDuckLake]` warning, never to the write. Each maintenance commit
+  takes the catalog commit lock like a write, so writes in the same process wait for one short
+  commit at most. A compaction that conflicts with another process's write fails at once and
+  yields; the next check tries again. `close()` lets the current pass finish and starts no other.
+
+On a PostgreSQL catalog, processes also keep writes and compaction apart. DuckLake keeps a small
+write's deletes in the catalog, and would commit them on top of another process's compaction of
+their file, which loses them (duckdb/ducklake#1484). So each write takes a shared advisory lock on
+its dataset, about a millisecond, and holds it for its transaction; each maintenance commit takes
+an exclusive one. A write waits for a compaction's commit, and a compaction waits up to 500 ms for
+the writes in flight, then yields until the next check. DuckDB-file and SQLite catalogs serve one
+process.
+
+The thresholds come from measurements on DuckDB 1.5.6 with a local catalog: with 16 small files
+or 4,000 inlined rows, reads cost what they cost compacted; with 256 files a full read took half
+as long again, with 1,024 three times as long and a one-row append twice as long. One merge or
+flush took 20–70 ms. On object storage, every file is also one more request per read.
+
+A partitioned dataset holding under about a million rows gets a warning once per process, and in
+`describeStorage`: each write adds a file per partition it touches, and merges stay within a
+partition.
 
 ### Read and Write Concurrency
 
 Large reads stream through dedicated connections in the same DuckDB engine, sharing its memory
 budget and PostgreSQL metadata pool. Metadata and writes remain available between yielded rows.
-Each read stays pinned to one immutable snapshot. Maintenance waits until no reads remain; it
-blocks new reads only while running, so continuous traffic can postpone it.
+Each read stays pinned to one immutable snapshot. Retention's file deletion waits until no reads
+remain; it blocks new reads only while deleting, so continuous traffic can postpone it.
 
 `readChanges` compares two versions in DuckDB. When no version between them changed rows
 (`rowsChanged` in the commit metadata, read from at most 32 snapshots), it returns an empty change

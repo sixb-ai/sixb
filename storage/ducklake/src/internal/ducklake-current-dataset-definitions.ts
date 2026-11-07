@@ -2,6 +2,7 @@ import type { DatasetDefinition } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import {
+  type DuckDbRow,
   getBigIntLike,
   getBoolean,
   getOptionalBigIntLike,
@@ -16,18 +17,24 @@ import {
   duckLakeCatalogColumnsToDatasetSchema,
 } from "./ducklake-catalog-schema"
 import { decodeDatasetTableName, encodeDatasetTableName } from "./names"
-import { duckLakeAlias, duckLakeMetadataTableName, quoteSqlString, quoteSqlStringList } from "./sql"
+import { buildDuckLakeMetadataQuery, quoteSqlStringList } from "./sql"
 
-interface CurrentDatasetTable {
+interface CatalogPartition {
+  readonly keyIndex: bigint
+  readonly transform: string
+}
+
+interface CatalogColumnRow {
+  readonly tableComment?: string
+  readonly column: DuckLakeCatalogColumn
+  readonly partition?: CatalogPartition
+}
+
+interface CatalogTable {
   readonly datasetId: string
   readonly tableName: string
   readonly comment?: string
-}
-
-interface CurrentDatasetPartition {
-  readonly tableName: string
-  readonly columnName: string
-  readonly transform: string
+  readonly rows: CatalogColumnRow[]
 }
 
 export interface ReadCurrentDatasetDefinitionsInput {
@@ -43,27 +50,20 @@ export async function readCurrentDatasetDefinitions(
     return new Map()
   }
 
-  const tables = await readCurrentDatasetTables(input, input.datasetIds)
-  if (tables.length === 0) {
-    return new Map()
-  }
-
-  const tableNames = tables.map((table) => table.tableName)
-  const columnsByTableName = groupColumnsByTableName(
-    await readCurrentDatasetColumns(input, tableNames)
-  )
-  const partitionByTableName = groupPartitionsByTableName(
-    await readCurrentDatasetPartitions(input, tableNames)
-  )
+  const tables = groupByTable(await readCurrentDatasetCatalogRows(input))
   const definitions = new Map<string, DatasetDefinition>()
 
   for (const table of tables) {
-    const columns = columnsByTableName.get(table.tableName) ?? []
+    const columns = table.rows.map((row) => row.column)
     const primaryKey = duckLakeCatalogColumnsToDatasetPrimaryKey(table.tableName, columns)
     const sequenceBy = columns.find(
       (column) => column.comment === DATASET_SEQUENCE_COLUMN_COMMENT
     )?.columnName
-    const partitionBy = partitionByTableName.get(table.tableName) ?? []
+    const partitionBy = table.rows
+      .flatMap(({ column, partition }) => (partition === undefined ? [] : [{ column, partition }]))
+      .sort((left, right) => Number(left.partition.keyIndex - right.partition.keyIndex))
+      .map(({ column, partition }) => partitionColumnName(table.tableName, column, partition))
+
     definitions.set(table.datasetId, {
       kind: "dataset",
       id: table.datasetId,
@@ -78,165 +78,130 @@ export async function readCurrentDatasetDefinitions(
   return definitions
 }
 
-async function readCurrentDatasetTables(
-  input: ReadCurrentDatasetDefinitionsInput,
-  datasetIds: readonly string[] | undefined
-): Promise<readonly CurrentDatasetTable[]> {
-  if (datasetIds !== undefined && datasetIds.length === 0) {
-    return []
-  }
-
+/**
+ * Every current column of the datasets' tables, with its table's comment and its place in the
+ * table's partitioning, from one query of the committed catalog rows. A small write reads its
+ * definition twice: one round trip each, and never `duckdb_tables()`, which loads DuckLake's
+ * whole catalog first.
+ */
+async function readCurrentDatasetCatalogRows(
+  input: ReadCurrentDatasetDefinitionsInput
+): Promise<readonly CatalogColumnRow[]> {
   const tableNameFilter =
-    datasetIds === undefined
+    input.datasetIds === undefined
       ? ""
-      : `AND table_name IN (${quoteSqlStringList(
-          [...new Set(datasetIds)].map((datasetId) => encodeDatasetTableName(datasetId))
+      : `AND table_meta.table_name IN (${quoteSqlStringList(
+          [...new Set(input.datasetIds)].map((datasetId) => encodeDatasetTableName(datasetId))
         )})`
 
   const rows = await input.runtime.query(
-    `SELECT table_name, comment FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
-      duckLakeAlias(input.options)
-    )} AND schema_name = 'main' ${tableNameFilter} AND NOT internal ORDER BY table_name`
+    buildDuckLakeMetadataQuery(input.options, (table) => currentColumnsSql(table, tableNameFilter))
   )
 
-  const tables: CurrentDatasetTable[] = []
-  for (const row of rows) {
-    const tableName = getString(row, "table_name")
-    const datasetId = decodeDatasetTableName(tableName)
-    if (datasetId === null) {
-      continue
-    }
-
-    tables.push({
-      datasetId,
-      tableName,
-      comment: getOptionalString(row, "comment"),
-    })
-  }
-
-  return tables
+  return rows.map(toCatalogColumnRow)
 }
 
-async function readCurrentDatasetColumns(
-  input: ReadCurrentDatasetDefinitionsInput,
-  tableNames: readonly string[]
-): Promise<readonly DuckLakeCatalogColumn[]> {
-  if (tableNames.length === 0) {
-    return []
-  }
-
-  const ducklakeTable = duckLakeMetadataTableName(input.options, "ducklake_table")
-  const ducklakeColumn = duckLakeMetadataTableName(input.options, "ducklake_column")
-  const ducklakeColumnTag = duckLakeMetadataTableName(input.options, "ducklake_column_tag")
-  const rows = await input.runtime.query(`
+/** One row per current column of the main schema's tables that pass `tableNameFilter`. */
+function currentColumnsSql(table: (name: string) => string, tableNameFilter: string): string {
+  return `
     SELECT
       table_meta.table_name,
+      table_tag."value" AS table_comment,
       column_meta.column_id,
       column_meta.column_order,
       column_meta.column_name,
       column_meta.column_type,
       CAST(column_meta.nulls_allowed AS BOOLEAN) AS nulls_allowed,
       column_meta.parent_column,
-      column_tag."value" AS comment
-    FROM ${ducklakeTable} table_meta
-    JOIN ${ducklakeColumn} column_meta
+      column_tag."value" AS comment,
+      partition_column.partition_key_index,
+      partition_column.transform
+    FROM ${table("ducklake_table")} table_meta
+    JOIN ${table("ducklake_schema")} schema_meta
+      ON schema_meta.schema_id = table_meta.schema_id
+      AND schema_meta.end_snapshot IS NULL
+      AND schema_meta.schema_name = 'main'
+    JOIN ${table("ducklake_column")} column_meta
       ON column_meta.table_id = table_meta.table_id
       AND column_meta.end_snapshot IS NULL
-    LEFT JOIN ${ducklakeColumnTag} column_tag
+    LEFT JOIN ${table("ducklake_tag")} table_tag
+      ON table_tag.object_id = table_meta.table_id
+      AND table_tag."key" = 'comment'
+      AND table_tag.end_snapshot IS NULL
+    LEFT JOIN ${table("ducklake_column_tag")} column_tag
       ON column_tag.table_id = column_meta.table_id
       AND column_tag.column_id = column_meta.column_id
       AND column_tag."key" = 'comment'
       AND column_tag.end_snapshot IS NULL
-    WHERE table_meta.end_snapshot IS NULL
-      AND table_meta.table_name IN (${quoteSqlStringList(tableNames)})
-    ORDER BY table_meta.table_name, column_meta.column_order
-  `)
-
-  return rows.map((row) => ({
-    tableName: getString(row, "table_name"),
-    columnId: getBigIntLike(row, "column_id"),
-    columnOrder: getBigIntLike(row, "column_order"),
-    columnName: getString(row, "column_name"),
-    columnType: getString(row, "column_type"),
-    nullsAllowed: getBoolean(row, "nulls_allowed"),
-    parentColumnId: getOptionalBigIntLike(row, "parent_column"),
-    comment: getOptionalString(row, "comment"),
-  }))
-}
-
-async function readCurrentDatasetPartitions(
-  input: ReadCurrentDatasetDefinitionsInput,
-  tableNames: readonly string[]
-): Promise<readonly CurrentDatasetPartition[]> {
-  if (tableNames.length === 0) {
-    return []
-  }
-
-  const ducklakeTable = duckLakeMetadataTableName(input.options, "ducklake_table")
-  const ducklakePartitionInfo = duckLakeMetadataTableName(input.options, "ducklake_partition_info")
-  const ducklakePartitionColumn = duckLakeMetadataTableName(
-    input.options,
-    "ducklake_partition_column"
-  )
-  const ducklakeColumn = duckLakeMetadataTableName(input.options, "ducklake_column")
-  const rows = await input.runtime.query(`
-    SELECT
-      table_meta.table_name,
-      column_meta.column_name,
-      partition_column.transform
-    FROM ${ducklakeTable} table_meta
-    JOIN ${ducklakePartitionInfo} partition_info
+    LEFT JOIN ${table("ducklake_partition_info")} partition_info
       ON partition_info.table_id = table_meta.table_id
       AND partition_info.end_snapshot IS NULL
-    JOIN ${ducklakePartitionColumn} partition_column
+    LEFT JOIN ${table("ducklake_partition_column")} partition_column
       ON partition_column.table_id = table_meta.table_id
       AND partition_column.partition_id = partition_info.partition_id
-    JOIN ${ducklakeColumn} column_meta
-      ON column_meta.table_id = table_meta.table_id
-      AND column_meta.column_id = partition_column.column_id
-      AND column_meta.end_snapshot IS NULL
-    WHERE table_meta.end_snapshot IS NULL
-      AND table_meta.table_name IN (${quoteSqlStringList(tableNames)})
-    ORDER BY table_meta.table_name, partition_column.partition_key_index
-  `)
+      AND partition_column.column_id = column_meta.column_id
+    WHERE table_meta.end_snapshot IS NULL ${tableNameFilter}
+    ORDER BY table_meta.table_name, column_meta.column_order
+  `
+}
 
-  return rows.map((row) => {
-    const partition = {
+function toCatalogColumnRow(row: DuckDbRow): CatalogColumnRow {
+  const partitionKeyIndex = getOptionalBigIntLike(row, "partition_key_index")
+
+  return {
+    tableComment: getOptionalString(row, "table_comment"),
+    column: {
       tableName: getString(row, "table_name"),
+      columnId: getBigIntLike(row, "column_id"),
+      columnOrder: getBigIntLike(row, "column_order"),
       columnName: getString(row, "column_name"),
-      transform: getString(row, "transform"),
-    } satisfies CurrentDatasetPartition
+      columnType: getString(row, "column_type"),
+      nullsAllowed: getBoolean(row, "nulls_allowed"),
+      parentColumnId: getOptionalBigIntLike(row, "parent_column"),
+      comment: getOptionalString(row, "comment"),
+    },
+    ...(partitionKeyIndex === undefined
+      ? {}
+      : {
+          partition: { keyIndex: partitionKeyIndex, transform: getString(row, "transform") },
+        }),
+  }
+}
 
-    if (partition.transform !== "identity") {
-      throw new LakeStorageError(
-        `[SixbDuckLake] Dataset table '${partition.tableName}' uses unsupported DuckLake partition transform '${partition.transform}'.`
-      )
+/** The rows of each dataset table, in table order, skipping tables that hold no dataset. */
+function groupByTable(rows: readonly CatalogColumnRow[]): readonly CatalogTable[] {
+  const tables = new Map<string, CatalogTable>()
+
+  for (const row of rows) {
+    const tableName = row.column.tableName
+    const datasetId = decodeDatasetTableName(tableName)
+    if (datasetId === null) {
+      continue
     }
 
-    return partition
-  })
+    const table = tables.get(tableName) ?? {
+      datasetId,
+      tableName,
+      ...(row.tableComment === undefined ? {} : { comment: row.tableComment }),
+      rows: [],
+    }
+    table.rows.push(row)
+    tables.set(tableName, table)
+  }
+
+  return [...tables.values()]
 }
 
-function groupColumnsByTableName(
-  rows: readonly DuckLakeCatalogColumn[]
-): Map<string, DuckLakeCatalogColumn[]> {
-  const result = new Map<string, DuckLakeCatalogColumn[]>()
-  for (const row of rows) {
-    const tableRows = result.get(row.tableName) ?? []
-    tableRows.push(row)
-    result.set(row.tableName, tableRows)
+function partitionColumnName(
+  tableName: string,
+  column: DuckLakeCatalogColumn,
+  partition: CatalogPartition
+): string {
+  if (partition.transform !== "identity") {
+    throw new LakeStorageError(
+      `[SixbDuckLake] Dataset table '${tableName}' uses unsupported DuckLake partition transform '${partition.transform}'.`
+    )
   }
-  return result
-}
 
-function groupPartitionsByTableName(
-  rows: readonly CurrentDatasetPartition[]
-): Map<string, string[]> {
-  const result = new Map<string, string[]>()
-  for (const row of rows) {
-    const tablePartitions = result.get(row.tableName) ?? []
-    tablePartitions.push(row.columnName)
-    result.set(row.tableName, tablePartitions)
-  }
-  return result
+  return column.columnName
 }

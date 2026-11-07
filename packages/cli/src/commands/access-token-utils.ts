@@ -1,4 +1,5 @@
 import type { SixbApiClientConfig } from "../lib/api-client"
+import { parseDurationMs } from "../lib/duration"
 
 /**
  * The API creates tokens only for a signed-in session, never for another access token, so say how
@@ -25,7 +26,7 @@ export function resolveExpiration(options: ExpirationOptions): string {
     return date.toISOString()
   }
 
-  const duration = parseDurationMs(options.expiresIn ?? "90d")
+  const duration = parseDurationMs(options.expiresIn ?? "90d", "--expires-in")
   return new Date(Date.now() + duration).toISOString()
 }
 
@@ -54,23 +55,4 @@ export function formatDate(value: string | undefined): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toISOString().replace("T", " ").slice(0, 16)
-}
-
-function parseDurationMs(value: string): number {
-  const match = value.trim().match(/^(\d+)(m|h|d|w|y)$/)
-  if (!match) {
-    throw new Error("[SixbCLI] Use --expires-in like 30d, 12h, 4w, or 1y.")
-  }
-
-  const amount = Number(match[1])
-  const unit = match[2]
-  const multipliers = {
-    m: 60_000,
-    h: 60 * 60_000,
-    d: 24 * 60 * 60_000,
-    w: 7 * 24 * 60 * 60_000,
-    y: 365 * 24 * 60 * 60_000,
-  } as const
-
-  return amount * multipliers[unit as keyof typeof multipliers]
 }

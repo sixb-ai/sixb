@@ -127,6 +127,29 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLakeStorage %s keyed merges", 
     ])
   })
 
+  // Regression proof: read dataset tables through duckdb_tables() in
+  // ducklake-current-dataset-definitions.ts, or read the definition in its own lease in
+  // beginMerge or commitMerge. The merge then loads DuckLake's catalog for each definition read,
+  // or attaches a DuckDB-file catalog four times.
+  test("a merge reads its definition from catalog rows and attaches the catalog twice", async () => {
+    const seed = await storage.beginMerge({ dataset: invoices })
+    await seed.writeChanges([change.upsert({ id: "inv_1", status: "open", note: null })])
+    await seed.commit()
+
+    const statements = await recordStatements(storage)
+    try {
+      const merge = await storage.beginMerge({ dataset: invoices })
+      await merge.writeChanges([change.upsert({ id: "inv_1", status: "paid", note: null })])
+      expect((await merge.commit()).outcome).toBe("created")
+    } finally {
+      statements.stop()
+    }
+
+    expect(statements.sql.filter((sql) => /\bduckdb_tables\s*\(/i.test(sql))).toEqual([])
+    // A SQLite catalog stays attached between reads, and attaches once.
+    expect(statements.sql.filter((sql) => /^\s*ATTACH\b/i.test(sql)).length).toBeLessThanOrEqual(2)
+  })
+
   test("rejects a corrupted duplicate baseline and cleans the staging table", async () => {
     const seed = await storage.beginWrite({ dataset: invoices, mode: "snapshot" })
     await seed.writeRows([{ id: "inv_1", status: "open", note: null }])
@@ -403,5 +426,54 @@ async function captureExclusiveSql<T>(
     return { result, statements, maxQueryRows }
   } finally {
     runtime.withExclusive = originalWithExclusive
+  }
+}
+
+/** Every statement the provider's runtime runs, exclusive sections included, until stopped. */
+async function recordStatements(storage: DuckLakeStorage) {
+  const runtime = await (storage as unknown as DuckLakeStorageInternals).connections.runtime()
+  const sql: string[] = []
+  const original = {
+    run: runtime.run,
+    runStatements: runtime.runStatements,
+    query: runtime.query,
+    withExclusive: runtime.withExclusive,
+  }
+
+  runtime.run = (statement, values) => {
+    sql.push(statement)
+    return original.run.call(runtime, statement, values)
+  }
+  runtime.runStatements = (statements) => {
+    sql.push(...statements)
+    return original.runStatements.call(runtime, statements)
+  }
+  runtime.query = (statement, values) => {
+    sql.push(statement)
+    return original.query.call(runtime, statement, values)
+  }
+  const withExclusive = original.withExclusive.bind(runtime)
+  runtime.withExclusive = (use) =>
+    withExclusive((exclusive) =>
+      use({
+        run: (statement, values) => {
+          sql.push(statement)
+          return exclusive.run(statement, values)
+        },
+        runStatements: (statements) => {
+          sql.push(...statements)
+          return exclusive.runStatements(statements)
+        },
+        query: (statement, values) => {
+          sql.push(statement)
+          return exclusive.query(statement, values)
+        },
+        withAppender: exclusive.withAppender.bind(exclusive),
+      })
+    )
+
+  return {
+    sql,
+    stop: () => Object.assign(runtime, original),
   }
 }

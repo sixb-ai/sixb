@@ -267,16 +267,17 @@ describe("DuckLakeStorage remote catalogs", () => {
     }
   })
 
-  // Regression proof: in DuckLakeMaintenance, stop keeping each dataset's latest version, or
-  // ignore `protect`. The idle dataset's version, or the protected one, then expires.
-  test("keeps needed versions during maintenance of a PostgreSQL catalog", async () => {
+  // Regression proof: in DuckLakeMaintenance.planExpiry, expire the last version of each dataset,
+  // or ignore `protect`. The idle dataset's version, or the protected one, then expires.
+  test("keeps needed versions during retention of a PostgreSQL catalog", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-maintenance-"))
     const idle = defineDataset(`raw.pg.idle.${randomId()}`, { schema: [col("id", "string")] })
     const busy = defineDataset(`raw.pg.busy.${randomId()}`, { schema: [col("id", "string")] })
-    const storage = new DuckLakeStorage({
+    const options: DuckLakeStorageOptions = {
       catalog: postgresCatalog(),
       dataPath: join(rootDir, "data"),
-    })
+    }
+    const storage = new DuckLakeStorage(options)
 
     const commit = async (dataset: DatasetDefinition, id: string) => {
       const write = await storage.beginWrite({ dataset, mode: "snapshot" })
@@ -293,13 +294,21 @@ describe("DuckLakeStorage remote catalogs", () => {
       const applied = await commit(busy, "reading_2")
       await commit(busy, "reading_3")
 
-      const report = await storage.runMaintenance({
-        expireOlderThan: "0 seconds",
-        deleteOlderThan: "0 seconds",
+      // Backdate the catalog's history instead of waiting for it to age.
+      const runtime = await (
+        storage as unknown as { connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+      ).connections.attachedRuntime()
+      await runtime.run(`
+        UPDATE ${duckLakeMetadataTableName(options, "ducklake_snapshot")}
+        SET snapshot_time = snapshot_time - INTERVAL '2 hours'
+      `)
+
+      const report = await storage.maintenance.applyRetention({
+        keepVersionsForMs: 60 * 60 * 1000,
         protect: [{ datasetId: busy.id, versionId: applied.versionId }],
       })
 
-      expect(report.keptSnapshots).toBe(2)
+      expect(report.keptVersions).toBe(1)
       expect(await storage.getVersion(busy.id, replaced.versionId)).toBeNull()
       expect(await storage.getVersion(busy.id, applied.versionId)).not.toBeNull()
       expect((await storage.getLatestVersion(idle.id))?.versionId).toBe(idleVersion.versionId)
@@ -311,6 +320,72 @@ describe("DuckLakeStorage remote catalogs", () => {
       await rm(rootDir, { recursive: true, force: true })
     }
   })
+
+  // Regression proof: in DuckLakeMaintenance, rethrow in yieldingToConcurrentPass. The pass that
+  // loses a race fails with "could not serialize access due to concurrent update" (most rounds
+  // have a loser with DuckLake ac7595b0).
+  test("two retention passes at once on a PostgreSQL catalog both succeed", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-retention-race-"))
+    const dataset = defineDataset(`raw.pg.race.${randomId()}`, {
+      schema: [col("id", "string"), col("n", "int64")],
+    })
+    const options: DuckLakeStorageOptions = {
+      catalog: postgresCatalog(),
+      dataPath: join(rootDir, "data"),
+    }
+    const first = new DuckLakeStorage(options)
+    const second = new DuckLakeStorage(options)
+    const retention = { keepVersionsForMs: 60 * 60 * 1000, deleteFilesAfterMs: 60 * 60 * 1000 }
+
+    // Backdates the catalog's history and its scheduled files, instead of waiting for them.
+    const backdate = async () => {
+      const runtime = await (
+        first as unknown as { connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+      ).connections.attachedRuntime()
+      for (const [table, column] of [
+        ["ducklake_snapshot", "snapshot_time"],
+        ["ducklake_files_scheduled_for_deletion", "schedule_start"],
+      ] as const) {
+        await runtime.run(`
+          UPDATE ${duckLakeMetadataTableName(options, table)}
+          SET ${column} = ${column} - INTERVAL '3 hours'
+        `)
+      }
+    }
+
+    try {
+      await first.createDataset(dataset)
+      let latest: DatasetWriteCommitResult | undefined
+      for (let n = 0; n < 40; n++) {
+        const write = await first.beginWrite({ dataset, mode: "snapshot" })
+        await write.writeRows(Array.from({ length: 20 }, (_, i) => ({ id: `r${i}`, n })))
+        latest = await write.commit()
+      }
+
+      // Two rounds: a provider that lost three in a row would fail, as it should (countYields).
+      for (let round = 0; round < 2; round++) {
+        await backdate()
+        const passes = await Promise.allSettled([
+          first.maintenance.applyRetention({ ...retention, limit: 8 }),
+          second.maintenance.applyRetention({ ...retention, limit: 8 }),
+        ])
+        expect(passes.map((pass) => pass.status)).toEqual(["fulfilled", "fulfilled"])
+      }
+
+      await backdate()
+      await first.maintenance.applyRetention(retention)
+      await backdate()
+      expect(await first.maintenance.applyRetention(retention)).toMatchObject({ hasMore: false })
+
+      expect((await second.getLatestVersion(dataset.id))?.versionId).toBe(latest?.versionId)
+      expect(await collectRows(second.readRows({ datasetId: dataset.id }))).toHaveLength(20)
+      expect(await second.listVersions(dataset.id)).toHaveLength(1)
+    } finally {
+      await first.close()
+      await second.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  }, 60_000)
 
   test("uses a PostgreSQL catalog with an S3-compatible data path", async () => {
     const dataset = defineDataset(`raw.pg.s3.${randomId()}`, {
@@ -1289,6 +1364,339 @@ describe("DuckLakeStorage remote catalogs", () => {
   }, 60_000)
 })
 
+describe("DuckLakeStorage automatic compaction on a PostgreSQL catalog", () => {
+  const events = defineDataset(`raw.pg.events.${randomId()}`, {
+    schema: [col("id", "string"), col("batch", "int64")],
+  })
+  const batch = (n: number) =>
+    Array.from({ length: 20 }, (_, i) => ({ id: `b${n}_${i}`, batch: n }))
+
+  async function append(storage: DuckLakeStorage, rows: readonly Record<string, unknown>[]) {
+    const write = await storage.beginWrite({ dataset: events, mode: "append" })
+    await write.writeRows(rows)
+    return write.commit()
+  }
+
+  async function withLake(
+    run: (options: DuckLakeStorageOptions, rootDir: string) => Promise<void>
+  ): Promise<void> {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-compaction-"))
+    try {
+      await run({ catalog: postgresCatalog(), dataPath: join(rootDir, "data") }, rootDir)
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  }
+
+  // Regression proof: make the write coordinator's versionCreated a no-op in DuckLakeStorage.
+  // The 17 small files then stay.
+  test("merges small files, and every version reads the rows it held", async () => {
+    await withLake(async (options) => {
+      let storage = new DuckLakeStorage(options)
+      const versions: DatasetVersion[] = []
+
+      try {
+        await storage.createDataset(events)
+        for (let n = 1; n <= 16; n++) {
+          versions.push(await append(storage, batch(n)))
+        }
+
+        // A new provider checks its first commit, the 17th file; closing waits for the pass.
+        await storage.close()
+        storage = new DuckLakeStorage(options)
+        versions.push(await append(storage, batch(17)))
+        await storage.close()
+
+        storage = new DuckLakeStorage(options)
+        const [health] = await storage.maintenance.describeStorage([events.id])
+        expect(health).toMatchObject({ dataFiles: 1, rowCount: 17 * 20 })
+
+        for (const [index, version] of versions.entries()) {
+          const rows = await collectRows(
+            storage.readRows({ datasetId: events.id, versionId: version.versionId })
+          )
+          expect(rows.length).toBe((index + 1) * 20)
+        }
+      } finally {
+        await storage.close()
+      }
+    })
+  }, 60_000)
+
+  // Regression proof: in readTableStorage, pass no inlined-delete tables to queryFiles. The
+  // dataset then reads 100 rows but counts 110, and compaction leaves the seed file as it is.
+  test("counts the deletes DuckLake keeps in the catalog, and rewrites the file they reach", async () => {
+    await withLake(async (options) => {
+      const scores = defineDataset(`crm.pg.scores.${randomId()}`, {
+        schema: [col("id", "string"), col("score", "int64")],
+        primaryKey: "id",
+      })
+      const adminSql = createAdminSql()
+      let storage = new DuckLakeStorage(options)
+
+      const merge = async (rows: readonly Record<string, unknown>[]) => {
+        const session = await storage.beginMerge({ dataset: scores })
+        await session.writeChanges(rows.map((row) => change.upsert(row)))
+        await session.commit({ createInitialVersion: true })
+      }
+      const scored = (count: number, score: number) =>
+        Array.from({ length: count }, (_, i) => ({ id: `a${i}`, score }))
+
+      try {
+        await storage.createDataset(scores)
+        await merge(scored(100, 0))
+
+        // Replacing ten rows of the seed file, DuckLake marks them deleted in the catalog.
+        await merge(scored(10, 1))
+
+        const [health] = await storage.maintenance.describeStorage([scores.id])
+        expect(health).toMatchObject({ deleteFiles: 0, rowCount: 100 })
+        expect(await collectRows(storage.readRows({ datasetId: scores.id }))).toHaveLength(100)
+
+        // A new provider checks its first commit: an eleventh delete, over a tenth of the file.
+        await storage.close()
+        storage = new DuckLakeStorage(options)
+        await merge([{ id: "a10", score: 2 }])
+        await storage.close()
+
+        storage = new DuckLakeStorage(options)
+        const [settled] = await storage.maintenance.describeStorage([scores.id])
+        expect(settled).toMatchObject({ deleteFiles: 0, rowCount: 100 })
+        expect(await liveFileRows(adminSql, options, scores.id)).toEqual([89])
+      } finally {
+        await storage.close()
+        await adminSql.close()
+      }
+    })
+  }, 60_000)
+
+  // Regression proof: in DuckLakeCompaction, take no lock in lockDataset. The write then commits
+  // while the compaction waits to, and no write ever waits for the lock.
+  test("a write in another process waits for a compaction to commit", async () => {
+    await withLake(async (options) => {
+      const writer = new DuckLakeStorage(options)
+      let compactor: DuckLakeStorage | undefined
+      const adminSql = createAdminSql()
+      const warn = spyOn(console, "warn").mockImplementation(() => {})
+      let release: (() => void) | undefined
+
+      try {
+        await writer.createDataset(events)
+        for (let n = 1; n <= 16; n++) {
+          await append(writer, batch(n))
+        }
+
+        // The compactor's merge is ready to commit when the writer replaces every row it merges.
+        compactor = new DuckLakeStorage(options)
+        const compaction = (
+          compactor as unknown as {
+            compaction: {
+              plan(dataset: DatasetDefinition): Promise<unknown>
+              commit(runtime: unknown, dataset: DatasetDefinition): Promise<void>
+            }
+          }
+        ).compaction
+        const plan = spyOn(compaction, "plan")
+        const commit = compaction.commit.bind(compaction)
+        const committed: string[] = []
+        let ready!: () => void
+        const merged = new Promise<void>((resolve) => {
+          ready = resolve
+        })
+        const released = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        spyOn(compaction, "commit").mockImplementation(async (runtime, dataset) => {
+          ready()
+          await released
+          await commit(runtime, dataset)
+          committed.push("compaction")
+        })
+
+        await append(compactor, batch(17))
+        await merged
+
+        const replace = await writer.beginWrite({ dataset: events, mode: "snapshot" })
+        await replace.writeRows(batch(99))
+        const replacing = replace.commit().then((version) => {
+          committed.push("write")
+          return version
+        })
+
+        await waitForDatasetLock(adminSql, options, events.id, {
+          mode: "ShareLock",
+          granted: false,
+        })
+        release?.()
+        await compactor.close()
+        const replaced = await replacing
+
+        expect(committed).toEqual(["compaction", "write"])
+        expect(warn).not.toHaveBeenCalled()
+        expect(plan).toHaveBeenCalledTimes(1)
+        expect((await writer.getLatestVersion(events.id))?.versionId).toBe(replaced.versionId)
+        expect(await collectRows(writer.readRows({ datasetId: events.id }))).toEqual(
+          batch(99).map((row) => ({ ...row, batch: "99" }))
+        )
+      } finally {
+        // A failed check must not leave the compaction, and so the close, waiting.
+        release?.()
+        warn.mockRestore()
+        await compactor?.close()
+        await writer.close()
+        await adminSql.close()
+      }
+    })
+  }, 60_000)
+
+  const accounts = defineDataset(`crm.pg.accounts.${randomId()}`, {
+    schema: [col("id", "string"), col("batch", "int64")],
+    primaryKey: "id",
+  })
+
+  /** 16 batches of rows, which `fillAccounts` appends as 16 small files. */
+  const accountRows = (changed: boolean) =>
+    Array.from({ length: 16 }, (_, index) => batch(index + 1))
+      .flat()
+      .map((row) =>
+        changed && (row.id === "b1_3" || row.id === "b9_3") ? { ...row, batch: 100 } : row
+      )
+
+  async function fillAccounts(storage: DuckLakeStorage): Promise<void> {
+    await storage.createDataset(accounts)
+    for (let n = 1; n <= 16; n++) {
+      const write = await storage.beginWrite({ dataset: accounts, mode: "append" })
+      await write.writeRows(batch(n))
+      await write.commit()
+    }
+  }
+
+  function compactionOf(storage: DuckLakeStorage) {
+    return (
+      storage as unknown as {
+        compaction: { afterCommit(dataset: DatasetDefinition): void; close(): Promise<void> }
+      }
+    ).compaction
+  }
+
+  /** Runs `during` once inside each commit's transaction, after its changes, before COMMIT. */
+  function beforeCommit(storage: DuckLakeStorage, during: () => Promise<void>) {
+    const writes = (
+      storage as unknown as { writes: { setCommitMetadata(...args: unknown[]): Promise<void> } }
+    ).writes
+    const setCommitMetadata = writes.setCommitMetadata.bind(writes)
+
+    return spyOn(writes, "setCommitMetadata").mockImplementation(async (...args) => {
+      await during()
+      return setCommitMetadata(...args)
+    })
+  }
+
+  const sortedById = (rows: readonly Record<string, unknown>[]) =>
+    [...rows].sort((left, right) => String(left.id).localeCompare(String(right.id)))
+
+  // Regression proof: in beginDatasetTransaction, take no lock. The other process's compaction
+  // then merges the 16 files while the write is open, the write still commits, and the two rows
+  // it replaced read twice. DuckLake keeps the write's two deletes in the catalog, which is what
+  // loses them (duckdb/ducklake#1484).
+  test("a write open in one process keeps its deletes across another's compaction", async () => {
+    await withLake(async (options) => {
+      const writer = new DuckLakeStorage(options)
+      const compactor = new DuckLakeStorage(options)
+      const warn = spyOn(console, "warn").mockImplementation(() => {})
+
+      try {
+        await fillAccounts(writer)
+
+        // The compaction runs, and finishes, while the write's transaction holds the lock.
+        let filesWhileOpen: number | undefined
+        beforeCommit(writer, async () => {
+          if (filesWhileOpen !== undefined) {
+            return
+          }
+
+          compactionOf(compactor).afterCommit(accounts)
+          await compactionOf(compactor).close()
+
+          const [health] = await compactor.maintenance.describeStorage([accounts.id])
+          filesWhileOpen = health?.dataFiles
+        })
+
+        // A keyed snapshot that changes two rows deletes them, and inserts their new values.
+        const write = await writer.beginWrite({ dataset: accounts, mode: "snapshot" })
+        await write.writeRows(accountRows(true))
+        const version = await write.commit()
+
+        const expected = sortedById(
+          accountRows(true).map((row) => ({ ...row, batch: String(row.batch) }))
+        )
+        expect((await writer.getLatestVersion(accounts.id))?.versionId).toBe(version.versionId)
+        expect(sortedById(await collectRows(writer.readRows({ datasetId: accounts.id })))).toEqual(
+          expected
+        )
+
+        // The compaction waited for the write, then yielded to it, as to a conflict.
+        expect(filesWhileOpen).toBe(16)
+        expect(warn).not.toHaveBeenCalled()
+
+        // Once the write is done, the next compaction merges the files and keeps every row.
+        const next = new DuckLakeStorage(options)
+        try {
+          compactionOf(next).afterCommit(accounts)
+          await compactionOf(next).close()
+
+          const [health] = await next.maintenance.describeStorage([accounts.id])
+          expect(health?.dataFiles).toBeLessThan(16)
+          expect(sortedById(await collectRows(next.readRows({ datasetId: accounts.id })))).toEqual(
+            expected
+          )
+        } finally {
+          await next.close()
+        }
+      } finally {
+        warn.mockRestore()
+        await compactor.close()
+        await writer.close()
+      }
+    })
+  }, 60_000)
+
+  // Regression proof: in beginTransactionOnLatestVersion, take the lock after readLatestVersion.
+  // The first read of the lake then finds no lock held. DuckDB commits a transaction's databases
+  // in reverse order of first use, so a lock taken after it would end before DuckLake commits.
+  test("a write holds its dataset's lock before it first reads the lake", async () => {
+    await withLake(async (options) => {
+      const writer = new DuckLakeStorage(options)
+      const adminSql = createAdminSql()
+
+      try {
+        await fillAccounts(writer)
+
+        const reader = (writer as unknown as { snapshotReader: DuckLakeSnapshotReader })
+          .snapshotReader
+        const readLatest = reader.getLatestVersionSummaryAtCurrentSnapshot.bind(reader)
+
+        const locksAtFirstRead: unknown[] = []
+        spyOn(reader, "getLatestVersionSummaryAtCurrentSnapshot").mockImplementation(
+          async (...args) => {
+            locksAtFirstRead.push(...(await datasetLocks(adminSql, options, accounts.id)))
+            return readLatest(...args)
+          }
+        )
+
+        const merge = await writer.beginMerge({ dataset: accounts })
+        await merge.writeChanges([change.upsert({ id: "b1_3", batch: 100 })])
+        await merge.commit()
+
+        expect(locksAtFirstRead).toEqual([{ mode: "ShareLock", granted: true }])
+      } finally {
+        await adminSql.close()
+        await writer.close()
+      }
+    })
+  }, 60_000)
+})
+
 function postgresCatalog(): Extract<DuckLakeStorageOptions["catalog"], { type: "postgres" }> {
   return {
     type: "postgres",
@@ -1332,6 +1740,55 @@ function createAdminSql(): SQL {
   url.password = process.env.SIXB_DUCKLAKE_POSTGRES_PASSWORD ?? "test"
 
   return new SQL({ url: url.toString(), max: 1 })
+}
+
+interface DatasetLockRow {
+  readonly mode: string
+  readonly granted: boolean
+}
+
+/** The PostgreSQL advisory locks held on, or waited for, a dataset's lock key. */
+async function datasetLocks(
+  sql: SQL,
+  options: DuckLakeStorageOptions,
+  datasetId: string
+): Promise<DatasetLockRow[]> {
+  const { metadataSchema } = options.catalog as { readonly metadataSchema: string }
+  const name = `sixb:${metadataSchema}:${encodeDatasetTableName(datasetId)}`
+
+  // A bigint advisory key is stored as its high and low 32 bits.
+  return (await sql.unsafe(
+    `
+      SELECT mode, granted FROM pg_locks
+      WHERE locktype = 'advisory'
+        AND objsubid = 1
+        AND ((classid::bigint << 32) | objid::bigint) = hashtextextended($1, 0)
+    `,
+    [name]
+  )) as DatasetLockRow[]
+}
+
+async function waitForDatasetLock(
+  sql: SQL,
+  options: DuckLakeStorageOptions,
+  datasetId: string,
+  lock: DatasetLockRow
+): Promise<void> {
+  const deadline = Date.now() + 10_000
+  let locks: DatasetLockRow[] = []
+
+  while (Date.now() < deadline) {
+    locks = await datasetLocks(sql, options, datasetId)
+    if (locks.some((row) => row.mode === lock.mode && row.granted === lock.granted)) {
+      return
+    }
+
+    await sleep(20)
+  }
+
+  throw new Error(
+    `[SixbDuckLake] Expected a ${lock.granted ? "granted" : "waiting"} ${lock.mode} on dataset '${datasetId}', found ${JSON.stringify(locks)}.`
+  )
 }
 
 async function expectCatalogConnectionsAtMost(
@@ -1395,6 +1852,27 @@ async function runBudgetStep<T>(step: string, run: () => Promise<T>): Promise<T>
       `[SixbDuckLake] Constrained connection budget test failed during ${step}: ${message}`
     )
   }
+}
+
+/** The rows each live data file of the dataset was written with, deleted ones included. */
+async function liveFileRows(
+  sql: SQL,
+  options: DuckLakeStorageOptions,
+  datasetId: string
+): Promise<number[]> {
+  const { metadataSchema } = options.catalog as { readonly metadataSchema: string }
+  const table = (name: string) => `${quotePgIdent(metadataSchema)}.${quotePgIdent(name)}`
+
+  const files = await sql.unsafe(`
+    SELECT file.record_count
+    FROM ${table("ducklake_data_file")} file
+    JOIN ${table("ducklake_table")} t ON t.table_id = file.table_id
+    WHERE file.end_snapshot IS NULL AND t.end_snapshot IS NULL
+      AND t.table_name = ${quotePgLiteral(encodeDatasetTableName(datasetId))}
+    ORDER BY file.data_file_id
+  `)
+
+  return files.map((file: { readonly record_count: unknown }) => Number(file.record_count))
 }
 
 /** Appends Sixb commits to one dataset, as inline DuckLake inserts, after the latest snapshot. */

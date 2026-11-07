@@ -73,6 +73,16 @@ interface SetupDuckLakeOptions {
   readonly attach?: boolean
 }
 
+/**
+ * The DuckLake extension build this provider is tested against, as `duckdb_extensions()` reports
+ * it. DuckDB's extension repository serves one build per DuckDB version and may replace it, so a
+ * new host may load another one. Upgrade it together with `@duckdb/node-api`.
+ */
+const DUCKLAKE_EXTENSION_VERSION = "ac7595b0"
+
+/** Builds this process has warned about. */
+const warnedDuckLakeBuilds = new Set<string>()
+
 class NodeDuckDbRuntime implements DuckDbRuntime {
   private closing = false
   private closed = false
@@ -348,6 +358,7 @@ export async function setupDuckLake(
   }
 
   await runtime.run("LOAD ducklake")
+  await warnOnUntestedDuckLakeBuild(runtime)
 
   for (const extension of requiredExtensions(options)) {
     await runtime.run(`LOAD ${quoteIdentifier(extension)}`)
@@ -372,4 +383,27 @@ export async function setupDuckLake(
       await runtime.run(buildConfigurePostgresMetadataPoolSql(options))
     }
   }
+}
+
+/**
+ * Warns once per process when the loaded DuckLake build is not the tested one, and carries on. A
+ * chosen build cannot be installed from the repository, which serves only its current one, so
+ * refusing another would stop every new host from opening the lake the day DuckDB replaced it.
+ */
+async function warnOnUntestedDuckLakeBuild(runtime: DuckDbQueryRuntime): Promise<void> {
+  const [row] = await runtime.query(`
+    SELECT extension_version
+    FROM duckdb_extensions()
+    WHERE extension_name = 'ducklake' AND loaded
+  `)
+  const loaded = String(row?.extension_version)
+
+  if (loaded === DUCKLAKE_EXTENSION_VERSION || warnedDuckLakeBuilds.has(loaded)) {
+    return
+  }
+
+  warnedDuckLakeBuilds.add(loaded)
+  console.warn(
+    `[SixbDuckLake] DuckLake extension build '${loaded}' is loaded, but this provider is tested against build '${DUCKLAKE_EXTENSION_VERSION}'. The lake opens anyway. To run the tested build, keep its file in the DuckDB extension directory (duckdb.config.extension_directory), or upgrade @sixb/ducklake.`
+  )
 }

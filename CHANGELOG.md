@@ -2,6 +2,21 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## Unreleased
+
+### Upgrade notes
+
+- `@sixb/ducklake`: `lakeStorage.runMaintenance()` and its `DuckLakeMaintenanceOptions` and
+  `DuckLakeMaintenanceReport` types are gone. Call `lakeStorage.maintenance.applyRetention()`.
+- `sixb lake cleanup --expire-older-than` and `--delete-older-than` are now `--keep-versions-for`
+  and `--delete-files-after`. A server cron on the old flags fails. A version now ages from the
+  commit that replaced it, not from its own, and neither may be under an hour.
+- `@sixb/ducklake` runs on DuckDB 1.5.6 (from 1.5.2) and a checked DuckLake build, `ac7595b0`. The
+  first process that opens the lake installs that extension over the network, so a host that cannot
+  fetch it fails there. Any other build logs a warning and still opens the lake.
+- DuckLake compacts a dataset on its own, in the process that wrote, after the commits that need
+  it. Compaction never creates a dataset version, and time travel reads the same rows after it.
+
 ## 2026-11-05 — Sixb 0.2.1
 
 0.2.1 runs pipelines and syncs only when there is something new to read, and keeps cost limits

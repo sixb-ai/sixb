@@ -1522,12 +1522,14 @@ describe("SQL lineage: DuckDB plan format drift", () => {
   })
 
   test("keeps UNION deduplication without a DISTINCT above it", async () => {
-    // Today DuckDB plans UNION as DISTINCT over UNION ALL. Should the deduplication move into the
-    // set operation, setop_all still makes every column a row dependency.
+    // Today DuckDB plans UNION as DISTINCT over UNION ALL (DuckDB 1.5.6 also marks that union
+    // ALL; 1.5.2 did not). Should the deduplication move into the set operation, a union without
+    // setop_all still makes every column a row dependency.
     const plan = await planOf("SELECT id FROM inv UNION SELECT name FROM cust")
     expect(plan.type).toBe("LOGICAL_DISTINCT")
 
     const union = find(plan, (node) => node.type === "LOGICAL_UNION")
+    union.setop_all = false
 
     expect(planLineage(union, tables)).toEqual({ rows: [0, 4], columns: [[0, 4]] })
   })

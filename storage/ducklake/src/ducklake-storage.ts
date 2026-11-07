@@ -5,6 +5,7 @@ import type {
   DatasetCatalogState,
   DatasetChanges,
   DatasetVersion,
+  LakeMaintenance,
   LakeMergeSession,
   LakeWriteSession,
   LatestVersionsSince,
@@ -13,6 +14,7 @@ import type {
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
 import { DuckLakeChangeReader } from "./internal/ducklake-change-reader"
+import { DuckLakeCompaction } from "./internal/ducklake-compaction"
 import { DuckLakeConnectionManager } from "./internal/ducklake-connection-manager"
 import { DuckLakeDatasetCatalog } from "./internal/ducklake-dataset-catalog"
 import { DuckLakeMaintenance } from "./internal/ducklake-maintenance"
@@ -20,11 +22,7 @@ import { DuckLakeRowReader } from "./internal/ducklake-row-reader"
 import { DuckLakeSnapshotReader } from "./internal/ducklake-snapshot-reader"
 import { DuckLakeSqlExecutor } from "./internal/ducklake-sql-executor"
 import { DuckLakeWriteCoordinator } from "./internal/ducklake-write-coordinator"
-import type {
-  DuckLakeMaintenanceOptions,
-  DuckLakeMaintenanceReport,
-  DuckLakeStorageOptions,
-} from "./types"
+import type { DuckLakeStorageOptions } from "./types"
 
 /**
  * DuckLake-backed implementation of Sixb's LakeStorage API.
@@ -37,12 +35,13 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   readonly standard = { id: "ducklake", version: "1.0" } as const
   readonly recordsLineage = true
   readonly sql: DuckLakeSqlExecutor
+  readonly maintenance: LakeMaintenance
 
   private readonly connections: DuckLakeConnectionManager
   private readonly datasets: DuckLakeDatasetCatalog
-  private readonly maintenance: DuckLakeMaintenance
   private readonly rows: DuckLakeRowReader
   private readonly changes: DuckLakeChangeReader
+  private readonly compaction: DuckLakeCompaction
   private readonly snapshotReader: DuckLakeSnapshotReader
   private readonly writes: DuckLakeWriteCoordinator
 
@@ -67,6 +66,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
     this.maintenance = new DuckLakeMaintenance(
       normalizedOptions,
       this.connections,
+      this.datasets,
       this.snapshotReader
     )
     this.rows = new DuckLakeRowReader(normalizedOptions, this.connections, this.snapshotReader)
@@ -79,7 +79,11 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
       normalizedOptions,
       this.connections,
       this.datasets,
-      this.snapshotReader
+      this.snapshotReader,
+      (dataset) => this.compaction.afterCommit(dataset)
+    )
+    this.compaction = new DuckLakeCompaction(normalizedOptions, this.connections, (run) =>
+      this.writes.withCommitRuntime(run)
     )
     this.sql = new DuckLakeSqlExecutor(
       normalizedOptions,
@@ -150,15 +154,12 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
     return this.changes.readChanges(input)
   }
 
-  async runMaintenance(options?: DuckLakeMaintenanceOptions): Promise<DuckLakeMaintenanceReport> {
-    return this.maintenance.runMaintenance(options)
-  }
-
   /**
    * `close()` is provider-specific and intentionally not part of the core
    * LakeStorage interface.
    */
   async close(): Promise<void> {
+    await this.compaction.close()
     await this.connections.close()
   }
 }
