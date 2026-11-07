@@ -4,10 +4,15 @@ import {
   DatasetIngestFlushError,
   type DatasetIngestRuntime,
   getDatasetIngestRuntime,
-  getLakeRetention,
+  getLakeRetentionRuntime,
   type LakeRetention,
 } from "@sixb/core/internal/runtime"
-import { QueueWorker, type QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
+import {
+  type BackoffPolicy,
+  backoffDelay,
+  QueueWorker,
+  type QueueWorkerFailureDecision,
+} from "@sixb/core/internal/workers"
 import type { LakeRetentionReport } from "@sixb/core/lake-storage"
 import type {
   ClaimedQueueJob,
@@ -26,7 +31,7 @@ const DEFAULT_CONCURRENCY = 4
  * A failed flush is tried again sooner at first, then every minute, for as long as it fails: its
  * changes stay in the inbox until one succeeds. The flush reports a dataset that keeps failing.
  */
-const FLUSH_RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 15_000, 30_000, 60_000] as const
+const FLUSH_RETRY: BackoffPolicy = { initialMs: 1_000, maxMs: 60_000 }
 
 /**
  * A flush that finds the dataset held tries again this soon, not when the holder's lease would
@@ -157,7 +162,7 @@ export class LakeWorker extends QueueWorker<LakeQueueJob, typeof FAILURE_CODES> 
     }
 
     const failures = error instanceof DatasetIngestFlushError ? error.failureStreak : job.attempt
-    const delayMs = flushRetryDelay(failures)
+    const delayMs = backoffDelay(Math.max(failures - 1, 0), FLUSH_RETRY)
 
     console.warn(
       `[SixbLakeWorker] Flushing the ingested changes of dataset '${job.payload.datasetId}' failed; retrying in ${delayMs / 1_000} s.`,
@@ -165,14 +170,6 @@ export class LakeWorker extends QueueWorker<LakeQueueJob, typeof FAILURE_CODES> 
     )
     return { kind: "retry", availableAt: new Date(Date.now() + delayMs).toISOString() }
   }
-}
-
-/** The pause after `failures` failed flushes in a row: the delays in turn, then the last one. */
-function flushRetryDelay(failures: number): number {
-  const last = FLUSH_RETRY_DELAYS_MS.length - 1
-  const index = Math.min(Math.max(failures - 1, 0), last)
-
-  return FLUSH_RETRY_DELAYS_MS[index] ?? FLUSH_RETRY_DELAYS_MS[last]
 }
 
 function changedAnything(report: LakeRetentionReport): boolean {

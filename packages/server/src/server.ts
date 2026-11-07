@@ -5,7 +5,7 @@ import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-executio
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
-import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
+import { findDatasetIngestRuntime, setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, warmAppliedMarkings } from "@sixb/core/internal/security"
 import type { Server } from "bun"
 import { Elysia, ParseError } from "elysia"
@@ -93,6 +93,11 @@ export interface SixbServerOptions {
    * every minute. Defaults to true; set it to false when an orchestrator runs for the project.
    */
   ontologyMaintenance?: boolean
+  /**
+   * Whether `sixb.datasets.ingest` in this server writes what it stored before it returns, as no
+   * worker will. Defaults to true; set it to false when a lake worker runs for the project.
+   */
+  ingestFlush?: boolean
 }
 
 export function createSixbServer(options: SixbServerOptions): SixbServer {
@@ -114,6 +119,7 @@ export class SixbServer {
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private readonly hostsOntologyMaintenance: boolean
+  private readonly flushesIngestion: boolean
   private maintenance: OntologyMaintenanceHandle | null = null
   private stopSweeper: (() => void) | null = null
 
@@ -124,6 +130,7 @@ export class SixbServer {
     this.quiet = options.quiet ?? false
     this.timing = options.timing ?? {}
     this.hostsOntologyMaintenance = options.ontologyMaintenance ?? true
+    this.flushesIngestion = options.ingestFlush ?? true
     this.apiBrowserPolicy = resolveApiBrowserPolicy(options.browser)
     // URLs the API hands to third parties, such as file download URLs, name this origin.
     if (this.apiBrowserPolicy.publicOrigin) {
@@ -199,6 +206,7 @@ export class SixbServer {
     warmAppliedMarkings(this.hostRuntime)
 
     this.hostRuntime.prepareReadiness()
+    this.setIngestFlush(this.flushesIngestion)
 
     const maintenance = this.hostsOntologyMaintenance
       ? await this.hostRuntime.startOntologyMaintenance()
@@ -232,7 +240,13 @@ export class SixbServer {
     }
   }
 
+  private setIngestFlush(inline: boolean): void {
+    const ingest = findDatasetIngestRuntime(this.hostRuntime)
+    if (ingest) ingest.writesInline = inline
+  }
+
   async stop(): Promise<void> {
+    this.setIngestFlush(false)
     this.stopSweeper?.()
     this.stopSweeper = null
     if (this.bunServer) {

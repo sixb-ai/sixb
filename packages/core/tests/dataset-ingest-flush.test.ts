@@ -855,7 +855,7 @@ test("a flush that spends its budget asks for the next job and leaves the rest",
     return beginMerge(input)
   }
 
-  expect(await flush(contacts)).toEqual({ kind: "flushed", versions: 1, deliveries: 1 })
+  expect(await flush(contacts)).toEqual({ kind: "handed-over", versions: 1, deliveries: 1 })
   expect(await storage.datasetIngest.summarize({ projectId: host.id })).toMatchObject([
     { datasetId: contacts.id, pendingDeliveries: 1, leaseExpiresAt: null },
   ])
@@ -865,6 +865,37 @@ test("a flush that spends its budget asks for the next job and leaves the rest",
     `ingest-flush:${contacts.id}:0`,
     `ingest-flush:${contacts.id}:2`,
   ])
+})
+
+test("an inline flush goes on past its budget, with no job for what remains", async () => {
+  // Regression proof: return after the first flush in `flushAll`; the second delivery then waits
+  // in an embedded server, where no worker would consume a job.
+  jest.useFakeTimers()
+  const lakeStorage = new InMemoryLakeStorage()
+  const { host, storage, queues, ingest } = setup(lakeStorage)
+
+  const batchOf = (from: number) =>
+    Array.from({ length: 10_000 }, (_, index) =>
+      change.upsert({ id: `${from + index}`, name: "N" })
+    )
+  await ingest(contacts, ...batchOf(0))
+  await ingest(contacts, ...batchOf(10_000))
+
+  const beginMerge = lakeStorage.beginMerge.bind(lakeStorage)
+  lakeStorage.beginMerge = async (input) => {
+    jest.setSystemTime(new Date(Date.now() + 31_000))
+    return beginMerge(input)
+  }
+
+  const runtime = getDatasetIngestRuntime(host)
+  runtime.writesInline = true
+  await runtime.flushAll(contacts.id, new AbortController().signal)
+
+  expect(await storage.datasetIngest.summarize({ projectId: host.id })).toEqual([])
+
+  // Only the job the first `ingest` queued, before the switch.
+  const queued = await queues.lake.claim({ projectId: host.id, workerId: "test", limit: 10 })
+  expect(queued.map(({ job }) => job.id)).toEqual([`ingest-flush:${contacts.id}:0`])
 })
 
 test("a flush that spent its budget ends cleanly when the queue refuses the next job", async () => {
@@ -897,7 +928,7 @@ test("a flush that spent its budget ends cleanly when the queue refuses the next
   const warn = console.warn
   console.warn = () => {}
   try {
-    expect(await flush(contacts)).toEqual({ kind: "flushed", versions: 1, deliveries: 2 })
+    expect(await flush(contacts)).toEqual({ kind: "handed-over", versions: 1, deliveries: 2 })
   } finally {
     console.warn = warn
   }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createAgentRuntime } from "../src/agents/execution"
 import { createDatasetsRuntime } from "../src/datasets/execution"
+import { getDatasetIngestRuntime } from "../src/datasets/ingest-flush"
 import { createDomainEventService } from "../src/events"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
@@ -95,7 +96,8 @@ describe("AuthorizedObjectReader runtime binding", () => {
         source,
         host.lakeStorage,
         host.blobStorage,
-        getDatasetVersionMarkings(host)
+        getDatasetVersionMarkings(host),
+        getDatasetIngestRuntime(host)
       ),
       createWorkflowsRuntime(runtime, scope.execution, source),
       createSyncsRuntime(runtime, scope.execution, source),

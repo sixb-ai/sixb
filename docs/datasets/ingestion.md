@@ -75,7 +75,10 @@ Ingestion updates source data. Existing pipelines and projections determine the 
   not.
 - Changes reach the lake with no orchestrator running. Keep it on all the same: it reports changes
   that wait, and asks again for a write that was lost when no other `ingest` call comes.
-- Console › Lake health shows the changes still waiting per dataset, and since when.
+- A server embedded with `createSixbServer` has no lake worker, so `ingest` writes the changes before
+  it returns. See [Custom server setup](../server/overview.md#custom-server-setup).
+- Console › Lake health shows the changes still waiting per dataset, and since when, and `sixb check`
+  names the datasets whose changes nothing has written for 10 minutes.
 - A worker that stops while writing resumes where it stopped, and never writes changes twice.
 
 | Failure | What happens |
