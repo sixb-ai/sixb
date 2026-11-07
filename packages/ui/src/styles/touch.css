@@ -94,9 +94,10 @@ html[data-keyboard] {
    inset is zero everywhere else, the desktop app included, whose sidebar clears the window controls
    on its own. A transparent top border makes the room, so it adds to the element's own padding and
    moves what is positioned inside it, such as a close button. In the base layer, so a phone shell,
-   which clears it with its own bars, or a utility such as a floating sidebar's border takes over. */
+   which clears it with its own bars, or a utility such as a floating sidebar's border takes over;
+   with the specificity of its attributes, so the base layer's own `* { border-color }` does not. */
 @layer base {
-  :where(
+  :is(
       [data-slot="sidebar-inner"],
       [data-slot="sidebar"][data-mobile],
       [data-slot="sidebar-inset"],
@@ -112,11 +113,11 @@ html[data-keyboard] {
 
   /* A phone on its side has the camera at one end: the sidebar's content clears the left, as its
      background runs under it, and the page clears the right. */
-  :where([data-slot="sidebar-inner"], [data-slot="sidebar"][data-mobile]) {
+  :is([data-slot="sidebar-inner"], [data-slot="sidebar"][data-mobile]) {
     border-left: env(safe-area-inset-left, 0px) solid transparent;
   }
 
-  :where([data-slot="sidebar-inset"]) {
+  [data-slot="sidebar-inset"] {
     border-right: env(safe-area-inset-right, 0px) solid transparent;
   }
 }
