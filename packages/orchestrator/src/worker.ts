@@ -72,10 +72,20 @@ async function consumeLiveJobs(
 ): Promise<void> {
   await consumeBatches(
     options,
-    { types: [eventType] },
+    { types: [eventType], ...directJobStart(eventType) },
     (events) => directJobs(options, events),
     signal
   )
+}
+
+/**
+ * Where a restart picks up. Nothing else repairs a cron occurrence, so one that was waiting to be
+ * read or dispatched when the process stopped is read again: run ids come from the event id, so
+ * the occurrences already dispatched start nothing. Dataset commits start at the live tail, because
+ * the `projections` pass reads the lake for them.
+ */
+function directJobStart(eventType: DomainEvent["type"]): { readonly from?: "earliest" } {
+  return eventType === "schedule.triggered" ? { from: "earliest" } : {}
 }
 
 async function consumeRetainedEventSchedules(
@@ -192,10 +202,42 @@ async function dispatchEventSchedule(
   binding: OrchestratorEventScheduleBinding,
   target: OrchestratorEventScheduleTarget
 ): Promise<void> {
-  const match = evaluateEventSchedule(binding.schedule, sourceEvent)
+  const scheduleId = binding.schedule.id
+  const match = readsEvent(options, sourceEvent, scheduleId, () =>
+    evaluateEventSchedule(binding.schedule, sourceEvent)
+  )
   if (!match) return
 
-  await enqueueEventScheduleTarget(options, sourceEvent, binding.schedule.id, match.event, target)
+  await enqueueEventScheduleTarget(options, sourceEvent, scheduleId, match.event, target)
+}
+
+/**
+ * Runs code that does nothing but read the event: a selector, or a project's mapper. Whatever it
+ * throws, the same event will throw it again, so it counts as a failure of this event.
+ */
+function readsEvent<T>(
+  options: OrchestratorRuntimeOptions,
+  sourceEvent: StoredDomainEvent,
+  scheduleId: string,
+  read: () => T
+): T {
+  try {
+    return read()
+  } catch (error) {
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbOrchestrator] Schedule '${scheduleId}' could not read event '${sourceEvent.id}'.`,
+      {
+        cause: error,
+        details: {
+          projectId: options.projectId,
+          scheduleId,
+          sourceEventId: sourceEvent.id,
+          sourceEventType: sourceEvent.type,
+        },
+      }
+    )
+  }
 }
 
 async function enqueueDirectJob(
@@ -351,7 +393,9 @@ async function enqueueEventScheduleTarget(
       })
       return
     case "workflows": {
-      const input = target.mapper ? target.mapper({ event } as never) : {}
+      const input = readsEvent(options, sourceEvent, scheduleId, () =>
+        target.mapper ? target.mapper({ event } as never) : {}
+      )
       if (!isRecord(input)) {
         throw createSixbError(
           "internal.unexpected",

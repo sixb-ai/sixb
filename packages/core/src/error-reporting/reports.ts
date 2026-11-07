@@ -204,6 +204,7 @@ export interface ReportOrchestratorDispatchFailureInput {
   readonly eventType: string
   readonly target: string
   readonly attempts: number
+  readonly dropped: boolean
 }
 
 export function reportOrchestratorDispatchFailure(
@@ -215,7 +216,7 @@ export function reportOrchestratorDispatchFailure(
   reporter.report(error, {
     ...input,
     type: "orchestrator.dispatch.failed",
-    notificationId: `project:${input.projectId}:dispatch:${input.eventId}:${input.target}:failed`,
+    notificationId: `project:${input.projectId}:dispatch:${input.eventId}:${input.target}:${input.dropped ? "dropped" : "retrying"}`,
     occurredAt,
     failure: captureSixbFailure(error, {
       allowedCodes: ["internal.unexpected"],
@@ -225,6 +226,7 @@ export function reportOrchestratorDispatchFailure(
         eventType: input.eventType,
         target: input.target,
         attempts: input.attempts,
+        dropped: input.dropped,
       },
       at: new Date(occurredAt),
     }),

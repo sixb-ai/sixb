@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import {
   col,
   defineConnector,
@@ -17,8 +17,10 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
+  type SixbErrorContext,
   SixbHost,
 } from "@sixb/core"
+import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import {
   DomainEventService,
   type EventDraft,
@@ -28,6 +30,7 @@ import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projectio
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { compileRoutes } from "../src/compile-routes"
+import { LakeChangeFeed, type LakeChangeFeedInput } from "../src/lake-change-feed"
 import { ProjectionDispatchReconciler } from "../src/projection-dispatch-reconciler"
 import { createReconciliationPasses } from "../src/reconciliation-passes"
 import type {
@@ -302,7 +305,8 @@ async function startWorker(
   routes: OrchestratorRoutes,
   projectId = PROJECT_ID,
   projectionDispatcher?: ProjectionDispatcherPort,
-  workflowDispatcher = createTestWorkflowRunDispatcher(queues, undefined, projectId)
+  workflowDispatcher = createTestWorkflowRunDispatcher(queues, undefined, projectId),
+  reporter: object = {}
 ): Promise<OrchestratorWorker> {
   const worker = new OrchestratorWorker({
     projectId,
@@ -315,7 +319,7 @@ async function startWorker(
       workflows: workflowDispatcher,
       ...(projectionDispatcher === undefined ? {} : { projections: projectionDispatcher }),
     },
-    reporter: {},
+    reporter,
   })
   workers.push(worker)
   await worker.start()
@@ -424,6 +428,10 @@ function createTestProjectionDispatcher(
       }
     },
   }
+}
+
+function testFeed(lakeStorage: LakeChangeFeedInput["lakeStorage"]): LakeChangeFeed {
+  return new LakeChangeFeed({ lakeStorage, projectId: PROJECT_ID, freshForMs: 0 })
 }
 
 async function noLakeChanges() {
@@ -831,6 +839,7 @@ describe("OrchestratorWorker", () => {
 
     await new ProjectionDispatchReconciler({
       projectId: PROJECT_ID,
+      feed: testFeed(lakeStorage),
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
       lakeStorage,
@@ -859,6 +868,7 @@ describe("OrchestratorWorker", () => {
     })
     const reconciler = new ProjectionDispatchReconciler({
       projectId: PROJECT_ID,
+      feed: testFeed(lakeStorage),
       dispatcher,
       descriptors: [descriptor],
       lakeStorage,
@@ -903,8 +913,8 @@ describe("OrchestratorWorker", () => {
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
       projectionRuns: noProjectionRuns,
+      feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
       lakeStorage: {
-        listLatestVersionsSince: noLakeChanges,
         async listVersions() {
           return [schemaVersion, dataVersion]
         },
@@ -937,8 +947,8 @@ describe("OrchestratorWorker", () => {
       dispatcher: createTestProjectionDispatcher([]),
       descriptors: [descriptor],
       projectionRuns: noProjectionRuns,
+      feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
       lakeStorage: {
-        listLatestVersionsSince: noLakeChanges,
         async listVersions() {
           return [schemaVersion]
         },
@@ -1116,6 +1126,108 @@ describe("OrchestratorWorker", () => {
     }
   })
 
+  // Reproduce: return the mapper's call in `enqueueEventScheduleTarget` unwrapped; its TypeError
+  // reads as an outage and the job retries forever.
+  test("a mapper that throws loses that event alone, reported at once", async () => {
+    const reported: SixbErrorContext[] = []
+    const reporter = {}
+    attachSixbErrorReporter(reporter, (_error, context) => {
+      reported.push(context)
+    })
+    const updated = defineSchedule("invoice.updated.mapped").on(events.object(Invoice).updated())
+    const mapped = defineWorkflow("mapped-workflow")
+      .input({ invoiceId: "string" })
+      .when(updated, ({ event }) => {
+        if (event.object.primaryId === "inv-1") throw new TypeError("cannot read this one")
+        return { invoiceId: event.object.primaryId }
+      })
+      .then(
+        defineWorkflowStep("takes-invoice")
+          .input({ invoiceId: "string" })
+          .output({})
+          .run(() => ({}))
+      )
+    const routes = compileRoutes({
+      schedules: [updated],
+      syncs: [],
+      pipelines: [],
+      workflows: [mapped],
+    })
+    const queues = new InMemoryQueues()
+    const eventRuntime = createEvents()
+
+    await startWorker(eventRuntime, queues, routes, PROJECT_ID, undefined, undefined, reporter)
+    await eventRuntime.publishEnvelopes([
+      makeInvoiceUpdatedEvent(0, 700),
+      {
+        ...makeInvoiceUpdatedEvent(0, 800),
+        payload: { ...makeInvoiceUpdatedEvent(0, 800).payload, primaryId: "inv-2" },
+      } as StableEventEnvelope,
+    ])
+
+    await waitFor(async () => {
+      const jobs = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "test" })
+      return jobs.length === 1
+    })
+    await flushSixbErrors(reporter)
+
+    expect(reported).toHaveLength(1)
+    expect(reported[0]).toMatchObject({
+      type: "orchestrator.dispatch.failed",
+      target: `workflow:${mapped.id}`,
+      attempts: 1,
+      dropped: true,
+    })
+  })
+
+  // Reproduce: drop `directJobStart` from `consumeLiveJobs`; the occurrence emitted before this
+  // start is not read, as a job in retry at the last shutdown would not be.
+  test("a restart reads cron occurrences again, and starts only what was not dispatched", async () => {
+    const daily = defineSchedule("daily-restart").cron("0 2 * * *")
+    const sync = defineSync("sync-restart")
+      .when(daily)
+      .from(connector)
+      .read(() => [])
+      .intoDataset(rawInvoices)
+    const routes = compileRoutes({ schedules: [daily], syncs: [sync], pipelines: [] })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    const [event] = await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
+
+    await startWorker(eventRuntime, queues, routes)
+
+    await waitFor(async () => {
+      const jobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "test" })
+      return jobs.length === 1 && jobs[0]!.job.payload.runId.includes(event!.id)
+    })
+  })
+
+  // Reproduce: pass `{ types: [eventType] }` in `consumeLiveJobs` for every type; the commit from
+  // before the start is delivered and dispatched.
+  test("a restart leaves past dataset commits to the projections pass", async () => {
+    const routes = compileRoutes({
+      schedules: [],
+      syncs: [],
+      pipelines: [],
+      projections: [invoiceProjectionDescriptor()],
+    })
+    const eventRuntime = createEvents()
+    const dispatches: ProjectionDispatchInput[] = []
+    await eventRuntime.append({ events: [makeDatasetVersionCommittedEvent("before-start")] })
+
+    await startWorker(
+      eventRuntime,
+      new InMemoryQueues(),
+      routes,
+      PROJECT_ID,
+      createTestProjectionDispatcher(dispatches)
+    )
+    await eventRuntime.append({ events: [makeDatasetVersionCommittedEvent("after-start")] })
+
+    await waitFor(() => dispatches.length > 0)
+    expect(dispatches.map((input) => input.datasetVersion.versionId)).toEqual(["after-start"])
+  })
+
   test("stop drains pending direct dispatches", async () => {
     const daily = defineSchedule("daily-stop").cron("0 2 * * *")
     const sync = defineSync("sync-stop")
@@ -1200,9 +1312,47 @@ describe("OrchestratorWorker", () => {
           projectId: PROJECT_ID,
           routes,
           dispatchers: { projections: createTestProjectionDispatcher([]) },
+          lakeStorage: new InMemoryLakeStorage(),
         })
       )
     ).toMatchObject({ code: "internal.unexpected", retryable: false, ...error })
+  })
+
+  // Reproduce: create a `LakeChangeFeed` per pass in `createReconciliationPasses`; it counts two.
+  test("projections and dataset triggers read the lake's feed with one query", async () => {
+    const updated = defineSchedule("raw.updated.shared").on(events.dataset(rawInvoices).updated())
+    const pipeline = definePipeline("shared-feed-pipeline")
+      .when(updated)
+      .then(
+        definePipelineStep("pass-through")
+          .inputs({ invoices: rawInvoices })
+          .output(cleanInvoices)
+          .run(() => {})
+      )
+    const lakeStorage = new InMemoryLakeStorage()
+    const storage = new InMemoryStorage()
+    const passes = createReconciliationPasses({
+      projectId: PROJECT_ID,
+      routes: compileRoutes({
+        schedules: [updated],
+        syncs: [],
+        pipelines: [pipeline],
+        projections: [invoiceProjectionDescriptor()],
+      }),
+      dispatchers: {
+        projections: createTestProjectionDispatcher([]),
+        pipelines: createTestPipelineRunDispatcher(new InMemoryQueues()),
+      },
+      lakeStorage,
+      projections: { lakeStorage, projectionRuns: noProjectionRuns },
+      datasetTriggers: { lakeStorage, pipelineRuns: storage.pipelineRuns },
+    })
+    const feed = spyOn(lakeStorage, "listLatestVersionsSince")
+
+    await Promise.all(passes.map((pass) => pass.run(signal)))
+
+    expect(passes.map((pass) => pass.id)).toEqual(["projections", "triggers"])
+    expect(feed).toHaveBeenCalledTimes(1)
   })
 
   test("adds no pass for a project with nothing to reconcile", () => {
@@ -1210,6 +1360,7 @@ describe("OrchestratorWorker", () => {
       projectId: PROJECT_ID,
       routes: new Map(),
       dispatchers: {},
+      lakeStorage: new InMemoryLakeStorage(),
     })
 
     expect(passes).toEqual([])
