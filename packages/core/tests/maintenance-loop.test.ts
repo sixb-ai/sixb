@@ -182,9 +182,8 @@ describe("MaintenanceLoop", () => {
         id: "flaky",
         lastSucceededAt: null,
         consecutiveFailures: 2,
-        lastError: "Error: catalog unavailable",
       },
-      expect.objectContaining({ id: "healthy", consecutiveFailures: 0, lastError: null }),
+      expect.objectContaining({ id: "healthy", consecutiveFailures: 0 }),
     ])
 
     failing = false
@@ -193,7 +192,6 @@ describe("MaintenanceLoop", () => {
     expect(beats.at(-1)?.passes[0]).toMatchObject({
       id: "flaky",
       consecutiveFailures: 0,
-      lastError: null,
     })
     expect(beats.at(-1)?.passes[0]?.lastSucceededAt).toBeInstanceOf(Date)
   })

@@ -3,7 +3,6 @@ export interface MaintenancePassHealth {
   readonly id: string
   readonly lastSucceededAt: Date | null
   readonly consecutiveFailures: number
-  readonly lastError: string | null
 }
 
 /**

@@ -48,11 +48,11 @@ export interface OntologyMaintenanceHandle {
   stop(): Promise<void>
 }
 
+/** No error text: a driver's message can hold a secret, and what failed goes to `onError`. */
 export interface MaintenancePassStatus {
   readonly id: string
   readonly lastSucceededAt: string | null
   readonly consecutiveFailures: number
-  readonly lastError: string | null
 }
 
 export interface OntologyOperationalStatus {

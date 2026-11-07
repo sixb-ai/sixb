@@ -23,7 +23,6 @@ function heartbeat(
         id: "ontology",
         lastSucceededAt: new Date(NOW.getTime() - 1_000),
         consecutiveFailures: 0,
-        lastError: null,
       },
     ],
     ...overrides,
@@ -54,7 +53,6 @@ describe("operationalStatus", () => {
             id: "ontology",
             lastSucceededAt: "2026-11-07T11:59:59.000Z",
             consecutiveFailures: 0,
-            lastError: null,
           },
         ],
         outbox: QUIET_OUTBOX,
@@ -91,9 +89,7 @@ describe("operationalStatus", () => {
     { failures: 1, status: "ok" },
     { failures: 2, status: "degraded" },
   ])("a pass that failed $failures time(s) in a row is $status", ({ failures, status }) => {
-    const passes = [
-      { id: "cron", lastSucceededAt: null, consecutiveFailures: failures, lastError: "Error: x" },
-    ]
+    const passes = [{ id: "cron", lastSucceededAt: null, consecutiveFailures: failures }]
 
     expect(statusOf({ heartbeat: heartbeat({ passes }) }).status).toBe(status)
   })

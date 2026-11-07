@@ -43,13 +43,11 @@ export function runMaintenanceHeartbeatStorageContractSuite<
               id: "ontology",
               lastSucceededAt: succeededAt,
               consecutiveFailures: 0,
-              lastError: null,
             },
             {
               id: "cron",
               lastSucceededAt: null,
               consecutiveFailures: 3,
-              lastError: "Error: broker refused",
             },
           ],
         }
@@ -65,9 +63,7 @@ export function runMaintenanceHeartbeatStorageContractSuite<
           projectId,
           beatAt,
           everyMs: 30_000,
-          passes: [
-            { id: "gone", lastSucceededAt: null, consecutiveFailures: 9, lastError: "Error: old" },
-          ],
+          passes: [{ id: "gone", lastSucceededAt: null, consecutiveFailures: 9 }],
         })
 
         const next = { projectId, beatAt: new Date(beatAt.getTime() + 1_000), everyMs: 60_000 }

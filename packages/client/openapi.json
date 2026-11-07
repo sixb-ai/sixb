@@ -14620,18 +14620,9 @@
                               "consecutiveFailures": {
                                 "type": "integer",
                                 "minimum": 0
-                              },
-                              "lastError": {
-                                "type": "string",
-                                "nullable": true
                               }
                             },
-                            "required": [
-                              "id",
-                              "lastSucceededAt",
-                              "consecutiveFailures",
-                              "lastError"
-                            ],
+                            "required": ["id", "lastSucceededAt", "consecutiveFailures"],
                             "additionalProperties": false
                           }
                         },

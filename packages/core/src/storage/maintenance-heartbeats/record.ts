@@ -32,7 +32,6 @@ function parsePass(value: unknown, projectId: unknown): MaintenancePassHealth {
     lastSucceededAt:
       typeof pass.lastSucceededAt === "string" ? new Date(pass.lastSucceededAt) : null,
     consecutiveFailures: Number(pass.consecutiveFailures),
-    lastError: typeof pass.lastError === "string" ? pass.lastError : null,
   }
 }
 

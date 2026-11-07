@@ -8,13 +8,7 @@ import {
   type Storage,
 } from "../storage"
 import { storageHeartbeat } from "./heartbeat"
-import {
-  errorMessage,
-  everyMs,
-  type MaintenanceFailure,
-  MaintenanceLoop,
-  type MaintenancePass,
-} from "./loop"
+import { everyMs, type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "./loop"
 import { operationalStatus } from "./status"
 import type {
   OntologyMaintenanceCleanupSnapshot,
@@ -439,6 +433,15 @@ function assertNonblank(value: string, name: string): void {
   if (value.trim().length === 0) {
     throw new Error(`[Sixb] Ontology maintenance ${name} must not be blank.`)
   }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof AggregateError) {
+    return [...error.errors].map(errorMessage).join(" | ").slice(0, 2_000)
+  }
+
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+  return message.slice(0, 2_000)
 }
 
 async function captureFailure(run: () => Promise<void>, failures: unknown[]): Promise<void>
