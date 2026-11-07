@@ -44,7 +44,7 @@ export interface LakeWorkerOptions {
   readonly concurrency?: number
 }
 
-/** Another flush holds the dataset: this job waits until its lease would expire. */
+/** Another flush holds the dataset, at most until `until`, when its lease would expire. */
 class DatasetIngestFlushBusy extends Error {
   constructor(readonly until: Date) {
     super("[SixbLakeWorker] Another flush holds the dataset.")
