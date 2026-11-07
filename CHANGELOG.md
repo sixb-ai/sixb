@@ -13,8 +13,8 @@ Read this first: lake retention starts on its own, and what it deletes does not 
    days later. Set `lakeMaintenance` now if that is not what you want.
 2. **Install and compile.** All `@sixb/*` move together, and `@sixb/lake-worker` arrives through
    `@sixb/cli`. See _What stops compiling_.
-3. **Stop the old services.** Old workers get `killTimeoutMs`, 10 s by default; a run they leave
-   behind ends 24 hours after it started.
+3. **Stop the old services.** Old workers get `killTimeoutMs` to finish, 70 s under `sixb deploy`;
+   a run they leave behind ends 24 hours after it started.
 4. **Migrate and check, with services down.** `sixb db migrate`, then `sixb check` and
    `sixb lake check`. This is the first step that opens DuckDB 1.5.6, so a host that cannot fetch the
    new extension fails here. The `ALTER`s take no `lock_timeout`: behind a long report on `sync_runs`
@@ -53,8 +53,8 @@ execution token stays `running` on 0.2.1, whose workers skip it.
 #### What to migrate
 
 - Storage gains `maintenance_heartbeats`, `lake_retention_runs`, `dataset_ingest_deliveries` and
-  `dataset_ingest_state`, and `sync_runs` and `pipeline_runs` gain columns. Migrate before starting
-  the new services.
+  `dataset_ingest_state`, and `sync_runs`, `pipeline_runs`, `webhook_runs` and `projection_runs`
+  gain columns. Migrate before starting the new services.
 - `@sixb/ducklake` runs on DuckDB 1.5.6 (from 1.5.2) and a checked DuckLake build, `ac7595b0`. The
   first process that opens the lake installs that extension over the network, so a host that cannot
   fetch it fails there. Any other build logs a warning and still opens the lake.
