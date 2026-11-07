@@ -1,4 +1,11 @@
 export type {
+  GitHubAttachment,
+  GitHubAttachmentSource,
+  GitHubAttachmentsApi,
+  GitHubBodyFormat,
+  GitHubBodyFormatOptions,
+} from "./attachments"
+export type {
   GitHubBranch,
   GitHubBranchCommit,
   GitHubBranchDetail,

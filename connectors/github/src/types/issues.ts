@@ -1,3 +1,4 @@
+import type { GitHubBodyFormatOptions } from "./attachments"
 import type { GitHubPage, GitHubPaginationOptions, GitHubUser } from "./common"
 import type { RepositoryIssueCommentsApi } from "./issue-comments"
 import type { GitHubRepository, GitHubSortDirection } from "./repos"
@@ -13,7 +14,7 @@ export type GitHubIssueState = "open" | "closed" | "all"
 export type GitHubIssueSort = "created" | "updated" | "comments"
 export type GitHubIssueStateReason = "completed" | "not_planned" | "duplicate" | "reopened" | null
 
-interface ListAssignedIssuesOptions extends GitHubPaginationOptions {
+interface ListAssignedIssuesOptions extends GitHubPaginationOptions, GitHubBodyFormatOptions {
   readonly filter?: GitHubIssueFilter
   readonly state?: GitHubIssueState
   readonly labels?: readonly string[]
@@ -34,7 +35,9 @@ export interface ListOrganizationIssuesOptions extends ListAssignedIssuesOptions
   readonly type?: string
 }
 
-export interface ListRepositoryIssuesOptions extends GitHubPaginationOptions {
+export interface ListRepositoryIssuesOptions
+  extends GitHubPaginationOptions,
+    GitHubBodyFormatOptions {
   readonly milestone?: string | number
   readonly state?: GitHubIssueState
   readonly assignee?: string
@@ -123,6 +126,10 @@ export interface GitHubIssue {
   readonly number: number
   readonly title: string
   readonly body: string | null
+  /** With `bodyFormat` `text` or `full`. */
+  readonly body_text?: string | null
+  /** With `bodyFormat` `html` or `full`. */
+  readonly body_html?: string | null
   readonly user: GitHubUser
   readonly labels: readonly GitHubLabel[]
   readonly state: "open" | "closed"
@@ -161,7 +168,7 @@ export interface RepositoryIssuesApi {
   readonly comments: RepositoryIssueCommentsApi
   /** List one page of this repository's issues. GitHub may include pull requests. */
   list(options?: ListRepositoryIssuesOptions): Promise<GitHubPage<GitHubIssue>>
-  get(issueNumber: number): Promise<GitHubIssue>
+  get(issueNumber: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssue>
   create(input: CreateIssueInput): Promise<GitHubIssue>
   update(issueNumber: number, patch: UpdateIssueInput): Promise<GitHubIssue>
 }

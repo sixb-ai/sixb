@@ -1,3 +1,4 @@
+import type { GitHubAttachmentsApi } from "./attachments"
 import type { RepositoryBranchesApi } from "./branches"
 import type { GitHubRepositoryTarget } from "./common"
 import type {
@@ -24,6 +25,8 @@ export interface GitHubClient {
   readonly issues: AuthenticatedUserIssuesApi
   readonly users: GitHubUsersApi
   readonly memberships: AuthenticatedUserOrganizationMembershipsApi
+  /** Images, videos and files attached to issues, pull requests and comments. */
+  readonly attachments: GitHubAttachmentsApi
   repo(target: GitHubRepositoryTarget): GitHubRepositoryScope
   org(org: string): GitHubOrganizationScope
 }

@@ -1,6 +1,7 @@
 import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
+  bodyFormatHeaders,
   pathId,
   pathPart,
   readJson,
@@ -9,6 +10,7 @@ import {
   resolvePagePath,
   withQuery,
 } from "../http"
+import type { GitHubBodyFormatOptions } from "../types/attachments"
 import type { GitHubPage, GitHubPaginationOptions, GitHubRepositoryTarget } from "../types/common"
 import type {
   AuthenticatedUserIssuesApi,
@@ -57,8 +59,12 @@ export function createRepositoryIssuesApi(
 
     list: (options) => listIssues(context, path, options, applyRepositoryIssueParams),
 
-    async get(issueNumber: number): Promise<GitHubIssue> {
-      return readJson<GitHubIssue>(await context.http.get(issuePath(path, issueNumber)))
+    async get(issueNumber: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssue> {
+      return readJson<GitHubIssue>(
+        await context.http.get(issuePath(path, issueNumber), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+        })
+      )
     },
 
     async create(input: CreateIssueInput): Promise<GitHubIssue> {
@@ -77,7 +83,7 @@ export function createRepositoryIssuesApi(
   }
 }
 
-async function listIssues<TOptions extends GitHubPaginationOptions>(
+async function listIssues<TOptions extends GitHubPaginationOptions & GitHubBodyFormatOptions>(
   context: GitHubHttpContext,
   path: string,
   options: TOptions | undefined,
@@ -87,7 +93,9 @@ async function listIssues<TOptions extends GitHubPaginationOptions>(
   applyPaging(params, options)
   applyParams(params, options)
   return readPage<GitHubIssue>(
-    await context.http.get(resolvePagePath(withQuery(path, params), options)),
+    await context.http.get(resolvePagePath(withQuery(path, params), options), {
+      headers: bodyFormatHeaders(options?.bodyFormat),
+    }),
     context.apiBaseUrl
   )
 }

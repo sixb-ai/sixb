@@ -5,6 +5,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Repositories** — list authenticated-user/org repositories, get a repository
 - **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
+- **Attachments** — find the images, videos and files in an issue or comment body and download them
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
 - **People** — query users, organization members, memberships, outside collaborators, and invitations
 - **Webhooks** — receive GitHub events through one inbound route
@@ -95,6 +96,8 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).issues.comments.get()` | `GET /repos/{owner}/{repo}/issues/comments/{id}` |
 | `gh.repo({ owner, repo }).issues.comments.update()` | `PATCH /repos/{owner}/{repo}/issues/comments/{id}` |
 | `gh.repo({ owner, repo }).issues.comments.delete()` | `DELETE /repos/{owner}/{repo}/issues/comments/{id}` |
+| `gh.attachments.find({ body, body_html })` | No request: reads the links in a body      |
+| `gh.attachments.download(attachment)`    | `GET` the attachment's link, without the token |
 | `gh.repo({ owner, repo }).releases.list()` | `GET /repos/{owner}/{repo}/releases`        |
 | `gh.repo({ owner, repo }).releases.get(id)` | `GET /repos/{owner}/{repo}/releases/{id}`  |
 | `gh.repo({ owner, repo }).releases.getLatest()` | `GET /repos/{owner}/{repo}/releases/latest` |
@@ -168,6 +171,35 @@ await repo.releases.reactions.create(release.id, { content: "rocket" })
 const file = await repo.releases.assets.download(release.assets[0]!.id)
 await Bun.write("app.zip", file)
 ```
+
+### Attachments
+
+GitHub has no API for the images, videos and files attached to issues, pull requests and comments:
+they are links in the Markdown body. `gh.attachments.find()` reads them from a body and returns each
+once, in order, with its `id` (the asset's UUID, or the file's id), its `kind` (`media` for images
+and videos, `file` for other files) and, for files, its `name`. `download()` returns a streaming
+`Response`; the response's `content-type` tells an image from a video.
+
+In a private repository the Markdown's links only open in a signed-in browser. Request the body with
+`bodyFormat: "full"` and pass `body_html` too: GitHub renders images and videos there as links
+signed for a few minutes, which `download()` uses. Download them right after reading the body.
+Files other than images and videos have no signed link, so they download only from public
+repositories.
+
+```ts
+const issue = await repo.issues.get(42, { bodyFormat: "full" })
+
+for (const attachment of gh.attachments.find(issue)) {
+  const response = await gh.attachments.download(attachment, { signal })
+  await Bun.write(`attachments/${attachment.name ?? attachment.id}`, response)
+}
+```
+
+`bodyFormat` is accepted by `issues.get()`, every issue list, `issues.comments.get()` and
+`issues.comments.list()`: `raw` (the default) returns the Markdown in `body`, `text` adds
+`body_text`, `html` returns only `body_html`, and `full` returns all three. `download()` refuses
+links outside GitHub's attachment hosts and never sends the token. With an Enterprise Server base
+URL, only attachments on that server's host are found.
 
 Branch calls accept a `signal` to abort the request. `branches.list()` returns every
 branch unless `protected` is set: `true` keeps only branches protected by branch protection

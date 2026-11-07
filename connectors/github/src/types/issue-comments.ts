@@ -1,6 +1,7 @@
+import type { GitHubBodyFormatOptions } from "./attachments"
 import type { GitHubPage, GitHubPaginationOptions, GitHubUser } from "./common"
 
-export interface ListIssueCommentsOptions extends GitHubPaginationOptions {
+export interface ListIssueCommentsOptions extends GitHubPaginationOptions, GitHubBodyFormatOptions {
   /** Only show comments updated at or after this ISO 8601 timestamp. */
   readonly since?: string
 }
@@ -19,6 +20,10 @@ export interface GitHubIssueComment {
   readonly url: string
   readonly html_url: string
   readonly body: string
+  /** With `bodyFormat` `text` or `full`. */
+  readonly body_text?: string | null
+  /** With `bodyFormat` `html` or `full`. */
+  readonly body_html?: string | null
   readonly user: GitHubUser
   readonly created_at: string
   readonly updated_at: string
@@ -33,7 +38,7 @@ export interface RepositoryIssueCommentsApi {
     options?: ListIssueCommentsOptions
   ): Promise<GitHubPage<GitHubIssueComment>>
   create(issueNumber: number, input: CreateIssueCommentInput): Promise<GitHubIssueComment>
-  get(commentId: number): Promise<GitHubIssueComment>
+  get(commentId: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssueComment>
   update(commentId: number, input: UpdateIssueCommentInput): Promise<GitHubIssueComment>
   delete(commentId: number): Promise<void>
 }

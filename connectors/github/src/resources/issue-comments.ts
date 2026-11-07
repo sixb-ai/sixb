@@ -1,6 +1,7 @@
 import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
+  bodyFormatHeaders,
   pathId,
   readJson,
   readNoContent,
@@ -9,6 +10,7 @@ import {
   resolvePagePath,
   withQuery,
 } from "../http"
+import type { GitHubBodyFormatOptions } from "../types/attachments"
 import type { GitHubPage, GitHubRepositoryTarget } from "../types/common"
 import type {
   CreateIssueCommentInput,
@@ -35,7 +37,9 @@ export function createRepositoryIssueCommentsApi(
       if (options?.since) params.set("since", options.since)
       const path = withQuery(`${issuePath}/${pathId(issueNumber, "issueNumber")}/comments`, params)
       return readPage<GitHubIssueComment>(
-        await context.http.get(resolvePagePath(path, options)),
+        await context.http.get(resolvePagePath(path, options), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+        }),
         context.apiBaseUrl
       )
     },
@@ -45,9 +49,11 @@ export function createRepositoryIssueCommentsApi(
       return readJson<GitHubIssueComment>(await context.http.post(path, { body: input.body }))
     },
 
-    async get(commentId: number): Promise<GitHubIssueComment> {
+    async get(commentId: number, options?: GitHubBodyFormatOptions): Promise<GitHubIssueComment> {
       return readJson<GitHubIssueComment>(
-        await context.http.get(commentPath(commentsPath, commentId))
+        await context.http.get(commentPath(commentsPath, commentId), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+        })
       )
     },
 

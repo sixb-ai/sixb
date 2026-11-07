@@ -2,9 +2,9 @@ import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
   assertNonEmpty,
-  GitHubApiError,
   pathId,
   pathPart,
+  readContent,
   readJson,
   readNoContent,
   readPage,
@@ -288,13 +288,6 @@ function assetPath(assetsPath: string, assetId: number): string {
 
 function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
-}
-
-async function readContent(response: Response): Promise<Response> {
-  if (!response.ok) {
-    throw new GitHubApiError(response.status, await response.text().catch(() => ""))
-  }
-  return response
 }
 
 /**

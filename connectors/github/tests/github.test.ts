@@ -683,6 +683,161 @@ describe("github connector", () => {
     expect(calls[0]?.url.pathname).toBe("/api/uploads/repos/acme/web/releases/7/assets")
   })
 
+  test("asks GitHub for an issue's or comment's body in the requested format", async () => {
+    const calls = record((request) =>
+      request.url.pathname.endsWith("/comments") || request.url.pathname.endsWith("/issues")
+        ? json([])
+        : json({ id: 1 })
+    )
+    const issues = (await connect()).repo(webRepo).issues
+
+    await issues.get(5)
+    await issues.get(5, { bodyFormat: "full" })
+    await issues.list({ bodyFormat: "html" })
+    await issues.comments.list(5, { bodyFormat: "text" })
+    await issues.comments.get(9, { bodyFormat: "full" })
+    const invalid: unknown = await issues
+      .get(5, { bodyFormat: "markdown" as never })
+      .catch((caught) => caught)
+
+    expect(calls.map(({ headers }) => headers.get("accept"))).toEqual([
+      "application/vnd.github+json",
+      "application/vnd.github.full+json",
+      "application/vnd.github.html+json",
+      "application/vnd.github.text+json",
+      "application/vnd.github.full+json",
+    ])
+    expect((invalid as Error).message).toContain("bodyFormat must be one of")
+  })
+
+  describe("attachments", () => {
+    const image = "1f11b016-6048-41fa-b313-5243b18d1399"
+    const video = "b4950445-beaf-455b-9464-7cb66ebc63a8"
+    const legacy = "ec748ba6-c002-4ee2-bd01-c66d510f2666"
+    const signedImage = `https://private-user-images.githubusercontent.com/20358651/663688738-${image}.png?jwt=eyJ.sig&amp;x=1`
+
+    test("finds each image, video and file a body links to, once and in order", async () => {
+      const attachments = (await connect()).attachments
+
+      const found = attachments.find({
+        body: [
+          `<img width="846" alt="Image" src="https://github.com/user-attachments/assets/${image}" />`,
+          "",
+          `https://github.com/user-attachments/assets/${video}`,
+          "",
+          `![old](https://github.com/acme/web/assets/20358651/${legacy}) and again https://github.com/user-attachments/assets/${image}.`,
+          "[report.pdf](https://github.com/user-attachments/files/17923/report%20Q3.pdf)",
+          "Not attachments: https://github.com/acme/web/issues/3 https://evil.example/user-attachments/assets/" +
+            image +
+            " https://github.com.evil.example/user-attachments/assets/" +
+            image,
+        ].join("\n"),
+      })
+
+      expect(found).toEqual([
+        {
+          id: image,
+          kind: "media",
+          url: `https://github.com/user-attachments/assets/${image}`,
+          downloadUrl: `https://github.com/user-attachments/assets/${image}`,
+        },
+        {
+          id: video,
+          kind: "media",
+          url: `https://github.com/user-attachments/assets/${video}`,
+          downloadUrl: `https://github.com/user-attachments/assets/${video}`,
+        },
+        {
+          id: legacy,
+          kind: "media",
+          url: `https://github.com/acme/web/assets/20358651/${legacy}`,
+          downloadUrl: `https://github.com/acme/web/assets/20358651/${legacy}`,
+        },
+        {
+          id: "17923",
+          kind: "file",
+          url: "https://github.com/user-attachments/files/17923/report%20Q3.pdf",
+          downloadUrl: "https://github.com/user-attachments/files/17923/report%20Q3.pdf",
+          name: "report Q3.pdf",
+        },
+      ])
+    })
+
+    test("downloads private media from the signed link in the body's HTML", async () => {
+      const attachments = (await connect()).attachments
+
+      const found = attachments.find({
+        body: `![shot](https://github.com/user-attachments/assets/${image})`,
+        body_html: `<p><a href="${signedImage}"><img src="${signedImage}" alt="shot"></a></p>`,
+      })
+      // Only the HTML was requested: its signed links are the attachments.
+      const htmlOnly = attachments.find({ body_html: `<img src="${signedImage}">` })
+
+      const signed = signedImage.replace("&amp;", "&")
+      expect(found).toEqual([
+        {
+          id: image,
+          kind: "media",
+          url: `https://github.com/user-attachments/assets/${image}`,
+          downloadUrl: signed,
+        },
+      ])
+      expect(htmlOnly).toEqual([{ id: image, kind: "media", url: signed, downloadUrl: signed }])
+    })
+
+    // Reproduce: download through `context.http.get`; the request then carries the token.
+    test("downloads an attachment without the token", async () => {
+      const calls = record(() => new Response(new Uint8Array([1, 2, 3])))
+      const attachments = (await connect()).attachments
+
+      const response = await attachments.download({
+        downloadUrl: signedImage.replace("&amp;", "&"),
+      })
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.url.host).toBe("private-user-images.githubusercontent.com")
+      expect(calls[0]?.url.searchParams.get("jwt")).toBe("eyJ.sig")
+      expect(calls[0]?.headers.get("authorization")).toBeNull()
+      expect([...(await response.bytes())]).toEqual([1, 2, 3])
+    })
+
+    test("refuses links outside GitHub's attachment hosts, and throws on a refused download", async () => {
+      const calls = record(() => new Response("Not Found", { status: 404 }))
+      const attachments = (await connect()).attachments
+
+      const foreign: unknown = await attachments
+        .download({ downloadUrl: `https://evil.example/user-attachments/assets/${image}` })
+        .catch((caught) => caught)
+      const issuePage: unknown = await attachments
+        .download({ downloadUrl: "https://github.com/acme/web/issues/3" })
+        .catch((caught) => caught)
+      expect(calls).toHaveLength(0)
+
+      const refused: unknown = await attachments
+        .download({ downloadUrl: `https://github.com/user-attachments/assets/${image}` })
+        .catch((caught) => caught)
+
+      expect((foreign as Error).message).toContain("Refusing an attachment URL")
+      expect((issuePage as Error).message).toContain("Refusing an attachment URL")
+      expect(refused).toBeInstanceOf(GitHubApiError)
+      expect(refused).toMatchObject({ status: 404 })
+    })
+
+    test("finds an Enterprise Server's attachments on its own host only", async () => {
+      const attachments = (await connect("https://ghe.example.com/api/v3/")).attachments
+
+      const found = attachments.find({
+        body: [
+          `https://ghe.example.com/user-attachments/assets/${image}`,
+          `https://github.com/user-attachments/assets/${video}`,
+          `https://user-images.githubusercontent.com/1/2-${legacy}.png`,
+        ].join("\n"),
+      })
+
+      expect(found.map(({ id }) => id)).toEqual([image])
+    })
+  })
+
   test("throws GitHubApiError on non-2xx responses", async () => {
     record(() => json({ message: "Not Found" }, { status: 404 }))
     const client = await connect()

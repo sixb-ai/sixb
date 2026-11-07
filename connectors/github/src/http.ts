@@ -1,4 +1,5 @@
 import type { RestClient } from "@sixb/connector-rest"
+import type { GitHubBodyFormat } from "./types/attachments"
 import type { GitHubPage, GitHubRepositoryTarget } from "./types/common"
 
 export interface GitHubHttpContext {
@@ -35,6 +36,25 @@ export async function readJson<T>(response: Response): Promise<T> {
     throw new GitHubApiError(response.status, await response.text().catch(() => ""))
   }
   return (await response.json()) as T
+}
+
+/** Return a successful response for its caller to read, such as a download. */
+export async function readContent(response: Response): Promise<Response> {
+  if (!response.ok) {
+    throw new GitHubApiError(response.status, await response.text().catch(() => ""))
+  }
+  return response
+}
+
+const BODY_FORMATS: readonly GitHubBodyFormat[] = ["raw", "text", "html", "full"]
+
+/** The `accept` header asking GitHub for an issue or comment body in `format`. */
+export function bodyFormatHeaders(format: GitHubBodyFormat | undefined) {
+  if (format === undefined) return undefined
+  if (!BODY_FORMATS.includes(format)) {
+    throw new Error(`[SixbGitHub] bodyFormat must be one of ${BODY_FORMATS.join(", ")}.`)
+  }
+  return { accept: `application/vnd.github.${format}+json` }
 }
 
 export async function readNoContent(response: Response): Promise<void> {
