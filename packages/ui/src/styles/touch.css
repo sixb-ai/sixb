@@ -109,6 +109,16 @@ html[data-keyboard] {
     ) {
     border-top: env(safe-area-inset-top, 0px) solid transparent;
   }
+
+  /* A phone on its side has the camera at one end: the sidebar's content clears the left, as its
+     background runs under it, and the page clears the right. */
+  :where([data-slot="sidebar-inner"], [data-slot="sidebar"][data-mobile]) {
+    border-left: env(safe-area-inset-left, 0px) solid transparent;
+  }
+
+  :where([data-slot="sidebar-inset"]) {
+    border-right: env(safe-area-inset-right, 0px) solid transparent;
+  }
 }
 
 /* Under the status bar iOS reports 100svh and 100dvh short by its height, so the fixed sidebar takes

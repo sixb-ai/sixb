@@ -149,6 +149,7 @@
   /* The shell clears the status bar with its own bars (see @sixb/ui touch.css). */
   :is(.phone-shell[data-slot="sidebar-inset"], .phone-shell > [data-slot="sidebar-inset"]) {
     border-top-width: 0;
+    border-right-width: 0;
   }
 
   .phone-shell > [data-slot="sidebar-inset"] {
