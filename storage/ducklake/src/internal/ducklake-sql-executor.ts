@@ -67,6 +67,7 @@ interface ApplySqlTransformInput {
   readonly sql: string
   readonly checkedCasts: readonly SqlTransformCheckedCast[]
   readonly previousRowCount?: number
+  readonly expectReplacement: boolean
 }
 
 interface SqlTransformResultColumn {
@@ -161,6 +162,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
             sql,
             checkedCasts,
             previousRowCount: context.previousRowCount,
+            expectReplacement: context.expectReplacement,
           }),
       })
     })
@@ -363,6 +365,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
         mode: input.mode,
         sourceRelationSql: tempTable,
         previousRowCount: input.previousRowCount,
+        expectReplacement: input.expectReplacement,
       })
     } catch (error) {
       try {

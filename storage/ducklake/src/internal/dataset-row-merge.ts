@@ -7,7 +7,12 @@ import {
   reconcileDatasetSequences,
 } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
-import { type ApplyDatasetRowsResult, inspectUniqueKeyedRelation } from "./dataset-row-commit"
+import {
+  type ApplyDatasetRowsResult,
+  datasetRowDifferenceSql,
+  inspectUniqueKeyedRelation,
+  primaryKeyMatchSql,
+} from "./dataset-row-commit"
 import { getBigIntLike, getOptionalString, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "./names"
@@ -59,7 +64,8 @@ export async function applyDatasetMergeFromRelation(
           sourceRowCount,
           resultingRowCount: { kind: "exact", value: previousRowCount },
           targetWasEmpty: previousRowCount === 0,
-          changedTableRows: false,
+          insertedRows: 0,
+          deletedRows: 0,
         }
       }
 
@@ -106,7 +112,8 @@ export async function applyDatasetMergeFromRelation(
           value: previousRowCount + effects.inserts - effects.deletes,
         },
         targetWasEmpty: previousRowCount === 0,
-        changedTableRows: true,
+        insertedRows: effects.inserts + effects.updates,
+        deletedRows: effects.updates + effects.deletes,
       }
     }
   )
@@ -298,41 +305,6 @@ async function countMergeEffects(
     updates: row === undefined ? 0 : Number(getBigIntLike(row, "update_count")),
     deletes: row === undefined ? 0 : Number(getBigIntLike(row, "delete_count")),
   }
-}
-
-function primaryKeyMatchSql(
-  primaryKeyColumns: readonly string[],
-  leftAlias: string,
-  rightAlias: string
-): string {
-  return primaryKeyColumns
-    .map(
-      (column) =>
-        `${leftAlias}.${quoteIdentifier(column)} = ${rightAlias}.${quoteIdentifier(column)}`
-    )
-    .join(" AND ")
-}
-
-/**
- * Whether a staged upsert changes the stored row of its key. A row that differs only in its
- * `sequenceBy` column is the stored row delivered again (`isSequenceOnlyChange`): it stays as is,
- * while the companion table still advances the key's ordering.
- */
-function datasetRowDifferenceSql(
-  dataset: DatasetDefinition,
-  leftAlias: string,
-  rightAlias: string
-): string {
-  const differences = dataset.schema.columns
-    .filter((column) => column.name !== dataset.sequenceBy)
-    .map(
-      (column) =>
-        `${leftAlias}.${quoteIdentifier(column.name)} IS DISTINCT FROM ${rightAlias}.${quoteIdentifier(
-          column.name
-        )}`
-    )
-
-  return differences.length > 0 ? differences.join(" OR ") : "FALSE"
 }
 
 async function countRows(runtime: DuckDbQueryRuntime, relationSql: string): Promise<number> {

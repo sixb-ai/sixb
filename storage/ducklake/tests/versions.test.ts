@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  maintainsTable,
   parseCommitMetadata,
   parseTableDataChange,
   parseVersionId,
@@ -27,6 +28,8 @@ describe("DuckLake version metadata", () => {
             producer: { kind: "sync", id: "sync-orders", runId: "run_123" },
             inputs: [{ datasetId: "raw.erp.customers", versionId: "ducklake:7" }],
             rowCount: 1250,
+            rowChanges: 12,
+            uncomparedReplacements: 3,
             validatedPrimaryKeyColumns: ["region", "order_id"],
             schemaChange: { addColumns: ["currency"] },
           },
@@ -40,6 +43,8 @@ describe("DuckLake version metadata", () => {
       producer: { kind: "sync", id: "sync-orders", runId: "run_123" },
       inputs: [{ datasetId: "raw.erp.customers", versionId: "ducklake:7" }],
       rowCount: 1250,
+      rowChanges: 12,
+      uncomparedReplacements: 3,
       validatedPrimaryKeyColumns: ["region", "order_id"],
       schemaChange: { addColumns: ["currency"] },
     })
@@ -64,6 +69,8 @@ describe("DuckLake version metadata", () => {
             inputs: [{ datasetId: "raw.erp.customers" }],
             schemaChange: { addColumns: ["currency", 42] },
             rowCount: "1250",
+            rowChanges: -1,
+            uncomparedReplacements: "3",
             validatedPrimaryKeyColumns: ["order_id", "order_id"],
           },
         })
@@ -77,6 +84,7 @@ describe("DuckLake version metadata", () => {
             kind: "datasetVersion",
             datasetId: "raw.erp.orders",
             validatedPrimaryKeyColumns: ["order_id"],
+            rowChanges: 3,
           },
         })
       )
@@ -141,6 +149,8 @@ describe("DuckLake version metadata", () => {
       parseTableDataChange("deleted_from_table:1,deleted_from_table:2,inline_flush:1", 1n)
     ).toEqual(none)
     expect(parseTableDataChange("merge_adjacent:3,rewrite_delete:3", 3n)).toEqual(none)
+    expect(maintainsTable("merge_adjacent:3,inserted_into_table:4", 3n)).toBe(true)
+    expect(maintainsTable("merge_adjacent:3,inserted_into_table:4", 4n)).toBe(false)
 
     // Only the maintained table: another table's rows changed in the same snapshot.
     expect(parseTableDataChange("inline_flush:1,deleted_from_table:2", 2n)).toEqual({

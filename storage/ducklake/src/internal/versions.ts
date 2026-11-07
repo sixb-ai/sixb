@@ -13,6 +13,17 @@ export interface SixbCommitMetadata {
   readonly producer?: DatasetVersion["producer"]
   readonly inputs?: DatasetVersion["inputs"]
   readonly rowCount?: number
+  /**
+   * Rows the commit inserted and deleted in the dataset table, an updated row counting twice: what
+   * DuckLake's change feed holds for this version. Absent on versions written before Sixb recorded
+   * it, and on schema changes.
+   */
+  readonly rowChanges?: number
+  /**
+   * How many keyed snapshots in a row, ending with this one, replaced every row without comparing
+   * them with the table first. Absent when this one compared.
+   */
+  readonly uncomparedReplacements?: number
   readonly validatedPrimaryKeyColumns?: readonly string[]
   readonly schemaChange?: SixbSchemaChangeMetadata
   /** As `encodeLineage` stored it: decoded only for the versions a read returns. */
@@ -65,6 +76,8 @@ export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefi
   const commitId = parsed.sixb.commitId
   const producer = parseDatasetProducer(parsed.sixb.producer)
   const rowCount = parsed.sixb.rowCount
+  const rowChanges = parsed.sixb.rowChanges
+  const uncomparedReplacements = parsed.sixb.uncomparedReplacements
   const validatedPrimaryKeyColumns = parsed.sixb.validatedPrimaryKeyColumns
   const { rowsChanged, lineageChanged } = parsed.sixb
 
@@ -78,6 +91,10 @@ export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefi
     ...(producer === undefined ? {} : { producer }),
     ...(isDatasetVersionRefs(parsed.sixb.inputs) ? { inputs: parsed.sixb.inputs } : {}),
     ...(typeof commitId === "string" && isRowCount(rowCount) ? { rowCount } : {}),
+    ...(typeof commitId === "string" && isRowCount(rowChanges) ? { rowChanges } : {}),
+    ...(typeof commitId === "string" && isRowCount(uncomparedReplacements)
+      ? { uncomparedReplacements }
+      : {}),
     ...(typeof commitId === "string" && isValidatedPrimaryKeyColumns(validatedPrimaryKeyColumns)
       ? { validatedPrimaryKeyColumns }
       : {}),
@@ -106,6 +123,15 @@ const MAINTENANCE_CHANGE_KINDS: ReadonlySet<string> = new Set([
   "rewrite_delete",
   "merge_adjacent",
 ])
+
+/** Whether a DuckLake snapshot is a maintenance commit on the table (see MAINTENANCE_CHANGE_KINDS). */
+export function maintainsTable(changesMade: string, tableId: bigint): boolean {
+  const tableIdText = tableId.toString()
+  return changesMade.split(",").some((change) => {
+    const [kind, changedTableId] = change.split(":")
+    return changedTableId === tableIdText && MAINTENANCE_CHANGE_KINDS.has(kind.toLowerCase())
+  })
+}
 
 /**
  * Whether a DuckLake snapshot changed a table's rows, and whether it removed any. DuckLake records
