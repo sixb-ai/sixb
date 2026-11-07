@@ -172,6 +172,65 @@ export function reportRuleEvaluationFailure(
   })
 }
 
+export interface ReportMaintenancePassFailureInput {
+  readonly projectId: string
+  readonly passId: string
+  readonly consecutiveFailures: number
+}
+
+export function reportMaintenancePassFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportMaintenancePassFailureInput
+): void {
+  const occurredAt = resolveOccurredAt()
+  reporter.report(error, {
+    ...input,
+    type: "maintenance.pass.failed",
+    notificationId: `project:${input.projectId}:maintenance:${input.passId}:failed:${randomUUID()}`,
+    occurredAt,
+    failure: captureSixbFailure(error, {
+      allowedCodes: ["internal.unexpected"],
+      defaultCode: "internal.unexpected",
+      details: { passId: input.passId, consecutiveFailures: input.consecutiveFailures },
+      at: new Date(occurredAt),
+    }),
+  })
+}
+
+export interface ReportOrchestratorDispatchFailureInput {
+  readonly projectId: string
+  readonly eventId: string
+  readonly eventType: string
+  readonly target: string
+  readonly attempts: number
+}
+
+export function reportOrchestratorDispatchFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportOrchestratorDispatchFailureInput
+): void {
+  const occurredAt = resolveOccurredAt()
+  reporter.report(error, {
+    ...input,
+    type: "orchestrator.dispatch.failed",
+    notificationId: `project:${input.projectId}:dispatch:${input.eventId}:${input.target}:failed`,
+    occurredAt,
+    failure: captureSixbFailure(error, {
+      allowedCodes: ["internal.unexpected"],
+      defaultCode: "internal.unexpected",
+      details: {
+        eventId: input.eventId,
+        eventType: input.eventType,
+        target: input.target,
+        attempts: input.attempts,
+      },
+      at: new Date(occurredAt),
+    }),
+  })
+}
+
 export interface ReportVectorIndexingFailureInput {
   readonly projectId: string
   readonly indexingId: string

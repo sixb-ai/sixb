@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
 import type { SixbErrorContext } from "../src"
 import { InMemoryBroker } from "../src"
 import {
@@ -35,6 +35,10 @@ async function firedOccurrences(events: DomainEventService): Promise<string[]> {
     const { scheduleId, occurrenceAt } = (event as StoredScheduleTriggeredEvent).payload
     return `${scheduleId}@${occurrenceAt}`
   })
+}
+
+async function flushAsync(): Promise<void> {
+  for (let turn = 0; turn < 20; turn++) await Promise.resolve()
 }
 
 const MINUTE = 60_000
@@ -267,6 +271,44 @@ describe("SchedulerRuntime", () => {
   // Guards the `MAX_TIMER_DELAY_MS` clamp in `armTimer`. To prove it still guards, drop the
   // `Math.min(..., MAX_TIMER_DELAY_MS)` and this test fails: Node coerces the oversized delay to
   // 1ms, so the timer fires immediately, finds nothing due, and re-arms forever.
+  // Reproduce: await the emits alone in `CronPass.run`; the hung emit holds the pass's slot, so the
+  // next occurrence never fires.
+  test("an emit that never settles does not hold the next occurrence", async () => {
+    const start = new Date("2026-01-01T00:00:30.000Z")
+    const clock = createTestClock(start)
+    const events = createEvents()
+    const emit = events.emit.bind(events)
+    let hung = false
+    events.emit = (input, options) => {
+      if (hung) return emit(input, options)
+
+      hung = true
+      void emit(input, options)
+      return new Promise(() => {})
+    }
+    const scheduler = new SchedulerRuntime({
+      schedules: [defineSchedule("minutely").cron("* * * * *")],
+      events,
+      now: clock.now,
+    })
+    await scheduler.start()
+
+    const error = spyOn(console, "error").mockImplementation(() => {})
+
+    for (const elapsed of [30_000, 5_000, 55_000]) {
+      clock.advance(elapsed)
+      jest.advanceTimersByTime(elapsed)
+      await flushAsync()
+    }
+
+    error.mockRestore()
+
+    expect(await firedOccurrences(events)).toEqual([
+      "minutely@2026-01-01T00:01:00.000Z",
+      "minutely@2026-01-01T00:02:00.000Z",
+    ])
+  })
+
   test("clamps an occurrence beyond the setTimeout ceiling instead of spinning", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-02T00:00:00Z"))

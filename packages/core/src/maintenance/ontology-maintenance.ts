@@ -7,6 +7,15 @@ import {
   type FileUploadSessionStore,
   type Storage,
 } from "../storage"
+import { storageHeartbeat } from "./heartbeat"
+import {
+  errorMessage,
+  everyMs,
+  type MaintenanceFailure,
+  MaintenanceLoop,
+  type MaintenancePass,
+} from "./loop"
+import { operationalStatus } from "./status"
 import type {
   OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
@@ -19,8 +28,10 @@ const DEFAULT_INTERVAL_MS = 60_000
 const DEFAULT_RETENTION_MS = 24 * 60 * 60_000
 const DEFAULT_CLEANUP_LIMIT = 1_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
-const DEGRADED_ATTEMPT_THRESHOLD = 3
-const DEGRADED_FAILURE_THRESHOLD = 2
+// Every step is bounded, by a page count or by `intervalMs`, so only a call that hangs reaches this.
+const PASS_BUDGET_MS = 5 * 60_000
+// An event undelivered this many intervals after it was saved has been missed by that many passes.
+const PENDING_LIMIT_INTERVALS = 2
 // A request that passed the expiry gate may still be finishing blob I/O, and the API clock may
 // run ahead of the database's; the sweep leaves sessions alone until this long past expiry.
 const ABANDONED_UPLOAD_SWEEP_DELAY_MS = 5 * 60_000
@@ -41,12 +52,13 @@ interface OntologyMaintenanceDependencies {
   readonly blobStorage?: BlobStorage
   readonly options?: OntologyMaintenanceOptions
   readonly now?: () => Date
-  readonly onError?: (error: unknown) => void
+  readonly onError?: (error: unknown, failure: MaintenanceFailure) => void
 }
 
 /**
- * Catch-up, retention, and operational snapshot lifecycle, hosted by the orchestrator. The process
- * that commits delivers its own events right away; a pass delivers what it left behind.
+ * Catch-up and retention. The process that commits delivers its own events right away; a pass
+ * delivers what it left behind. The orchestrator runs `pass` on its loop; `start()` runs it on a
+ * loop of its own, for an embedded host with no orchestrator.
  */
 export class OntologyMaintenance {
   private readonly projectId: string
@@ -58,14 +70,13 @@ export class OntologyMaintenance {
   private readonly publishedOutboxRetentionMs: number
   private readonly terminalSourceRetentionMs: number
   private readonly cleanupLimit: number
-  private readonly shutdownTimeoutMs: number
   private readonly now: () => Date
-  private readonly onError: (error: unknown) => void
   private readonly owners = new Set<symbol>()
-  private timer: ReturnType<typeof setTimeout> | null = null
-  private pass: Promise<void> | null = null
+  private readonly loop: MaintenanceLoop
   private stopping: Promise<void> | null = null
   private snapshot: OntologyMaintenanceSnapshot
+
+  readonly pass: MaintenancePass
 
   constructor(dependencies: OntologyMaintenanceDependencies) {
     assertNonblank(dependencies.projectId, "projectId")
@@ -88,15 +99,27 @@ export class OntologyMaintenance {
       options.cleanupLimit ?? DEFAULT_CLEANUP_LIMIT,
       "cleanupLimit"
     )
-    this.shutdownTimeoutMs = nonnegativeInteger(
-      options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
-      "shutdownTimeoutMs"
-    )
     this.now = dependencies.now ?? (() => new Date())
-    this.onError =
-      dependencies.onError ??
-      ((error) => console.error("[Sixb] Ontology maintenance error:", error))
     this.snapshot = emptySnapshot(this.intervalMs)
+
+    this.pass = everyMs({
+      id: "ontology",
+      intervalMs: this.intervalMs,
+      budgetMs: PASS_BUDGET_MS,
+      run: (signal) => this.runPass(signal),
+    })
+    this.loop = new MaintenanceLoop({
+      passes: [this.pass],
+      heartbeat: storageHeartbeat(this.projectId, this.storage),
+      onError:
+        dependencies.onError ??
+        ((error) => console.error("[Sixb] Ontology maintenance error:", error)),
+      now: this.now,
+      shutdownTimeoutMs: nonnegativeInteger(
+        options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+        "shutdownTimeoutMs"
+      ),
+    })
   }
 
   /** Acquires maintenance ownership and starts catch-up without blocking the host from listening. */
@@ -105,7 +128,7 @@ export class OntologyMaintenance {
     const owner = Symbol("ontology-maintenance-owner")
     const startsHosting = this.owners.size === 0
     this.owners.add(owner)
-    if (startsHosting) this.startHostedPass()
+    if (startsHosting) this.loop.start()
 
     let released = false
     return {
@@ -120,11 +143,7 @@ export class OntologyMaintenance {
 
   /** Runs one coalesced pass. Exposed for deterministic hosting and tests. */
   runNow(): Promise<void> {
-    if (this.stopping) return this.stopping
-    this.pass ??= this.runPass().finally(() => {
-      this.pass = null
-    })
-    return this.pass
+    return this.loop.runNow()
   }
 
   /** Force-stops every owner; used during provider shutdown. */
@@ -138,37 +157,24 @@ export class OntologyMaintenance {
   }
 
   /**
-   * Reads the outbox as storage holds it, not as the last pass saw it: the API answers this and
-   * runs no pass, and events left undelivered are what shows that nothing recovers them.
+   * Reads what storage holds, not what this process saw: the API answers this and runs no pass, so
+   * the heartbeat is what tells it whether anything does.
    */
   async getOperationalStatus(): Promise<OntologyOperationalStatus> {
-    const outbox = await this.storage.ontology.outbox.summarize({ projectId: this.projectId })
-    const snapshot = { ...this.getSnapshot(), outbox }
+    const [outbox, heartbeat] = await Promise.all([
+      this.storage.ontology.outbox.summarize({ projectId: this.projectId }),
+      this.storage.maintenanceHeartbeats?.get({ projectId: this.projectId }) ?? null,
+    ])
 
-    const lastActivityAt = latestTimestamp(snapshot.lastStartedAt, snapshot.lastCompletedAt)
-    const overdue =
-      lastActivityAt !== null &&
-      this.now().getTime() - Date.parse(lastActivityAt) > this.intervalMs * 2
-    const oldestPendingAt = snapshot.outbox?.oldestPendingAt ?? null
-    const pendingTooLong =
-      oldestPendingAt !== null &&
-      this.now().getTime() - Date.parse(oldestPendingAt) > this.intervalMs * 2
-    const repeatedlyFailing = (snapshot.outbox?.maxAttempts ?? 0) >= DEGRADED_ATTEMPT_THRESHOLD
-    const degraded =
-      snapshot.consecutiveFailures >= DEGRADED_FAILURE_THRESHOLD ||
-      repeatedlyFailing ||
-      pendingTooLong ||
-      overdue
-    return { status: degraded ? "degraded" : "ok", maintenance: snapshot }
+    return operationalStatus({
+      heartbeat,
+      outbox,
+      pendingLimitMs: this.intervalMs * PENDING_LIMIT_INTERVALS,
+      now: this.now(),
+    })
   }
 
-  private startHostedPass(): void {
-    void this.runNow()
-      .catch((error) => this.reportError(error))
-      .finally(() => this.scheduleNextPass())
-  }
-
-  private async runPass(): Promise<void> {
+  private async runPass(signal: AbortSignal): Promise<void> {
     const started = this.now()
     this.snapshot = { ...this.snapshot, running: true, lastStartedAt: started.toISOString() }
 
@@ -176,7 +182,7 @@ export class OntologyMaintenance {
     await captureFailure(() => this.dispatcher.drain(), failures)
     const vectorIndexing = this.vectorIndexing
     if (vectorIndexing) await captureFailure(() => vectorIndexing.drain(), failures)
-    const cleanup = await this.cleanupExpiredRows(started, failures)
+    const cleanup = await this.cleanupExpiredRows(started, failures, signal)
     const outbox = await captureFailure(
       () => this.storage.ontology.outbox.summarize({ projectId: this.projectId }),
       failures,
@@ -187,7 +193,8 @@ export class OntologyMaintenance {
 
   private async cleanupExpiredRows(
     started: Date,
-    failures: unknown[]
+    failures: unknown[],
+    signal: AbortSignal
   ): Promise<OntologyMaintenanceCleanupSnapshot> {
     const publishedOutboxRowsDeleted = await captureFailure(
       () =>
@@ -202,7 +209,11 @@ export class OntologyMaintenance {
       0
     )
     // Plans go first: a source version is cleaned only once its plan is gone.
-    const spentPlanRows = await captureFailure(() => this.purgeSpentPlans(started), failures, 0)
+    const spentPlanRows = await captureFailure(
+      () => this.purgeSpentPlans(started, signal),
+      failures,
+      0
+    )
     const terminalSources = await captureFailure(
       () =>
         this.storage.ontology.sources.cleanupTerminal({
@@ -216,7 +227,7 @@ export class OntologyMaintenance {
       { rowsDeleted: 0, materializationsDeleted: 0 }
     )
     const abandonedSources = await captureFailure(
-      () => this.purgeAbandonedSources(started),
+      () => this.purgeAbandonedSources(started, signal),
       failures,
       { rowsDeleted: 0, materializationsDeleted: 0 }
     )
@@ -266,7 +277,8 @@ export class OntologyMaintenance {
 
   /** Deletes abandoned candidates batch after batch, until none is left or the pass runs long. */
   private async purgeAbandonedSources(
-    started: Date
+    started: Date,
+    signal: AbortSignal
   ): Promise<{ readonly rowsDeleted: number; readonly materializationsDeleted: number }> {
     let rowsDeleted = 0
     let materializationsDeleted = 0
@@ -279,14 +291,14 @@ export class OntologyMaintenance {
       materializationsDeleted += purged.materializationsDeleted
       const exhausted =
         purged.rowsDeleted + purged.materializationsDeleted < ABANDONED_SOURCE_PURGE_BATCH
-      if (exhausted || this.now().getTime() - started.getTime() >= this.intervalMs) {
+      if (exhausted || this.passedInterval(started) || signal.aborted) {
         return { rowsDeleted, materializationsDeleted }
       }
     }
   }
 
   /** Deletes the plans of candidates that left `ready`, batch after batch, like candidates. */
-  private async purgeSpentPlans(started: Date): Promise<number> {
+  private async purgeSpentPlans(started: Date, signal: AbortSignal): Promise<number> {
     let rowsDeleted = 0
     while (true) {
       const purged = await this.storage.ontology.replacementPlans.purge({
@@ -294,13 +306,14 @@ export class OntologyMaintenance {
         limit: ABANDONED_SOURCE_PURGE_BATCH,
       })
       rowsDeleted += purged
-      if (
-        purged < ABANDONED_SOURCE_PURGE_BATCH ||
-        this.now().getTime() - started.getTime() >= this.intervalMs
-      ) {
+      if (purged < ABANDONED_SOURCE_PURGE_BATCH || this.passedInterval(started) || signal.aborted) {
         return rowsDeleted
       }
     }
+  }
+
+  private passedInterval(started: Date): boolean {
+    return this.now().getTime() - started.getTime() >= this.intervalMs
   }
 
   private async retireAbandonedUploads(
@@ -381,50 +394,16 @@ export class OntologyMaintenance {
       outbox: input.outbox,
       cleanup: input.cleanup,
     }
-    if (failure) this.reportError(failure)
-  }
-
-  private scheduleNextPass(): void {
-    if (this.owners.size === 0 || this.timer !== null) return
-    this.timer = setTimeout(() => {
-      this.timer = null
-      if (this.owners.size === 0) return
-      void this.runNow()
-        .catch((error) => this.reportError(error))
-        .finally(() => this.scheduleNextPass())
-    }, this.intervalMs)
-    this.timer.unref?.()
+    if (failure) throw failure
   }
 
   private stopLoop(): Promise<void> {
     if (this.stopping) return this.stopping
-    if (this.timer !== null) {
-      clearTimeout(this.timer)
-      this.timer = null
-    }
-    const activePass = this.pass ?? Promise.resolve()
-    const stopping = settlesWithin(activePass, this.shutdownTimeoutMs).then(async (settled) => {
-      if (!settled) {
-        this.reportError(
-          new Error(
-            `[Sixb] Ontology maintenance is still stopping after ${this.shutdownTimeoutMs}ms; waiting for active storage operations.`
-          )
-        )
-      }
-      await activePass
-    })
-    this.stopping = stopping.finally(() => {
+
+    this.stopping = this.loop.stop().finally(() => {
       this.stopping = null
     })
     return this.stopping
-  }
-
-  private reportError(error: unknown): void {
-    try {
-      this.onError(error)
-    } catch {
-      // Maintenance failures stay observable without escaping into runtime lifecycle code.
-    }
   }
 }
 
@@ -460,36 +439,6 @@ function assertNonblank(value: string, name: string): void {
   if (value.trim().length === 0) {
     throw new Error(`[Sixb] Ontology maintenance ${name} must not be blank.`)
   }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof AggregateError) {
-    return [...error.errors].map(errorMessage).join(" | ").slice(0, 2_000)
-  }
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-  return message.slice(0, 2_000)
-}
-
-function latestTimestamp(left: string | null, right: string | null): string | null {
-  if (left === null) return right
-  if (right === null) return left
-  return Date.parse(left) >= Date.parse(right) ? left : right
-}
-
-async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timedOut = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), timeoutMs)
-  })
-  const result = await Promise.race([
-    promise.then(
-      () => true as const,
-      () => true as const
-    ),
-    timedOut,
-  ])
-  if (timer !== undefined) clearTimeout(timer)
-  return result
 }
 
 async function captureFailure(run: () => Promise<void>, failures: unknown[]): Promise<void>

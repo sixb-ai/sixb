@@ -32,7 +32,7 @@ export type DeployEnv = Readonly<Record<string, string>>
 export type DeployHttpServiceName = "api" | "app"
 
 /** The services that must run as exactly one process: a second would duplicate their work. */
-export type DeploySingletonServiceName = "orchestrator" | "scheduler" | "rules"
+export type DeploySingletonServiceName = "orchestrator" | "rules"
 
 export type DeployServiceName = DeployHttpServiceName | DeploySingletonServiceName | "workers"
 
@@ -42,7 +42,6 @@ export interface DeployServicesConfig {
   readonly api?: boolean | DeployHttpServiceConfig
   readonly app?: boolean | DeployHttpServiceConfig
   readonly orchestrator?: boolean | DeploySingletonServiceConfig
-  readonly scheduler?: boolean | DeploySingletonServiceConfig
   readonly rules?: boolean | DeploySingletonServiceConfig
   readonly workers?: boolean | DeployWorkersConfig
 }

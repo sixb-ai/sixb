@@ -32,7 +32,6 @@ describe("deploy config validation", () => {
         api: { domain: "api.example.com", env: { POSTGRES_POOL_MAX: "6" }, process: {} },
         app: true,
         orchestrator: { process: { killTimeoutMs: 30_000 } },
-        scheduler: false,
         rules: { env: { RULES_DEBUG: "1" } },
         workers: {
           types: ["sync", "agent", "workflow"],
@@ -76,8 +75,15 @@ describe("deploy config validation", () => {
       "HTTP services run one process each."
     )
     rejects(
-      config({ services: { scheduler: { process: { instances: 2 } } } }),
-      "The scheduler runs exactly one process"
+      config({ services: { orchestrator: { process: { instances: 2 } } } }),
+      "The orchestrator runs exactly one process"
+    )
+  })
+
+  test("says where the scheduler went", () => {
+    rejects(
+      config({ services: { scheduler: false } }),
+      "The orchestrator runs cron schedules now; remove the setting."
     )
   })
 
