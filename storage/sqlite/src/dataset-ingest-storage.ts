@@ -37,7 +37,7 @@ class SqliteDatasetIngestBackend implements DatasetIngestPersistenceBackend {
 interface SqliteStateRow {
   readonly datasetId: string
   readonly request: number
-  readonly requested: number
+  readonly requestedAt: string | null
   readonly leaseOwner: string | null
   readonly leaseExpiresAt: string | null
   readonly flushId: string | null
@@ -56,7 +56,7 @@ interface SqliteDeliveryRow {
 }
 
 const SELECT_STATE = `
-  SELECT dataset_id AS datasetId, request, requested, lease_owner AS leaseOwner,
+  SELECT dataset_id AS datasetId, request, requested_at AS requestedAt, lease_owner AS leaseOwner,
     lease_expires_at AS leaseExpiresAt, flush_id AS flushId, flush_started_at AS flushStartedAt,
     failure_streak AS failureStreak, last_flushed_at AS lastFlushedAt
   FROM dataset_ingest_state`
@@ -94,13 +94,13 @@ class SqliteDatasetIngestPersistence implements DatasetIngestPersistence {
     this.db
       .query(
         `UPDATE dataset_ingest_state
-         SET request = ?, requested = ?, lease_owner = ?, lease_expires_at = ?, flush_id = ?,
+         SET request = ?, requested_at = ?, lease_owner = ?, lease_expires_at = ?, flush_id = ?,
            flush_started_at = ?, failure_streak = ?, last_flushed_at = ?
          WHERE project_id = ? AND dataset_id = ?`
       )
       .run(
         state.request,
-        state.requested ? 1 : 0,
+        state.requestedAt?.toISOString() ?? null,
         state.leaseOwner,
         state.leaseExpiresAt?.toISOString() ?? null,
         state.flushId,
@@ -270,7 +270,7 @@ function stateFromRow(row: SqliteStateRow): DatasetIngestState {
   return {
     datasetId: row.datasetId,
     request: row.request,
-    requested: row.requested === 1,
+    requestedAt: row.requestedAt === null ? null : new Date(row.requestedAt),
     leaseOwner: row.leaseOwner,
     leaseExpiresAt: row.leaseExpiresAt === null ? null : new Date(row.leaseExpiresAt),
     flushId: row.flushId,

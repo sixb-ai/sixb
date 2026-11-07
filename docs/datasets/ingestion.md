@@ -73,14 +73,14 @@ Ingestion updates source data. Existing pipelines and projections determine the 
 - The `lake` worker writes ingested changes. `sixb dev` and `sixb worker-group` include it; a
   deployment that names its worker `types` must list `lake`, and `sixb deploy` warns when it does
   not.
-- Changes reach the lake with no orchestrator running. Keep it on all the same: it recovers the
-  failures below and reports changes that wait.
+- Changes reach the lake with no orchestrator running. Keep it on all the same: it reports changes
+  that wait, and asks again for a write that was lost when no other `ingest` call comes.
 - Console › Lake health shows the changes still waiting per dataset, and since when.
 - A worker that stops while writing resumes where it stopped, and never writes changes twice.
 
 | Failure | What happens |
 | --- | --- |
 | The lake or blob storage is unavailable | Retried until it succeeds; `dataset.ingest.flush.failed` reaches `onError` at the fifth failure in a row |
-| The queue refuses the write | `ingest` still succeeds: the changes are stored, and the orchestrator asks again within 30 seconds |
+| The queue refuses the write or is down | `ingest` still succeeds, after waiting one second at most: the changes are stored, and the next `ingest` after 30 seconds asks again, as the orchestrator does on its own |
 | Changes wait 10 minutes and nothing writes them | The orchestrator reports `dataset.ingest.flush.failed` to `onError` |
 | A stored change is refused when written: no longer valid for the schema, a deleted blob, a value the lake cannot hold, or a source sequence another call holds with other content | That call's changes are dropped and `dataset.ingest.rejected` names it and the refused change; the other calls' changes are written |

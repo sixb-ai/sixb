@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import {
   change,
   col,
@@ -20,6 +20,16 @@ const dataset = defineDataset("source.people", {
   primaryKey: "id",
   sequenceBy: "revision",
 })
+
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+async function turns(count = 20): Promise<void> {
+  for (let turn = 0; turn < count; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+}
 
 function setup() {
   const lakeStorage = new InMemoryLakeStorage()
@@ -241,6 +251,63 @@ test("ingestion refuses unkeyed datasets and unsupported providers before storin
 
   Object.defineProperty(lakeStorage, "beginMerge", { value: undefined })
   expect(await refused(dataset)).toContain("merge support")
+})
+
+test("a queue that never answers holds the call for a second at most", async () => {
+  // Regression proof: await the enqueue without its bound in `tryEnqueueIngestFlush`; the call then
+  // never returns. A queue whose Redis is down at start behaves this way.
+  jest.useFakeTimers()
+  const { sixb, queues, waiting } = setup()
+  queues.lake.enqueue = () => new Promise(() => {})
+
+  const warn = console.warn
+  console.warn = () => {}
+  try {
+    let returned = false
+    const ingesting = sixb.datasets
+      .ingest(dataset, { changes: [change.upsert({ id: "42", revision: 8, name: "Sam" })] })
+      .then(() => {
+        returned = true
+      })
+
+    await turns()
+    jest.advanceTimersByTime(999)
+    await turns()
+    expect(returned).toBe(false)
+
+    jest.advanceTimersByTime(1)
+    await ingesting
+  } finally {
+    console.warn = warn
+  }
+
+  expect(await waiting()).toMatchObject([{ datasetId: dataset.id, pendingDeliveries: 1 }])
+})
+
+test("a later delivery asks again for a flush the queue lost, after half a minute", async () => {
+  // Regression proof: join any open request in `requestFlushIn`; the request then stays open with
+  // no job, and only the orchestrator's pass can restart ingestion.
+  jest.useFakeTimers()
+  const { sixb, enqueued } = setup()
+  const ingest = (id: string) =>
+    sixb.datasets.ingest(dataset, {
+      changes: [change.upsert({ id, revision: 1, name: "Sam" })],
+    })
+
+  await ingest("1")
+
+  jest.advanceTimersByTime(29_999)
+  await ingest("2")
+  expect(enqueued).toHaveLength(1)
+
+  jest.advanceTimersByTime(1)
+  await ingest("3")
+  await ingest("4")
+
+  expect(enqueued.map((job) => job.id)).toEqual([
+    `ingest-flush:${dataset.id}:0`,
+    `ingest-flush:${dataset.id}:0`,
+  ])
 })
 
 test("ingestion needs no broker", async () => {

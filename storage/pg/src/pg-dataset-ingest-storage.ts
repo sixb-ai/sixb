@@ -31,7 +31,7 @@ class PgDatasetIngestBackend implements DatasetIngestPersistenceBackend {
 interface PgStateRow {
   readonly dataset_id: string
   readonly request: string
-  readonly requested: boolean
+  readonly requested_at: Date | null
   readonly lease_owner: string | null
   readonly lease_expires_at: Date | null
   readonly flush_id: string | null
@@ -68,7 +68,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
     // Read committed: this statement runs once the lock is ours, so it sees every delivery and
     // request committed before.
     const [row] = await this.sql<PgStateRow[]>`
-      SELECT dataset_id, request::text AS request, requested, lease_owner, lease_expires_at,
+      SELECT dataset_id, request::text AS request, requested_at, lease_owner, lease_expires_at,
         flush_id, flush_started_at, failure_streak, last_flushed_at
       FROM dataset_ingest_state
       WHERE project_id = ${projectId} AND dataset_id = ${datasetId}
@@ -81,7 +81,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
     await this.sql`
       UPDATE dataset_ingest_state
       SET request = ${state.request},
-        requested = ${state.requested},
+        requested_at = ${state.requestedAt},
         lease_owner = ${state.leaseOwner},
         lease_expires_at = ${state.leaseExpiresAt},
         flush_id = ${state.flushId},
@@ -193,7 +193,7 @@ class PgDatasetIngestPersistence implements DatasetIngestPersistence {
     datasetIds: readonly string[] | undefined
   ): Promise<readonly DatasetIngestState[]> {
     const rows = await this.sql<PgStateRow[]>`
-      SELECT dataset_id, request::text AS request, requested, lease_owner, lease_expires_at,
+      SELECT dataset_id, request::text AS request, requested_at, lease_owner, lease_expires_at,
         flush_id, flush_started_at, failure_streak, last_flushed_at
       FROM dataset_ingest_state
       WHERE project_id = ${projectId}
@@ -234,7 +234,7 @@ function stateFromRow(row: PgStateRow): DatasetIngestState {
   return {
     datasetId: row.dataset_id,
     request: Number(row.request),
-    requested: row.requested,
+    requestedAt: row.requested_at === null ? null : new Date(row.requested_at),
     leaseOwner: row.lease_owner,
     leaseExpiresAt: row.lease_expires_at === null ? null : new Date(row.lease_expires_at),
     flushId: row.flush_id,

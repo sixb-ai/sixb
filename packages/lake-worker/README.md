@@ -31,8 +31,9 @@ One run:
 
 `dataset.ingest.flush.requested`: writes one dataset's ingested changes through
 `getDatasetIngestRuntime(host).flush` (see `packages/core/src/datasets/ingest-flush.ts`). No
-orchestrator is involved: `ingest` queues the job itself, and the orchestrator's `ingest` pass only
-recovers a job that could not be queued.
+orchestrator is involved: `ingest` queues the job itself, waiting one second at most, and a later
+`ingest` asks again for a request left open for 30 s. The orchestrator's `ingest` pass does the same
+when no other call comes.
 
 - Its id names the flush request (`ingest-flush:<dataset>:<request>`), so the deliveries of one
   request queue one job.

@@ -19,7 +19,8 @@ export { decodeDatasetIngestChanges, encodeDatasetIngestChanges } from "./codec"
 export interface DatasetIngestState {
   readonly datasetId: string
   readonly request: number
-  readonly requested: boolean
+  /** When a flush of the open request was last asked for. Null when none is open. */
+  readonly requestedAt: Date | null
   readonly leaseOwner: string | null
   readonly leaseExpiresAt: Date | null
   readonly flushId: string | null
@@ -109,6 +110,14 @@ export class DatasetIngestLeaseLostError extends Error {
 const READ_PAGE_SIZE = 50
 
 /**
+ * An open request nobody took for this long may have no job: the process that opened it died, or
+ * the queue refused it. The next delivery asks again under the same id, which queues nothing if
+ * the job exists, so ingestion restarts by itself. A request is taken in about a second, so the
+ * healthy path never gets here, and a stuck one costs one queue call this often, not one a delivery.
+ */
+const ASK_AGAIN_AFTER_MS = 30_000
+
+/**
  * Shared durable implementation of the ingest inbox. Concrete providers own SQL, transactions and
  * database time; every rule about requests, leases and batches lives here so SQLite, PostgreSQL
  * and the in-memory reference cannot drift.
@@ -139,16 +148,17 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
     const changes = encodeDatasetIngestChanges(input.changes)
 
     return this.backend.transaction(async (persistence) => {
+      const receivedAt = await persistence.now()
       const record: DatasetIngestDeliveryRecord = {
         datasetId: input.datasetId,
         executionId: input.executionId,
         correlationId: input.correlationId,
-        receivedAt: await persistence.now(),
+        receivedAt,
         changeCount: input.changes.length,
         changes,
       }
       const id = await persistence.insertDelivery(input.projectId, record)
-      const flush = await requestFlushIn(persistence, input.projectId, input.datasetId)
+      const flush = await requestFlushIn(persistence, input.projectId, input.datasetId, receivedAt)
 
       const { changes: _changes, ...delivery } = record
       return { delivery: { id, ...delivery }, flush }
@@ -245,7 +255,7 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
 
       // Every batch moves to the next request, so a request named after one that a flush has
       // closed is never reused by a delivery that comes later.
-      const closed = { ...state, requested: false, request: state.request + 1 }
+      const closed = { ...state, requestedAt: null, request: state.request + 1 }
       const untaken = await persistence.listUntaken(
         lease.projectId,
         lease.datasetId,
@@ -394,7 +404,7 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
       await persistence.writeState(lease.projectId, {
         ...state,
         request,
-        requested: true,
+        requestedAt: await persistence.now(),
         leaseOwner: null,
         leaseExpiresAt: null,
       })
@@ -439,17 +449,22 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
   }
 }
 
-/** Opens a flush request under the state-row lock, or joins the one open. */
+/** Opens a flush request under the state-row lock, or joins the one open unless it went quiet. */
 async function requestFlushIn(
   persistence: DatasetIngestPersistence,
   projectId: string,
-  datasetId: string
+  datasetId: string,
+  now: Date
 ): Promise<DatasetIngestFlushRequest> {
   const state = await persistence.lockState(projectId, datasetId)
-  if (state.requested) return { request: state.request, requested: false }
+  const { request, requestedAt } = state
 
-  await persistence.writeState(projectId, { ...state, requested: true })
-  return { request: state.request, requested: true }
+  if (requestedAt !== null && now.getTime() - requestedAt.getTime() < ASK_AGAIN_AFTER_MS) {
+    return { request, requested: false }
+  }
+
+  await persistence.writeState(projectId, { ...state, requestedAt: now })
+  return { request, requested: true }
 }
 
 /** A new dataset's state. */
@@ -457,7 +472,7 @@ export function initialDatasetIngestState(datasetId: string): DatasetIngestState
   return {
     datasetId,
     request: 0,
-    requested: false,
+    requestedAt: null,
     leaseOwner: null,
     leaseExpiresAt: null,
     flushId: null,

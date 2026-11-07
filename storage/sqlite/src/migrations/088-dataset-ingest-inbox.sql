@@ -20,7 +20,7 @@ CREATE TABLE dataset_ingest_state (
   project_id TEXT NOT NULL,
   dataset_id TEXT NOT NULL,
   request INTEGER NOT NULL DEFAULT 0,
-  requested INTEGER NOT NULL DEFAULT 0,
+  requested_at TEXT,
   lease_owner TEXT,
   lease_expires_at TEXT,
   flush_id TEXT,

@@ -73,7 +73,7 @@ export interface DatasetIngestAppendResult {
 export interface DatasetIngestFlushRequest {
   /** The request a flush job for this dataset is named after. */
   readonly request: number
-  /** True only for the call that asked: the others are covered by the same request. */
+  /** True for the call that has to ask for a job: the others are covered by the same request. */
   readonly requested: boolean
 }
 
@@ -94,7 +94,7 @@ export interface DatasetIngestStorage {
   /**
    * Stores one delivery and asks for a flush of its dataset, in one transaction. A request already
    * open covers the delivery: a flush that takes a batch closes the request and sees every delivery
-   * appended before.
+   * appended before. One left open for long is asked for again, in case it never got a job.
    */
   append(input: AppendDatasetIngestDeliveryInput): Promise<DatasetIngestAppendResult>
 

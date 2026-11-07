@@ -69,8 +69,8 @@ Sixb packages are versioned independently. Each release entry names the packages
 - The `lake` worker writes ingested changes, and starts for any dataset with a primary key. A
   deployment that lists its worker `types`, or a `sixb worker-group` given a list, must add `lake`:
   both warn when it is missing, and until then changes wait, shown in Console › Lake health. No
-  orchestrator is needed for webhooks to reach the lake. Keep it on all the same: it asks again for
-  a write the queue refused, and reports changes that wait.
+  orchestrator is needed for webhooks to reach the lake. Keep it on all the same: it reports changes
+  that wait, and asks again for a write the queue lost when no other `ingest` call comes.
 - Storage gains `dataset_ingest_deliveries` and `dataset_ingest_state`: migrate before starting the
   new services. `onError` gains `dataset.ingest.flush.failed` and `dataset.ingest.rejected`, and the
   error catalog `dataset.change_refused`. `@sixb/core/lake-storage` exports `LakeValueRefusedError`
