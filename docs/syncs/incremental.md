@@ -33,9 +33,8 @@ Sixb saves the latest checkpoint after the run succeeds, including runs that ret
 A failed run keeps the previous checkpoint. Use a new sync ID if you change its connector.
 
 A run outlives its worker. After a crash or a deploy it reads again from the previous checkpoint,
-unless its rows were already committed, in which case they are kept and it does not read again.
-One run of a sync runs at a time: a new run waits for the one in progress, so it reads from the
-checkpoint that run saves.
+unless its rows were already committed, in which case they are kept and it does not read again. A
+run that loses its worker five times ends `failed`.
 
 The mode controls how rows are written. The checkpoint controls where your code resumes reading;
 Sixb does not filter the source data for you.
