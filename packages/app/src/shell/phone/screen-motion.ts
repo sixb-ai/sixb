@@ -165,8 +165,8 @@ function prepare(to: string, motion: ScreenMotion) {
  */
 function movesScreen(from: string, to: string): boolean {
   if (from === to) return false
-  if (!matchMedia(PHONE_QUERY).matches) return false
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return false
+  if (!window.matchMedia(PHONE_QUERY).matches) return false
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false
   if (sectionOf(from) !== sectionOf(to)) return false
   if (isRootPath(from) && isRootPath(to)) return false
   return true

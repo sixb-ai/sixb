@@ -23,7 +23,7 @@ export function PullToRefresh() {
   const indicator = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const phone = matchMedia(PHONE_QUERY)
+    const phone = window.matchMedia(PHONE_QUERY)
     const element = indicator.current
     if (!element) return
 
