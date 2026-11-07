@@ -28,6 +28,11 @@ export interface WriteDatasetInput<TValue extends DatasetWriteValue = DatasetWri
   readValues(): Promise<Iterable<TValue> | AsyncIterable<TValue>>
   readonly producer?: DatasetProducer
   readonly expectedLatestVersionId?: string
+  /**
+   * Refuse the commit if the dataset moved since the source was read, when no version was asked
+   * for. A merge has this already, or rebases on purpose: only a plain write needs it.
+   */
+  readonly guardLatestVersion?: boolean
   readonly commitMessage?: string
   /** Diagnostic label for the caller, including its component prefix. */
   readonly sourceLabel?: string
@@ -35,7 +40,15 @@ export interface WriteDatasetInput<TValue extends DatasetWriteValue = DatasetWri
   onRead?(rowsRead: number): void
   /** Attach caller-owned source provenance to a validation failure. */
   mapValidationError?(error: unknown, value: TValue, itemIndex: number): unknown
+  /**
+   * Runs once the source is exhausted, right before the commit, and after `guardLatestVersion`
+   * took its version: a commit this does not see lands after the guard. Rejecting stops the commit,
+   * so a caller can prove it still owns the write and record what it read beforehand.
+   */
+  beforeCommit?(): Promise<void>
 }
+
+export { findProducedVersion } from "./produced-version"
 
 export type WriteDatasetResult = DatasetMergeCommitResult & { readonly rowsRead: number }
 
@@ -97,6 +110,7 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
         )
       )
       throwIfAborted(signal)
+      await input.beforeCommit?.()
       const result = await session.commit({
         commitMessage: input.commitMessage,
         createInitialVersion: reconcileSnapshot,
@@ -131,8 +145,11 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
       return { outcome: "unchanged", version, rowsRead }
     }
 
+    const expectedLatestVersionId = await commitGuard(input, dataset)
+
+    await input.beforeCommit?.()
     const { outcome, ...version } = await session.commit({
-      expectedLatestVersionId: input.expectedLatestVersionId,
+      expectedLatestVersionId,
       commitMessage: input.commitMessage,
     })
     return { outcome, version, rowsRead }
@@ -141,6 +158,18 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
     await abortWrite?.().catch(() => {})
     throw error
   }
+}
+
+async function commitGuard<TValue extends DatasetWriteValue>(
+  input: WriteDatasetInput<TValue>,
+  dataset: DatasetDefinition
+): Promise<string | null | undefined> {
+  if (input.expectedLatestVersionId !== undefined || !input.guardLatestVersion) {
+    return input.expectedLatestVersionId
+  }
+
+  const latest = await input.lakeStorage.getLatestVersion(dataset.id)
+  return latest?.versionId ?? null
 }
 
 /**
