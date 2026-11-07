@@ -377,7 +377,8 @@ describe("DatasetTriggerReconciler", () => {
       const scene = createScene()
       await scene.commit("order-1")
       await scene.run("stopped", "cancelled")
-      await scene.createReconciler().pass(signal, scene.later())
+      const reconciler = scene.createReconciler()
+      await reconciler.pass(signal, scene.later())
       const [recovered] = await queuedRuns(scene.storage)
 
       tick()
@@ -387,7 +388,9 @@ describe("DatasetTriggerReconciler", () => {
         projectId: "project",
         status: "cancelled",
       })
-      await scene.createReconciler().pass(signal, scene.later())
+      // Reproduce: return true after `dispatch` in `settleTrigger`; with no new commit, nothing
+      // looks at this trigger again.
+      await reconciler.pass(signal, scene.later())
 
       const [next] = await queuedRuns(scene.storage)
       expect(next?.id).toBeDefined()

@@ -126,22 +126,12 @@ export interface ProjectionReconciliationPorts {
   readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
   /** Source of runs whose queue publication was lost. */
   readonly projectionRuns: Pick<ProjectionRunStorage, "list">
-  /**
-   * Pause between passes, which also counts a run as stuck once it has stayed `queued` for longer.
-   * Defaults to 30 s.
-   */
-  readonly intervalMs?: number
 }
 
 export interface DatasetTriggerReconciliationPorts {
   readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "listVersions">
   /** What each pipeline last read. */
   readonly pipelineRuns: Pick<PipelineRunStorage, "listLatestByPipelineIds" | "listSteps">
-  /**
-   * Pause between passes, which also leaves a commit's event that long to arrive first. Defaults
-   * to 30 s.
-   */
-  readonly intervalMs?: number
 }
 
 export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput

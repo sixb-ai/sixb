@@ -5,7 +5,6 @@ import type { ListProjectionRunsInput, ProjectionRunRecord } from "@sixb/core/st
 import type { LakeChangeFeed, LakeChangeReader } from "./lake-change-feed"
 import type { ProjectionDispatcherPort, ProjectionReconciliationPorts } from "./types"
 
-const INTERVAL_MS = 30_000
 const STUCK_RUN_PAGE_SIZE = 100
 
 interface ProjectionDispatchReconcilerInput extends ProjectionReconciliationPorts {
@@ -13,6 +12,8 @@ interface ProjectionDispatchReconcilerInput extends ProjectionReconciliationPort
   readonly dispatcher: ProjectionDispatcherPort
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
   readonly feed: LakeChangeFeed
+  /** Pause between passes, which also counts a run as stuck once it stayed `queued` for longer. */
+  readonly intervalMs: number
 }
 
 /**
@@ -29,14 +30,12 @@ interface ProjectionDispatchReconcilerInput extends ProjectionReconciliationPort
  * enqueue error, are dispatched again, and the dispatcher republishes the same run and job.
  */
 export class ProjectionDispatchReconciler {
-  readonly intervalMs: number
   private readonly descriptorsByDatasetId: ReadonlyMap<string, ProjectionDispatchDescriptor[]>
   /** Projections whose latest data version must be looked up rather than taken from the feed. */
   private readonly unverified: Set<string>
   private readonly changes: LakeChangeReader
 
   constructor(private readonly input: ProjectionDispatchReconcilerInput) {
-    this.intervalMs = input.intervalMs ?? INTERVAL_MS
     this.descriptorsByDatasetId = groupByDataset(input.descriptors)
     this.unverified = new Set(input.descriptors.map((descriptor) => descriptor.projectionId))
     this.changes = input.feed.subscribe({
@@ -162,7 +161,7 @@ export class ProjectionDispatchReconciler {
         this.listRuns({
           statuses: ["queued"],
           // Younger runs may still be in their first publication.
-          startedBefore: new Date(now - this.intervalMs),
+          startedBefore: new Date(now - this.input.intervalMs),
         }),
         this.listRuns({ statuses: ["failed"], errorCodes: ["queue.enqueue_failed"] }),
       ])

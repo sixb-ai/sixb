@@ -3,6 +3,7 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
+import { retryDelay, sleep } from "./backoff"
 import { type DispatchJob, JobDispatch } from "./job-dispatch"
 import { routeKeysForEvent } from "./route-key"
 import type {
@@ -13,9 +14,6 @@ import type {
   OrchestratorRoutes,
   OrchestratorRuntimeOptions,
 } from "./types"
-
-const SUBSCRIBE_RETRY_INITIAL_DELAY_MS = 250
-const SUBSCRIBE_RETRY_MAX_DELAY_MS = 10_000
 
 export class OrchestratorWorker extends Worker {
   private readonly options: OrchestratorRuntimeOptions
@@ -72,20 +70,10 @@ async function consumeLiveJobs(
 ): Promise<void> {
   await consumeBatches(
     options,
-    { types: [eventType], ...directJobStart(eventType) },
+    { types: [eventType] },
     (events) => directJobs(options, events),
     signal
   )
-}
-
-/**
- * Where a restart picks up. Nothing else repairs a cron occurrence, so one that was waiting to be
- * read or dispatched when the process stopped is read again: run ids come from the event id, so
- * the occurrences already dispatched start nothing. Dataset commits start at the live tail, because
- * the `projections` pass reads the lake for them.
- */
-function directJobStart(eventType: DomainEvent["type"]): { readonly from?: "earliest" } {
-  return eventType === "schedule.triggered" ? { from: "earliest" } : {}
 }
 
 async function consumeRetainedEventSchedules(
@@ -129,7 +117,7 @@ async function consumeBatches(
     } catch (error) {
       if (signal.aborted) return
       console.error("[SixbOrchestrator] Subscription failed; retrying:", error)
-      await sleep(subscribeRetryDelay(attempt++), signal)
+      await sleep(retryDelay(attempt++), signal)
       continue
     }
     await waitForAbort(signal)
@@ -527,25 +515,4 @@ export function requireDispatcher<TKey extends keyof OrchestratorDispatchers>(
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve()
   return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve()
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort)
-      resolve()
-    }, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", onAbort)
-      resolve()
-    }
-    signal.addEventListener("abort", onAbort, { once: true })
-  })
-}
-
-function subscribeRetryDelay(attempt: number): number {
-  return Math.min(SUBSCRIBE_RETRY_INITIAL_DELAY_MS * 2 ** attempt, SUBSCRIBE_RETRY_MAX_DELAY_MS)
 }
