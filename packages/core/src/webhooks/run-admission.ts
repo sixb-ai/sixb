@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
-import type { ExecutionRecord, Storage, WebhookRunRecord } from "../storage"
+import type { ExecutionRecord, Storage, WebhookRunExecution, WebhookRunRecord } from "../storage"
 import {
   canRetryWebhookRun,
   ExecutionStorageError,
   isStorageSerializationFailure,
   WebhookRunError,
 } from "../storage"
+import { WEBHOOK_RUN_LEASE_MS } from "../storage/webhook-runs"
 
 const MAX_ADMISSION_ATTEMPTS = 3
 
@@ -74,13 +75,16 @@ async function admitWebhookRunTransaction(
 
   if (existing) {
     assertSameDelivery(existing, input)
-    if (existing.status === "running") return { status: "in_progress", run: existing }
-    if (!canRetryWebhookRun(existing)) return { status: "duplicate", run: existing }
+
+    if (!canRetryWebhookRun(existing)) {
+      return { status: existing.status === "running" ? "in_progress" : "duplicate", run: existing }
+    }
 
     const execution = await requireWebhookExecution(storage, existing)
     const run = await runs.restart({
       projectId: input.projectId,
       id: existing.id,
+      execution: freshWebhookExecution(),
     })
     return { status: "admitted", run, execution, retried: true }
   }
@@ -100,6 +104,7 @@ async function admitWebhookRunTransaction(
     id: input.runId,
     projectId: input.projectId,
     executionId: execution.id,
+    execution: freshWebhookExecution(),
     connectorId: input.connectorId,
     webhookId: input.webhookId,
     method: input.method,
@@ -109,6 +114,13 @@ async function admitWebhookRunTransaction(
     idempotencyKey: input.idempotencyKey,
   })
   return { status: "admitted", run, execution, retried: false }
+}
+
+function freshWebhookExecution(): WebhookRunExecution {
+  return {
+    token: `webhookx_${randomUUID()}`,
+    leaseExpiresAt: new Date(Date.now() + WEBHOOK_RUN_LEASE_MS),
+  }
 }
 
 function assertSameDelivery(existing: WebhookRunRecord, input: AdmitWebhookRunInput): void {

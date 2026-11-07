@@ -35,7 +35,8 @@ async function createTestWebhookExecution(
 /** Start a Webhook run with the valid durable execution fixture required by every provider. */
 export async function startTestWebhookRun(
   storage: Pick<Storage, "webhookRuns" | "executions">,
-  input: Omit<StartWebhookRunInput, "executionId">
+  input: Omit<StartWebhookRunInput, "executionId" | "execution"> &
+    Partial<Pick<StartWebhookRunInput, "execution">>
 ): Promise<WebhookRunRecord> {
   if (!storage.webhookRuns) throw new Error("Webhook run storage is not configured for this test.")
   const executionId = await createTestWebhookExecution(storage.executions, {
@@ -43,5 +44,9 @@ export async function startTestWebhookRun(
     route: input.route,
     runId: input.id,
   })
-  return storage.webhookRuns.start({ ...input, executionId })
+  return storage.webhookRuns.start({
+    execution: { token: "first", leaseExpiresAt: new Date("2100-01-01T00:00:00.000Z") },
+    ...input,
+    executionId,
+  })
 }

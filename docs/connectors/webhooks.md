@@ -67,6 +67,11 @@ Providers may retry deliveries. Use a stable delivery ID with `.idempotencyKey()
 requests, and make handler writes safe to repeat. A failed handler can have already completed
 some of its writes.
 
+With a delivery ID, a retry that arrives while the handler still runs gets `503 Service Unavailable`
+with `Retry-After` and runs nothing, however long the handler takes. The provider tries again, so a
+handler that then fails does not lose the delivery. If the process running it dies, retries run the
+handler again from 60 seconds after that. A provider that does not retry loses that delivery.
+
 ## OAuth accounts
 
 For [OAuth connectors](authentication.md), resolve the account named in the event before accessing

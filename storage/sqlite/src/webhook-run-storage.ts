@@ -7,6 +7,7 @@ import type {
   GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RenewWebhookRunInput,
   RestartWebhookRunInput,
   StartWebhookRunInput,
   WebhookRunRecord,
@@ -62,8 +63,9 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
           `
           INSERT INTO webhook_runs (
             project_id, id, execution_id, connector_id, webhook_id, status, method, route,
+            execution_token, execution_lease_expires_at,
             started_at, request_body_bytes, request_body_sha256, idempotency_key
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -75,6 +77,8 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
           "running",
           input.method,
           input.route,
+          input.execution.token,
+          input.execution.leaseExpiresAt.toISOString(),
           startedAt.toISOString(),
           input.requestBodyBytes,
           input.requestBodySha256,
@@ -102,31 +106,44 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
           "not_found"
         )
       }
-      if (!canRetryWebhookRun(rowToWebhookRunRecord(existing))) {
+      const startedAt = input.startedAt ?? new Date()
+      if (!canRetryWebhookRun(rowToWebhookRunRecord(existing), startedAt)) {
         throw new WebhookRunError(
           `[SixbSqlite] Webhook run '${input.id}' cannot restart from status '${existing.status}'.`,
           "invalid_transition"
         )
       }
 
-      const result = this.db
+      this.db
         .query(
           `
           UPDATE webhook_runs
-          SET status = 'running', started_at = ?, finished_at = NULL,
-              response_status = NULL, error = NULL
-          WHERE project_id = ? AND id = ? AND status = 'failed'
+          SET status = 'running', execution_token = ?, execution_lease_expires_at = ?,
+              started_at = ?, finished_at = NULL, response_status = NULL, error = NULL
+          WHERE project_id = ? AND id = ?
         `
         )
-        .run((input.startedAt ?? new Date()).toISOString(), input.projectId, input.id)
-      if (result.changes === 0) {
-        throw new WebhookRunError(
-          `[SixbSqlite] Webhook run '${input.id}' changed while restarting.`,
-          "invalid_transition"
+        .run(
+          input.execution.token,
+          input.execution.leaseExpiresAt.toISOString(),
+          startedAt.toISOString(),
+          input.projectId,
+          input.id
         )
-      }
       return this.requireWebhookRun(input.projectId, input.id)
     })()
+  }
+
+  async renewLease(input: RenewWebhookRunInput): Promise<boolean> {
+    const result = this.db
+      .query(
+        `
+        UPDATE webhook_runs SET execution_lease_expires_at = ?
+        WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
+      `
+      )
+      .run(input.leaseExpiresAt.toISOString(), input.projectId, input.id, input.executionToken)
+    return result.changes > 0
   }
 
   async finish(input: FinishWebhookRunInput): Promise<WebhookRunRecord> {
@@ -144,12 +161,19 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
           "invalid_transition"
         )
       }
+      if (existing.execution_token !== input.executionToken) {
+        throw new WebhookRunError(
+          `[SixbSqlite] Execution token is no longer current on webhook run '${input.id}'.`,
+          "invalid_transition"
+        )
+      }
 
       this.db
         .query(
           `
           UPDATE webhook_runs
-          SET status = ?, finished_at = ?, response_status = ?, error = ?
+          SET status = ?, execution_token = NULL, execution_lease_expires_at = NULL,
+              finished_at = ?, response_status = ?, error = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -250,6 +274,13 @@ function rowToWebhookRunRecord(row: WebhookRunDatabaseRow): WebhookRunRecord {
     connectorId: row.connector_id,
     webhookId: row.webhook_id,
     status: row.status,
+    execution:
+      row.execution_token && row.execution_lease_expires_at
+        ? {
+            token: row.execution_token,
+            leaseExpiresAt: new Date(row.execution_lease_expires_at),
+          }
+        : undefined,
     method: row.method,
     route: row.route,
     startedAt: new Date(row.started_at),
@@ -269,6 +300,8 @@ interface WebhookRunDatabaseRow {
   readonly connector_id: string
   readonly webhook_id: string
   readonly status: WebhookRunRecord["status"]
+  readonly execution_token: string | null
+  readonly execution_lease_expires_at: string | null
   readonly method: string
   readonly route: string
   readonly started_at: string
