@@ -127,6 +127,7 @@ const SHIPPED_MIGRATIONS = [
   "087-agent-computer-background-commands",
   "088-web-search-model-kind",
   "089-maintenance-heartbeats",
+  "090-lake-retention-runs",
 ]
 
 const steps = postgresStorageMigrations.steps

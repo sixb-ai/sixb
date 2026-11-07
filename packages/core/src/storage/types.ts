@@ -10,6 +10,7 @@ import type { ConnectorConnectionStorage } from "./connector-connections"
 import type { ExecutionStorage } from "./executions"
 import type { FileDownloadGrantStorage } from "./file-download-grants"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
+import type { LakeRetentionRunStorage } from "./lake-retention-runs"
 import type { MaintenanceHeartbeatStorage } from "./maintenance-heartbeats"
 import type { ObjectStorage } from "./objects/types"
 import type { OntologyStorage } from "./ontology"
@@ -378,6 +379,7 @@ export interface Storage {
   fileUploadSessions?: FileUploadSessionStore
   fileDownloadGrants?: FileDownloadGrantStorage
   maintenanceHeartbeats?: MaintenanceHeartbeatStorage
+  lakeRetentionRuns?: LakeRetentionRunStorage
   connectorConnections?: ConnectorConnectionStorage
   activity?: ActivityStorage
 
