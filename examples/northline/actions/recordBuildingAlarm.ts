@@ -2,6 +2,7 @@ import { defineAction, param } from "@sixb/core"
 import { stringEnum } from "@sixb/core/ontology"
 import { businessSystemConnector } from "../connectors/business-system"
 import { serviceCaseIdentity } from "../lib/case-policy"
+import { findRow } from "../lib/sources/client-utils"
 import { BuildingAlarm } from "../ontology/building-alarm"
 import { CustomerAccount } from "../ontology/customer-account"
 import { Equipment } from "../ontology/equipment"
@@ -24,10 +25,12 @@ export const recordBuildingAlarm = defineAction("record-building-alarm", {
   })
   .writeback(async ({ params, sixb }) => {
     const business = await sixb.connector(businessSystemConnector)
-    const facility = (await business.listFacilities()).rows.find(
+    const facility = await findRow(
+      (input) => business.listFacilities(input),
       (row) => row.facility_id === params.facilityId
     )
-    const contract = (await business.listContracts()).rows.find(
+    const contract = await findRow(
+      (input) => business.listContracts(input),
       (row) => row.facility_id === params.facilityId && row.status === "active"
     )
     if (!facility || !contract) {

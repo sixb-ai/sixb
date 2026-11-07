@@ -14,19 +14,21 @@ import { EquipmentPicture } from "./_components/equipment-picture"
 import { Widget, WidgetBreakdown, WidgetMetric, WidgetState } from "./_components/home/widget"
 import {
   CaseClockText,
-  caseClock,
   formatMoney,
   formatRelativeTime,
   formatTime,
   humanize,
   initials,
-  isCaseAtRisk,
   StatusBadge,
 } from "./_components/ui"
 import { threadPath } from "./_lib/agent-threads"
 import type { QueryRow } from "./_lib/query-types"
 import {
+  type CaseView,
+  caseClock,
   caseDecision,
+  casePriority,
+  inCaseView,
   openServiceCases,
   openWorkOrders,
   useCasesWithFieldWorkDone,
@@ -65,7 +67,6 @@ const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, 
 type CaseRow = QueryRow<typeof casesQuery>
 type AlarmRow = QueryRow<typeof alarmsQuery>
 
-const severityRank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
 const summaryLink = "font-semibold whitespace-nowrap hover:underline"
 
 export default function NorthlineHomePage() {
@@ -91,23 +92,19 @@ export default function NorthlineHomePage() {
     open.filter((item) => statuses.includes(item.properties.status ?? "")).length
   // Before a technician is on site: new, being triaged, or dispatched and on the way.
   const beforeArrival = countStatus("new", "triage", "dispatching")
-  const atRisk = open.filter((item) => isCaseAtRisk(item.properties))
+  // The same cases, in the same order, as the list views the summary links to.
+  const inView = (view: CaseView) =>
+    open
+      .filter((item) => inCaseView(item, view, fieldWorkDone))
+      .sort((left, right) => casePriority(right.properties) - casePriority(left.properties))
+  const atRisk = inView("risk")
+  const decisionRows = inView("action")
   // The commitments still running, soonest first: responses, then resolutions once on site.
   const dueNext = open
     .map((item) => ({ item, dueAt: caseClock(item.properties).dueAt }))
     .filter((entry) => Number.isFinite(entry.dueAt))
     .sort((left, right) => left.dueAt - right.dueAt)
     .map((entry) => entry.item)
-  const decisionOf = (item: CaseRow) =>
-    caseDecision(item.properties.status, fieldWorkDone.has(item.primaryId))
-  const decisionRows = open
-    .filter((item) => decisionOf(item) !== undefined)
-    .sort(
-      (left, right) =>
-        (severityRank[left.properties.severity ?? "low"] ?? 9) -
-          (severityRank[right.properties.severity ?? "low"] ?? 9) ||
-        caseClock(left.properties).dueAt - caseClock(right.properties).dueAt
-    )
 
   const quoteRows = quotes.data?.objects ?? []
   const quoteCount = (...statuses: string[]) =>
@@ -201,7 +198,7 @@ export default function NorthlineHomePage() {
                 <WidgetMetric
                   value={open.length}
                   label="open"
-                  aside={`${countStatus("dispatching", "in_service")} in the field`}
+                  aside={`${inView("field").length} in the field`}
                 />
                 <WidgetBreakdown
                   label="Open cases by stage"
@@ -320,7 +317,14 @@ export default function NorthlineHomePage() {
               ) : (
                 <ul className="mt-2 flex flex-col">
                   {decisionRows.slice(0, 3).map((item) => (
-                    <DecisionRow key={item.primaryId} item={item} decision={decisionOf(item)} />
+                    <DecisionRow
+                      key={item.primaryId}
+                      item={item}
+                      decision={caseDecision(
+                        item.properties.status,
+                        fieldWorkDone.has(item.primaryId)
+                      )}
+                    />
                   ))}
                 </ul>
               )}

@@ -39,7 +39,7 @@ import {
   StatusBadge,
 } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
-import { quotePath } from "../_lib/quotes"
+import { isQuoteOpen, quotePath } from "../_lib/quotes"
 
 const allQuotes = objects(Quote)
   .query()
@@ -112,7 +112,7 @@ export default function QuotesPage() {
   const caseRows = serviceCases.data?.objects ?? []
   const pendingReviews = reviews.data?.interventions ?? []
   const blockedValue = allRows
-    .filter((quote) => isOpen(quote.properties.status))
+    .filter((quote) => isQuoteOpen(quote.properties.status))
     .reduce((total, quote) => total + quote.properties.amount, 0)
   const counts = useMemo(
     () =>
@@ -271,7 +271,7 @@ export default function QuotesPage() {
 
 function QuoteListRow({ quote, awaitingApproval }: { quote: QuoteRow; awaitingApproval: boolean }) {
   const status = quote.properties.status
-  const open = isOpen(status)
+  const open = isQuoteOpen(status)
   const caseNumber = quote.links.serviceCase?.properties.number
 
   return (
@@ -460,7 +460,7 @@ function QuoteDocument({
   const customer = quote.links.customer
   const facility = quote.links.facility
   const linkedCase = quote.links.serviceCase
-  const canRecordDecision = Boolean(linkedCase) && isOpen(properties.status)
+  const canRecordDecision = Boolean(linkedCase) && isQuoteOpen(properties.status)
   const decided = properties.status === "approved" || properties.status === "declined"
 
   let next: ReactNode = null
@@ -539,7 +539,7 @@ function QuoteDocument({
           <Fact label="Valid until">
             <span className={cn(expiresSoon(quote) && "text-[color:var(--warning)]")}>
               {formatDate(properties.validUntil)}
-              {isOpen(properties.status) ? ` · ${remainingLabel(properties.validUntil)}` : ""}
+              {isQuoteOpen(properties.status) ? ` · ${remainingLabel(properties.validUntil)}` : ""}
             </span>
           </Fact>
           <Fact label="Service case">
@@ -713,9 +713,7 @@ function caseForReview(
 
 function matchesView(quote: QuoteRow, view: View): boolean {
   if (view === "all") return true
-  if (view === "expiring") {
-    return isOpen(quote.properties.status) && daysUntil(quote.properties.validUntil) <= 7
-  }
+  if (view === "expiring") return expiresSoon(quote)
   return quote.properties.status === view
 }
 
@@ -744,13 +742,10 @@ function quotePriority(quote: QuoteRow): number {
   return status + Math.max(0, 30 - daysUntil(quote.properties.validUntil))
 }
 
-/** Quotes still waiting on a decision, from Northline or from the customer. */
-function isOpen(status: string): boolean {
-  return status === "internal_review" || status === "sent"
-}
-
+/** Open and valid for at most another week; a quote past its date has already expired. */
 function expiresSoon(quote: QuoteRow): boolean {
-  return isOpen(quote.properties.status) && daysUntil(quote.properties.validUntil) <= 7
+  const days = daysUntil(quote.properties.validUntil)
+  return isQuoteOpen(quote.properties.status) && days >= 0 && days <= 7
 }
 
 function statusLabel(status: string): string {
@@ -763,7 +758,7 @@ function validityLabel(quote: QuoteRow): string {
     return decisionAt ? `${humanize(status)} ${formatDate(decisionAt)}` : humanize(status)
   }
   if (status === "expired" || daysUntil(validUntil) < 0) return `Expired ${formatDate(validUntil)}`
-  if (isOpen(status) && daysUntil(validUntil) <= 7) return remainingLabel(validUntil)
+  if (expiresSoon(quote)) return remainingLabel(validUntil)
   return `Valid until ${formatDate(validUntil)}`
 }
 

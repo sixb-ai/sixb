@@ -127,6 +127,15 @@ export default function DispatchPage() {
           left.properties.name.localeCompare(right.properties.name)
       )
   }, [technicians.data?.objects, workOnSelectedDate])
+  // The day's board: jobs for technicians on duty, and jobs still waiting for one. The count, the
+  // timeline and the list all show these.
+  const boardWork = useMemo(() => {
+    const onDuty = new Set(technicianRows.map((technician) => technician.primaryId))
+    return workOnSelectedDate.filter((workOrder) => {
+      const assigneeId = workOrder.links.assignee?.primaryId
+      return !assigneeId || onDuty.has(assigneeId)
+    })
+  }, [technicianRows, workOnSelectedDate])
   const visibleTechnicians = technicianRows.filter(
     (technician) => !showAvailableOnly || technician.properties.availability === "available"
   )
@@ -168,7 +177,7 @@ export default function DispatchPage() {
             {technicians.isLoading ? "—" : `${availableCount} of ${technicianRows.length}`}
           </Fact>
           <Fact label="Scheduled">
-            {workOrders.isLoading ? "—" : count(workOnSelectedDate.length, "job")}
+            {workOrders.isLoading ? "—" : count(boardWork.length, "job")}
           </Fact>
         </dl>
       </PageHeader>
@@ -294,11 +303,11 @@ export default function DispatchPage() {
               <ScheduleTimeline
                 date={selectedDate}
                 technicians={visibleTechnicians}
-                workOrders={workOnSelectedDate}
+                workOrders={boardWork}
                 pending={pending}
               />
             ) : (
-              <ScheduleList technicians={visibleTechnicians} workOrders={workOnSelectedDate} />
+              <ScheduleList technicians={visibleTechnicians} workOrders={boardWork} />
             )}
           </QueryState>
         </section>
@@ -620,6 +629,7 @@ function ScheduleTimeline({
 }) {
   const now = new Date()
   const range = createTimelineRange(date, workOrders)
+  const unassigned = workOrders.filter((workOrder) => !workOrder.links.assignee)
   const nowPosition = isSameDay(date, now) ? timePosition(now, date, range) : undefined
   const timelineWidth = ((range.endMinutes - range.startMinutes) / 60) * timelineHourWidth
   const timelineCanvasStyle = {
@@ -662,6 +672,25 @@ function ScheduleTimeline({
               ) : null}
             </div>
           </div>
+
+          {unassigned.length > 0 ? (
+            <div className="grid border-b border-border/70" style={timelineGridStyle}>
+              <div className="flex items-center border-r border-border/70 bg-card px-5 py-3 text-[14.5px] font-semibold md:sticky md:left-0 md:z-20">
+                Waiting for a technician
+              </div>
+              <div className="relative min-h-[80px] overflow-hidden">
+                <TimelineGuides range={range} />
+                {unassigned.map((workOrder) => (
+                  <ScheduleBlock
+                    key={workOrder.primaryId}
+                    workOrder={workOrder}
+                    date={date}
+                    range={range}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {technicians.length === 0 ? (
             <p className="px-6 py-10 text-[14px] text-muted-foreground">

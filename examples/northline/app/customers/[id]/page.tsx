@@ -16,7 +16,6 @@ import { EquipmentPicture } from "../../_components/equipment-picture"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
-  casePriority,
   Fact,
   formatCoverageHours,
   formatDate,
@@ -24,14 +23,15 @@ import {
   formatMoney,
   humanize,
   initials,
-  isCaseAtRisk,
   QueryState,
   Section,
   StatusBadge,
   StatusIndicator,
 } from "../../_components/ui"
+import { contractTypeLabel, isContractCurrent } from "../../_lib/contracts"
 import type { QueryRow } from "../../_lib/query-types"
 import { quotePath } from "../../_lib/quotes"
+import { casePriority, isCaseAtRisk, isCaseOpen } from "../../_lib/service-cases"
 
 /** A customer and the records that belong to it, each followed from the customer by the server. */
 function customerQueries(id: string) {
@@ -70,12 +70,6 @@ type ContractRow = QueryRow<CustomerQueries["contracts"]>
 type VisitRow = QueryRow<CustomerQueries["visits"]>
 type QuoteRow = QueryRow<CustomerQueries["quotes"]>
 
-const contractTypes: Record<string, string> = {
-  full_service: "Full service",
-  priority_care: "PriorityCare",
-  preventive: "Preventive",
-}
-
 export default function CustomerDetailPage() {
   const { id = "" } = useParams<{ id: string }>()
   const queries = useMemo(() => customerQueries(id), [id])
@@ -92,10 +86,12 @@ export default function CustomerDetailPage() {
   const equipment = equipmentResult.data?.objects ?? []
   const cases = casesResult.data?.objects ?? []
   const activeCases = cases
-    .filter((serviceCase) => !["closed", "cancelled"].includes(serviceCase.properties.status))
+    .filter((serviceCase) => isCaseOpen(serviceCase.properties.status))
     .sort((left, right) => casePriority(right.properties) - casePriority(left.properties))
   const contracts = [...(contractsResult.data?.objects ?? [])].sort(
-    (left, right) => Number(isCurrent(right)) - Number(isCurrent(left))
+    (left, right) =>
+      Number(isContractCurrent(right.properties.status)) -
+      Number(isContractCurrent(left.properties.status))
   )
   const visits = visitsResult.data?.objects ?? []
   const quotes = quotesResult.data?.objects ?? []
@@ -283,8 +279,7 @@ function ContractsCard({ contracts }: { contracts: readonly ContractRow[] }) {
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span className="truncate text-[15px] font-semibold">{properties.name}</span>
                     <span className="text-[13px] text-muted-foreground tabular-nums">
-                      {properties.number} ·{" "}
-                      {contractTypes[properties.contractType] ?? properties.contractType}
+                      {properties.number} · {contractTypeLabel(properties.contractType)}
                     </span>
                   </span>
                   <StatusBadge value={properties.status} />
@@ -510,10 +505,6 @@ function TimelineLink({ to, children }: { to: string; children: ReactNode }) {
       {children}
     </Link>
   )
-}
-
-function isCurrent(contract: ContractRow): boolean {
-  return ["active", "expiring"].includes(contract.properties.status)
 }
 
 function pluralize(singular: string, plural: string, count: number): string {

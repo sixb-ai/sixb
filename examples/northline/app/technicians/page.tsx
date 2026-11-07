@@ -17,6 +17,7 @@ import {
 } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
 import { openWorkOrders } from "../_lib/service-cases"
+import { currentWork } from "../_lib/technicians"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(100)
 const workOrdersQuery = openWorkOrders
@@ -25,6 +26,8 @@ const workOrdersQuery = openWorkOrders
   .expand(WorkOrder.l.equipment)
   .orderBy(WorkOrder.p.scheduledStart, "asc")
   .limit(100)
+
+const workUnderWay = new Set(["en_route", "on_site", "paused"])
 
 const views = [
   ["all", "All"],
@@ -51,14 +54,24 @@ export default function TechniciansPage() {
   const [sort, setSort] = useState<Sort>("availability")
   const [search, setSearch] = useState("")
   const allTechnicians = technicians.data?.objects ?? []
-  const allWorkOrders = workOrders.data?.objects ?? []
+  // Each technician's current job, worked out once rather than per row.
+  const assignments = useMemo(() => {
+    const work = new Map<string, WorkOrderRow[]>()
+    for (const workOrder of workOrders.data?.objects ?? []) {
+      const assigneeId = workOrder.links.assignee?.primaryId
+      if (assigneeId) work.set(assigneeId, [...(work.get(assigneeId) ?? []), workOrder])
+    }
+    return new Map(
+      [...work].map(([technicianId, open]) => [technicianId, currentWork(open, workUnderWay)])
+    )
+  }, [workOrders.data])
   const rows = useMemo(() => {
     const normalized = search.trim().toLowerCase()
     return allTechnicians
       .filter((technician) => {
         if (view !== "all" && technician.properties.availability !== view) return false
         if (!normalized) return true
-        const assignment = currentAssignment(technician, allWorkOrders)
+        const assignment = assignments.get(technician.primaryId)
         return [
           technician.properties.name,
           technician.properties.email,
@@ -71,7 +84,7 @@ export default function TechniciansPage() {
         ].some((value) => value?.toLowerCase().includes(normalized))
       })
       .sort((left, right) => compareTechnicians(left, right, sort))
-  }, [allTechnicians, allWorkOrders, search, sort, view])
+  }, [allTechnicians, assignments, search, sort, view])
 
   const counts = Object.fromEntries(
     views.map(([value]) => [
@@ -127,7 +140,7 @@ export default function TechniciansPage() {
               <TechnicianListRow
                 key={technician.primaryId}
                 technician={technician}
-                assignment={currentAssignment(technician, allWorkOrders)}
+                assignment={assignments.get(technician.primaryId)}
               />
             ))}
           </ul>
@@ -144,7 +157,15 @@ function TechnicianListRow({
   technician: TechnicianRow
   assignment: WorkOrderRow | undefined
 }) {
-  const offDuty = technician.properties.availability === "off_duty"
+  const { availability } = technician.properties
+  const offDuty = availability === "off_duty"
+  // Without a job: off shift, assigned but not yet scheduled, or free.
+  const idle =
+    availability === "off_duty"
+      ? { detail: "Not on shift", when: "Off shift" }
+      : availability === "assigned"
+        ? { detail: "Assigned; no visit scheduled yet", when: "Awaiting a visit" }
+        : { detail: "Ready for dispatch", when: "Available now" }
   const assignmentDetail = assignment
     ? [
         assignment.properties.number,
@@ -154,9 +175,7 @@ function TechnicianListRow({
       ]
         .filter(Boolean)
         .join(" · ")
-    : offDuty
-      ? "Not on shift"
-      : "Ready for dispatch"
+    : idle.detail
 
   return (
     <li className="border-t border-border/70 first:border-t-0">
@@ -219,11 +238,7 @@ function TechnicianListRow({
         <span className="hidden w-44 shrink-0 flex-col items-end gap-1.5 md:flex">
           <StatusBadge value={technician.properties.availability} />
           <span className="text-[13px] text-muted-foreground tabular-nums">
-            {assignment
-              ? formatDateTime(assignment.properties.scheduledStart)
-              : offDuty
-                ? "Off shift"
-                : "Available now"}
+            {assignment ? formatDateTime(assignment.properties.scheduledStart) : idle.when}
           </span>
         </span>
 
@@ -234,22 +249,6 @@ function TechnicianListRow({
       </Link>
     </li>
   )
-}
-
-function currentAssignment(
-  technician: TechnicianRow,
-  workOrders: readonly WorkOrderRow[]
-): WorkOrderRow | undefined {
-  return workOrders
-    .filter(
-      (workOrder) =>
-        workOrder.links.assignee?.primaryId === technician.primaryId &&
-        !["completed", "cancelled"].includes(workOrder.properties.status)
-    )
-    .sort(
-      (left, right) =>
-        timestamp(left.properties.scheduledStart) - timestamp(right.properties.scheduledStart)
-    )[0]
 }
 
 function compareTechnicians(left: TechnicianRow, right: TechnicianRow, sort: Sort): number {
@@ -268,10 +267,6 @@ function compareTechnicians(left: TechnicianRow, right: TechnicianRow, sort: Sor
     left.properties.territory.localeCompare(right.properties.territory) ||
     left.properties.name.localeCompare(right.properties.name)
   )
-}
-
-function timestamp(value: string | Date | undefined): number {
-  return value ? new Date(value).getTime() : Number.POSITIVE_INFINITY
 }
 
 function availabilityPriority(status: string): number {

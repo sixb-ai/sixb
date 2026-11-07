@@ -10,18 +10,18 @@ import { ServiceCase } from "../../ontology/service-case"
 import { ServiceContract } from "../../ontology/service-contract"
 import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
 import {
-  caseClock,
   formatCoverageHours,
   formatMinutes,
   humanize,
   initials,
-  isCaseAtRisk,
   PageHeader,
   QueryState,
   StatusBadge,
   StatusIndicator,
 } from "../_components/ui"
+import { isContractCurrent } from "../_lib/contracts"
 import type { QueryRow } from "../_lib/query-types"
+import { caseClock, isCaseAtRisk, isCaseOpen } from "../_lib/service-cases"
 
 const customersQuery = objects(CustomerAccount)
   .query()
@@ -194,7 +194,7 @@ function CustomerListRow({
     (serviceCase) => caseClock(serviceCase.properties).tone === "critical"
   )
   const activeContract = customerContracts.find((contract) =>
-    ["active", "expiring"].includes(contract.properties.status)
+    isContractCurrent(contract.properties.status)
   )
   const summary = [
     humanize(customer.properties.serviceTier),
@@ -319,7 +319,7 @@ function contractsFor(customer: CustomerRow, contracts: readonly ContractRow[]):
 }
 
 function isOpenCase(serviceCase: CaseRow): boolean {
-  return !["closed", "cancelled"].includes(serviceCase.properties.status)
+  return isCaseOpen(serviceCase.properties.status)
 }
 
 function isAtRisk(serviceCase: CaseRow): boolean {

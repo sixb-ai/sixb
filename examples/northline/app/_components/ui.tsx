@@ -1,6 +1,7 @@
 import { Skeleton } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import type { PropsWithChildren, ReactNode } from "react"
+import { type CaseClockFields, caseClock } from "../_lib/service-cases"
 
 const critical = new Set([
   "critical",
@@ -346,115 +347,6 @@ export function formatMoney(value: number | undefined): string {
       }).format(value)
 }
 
-export interface CaseClockFields {
-  readonly status?: string
-  readonly slaStatus?: string
-  readonly responseDeadline?: string | Date
-  readonly resolutionDeadline?: string | Date
-}
-
-export interface CaseClock {
-  /** Which commitment is running: "Response", "Resolution" or "Commitment" once it is over. */
-  readonly label: string
-  /** The clock on its own, for a labelled fact: "47m left", "2h overdue", "Met". */
-  readonly value: string
-  /** The clock as a phrase, for rows that have no label: "47m to respond". */
-  readonly summary: string
-  readonly tone: Tone
-  /** When the running commitment falls due, for sorting; infinity once it is over. */
-  readonly dueAt: number
-}
-
-const awaitingResponse = new Set(["new", "triage", "dispatching"])
-const finished = new Set(["resolved", "closed", "cancelled"])
-
-/**
- * The commitment that matters at a case's stage. Until a technician is on site the customer is
- * waiting on a response; after that, on a resolution, which pauses while the customer authorizes
- * a repair; once resolved, the commitment was met or missed.
- */
-export function caseClock(serviceCase: CaseClockFields): CaseClock {
-  const status = serviceCase.status ?? "new"
-  const atRisk = serviceCase.slaStatus === "at_risk" || serviceCase.slaStatus === "breached"
-  if (finished.has(status)) {
-    const missed = serviceCase.slaStatus === "breached"
-    return {
-      label: "Commitment",
-      value: missed ? "Missed" : "Met",
-      summary: missed ? "Commitment missed" : "Commitment met",
-      tone: missed ? "critical" : "neutral",
-      dueAt: Number.POSITIVE_INFINITY,
-    }
-  }
-
-  // Contracts stop the resolution clock while the customer decides on work outside coverage.
-  if (status === "awaiting_authorization") {
-    return {
-      label: "Resolution",
-      value: "Paused",
-      summary: "Waiting on the customer",
-      tone: "neutral",
-      dueAt: Number.POSITIVE_INFINITY,
-    }
-  }
-
-  const responding = awaitingResponse.has(status)
-  const label = responding ? "Response" : "Resolution"
-  const deadline = responding ? serviceCase.responseDeadline : serviceCase.resolutionDeadline
-  if (!deadline) {
-    const dueAt = Number.POSITIVE_INFINITY
-    return { label, value: "No deadline", summary: "No deadline", tone: "neutral", dueAt }
-  }
-
-  const dueAt = new Date(deadline).getTime()
-  const remaining = dueAt - Date.now()
-  const duration = formatDuration(Math.abs(remaining))
-  if (remaining < 0) {
-    return {
-      label,
-      value: `${duration} overdue`,
-      summary: `${label} ${duration} overdue`,
-      tone: "critical",
-      dueAt,
-    }
-  }
-  return {
-    label,
-    value: `${duration} left`,
-    summary: `${duration} to ${responding ? "respond" : "resolve"}`,
-    tone: atRisk ? "warning" : "neutral",
-    dueAt,
-  }
-}
-
-/** At risk is what the clock shows: overdue, or flagged by the contract while time remains. */
-export function isCaseAtRisk(serviceCase: CaseClockFields): boolean {
-  return caseClock(serviceCase).tone !== "neutral"
-}
-
-const severityWeight: Readonly<Record<string, number>> = {
-  critical: 40,
-  high: 30,
-  medium: 20,
-  low: 10,
-}
-const riskWeight: Readonly<Record<string, number>> = { critical: 30, warning: 20 }
-
-/** Most urgent first: severity, then what the clock shows, then the soonest deadline. */
-export function casePriority(
-  serviceCase: CaseClockFields & { readonly severity?: string }
-): number {
-  const clock = caseClock(serviceCase)
-  const closed = ["closed", "cancelled"].includes(serviceCase.status ?? "") ? -100 : 0
-  const dueAt = Number.isFinite(clock.dueAt) ? clock.dueAt : Date.now()
-  return (
-    (severityWeight[serviceCase.severity ?? "low"] ?? 0) +
-    (riskWeight[clock.tone] ?? 0) +
-    closed -
-    dueAt / 1e13
-  )
-}
-
 /** A case's clock in its tone; neutral clocks take the surrounding text color. */
 export function CaseClockText({
   serviceCase,
@@ -478,14 +370,6 @@ export function CaseClockText({
       {clock[variant]}
     </span>
   )
-}
-
-function formatDuration(milliseconds: number): string {
-  const minutes = Math.max(1, Math.round(milliseconds / 60_000))
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.round(minutes / 60)
-  if (hours < 48) return `${hours}h`
-  return `${Math.round(hours / 24)}d`
 }
 
 /** Up to two initials for an avatar: "Marcus Reed" becomes "MR". */
