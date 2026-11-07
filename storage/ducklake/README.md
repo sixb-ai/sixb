@@ -245,9 +245,9 @@ rows. The version reads exactly the rows written, as a full replacement would, a
 write commits nothing. A write that changes at least 80% of the rows replaces them all instead, as
 does one that changes 5,000 rows or more and at least 5% of them: deleting many rows across files
 costs more than writing them anew. Unkeyed datasets are always replaced. In a table of 100,000
-rows or more, a guarded snapshot over a version that replaced every row replaces them again
-without comparing them first, and compares every 8th time: with a million rows, the comparison
-costs a tenth of such a write.
+rows or more, a guarded snapshot over a version in which at least 80% of the rows changed replaces
+them again without comparing them first, and compares every 8th time: with a million rows, the
+comparison costs a tenth of such a write.
 
 A difference of up to 10 rows is inlined in the catalog and writes no file; automatic compaction
 moves inlined rows to files later. DuckLake's change feed then holds only what each version

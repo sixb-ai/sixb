@@ -770,7 +770,7 @@ describe("DuckLakeStorage keyed snapshot writes", () => {
     const changed = { delete: 1, insert: 1 }
     expect(feeds).toEqual([...Array(7).fill(replaced), changed, changed])
 
-    // In a smaller table, a difference may insert and delete more rows than the table holds.
+    // In a smaller table, a replacement says nothing: the next write compares.
     const small = defineDataset("crm.small_accounts", {
       schema: accounts.schema.columns,
       primaryKey: "id",
@@ -783,6 +783,29 @@ describe("DuckLakeStorage keyed snapshot writes", () => {
     smallRows = smallRows.map((row) => (row.id === "a1" ? { ...row, name: "renamed" } : row))
     smallLatest = (await guardedSnapshot(small, smallRows, smallLatest)).versionId
     expect(await feedOf(small, smallLatest)).toEqual(changed)
+  }, 60_000)
+
+  // Regression proof: in applyKeyedSnapshot, report mostRowsChanged for any replacement of a
+  // non-empty table. The write after the catch-up then replaces all 100,000 rows for one change.
+  // Or report it for an empty table too: the write after the first one does the same.
+  test("compares the rows after a replacement that a large difference caused", async () => {
+    await storage.createDataset(accounts)
+    let rows = accountRows(100_000)
+    let latest = (await guardedSnapshot(accounts, rows, null)).versionId
+
+    // Nothing to compare with: the first write says nothing of the next one either.
+    rows = rows.map((row) => (row.id === "a1" ? { ...row, name: "renamed" } : row))
+    latest = (await guardedSnapshot(accounts, rows, latest)).versionId
+    expect(await feedOf(accounts, latest)).toEqual({ delete: 1, insert: 1 })
+
+    // A catch-up: 5% of the rows change, a replacement at this size.
+    rows = rescored(rows, 5_000, 1)
+    latest = (await guardedSnapshot(accounts, rows, latest)).versionId
+    expect(await feedOf(accounts, latest)).toEqual({ delete: 100_000, insert: 100_000 })
+
+    rows = rows.map((row) => (row.id === "a2" ? { ...row, name: "renamed" } : row))
+    latest = (await guardedSnapshot(accounts, rows, latest)).versionId
+    expect(await feedOf(accounts, latest)).toEqual({ delete: 1, insert: 1 })
   }, 60_000)
 
   // Regression proof: in applyKeyedSnapshot, drop the check of the table's row count. The

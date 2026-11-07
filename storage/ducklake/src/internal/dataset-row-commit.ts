@@ -32,6 +32,8 @@ export interface ApplyDatasetRowsResult {
    */
   readonly insertedRows: number
   readonly deletedRows: number
+  /** A keyed snapshot compared its rows and most of them changed (`changesMostRows`). */
+  readonly mostRowsChanged?: boolean
 }
 
 /**
@@ -51,17 +53,21 @@ const FULL_REPLACEMENT_SHARE = 0.8
 const LARGE_DIFFERENCE_ROWS = 5_000
 const LARGE_DIFFERENCE_SHARE = 0.05
 
+function changesMostRows(changedKeys: number, tableRows: number): boolean {
+  return changedKeys >= FULL_REPLACEMENT_SHARE * tableRows
+}
+
 /** Whether a keyed snapshot changing this many rows of a table this size replaces them all. */
 export function replacesEveryRow(changedKeys: number, tableRows: number): boolean {
   return (
-    changedKeys >= FULL_REPLACEMENT_SHARE * tableRows ||
+    changesMostRows(changedKeys, tableRows) ||
     (changedKeys >= LARGE_DIFFERENCE_ROWS && changedKeys >= LARGE_DIFFERENCE_SHARE * tableRows)
   )
 }
 
 /**
- * The smallest table in which a difference is always under `LARGE_DIFFERENCE_SHARE`: in it, a
- * difference inserts and deletes fewer rows than the table holds, and a replacement more.
+ * Below this many rows a snapshot always compares its rows: the comparison costs too little for
+ * skipping it to pay, and a replacement of rows that did not change costs more.
  */
 export const LARGE_TABLE_ROWS = LARGE_DIFFERENCE_ROWS / LARGE_DIFFERENCE_SHARE
 
@@ -253,7 +259,7 @@ async function applyKeyedSnapshot(input: {
     // An updated row is one changed key, both deleted and inserted.
     const largerSide = Math.max(input.sourceRowCount, targetRowCount)
     if (targetRowCount === 0 || replacesEveryRow(changedKeys, largerSide)) {
-      return replaceRows({
+      const replaced = await replaceRows({
         runtime: input.runtime,
         table: input.table,
         columnsSql,
@@ -261,6 +267,11 @@ async function applyKeyedSnapshot(input: {
         sourceRowCount: input.sourceRowCount,
         targetRowCount,
       })
+
+      return {
+        ...replaced,
+        mostRowsChanged: targetRowCount > 0 && changesMostRows(changedKeys, largerSide),
+      }
     }
 
     // DuckLake commits two writes that only insert concurrently, and two that only delete from

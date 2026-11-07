@@ -90,15 +90,15 @@ export interface DuckLakeApplyChangesContext {
   readonly previousRowCount?: number
   readonly validatedPrimaryKeyColumns?: readonly string[]
   /**
-   * The snapshot is expected to replace every row, as the version it builds on did: it replaces
-   * them without the join that would find which rows changed (see `uncomparedReplacementStreak`).
+   * Most rows are expected to change, as in the version this builds on: the snapshot replaces them
+   * without the join that would find which ones (see `uncomparedReplacementStreak`).
    */
   readonly expectReplacement: boolean
 }
 
 /**
- * A keyed snapshot over a version that replaced every row skips comparing its rows this many
- * times in a row, then compares them again in case far fewer change now.
+ * After a version in which most rows changed, a keyed snapshot compares its rows only every this
+ * many times, in case far fewer change now.
  */
 const RECHECK_REPLACEMENT_EVERY = 8
 
@@ -386,7 +386,7 @@ export class DuckLakeWriteCoordinator {
         rowCount: commitRowCount(input, changeResult, latestVersion),
         rowChanges,
         uncomparedReplacements: changeResult.dataChangeExpected
-          ? uncomparedReplacements
+          ? (uncomparedReplacements ?? (changeResult.mostRowsChanged ? 0 : undefined))
           : undefined,
         lineage,
         rowsChanged: parent === null || rowChanges > 0,
@@ -841,27 +841,27 @@ function mustClaimTable(
  *
  * The join finds which rows changed, so that a few changed rows are all that is written; when
  * most rows change, it is a cost on top of the replacement that follows (a tenth of the write
- * with a million rows). In a large table (`LARGE_TABLE_ROWS`), a version that replaced the rows
- * of a non-empty table inserted and deleted more rows than it holds, which a difference never
- * does: its next snapshot is expected to replace them too. Every `RECHECK_REPLACEMENT_EVERY`th
- * one compares again. The count travels with the versions (`uncomparedReplacements`), so every
- * process writing the dataset decides the same.
+ * with a million rows). So in a large table (`LARGE_TABLE_ROWS`), a version that found most rows
+ * changed expects the same of the next snapshot. A version replaced for a large difference does
+ * not: a catch-up of 6% says nothing of the 10 rows the next run changes.
+ *
+ * Every `RECHECK_REPLACEMENT_EVERY`th one compares again. The count travels with the versions
+ * (`uncomparedReplacements`), so every process writing the dataset decides the same.
  */
 function uncomparedReplacementStreak(
   input: DuckLakeCommitVersionOutcomeRuntimeInput,
   parent: DuckLakeVersionSummary | null | undefined
 ): number | undefined {
-  const replaced =
-    input.mode === "snapshot" &&
-    parent?.rowChanges !== undefined &&
-    parent.rowCount !== undefined &&
-    parent.rowCount >= LARGE_TABLE_ROWS &&
-    parent.rowChanges > parent.rowCount
-  if (!replaced) {
+  if (
+    input.mode !== "snapshot" ||
+    parent?.uncomparedReplacements === undefined ||
+    parent.rowCount === undefined ||
+    parent.rowCount < LARGE_TABLE_ROWS
+  ) {
     return undefined
   }
 
-  const streak = (parent.uncomparedReplacements ?? 0) + 1
+  const streak = parent.uncomparedReplacements + 1
   return streak < RECHECK_REPLACEMENT_EVERY ? streak : undefined
 }
 
