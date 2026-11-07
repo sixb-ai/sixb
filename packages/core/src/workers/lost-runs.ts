@@ -10,6 +10,7 @@ import {
   ORPHANED_RUN_AFTER_MS,
 } from "../storage/run-claim"
 import { recoverJobId } from "./job-ids"
+import { type ProjectionRunRecovery, republishQueuedProjectionRuns } from "./lost-projection-runs"
 
 /**
  * A job may still be on its way for this long: a queued run may be in its first publication, and a
@@ -26,12 +27,19 @@ const LOST_WORKER = "Its worker was lost, and it was too old or too unclear to r
 
 export interface RepublishLostRunsInput {
   readonly projectId: string
-  readonly storage: Pick<Storage, "executions" | "syncRuns" | "pipelineRuns" | "workflowRuns">
-  readonly queues: Pick<Queues, "syncRuns" | "pipelines" | "workflows">
+  readonly storage: Pick<
+    Storage,
+    "executions" | "syncRuns" | "pipelineRuns" | "workflowRuns" | "projectionRuns"
+  >
+  readonly queues: Pick<Queues, "syncRuns" | "pipelines" | "workflows" | "projections">
   readonly events: Pick<DomainEventLog, "emit">
   readonly now: Date
   /** Most runs of each primitive one call looks at, longest lost first. */
   readonly limit?: number
+  /** Brings back queued projection runs. Without it, only lapsed ones get a job. */
+  readonly projections?: ProjectionRunRecovery
+  /** Stops a backlog of queued projection runs, which no limit caps, between two of them. */
+  readonly signal?: AbortSignal
 }
 
 interface RepublishLostRunsResult {
@@ -84,7 +92,8 @@ interface RecoveryJob {
  *   happen by surprise that late, least of all a workflow's side effects.
  *
  * A delivery that finds the run held or finished does nothing, so this can be wrong about a job
- * being lost without doing harm.
+ * being lost without doing harm. Projections have no older version to settle, and retry without a
+ * cap, so a lost one only ever gets a job (see `republishQueuedProjectionRuns`).
  */
 export async function republishLostRuns(
   input: RepublishLostRunsInput
@@ -93,6 +102,7 @@ export async function republishLostRuns(
     recoverLane(input, syncLane(input)),
     recoverLane(input, pipelineLane(input)),
     recoverLane(input, workflowLane(input)),
+    recoverProjections(input),
   ]
 
   // A lane that fails must not hold the others, and still has to reach the caller.
@@ -198,6 +208,41 @@ async function settleRun<TRun extends LostRunCandidate>(
     { events: [finished], correlationId: await readCorrelationId(input, run) },
     { source: SOURCE }
   )
+}
+
+async function recoverProjections(input: RepublishLostRunsInput): Promise<RepublishLostRunsResult> {
+  const { projectId, storage, queues, projections } = input
+  const { projectionRuns } = storage
+  if (!projectionRuns) return { republished: 0, settled: 0 }
+
+  const jobOnItsWay = new Date(input.now.getTime() - JOB_ON_ITS_WAY_MS)
+
+  const lapsed = await projectionRuns.listLapsed({
+    projectId,
+    lapsedBy: jobOnItsWay,
+    limit: input.limit ?? DEFAULT_LIMIT,
+  })
+
+  const jobs = lapsed.map(recoveryJob)
+
+  if (jobs.length > 0) {
+    await queues.projections.enqueue({
+      projectId,
+      jobs: queueJobs("projection.run.requested", jobs),
+    })
+  }
+
+  const queued = projections
+    ? await republishQueuedProjectionRuns({
+        projectId,
+        projectionRuns,
+        queuedBefore: jobOnItsWay,
+        recovery: projections,
+        signal: input.signal,
+      })
+    : 0
+
+  return { republished: jobs.length + queued, settled: 0 }
 }
 
 /**

@@ -49,13 +49,18 @@ export interface RunWorkerConfig<
 /** A queue job that stands for a durable run. */
 type RunQueueJob = QueueJob<string, { readonly runId: string }>
 
-/** A claim, or a run the job takes by a transition of its own: it holds no token until then. */
-export type RunDelivery<TRun> = RunClaim<TRun> | { readonly outcome: "woken"; readonly run: TRun }
+/**
+ * A claim, or a run the job will take by a transition of its own, which `deferred` hands it
+ * untaken: a workflow's resume, or a projection, whose job takes its run under the token made here.
+ */
+export type RunDelivery<TRun> =
+  | RunClaim<TRun>
+  | { readonly outcome: "deferred"; readonly run: TRun }
 
 /** What an execution holds once a delivery has taken a run. */
 export type HeldRunClaim<TRun> = Extract<
   RunDelivery<TRun>,
-  { readonly outcome: "started" | "resumed" | "woken" }
+  { readonly outcome: "started" | "resumed" | "deferred" }
 > & {
   readonly execution: RunExecution
   /**

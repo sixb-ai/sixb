@@ -10,7 +10,7 @@ import type {
   ProjectionTarget,
 } from "../../projections/types"
 import { PROJECTION_RUN_FAILURE_CODES } from "../../projections/types"
-import { ProjectionRunError } from "./errors"
+import { ProjectionRunError, ProjectionRunHeldError } from "./errors"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
   FailProjectionRunEnqueueInput,
@@ -53,6 +53,7 @@ export interface PersistedProjectionRunRecord {
   readonly finishedAt?: Date
   readonly attempt: number
   readonly executionToken?: string
+  readonly queueLeaseExpiresAt?: Date
   readonly fixedBatchSize?: number
   readonly nextBatchOrdinal?: number
   readonly nextRowOffset?: number
@@ -199,6 +200,12 @@ export function planProjectionRunReclaim(
       `[Sixb] Projection run '${input.id}' fixed batch size does not match.`
     )
   }
+
+  const ownedUntil = record.status === "running" ? record.queueLeaseExpiresAt : undefined
+  if (ownedUntil && ownedUntil.getTime() > (input.startedAt ?? new Date()).getTime()) {
+    throw new ProjectionRunHeldError(record.id, ownedUntil)
+  }
+
   return { attempt: record.status === "queued" ? 1 : nextProjectionRunAttempt(record.attempt) }
 }
 
@@ -524,6 +531,7 @@ export function restoreProjectionRun(row: PersistedProjectionRunRecord): StoredP
         ? undefined
         : parseSixbFailure(row.error, PROJECTION_RUN_FAILURE_CODES),
     executionToken: row.executionToken,
+    queueLeaseExpiresAt: row.queueLeaseExpiresAt,
   }
 
   if (identity.projectionKind === "link") {

@@ -11,6 +11,7 @@ import type {
   ProjectionRunFailureCode,
   ProjectionRunRecord,
   ProjectionRunStorage,
+  RunExecution,
 } from "@sixb/core/storage"
 
 export interface ProjectionWorkerContext {
@@ -33,6 +34,8 @@ export interface RunProjectionJobInput {
   readonly runtime: ProjectionWorkerContext
   readonly job: ProjectionJob
   readonly signal?: AbortSignal
+  /** The execution this delivery takes the run under, with the lease behind it. */
+  readonly execution?: RunExecution
   /**
    * Clock for the missing-target grace window, measured from the run's own `startedAt`.
    *

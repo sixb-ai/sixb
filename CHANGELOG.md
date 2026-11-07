@@ -6,101 +6,135 @@ Sixb packages are versioned independently. Each release entry names the packages
 
 ### Upgrade notes
 
+Read this first: lake retention starts on its own, and what it deletes does not come back. In order
+(`sixb deploy` does steps 3 to 5):
+
+1. **Decide what the lake keeps.** Replaced versions go after 7 days, and the files only they read 7
+   days later. Set `lakeMaintenance` now if that is not what you want.
+2. **Install and compile.** All `@sixb/*` move together, and `@sixb/lake-worker` arrives through
+   `@sixb/cli`. See _What stops compiling_.
+3. **Stop the old services.** Old workers get `killTimeoutMs` to finish, 70 s under `sixb deploy`;
+   a run they leave behind ends 24 hours after it started.
+4. **Migrate and check, with services down.** `sixb db migrate`, then `sixb check` and
+   `sixb lake check`. This is the first step that opens DuckDB 1.5.6, so a host that cannot fetch the
+   new extension fails here. The `ALTER`s take no `lock_timeout`: behind a long report on `sync_runs`
+   or `pipeline_runs` they wait, and so does every reader behind them.
+5. **Look at what `sixb check` counts, then start.** See _What a restart picks up_.
+6. **After.** `/api/status` reads `unknown` until the first beat: a monitor on `== "ok"` alerts for up
+   to one beat. Regenerate clients.
+
+To roll back to 0.2.1, stop `ingest` traffic and let the inbox drain first: 0.2.1 does not read
+`dataset_ingest_deliveries`, so what waits there stays until you roll forward. A run holding an
+execution token stays `running` on 0.2.1, whose workers skip it.
+
+#### What stops compiling or starting
+
 - `@sixb/ducklake`: `lakeStorage.runMaintenance()` and its `DuckLakeMaintenanceOptions` and
   `DuckLakeMaintenanceReport` types are gone. Call `lakeStorage.maintenance.applyRetention()`.
-- `sixb lake cleanup --expire-older-than` and `--delete-older-than` are now `--keep-versions-for`
-  and `--delete-files-after`. A server cron on the old flags fails. A version now ages from the
-  commit that replaced it, not from its own, and neither may be under an hour.
-- `@sixb/ducklake` runs on DuckDB 1.5.6 (from 1.5.2) and a checked DuckLake build, `ac7595b0`. The
-  first process that opens the lake installs that extension over the network, so a host that cannot
-  fetch it fails there. Any other build logs a warning and still opens the lake.
-- A pipeline step that replaces a keyed output now stores only the rows that changed, so projections
-  of it apply only those. A version that changes no row is still recorded, and fires no
-  `updated()`.
-- DuckLake compacts a dataset on its own, in the process that wrote, after the commits that need
-  it. Compaction never creates a dataset version, and time travel reads the same rows after it.
-- `sixb scheduler` is gone: `sixb orchestrator` runs cron schedules now. The command exits with an
-  error, so a process manager left on it shows up. Remove that process. During the rollout, stop the
-  old scheduler before the new orchestrator starts, or occurrences due in between fire twice.
-  `sixb deploy` does this for you: it stops every service of the old release first.
+- `sixb.datasets.ingest` returns `{ deliveryId, changes }`: `outcome`, `version` and `rowsRead` are
+  gone. See _What changes at runtime_.
 - `sixb.scheduler` and the `SchedulerController` type are gone: nothing outside tests called them.
   Cron runs in the orchestrator's maintenance loop, through `host.startMaintenance()`.
 - `services.scheduler` is no longer a `sixb deploy` setting. Remove it. A deployment with
   `orchestrator: false` runs no cron.
+- `sixb scheduler` is gone: `sixb orchestrator` runs cron schedules now. The command exits with an
+  error, so a process manager left on it shows up. Remove that process. During the rollout, stop the
+  old scheduler before the new orchestrator starts, or occurrences due in between fire twice.
+  `sixb deploy` does this for you: it stops every service of the old release first.
+- `sixb lake cleanup --expire-older-than` and `--delete-older-than` are now `--keep-versions-for`
+  and `--delete-files-after`. A server cron on the old flags fails. A version now ages from the
+  commit that replaced it, not from its own, and neither may be under an hour. The command defaults
+  to the project's `lakeMaintenance` instead of 7 days, and runs until nothing is left instead of
+  one pass.
+- `Queues` gains a required `lake` lane, so a third-party queues provider must implement it. Without
+  it `sixb orchestrator` fails to request cleanup, once a minute, and reports it through
+  `maintenance.pass.failed`. A third-party `LakeStorage` needs nothing: `maintenance` is optional.
+
+#### What to migrate
+
+- Storage gains `maintenance_heartbeats`, `lake_retention_runs`, `dataset_ingest_deliveries` and
+  `dataset_ingest_state`, and `sync_runs`, `pipeline_runs`, `webhook_runs` and `projection_runs`
+  gain columns. Migrate before starting the new services.
+- `@sixb/ducklake` runs on DuckDB 1.5.6 (from 1.5.2) and a checked DuckLake build, `ac7595b0`. The
+  first process that opens the lake installs that extension over the network, so a host that cannot
+  fetch it fails there. Any other build logs a warning and still opens the lake.
+
+#### What runs where
+
 - `sixb api` no longer delivers events left undelivered or purges expired records: run
   `sixb orchestrator`, even with no schedules. It warns at startup. `sixb deploy` runs one unless
   `services.orchestrator` is `false`.
-- `createSixbServer` keeps doing that work. Pass `ontologyMaintenance: false` to it if your process
-  also runs an orchestrator.
-- `/api/status` reads a heartbeat the orchestrator writes to storage. `status` can now be `unknown`,
-  and `maintenance` holds `owner`, `beatAt`, `stale`, `passes` and `outbox` instead of the last pass
-  of the process that answered. Regenerate clients.
-- Storage gains `maintenance_heartbeats`: migrate before starting the new services.
-- `onError` gains `maintenance.pass.failed` and `orchestrator.dispatch.failed`.
-- An automatic dispatch that fails no longer holds the routes behind it. An outage retries until it
-  ends, and a failure about one event, such as a mapper that throws, is reported and dropped.
-  `packages/orchestrator/README.md` lists what can be lost.
-- A cron occurrence the broker refuses is retried until accepted, and fails the `cron` pass
-  meanwhile, instead of being reported once and lost.
-- `onError`'s `orchestrator.dispatch.failed` carries `dropped`, and `InMemoryBroker` now honors
-  `idempotencyKey`, as Redis and NATS do.
-- Lake retention now runs on its own in every project with datasets and a provider that supports
-  it, such as DuckLake: replaced versions go after 7 days, and the files only they read 7 days
-  later. To keep more, set `lakeMaintenance: { keepVersionsFor, deleteFilesAfter }` before you
-  deploy; to keep running it by hand, set `lakeMaintenance: { enabled: false }`.
-- The new `@sixb/lake-worker` runs it, as worker type `lake`. `sixb worker-group` with no types and
-  `sixb deploy` include it, in the existing process. A deployment that lists its worker `types`, or
-  a `sixb worker-group` given a list, must add `lake`: both warn when it is missing, and until then
-  nothing cleans the lake.
+- Only the orchestrator brings back a run that lost its worker. Without one, a lost sync run stays
+  `running`, and later runs of that sync wait behind it.
+- The new `@sixb/lake-worker` runs lake retention and writes ingested changes, as worker type `lake`.
+  `sixb worker-group` with no types and `sixb deploy` include it, in the existing process. A
+  deployment that lists its worker `types`, or a `sixb worker-group` given a list, must add `lake`:
+  both warn when it is missing, and until then nothing cleans the lake and changes wait, shown in
+  Console › Lake health. It starts for any dataset with a primary key.
 - Separate `sixb worker <type>` processes get no such warning at startup: add a `sixb worker lake`
   process. Until then the orchestrator's output, `sixb check` and Console › Lake health say that no
-  lake worker has run cleanup.
-- `Queues` gains a required `lake` lane, so a third-party queues provider must implement it. Without
-  it `sixb orchestrator` fails to request cleanup, once a minute, and reports it through
-  `maintenance.pass.failed`.
-- `sixb lake cleanup` defaults to the project's `lakeMaintenance` instead of 7 days, and runs until
-  nothing is left instead of one pass.
-- Storage gains `lake_retention_runs`, and `onError` gains `lake.retention.failed`.
-- `sixb.datasets.ingest` now stores the changes and returns before they are in the dataset; a
-  worker writes what waits as one version. The result is `{ deliveryId, changes }`: `outcome`,
-  `version` and `rowsRead` are gone. Code that read the dataset right after `ingest` must be
-  triggered by the version instead: `defineSchedule("x").on(events.dataset(x).updated())`, attached
-  to the sync, pipeline or workflow. In tests, and in a server embedded with `createSixbServer`,
-  `ingest` still writes before it returns: pass `ingestFlush: false` if a lake worker runs for that
-  server's project. `sixb api` already does, so its changes wait for a lake worker, and `sixb check`
-  and Console › Lake health say so.
-- The `lake` worker writes ingested changes, and starts for any dataset with a primary key. A
-  deployment that lists its worker `types`, or a `sixb worker-group` given a list, must add `lake`:
-  both warn when it is missing, and until then changes wait, shown in Console › Lake health. No
-  orchestrator is needed for webhooks to reach the lake. Keep it on all the same: it reports changes
-  that wait, and asks again for a write the queue lost when no other `ingest` call comes.
-- `ingest` refuses, by throwing, a value the lake cannot hold when it can tell, such as a date
-  DuckDB does not read. One found later sets its call aside for a week: `sixb lake rejected` prints
-  it, and Console › Lake health counts it. Nothing else behind it waits.
-- During a rollout, a lake worker older than the API keeps retrying what it would refuse, until it
-  runs the same code. Finish the rollout: changes wait for it. Rolling back past a definition leaves
-  the same wait, until you roll forward. A rollback to 0.2.1 does not read
-  `dataset_ingest_deliveries` at all, so changes waiting there stay until you roll forward: stop
-  `ingest` traffic and let the inbox drain first.
-- Storage gains `dataset_ingest_deliveries` and `dataset_ingest_state`: migrate before starting the
-  new services. `onError` gains `dataset.ingest.flush.failed` and `dataset.ingest.rejected`, and the
-  error catalog `dataset.change_refused`. `@sixb/core/lake-storage` exports `LakeValueRefusedError`
-  and `DatasetSequenceConflictError`.
-- `sync_runs` and `pipeline_runs` gain columns: migrate before starting the new services. The
-  `ALTER` takes no `lock_timeout`, so run it when no long report holds these tables.
+  lake worker has run cleanup, and `sixb check` names the datasets whose changes nothing writes.
+- No orchestrator is needed for webhooks to reach the lake. Keep it on all the same: it reports
+  changes that wait, and asks again for a write the queue lost when no other `ingest` call comes.
+- `createSixbServer` keeps delivering events and purging records, and writes what `ingest` stores
+  before the call returns, since no lake worker would. Pass `ontologyMaintenance: false` to it if
+  your process also runs an orchestrator, and `ingestFlush: false` if a lake worker runs for the
+  project. `sixb api` passes both. An embedded server runs no cron, no lake retention and no report
+  of changes that wait.
+
+#### What a restart picks up
+
+- The orchestrator's new `runs` pass brings back what lost its job, however old: a queued run starts,
+  and a running run whose lease lapsed resumes. A run lost for a week ends `cancelled` instead, and
+  so does a run an older version left running, 24 hours after it started. `*.run.finished` fires for
+  those, and a schedule on it with them.
+- `sixb check` counts what will go on and what will end. Workflows are the ones with side effects,
+  so read them before you start:
+  ```sql
+  SELECT status, count(*), min(queued_at) FROM workflow_runs
+  WHERE status IN ('queued','running') GROUP BY status;
+  ```
+- The first `triggers` pass looks at each dataset once, and may start a pipeline for a change no run
+  read. The first `lake-retention` request deletes what step 1 of these notes says.
+
+#### What changes at runtime
+
 - A stopped worker no longer ends a run: it stays `running` and the next delivery resumes it, so
   `*.run.finished` with `cancelled` stops firing at deploys. A run that loses its worker five times
   ends `failed`. `attempt` joins the sync and pipeline run APIs, and the Console run rows.
 - One run of a sync runs at a time: a queued run waits for the running one, and triggers join it.
   Datasets stay multi-writer.
-- Runs left behind are picked up, by the orchestrator's new `runs` pass. A queued run whose job was
-  lost starts, a running run whose lease lapsed resumes, and either ends `cancelled` once lost for a
-  week. So does a run an older version left running, 24 hours after it started. Look before you
-  start: `sixb check` counts them, and this lists a workflow's, the ones with side effects:
-  ```sql
-  SELECT status, count(*), min(queued_at) FROM workflow_runs
-  WHERE status IN ('queued','running') GROUP BY status;
-  ```
+- A webhook retry during a live delivery gets `503` with `Retry-After`, not `202`. A delivery whose
+  process died runs its handler again on the retry, so handlers must be idempotent.
+- `sixb.datasets.ingest` stores the changes and returns before they are in the dataset; a worker
+  writes what waits as one version. Code that read the dataset right after `ingest` must be
+  triggered by the version instead: `defineSchedule("x").on(events.dataset(x).updated())`, attached
+  to the sync, pipeline or workflow. In tests, and in an embedded server, `ingest` still writes
+  before it returns.
+- `ingest` refuses, by throwing, a value the lake cannot hold when it can tell, such as a date
+  DuckDB does not read. One found later sets its call aside for a week: `sixb lake rejected` prints
+  it, and Console › Lake health counts it. Nothing else behind it waits.
+- During a rollout, a lake worker older than the API keeps retrying what it would refuse, until it
+  runs the same code. Finish the rollout: changes wait for it. Rolling back past a definition leaves
+  the same wait, until you roll forward.
+- DuckLake compacts a dataset on its own, in the process that wrote, after the commits that need
+  it. Compaction never creates a dataset version, and time travel reads the same rows after it.
+- A pipeline step that replaces a keyed output now stores only the rows that changed, so projections
+  of it apply only those. A version that changes no row is still recorded, and fires no
+  `updated()`.
+- An automatic dispatch that fails no longer holds the routes behind it. An outage retries until it
+  ends, and a failure about one event, such as a mapper that throws, is reported and dropped.
+  `packages/orchestrator/README.md` lists what can be lost.
+- A cron occurrence the broker refuses is retried until accepted, and fails the `cron` pass
+  meanwhile, instead of being reported once and lost.
+- `/api/status` reads a heartbeat the orchestrator writes to storage. `status` can now be `unknown`,
+  and `maintenance` holds `owner`, `beatAt`, `stale`, `passes` and `outbox` instead of the last pass
+  of the process that answered.
+- `onError` gains `maintenance.pass.failed`, `orchestrator.dispatch.failed`, which carries `dropped`,
+  `lake.retention.failed`, `dataset.ingest.flush.failed` and `dataset.ingest.rejected`, and the
+  error catalog `dataset.change_refused`. `@sixb/core/lake-storage` exports `LakeValueRefusedError`
+  and `DatasetSequenceConflictError`. `InMemoryBroker` now honors `idempotencyKey`, as Redis and NATS
+  do.
 
 ## 2026-11-05 — Sixb 0.2.1
 

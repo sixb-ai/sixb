@@ -89,7 +89,7 @@ export class WorkflowWorker extends RunWorker<
   ): Promise<RunDelivery<WorkflowRunRecord>> {
     if (claimed.job.type === "workflow.run.resume.requested") {
       const run = await this.requireWorkflowRun(claimed.job.payload.runId)
-      if (run.status !== "running") return { outcome: "woken", run }
+      if (run.status !== "running") return { outcome: "deferred", run }
     }
 
     return this.workflowRuns.startOrReclaim({

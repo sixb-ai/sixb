@@ -99,11 +99,11 @@ picks up depends on the primitive:
 | Primitive | After a crash or a shutdown |
 | --- | --- |
 | Sync | Records a commit that landed, otherwise reads again from the last checkpoint |
-| Pipeline | Runs the steps that did not commit; nothing is written twice |
+| Pipeline | Resumes at the first step that did not commit; nothing is written twice |
 | Projection, workflow | Resumes where its records say it stopped |
 | Run of an older version | Left to its old worker for 24 h, then ends `cancelled` |
 | Agent turn | Ends as interrupted: running it again would repeat its tools |
-| Webhook | Runs again on the provider's next retry, if it failed |
+| Webhook | Runs again on the provider's next retry, once its 60 s lease has lapsed; a retry before that gets `503` |
 
 Actions are the exception: with no job to reclaim, an action whose process crashes
 mid-run leaves no record, and requesting its `runId` again runs it again.

@@ -30,12 +30,15 @@ import {
   SUPERSEDING_PROJECTION_RUN_STATUSES,
   staleProjectionRunExecution,
 } from "@sixb/core/internal/projection-run-storage-provider"
+import { laterLease } from "@sixb/core/internal/storage"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
+  ConfirmRunExecutionInput,
   ExecutionStorage,
   FailProjectionRunEnqueueInput,
   FindSupersedingProjectionRunInput,
   FinishProjectionRunInput,
+  ListLapsedProjectionRunsInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
@@ -49,6 +52,7 @@ import type {
   QueueProjectionRunInput,
   RecordProjectionAttemptFailureInput,
   RecordProjectionMissingTargetInput,
+  ReleaseRunExecutionInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
@@ -159,11 +163,13 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       if (!existingRow) throw projectionRunNotFound(input.projectId, input.id)
       const existing = restoreProjectionRunRow(existingRow)
       const { attempt } = planProjectionRunReclaim(existing, input)
-      const executionToken = createFreshExecutionToken(existing.executionToken)
+      const executionToken =
+        input.execution?.token ?? createFreshExecutionToken(existing.executionToken)
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET status = ${"running"}, started_at = COALESCE(started_at, ${input.startedAt ?? new Date()}),
-          finished_at = ${null}, attempt = ${attempt}, execution_token = ${executionToken}
+          finished_at = ${null}, attempt = ${attempt}, execution_token = ${executionToken},
+          execution_queue_lease_expires_at = ${input.execution?.queueLeaseExpiresAt ?? null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
           AND (
             (status = ${"queued"} AND execution_token IS NULL)
@@ -174,6 +180,54 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       if (!updated) throw staleProjectionRunExecution(input.id)
       return projectionRunClaim(updated)
     })
+  }
+
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<ProjectionRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const [existingRow] = await tx<DatabaseRow[]>`
+        SELECT * FROM projection_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `
+      if (!existingRow) throw projectionRunNotFound(input.projectId, input.id)
+
+      const existing = restoreProjectionRunRow(existingRow)
+      if (existing.status !== "running" || existing.executionToken !== input.executionToken) {
+        throw staleProjectionRunExecution(input.id)
+      }
+
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE projection_runs
+        SET execution_queue_lease_expires_at = ${laterLease(
+          existing.queueLeaseExpiresAt,
+          input.queueLeaseExpiresAt
+        )}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return rowToProjectionRunRecord(updated)
+    })
+  }
+
+  /** Starts from `(project_id, status, ...)`: running rows are few however long the history. */
+  async listLapsed(input: ListLapsedProjectionRunsInput): Promise<readonly ProjectionRunRecord[]> {
+    const rows = await this.sql<DatabaseRow[]>`
+      SELECT * FROM projection_runs
+      WHERE project_id = ${input.projectId} AND status = ${"running"}
+        AND execution_queue_lease_expires_at <= ${input.lapsedBy}
+      ORDER BY execution_queue_lease_expires_at
+      LIMIT ${input.limit}
+    `
+
+    return rows.map(rowToProjectionRunRecord)
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    await this.sql`
+      UPDATE projection_runs SET execution_queue_lease_expires_at = ${input.releasedAt ?? new Date()}
+      WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"running"}
+        AND execution_token = ${input.executionToken}
+    `
   }
 
   async failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord> {
@@ -263,6 +317,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           status = ${input.status},
           finished_at = ${plan.finishedAt},
           execution_token = ${null},
+          execution_queue_lease_expires_at = ${null},
           source_rows_read = ${plan.progress.sourceRowsRead},
           source_rows_skipped = ${plan.progress.sourceRowsSkipped},
           source_changes_read = ${plan.progress.sourceChangesRead ?? null},
@@ -574,6 +629,9 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     attempt: databaseSafeInteger(row.attempt, "attempt"),
     executionToken: row.execution_token ?? undefined,
+    queueLeaseExpiresAt: row.execution_queue_lease_expires_at
+      ? new Date(row.execution_queue_lease_expires_at)
+      : undefined,
     fixedBatchSize: optionalDatabaseSafeInteger(row.fixed_batch_size, "fixedBatchSize"),
     nextBatchOrdinal: optionalDatabaseSafeInteger(row.next_batch_ordinal, "nextBatchOrdinal"),
     nextRowOffset: optionalDatabaseSafeInteger(row.next_row_offset, "nextRowOffset"),
@@ -633,6 +691,7 @@ interface DatabaseRow {
   finished_at: Date | string | null
   attempt: number | string
   execution_token: string | null
+  execution_queue_lease_expires_at: Date | string | null
   materialization_protocol: "replacement" | "telemetry" | null
   dataset_version_created_at: string | null
   ontology_revision: string | null

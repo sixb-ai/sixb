@@ -13,3 +13,13 @@ export class ProjectionRunError extends MaterializationConflictError {
     super(kind, message)
   }
 }
+
+/** A delivery found its run held by a live execution, whose lease lasts until `ownedUntil`. */
+export class ProjectionRunHeldError extends ProjectionRunError {
+  constructor(
+    readonly runId: string,
+    readonly ownedUntil: Date
+  ) {
+    super(`[Sixb] Projection run '${runId}' is still held by another delivery.`)
+  }
+}

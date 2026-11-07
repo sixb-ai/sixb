@@ -16,7 +16,7 @@ The two surfaces use distinct namespaces:
 | `host.definitions` | Validated project definitions, without caller-specific filtering | `host.definitions.workflows.getById(id)` |
 | `host.storage`, `host.blobStorage`, … | Configured process providers | `host.blobStorage.stat(blobId)` |
 | `host.logging` | Process logging, capture, and lifecycle | `host.logging.startExecution(run)` |
-| `host.scheduler`, `host.close*()` | Process lifecycle | `host.scheduler.start()` |
+| `host.startMaintenance()`, `host.close*()` | Process lifecycle | `host.startMaintenance(passes)` |
 | `sixb` | Execution-bound domain operations and visible definitions | `sixb.workflows.requestById(input)` |
 
 Definition catalogs expose `list()` and `getById(id)`. The model catalog uses `list()` and

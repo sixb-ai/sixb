@@ -6,11 +6,13 @@ export type {
   GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RenewWebhookRunInput,
   RestartWebhookRunInput,
   StartWebhookRunInput,
+  WebhookRunExecution,
   WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./types"
-export { canRetryWebhookRun, WEBHOOK_RUN_FAILURE_CODES } from "./types"
+export { canRetryWebhookRun, WEBHOOK_RUN_FAILURE_CODES, WEBHOOK_RUN_LEASE_MS } from "./types"

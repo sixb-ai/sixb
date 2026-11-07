@@ -49,6 +49,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
 
   const execution = await claimOrReplaySettledRun(input)
   if ("replayedTerminal" in execution) return execution
+
   // Outside the try below: a supersession that fails is retried by the next delivery, never
   // turned into a failed run.
   if (await supersedeStaleRun(input, execution)) {
@@ -157,6 +158,7 @@ async function claimExecution(input: RunProjectionJobInput): Promise<ClaimedProj
         ...common,
         identity: run.identity,
         target: run.target,
+        execution: input.execution,
       })
     }
     case "link": {
@@ -165,6 +167,7 @@ async function claimExecution(input: RunProjectionJobInput): Promise<ClaimedProj
         ...common,
         identity: run.identity,
         target: run.target,
+        execution: input.execution,
       })
     }
     case "telemetry": {
@@ -176,6 +179,7 @@ async function claimExecution(input: RunProjectionJobInput): Promise<ClaimedProj
         identity: run.identity,
         target: run.target,
         fixedBatchSize: input.telemetryBatchSize ?? run.telemetryCheckpoint.fixedBatchSize,
+        execution: input.execution,
       })
     }
   }

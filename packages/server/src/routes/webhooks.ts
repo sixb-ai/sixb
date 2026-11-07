@@ -18,9 +18,14 @@ import {
   type AdmitWebhookRunResult,
   admitWebhookRun,
   createWebhookConnections,
+  holdWebhookRun,
   isStaticConnectorDefinition,
 } from "@sixb/core/internal/webhooks"
-import type { WebhookRunFailureCode } from "@sixb/core/storage"
+import type {
+  WebhookRunExecution,
+  WebhookRunFailureCode,
+  WebhookRunRecord,
+} from "@sixb/core/storage"
 import { WEBHOOK_RUN_FAILURE_CODES, WebhookRunError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
@@ -60,11 +65,13 @@ type WebhookRunFailure = SixbFailure<WebhookRunFailureCode>
 type FinishWebhookRunInput =
   | {
       readonly runId: string
+      readonly executionToken: string
       readonly status: "succeeded"
       readonly responseStatus: number
     }
   | {
       readonly runId: string
+      readonly executionToken: string
       readonly status: "failed"
       readonly responseStatus: number
       readonly failure: WebhookRunFailure
@@ -92,8 +99,16 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
 
   const admission = await admitPreparedWebhook(options, candidateRunId, prepared.request)
   if (admission.status === "responded") return admission.response
+  if (admission.status === "in_progress") return retryLater(options.set, admission.run)
   if (admission.status !== "admitted") return accepted(options.set)
 
+  const execution = requireWebhookExecution(admission.run)
+  const stopHolding = holdWebhookRun({
+    storage: options.host.storage,
+    projectId: options.host.id,
+    runId: admission.run.id,
+    execution,
+  })
   const executionLogs = options.host.logging.startExecution({
     kind: "webhook",
     id: admission.run.id,
@@ -103,9 +118,11 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
       options,
       prepared.request,
       admission,
+      execution,
       executionLogs.withContext({ phase: "handle" })
     )
   } finally {
+    stopHolding()
     await executionLogs.flush()
   }
 }
@@ -214,6 +231,7 @@ async function executeWebhookHandler(
   options: DispatchWebhookOptions,
   prepared: PreparedWebhookRequest,
   admission: Extract<AdmitWebhookRunResult, { readonly status: "admitted" }>,
+  { token: executionToken }: WebhookRunExecution,
   logger: Logger
 ): Promise<unknown> {
   const { host, registered, request, set } = options
@@ -251,6 +269,7 @@ async function executeWebhookHandler(
     try {
       await finishWebhookRun(host, {
         runId,
+        executionToken,
         status: "failed",
         responseStatus: 500,
         failure: failed.failure,
@@ -278,8 +297,8 @@ async function executeWebhookHandler(
     await finishWebhookRun(
       host,
       failed
-        ? { runId, status: "failed", responseStatus, failure: failed.failure }
-        : { runId, status: "succeeded", responseStatus }
+        ? { runId, executionToken, status: "failed", responseStatus, failure: failed.failure }
+        : { runId, executionToken, status: "succeeded", responseStatus }
     )
   } catch (error) {
     const failure = captureSixbFailure(error, {
@@ -300,6 +319,27 @@ async function executeWebhookHandler(
     reportFailure(failed.error, failed.failure)
   }
   return applyWebhookResponse(set, response)
+}
+
+/**
+ * The handler may still fail, so "accepted" could lose the delivery: a provider stops retrying once
+ * it hears that. It deduplicates by the same key, so answering "later" is safe either way.
+ */
+function retryLater(set: DispatchWebhookOptions["set"], run: WebhookRunRecord): unknown {
+  const untilLeaseEnds = (run.execution?.leaseExpiresAt.getTime() ?? 0) - Date.now()
+
+  set.status = 503
+  setHeader(set, "retry-after", String(Math.max(1, Math.ceil(untilLeaseEnds / 1_000))))
+  return { error: "Webhook delivery in progress" }
+}
+
+function requireWebhookExecution(run: WebhookRunRecord): WebhookRunExecution {
+  if (run.execution) return run.execution
+
+  throw createSixbError(
+    "internal.unexpected",
+    `[SixbServer] Admitted webhook run '${run.id}' has no execution.`
+  )
 }
 
 function createFailureReporter(
@@ -335,6 +375,7 @@ async function finishWebhookRun(host: SixbHostView, input: FinishWebhookRunInput
   const terminal = {
     id: input.runId,
     projectId: host.id,
+    executionToken: input.executionToken,
     responseStatus: input.responseStatus,
   }
   await storage.finish(

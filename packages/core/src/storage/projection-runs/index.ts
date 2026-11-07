@@ -1,4 +1,4 @@
-export { ProjectionRunError } from "./errors"
+export { ProjectionRunError, ProjectionRunHeldError } from "./errors"
 export { InMemoryProjectionRunStorage } from "./in-memory"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
@@ -7,6 +7,7 @@ export type {
   FinishProjectionRunInput,
   LinkProjectionRunRecord,
   LinkProjectionTarget,
+  ListLapsedProjectionRunsInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
