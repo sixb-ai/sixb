@@ -176,6 +176,23 @@ export async function applyDatasetRowsFromRelation(input: {
   }
 }
 
+interface KeyedSnapshotInput {
+  readonly runtime: DuckDbQueryRuntime
+  readonly dataset: DatasetDefinition
+  readonly table: string
+  readonly sourceRelationSql: string
+  readonly sourceRowCount: number
+  /** The row count the latest version recorded, when the commit read it. */
+  readonly previousRowCount?: number
+  readonly primaryKeyColumns: readonly string[]
+}
+
+interface DeltaCounts {
+  readonly changedKeys: number
+  readonly insertedRows: number
+  readonly deletedRows: number
+}
+
 /**
  * Writes a keyed snapshot as the difference from the table it read: deletes the rows whose key
  * is gone or whose values changed, and inserts the staged rows that are new or changed. The
@@ -186,19 +203,47 @@ export async function applyDatasetRowsFromRelation(input: {
  * each. A table that was empty, or a write that changes enough of its rows (`replacesEveryRow`),
  * replaces them all instead.
  */
-async function applyKeyedSnapshot(input: {
-  readonly runtime: DuckDbQueryRuntime
-  readonly dataset: DatasetDefinition
-  readonly table: string
-  readonly sourceRelationSql: string
-  readonly sourceRowCount: number
-  /** The row count the latest version recorded, when the commit read it. */
-  readonly previousRowCount?: number
-  readonly primaryKeyColumns: readonly string[]
-}): Promise<ApplyDatasetRowsResult> {
-  const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
+async function applyKeyedSnapshot(input: KeyedSnapshotInput): Promise<ApplyDatasetRowsResult> {
   const delta = quoteIdentifier(`sixb_snapshot_delta_${randomUUID().replaceAll("-", "")}`)
 
+  await createSnapshotDelta(input, delta)
+
+  try {
+    const counts = await readDeltaCounts(input.runtime, delta)
+
+    // The source holds every row the table keeps, so the table held those plus the deleted ones,
+    // provided its keys are unique. A table holding more, such as a key a client outside Sixb
+    // inserted twice, is replaced: a difference would keep the duplicate.
+    const targetRowCount = input.sourceRowCount - counts.insertedRows + counts.deletedRows
+    const actualRowCount = input.previousRowCount ?? (await countRows(input.runtime, input.table))
+    if (actualRowCount !== targetRowCount) {
+      return await replaceSnapshotRows(input, actualRowCount)
+    }
+
+    if (counts.changedKeys === 0) {
+      return unchangedSnapshot(input.sourceRowCount, targetRowCount)
+    }
+
+    // An updated row is one changed key, both deleted and inserted.
+    const largerSide = Math.max(input.sourceRowCount, targetRowCount)
+    if (targetRowCount === 0 || replacesEveryRow(counts.changedKeys, largerSide)) {
+      return {
+        ...(await replaceSnapshotRows(input, targetRowCount)),
+        mostRowsChanged: targetRowCount > 0 && changesMostRows(counts.changedKeys, largerSide),
+      }
+    }
+
+    return await applyDelta(input, delta, counts)
+  } finally {
+    await dropTemporaryTable(input.runtime, delta)
+  }
+}
+
+/**
+ * Stores the key of every row the snapshot adds, removes or changes, and on which side it is.
+ * Keys are non-null and unique on both sides, so a missing side means a new or a removed row.
+ */
+async function createSnapshotDelta(input: KeyedSnapshotInput, delta: string): Promise<void> {
   const firstKey = quoteIdentifier(input.primaryKeyColumns[0]!)
   const sourceMissing = `source.${firstKey} IS NULL`
   const targetMissing = `target.${firstKey} IS NULL`
@@ -209,7 +254,6 @@ async function applyKeyedSnapshot(input: {
     })
     .join(", ")
 
-  // Keys are non-null and unique on both sides, so a missing side means a new or a removed row.
   await input.runtime.run(`
     CREATE TEMP TABLE ${delta} AS
     SELECT
@@ -223,109 +267,102 @@ async function applyKeyedSnapshot(input: {
       OR ${targetMissing}
       OR (${datasetRowDifferenceSql(input.dataset, "source", "target")})
   `)
+}
 
-  try {
-    const [counts] = await input.runtime.query(`
-      SELECT
-        count(*) AS changed_keys,
-        count(*) FILTER (WHERE in_source) AS inserted,
-        count(*) FILTER (WHERE in_target) AS deleted
-      FROM ${delta}
-    `)
-    const changedKeys = counts === undefined ? 0 : Number(getBigIntLike(counts, "changed_keys"))
-    const insertedRows = counts === undefined ? 0 : Number(getBigIntLike(counts, "inserted"))
-    const deletedRows = counts === undefined ? 0 : Number(getBigIntLike(counts, "deleted"))
+async function readDeltaCounts(runtime: DuckDbQueryRuntime, delta: string): Promise<DeltaCounts> {
+  const [counts] = await runtime.query(`
+    SELECT
+      count(*) AS changed_keys,
+      count(*) FILTER (WHERE in_source) AS inserted,
+      count(*) FILTER (WHERE in_target) AS deleted
+    FROM ${delta}
+  `)
 
-    // The source holds every row the table keeps, so the table held those plus the deleted ones,
-    // provided its keys are unique. A table holding more, such as a key a client outside Sixb
-    // inserted twice, is replaced: a difference would keep the duplicate.
-    const targetRowCount = input.sourceRowCount - insertedRows + deletedRows
-    const actualRowCount = input.previousRowCount ?? (await countRows(input.runtime, input.table))
-    if (actualRowCount !== targetRowCount) {
-      return replaceRows({
-        runtime: input.runtime,
-        table: input.table,
-        columnsSql,
-        sourceRelationSql: input.sourceRelationSql,
-        sourceRowCount: input.sourceRowCount,
-        targetRowCount: actualRowCount,
-      })
-    }
-
-    if (changedKeys === 0) {
-      return unchangedSnapshot(input.sourceRowCount, targetRowCount)
-    }
-
-    // An updated row is one changed key, both deleted and inserted.
-    const largerSide = Math.max(input.sourceRowCount, targetRowCount)
-    if (targetRowCount === 0 || replacesEveryRow(changedKeys, largerSide)) {
-      const replaced = await replaceRows({
-        runtime: input.runtime,
-        table: input.table,
-        columnsSql,
-        sourceRelationSql: input.sourceRelationSql,
-        sourceRowCount: input.sourceRowCount,
-        targetRowCount,
-      })
-
-      return {
-        ...replaced,
-        mostRowsChanged: targetRowCount > 0 && changesMostRows(changedKeys, largerSide),
-      }
-    }
-
-    // DuckLake commits two writes that only insert concurrently, and two that only delete from
-    // different files: a difference that would only do one rewrites an unchanged row too, so
-    // that any concurrent change to the table's rows conflicts with it, as with a replacement.
-    const oneSided = insertedRows === 0 || deletedRows === 0
-    if (oneSided) {
-      const sourceKeysSql = input.primaryKeyColumns
-        .map((column) => `source.${quoteIdentifier(column)}`)
-        .join(", ")
-
-      await input.runtime.run(`
-        INSERT INTO ${delta}
-        SELECT ${sourceKeysSql}, true, true
-        FROM ${input.sourceRelationSql} source
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM ${delta} delta
-          WHERE ${primaryKeyMatchSql(input.primaryKeyColumns, "source", "delta")}
-        )
-        LIMIT 1
-      `)
-    }
-
-    await input.runtime.run(`
-      DELETE FROM ${input.table} AS target
-      USING ${delta} AS delta
-      WHERE delta.in_target
-        AND ${primaryKeyMatchSql(input.primaryKeyColumns, "target", "delta")}
-    `)
-
-    await input.runtime.run(`
-      INSERT INTO ${input.table} (${columnsSql})
-      SELECT ${columnsSql}
-      FROM ${input.sourceRelationSql} source
-      WHERE EXISTS (
-        SELECT 1
-        FROM ${delta} delta
-        WHERE delta.in_source
-          AND ${primaryKeyMatchSql(input.primaryKeyColumns, "source", "delta")}
-      )
-    `)
-
-    return {
-      dataChangeExpected: true,
-      sourceRowCount: input.sourceRowCount,
-      resultingRowCount: { kind: "exact", value: input.sourceRowCount },
-      targetWasEmpty: false,
-      insertedRows: oneSided ? insertedRows + 1 : insertedRows,
-      deletedRows: oneSided ? deletedRows + 1 : deletedRows,
-    }
-  } finally {
-    await dropTemporaryTable(input.runtime, delta)
+  return {
+    changedKeys: counts === undefined ? 0 : Number(getBigIntLike(counts, "changed_keys")),
+    insertedRows: counts === undefined ? 0 : Number(getBigIntLike(counts, "inserted")),
+    deletedRows: counts === undefined ? 0 : Number(getBigIntLike(counts, "deleted")),
   }
+}
+
+function replaceSnapshotRows(
+  input: KeyedSnapshotInput,
+  targetRowCount: number
+): Promise<ApplyDatasetRowsResult> {
+  return replaceRows({
+    runtime: input.runtime,
+    table: input.table,
+    columnsSql: datasetSchemaColumnNamesSql(input.dataset.schema),
+    sourceRelationSql: input.sourceRelationSql,
+    sourceRowCount: input.sourceRowCount,
+    targetRowCount,
+  })
+}
+
+/** Deletes what the delta says went or changed, then inserts what it says came or changed. */
+async function applyDelta(
+  input: KeyedSnapshotInput,
+  delta: string,
+  counts: DeltaCounts
+): Promise<ApplyDatasetRowsResult> {
+  const { runtime, table, sourceRelationSql, primaryKeyColumns } = input
+  const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
+
+  const oneSided = counts.insertedRows === 0 || counts.deletedRows === 0
+  if (oneSided) {
+    await addUnchangedRowToDelta(input, delta)
+  }
+
+  await runtime.run(`
+    DELETE FROM ${table} AS target
+    USING ${delta} AS delta
+    WHERE delta.in_target
+      AND ${primaryKeyMatchSql(primaryKeyColumns, "target", "delta")}
+  `)
+
+  await runtime.run(`
+    INSERT INTO ${table} (${columnsSql})
+    SELECT ${columnsSql}
+    FROM ${sourceRelationSql} source
+    WHERE EXISTS (
+      SELECT 1
+      FROM ${delta} delta
+      WHERE delta.in_source
+        AND ${primaryKeyMatchSql(primaryKeyColumns, "source", "delta")}
+    )
+  `)
+
+  return {
+    dataChangeExpected: true,
+    sourceRowCount: input.sourceRowCount,
+    resultingRowCount: { kind: "exact", value: input.sourceRowCount },
+    targetWasEmpty: false,
+    insertedRows: oneSided ? counts.insertedRows + 1 : counts.insertedRows,
+    deletedRows: oneSided ? counts.deletedRows + 1 : counts.deletedRows,
+  }
+}
+
+/**
+ * DuckLake commits two writes that only insert concurrently, and two that only delete from
+ * different files: a difference that would only do one rewrites an unchanged row too, so that any
+ * concurrent change to the table's rows conflicts with it, as with a replacement.
+ */
+async function addUnchangedRowToDelta(input: KeyedSnapshotInput, delta: string): Promise<void> {
+  const sourceKeysSql = input.primaryKeyColumns
+    .map((column) => `source.${quoteIdentifier(column)}`)
+    .join(", ")
+
+  await input.runtime.run(`
+    INSERT INTO ${delta}
+    SELECT ${sourceKeysSql}, true, true
+    FROM ${input.sourceRelationSql} source
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM ${delta} delta
+      WHERE ${primaryKeyMatchSql(input.primaryKeyColumns, "source", "delta")}
+    )
+    LIMIT 1
+  `)
 }
 
 /** Deletes every row of the table, then inserts every source row. */
