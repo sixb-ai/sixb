@@ -182,7 +182,7 @@ sixb worker sync --concurrency 2
 sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8
 ```
 
-Agent workers default to 8 concurrent jobs; other types default to 1. The same per-type options work with `sixb dev`.
+Agent workers default to 8 concurrent jobs, lake workers to 4, and other types to 1. The same per-type options work with `sixb dev`.
 
 Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the environment. Command flags take precedence. Replicas multiply the total concurrency.
 

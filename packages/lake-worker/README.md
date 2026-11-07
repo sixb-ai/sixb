@@ -1,8 +1,8 @@
 # @sixb/lake-worker
 
-Queue worker for lake upkeep that must not run in the process that asks for it. It consumes the
-`lake` queue, so lake work never takes a slot from the syncs and pipelines that write the lake, and
-the orchestrator never touches the catalog.
+Queue worker for lake work that must not run in the process that asks for it: retention, and
+writing ingested changes. It consumes the `lake` queue, so lake work never takes a slot from the
+syncs and pipelines that write the lake, and the orchestrator never touches the catalog.
 
 You normally do not import it. `sixb worker lake` and `sixb worker-group` construct it for you, and
 `sixb dev` starts it when lake retention runs on its own or a dataset can be ingested.
@@ -30,10 +30,14 @@ One run:
   half a minute to end, then leaves the files to the next pass with `hasMore`.
 
 `dataset.ingest.flush.requested`: writes one dataset's ingested changes through
-`getDatasetIngestRuntime(host).flush` (see `packages/core/src/datasets/ingest-flush.ts`).
+`getDatasetIngestRuntime(host).flush` (see `packages/core/src/datasets/ingest-flush.ts`). No
+orchestrator is involved: `ingest` queues the job itself, and the orchestrator's `ingest` pass only
+recovers a job that could not be queued.
 
 - Its id names the flush request (`ingest-flush:<dataset>:<request>`), so the deliveries of one
   request queue one job.
+- A job takes batches for 30 s, then hands over: it leaves the rest to a new request, never to its
+  own, whose id the queue would ignore.
 - When another flush holds the dataset, the job tries again a second later, until that flush
   releases it.
 - A failure retries after 1, 2, 5, 15 and 30 s, then every minute, and the job never fails: the

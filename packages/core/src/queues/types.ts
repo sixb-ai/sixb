@@ -241,9 +241,9 @@ export interface Queues {
     "internal.unexpected" | "runtime.cancelled"
   >
   /**
-   * Lake work the framework runs in a worker rather than in the process that asks for it, such as
-   * the retention of replaced dataset versions and their files. LakeWorker consumes this lane, so
-   * lake work never waits behind a sync or takes its slot.
+   * Lake work the framework runs in a worker rather than in the process that asks for it: the
+   * retention of replaced dataset versions and their files, and writing ingested changes.
+   * LakeWorker consumes this lane, so lake work never waits behind a sync or takes its slot.
    */
   readonly lake: Queue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: Queue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
