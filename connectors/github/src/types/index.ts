@@ -14,6 +14,15 @@ export type {
 } from "./branches"
 export type { GitHubClient, GitHubOrganizationScope, GitHubRepositoryScope } from "./client"
 export type {
+  GitHubCommit,
+  GitHubCommitDetail,
+  GitHubCommitFile,
+  GitHubCommitParent,
+  GitHubGitActor,
+  ListCommitsOptions,
+  RepositoryCommitsApi,
+} from "./commits"
+export type {
   GitHubPage,
   GitHubPaginationOptions,
   GitHubRepositoryTarget,
@@ -66,6 +75,20 @@ export type {
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
 export type { GitHubConnectorOptions } from "./options"
+export type {
+  GetPullRequestOptions,
+  GitHubPullRequest,
+  GitHubPullRequestBranch,
+  GitHubPullRequestDetail,
+  GitHubPullRequestReview,
+  GitHubPullRequestReviewState,
+  GitHubPullRequestSort,
+  GitHubPullRequestState,
+  ListPullRequestReviewsOptions,
+  ListPullRequestsOptions,
+  RepositoryPullRequestReviewsApi,
+  RepositoryPullRequestsApi,
+} from "./pulls"
 export type {
   CreateReleaseInput,
   CreateReleaseReactionInput,

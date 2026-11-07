@@ -5,6 +5,8 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 - **Repositories** — list authenticated-user/org repositories, get a repository
 - **Branches** — list a repository's branches, optionally only protected or unprotected ones, get one by name
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
+- **Pull requests** — list a repository's pull requests, get one with its merge state and size, list its reviews
+- **Commits** — list a repository's commits by branch, path, author or date, get one with its changed files
 - **Attachments** — find the images, videos and files in an issue or comment body and download them
 - **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
 - **People** — query users, organization members, memberships, outside collaborators, and invitations
@@ -34,7 +36,8 @@ export const githubConnector = defineConnector(
 | `onEvent`       | Handler for inbound webhook events. See [Webhooks](#webhooks).           |
 
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
-repository and issue APIs. Branches need `Contents: read`. Releases need `Contents: read`, or
+repository and issue APIs. Pull requests need `Pull requests: read`. Branches and commits need
+`Contents: read`. Releases need `Contents: read`, or
 `Contents: read & write` to create, update or delete them and their assets. Organization people
 APIs require `Members: read`. Public user profiles
 and public organization membership can be queried without that organization permission, but private
@@ -87,6 +90,11 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).get()`         | `GET /repos/{owner}/{repo}`                   |
 | `gh.repo({ owner, repo }).branches.list()` | `GET /repos/{owner}/{repo}/branches`        |
 | `gh.repo({ owner, repo }).branches.get(branch)` | `GET /repos/{owner}/{repo}/branches/{branch}` |
+| `gh.repo({ owner, repo }).pulls.list()` | `GET /repos/{owner}/{repo}/pulls`             |
+| `gh.repo({ owner, repo }).pulls.get(number)` | `GET /repos/{owner}/{repo}/pulls/{number}` |
+| `gh.repo({ owner, repo }).pulls.reviews.list(number)` | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| `gh.repo({ owner, repo }).commits.list()` | `GET /repos/{owner}/{repo}/commits`         |
+| `gh.repo({ owner, repo }).commits.get(ref)` | `GET /repos/{owner}/{repo}/commits/{ref}` |
 | `gh.repo({ owner, repo }).issues.list()` | `GET /repos/{owner}/{repo}/issues`            |
 | `gh.repo({ owner, repo }).issues.get()`  | `GET /repos/{owner}/{repo}/issues/{number}`   |
 | `gh.repo({ owner, repo }).issues.create()` | `POST /repos/{owner}/{repo}/issues`         |
@@ -207,6 +215,22 @@ or rulesets, `false` only the others. Each item carries the branch `name`, the t
 `commit.sha` and `protected`. `branches.get()` accepts names containing `/` and adds
 `_links.html`, the branch's web page.
 
+Pull request calls accept a `signal` to abort the request. `pulls.list()` returns open pull
+requests unless `state` is `closed` or `all`; filter by `head` (`owner:branch`) or `base`, and
+sort by `created`, `updated`, `popularity` or `long-running`. A merged pull request is `closed`
+with `merged_at` set. `pulls.get()` adds `merged`, `mergeable` (`null` while GitHub computes it),
+`merged_by`, comment and commit counts, and line and file counts. `pulls.reviews.list()` returns
+each review with its `state`: `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or
+`PENDING`. `pulls.list()` and `pulls.get()` accept `bodyFormat`, so `attachments.find()` reads
+pull request bodies too.
+
+Commit calls accept a `signal` to abort the request. `commits.list()` returns newest first from
+the default branch, or from `sha` (a branch or commit), and filters by `path`, `author`,
+`committer`, `since` and `until`. Each item carries the Git `commit` (message, author and
+committer as Git recorded them) and the matching GitHub accounts in `author` and `committer`,
+which are `null` when no account has that email. `commits.get()` accepts a SHA, branch or tag,
+names containing `/` included, and adds `stats` and the changed `files` with their patches.
+
 Release calls accept a `signal` to abort the request. `releases.list()` returns
 newest first and includes drafts only when the token can push to the repository;
 `getByTag()` and `getLatest()` never return a draft (GitHub answers 404, thrown as
@@ -312,5 +336,6 @@ connector recomputes the HMAC over the raw body and rejects mismatches before
 
 - **Closing issues.** Use `repo.issues.update(number, { state: "closed" })`,
   matching GitHub's Update an issue REST endpoint.
-- **Pull requests.** GitHub's repository issues endpoint can return pull
-  requests with a `pull_request` field; this connector returns them unchanged.
+- **Pull requests in issue lists.** GitHub's repository issues endpoint can return pull
+  requests with a `pull_request` field; this connector returns them unchanged. Use
+  `repo.pulls` for their branches, merge state and reviews.

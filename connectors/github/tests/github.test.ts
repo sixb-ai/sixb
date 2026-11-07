@@ -244,6 +244,68 @@ describe("github connector", () => {
       "/repos/acme/web/releases/7/reactions",
       { content: "rocket", per_page: "50" },
     ],
+    [
+      "repo().pulls.list",
+      (client: GitHubClient) =>
+        client.repo(webRepo).pulls.list({
+          state: "closed",
+          head: "acme:feature/login",
+          base: "main",
+          sort: "long-running",
+          direction: "asc",
+          pageSize: 50,
+        }),
+      "/repos/acme/web/pulls",
+      {
+        state: "closed",
+        head: "acme:feature/login",
+        base: "main",
+        sort: "long-running",
+        direction: "asc",
+        per_page: "50",
+      },
+    ],
+    [
+      "repo().pulls.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).pulls.list(),
+      "/repos/acme/web/pulls",
+      {},
+    ],
+    [
+      "repo().pulls.reviews.list",
+      (client: GitHubClient) => client.repo(webRepo).pulls.reviews.list(12, { pageSize: 50 }),
+      "/repos/acme/web/pulls/12/reviews",
+      { per_page: "50" },
+    ],
+    [
+      "repo().commits.list",
+      (client: GitHubClient) =>
+        client.repo(webRepo).commits.list({
+          sha: "release/1.0",
+          path: "src/app.ts",
+          author: "mona",
+          committer: "hubot",
+          since: "2026-10-01T00:00:00Z",
+          until: "2026-11-01T00:00:00Z",
+          pageSize: 50,
+        }),
+      "/repos/acme/web/commits",
+      {
+        sha: "release/1.0",
+        path: "src/app.ts",
+        author: "mona",
+        committer: "hubot",
+        since: "2026-10-01T00:00:00Z",
+        until: "2026-11-01T00:00:00Z",
+        per_page: "50",
+      },
+    ],
+    [
+      "repo().commits.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).commits.list(),
+      "/repos/acme/web/commits",
+      {},
+    ],
   ] as const)("%s maps its filters and returns GitHub's items", async (_name, list, path, query) => {
     const calls = record(() => json(listItems))
     const client = await connect()
@@ -330,6 +392,29 @@ describe("github connector", () => {
       (c) => c.repo(webRepo).branches.get("feature/login"),
       "GET",
       "/repos/acme/web/branches/feature%2Flogin",
+      undefined,
+    ],
+    [
+      "repo().pulls.get",
+      (c) => c.repo(webRepo).pulls.get(12),
+      "GET",
+      "/repos/acme/web/pulls/12",
+      undefined,
+    ],
+    [
+      "repo().commits.get by SHA",
+      (c) => c.repo(webRepo).commits.get("6dcb09b5b57875f334f61aebed695e2e4193db5e"),
+      "GET",
+      "/repos/acme/web/commits/6dcb09b5b57875f334f61aebed695e2e4193db5e",
+      undefined,
+    ],
+    // Reproduce: build the commit path with the raw ref instead of `pathPart`; the slash then
+    // splits it into two segments.
+    [
+      "repo().commits.get by branch",
+      (c) => c.repo(webRepo).commits.get("release/1.0"),
+      "GET",
+      "/repos/acme/web/commits/release%2F1.0",
       undefined,
     ],
     [
@@ -498,6 +583,32 @@ describe("github connector", () => {
     expect(second).toMatchObject({ items: [{ name: "release/2" }], hasMore: false })
   })
 
+  test("follows a commit page's next link with its filters", async () => {
+    const calls = record((_, index) =>
+      json(
+        [{ sha: `sha-${index}` }],
+        index === 1
+          ? nextLink(
+              "https://api.github.com/repos/acme/web/commits?sha=main&since=2026-10-01T00%3A00%3A00Z&page=2"
+            )
+          : undefined
+      )
+    )
+    const commits = (await connect()).repo(webRepo).commits
+
+    const first = await commits.list({ sha: "main", since: "2026-10-01T00:00:00Z" })
+    const second = await commits.list({ pageToken: first.nextPageToken })
+
+    expect(first).toMatchObject({ items: [{ sha: "sha-1" }], hasMore: true })
+    expect(calls[1]?.url.pathname).toBe("/repos/acme/web/commits")
+    expect(Object.fromEntries(calls[1]?.url.searchParams ?? [])).toEqual({
+      sha: "main",
+      since: "2026-10-01T00:00:00Z",
+      page: "2",
+    })
+    expect(second).toMatchObject({ items: [{ sha: "sha-2" }], hasMore: false })
+  })
+
   test("rejects caller-provided pageTokens that decode to absolute URLs", async () => {
     const calls = record()
     const client = await connect()
@@ -540,11 +651,15 @@ describe("github connector", () => {
     expect(calls[1]?.url.pathname).toBe("/api/v3/user/repos")
   })
 
-  test("rejects invalid issue ids, comment ids, release tags and branch names before requesting", async () => {
+  test("rejects invalid issue, pull and comment ids, release tags, branch names and commit refs before requesting", async () => {
     const calls = record()
-    const { branches, issues, releases } = (await connect()).repo(webRepo)
+    const { branches, commits, issues, pulls, releases } = (await connect()).repo(webRepo)
 
     await expect(branches.get(" ")).rejects.toThrow("branch must not be empty")
+    await expect(commits.get(" ")).rejects.toThrow("ref must not be empty")
+    await expect(pulls.get(0)).rejects.toThrow("pullNumber must be a positive integer")
+    await expect(pulls.get(1.5)).rejects.toThrow("pullNumber must be a positive integer")
+    await expect(pulls.reviews.list(0)).rejects.toThrow("pullNumber must be a positive integer")
     await expect(issues.get(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.get(0)).rejects.toThrow("commentId must be a positive integer")
@@ -556,6 +671,29 @@ describe("github connector", () => {
       "reactionId must be a positive integer"
     )
 
+    expect(calls).toHaveLength(0)
+  })
+
+  const pullAndCommitCalls: readonly (readonly [
+    name: string,
+    run: (repo: GitHubRepositoryScope, signal: AbortSignal) => Promise<unknown>,
+  ])[] = [
+    ["pulls.list", (r, signal) => r.pulls.list({ signal })],
+    ["pulls.get", (r, signal) => r.pulls.get(12, { signal })],
+    ["pulls.reviews.list", (r, signal) => r.pulls.reviews.list(12, { signal })],
+    ["commits.list", (r, signal) => r.commits.list({ signal })],
+    ["commits.get", (r, signal) => r.commits.get("main", { signal })],
+  ]
+
+  // Reproduce: drop `signal` from one method's request init in resources/pulls.ts or
+  // resources/commits.ts; its row then reaches fetch and resolves.
+  test.each(pullAndCommitCalls)("%s forwards the caller's signal", async (_name, run) => {
+    const calls = record(() => json({}))
+    const repo = (await connect()).repo(webRepo)
+
+    const error: unknown = await run(repo, AbortSignal.abort()).catch((caught) => caught)
+
+    expect(error).toMatchObject({ name: "AbortError" })
     expect(calls).toHaveLength(0)
   })
 
@@ -683,19 +821,20 @@ describe("github connector", () => {
     expect(calls[0]?.url.pathname).toBe("/api/uploads/repos/acme/web/releases/7/assets")
   })
 
-  test("asks GitHub for an issue's or comment's body in the requested format", async () => {
+  test("asks GitHub for an issue's, pull request's or comment's body in the requested format", async () => {
     const calls = record((request) =>
-      request.url.pathname.endsWith("/comments") || request.url.pathname.endsWith("/issues")
-        ? json([])
-        : json({ id: 1 })
+      /\/(comments|issues|pulls)$/.test(request.url.pathname) ? json([]) : json({ id: 1 })
     )
-    const issues = (await connect()).repo(webRepo).issues
+    const client = await connect()
+    const issues = client.repo(webRepo).issues
 
     await issues.get(5)
     await issues.get(5, { bodyFormat: "full" })
     await issues.list({ bodyFormat: "html" })
     await issues.comments.list(5, { bodyFormat: "text" })
     await issues.comments.get(9, { bodyFormat: "full" })
+    await client.repo(webRepo).pulls.list({ bodyFormat: "html" })
+    await client.repo(webRepo).pulls.get(12, { bodyFormat: "full" })
     const invalid: unknown = await issues
       .get(5, { bodyFormat: "markdown" as never })
       .catch((caught) => caught)
@@ -705,6 +844,8 @@ describe("github connector", () => {
       "application/vnd.github.full+json",
       "application/vnd.github.html+json",
       "application/vnd.github.text+json",
+      "application/vnd.github.full+json",
+      "application/vnd.github.html+json",
       "application/vnd.github.full+json",
     ])
     expect((invalid as Error).message).toContain("bodyFormat must be one of")

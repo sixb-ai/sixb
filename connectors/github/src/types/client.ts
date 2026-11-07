@@ -1,5 +1,6 @@
 import type { GitHubAttachmentsApi } from "./attachments"
 import type { RepositoryBranchesApi } from "./branches"
+import type { RepositoryCommitsApi } from "./commits"
 import type { GitHubRepositoryTarget } from "./common"
 import type {
   AuthenticatedUserIssuesApi,
@@ -12,6 +13,7 @@ import type {
   OrganizationMembersApi,
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
+import type { RepositoryPullRequestsApi } from "./pulls"
 import type { RepositoryReleasesApi } from "./releases"
 import type {
   AuthenticatedUserRepositoriesApi,
@@ -33,7 +35,9 @@ export interface GitHubClient {
 
 export interface GitHubRepositoryScope {
   readonly branches: RepositoryBranchesApi
+  readonly commits: RepositoryCommitsApi
   readonly issues: RepositoryIssuesApi
+  readonly pulls: RepositoryPullRequestsApi
   readonly releases: RepositoryReleasesApi
   get(): Promise<GitHubRepository>
 }
