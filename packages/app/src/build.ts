@@ -96,9 +96,10 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
     .replace(sourceEntryPattern, "")
     .replace("</head>", `  ${assetTags}</head>`)
   await writeFile(join(outdir, "index.html"), html, "utf-8")
-  await writeServiceWorker(outdir, html)
+  const serviceWorkerPath = await writeServiceWorker(outdir, html)
 
-  const outputs = [...result.outputs]
+  // The worker is compressed with the bundles, so the server can send it as it sends them.
+  const outputs = [...result.outputs, { path: serviceWorkerPath, type: "text/javascript" }]
   if (options.sharedEntryPath && options.sharedScriptEntryPath) {
     // Keep these builds sequential. Bun can mis-resolve package-relative imports when two large
     // browser entry graphs are built together, while content hashes safely deduplicate their
@@ -397,7 +398,7 @@ function withLoadingShell(html: string): string {
  * entry file, so any change to the app replaces what devices keep. It saves the shell's stylesheet,
  * script and icons up front; the rest is saved as the app loads it.
  */
-async function writeServiceWorker(outdir: string, html: string): Promise<void> {
+async function writeServiceWorker(outdir: string, html: string): Promise<string> {
   const version = createHash("sha256").update(html).digest("hex").slice(0, 16)
   const precache = [
     ...new Set(
@@ -406,11 +407,9 @@ async function writeServiceWorker(outdir: string, html: string): Promise<void> {
         .filter((path): path is string => path !== undefined && path !== "/app.webmanifest")
     ),
   ]
-  await writeFile(
-    join(outdir, SERVICE_WORKER_PATH.slice(1)),
-    renderServiceWorker({ version, precache }),
-    "utf-8"
-  )
+  const path = join(outdir, SERVICE_WORKER_PATH.slice(1))
+  await writeFile(path, renderServiceWorker({ version, precache }), "utf-8")
+  return path
 }
 
 const extensionlessSourceImportPlugin: Bun.BunPlugin = {
