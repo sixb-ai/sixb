@@ -15,6 +15,7 @@ afterEach(() => {
   Object.assign(lakeFixture, {
     drift: false,
     maintenance: true,
+    lakeMaintenance: undefined,
     retentionPassesWithMore: 0,
     appliedVersion: undefined,
   })
@@ -92,6 +93,35 @@ describe("sixb lake cleanup", () => {
     expect(lakeFixture.events[0]).toMatchObject({
       keepVersionsForMs: 2 * 60 * 60_000,
       deleteFilesAfterMs: 60 * 60_000,
+    })
+  })
+
+  // Reproduce: default to "7d" in commands/lake-cleanup.ts. Cleanup then expires versions the project
+  // asked to keep for a month, and the dry run measures something no run would do.
+  test("keeps what the project's lakeMaintenance keeps when no flag says otherwise", async () => {
+    lakeFixture.lakeMaintenance = { keepVersionsFor: "30d", deleteFilesAfter: "14d" }
+
+    const result = await runInProcess(() => runLakeCleanup({ entry, dryRun: true }))
+
+    expect(flat(result.output)).toContain("Keep versions for 30d Delete files after 14d")
+    expect(lakeFixture.events[0]).toMatchObject({
+      keepVersionsForMs: 30 * DAY_MS,
+      deleteFilesAfterMs: 14 * DAY_MS,
+    })
+  })
+
+  // Reproduce: read both durations from `settings` in commands/lake-cleanup.ts.
+  test("lets a flag override one setting and keeps the other", async () => {
+    lakeFixture.lakeMaintenance = { keepVersionsFor: "30d", deleteFilesAfter: "14d" }
+
+    const result = await runInProcess(() =>
+      runLakeCleanup({ entry, dryRun: true, keepVersionsFor: "2d" })
+    )
+
+    expect(flat(result.output)).toContain("Keep versions for 2d Delete files after 14d")
+    expect(lakeFixture.events[0]).toMatchObject({
+      keepVersionsForMs: 2 * DAY_MS,
+      deleteFilesAfterMs: 14 * DAY_MS,
     })
   })
 

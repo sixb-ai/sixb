@@ -463,9 +463,7 @@ export function lakeCleanupView({
         ? measuredOnePass
           ? "nothing was deleted; one pass measured, more remain"
           : "nothing was deleted"
-        : report.hasMore
-          ? "more is due: run it again"
-          : undefined
+        : undefined
     )
   )
 }
