@@ -17,6 +17,7 @@ import {
   agentRuntimeRequired,
   assertWorkerInputs,
   createWorkerForType,
+  omittedWorkerWarnings,
   resolveRegisteredWorkerTypes,
 } from "../src/lib/worker-registry"
 
@@ -254,18 +255,38 @@ describe("lake retention", () => {
     })
   }
 
-  // Reproduce: select `sync` from registered syncs alone in resolveRegisteredWorkerTypes.
-  test("selects the sync worker for a project with datasets and no syncs", async () => {
+  // Reproduce: drop `lake` from resolveRegisteredWorkerTypes.
+  test("selects the lake worker for a project with datasets, and no sync worker", async () => {
     const sixb = host()
+    const types = resolveRegisteredWorkerTypes(sixb)
 
-    expect(resolveRegisteredWorkerTypes(sixb)).toContain("sync")
+    expect(types).toContain("lake")
+    expect(types).not.toContain("sync")
 
-    const worker = createWorkerForType(sixb, "sync")
+    const worker = createWorkerForType(sixb, "lake")
     await worker.start()
     await worker.stop()
   })
 
-  test("selects no sync worker when lake retention is off", () => {
-    expect(resolveRegisteredWorkerTypes(host({ enabled: false }))).not.toContain("sync")
+  test("selects no lake worker when lake retention is off", () => {
+    expect(resolveRegisteredWorkerTypes(host({ enabled: false }))).not.toContain("lake")
+  })
+
+  test("runs the lake worker at the concurrency it was given", () => {
+    const worker = createWorkerForType(host(), "lake", { workerConcurrency: { lake: 3 } })
+
+    expect(worker.concurrency).toBe(3)
+  })
+
+  // Reproduce: return [] from omittedWorkerWarnings in lib/worker-registry.ts.
+  test("warns about a worker list that leaves the lake worker out", () => {
+    expect(omittedWorkerWarnings(host(), ["pipeline"])).toEqual([
+      expect.stringContaining("Lake cleanup needs a lake worker"),
+    ])
+  })
+
+  test("warns about nothing when the list has it, or nothing needs it", () => {
+    expect(omittedWorkerWarnings(host(), ["pipeline", "lake"])).toEqual([])
+    expect(omittedWorkerWarnings(host({ enabled: false }), ["pipeline"])).toEqual([])
   })
 })

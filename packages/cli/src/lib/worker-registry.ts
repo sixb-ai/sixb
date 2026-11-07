@@ -1,6 +1,7 @@
 import { AgentWorker } from "@sixb/agent-worker"
 import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
 import type { Worker } from "@sixb/core/internal/workers"
+import { LakeWorker } from "@sixb/lake-worker"
 import { PipelineWorker } from "@sixb/pipeline-worker"
 import { ProjectionWorker } from "@sixb/projection-worker"
 import { SyncWorker } from "@sixb/sync-worker"
@@ -9,7 +10,7 @@ import { SixbCliError } from "./errors"
 import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 
-export const WORKER_TYPES = ["sync", "agent", "pipeline", "projection", "workflow"] as const
+export const WORKER_TYPES = ["sync", "agent", "pipeline", "projection", "workflow", "lake"] as const
 
 export type WorkerType = (typeof WORKER_TYPES)[number]
 
@@ -74,6 +75,10 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
   workflow: {
     create: (sixb, options) =>
       new WorkflowWorker(sixb, { concurrency: options.workerConcurrency?.workflow }),
+  },
+  lake: {
+    create: (sixb, options) =>
+      new LakeWorker(sixb, { concurrency: options.workerConcurrency?.lake }),
   },
 }
 
@@ -178,7 +183,7 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
 export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly WorkerType[] {
   const workerTypes: WorkerType[] = []
 
-  if (syncWorkerRequired(sixb)) {
+  if (sixb.definitions.syncs.list().length > 0) {
     workerTypes.push("sync")
   }
 
@@ -196,6 +201,10 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly Wor
 
   if (sixb.definitions.workflows.list().length > 0) {
     workerTypes.push("workflow")
+  }
+
+  if (lakeWorkerRequired(sixb)) {
+    workerTypes.push("lake")
   }
 
   return workerTypes
@@ -221,9 +230,20 @@ function resolveAgentApiBaseUrl(value: string | undefined): string {
   return apiBaseUrl
 }
 
-/** The sync worker also hosts the lake lane, so scheduled lake retention needs it without syncs. */
-export function syncWorkerRequired(sixb: LoadedSixbHost): boolean {
-  return sixb.definitions.syncs.list().length > 0 || getLakeRetentionRuntime(sixb).automatic
+export function lakeWorkerRequired(sixb: LoadedSixbHost): boolean {
+  return getLakeRetentionRuntime(sixb).automatic
+}
+
+/** Requests stay queued while no worker claims them, which looks like an idle system. */
+export function omittedWorkerWarnings(
+  sixb: LoadedSixbHost,
+  workerTypes: readonly string[]
+): readonly string[] {
+  if (workerTypes.includes("lake") || !lakeWorkerRequired(sixb)) return []
+
+  return [
+    "Lake cleanup needs a lake worker and this group has none: run `sixb worker lake`, or the lake keeps growing.",
+  ]
 }
 
 /** Explicit model calls can enqueue accounting recovery without a model catalog. */

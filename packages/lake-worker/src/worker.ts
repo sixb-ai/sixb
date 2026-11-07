@@ -8,29 +8,39 @@ import type { ClaimedQueueJob, LakeQueueJob, Queues } from "@sixb/core/queues"
 const FAILURE_CODES = ["internal.unexpected", "runtime.cancelled"] as const
 
 /** Two at a time, so lake work behind a long retention pass does not wait for it. */
-const LAKE_CONCURRENCY = 2
+const DEFAULT_CONCURRENCY = 2
 
 export interface LakeWorkerHost {
   readonly id: string
   readonly queues: Pick<Queues, "lake">
 }
 
-/** Separate lane: lake work never takes a sync slot, and a sync never delays it. */
+export interface LakeWorkerOptions {
+  /** Maximum lake jobs this worker claims and executes at once. Defaults to 2. */
+  readonly concurrency?: number
+}
+
+/** Consumes the `lake` queue, so lake work never takes a slot from the runs that write the lake. */
 export class LakeWorker extends QueueWorker<LakeQueueJob, typeof FAILURE_CODES> {
   private readonly host: LakeWorkerHost
   private readonly retention: LakeRetentionRuntime
 
-  constructor(host: LakeWorkerHost) {
+  constructor(host: LakeWorkerHost, options: LakeWorkerOptions = {}) {
+    const retention = getLakeRetentionRuntime(host)
+    if (!retention.automatic) {
+      throw new Error("[SixbLakeWorker] Lake retention does not run on its own in this project.")
+    }
+
     super({
       projectId: host.id,
       queue: host.queues.lake,
       failureCodes: FAILURE_CODES,
       workerId: `lake-worker-${host.id}`,
-      claimLimit: LAKE_CONCURRENCY,
+      claimLimit: options.concurrency ?? DEFAULT_CONCURRENCY,
     })
 
     this.host = host
-    this.retention = getLakeRetentionRuntime(host)
+    this.retention = retention
   }
 
   protected async execute(claimed: ClaimedQueueJob<LakeQueueJob>, signal: AbortSignal) {

@@ -17,6 +17,7 @@ import {
   SixbHost,
   type StorageMigrator,
 } from "@sixb/core"
+import type { LakeMaintenance } from "@sixb/core/lake-storage"
 import { SharedBroker } from "../shared/sharedBroker"
 
 const Transaction = defineObjectType({
@@ -59,6 +60,13 @@ function logFixtureEvent(entry: Record<string, unknown>): void {
 // Logs every lake definition probe so tests can assert role startup never opens
 // the lake catalog (guarding against a thundering-herd regression).
 class TrackingLakeStorage extends InMemoryLakeStorage {
+  readonly maintenance: LakeMaintenance = {
+    applyRetention: async () => {
+      throw new Error("The prod-roles fixture does not clean up its lake.")
+    },
+    describeStorage: async () => [],
+  }
+
   override async assertDatasetDefinitionsCompatible(
     definitions: readonly DatasetDefinition[]
   ): Promise<void> {

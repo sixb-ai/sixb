@@ -373,7 +373,7 @@ names the condition instead of migrating over it. SQLite has no cross-process lo
 starting together on one file can collide; migrate it as its own step and pass `--no-migrate`.
 
 The lake is opened only when a role actually does lake work — API dataset routes, sync jobs,
-pipeline jobs, and projection jobs. Write paths re-validate their target dataset through the lake
+pipeline jobs, projection jobs, and lake jobs. Write paths re-validate their target dataset through the lake
 provider's `createDataset` before committing, so drift still fails clearly even between deploys.
 
 Use `sixb lake cleanup` to run one retention pass on providers with lake maintenance. A version

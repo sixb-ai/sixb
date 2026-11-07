@@ -768,6 +768,7 @@
         "@sixb/cli-core": "workspace:^",
         "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:*",
+        "@sixb/lake-worker": "workspace:*",
         "@sixb/orchestrator": "workspace:*",
         "@sixb/pipeline-worker": "workspace:*",
         "@sixb/projection-worker": "workspace:*",
@@ -858,6 +859,18 @@
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.7.0",
+      },
+    },
+    "packages/lake-worker": {
+      "name": "@sixb/lake-worker",
+      "version": "0.2.1",
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
       },
     },
     "packages/orchestrator": {
@@ -1792,6 +1805,8 @@
     "@sixb/example-roku-tv": ["@sixb/example-roku-tv@workspace:examples/roku-tv"],
 
     "@sixb/lake-local": ["@sixb/lake-local@workspace:storage/lake-local"],
+
+    "@sixb/lake-worker": ["@sixb/lake-worker@workspace:packages/lake-worker"],
 
     "@sixb/logger-pino": ["@sixb/logger-pino@workspace:loggers/pino"],
 

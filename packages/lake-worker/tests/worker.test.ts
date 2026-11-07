@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   col,
-  defineConnector,
   defineDataset,
   defineObjectType,
-  defineSync,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -14,10 +12,9 @@ import {
   prop,
   type SixbErrorContext,
   SixbHost,
-  type SyncDefinition,
 } from "@sixb/core"
 import type { LakeMaintenance, LakeRetentionReport } from "@sixb/core/lake-storage"
-import { SyncWorker } from "../src"
+import { LakeWorker, type LakeWorkerOptions } from "../src"
 
 const Room = defineObjectType({
   id: "Room",
@@ -26,13 +23,6 @@ const Room = defineObjectType({
 })
 
 const rooms = defineDataset("raw.rooms", { schema: [col("id", "string")] })
-
-const erpDb = defineConnector("erpDb", {
-  type: "sql",
-  connect() {
-    return {}
-  },
-})
 
 const PROJECT_ID = "lake-project"
 const MINUTE = 60_000
@@ -50,18 +40,21 @@ const REPORT: LakeRetentionReport = {
 
 /** A provider whose passes wait for the test to settle them, one at a time. */
 class ControlledLakeStorage extends InMemoryLakeStorage {
-  readonly passes: { resolve(): void; reject(error: Error): void }[] = []
+  readonly passes: {
+    resolve(report?: Partial<LakeRetentionReport>): void
+    reject(error: Error): void
+  }[] = []
 
   readonly maintenance: LakeMaintenance = {
     applyRetention: () =>
       new Promise<LakeRetentionReport>((resolve, reject) => {
-        this.passes.push({ resolve: () => resolve(REPORT), reject })
+        this.passes.push({ resolve: (report) => resolve({ ...REPORT, ...report }), reject })
       }),
     describeStorage: async () => [],
   }
 }
 
-const workers: SyncWorker[] = []
+const workers: LakeWorker[] = []
 const lakes: ControlledLakeStorage[] = []
 
 afterEach(async () => {
@@ -72,11 +65,7 @@ afterEach(async () => {
 })
 
 function createHost(
-  input: {
-    syncs?: SyncDefinition[]
-    lakeMaintenance?: LakeMaintenanceOptions
-    errors?: SixbErrorContext[]
-  } = {}
+  input: { lakeMaintenance?: LakeMaintenanceOptions; errors?: SixbErrorContext[] } = {}
 ) {
   const lakeStorage = new ControlledLakeStorage()
   lakes.push(lakeStorage)
@@ -85,8 +74,6 @@ function createHost(
     id: PROJECT_ID,
     ontology: [Room],
     datasets: [rooms],
-    connectors: [erpDb],
-    syncs: input.syncs ?? [],
     broker: new InMemoryBroker(),
     storage: new InMemoryStorage(),
     lakeStorage,
@@ -101,8 +88,8 @@ function createHost(
   return { sixb, lakeStorage, queues }
 }
 
-async function start(sixb: SixbHost, options?: ConstructorParameters<typeof SyncWorker>[1]) {
-  const worker = new SyncWorker(sixb, options)
+async function start(sixb: SixbHost, options?: LakeWorkerOptions) {
+  const worker = new LakeWorker(sixb, options)
   workers.push(worker)
   await worker.start()
   return worker
@@ -121,33 +108,6 @@ async function enqueueRetention(queues: InMemoryQueues, requestedAt: string) {
   })
 }
 
-async function enqueueSyncRun(sixb: SixbHost, sync: SyncDefinition, runId: string) {
-  const executionId = `exec:${runId}`
-  await sixb.storage.executions.create({
-    id: executionId,
-    projectId: sixb.id,
-    executor: { type: "primitive", kind: "sync", runId },
-    source: { type: "schedule", eventId: `event:${runId}` },
-    correlationId: `correlation:${runId}`,
-    authorizationRef: {
-      type: "trustedPrimitive",
-      primitive: { kind: "sync", id: sync.id, runId },
-    },
-  })
-  await sixb.storage.syncRuns!.queue({
-    id: runId,
-    projectId: sixb.id,
-    executionId,
-    syncId: sync.id,
-    datasetId: sync.target.dataset.id,
-    mode: sync.config.mode,
-  })
-  await sixb.queues.syncRuns.enqueue({
-    projectId: sixb.id,
-    jobs: [{ id: runId, type: "sync.run.requested", payload: { runId } }],
-  })
-}
-
 /** Waits a bounded number of event-loop turns: fake timers freeze the clock a timeout would use. */
 async function eventually(predicate: () => boolean, turns = 500): Promise<void> {
   for (let turn = 0; turn < turns; turn += 1) {
@@ -157,9 +117,8 @@ async function eventually(predicate: () => boolean, turns = 500): Promise<void> 
   throw new Error("Condition not reached.")
 }
 
-describe("SyncWorker lake lane", () => {
-  // Reproduce: keep the "No sync definitions" refusal in SyncWorker's constructor.
-  test("starts without syncs when lake retention is scheduled, and runs an occurrence", async () => {
+describe("LakeWorker", () => {
+  test("runs a retention request", async () => {
     const { sixb, lakeStorage, queues } = createHost()
     await start(sixb)
 
@@ -169,43 +128,17 @@ describe("SyncWorker lake lane", () => {
     lakeStorage.passes[0]!.resolve()
   })
 
-  test("refuses to start with neither syncs nor scheduled lake retention", () => {
+  // Reproduce: drop the refusal from LakeWorker's constructor in worker.ts.
+  test("refuses to start when lake retention does not run on its own", () => {
     const { sixb } = createHost({ lakeMaintenance: { enabled: false } })
 
-    expect(() => new SyncWorker(sixb)).toThrow(
-      "[SixbSyncWorker] No sync definitions are registered, and lake retention is not scheduled."
+    expect(() => new LakeWorker(sixb)).toThrow(
+      "[SixbLakeWorker] Lake retention does not run on its own in this project."
     )
   })
 
-  // Reproduce: drop the LakeWorker's start from SyncWorker.start(); lake jobs then wait forever.
-  test("runs lake retention while a sync holds the only sync slot", async () => {
-    let releaseSync = () => {}
-    const syncGate = new Promise<void>((resolve) => {
-      releaseSync = resolve
-    })
-    let syncStarted = false
-    const blocking = defineSync("blocking")
-      .from(erpDb)
-      .read(async () => {
-        syncStarted = true
-        await syncGate
-        return []
-      })
-      .intoDataset(rooms)
-    const { sixb, lakeStorage, queues } = createHost({ syncs: [blocking] })
-    await start(sixb, { concurrency: 1 })
-
-    await enqueueSyncRun(sixb, blocking, "run-blocking")
-    await eventually(() => syncStarted)
-    await enqueueRetention(queues, new Date().toISOString())
-
-    await eventually(() => lakeStorage.passes.length === 1)
-    lakeStorage.passes[0]!.resolve()
-    releaseSync()
-  })
-
-  // Reproduce: set LAKE_CONCURRENCY to 1 in lake-worker.ts.
-  test("runs two lake jobs at once", async () => {
+  // Reproduce: set DEFAULT_CONCURRENCY to 1 in worker.ts.
+  test("runs two lake jobs at once by default", async () => {
     const { sixb, lakeStorage, queues } = createHost()
     await start(sixb)
     const now = Date.now()
@@ -217,8 +150,7 @@ describe("SyncWorker lake lane", () => {
     for (const pass of lakeStorage.passes) pass.resolve()
   })
 
-  // Reproduce: return `{ kind: "retry" }` from onExecutionError in lake-worker.ts; the job then runs
-  // again and the failure goes unreported.
+  // Reproduce: return `{ kind: "retry" }` from onExecutionError in worker.ts.
   test("reports a failed run once and leaves the next interval to try again", async () => {
     const errors: SixbErrorContext[] = []
     const { sixb, lakeStorage, queues } = createHost({ errors })
@@ -269,30 +201,8 @@ describe("SyncWorker lake lane", () => {
     expect(errors[0]?.type).toBe("lake.retention.failed")
   })
 
-  test("skips a backlog's old requests without running them", async () => {
-    const { sixb, lakeStorage, queues } = createHost()
-    const completed: string[] = []
-    const complete = queues.lake.complete.bind(queues.lake)
-    queues.lake.complete = async (input) => {
-      await complete(input)
-      completed.push(input.jobId)
-    }
-    await start(sixb)
-    const old = new Date(Date.now() - 2 * 60 * MINUTE).toISOString()
-    const current = new Date().toISOString()
-
-    await enqueueRetention(queues, old)
-    await enqueueRetention(queues, current)
-
-    await eventually(() => lakeStorage.passes.length === 1)
-    lakeStorage.passes[0]!.resolve()
-    await eventually(() => completed.length === 2)
-
-    expect(lakeStorage.passes).toHaveLength(1)
-  })
-
-  // Reproduce: fail the job in onAbortError in lake-worker.ts.
-  test("returns the job to the queue on shutdown, without reporting a failure", async () => {
+  // Reproduce: return `{ kind: "fail" }` from an `onAbortError` override in worker.ts.
+  test("returns the job to the queue on shutdown, and reports nothing", async () => {
     const errors: SixbErrorContext[] = []
     const { sixb, lakeStorage, queues } = createHost({ errors })
     const worker = await start(sixb)
@@ -302,9 +212,12 @@ describe("SyncWorker lake lane", () => {
     await eventually(() => lakeStorage.passes.length === 1)
 
     const stopping = worker.stop()
-    lakeStorage.passes[0]!.resolve()
+    lakeStorage.passes[0]!.resolve({ hasMore: true })
     await stopping
 
+    const [redelivered] = await queues.lake.claim({ projectId: PROJECT_ID, workerId: "next" })
+
+    expect(redelivered?.job).toMatchObject({ id: `lake-retention:${requestedAt}`, attempt: 2 })
     expect(errors).toEqual([])
   })
 })

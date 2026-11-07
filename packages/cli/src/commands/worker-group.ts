@@ -13,6 +13,7 @@ import {
   agentRuntimeRequired,
   assertWorkerInputs,
   createWorkerForType,
+  omittedWorkerWarnings,
   type QueueWorkerProcess,
   resolveRegisteredWorkerTypes,
   resolveWorkerTypeToStart,
@@ -102,10 +103,12 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     )
     await Promise.all(workers.map((worker) => worker.start()))
 
-    const warnings =
-      workerTypes.length === 0
+    const warnings = [
+      ...(workerTypes.length === 0
         ? ["No queue worker types are registered; the worker group process is idle."]
-        : []
+        : []),
+      ...omittedWorkerWarnings(host, workerTypes),
+    ]
 
     app.stop()
     await renderStatic(
