@@ -370,6 +370,54 @@ html[data-keyboard] {
     font-size: 16px;
   }
 
+  /* A full-screen dialog, such as a search: its field at the top, its list above the keyboard. */
+  [data-slot="dialog-content"][data-fullscreen] {
+    --tw-translate-x: 0px;
+    --tw-translate-y: 0px;
+    inset: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: none;
+    height: var(--app-height);
+    padding-top: var(--safe-top);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    animation: fullscreen-in 280ms var(--ease-sheet);
+  }
+
+  [data-slot="dialog-content"][data-fullscreen][data-state="closed"] {
+    animation: fullscreen-out 180ms ease-in forwards;
+  }
+
+  [data-fullscreen] [data-slot="command"] {
+    min-height: 0;
+    flex: 1;
+    border-radius: 0;
+  }
+
+  /* Room for the close button at the end of the field. */
+  [data-fullscreen] [data-slot="command-input-wrapper"] {
+    padding-right: 52px;
+  }
+
+  [data-fullscreen] [data-slot="command-list"] {
+    min-height: 0;
+    max-height: none;
+    flex: 1;
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
+
+  html[data-keyboard] [data-fullscreen] [data-slot="command-list"] {
+    padding-bottom: 16px;
+  }
+
+  [data-fullscreen] [data-slot="dialog-close"] {
+    top: calc(var(--safe-top) + 9px);
+    right: 12px;
+  }
+
   /* Side sheets clear the notch and the home indicator. */
   [data-slot="sheet-content"] {
     padding-top: var(--safe-top);
@@ -410,6 +458,19 @@ html[data-keyboard] {
 @keyframes sheet-out {
   to {
     transform: translate3d(0, 100%, 0);
+  }
+}
+
+@keyframes fullscreen-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -12px, 0);
+  }
+}
+
+@keyframes fullscreen-out {
+  to {
+    opacity: 0;
   }
 }
 
