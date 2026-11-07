@@ -7,6 +7,7 @@ import type {
   WorkflowStepOutputs,
 } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
+import type { HeldRunClaim } from "@sixb/core/internal/workers"
 import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
@@ -32,14 +33,14 @@ export interface WorkflowJob {
   readonly id: string
   readonly workflowId: string
   readonly input?: Readonly<Record<string, unknown>>
-  readonly execution?: WorkflowRunExecution
+  readonly execution: WorkflowRunExecution
 }
 
 export interface WorkflowResumeJob {
   readonly id: string
   readonly workflowId: string
   readonly nodeRunId: string
-  readonly execution?: WorkflowRunExecution
+  readonly execution: WorkflowRunExecution
 }
 
 export type WorkflowRunFailureReporter = (
@@ -50,6 +51,8 @@ export type WorkflowRunFailureReporter = (
 
 export interface RunWorkflowJobInput {
   readonly runtime: WorkflowWorkerContext
+  /** The run this delivery holds, and whether an earlier execution already worked on it. */
+  readonly claim: HeldRunClaim<WorkflowRunRecord>
   readonly job: WorkflowJob
   readonly signal?: AbortSignal
   readonly observer?: WorkflowRunObserver

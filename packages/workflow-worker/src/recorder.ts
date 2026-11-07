@@ -62,15 +62,8 @@ export class WorkflowRunRecorder {
     return [...this.nodeRuns]
   }
 
-  async startRun(): Promise<WorkflowRunRecord> {
-    const run = await this.dependencies.workflowRuns.start({
-      projectId: this.dependencies.projectId,
-      id: this.dependencies.runId,
-      execution: this.dependencies.execution,
-    })
-    this.started = true
+  async announceStarted(run: WorkflowRunRecord): Promise<void> {
     await this.notify(() => this.dependencies.observer.onRunStarted(run))
-    return run
   }
 
   async startNode(params: {

@@ -9,6 +9,7 @@ import {
 } from "@sixb/core"
 import type { SyncConnectorSource, SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
 import type { ExecutionStorage } from "@sixb/core/storage"
+import { claimTestRun, startTestRun } from "@sixb/core/testing"
 import { runSyncJob as runSyncJobWithDurableRun } from "../src/run-sync-job"
 import type { SyncWorkerContext } from "../src/types"
 
@@ -102,7 +103,7 @@ export async function run(
   const queued = await queueRun(fixture, syncId, runId)
   return runSyncJobWithDurableRun({
     runtime: fixture.runtime,
-    run: queued,
+    claim: await claimTestRun(fixture.runtime.syncRunsStorage, queued),
     ...(signal === undefined ? {} : { signal }),
   })
 }
@@ -114,7 +115,7 @@ export async function seedSuccessfulCheckpoint(
   checkpoint: JsonValue
 ): Promise<void> {
   const queued = await queueRun(fixture, syncId, runId)
-  await fixture.runtime.syncRunsStorage.start({
+  await startTestRun(fixture.runtime.syncRunsStorage, {
     projectId: fixture.runtime.id,
     id: queued.id,
   })

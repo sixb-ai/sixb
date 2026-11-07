@@ -1,5 +1,10 @@
-import { cloneJsonValue, type DatasetDefinition, type JsonValue } from "@sixb/core"
-import { writeDataset } from "@sixb/core/internal/datasets"
+import {
+  cloneJsonValue,
+  type DatasetDefinition,
+  type JsonValue,
+  type SyncDefinition,
+} from "@sixb/core"
+import { findProducedVersion, writeDataset } from "@sixb/core/internal/datasets"
 import {
   captureSixbFailure,
   createSixbError,
@@ -7,18 +12,33 @@ import {
   summarizeErrorMessage,
 } from "@sixb/core/internal/errors"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
+import { type DatasetVersion, LakeConcurrencyError } from "@sixb/core/lake-storage"
 import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
 import { throwIfAborted } from "./normalize"
 import { readSyncValues, type SyncSourceValue } from "./source-read"
 import type { RunSyncJobInput, SyncRunFinishedHandler, SyncRunResult } from "./types"
 
-export class SyncRunAlreadyStartedError extends Error {
-  override readonly name = "SyncRunAlreadyStartedError"
+/** What the execution behind a commit read, which the run records once it finds that commit. */
+interface LandedRead {
+  readonly rowsRead: number
+  readonly checkpoint: JsonValue | undefined
+}
 
-  constructor(readonly run: SyncRunRecord) {
-    super(`[SixbSyncWorker] Sync run '${run.id}' has already started.`)
+/** What a run found just before committing: an earlier execution's commit landed after all. */
+class CommitAlreadyLandedError extends Error {
+  override readonly name = "CommitAlreadyLandedError"
+
+  constructor(readonly version: DatasetVersion) {
+    super(`[SixbSyncWorker] Version '${version.versionId}' already holds this run's rows.`)
   }
+}
+
+/**
+ * Another writer moved the dataset between this run's guard and its commit. Nothing was written, so
+ * the run stays running and the next delivery reads its source again.
+ */
+class CommitLostRaceError extends Error {
+  override readonly name = "CommitLostRaceError"
 }
 
 function createBookkeepingError(options: {
@@ -27,10 +47,10 @@ function createBookkeepingError(options: {
   version: DatasetVersion
   cause: unknown
 }): Error {
-  // The lake commit is already durable here, so we surface an explicit repair-needed error.
+  // The lake commit is already durable here: the run stays running, and the next delivery finds it.
   return createSixbError(
     "internal.unexpected",
-    `[SixbSyncWorker] Sync '${options.syncId}' committed dataset version '${options.version.versionId}', but failed to finalize sync run '${options.runId}'. The dataset commit may already have succeeded and the sync run record may need repair.`,
+    `[SixbSyncWorker] Sync '${options.syncId}' committed dataset version '${options.version.versionId}', but failed to finalize sync run '${options.runId}'.`,
     {
       cause: options.cause,
       details: {
@@ -114,13 +134,18 @@ function sourceValidationError(
 }
 
 /**
- * Run one already-persisted Sync run end to end.
+ * Run what is left of one Sync run this delivery holds, and record how it ended.
  *
- * Dispatch owns identity and queueing. The worker only transitions the durable run from queued to
- * running, streams source values, and records its terminal outcome.
+ * Dispatch owns identity and queueing, and the worker owns the claim. A run reads its whole source
+ * into one lake commit, so what is left is either that commit, from the last succeeded run's
+ * checkpoint, or nothing but its record: a run that resumes asks the lake which.
+ *
+ * A stopped worker writes nothing here: the run stays running, and the next delivery takes it up.
  */
 export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult> {
-  const { runtime, run } = input
+  const { runtime, claim } = input
+  const { run } = claim
+  const executionToken = claim.execution.token
   const job = {
     id: run.id,
     syncId: run.syncId,
@@ -138,25 +163,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
   throwIfAborted(signal)
 
-  let startedRun: SyncRunRecord
-  try {
-    startedRun = await syncRunsStorage.start({
-      projectId: runtime.id,
-      id: job.id,
-    })
-  } catch (error) {
-    const existing = await syncRunsStorage.getById({ projectId: runtime.id, id: job.id })
-    // A run still queued did not start elsewhere: the start itself failed.
-    if (
-      existing?.syncId === run.syncId &&
-      existing.executionId === run.executionId &&
-      existing.status !== "queued"
-    ) {
-      throw new SyncRunAlreadyStartedError(existing)
-    }
-    throw error
-  }
-  await input.onRunStarted?.(startedRun)
+  if (claim.outcome === "started") await input.onRunStarted?.(run)
 
   const logSession = resolveLoggingService(runtime.id, runtime.logging).startExecution({
     kind: "sync",
@@ -164,18 +171,89 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   })
   const logger = logSession.logger
   let rowsRead = 0
+  let nextCheckpoint: JsonValue | undefined
   let committedVersion: DatasetVersion | undefined
 
+  /** When this run first reached a commit: the earliest a version of it can have landed. */
+  let commitPreparedAt = run.commitPreparedAt
+  /** Whether a commit of this very execution is the one that may have landed. */
+  let reachedCommit = false
+
+  /** The lake and the run agree from here: what is left is only telling others. */
+  const finishSucceeded = async (
+    result: LandedRead & {
+      readonly version: DatasetVersion | null | undefined
+      readonly versionCreated: boolean
+    }
+  ): Promise<SyncRunResult> => {
+    const { version, versionCreated } = result
+    let finishedRun: SyncRunRecord
+
+    try {
+      finishedRun = await syncRunsStorage.finish({
+        projectId: runtime.id,
+        id: job.id,
+        executionToken,
+        status: "succeeded",
+        rowsRead: result.rowsRead,
+        ...(version
+          ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
+          : {}),
+        checkpoint: result.checkpoint,
+      })
+    } catch (error) {
+      if (committedVersion) {
+        throw createBookkeepingError({
+          syncId: run.syncId,
+          runId: job.id,
+          version: committedVersion,
+          cause: error,
+        })
+      }
+      throw error
+    }
+
+    const finishedAt = requireFinishedAt({
+      syncId: run.syncId,
+      runId: job.id,
+      finishedAt: finishedRun.finishedAt,
+    })
+    await notifyRunFinished(input.onRunFinished, finishedRun, committedVersion)
+
+    const summary = {
+      id: job.id,
+      syncId: run.syncId,
+      datasetId: run.datasetId,
+      mode: run.mode,
+      startedAt: requireStartedAt(job.id, run.startedAt),
+      finishedAt,
+      rowsRead: result.rowsRead,
+    }
+    return version ? { ...summary, version, versionCreated } : { ...summary, versionCreated: false }
+  }
+
+  /** Records a commit this run made, with what the execution that made it read. */
+  const finishLanded = (version: DatasetVersion, read: LandedRead) =>
+    finishSucceeded({ version, versionCreated: true, ...read })
+
+  // Only an execution holding the run could prepare a commit, so none has moved these since.
+  const readByEarlierExecution: LandedRead = {
+    rowsRead: run.rowsRead ?? 0,
+    checkpoint: run.checkpoint,
+  }
+
   try {
-    const sync = runtime.syncs.getById(run.syncId)
-    if (!sync) {
-      throw new Error(`[SixbSyncWorker] Unknown sync '${run.syncId}'.`)
+    if (claim.outcome === "resumed") {
+      const landed = await findLandedCommit(input, commitPreparedAt)
+      if (landed) {
+        committedVersion = landed
+        return await finishLanded(landed, readByEarlierExecution)
+      }
     }
-    if (sync.target.dataset.id !== run.datasetId || sync.config.mode !== run.mode) {
-      throw new Error(
-        `[SixbSyncWorker] Sync run '${run.id}' no longer matches Sync '${sync.id}' configuration.`
-      )
-    }
+
+    if (claim.givenUp) throw claim.givenUp
+
+    const sync = requireSync(runtime, run)
 
     const dataset = runtime.datasets.getById(run.datasetId)
     if (!dataset) {
@@ -192,7 +270,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       order: "desc",
     })
     const previousCheckpoint = latestSuccessfulRuns.runs[0]?.checkpoint
-    let nextCheckpoint: JsonValue | undefined =
+    nextCheckpoint =
       previousCheckpoint !== undefined ? cloneJsonValue(previousCheckpoint) : undefined
 
     const producer = {
@@ -214,6 +292,25 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           nextCheckpoint = next === undefined ? undefined : cloneJsonValue(next)
         },
       })
+
+    // A crash right after the commit would lose the checkpoint it paid for, so it goes first. A
+    // stale execution stops here; one that slept past this point meets the guard.
+    const prepareCommit = async () => {
+      const landed = await findLandedCommit(input, commitPreparedAt)
+      if (landed) throw new CommitAlreadyLandedError(landed)
+
+      const prepared = await syncRunsStorage.prepareCommit({
+        projectId: runtime.id,
+        id: job.id,
+        executionToken,
+        rowsRead,
+        checkpoint: nextCheckpoint,
+      })
+
+      commitPreparedAt ??= prepared.commitPreparedAt
+      reachedCommit = true
+    }
+
     const { outcome, version } = await writeDataset({
       lakeStorage,
       blobStorage,
@@ -230,84 +327,66 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       },
       mapValidationError: (error, value, itemIndex) =>
         sourceValidationError(error, value, { syncId: sync.id, runId: job.id, dataset }, itemIndex),
+      guardLatestVersion: true,
+      beforeCommit: () => prepareCommit(),
     })
     if (outcome === "created") {
       committedVersion = version
     }
-    let finishedRun: SyncRunRecord
 
-    try {
-      finishedRun = await syncRunsStorage.finish({
-        projectId: runtime.id,
-        id: job.id,
-        status: "succeeded",
-        rowsRead,
-        ...(version
-          ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
-          : {}),
-        checkpoint: nextCheckpoint,
-      })
-    } catch (error) {
-      if (committedVersion) {
-        throw createBookkeepingError({
-          syncId: sync.id,
-          runId: job.id,
-          version: committedVersion,
-          cause: error,
-        })
-      }
-      throw error
-    }
-
-    const finishedAt = requireFinishedAt({
-      syncId: sync.id,
-      runId: job.id,
-      finishedAt: finishedRun.finishedAt,
-    })
-    await notifyRunFinished(input.onRunFinished, finishedRun, committedVersion)
-    const result = {
-      id: job.id,
-      syncId: sync.id,
-      datasetId: dataset.id,
-      mode: sync.config.mode,
-      startedAt: requireStartedAt(job.id, startedRun.startedAt),
-      finishedAt,
+    return await finishSucceeded({
+      version,
+      versionCreated: outcome === "created",
       rowsRead,
+      checkpoint: nextCheckpoint,
+    })
+  } catch (caught) {
+    // A commit can land and still answer with an error, so only the lake can say what happened. If
+    // it cannot say either, this throws, and the run stays open for the next delivery to ask.
+    const landed = committedVersion
+      ? null
+      : await landedCommitBehind(input, caught, commitPreparedAt)
+
+    if (landed) {
+      committedVersion = landed
+      const lostItsRace = caught instanceof LakeConcurrencyError
+      const own = reachedCommit && !lostItsRace && !(caught instanceof CommitAlreadyLandedError)
+
+      return await finishLanded(
+        landed,
+        own ? { rowsRead, checkpoint: nextCheckpoint } : readByEarlierExecution
+      )
     }
-    return version
-      ? { ...result, version, versionCreated: outcome === "created" }
-      : { ...result, versionCreated: false }
-  } catch (error) {
-    if (!committedVersion) {
+
+    const error = translateLostRace(run, caught)
+
+    if (!committedVersion && !signal.aborted && !(error instanceof CommitLostRaceError)) {
       // The shared writer has already cleaned up its session. Finalize the failed sync run.
-      const status = signal.aborted ? "cancelled" : "failed"
       try {
-        const failureError =
-          status === "failed"
-            ? translateSyncExecutionError(error, {
-                syncId: run.syncId,
-                runId: job.id,
-                datasetId: run.datasetId,
-              })
-            : error
-        const failure = captureSixbFailure(failureError, {
-          allowedCodes: SYNC_RUN_FAILURE_CODES,
-          defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-          details: { syncId: run.syncId, runId: job.id, datasetId: run.datasetId },
-        })
+        const failure = captureSixbFailure(
+          translateSyncExecutionError(error, {
+            syncId: run.syncId,
+            runId: job.id,
+            datasetId: run.datasetId,
+          }),
+          {
+            allowedCodes: SYNC_RUN_FAILURE_CODES,
+            defaultCode: "internal.unexpected",
+            details: { syncId: run.syncId, runId: job.id, datasetId: run.datasetId },
+          }
+        )
         const failedRun = await syncRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
-          status,
+          executionToken,
+          status: "failed",
           rowsRead,
           error: failure,
         })
         await notifyRunFinished(input.onRunFinished, failedRun)
-        if (status === "failed" && failedRun.status === "failed") {
-          input.onRunFailed?.(error, failedRun, failure)
-        }
+        input.onRunFailed?.(error, failedRun, failure)
       } catch {
-        // The run did not transition to the requested terminal status.
+        // The run did not transition: a later delivery, or the execution that holds it, ends it.
       }
     }
 
@@ -315,6 +394,62 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   } finally {
     await logSession.flush()
   }
+}
+
+function requireSync(runtime: RunSyncJobInput["runtime"], run: SyncRunRecord): SyncDefinition {
+  const sync = runtime.syncs.getById(run.syncId)
+  if (!sync) {
+    throw new Error(`[SixbSyncWorker] Unknown sync '${run.syncId}'.`)
+  }
+  if (sync.target.dataset.id !== run.datasetId || sync.config.mode !== run.mode) {
+    throw new Error(
+      `[SixbSyncWorker] Sync run '${run.id}' no longer matches Sync '${sync.id}' configuration.`
+    )
+  }
+
+  return sync
+}
+
+/** The commit an error says landed, or that the lake holds in spite of the error. */
+async function landedCommitBehind(
+  input: RunSyncJobInput,
+  error: unknown,
+  commitPreparedAt: Date | undefined
+): Promise<DatasetVersion | null> {
+  if (error instanceof CommitAlreadyLandedError) return error.version
+
+  return findLandedCommit(input, commitPreparedAt)
+}
+
+/** A guard this run asked for failed on purpose. Its own guard only lost to another writer. */
+function translateLostRace(run: SyncRunRecord, error: unknown): unknown {
+  if (!(error instanceof LakeConcurrencyError) || run.expectedLatestVersionId !== undefined) {
+    return error
+  }
+
+  return new CommitLostRaceError(`[SixbSyncWorker] Sync run '${run.id}' lost its commit race.`, {
+    cause: error,
+  })
+}
+
+/**
+ * The version this run committed, if one did. A run that never prepared a commit has none: nothing
+ * of a partial run exists until then, rows stay in a session no reader sees, and it need not ask.
+ */
+async function findLandedCommit(
+  input: RunSyncJobInput,
+  commitPreparedAt: Date | undefined
+): Promise<DatasetVersion | null> {
+  if (!commitPreparedAt) return null
+
+  const { run } = input.claim
+
+  return findProducedVersion({
+    lakeStorage: input.runtime.lakeStorage,
+    datasetId: run.datasetId,
+    producer: { kind: "sync", runId: run.id },
+    since: commitPreparedAt,
+  })
 }
 
 async function notifyRunFinished(
