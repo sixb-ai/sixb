@@ -151,7 +151,7 @@ const CATALOG_SNAPSHOT_SCAN_LIMIT = 512
  * DuckLake names a table in `changes_made` for every change to its rows, inlined
  * or written to files, so version reads never scan the catalog's file tables.
  * Maintenance commits, which only move rows between files, name the table too and
- * are never versions (see `parseTableDataChange`).
+ * are never versions (see `parseTableDataChange`, `commitMaintenance`).
  */
 export class DuckLakeSnapshotReader {
   constructor(
@@ -1154,6 +1154,10 @@ export class DuckLakeSnapshotReader {
     tableId: bigint,
     candidate: DatasetSnapshotCandidateRow
   ): DatasetSnapshotRow | null {
+    if (candidate.metadata?.kind === "compaction") {
+      return null
+    }
+
     const { hasDataChange, hasDeleteChange } = parseTableDataChange(candidate.changesMade, tableId)
 
     // Metadata-only snapshots are common for table comments, schema changes,

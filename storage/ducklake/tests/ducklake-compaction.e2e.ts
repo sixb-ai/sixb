@@ -13,6 +13,7 @@ import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
 interface DuckLakeStorageInternals {
   readonly connections: {
     withExclusiveAttached<T>(run: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T>
+    detachLocalCatalogAfterCommit(runtime: DuckDbExclusiveRuntime): Promise<void>
   }
   readonly compaction: {
     plan(dataset: DatasetDefinition): Promise<unknown>
@@ -203,6 +204,53 @@ describe("DuckLakeStorage compaction", () => {
     }, 30_000)
   }
 
+  for (const catalogType of ["duckdb", "sqlite"] as const) {
+    // Regression proof: compare only inlinedRows with FLUSH_INLINED_ROWS in plan(). The deletes
+    // then stay in the catalog, and the dataset keeps no delete file. Or start commitMaintenance
+    // with moved = false: the flush then leaves a local catalog attached.
+    test(`${catalogType}: flushes deletes the catalog holds, short of rewriting their file`, async () => {
+      await useCatalog(catalogType)
+      await storage.createDataset(accounts)
+      await merge(
+        accounts,
+        rows(10_100, (i) => ({ id: `a${i}`, score: 0 }))
+      )
+      await setInliningLimit(2_000)
+
+      // A new provider checks its first commit: 1,000 deletes, under a tenth of the file.
+      await reopen()
+      const detach = spyOn(internals(storage).connections, "detachLocalCatalogAfterCommit")
+      await deleteRows(accounts, 1_000)
+      const before = await history([accounts])
+
+      expect(await settled(accounts)).toMatchObject({ deleteFiles: 1, rowCount: 9_100 })
+      expect(await liveFileRows(accounts)).toEqual([10_100])
+      expect(await history([accounts])).toEqual(before)
+
+      // The write's commit and the flush's, which reports no rows: the catalog changed all the same.
+      expect(detach).toHaveBeenCalledTimes(2)
+    }, 30_000)
+  }
+
+  // Regression proof: drop the compaction marker from commitMaintenance. DuckLake records a flush
+  // of a table's deletes alone as `deleted_from_table`, an ordinary delete: here the tombstones
+  // cross the threshold in the sequence table, and the main table gets a version written by nobody.
+  test("a flush of the main table's deletes alone is never a version", async () => {
+    await storage.createDataset(items)
+    await merge(
+      items,
+      rows(10_100, (i) => ({ id: `i${i}`, revision: 1, name: "n" }))
+    )
+    await setInliningLimit(2_000)
+
+    await reopen()
+    await deleteRows(items, 1_000, 2)
+    const before = await history([items])
+
+    expect(await settled(items)).toMatchObject({ inlinedRows: 0, rowCount: 9_100 })
+    expect(await history([items])).toEqual(before)
+  }, 30_000)
+
   // Regression proof: in the write coordinator, await the compaction a commit schedules. The
   // commit then waits for the blocked check, and the test times out.
   test("returns the version before compaction looks at the dataset", async () => {
@@ -392,6 +440,18 @@ describe("DuckLakeStorage compaction", () => {
     return (await session.commit({ createInitialVersion: true })).version as DatasetVersion
   }
 
+  /** Deletes the dataset's first rows in one merge. */
+  async function deleteRows(dataset: DatasetDefinition, count: number, sequence?: number) {
+    const session = await storage.beginMerge({ dataset })
+    await session.writeChanges(
+      rows(count, (i) => {
+        const key = { id: rowId(dataset, i) }
+        return sequence === undefined ? change.delete(key) : change.delete(key, { sequence })
+      })
+    )
+    await session.commit()
+  }
+
   async function append(dataset: DatasetDefinition, appended: readonly DatasetRow[]) {
     const write = await storage.beginWrite({ dataset, mode: "append" })
     await write.writeRows(appended)
@@ -440,6 +500,10 @@ function readBatch(batch: number): DatasetRow[] {
 
 function rows<T>(count: number, row: (index: number) => T): T[] {
   return Array.from({ length: count }, (_, index) => row(index))
+}
+
+function rowId(dataset: DatasetDefinition, index: number): string {
+  return `${dataset === items ? "i" : "a"}${index}`
 }
 
 function table(dataset: DatasetDefinition): string {

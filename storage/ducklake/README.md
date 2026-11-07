@@ -145,14 +145,16 @@ is configured.
 
 - **When.** After a dataset's first commit in a provider, then after every 8th, the provider reads
   the dataset's catalog rows (three or four queries, no data). A pass runs only past a threshold:
-  1,000 inlined rows, a data file with a tenth of its rows deleted, or 16 files under 1 MiB.
-- **What.** A first maintenance commit flushes inlined rows to files. A second rewrites the files
-  with a tenth of their rows deleted, then merges files under 1 MiB, at most 256 per pass. A
-  backlog takes several passes, one after the other.
+  1,000 rows or deletes inlined in the catalog, a data file with a tenth of its rows deleted, or
+  16 files under 1 MiB.
+- **What.** A first maintenance commit flushes what the catalog holds to files. A second rewrites
+  the files with a tenth of their rows deleted, then merges files under 1 MiB, at most 256 per
+  pass. A backlog takes several passes, one after the other.
 - **Never a version.** DuckLake records these commits as `inline_flush`, `rewrite_delete` and
   `merge_adjacent`, which change no rows: they are not versions, the change feed skips them, and
   every retained version reads the same rows through the new files. Whoever runs them, by hand
-  included, the rule is the same.
+  included, the rule is the same, but for a flush of deletes alone: DuckLake records it as a plain
+  delete, so only the provider's own commits, which say they are compaction, are told apart.
 - **Never in a write's way.** The version is committed and returned first; the commit only
   schedules the check. One compaction runs per dataset at a time; commits meanwhile get one more
   pass. A failure goes to a `[SixbDuckLake]` warning, never to the write. Each maintenance commit

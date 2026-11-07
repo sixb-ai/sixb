@@ -6,7 +6,8 @@ export interface SixbSchemaChangeMetadata {
 }
 
 export interface SixbCommitMetadata {
-  readonly kind: "datasetVersion"
+  /** `compaction`: a commit of the provider's compaction, never a version of the dataset. */
+  readonly kind: "datasetVersion" | "compaction"
   readonly datasetId: string
   readonly commitId?: string
   readonly mode?: DatasetVersion["mode"]
@@ -55,7 +56,7 @@ export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefi
   if (
     !isRecord(parsed) ||
     !isRecord(parsed.sixb) ||
-    parsed.sixb.kind !== "datasetVersion" ||
+    (parsed.sixb.kind !== "datasetVersion" && parsed.sixb.kind !== "compaction") ||
     typeof parsed.sixb.datasetId !== "string"
   ) {
     return undefined
@@ -69,7 +70,7 @@ export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefi
   const { rowsChanged, lineageChanged } = parsed.sixb
 
   return {
-    kind: "datasetVersion",
+    kind: parsed.sixb.kind,
     datasetId: parsed.sixb.datasetId,
     ...(typeof commitId === "string" ? { commitId } : {}),
     ...(mode === "snapshot" || mode === "append" || mode === "merge" || mode === "schema"

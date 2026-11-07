@@ -40,6 +40,8 @@ export interface DuckLakeTableStorage {
   /** Rows inlined in the catalog, the ones later replaced or deleted included. */
   readonly inlinedRows: number
   readonly liveInlinedRows: number
+  /** The part of `deletedRows` the catalog holds. */
+  readonly inlinedDeletes: number
 }
 
 const EMPTY_TABLE_STORAGE: DuckLakeTableStorage = {
@@ -52,6 +54,7 @@ const EMPTY_TABLE_STORAGE: DuckLakeTableStorage = {
   filesToRewrite: 0,
   inlinedRows: 0,
   liveInlinedRows: 0,
+  inlinedDeletes: 0,
 }
 
 /**
@@ -85,6 +88,7 @@ export async function readTableStorage(
       deleteFiles: count(row, "delete_files"),
       deletedRows: count(row, "deleted_rows"),
       filesToRewrite: count(row, "files_to_rewrite"),
+      inlinedDeletes: count(row, "inlined_deletes"),
     })
   }
 
@@ -112,10 +116,8 @@ async function queryFiles(
   tableIds: readonly bigint[],
   inlinedDeletes: readonly bigint[]
 ): Promise<readonly DuckDbRow[]> {
-  const deleted =
-    inlinedDeletes.length === 0
-      ? "coalesce(deletes.delete_count, 0)"
-      : "coalesce(deletes.delete_count, 0) + coalesce(inlined.delete_count, 0)"
+  const inlinedCount = inlinedDeletes.length === 0 ? "0" : "coalesce(inlined.delete_count, 0)"
+  const deleted = `coalesce(deletes.delete_count, 0) + ${inlinedCount}`
 
   return runtime.query(
     buildDuckLakeMetadataQuery(options, (table) => {
@@ -148,6 +150,7 @@ async function queryFiles(
           CAST(coalesce(sum(file.record_count), 0) AS BIGINT) AS file_rows,
           CAST(count(deletes.delete_file_id) AS BIGINT) AS delete_files,
           CAST(coalesce(sum(${deleted}), 0) AS BIGINT) AS deleted_rows,
+          CAST(coalesce(sum(${inlinedCount}), 0) AS BIGINT) AS inlined_deletes,
           CAST(
             count(*) FILTER (
               WHERE ${deleted} > 0 AND ${deleted} >= file.record_count * ${REWRITE_DELETED_SHARE}

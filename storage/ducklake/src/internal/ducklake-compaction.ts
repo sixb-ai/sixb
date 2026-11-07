@@ -14,6 +14,7 @@ import {
 import { CatalogMovedError, commitVersionTransaction } from "./ducklake-version-transaction"
 import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "./names"
 import { buildDatasetLockSql, duckLakeAlias, quoteIdentifier, quoteSqlString } from "./sql"
+import type { SixbCommitMetadata } from "./versions"
 
 /**
  * A dataset's thresholds are checked after its first commit in this provider, then after every
@@ -22,7 +23,7 @@ import { buildDatasetLockSql, duckLakeAlias, quoteIdentifier, quoteSqlString } f
  */
 const CHECK_EVERY_COMMITS = 8
 
-/** Inlined rows a dataset's tables may hold in the catalog before a flush moves them to a file. */
+/** Rows and deletes a dataset's tables may hold in the catalog before a flush moves them to files. */
 const FLUSH_INLINED_ROWS = 1_000
 
 /** Small files a dataset's tables may hold before they are merged. */
@@ -57,6 +58,8 @@ interface DatasetCompactionState {
 interface CompactionPlan {
   readonly table: DatasetTableRef
   readonly flush: boolean
+  /** The flush has deletes to move, which DuckLake's flush does not report. */
+  readonly flushesDeletes: boolean
   readonly compact: boolean
 }
 
@@ -69,9 +72,9 @@ const warnedPartitionedDatasets = new Set<string>()
  * A commit only schedules the work: the version is committed and returned first, and a failure
  * never reaches the write. One compaction runs per dataset at a time; a commit arriving meanwhile
  * marks it for one more pass. A pass that crosses no threshold changes nothing. Otherwise it
- * flushes inlined rows to a file, then rewrites the files whose deleted rows reached
+ * flushes inlined rows and deletes to files, then rewrites the files whose deleted rows reached
  * `REWRITE_DELETED_SHARE` and merges small files, as two maintenance commits, which are never
- * dataset versions (see `parseTableDataChange`). Time travel to a retained version reads the same
+ * dataset versions (see `commitMaintenance`). Time travel to a retained version reads the same
  * rows after them.
  *
  * Each commit takes the catalog commit lock, as writes do, and a merge reads at most
@@ -159,7 +162,11 @@ export class DuckLakeCompaction {
 
     let progressed = false
     if (plan.flush) {
-      progressed = await this.commitMaintenance(dataset, this.flushCalls(plan.table))
+      progressed = await this.commitMaintenance(
+        dataset,
+        this.flushCalls(plan.table),
+        plan.flushesDeletes
+      )
     }
 
     if (plan.compact) {
@@ -188,12 +195,15 @@ export class DuckLakeCompaction {
     const sum = (count: (storage: DuckLakeTableStorage) => number) =>
       tables.reduce((total, storage) => total + count(storage), 0)
 
-    const flush = sum((storage) => storage.inlinedRows) >= FLUSH_INLINED_ROWS
+    const inlinedDeletes = sum((storage) => storage.inlinedDeletes)
+    const flush = sum((storage) => storage.inlinedRows) + inlinedDeletes >= FLUSH_INLINED_ROWS
     const compact =
       sum((storage) => storage.filesToRewrite) > 0 ||
       sum((storage) => storage.smallDataFiles) >= MERGE_SMALL_FILES
 
-    return flush || compact ? { table: found.table, flush, compact } : null
+    return flush || compact
+      ? { table: found.table, flush, flushesDeletes: flush && inlinedDeletes > 0, compact }
+      : null
   }
 
   private flushCalls(table: DatasetTableRef): readonly string[] {
@@ -214,20 +224,25 @@ export class DuckLakeCompaction {
   /**
    * Runs DuckLake maintenance calls as one commit, and says whether they moved anything. DuckLake
    * refuses to flush and compact in one transaction, hence two commits per pass.
+   *
+   * The commit says it is compaction. DuckLake marks most of its maintenance in `changes_made`
+   * (see `parseTableDataChange`), but records a flush of a table's deletes alone as an ordinary
+   * delete, which would read as a version nobody wrote.
    */
   private async commitMaintenance(
     dataset: DatasetDefinition,
-    calls: readonly string[]
+    calls: readonly string[],
+    movesUnreported = false
   ): Promise<boolean> {
     return this.withCommitRuntime(async (runtime) => {
-      let moved = false
+      let moved = movesUnreported
       let committed = false
 
       await runtime.run("BEGIN TRANSACTION")
       try {
         await this.lockDataset(runtime, dataset)
         await runtime.run(
-          `CALL ${quoteIdentifier(duckLakeAlias(this.options))}.set_commit_message(${quoteSqlString("Sixb")}, ${quoteSqlString(`compact dataset ${dataset.id}`)})`
+          `CALL ${quoteIdentifier(duckLakeAlias(this.options))}.set_commit_message(${quoteSqlString("Sixb")}, ${quoteSqlString(`compact dataset ${dataset.id}`)}, extra_info => ${quoteSqlString(compactionCommitInfo(dataset))})`
         )
 
         for (const call of calls) {
@@ -326,6 +341,11 @@ export class DuckLakeCompaction {
   private aliasSql(): string {
     return quoteSqlString(duckLakeAlias(this.options))
   }
+}
+
+function compactionCommitInfo(dataset: DatasetDefinition): string {
+  const metadata: SixbCommitMetadata = { kind: "compaction", datasetId: dataset.id }
+  return JSON.stringify({ sixb: metadata })
 }
 
 /** Whether a DuckLake maintenance call's result row reports moved rows or files. */
