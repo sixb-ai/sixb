@@ -1,10 +1,9 @@
 import type { DomainEvent } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
-import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
-import { runProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
+import { type DispatchJob, JobDispatch } from "./job-dispatch"
 import { routeKeysForEvent } from "./route-key"
 import type {
   OrchestratorDispatchers,
@@ -15,12 +14,11 @@ import type {
   OrchestratorRuntimeOptions,
 } from "./types"
 
-const EVENT_SCHEDULE_RETRY_INITIAL_DELAY_MS = 250
-const EVENT_SCHEDULE_RETRY_MAX_DELAY_MS = 10_000
+const SUBSCRIBE_RETRY_INITIAL_DELAY_MS = 250
+const SUBSCRIBE_RETRY_MAX_DELAY_MS = 10_000
 
 export class OrchestratorWorker extends Worker {
   private readonly options: OrchestratorRuntimeOptions
-  private readonly projectionDescriptors: readonly ProjectionDispatchDescriptor[]
 
   constructor(options: OrchestratorRuntimeOptions) {
     if (!options.projectId) {
@@ -28,54 +26,21 @@ export class OrchestratorWorker extends Worker {
     }
     super()
     this.options = options
-    this.projectionDescriptors = projectionDescriptors(options.projectId, options.routes)
-    if (this.projectionDescriptors.length > 0 && !options.projectionReconciliation) {
-      throw createSixbError(
-        "internal.unexpected",
-        "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
-        {
-          details: {
-            projectId: options.projectId,
-            projectionIds: this.projectionDescriptors.map((descriptor) => descriptor.projectionId),
-          },
-        }
-      )
-    }
     for (const key of ["syncs", "pipelines", "projections", "workflows"] as const) {
       if (hasDispatcherRoutes(options.routes, key)) requireDispatcher(options, key)
     }
   }
 
+  /** One subscription per event type, so a job that keeps failing holds its own type at most. */
   protected async run(signal: AbortSignal): Promise<void> {
     const { directJobTypes, eventScheduleTypes } = deriveSubscribedTypes(this.options.routes)
     const consumers: Promise<void>[] = []
 
-    if (directJobTypes.length > 0) {
-      consumers.push(consumeLiveJobs(this.options, directJobTypes, signal))
+    for (const eventType of directJobTypes) {
+      consumers.push(consumeLiveJobs(this.options, eventType, signal))
     }
     for (const eventType of eventScheduleTypes) {
       consumers.push(consumeRetainedEventSchedules(this.options, eventType, signal))
-    }
-    if (this.projectionDescriptors.length > 0) {
-      const reconciliation = this.options.projectionReconciliation
-      if (!reconciliation) {
-        throw createSixbError(
-          "internal.unexpected",
-          "[SixbOrchestrator] Projection reconciliation is not configured.",
-          { details: { projectId: this.options.projectId } }
-        )
-      }
-      consumers.push(
-        runProjectionDispatchReconciler(
-          {
-            projectId: this.options.projectId,
-            dispatcher: requireDispatcher(this.options, "projections"),
-            descriptors: this.projectionDescriptors,
-            ...reconciliation,
-          },
-          signal
-        )
-      )
     }
 
     await Promise.all(consumers)
@@ -102,10 +67,15 @@ function deriveSubscribedTypes(routes: OrchestratorRoutes): {
 
 async function consumeLiveJobs(
   options: OrchestratorRuntimeOptions,
-  types: readonly DomainEvent["type"][],
+  eventType: DomainEvent["type"],
   signal: AbortSignal
 ): Promise<void> {
-  await consumeBatches(options, { types }, (events) => dispatchDirectJobs(options, events), signal)
+  await consumeBatches(
+    options,
+    { types: [eventType] },
+    (events) => directJobs(options, events),
+    signal
+  )
 }
 
 async function consumeRetainedEventSchedules(
@@ -116,118 +86,116 @@ async function consumeRetainedEventSchedules(
   await consumeBatches(
     options,
     { types: [eventType], from: "earliest" },
-    (events) => dispatchEventSchedules(options, events),
+    (events) => eventScheduleJobs(options, events),
     signal
   )
 }
 
-/** Keep only the current batch in flight. The provider owns the unread backlog. */
+/**
+ * Keep only the current batch in flight. The provider owns the unread backlog. A batch ends once
+ * each of its jobs was dispatched or left to retry on its own.
+ */
 async function consumeBatches(
   options: OrchestratorRuntimeOptions,
   input: Parameters<OrchestratorRuntimeOptions["events"]["subscribe"]>[0],
-  dispatch: (events: readonly StoredDomainEvent[]) => Promise<void>,
+  jobsOf: (events: readonly StoredDomainEvent[]) => readonly DispatchJob[],
   signal: AbortSignal
 ): Promise<void> {
+  const dispatch = new JobDispatch({
+    projectId: options.projectId,
+    reporter: options.reporter,
+    signal,
+  })
+
   let attempt = 0
   while (!signal.aborted) {
     let pending: Promise<void> = Promise.resolve()
     let unsubscribe: (() => void) | undefined
     try {
       unsubscribe = await options.events.subscribe(input, (events) => {
-        pending = retryBatch(dispatch, events, signal)
+        pending = dispatch.all(jobsOf(events))
         return pending
       })
     } catch (error) {
       if (signal.aborted) return
       console.error("[SixbOrchestrator] Subscription failed; retrying:", error)
-      await sleep(eventScheduleRetryDelay(attempt++), signal)
+      await sleep(subscribeRetryDelay(attempt++), signal)
       continue
     }
     await waitForAbort(signal)
     unsubscribe()
     await pending
+    await dispatch.drain()
     return
   }
 }
 
-async function retryBatch(
-  dispatch: (events: readonly StoredDomainEvent[]) => Promise<void>,
-  events: readonly StoredDomainEvent[],
-  signal: AbortSignal
-): Promise<void> {
-  let retry = 0
-  while (!signal.aborted) {
-    try {
-      await dispatch(events)
-      return
-    } catch (error) {
-      if (signal.aborted) return
-      console.error("[SixbOrchestrator] Dispatch failed; retrying the current batch:", error)
-      await sleep(eventScheduleRetryDelay(retry++), signal)
-    }
+function directJobs(
+  options: OrchestratorRuntimeOptions,
+  events: readonly StoredDomainEvent[]
+): readonly DispatchJob[] {
+  return events.flatMap((event) =>
+    routeKeysForEvent(event).flatMap((key) =>
+      (options.routes.get(key)?.jobs ?? []).map((item) => ({
+        event,
+        target: directJobTarget(item),
+        dispatch: () => enqueueDirectJob(options, event, item),
+      }))
+    )
+  )
+}
+
+function eventScheduleJobs(
+  options: OrchestratorRuntimeOptions,
+  events: readonly StoredDomainEvent[]
+): readonly DispatchJob[] {
+  return events.flatMap((event) =>
+    routeKeysForEvent(event).flatMap((key) =>
+      (options.routes.get(key)?.eventSchedules ?? []).flatMap((binding) =>
+        binding.targets.map((target) => ({
+          event,
+          target: eventScheduleTarget(target),
+          dispatch: () => dispatchEventSchedule(options, event, binding, target),
+        }))
+      )
+    )
+  )
+}
+
+function directJobTarget(item: OrchestratorJob): string {
+  switch (item.queue) {
+    case "syncRuns":
+      return `sync:${item.job.payload.syncId}`
+    case "pipelines":
+      return `pipeline:${item.job.payload.pipelineId}`
+    case "projections":
+      return `projection:${item.job.payload.projectionId}`
+    case "workflows":
+      return `workflow:${item.job.payload.workflowId}`
   }
 }
 
-async function dispatchDirectJobs(
-  options: OrchestratorRuntimeOptions,
-  events: readonly StoredDomainEvent[]
-): Promise<void> {
-  const errors: unknown[] = []
-  for (const event of events) {
-    for (const key of routeKeysForEvent(event)) {
-      const route = options.routes.get(key)
-      if (!route) continue
-      for (const item of route.jobs) {
-        try {
-          await enqueueDirectJob(options, event, item)
-        } catch (error) {
-          // One direct fan-out sibling must not prevent the others from being queued.
-          errors.push(error)
-        }
-      }
-    }
-  }
-  if (errors.length > 0) throw new AggregateError(errors, "Direct event dispatch failed.")
-}
-
-async function dispatchEventSchedules(
-  options: OrchestratorRuntimeOptions,
-  events: readonly StoredDomainEvent[]
-): Promise<void> {
-  for (const event of events) {
-    for (const key of routeKeysForEvent(event)) {
-      const bindings = options.routes.get(key)?.eventSchedules ?? []
-      for (const binding of bindings) {
-        await dispatchEventSchedule(options, event, binding)
-      }
-    }
+function eventScheduleTarget(target: OrchestratorEventScheduleTarget): string {
+  switch (target.queue) {
+    case "syncRuns":
+      return `sync:${target.syncId}`
+    case "pipelines":
+      return `pipeline:${target.pipelineId}`
+    case "workflows":
+      return `workflow:${target.workflowId}`
   }
 }
 
 async function dispatchEventSchedule(
   options: OrchestratorRuntimeOptions,
   sourceEvent: StoredDomainEvent,
-  binding: OrchestratorEventScheduleBinding
+  binding: OrchestratorEventScheduleBinding,
+  target: OrchestratorEventScheduleTarget
 ): Promise<void> {
   const match = evaluateEventSchedule(binding.schedule, sourceEvent)
   if (!match) return
 
-  const results = await Promise.allSettled(
-    binding.targets.map((target) =>
-      enqueueEventScheduleTarget(options, sourceEvent, binding.schedule.id, match.event, target)
-    )
-  )
-  const errors = results
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-    .map((result) => result.reason)
-
-  if (errors.length === 1) throw errors[0]
-  if (errors.length > 1) {
-    throw new AggregateError(
-      errors,
-      `Schedule '${binding.schedule.id}' dispatch failed for event '${sourceEvent.id}'.`
-    )
-  }
+  await enqueueEventScheduleTarget(options, sourceEvent, binding.schedule.id, match.event, target)
 }
 
 async function enqueueDirectJob(
@@ -479,30 +447,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function projectionDescriptors(
-  projectId: string,
-  routes: OrchestratorRoutes
-): readonly ProjectionDispatchDescriptor[] {
-  const descriptors = new Map<string, ProjectionDispatchDescriptor>()
-  for (const route of routes.values()) {
-    for (const item of route.jobs) {
-      if (item.queue !== "projections") continue
-      const existing = descriptors.get(item.job.payload.projectionId)
-      if (existing && !projectionDescriptorsEqual(existing, item.job.payload)) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbOrchestrator] Projection '${item.job.payload.projectionId}' has conflicting dispatch routes.`,
-          { details: { projectId, projectionId: item.job.payload.projectionId } }
-        )
-      }
-      descriptors.set(item.job.payload.projectionId, item.job.payload)
-    }
-  }
-  return [...descriptors.values()].sort((left, right) =>
-    left.projectionId.localeCompare(right.projectionId)
-  )
-}
-
 function hasDispatcherRoutes(
   routes: OrchestratorRoutes,
   key: keyof OrchestratorDispatchers
@@ -521,7 +465,7 @@ function hasDispatcherRoutes(
   return false
 }
 
-function requireDispatcher<TKey extends keyof OrchestratorDispatchers>(
+export function requireDispatcher<TKey extends keyof OrchestratorDispatchers>(
   options: Pick<OrchestratorRuntimeOptions, "projectId" | "dispatchers">,
   key: TKey
 ): NonNullable<OrchestratorDispatchers[TKey]> {
@@ -534,21 +478,6 @@ function requireDispatcher<TKey extends keyof OrchestratorDispatchers>(
     )
   }
   return dispatcher
-}
-
-function projectionDescriptorsEqual(
-  left: ProjectionDispatchDescriptor,
-  right: ProjectionDispatchDescriptor
-): boolean {
-  return (
-    left.projectionId === right.projectionId &&
-    left.projectionKind === right.projectionKind &&
-    left.protocol === right.protocol &&
-    left.datasetId === right.datasetId &&
-    left.ontologyRevision === right.ontologyRevision &&
-    left.projectionRevision === right.projectionRevision &&
-    left.ownershipHash === right.ownershipHash
-  )
 }
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
@@ -573,9 +502,6 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-function eventScheduleRetryDelay(attempt: number): number {
-  return Math.min(
-    EVENT_SCHEDULE_RETRY_INITIAL_DELAY_MS * 2 ** attempt,
-    EVENT_SCHEDULE_RETRY_MAX_DELAY_MS
-  )
+function subscribeRetryDelay(attempt: number): number {
+  return Math.min(SUBSCRIBE_RETRY_INITIAL_DELAY_MS * 2 ** attempt, SUBSCRIBE_RETRY_MAX_DELAY_MS)
 }

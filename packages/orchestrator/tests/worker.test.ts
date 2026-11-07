@@ -29,6 +29,7 @@ import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { compileRoutes } from "../src/compile-routes"
 import { ProjectionDispatchReconciler } from "../src/projection-dispatch-reconciler"
+import { createReconciliationPasses } from "../src/reconciliation-passes"
 import type {
   OrchestratorRoutes,
   PipelineDispatcherPort,
@@ -208,11 +209,13 @@ function thrownBy(run: () => unknown): unknown {
   throw new Error("Expected function to throw.")
 }
 
+const signal = new AbortController().signal
+
 const workers: OrchestratorWorker[] = []
 
 // Revert the returned processing promise in consumeBatches: all retained batches enter at once.
 // Drop `from: "earliest"` from consumeRetainedEventSchedules: the events published before start are
-// never delivered. Skip the retry in retryBatch: the failed batch's 99 siblings are never queued.
+// never delivered. Skip the retry in JobDispatch: the job that failed is never queued.
 // The broker delivers retained events in pages of 100, so 150 events make two batches.
 test("retained event schedules catch up with backpressure and replay a failed enqueue", async () => {
   const broker = new InMemoryBroker()
@@ -270,7 +273,9 @@ test("retained event schedules catch up with backpressure and replay a failed en
       await waitForTurns(20)
       expect(deliveries).toBe(1)
       release()
-      // The failed batch waits out a 250ms retry backoff before it is dispatched again.
+      // The failed job left the line: every other event is queued while it waits out its 250ms.
+      await waitFor(() => acknowledged === 149)
+      expect(deliveries).toBe(2)
       await waitFor(() => jest.getTimerCount() === 1)
       fireTimerDueIn(250)
       await waitFor(() => acknowledged === 150)
@@ -296,10 +301,7 @@ async function startWorker(
   queues: InMemoryQueues,
   routes: OrchestratorRoutes,
   projectId = PROJECT_ID,
-  projections?: {
-    readonly dispatcher: ProjectionDispatcherPort
-    readonly reconciliation: ProjectionReconciliationPorts
-  },
+  projectionDispatcher?: ProjectionDispatcherPort,
   workflowDispatcher = createTestWorkflowRunDispatcher(queues, undefined, projectId)
 ): Promise<OrchestratorWorker> {
   const worker = new OrchestratorWorker({
@@ -311,9 +313,9 @@ async function startWorker(
       syncs: createTestSyncRunDispatcher(queues, projectId),
       pipelines: createTestPipelineRunDispatcher(queues, projectId),
       workflows: workflowDispatcher,
-      ...(projections === undefined ? {} : { projections: projections.dispatcher }),
+      ...(projectionDispatcher === undefined ? {} : { projections: projectionDispatcher }),
     },
-    ...(projections === undefined ? {} : { projectionReconciliation: projections.reconciliation }),
+    reporter: {},
   })
   workers.push(worker)
   await worker.start()
@@ -588,24 +590,20 @@ describe("OrchestratorWorker", () => {
     const [sourceEvent] = await eventRuntime.append({
       events: [makeDatasetVersionCommittedEvent()],
     })
+    // Jobs go out one at a time, so they land across polls, and claiming takes them off the queue.
+    const claimed: { job: { payload: { runId: string } } }[] = []
     await waitFor(async () => {
-      const syncJobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync" })
-      const pipelineJobs = await queues.pipelines.claim({
-        projectId: PROJECT_ID,
-        workerId: "pipeline",
-      })
-      const workflowJobs = await queues.workflows.claim({
-        projectId: PROJECT_ID,
-        workerId: "workflow",
-      })
-      if (syncJobs.length === 0 || pipelineJobs.length === 0 || workflowJobs.length === 0) {
-        return false
-      }
-      expect(syncJobs[0]!.job.payload.runId).toContain(`event:${sourceEvent!.id}`)
-      expect(pipelineJobs[0]!.job.payload.runId).toContain(`event:${sourceEvent!.id}`)
-      expect(workflowJobs[0]!.job.payload.runId).toContain(`event:${sourceEvent!.id}`)
-      return true
+      claimed.push(
+        ...(await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync" })),
+        ...(await queues.pipelines.claim({ projectId: PROJECT_ID, workerId: "pipeline" })),
+        ...(await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "workflow" }))
+      )
+      return claimed.length === 3
     })
+
+    for (const { job } of claimed) {
+      expect(job.payload.runId).toContain(`event:${sourceEvent!.id}`)
+    }
   })
 
   test("dataset schedules skip versions that change neither rows nor lineage", async () => {
@@ -640,10 +638,13 @@ describe("OrchestratorWorker", () => {
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
     const projectionDispatches: ProjectionDispatchInput[] = []
-    await startWorker(eventRuntime, queues, routes, PROJECT_ID, {
-      dispatcher: createTestProjectionDispatcher(projectionDispatches),
-      reconciliation: { lakeStorage: new InMemoryLakeStorage(), projectionRuns: noProjectionRuns },
-    })
+    await startWorker(
+      eventRuntime,
+      queues,
+      routes,
+      PROJECT_ID,
+      createTestProjectionDispatcher(projectionDispatches)
+    )
 
     // One ordered subscription: the jobs of the later versions show the first one was judged.
     const [, lineageOnly, rowsOnly] = await eventRuntime.append({
@@ -797,10 +798,13 @@ describe("OrchestratorWorker", () => {
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
     const dispatches: ProjectionDispatchInput[] = []
-    await startWorker(eventRuntime, queues, routes, PROJECT_ID, {
-      dispatcher: createTestProjectionDispatcher(dispatches),
-      reconciliation: { lakeStorage: new InMemoryLakeStorage(), projectionRuns: noProjectionRuns },
-    })
+    await startWorker(
+      eventRuntime,
+      queues,
+      routes,
+      PROJECT_ID,
+      createTestProjectionDispatcher(dispatches)
+    )
 
     const [sourceEvent] = await eventRuntime.append({
       events: [makeDatasetVersionCommittedEvent("version-42")],
@@ -821,24 +825,18 @@ describe("OrchestratorWorker", () => {
   })
 
   test("reconciles a committed dataset version when its live event is missing", async () => {
-    const descriptor = invoiceProjectionDescriptor()
-    const routes = compileRoutes({
-      schedules: [],
-      syncs: [],
-      pipelines: [],
-      projections: [descriptor],
-    })
     const lakeStorage = new InMemoryLakeStorage()
     const version = await commitInvoiceDatasetVersion(lakeStorage)
-    const queues = new InMemoryQueues()
     const dispatches: ProjectionDispatchInput[] = []
 
-    await startWorker(createEvents(), queues, routes, PROJECT_ID, {
+    await new ProjectionDispatchReconciler({
+      projectId: PROJECT_ID,
       dispatcher: createTestProjectionDispatcher(dispatches),
-      reconciliation: { lakeStorage, projectionRuns: noProjectionRuns },
-    })
+      descriptors: [invoiceProjectionDescriptor()],
+      lakeStorage,
+      projectionRuns: noProjectionRuns,
+    }).pass(signal)
 
-    await waitFor(() => dispatches.length === 1)
     expect(dispatches[0]).toMatchObject({
       datasetVersion: {
         datasetId: rawInvoices.id,
@@ -867,15 +865,11 @@ describe("OrchestratorWorker", () => {
       projectionRuns: noProjectionRuns,
     })
 
-    const originalError = console.error
-    console.error = () => {}
-    try {
-      await reconciler.pass()
-      await reconciler.pass()
-      await reconciler.pass()
-    } finally {
-      console.error = originalError
-    }
+    const failure = await reconciler.pass(signal).catch((error) => error)
+    expect(failure).toBeInstanceOf(AggregateError)
+
+    await reconciler.pass(signal)
+    await reconciler.pass(signal)
 
     // The failed lookup is retried once; nothing changed after it succeeded.
     expect(attempts).toBe(2)
@@ -921,7 +915,7 @@ describe("OrchestratorWorker", () => {
           return versionId === dataVersion.versionId ? dataVersion : null
         },
       },
-    }).pass()
+    }).pass(signal)
 
     expect(dispatches[0]?.datasetVersion.versionId).toBe(dataVersion.versionId)
   })
@@ -938,37 +932,29 @@ describe("OrchestratorWorker", () => {
       rowsChanged: true,
       lineageChanged: true,
     }
-    const errors: unknown[] = []
-    const originalError = console.error
-    console.error = (_message, error) => {
-      errors.push(error)
-    }
-
-    try {
-      await new ProjectionDispatchReconciler({
-        projectId: PROJECT_ID,
-        dispatcher: createTestProjectionDispatcher([]),
-        descriptors: [descriptor],
-        projectionRuns: noProjectionRuns,
-        lakeStorage: {
-          listLatestVersionsSince: noLakeChanges,
-          async listVersions() {
-            return [schemaVersion]
-          },
-          async getLatestVersion() {
-            return schemaVersion
-          },
-          async getVersion() {
-            return schemaVersion
-          },
+    const failure = await new ProjectionDispatchReconciler({
+      projectId: PROJECT_ID,
+      dispatcher: createTestProjectionDispatcher([]),
+      descriptors: [descriptor],
+      projectionRuns: noProjectionRuns,
+      lakeStorage: {
+        listLatestVersionsSince: noLakeChanges,
+        async listVersions() {
+          return [schemaVersion]
         },
-      }).pass()
-    } finally {
-      console.error = originalError
-    }
+        async getLatestVersion() {
+          return schemaVersion
+        },
+        async getVersion() {
+          return schemaVersion
+        },
+      },
+    })
+      .pass(signal)
+      .catch((error) => error)
 
-    expect(errors).toHaveLength(1)
-    expect(errors[0]).toMatchObject({
+    expect(failure.errors).toHaveLength(1)
+    expect(failure.errors[0].cause).toMatchObject({
       code: "internal.unexpected",
       retryable: false,
       message:
@@ -1022,20 +1008,109 @@ describe("OrchestratorWorker", () => {
       await quietly(async () => {
         await startWorker(eventRuntime, queues, routes)
         await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
-        // The batch failed on its sync sibling and waits out a 250ms retry backoff.
+        // Only the sync sibling failed, and only it waits out a 250ms retry backoff.
         await waitFor(() => pipelineDispatches === 1 && jest.getTimerCount() === 1)
         fireTimerDueIn(250)
-        await waitFor(() => pipelineDispatches === 2)
+        await waitFor(() => syncAttempts === 2)
       })
 
       // Claimed on the faked clock: the retried job is stamped with it.
-      expect(syncAttempts).toBe(2)
+      expect(pipelineDispatches).toBe(1)
       expect(
         await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync", limit: 10 })
       ).toHaveLength(1)
       expect(
         await queues.pipelines.claim({ projectId: PROJECT_ID, workerId: "pipeline", limit: 10 })
       ).toHaveLength(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Reproduce: await `retry` in `JobDispatch.one`; the pipeline waits for every retry of the sync,
+  // and the test's frozen clock never lets them end.
+  test("a job that keeps failing holds no other route", async () => {
+    const broken = defineSchedule("broken-route").cron("0 2 * * *")
+    const healthy = defineSchedule("healthy-route").cron("0 3 * * *")
+    const sync = defineSync("sync-always-fails")
+      .when(broken)
+      .from(connector)
+      .read(() => [])
+      .intoDataset(rawInvoices)
+    const pipeline = definePipeline("pipeline-keeps-running")
+      .when(healthy)
+      .then(
+        definePipelineStep("pass-through")
+          .inputs({ invoices: rawInvoices })
+          .output(cleanInvoices)
+          .run(() => {})
+      )
+    const routes = compileRoutes({
+      schedules: [broken, healthy],
+      syncs: [sync],
+      pipelines: [pipeline],
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    queues.syncRuns.enqueue = async () => {
+      throw new Error("Unavailable")
+    }
+
+    jest.useFakeTimers()
+    try {
+      await quietly(async () => {
+        await startWorker(eventRuntime, queues, routes)
+        await eventRuntime.append({ events: [makeScheduleTriggeredEvent(broken.id)] })
+        await eventRuntime.append({ events: [makeScheduleTriggeredEvent(healthy.id)] })
+
+        await waitFor(async () => {
+          const jobs = await queues.pipelines.claim({ projectId: PROJECT_ID, workerId: "test" })
+          return jobs.length === 1
+        })
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Reproduce: subscribe once to every direct type in `run`; the retries fill the line and the cron
+  // event behind them is never read.
+  test("failing projections leave cron routes alone", async () => {
+    const daily = defineSchedule("daily-beside-projections").cron("0 2 * * *")
+    const sync = defineSync("sync-beside-projections")
+      .when(daily)
+      .from(connector)
+      .read(() => [])
+      .intoDataset(rawInvoices)
+    const routes = compileRoutes({
+      schedules: [daily],
+      syncs: [sync],
+      pipelines: [],
+      projections: [invoiceProjectionDescriptor()],
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    const failingProjections = createTestProjectionDispatcher([], async () => {
+      throw new Error("Unavailable")
+    })
+
+    jest.useFakeTimers()
+    try {
+      await quietly(async () => {
+        await startWorker(eventRuntime, queues, routes, PROJECT_ID, failingProjections)
+        await eventRuntime.append({
+          events: Array.from({ length: 80 }, (_, index) =>
+            makeDatasetVersionCommittedEvent(`v-${index}`)
+          ),
+        })
+        await waitForTurns(20)
+        await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
+
+        await waitFor(async () => {
+          const jobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "test" })
+          return jobs.length === 1
+        })
+      })
     } finally {
       jest.useRealTimers()
     }
@@ -1072,29 +1147,6 @@ describe("OrchestratorWorker", () => {
       error: { message: "[SixbOrchestrator] projectId is required." },
     },
     {
-      name: "projection routes without durable reconciliation",
-      projectId: PROJECT_ID,
-      routes: invoiceProjectionRoutes(invoiceProjectionDescriptor()),
-      error: {
-        message:
-          "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
-        details: { projectId: PROJECT_ID, projectionIds: ["invoice-projection"] },
-      },
-    },
-    {
-      name: "conflicting projection routes",
-      projectId: PROJECT_ID,
-      routes: invoiceProjectionRoutes(
-        invoiceProjectionDescriptor(),
-        invoiceProjectionDescriptor({ projectionRevision: "projection-2" })
-      ),
-      error: {
-        message:
-          "[SixbOrchestrator] Projection 'invoice-projection' has conflicting dispatch routes.",
-        details: { projectId: PROJECT_ID, projectionId: "invoice-projection" },
-      },
-    },
-    {
       name: "workflow routes without durable Core dispatch",
       projectId: PROJECT_ID,
       routes: eventWorkflowRoutes(),
@@ -1113,8 +1165,53 @@ describe("OrchestratorWorker", () => {
             queues: new InMemoryQueues(),
             routes,
             dispatchers: {},
+            reporter: {},
           })
       )
     ).toMatchObject({ code: "internal.unexpected", retryable: false, ...error })
+  })
+
+  test.each([
+    {
+      name: "projection routes without durable reconciliation",
+      routes: invoiceProjectionRoutes(invoiceProjectionDescriptor()),
+      error: {
+        message:
+          "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
+        details: { projectId: PROJECT_ID, projectionIds: ["invoice-projection"] },
+      },
+    },
+    {
+      name: "conflicting projection routes",
+      routes: invoiceProjectionRoutes(
+        invoiceProjectionDescriptor(),
+        invoiceProjectionDescriptor({ projectionRevision: "projection-2" })
+      ),
+      error: {
+        message:
+          "[SixbOrchestrator] Projection 'invoice-projection' has conflicting dispatch routes.",
+        details: { projectId: PROJECT_ID, projectionId: "invoice-projection" },
+      },
+    },
+  ])("reconciliation rejects $name structurally", ({ routes, error }) => {
+    expect(
+      thrownBy(() =>
+        createReconciliationPasses({
+          projectId: PROJECT_ID,
+          routes,
+          dispatchers: { projections: createTestProjectionDispatcher([]) },
+        })
+      )
+    ).toMatchObject({ code: "internal.unexpected", retryable: false, ...error })
+  })
+
+  test("adds no pass for a project with nothing to reconcile", () => {
+    const passes = createReconciliationPasses({
+      projectId: PROJECT_ID,
+      routes: new Map(),
+      dispatchers: {},
+    })
+
+    expect(passes).toEqual([])
   })
 })
