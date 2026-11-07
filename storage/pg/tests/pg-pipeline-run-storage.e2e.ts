@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { PipelineRunError, type PipelineRunFailureCode, type SixbFailure } from "@sixb/core/storage"
-import { createTestPipelineExecution, startTestPipelineRun, startTestRun } from "@sixb/core/testing"
+import { createTestPipelineExecution, startTestPipelineRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 

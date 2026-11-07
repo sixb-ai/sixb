@@ -71,6 +71,7 @@ export class WorkflowWorker extends RunWorker<
       workerId: `workflow-worker-${host.id}`,
       claimLimit: options.concurrency,
       runs: workflowRuns,
+      executions: host.storage.executions,
     })
 
     this.host = host
@@ -106,19 +107,11 @@ export class WorkflowWorker extends RunWorker<
     const { run, execution } = claim
 
     if (claim.givenUp) {
-      await this.giveUp(run, claimed, claim.givenUp)
+      await this.giveUp(run, claim.givenUp)
       return
     }
 
-    const durableExecution = await this.host.storage.executions.getById({
-      projectId: this.host.id,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw new Error(
-        `[SixbWorkflowWorker] Workflow run '${run.id}' references missing execution '${run.executionId}'.`
-      )
-    }
+    const durableExecution = await this.requireExecution(run)
     const executionScope = bindDurablePrimitiveExecution(this.host, {
       execution: durableExecution,
       primitive: { kind: "workflow", id: run.workflowId, runId: run.id },
@@ -129,7 +122,7 @@ export class WorkflowWorker extends RunWorker<
     })
     const context = buildWorkflowContext(this.host, this.workflowRuns, executionScope.sixb)
     const onRunFailed: WorkflowRunFailureReporter = (error, run, failure) =>
-      this.reportFailedRun(claimed, error, run, failure)
+      this.reportFailedRun(error, run, failure)
 
     if (claimed.job.type === "workflow.run.resume.requested") {
       await runWorkflowResumeJob({
@@ -165,7 +158,6 @@ export class WorkflowWorker extends RunWorker<
   /** End a run that will not be tried again, with whatever node its executions left running. */
   private async giveUp(
     run: WorkflowRunRecord,
-    claimed: ClaimedQueueJob<WorkflowQueueJob>,
     error: unknown
   ): Promise<SixbFailure<(typeof WORKFLOW_RUN_FAILURE_CODES)[number]>> {
     const failure = captureSixbFailure(error, {
@@ -199,7 +191,7 @@ export class WorkflowWorker extends RunWorker<
 
     await this.observer.onRunFinished(failed)
 
-    this.reportFailedRun(claimed, error, failed, failure)
+    this.reportFailedRun(error, failed, failure)
     return failure
   }
 
@@ -212,14 +204,13 @@ export class WorkflowWorker extends RunWorker<
   }
 
   private reportFailedRun(
-    claimed: ClaimedQueueJob<WorkflowQueueJob>,
     error: unknown,
     run: WorkflowRunRecord,
     failure: Parameters<WorkflowRunFailureReporter>[2]
   ): void {
     reportRunFailure(this.host, error, {
       projectId: this.host.id,
-      attempt: claimed.job.attempt,
+      attempt: run.attempt,
       runKind: "workflow",
       run: {
         runId: run.id,
@@ -241,7 +232,7 @@ export class WorkflowWorker extends RunWorker<
         .catch(() => null)
 
       return run?.status === "running"
-        ? { kind: "fail", failure: await this.giveUp(run, claimed, error) }
+        ? { kind: "fail", failure: await this.giveUp(run, error) }
         : { kind: "fail" }
     }
 

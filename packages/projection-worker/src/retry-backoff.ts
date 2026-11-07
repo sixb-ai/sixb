@@ -1,6 +1,7 @@
-const RETRY_BASE_DELAY_MS = 1_000
-const RETRY_MAX_DELAY_MS = 5 * 60_000
-const MAX_EXPONENT = Math.ceil(Math.log2(RETRY_MAX_DELAY_MS / RETRY_BASE_DELAY_MS))
+import { type BackoffPolicy, backoffDelay } from "@sixb/core/internal/workers"
+
+/** A projection's run keeps its progress, so it can wait longer than a run that starts over. */
+const RETRY_BACKOFF: BackoffPolicy = { initialMs: 1_000, maxMs: 5 * 60_000 }
 
 /**
  * How long a telemetry batch waits for one missing object before the run fails.
@@ -23,8 +24,7 @@ export function projectionRetryAvailableAt(input: {
   readonly now?: number
 }): string {
   const attempt = Number.isSafeInteger(input.attempt) ? Math.max(1, input.attempt) : 1
-  const exponent = Math.min(attempt - 1, MAX_EXPONENT)
-  const ceiling = Math.min(RETRY_BASE_DELAY_MS * 2 ** exponent, RETRY_MAX_DELAY_MS)
+  const ceiling = backoffDelay(attempt - 1, RETRY_BACKOFF)
   const jitter = 0.5 + stableFraction(`${input.jobId}:${attempt}`) * 0.5
   const delay = Math.max(1, Math.floor(ceiling * jitter))
   return new Date((input.now ?? Date.now()) + delay).toISOString()

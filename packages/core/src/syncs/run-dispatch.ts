@@ -2,16 +2,17 @@ import { reportRunFailure } from "../error-reporting/capability"
 import { toSixbFailure } from "../errors/internal"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
-import {
-  dispatchQueuedRun,
-  hasAutomaticRunProvenance,
-  type QueuedRunPrimitive,
-  type RunPublication,
-} from "../execution/queued-run-dispatch"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
 import type { CreateExecutionInput, Storage, SyncRunRecord } from "../storage"
 import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "../storage"
+import {
+  dispatchQueuedRun,
+  hasAutomaticRunProvenance,
+  type QueuedRunPrimitive,
+  type QueuedRunStore,
+  type RunPublication,
+} from "../workers/queued-run-dispatch"
 import { SyncValidationError } from "./errors"
 import type { SyncRunRequestOptions, SyncRunRequestResult } from "./request"
 import type { SyncDefinition } from "./types"
@@ -46,6 +47,8 @@ interface DispatchSyncRunInput extends SyncRunRequestOptions {
   readonly metadata?: Readonly<Record<string, string>>
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
   readonly validateExistingRun?: (run: SyncRunRecord, storage: Storage) => Promise<void>
+  /** A trigger, not a caller (see `dispatchQueuedRun`). */
+  readonly automatic?: boolean
   /** Return a matching run of this Sync that has not started yet instead of queueing another one. */
   readonly joinQueuedRun?: boolean
 }
@@ -69,6 +72,7 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
       expectedLatestVersionId: input.expectedLatestVersionId,
       commitMessage: input.commitMessage,
       metadata: input.metadata,
+      automatic: true,
       validateExistingRun: (run, storage) =>
         assertAutomaticExecutionIdentity(storage, this.dependencies.id, input, run),
       joinQueuedRun: true,
@@ -97,6 +101,7 @@ export async function dispatchSyncRun(input: DispatchSyncRunInput): Promise<Sync
     metadata: input.metadata,
     createExecution: input.createExecution,
     validateExistingRun: input.validateExistingRun,
+    automatic: input.automatic,
     joinQueuedRun: input.joinQueuedRun,
   })
 }
@@ -104,51 +109,14 @@ export async function dispatchSyncRun(input: DispatchSyncRunInput): Promise<Sync
 function syncRunPrimitive(
   input: DispatchSyncRunInput
 ): QueuedRunPrimitive<SyncRunRecord, SyncRunRequestResult> {
-  const { projectId, sync } = input
+  const { projectId } = input
 
   return {
     label: "Sync",
     failureDetails: (run) => ({ syncId: run.syncId }),
 
-    runs: requireSyncRunStorage,
+    store: (storage) => syncRunStore(input, requireSyncRunStorage(storage)),
     matches: (run) => runMatchesRequest(run, input),
-
-    queueRun: (storage, run) =>
-      requireSyncRunStorage(storage).queue({
-        projectId,
-        id: run.id,
-        executionId: run.executionId,
-        syncId: sync.id,
-        datasetId: sync.target.dataset.id,
-        mode: sync.config.mode,
-        queuedAt: run.queuedAt,
-        expectedLatestVersionId: input.expectedLatestVersionId,
-        commitMessage: input.commitMessage,
-      }),
-
-    requeueRun: (storage, run, queuedAt) =>
-      requireSyncRunStorage(storage).queue({
-        projectId,
-        id: run.id,
-        executionId: run.executionId,
-        syncId: run.syncId,
-        datasetId: run.datasetId,
-        mode: run.mode,
-        queuedAt,
-        expectedLatestVersionId: run.expectedLatestVersionId,
-        commitMessage: run.commitMessage,
-      }),
-
-    async oldestQueuedRun(storage) {
-      const { runs } = await requireSyncRunStorage(storage).list({
-        projectId,
-        syncId: sync.id,
-        statuses: ["queued"],
-        order: "asc",
-        limit: 1,
-      })
-      return runs[0]
-    },
 
     async enqueue(job) {
       const [enqueued] = await input.queue.enqueue({
@@ -184,9 +152,57 @@ function syncRunPrimitive(
 
     result: toRequestResult,
 
-    runError: (message) => new SyncRunError(message),
-    isRunError: (error) => error instanceof SyncRunError,
-    requestError: (message) => new SyncValidationError(message),
+    RunError: SyncRunError,
+    RequestError: SyncValidationError,
+  }
+}
+
+function syncRunStore(
+  input: DispatchSyncRunInput,
+  runs: NonNullable<Storage["syncRuns"]>
+): QueuedRunStore<SyncRunRecord> {
+  const { projectId, sync } = input
+
+  return {
+    getById: (params) => runs.getById(params),
+
+    async oldestQueued() {
+      const { runs: queued } = await runs.list({
+        projectId,
+        syncId: sync.id,
+        statuses: ["queued"],
+        order: "asc",
+        limit: 1,
+      })
+
+      return queued[0]
+    },
+
+    queue: (run) =>
+      runs.queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        syncId: sync.id,
+        datasetId: sync.target.dataset.id,
+        mode: sync.config.mode,
+        queuedAt: run.queuedAt,
+        expectedLatestVersionId: input.expectedLatestVersionId,
+        commitMessage: input.commitMessage,
+      }),
+
+    requeue: (run, queuedAt) =>
+      runs.queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        syncId: run.syncId,
+        datasetId: run.datasetId,
+        mode: run.mode,
+        queuedAt,
+        expectedLatestVersionId: run.expectedLatestVersionId,
+        commitMessage: run.commitMessage,
+      }),
   }
 }
 

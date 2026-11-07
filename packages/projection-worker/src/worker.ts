@@ -117,7 +117,7 @@ export class ProjectionWorker extends QueueWorker<
       onRunFailed: (error, run, failure) => {
         reportRunFailure(this.host, error, {
           projectId: this.host.id,
-          attempt: job.attempt,
+          attempt: run.attempt,
           runKind: "projection",
           run: {
             runId: run.id,

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { type SixbFailure, SyncRunError, type SyncRunFailureCode } from "@sixb/core/storage"
-import { createTestSyncExecution, startTestRun, startTestSyncRun } from "@sixb/core/testing"
+import { createTestSyncExecution, startTestSyncRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 

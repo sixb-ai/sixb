@@ -29,13 +29,19 @@ describe.each([
     expect(canFinish("running", failed)).toBe(false)
   })
 
-  test("succeeds or cancels only a running run", () => {
-    for (const status of ["succeeded", "cancelled"] as const) {
-      const finished = { ...run, status, rowsRead: 0 }
+  test("succeeds only a running run", () => {
+    const finished = { ...run, status: "succeeded" as const, rowsRead: 0 }
 
-      expect(canFinish("queued", finished)).toBe(false)
-      expect(canFinish("running", finished)).toBe(true)
-      expect(canFinish("failed", finished)).toBe(false)
-    }
+    expect(canFinish("queued", finished)).toBe(false)
+    expect(canFinish("running", finished)).toBe(true)
+    expect(canFinish("failed", finished)).toBe(false)
+  })
+
+  test("cancels a run that has not ended, started or not", () => {
+    const cancelled = { ...run, status: "cancelled" as const }
+
+    expect(canFinish("queued", cancelled)).toBe(true)
+    expect(canFinish("running", cancelled)).toBe(true)
+    expect(canFinish("failed", cancelled)).toBe(false)
   })
 })

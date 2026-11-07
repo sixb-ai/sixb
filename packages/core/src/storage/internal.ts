@@ -52,7 +52,6 @@ export { canFinishPipelineRun } from "./pipeline-runs/transitions"
 export { projectionRunObjectTypesVisible, zeroProjectionRunProgress } from "./projection-runs/types"
 export {
   type ClaimableRun,
-  hasLapsedLease,
   holdsRun,
   laterLease,
   mayFinishRun,

@@ -974,24 +974,6 @@ function parseJson<T>(value: T | string): T {
   return typeof value === "string" ? (JSON.parse(value) as T) : value
 }
 
-async function lockWorkflowRun(
-  sql: PgStoreClient,
-  projectId: string,
-  id: string,
-  status: WorkflowRunRecord["status"]
-): Promise<WorkflowRunDatabaseRow> {
-  const [row] = await sql<WorkflowRunDatabaseRow[]>`
-    SELECT * FROM workflow_runs WHERE project_id = ${projectId} AND id = ${id} FOR UPDATE
-  `
-  if (!row) throw new WorkflowRunError(`[SixbPg] Workflow run '${id}' not found.`)
-  if (row.status !== status) {
-    throw new WorkflowRunError(
-      `[SixbPg] Workflow run '${id}' must be ${status} (status '${row.status}').`
-    )
-  }
-  return row
-}
-
 function assertWorkflowRunExecutionOwnership(row: WorkflowRunDatabaseRow, token?: string): void {
   if (!holdsRun(rowToWorkflowRunRecord(row), token)) throw WORKFLOW_RUNS.staleExecution(row.id)
 }

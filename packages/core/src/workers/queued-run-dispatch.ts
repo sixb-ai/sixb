@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { isDeepStrictEqual } from "node:util"
 import { createSixbError, type SixbCodedError } from "../errors/internal"
 import type { CreateExecutionInput, ExecutionRecord, Storage } from "../storage"
+import { joinJobId } from "./job-ids"
 
 /** A durable run that waits for a worker: the part of a Sync or Pipeline run dispatch reads. */
 export interface QueuedRun {
@@ -14,6 +15,15 @@ export interface QueuedRun {
 
 export interface QueuedRunStore<TRun extends QueuedRun> {
   getById(params: { projectId: string; id: string }): Promise<TRun | null>
+  /** The oldest run of this definition that has not started, whatever its request. */
+  oldestQueued(): Promise<TRun | undefined>
+  queue(run: {
+    readonly id: string
+    readonly executionId: string
+    readonly queuedAt: Date
+  }): Promise<TRun>
+  /** Queue again a run whose job could not be published. */
+  requeue(run: TRun, queuedAt: Date): Promise<TRun>
 }
 
 export type RunDispatchProvenance =
@@ -27,17 +37,10 @@ export interface QueuedRunPrimitive<TRun extends QueuedRun, TResult> {
   /** Details that identify the primitive in a failure, beside the run id. */
   failureDetails(run: TRun): Readonly<Record<string, string>>
 
-  runs(storage: Storage): QueuedRunStore<TRun>
+  /** The primitive's runs, in this storage or in one transaction of it. */
+  store(storage: Storage): QueuedRunStore<TRun>
   /** A run of this definition, with this same request, could serve as this one. */
   matches(run: TRun): boolean
-  queueRun(
-    storage: Storage,
-    run: { readonly id: string; readonly executionId: string; readonly queuedAt: Date }
-  ): Promise<TRun>
-  /** Queue again a run whose job could not be published. */
-  requeueRun(storage: Storage, run: TRun, queuedAt: Date): Promise<TRun>
-  /** The oldest run of this definition that has not started, whatever its request. */
-  oldestQueuedRun(storage: Storage): Promise<TRun | undefined>
 
   enqueue(job: {
     readonly id: string
@@ -49,11 +52,14 @@ export interface QueuedRunPrimitive<TRun extends QueuedRun, TResult> {
 
   result(run: TRun, publication?: RunPublication): TResult
 
-  /** The error that says a run record cannot serve this request. */
-  runError(message: string): Error
-  isRunError(error: unknown): boolean
-  /** The error that says the request itself is malformed. */
-  requestError(message: string): Error
+  /** Says a run record cannot serve this request. */
+  readonly RunError: new (
+    message: string
+  ) => Error
+  /** Says the request itself is malformed. */
+  readonly RequestError: new (
+    message: string
+  ) => Error
 }
 
 export interface RunPublication {
@@ -72,6 +78,11 @@ export interface DispatchQueuedRunInput<TRun extends QueuedRun, TResult> {
   readonly validateExistingRun?: (run: TRun, storage: Storage) => Promise<void>
   /** Return a matching run that has not started yet instead of queueing another one. */
   readonly joinQueuedRun?: boolean
+  /**
+   * A trigger, not a caller. It republishes a queued run it finds, and leaves its publication
+   * uncertain: its consumer retains the batch and retries, where a caller is told it failed.
+   */
+  readonly automatic?: boolean
 }
 
 type PersistedRun<TRun extends QueuedRun> =
@@ -92,7 +103,7 @@ export async function dispatchQueuedRun<TRun extends QueuedRun, TResult>(
   const runId = createRunId(input)
 
   let persisted = await persistRun(input, runId)
-  if (!persisted.publish && input.validateExistingRun && persisted.run.status === "queued") {
+  if (!persisted.publish && input.automatic && persisted.run.status === "queued") {
     persisted = await reuseRun(input, persisted.run)
   }
 
@@ -106,9 +117,9 @@ async function persistRun<TRun extends QueuedRun, TResult>(
 ): Promise<PersistedRun<TRun>> {
   const { primitive } = input
 
-  const existing = await primitive
-    .runs(input.storage)
-    .getById({ projectId: input.projectId, id: runId })
+  const store = primitive.store(input.storage)
+
+  const existing = await store.getById({ projectId: input.projectId, id: runId })
   if (existing) return reuseRun(input, existing)
 
   const execution = await input.createExecution(`exec_${randomUUID()}`, runId)
@@ -120,11 +131,9 @@ async function persistRun<TRun extends QueuedRun, TResult>(
       { isolation: "serializable" }
     )
   } catch (error) {
-    if (!primitive.isRunError(error)) throw error
+    if (!(error instanceof primitive.RunError)) throw error
 
-    const raced = await primitive
-      .runs(input.storage)
-      .getById({ projectId: input.projectId, id: runId })
+    const raced = await store.getById({ projectId: input.projectId, id: runId })
     if (!raced) throw error
 
     await assertReusable(input, raced, input.storage)
@@ -139,39 +148,31 @@ async function persistRunInTransaction<TRun extends QueuedRun, TResult>(
   execution: CreateExecutionInput,
   queuedAt: Date
 ): Promise<PersistedRun<TRun>> {
-  const { primitive } = input
+  const store = input.primitive.store(tx)
 
-  const raced = await primitive.runs(tx).getById({ projectId: input.projectId, id: runId })
+  const raced = await store.getById({ projectId: input.projectId, id: runId })
   if (raced) {
     await assertReusable(input, raced, tx)
     return { publish: false, run: raced }
   }
 
   if (input.joinQueuedRun) {
-    const waiting = await primitive.oldestQueuedRun(tx)
-    if (waiting && primitive.matches(waiting)) {
+    const waiting = await store.oldestQueued()
+    if (waiting && input.primitive.matches(waiting)) {
       return {
         publish: true,
         run: waiting,
         queuedAt: waiting.queuedAt,
         created: false,
-        jobId: joinJobId(waiting),
+        // The run's own job may be gone, so a joining trigger brings one that can start the run.
+        jobId: joinJobId(waiting.id),
       }
     }
   }
 
   await tx.executions.create(execution)
-  const run = await primitive.queueRun(tx, { id: runId, executionId: execution.id, queuedAt })
+  const run = await store.queue({ id: runId, executionId: execution.id, queuedAt })
   return { publish: true, run, queuedAt, created: true }
-}
-
-/**
- * The job a trigger publishes for the run it joins. The run's own job may be gone (a provider keeps
- * a settled job id, and ignores a new job under it), so a joining trigger brings a job that can
- * start the run. However many join, the run gets one, so a busy trigger costs nothing per event.
- */
-function joinJobId(waiting: QueuedRun): string {
-  return `${waiting.id}:join`
 }
 
 async function reuseRun<TRun extends QueuedRun, TResult>(
@@ -180,7 +181,7 @@ async function reuseRun<TRun extends QueuedRun, TResult>(
 ): Promise<PersistedRun<TRun>> {
   await assertReusable(input, existing, input.storage)
 
-  if (input.validateExistingRun && existing.status === "queued") {
+  if (input.automatic && existing.status === "queued") {
     await requireExecution(input, existing)
     return { publish: true, run: existing, queuedAt: existing.queuedAt, created: false }
   }
@@ -196,7 +197,7 @@ async function reuseRun<TRun extends QueuedRun, TResult>(
   await requireExecution(input, existing)
 
   const queuedAt = new Date()
-  const run = await input.primitive.requeueRun(input.storage, existing, queuedAt)
+  const run = await input.primitive.store(input.storage).requeue(existing, queuedAt)
   return { publish: true, run, queuedAt, created: false }
 }
 
@@ -206,7 +207,7 @@ async function assertReusable<TRun extends QueuedRun, TResult>(
   storage: Storage
 ): Promise<void> {
   if (!input.primitive.matches(run)) {
-    throw input.primitive.runError(
+    throw new input.primitive.RunError(
       `[Sixb] ${input.primitive.label} run '${run.id}' already exists with a different request payload.`
     )
   }
@@ -223,7 +224,7 @@ async function requireExecution<TRun extends QueuedRun, TResult>(
     id: run.executionId,
   })
   if (!execution) {
-    throw input.primitive.runError(
+    throw new input.primitive.RunError(
       `[Sixb] Execution '${run.executionId}' for ${input.primitive.label} run '${run.id}' was not found.`
     )
   }
@@ -243,7 +244,7 @@ async function publishRun<TRun extends QueuedRun, TResult>(
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     })
     if (!job || job.id !== jobId) {
-      throw primitive.runError(
+      throw new primitive.RunError(
         `[Sixb] Queue did not acknowledge ${primitive.label} run '${persisted.run.id}'.`
       )
     }
@@ -256,7 +257,7 @@ async function publishRun<TRun extends QueuedRun, TResult>(
   } catch (error) {
     // Automatic consumers retain the batch and retry. Keep uncertain delivery queued:
     // a lost reply does not prove that the queue rejected the job.
-    if (input.validateExistingRun) throw error
+    if (input.automatic) throw error
 
     await primitive.failPublication(
       persisted.run,
@@ -298,7 +299,9 @@ function createRunId<TRun extends QueuedRun, TResult>(
   if (input.runId === undefined) return `run_${randomUUID()}`
 
   if (!input.runId.trim()) {
-    throw input.primitive.requestError(`[Sixb] ${input.primitive.label} run id must not be empty`)
+    throw new input.primitive.RequestError(
+      `[Sixb] ${input.primitive.label} run id must not be empty`
+    )
   }
 
   return input.runId
