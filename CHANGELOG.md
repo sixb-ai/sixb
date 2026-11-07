@@ -86,6 +86,21 @@ Sixb packages are versioned independently. Each release entry names the packages
   new services. `onError` gains `dataset.ingest.flush.failed` and `dataset.ingest.rejected`, and the
   error catalog `dataset.change_refused`. `@sixb/core/lake-storage` exports `LakeValueRefusedError`
   and `DatasetSequenceConflictError`.
+- `sync_runs` and `pipeline_runs` gain columns: migrate before starting the new services. The
+  `ALTER` takes no `lock_timeout`, so run it when no long report holds these tables.
+- A stopped worker no longer ends a run: it stays `running` and the next delivery resumes it, so
+  `*.run.finished` with `cancelled` stops firing at deploys. A run that loses its worker five times
+  ends `failed`. `attempt` joins the sync and pipeline run APIs, and the Console run rows.
+- One run of a sync runs at a time: a queued run waits for the running one, and triggers join it.
+  Datasets stay multi-writer.
+- Runs left behind are picked up, by the orchestrator's new `runs` pass. A queued run whose job was
+  lost starts, a running run whose lease lapsed resumes, and either ends `cancelled` once lost for a
+  week. So does a run an older version left running, 24 hours after it started. Look before you
+  start: `sixb check` counts them, and this lists a workflow's, the ones with side effects:
+  ```sql
+  SELECT status, count(*), min(queued_at) FROM workflow_runs
+  WHERE status IN ('queued','running') GROUP BY status;
+  ```
 
 ## 2026-11-05 — Sixb 0.2.1
 

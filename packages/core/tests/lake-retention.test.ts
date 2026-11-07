@@ -9,8 +9,12 @@ import {
   LakeRetention,
   resolveLakeMaintenanceSettings,
 } from "../src/maintenance/lake-retention"
+import { InMemoryStorage, type Storage } from "../src/storage"
+import type { DatasetIngestStorage } from "../src/storage/dataset-ingest"
 import { InMemoryLakeRetentionRunStorage } from "../src/storage/lake-retention-runs"
 import type { ActiveOntologySource } from "../src/storage/ontology/sources"
+import { queueTestPipelineRun } from "../src/testing"
+import { queueTestSyncRun } from "../src/testing/sync-execution"
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -70,12 +74,13 @@ function runtime(input: {
   options?: LakeMaintenanceOptions
   datasetCount?: number
   lakeRetentionRuns?: InMemoryLakeRetentionRunStorage
+  storage?: Pick<Storage, "syncRuns" | "pipelineRuns" | "datasetIngest">
 }) {
   return new LakeRetention({
     projectId: "project",
     options: input.options,
     lakeStorage: { maintenance: input.maintenance },
-    storage: { lakeRetentionRuns: input.lakeRetentionRuns },
+    storage: { lakeRetentionRuns: input.lakeRetentionRuns, ...input.storage },
     sources: input.sources ?? appliedSources(),
     datasetCount: input.datasetCount ?? 1,
   })
@@ -417,5 +422,131 @@ describe("a requested retention run", () => {
 
     expect(report?.expiredVersions).toBe(2)
     expect(String(error.mock.calls[0])).toContain("Could not record a lake retention run")
+  })
+})
+
+describe("what retention keeps for a commit nobody recorded", () => {
+  const threeDaysAgo = new Date(NOW.getTime() - 72 * HOUR)
+
+  function passAsked(storage: Pick<Storage, "syncRuns" | "pipelineRuns" | "datasetIngest">) {
+    const { maintenance, passes } = fakeMaintenance()
+    const retention = runtime({ maintenance, storage })
+
+    return {
+      passes,
+      apply: () => drive(retention.apply({ keepVersionsForMs: HOUR, deleteFilesAfterMs: HOUR })),
+    }
+  }
+
+  // Reproduce: give `applyRetention` the configured `keepVersionsForMs`. The version a resumed run
+  // would look for then expires, and the run writes its rows twice.
+  test("keeps versions back to the commit a running sync prepared", async () => {
+    const storage = new InMemoryStorage()
+    await queueTestSyncRun(storage, {
+      id: "sync-run",
+      projectId: "project",
+      syncId: "orders",
+      datasetId: "orders",
+      mode: "append",
+      queuedAt: threeDaysAgo,
+    })
+    await storage.syncRuns.startOrReclaim({
+      projectId: "project",
+      id: "sync-run",
+      execution: { token: "token", queueLeaseExpiresAt: threeDaysAgo },
+      claimedAt: threeDaysAgo,
+    })
+    await storage.syncRuns.prepareCommit({
+      projectId: "project",
+      id: "sync-run",
+      executionToken: "token",
+      rowsRead: 1,
+      preparedAt: threeDaysAgo,
+    })
+
+    const { passes, apply } = passAsked(storage)
+    await apply()
+
+    expect(passes[0]?.keepVersionsForMs).toBeGreaterThanOrEqual(72 * HOUR)
+  })
+
+  test("does not hold back for a running sync that never prepared a commit", async () => {
+    const storage = new InMemoryStorage()
+    await queueTestSyncRun(storage, {
+      id: "sync-run",
+      projectId: "project",
+      syncId: "orders",
+      datasetId: "orders",
+      mode: "append",
+      queuedAt: threeDaysAgo,
+    })
+    await storage.syncRuns.startOrReclaim({
+      projectId: "project",
+      id: "sync-run",
+      execution: { token: "token", queueLeaseExpiresAt: threeDaysAgo },
+      claimedAt: threeDaysAgo,
+    })
+
+    const { passes, apply } = passAsked(storage)
+    await apply()
+
+    expect(passes[0]?.keepVersionsForMs).toBe(HOUR)
+  })
+
+  test("keeps versions back to the start of a running pipeline", async () => {
+    const storage = new InMemoryStorage()
+    await queueTestPipelineRun(storage, {
+      id: "pipeline-run",
+      projectId: "project",
+      pipelineId: "customers",
+      queuedAt: threeDaysAgo,
+    })
+    await storage.pipelineRuns.startOrReclaim({
+      projectId: "project",
+      id: "pipeline-run",
+      execution: { token: "token", queueLeaseExpiresAt: threeDaysAgo },
+      claimedAt: threeDaysAgo,
+    })
+
+    const { passes, apply } = passAsked(storage)
+    await apply()
+
+    expect(passes[0]?.keepVersionsForMs).toBeGreaterThanOrEqual(72 * HOUR)
+  })
+
+  describe("with changes in an inbox", () => {
+    const summary = {
+      datasetId: "crm.contacts",
+      pendingDeliveries: 1,
+      pendingChanges: 1,
+      oldestReceivedAt: threeDaysAgo,
+      flushStartedAt: null,
+      request: 0,
+      leaseExpiresAt: null,
+      failureStreak: 0,
+      lastFlushedAt: null,
+      rejectedDeliveries: 0,
+    }
+
+    const inboxOf = (flushStartedAt: Date | null) =>
+      ({
+        summarize: async () => [{ ...summary, flushStartedAt }],
+      }) as unknown as DatasetIngestStorage
+
+    test("keeps versions back to when a flush in flight took its batch", async () => {
+      const { passes, apply } = passAsked({ datasetIngest: inboxOf(threeDaysAgo) })
+      await apply()
+
+      expect(passes[0]?.keepVersionsForMs).toBeGreaterThanOrEqual(72 * HOUR)
+    })
+
+    // A delivery no flush took has no commit to lose. Basing the floor on `oldestReceivedAt`
+    // instead fails this: one delivery nothing can write would stop retention for the project.
+    test("is not held back by a change no flush took", async () => {
+      const { passes, apply } = passAsked({ datasetIngest: inboxOf(null) })
+      await apply()
+
+      expect(passes[0]?.keepVersionsForMs).toBeLessThan(72 * HOUR)
+    })
   })
 })

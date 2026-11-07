@@ -27,10 +27,24 @@ import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-exe
 import { snapshotWorkflowInput, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type { LanguageModel } from "@sixb/core/models"
 import type { ActionRunRecord, QueueWorkflowRunInput, WorkflowRunStorage } from "@sixb/core/storage"
-import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
+import {
+  claimTestRun,
+  createTestSixb,
+  createTestWorkflowExecution,
+  startTestRun,
+  testRunExecution,
+} from "@sixb/core/testing"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
-import { runWorkflowJob as executeWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
-import type { RunWorkflowJobInput, WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
+import {
+  runWorkflowJob as executeWorkflowJob,
+  runWorkflowResumeJob as executeWorkflowResumeJob,
+} from "../src/run-workflow-job"
+import type {
+  RunWorkflowJobInput,
+  RunWorkflowResumeJobInput,
+  WorkflowRunObserver,
+  WorkflowWorkerContext,
+} from "../src/types"
 import type { WorkflowWorkerHost } from "../src/worker"
 
 const Transaction = defineObjectType({
@@ -301,21 +315,50 @@ async function queueWorkflowRunFixture(
   return requireWorkflowRunsStorage(host).queue({ ...input, executionId })
 }
 
-async function runWorkflowJob(input: RunWorkflowJobInput) {
+type TestJobInput<TInput extends { readonly job: { readonly execution: unknown } }> = Omit<
+  TInput,
+  "job" | "claim"
+> & {
+  readonly job: Omit<TInput["job"], "execution"> & Partial<Pick<TInput["job"], "execution">>
+}
+
+/** A worker claims a run left running before it resumes it; a waiting one wakes by the job. */
+async function runWorkflowResumeJob(input: TestJobInput<RunWorkflowResumeJobInput>) {
+  const execution = input.job.execution ?? testRunExecution(input.job.id)
+  const { workflowRuns, projectId } = input.runtime
+  const run = await workflowRuns.getById({ projectId, id: input.job.id })
+  if (run?.status === "running") {
+    await workflowRuns.startOrReclaim({ projectId, id: input.job.id, execution })
+  }
+
+  return executeWorkflowResumeJob({ ...input, job: { ...input.job, execution } })
+}
+
+async function claimedWorkflowJob(input: TestJobInput<RunWorkflowJobInput>) {
+  const execution = input.job.execution ?? testRunExecution(input.job.id)
+  const claim = await claimTestRun(input.runtime.workflowRuns, {
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+    token: execution.token,
+  })
+
+  return executeWorkflowJob({ ...input, claim, job: { ...input.job, execution: claim.execution } })
+}
+
+async function runWorkflowJob(input: TestJobInput<RunWorkflowJobInput>) {
   let existing = await input.runtime.workflowRuns.getById({
     projectId: input.runtime.projectId,
     id: input.job.id,
   })
   if (!existing) {
     const workflow = input.runtime.sixb.workflows.getById(input.job.workflowId)
-    if (!workflow) {
-      return executeWorkflowJob(input)
-    }
-    const snapshot = snapshotWorkflowInput({
-      workflow,
-      value: input.job.input ?? {},
-      valueTypesById: input.runtime.ontology.getValueTypesById(),
-    })
+    const snapshot = workflow
+      ? snapshotWorkflowInput({
+          workflow,
+          value: input.job.input ?? {},
+          valueTypesById: input.runtime.ontology.getValueTypesById(),
+        })
+      : {}
     await queueWorkflowRunFixture(input.runtime, {
       id: input.job.id,
       projectId: input.runtime.projectId,
@@ -338,7 +381,7 @@ async function runWorkflowJob(input: RunWorkflowJobInput) {
     execution: durableExecution,
     primitive: { kind: "workflow", id: existing.workflowId, runId: existing.id },
   })
-  return executeWorkflowJob({
+  return claimedWorkflowJob({
     ...input,
     runtime: { ...input.runtime, sixb: bound.sixb },
   })
@@ -406,7 +449,7 @@ describe("runWorkflowJob", () => {
     ])
   })
 
-  test("treats duplicate requested jobs for an existing run as no-op", async () => {
+  test("leaves a finished run to a duplicate requested job", async () => {
     const workflow = defineWorkflow("idempotent-workflow")
       .input({
         transaction: ref(Transaction),
@@ -425,20 +468,14 @@ describe("runWorkflowJob", () => {
       runtime: createRuntime(sixb),
       job,
     })
-    const second = await runWorkflowJob({
-      runtime: createRuntime(sixb),
-      job,
-    })
-
     expect(first.status).toBe("succeeded")
-    expect(second.status).toBe("succeeded")
-    expect(second.nodes).toHaveLength(1)
 
-    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+    const duplicate = await sixb.storage.workflowRuns!.startOrReclaim({
       projectId: sixb.id,
-      workflowRunId: job.id,
+      id: job.id,
+      execution: testRunExecution(job.id),
     })
-    expect(nodes.total).toBe(1)
+    expect(duplicate.outcome).toBe("settled")
   })
 
   test("reclaims a running delivery and resumes from its deterministic node", async () => {
@@ -462,7 +499,7 @@ describe("runWorkflowJob", () => {
       workflowId: workflow.id,
       input,
     })
-    await runs.start({
+    await startTestRun(runs, {
       id: "wfrun_recovered",
       projectId: sixb.id,
       execution: {

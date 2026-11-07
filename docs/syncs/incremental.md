@@ -32,6 +32,10 @@ export const importInvoiceEvents = defineSync("import-invoice-events", { mode: "
 Sixb saves the latest checkpoint after the run succeeds, including runs that return no new rows.
 A failed run keeps the previous checkpoint. Use a new sync ID if you change its connector.
 
+A run outlives its worker. After a crash or a deploy it reads again from the previous checkpoint,
+unless its rows were already committed, in which case they are kept and it does not read again. A
+run that loses its worker five times ends `failed`.
+
 The mode controls how rows are written. The checkpoint controls where your code resumes reading;
 Sixb does not filter the source data for you.
 

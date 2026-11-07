@@ -44,6 +44,7 @@ import {
   createTestAgentExecution,
   createTestSixb,
   createTestWorkflowExecution,
+  startTestRun,
 } from "@sixb/core/testing"
 import { Elysia } from "elysia"
 import { registerAgentApprovalRoutes } from "../src/routes/agent-approvals"
@@ -2154,7 +2155,7 @@ async function createRunTokenRuntime(
     input: { document: fileRefJson(completedWorkflowOutput) },
     queuedAt: NOW,
   })
-  await storage.workflowRuns.start({
+  await startTestRun(storage.workflowRuns, {
     id: "completed-workflow-run",
     projectId: PROJECT_ID,
     startedAt: NOW,
@@ -2247,7 +2248,7 @@ async function createRunTokenRuntime(
       input: {},
       queuedAt: NOW,
     })
-    await storage.workflowRuns.start({
+    await startTestRun(storage.workflowRuns, {
       id: "parent-workflow-run",
       projectId: PROJECT_ID,
       startedAt: NOW,

@@ -233,6 +233,12 @@ export function ConsoleSyncPage() {
                         </span>
                       </>
                     ) : null}
+                    {run.attempt > 1 ? (
+                      <>
+                        <MetaDot />
+                        <span>{messages.projections.attempt(run.attempt)}</span>
+                      </>
+                    ) : null}
                     {run.rowsRead !== undefined ? (
                       <>
                         <MetaDot />

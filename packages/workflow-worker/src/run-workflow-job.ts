@@ -6,44 +6,35 @@ import { WorkflowRunSession } from "./execution/workflow-run-session"
 import { statusForFailure } from "./normalize"
 import type { RunWorkflowJobInput, RunWorkflowResumeJobInput, WorkflowRunResult } from "./types"
 
+/**
+ * Run what is left of one workflow run this delivery holds. A run that resumes picks up from its
+ * node records. A stopped worker writes nothing: the run stays running for the next delivery.
+ */
 export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<WorkflowRunResult> {
-  const existing = await completedWorkflowRunResult(input)
-  if (existing) {
-    return existing
-  }
-
   let session: WorkflowRunSession
   try {
-    const active = await input.runtime.workflowRuns.getById({
-      projectId: input.runtime.projectId,
-      id: input.job.id,
-    })
     session =
-      active?.status === "running"
-        ? await WorkflowRunSession.recoverRunning(input, {
-            executors: workflowNodeExecutors,
-          })
-        : WorkflowRunSession.create(input, {
-            executors: workflowNodeExecutors,
-          })
+      input.claim.outcome === "resumed"
+        ? await WorkflowRunSession.recoverRunning(input, { executors: workflowNodeExecutors })
+        : WorkflowRunSession.create(input, { executors: workflowNodeExecutors })
   } catch (error) {
-    await failQueuedRun(input, error)
+    await failRunBeforeItsSession(input, error)
     throw error
   }
 
   try {
-    await session.start()
+    if (input.claim.outcome === "started") await session.announceStarted(input.claim.run)
+
     const waitingRun = await session.runAllNodes()
     if (waitingRun) {
       return session.finishWaiting(waitingRun)
     }
     return await session.finishSucceeded()
   } catch (error) {
-    if (input.job.execution && input.signal?.aborted) {
+    if (input.signal?.aborted) {
       throw error
     }
     await session.finishAfterError(error)
-    await failQueuedRun(input, error)
     throw unwrapWorkflowNodeFailure(error)
   } finally {
     await session.flushLogs()
@@ -68,7 +59,7 @@ export async function runWorkflowResumeJob(
     }
     return await session.finishSucceeded()
   } catch (error) {
-    if (input.job.execution && input.signal?.aborted) {
+    if (input.signal?.aborted) {
       throw error
     }
     await session.finishAfterError(error)
@@ -78,49 +69,11 @@ export async function runWorkflowResumeJob(
   }
 }
 
-async function completedWorkflowRunResult(
-  input: RunWorkflowJobInput
-): Promise<WorkflowRunResult | null> {
-  const run = await input.runtime.workflowRuns.getById({
-    projectId: input.runtime.projectId,
-    id: input.job.id,
-  })
-  if (!run || run.status === "queued" || run.status === "running") {
-    return null
-  }
+async function failRunBeforeItsSession(input: RunWorkflowJobInput, error: unknown): Promise<void> {
+  const signal = input.signal ?? new AbortController().signal
+  if (signal.aborted) return
 
-  if (run.workflowId !== input.job.workflowId) {
-    throw new Error(
-      `[SixbWorkflowWorker] Workflow run '${input.job.id}' belongs to workflow '${run.workflowId}', not '${input.job.workflowId}'.`
-    )
-  }
-
-  const nodes = await input.runtime.workflowRuns.nodes.list({
-    projectId: input.runtime.projectId,
-    workflowRunId: run.id,
-    order: "asc",
-  })
-
-  return {
-    id: input.job.id,
-    workflowId: input.job.workflowId,
-    status: run.status,
-    run,
-    nodes: nodes.nodes,
-    steps: {},
-  }
-}
-
-async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promise<void> {
-  const run = await input.runtime.workflowRuns.getById({
-    projectId: input.runtime.projectId,
-    id: input.job.id,
-  })
-  if (run?.status !== "queued") {
-    return
-  }
-
-  const status = statusForFailure(input.signal ?? new AbortController().signal, error)
+  const status = statusForFailure(signal, error)
   const failure = captureSixbFailure(error, {
     allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
     defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
@@ -129,6 +82,7 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
   const failed = await input.runtime.workflowRuns.finish({
     projectId: input.runtime.projectId,
     id: input.job.id,
+    executionToken: input.job.execution.token,
     status,
     error: failure,
   })

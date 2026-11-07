@@ -772,7 +772,6 @@ export type {
   PipelineStepRunRecord,
   PipelineStepRunStatus,
   QueuePipelineRunInput,
-  StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
 export {
@@ -830,6 +829,14 @@ export type {
 } from "./rules"
 export { InMemoryRulesStorage } from "./rules"
 export type {
+  ClaimRunInput,
+  ConfirmRunExecutionInput,
+  ListLostRunsInput,
+  ReleaseRunExecutionInput,
+  RunClaim,
+  RunExecution,
+} from "./run-claim"
+export type {
   CreateShareGrantInput,
   GetShareGrantByIdInput,
   GetShareGrantsByIdsInput,
@@ -859,8 +866,8 @@ export type {
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  PrepareSyncRunCommitInput,
   QueueSyncRunInput,
-  StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunMode,
   SyncRunRecord,
@@ -929,11 +936,9 @@ export type {
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
   ReclaimWorkflowAgentNodeRunInput,
-  ReclaimWorkflowRunInput,
   ResumeWorkflowRunInput,
   StartWorkflowAgentNodeRunInput,
   StartWorkflowNodeRunInput,
-  StartWorkflowRunInput,
   WaitWorkflowNodeRunInput,
   WaitWorkflowRunInput,
   WorkflowAgentNodeRunExecution,

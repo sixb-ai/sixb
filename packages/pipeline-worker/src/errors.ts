@@ -1,6 +1,6 @@
 import type { DatasetDefinition, PipelineDefinition } from "@sixb/core"
 import { createSixbError, isSixbError, summarizeErrorMessage } from "@sixb/core/internal/errors"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type { DatasetVersion, DatasetVersionRef } from "@sixb/core/lake-storage"
 import type { PipelineRunStatus } from "@sixb/core/storage"
 import type { PipelineJob } from "./types"
 
@@ -10,11 +10,15 @@ export function throwIfAborted(signal: AbortSignal): void {
   }
 }
 
+/**
+ * How a step or run ends. A step that throws an abort by itself cancelled its own work. Nothing
+ * asks this of a worker being stopped, whose signal says only that the delivery ended: the run
+ * stays running, and the next delivery takes it up.
+ */
 export function statusForFailure(
-  signal: AbortSignal,
   error: unknown
 ): Extract<PipelineRunStatus, "failed" | "cancelled"> {
-  return signal.aborted || isAbortError(error) ? "cancelled" : "failed"
+  return isAbortError(error) ? "cancelled" : "failed"
 }
 
 export function requireFinishedAt(input: {
@@ -33,6 +37,14 @@ export function requireFinishedAt(input: {
   )
 }
 
+/**
+ * A dataset version is durable but its record is not. The run stays running: the next delivery
+ * finds the version by its producer and records it, so nothing is written twice.
+ */
+export class CommitNotRecordedError extends Error {
+  override readonly name = "CommitNotRecordedError"
+}
+
 export function createStepBookkeepingError(options: {
   readonly pipelineId: string
   readonly pipelineRunId: string
@@ -41,21 +53,9 @@ export function createStepBookkeepingError(options: {
   readonly version: DatasetVersion
   readonly cause: unknown
 }): Error {
-  // The dataset version is already durable; retrying the whole pipeline could duplicate appends.
-  return createSixbError(
-    "internal.unexpected",
-    `[SixbPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' committed dataset version '${options.version.versionId}', but failed to finalize step run '${options.stepRunId}'. The dataset commit may already have succeeded and the step run record may need repair.`,
-    {
-      cause: options.cause,
-      details: {
-        pipelineId: options.pipelineId,
-        pipelineRunId: options.pipelineRunId,
-        stepId: options.stepId,
-        stepRunId: options.stepRunId,
-        datasetId: options.version.datasetId,
-        versionId: options.version.versionId,
-      },
-    }
+  return new CommitNotRecordedError(
+    `[SixbPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' committed dataset version '${options.version.versionId}', but failed to finalize step run '${options.stepRunId}'.`,
+    { cause: options.cause }
   )
 }
 
@@ -90,27 +90,18 @@ export function unwrapPipelineStepFailure(error: unknown): unknown {
 export function createPipelineBookkeepingError(options: {
   readonly pipelineId: string
   readonly runId: string
-  readonly version: DatasetVersion
+  readonly version: DatasetVersionRef
   readonly cause: unknown
 }): Error {
-  return createSixbError(
-    "internal.unexpected",
-    `[SixbPipelineWorker] Pipeline '${options.pipelineId}' committed final dataset version '${options.version.versionId}', but failed to finalize pipeline run '${options.runId}'. The dataset commit may already have succeeded and the pipeline run record may need repair.`,
-    {
-      cause: options.cause,
-      details: {
-        pipelineId: options.pipelineId,
-        runId: options.runId,
-        datasetId: options.version.datasetId,
-        versionId: options.version.versionId,
-      },
-    }
+  return new CommitNotRecordedError(
+    `[SixbPipelineWorker] Pipeline '${options.pipelineId}' committed final dataset version '${options.version.versionId}', but failed to finalize pipeline run '${options.runId}'.`,
+    { cause: options.cause }
   )
 }
 
 export function requirePipeline(
   pipeline: PipelineDefinition | null,
-  job: PipelineJob
+  job: Pick<PipelineJob, "id" | "pipelineId">
 ): PipelineDefinition {
   if (!pipeline) {
     throw createSixbError(

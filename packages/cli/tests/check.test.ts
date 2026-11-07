@@ -11,6 +11,8 @@ function fixtureEntry(name: string): string {
 
 afterEach(() => {
   lakeFixture.unansweredRequest = false
+  lakeFixture.stalledIngest = false
+  lakeFixture.lostRuns = false
   lakeFixture.events = []
 })
 
@@ -69,6 +71,29 @@ describe("sixb check", () => {
 
     expect(result.output).toContain("no lake worker has run it")
     expect(result.exitCode).toBe(0)
+  })
+
+  // A project on `sixb api` with no lake worker. Reproduce: drop `stalledIngestDatasets` from
+  // commands/check.ts.
+  test("names the datasets whose ingested changes nothing writes", async () => {
+    lakeFixture.stalledIngest = true
+
+    const result = await check("lake-project")
+
+    expect(result.output.replace(/[\s│]+/g, " ")).toContain(
+      "Ingested changes wait and nothing writes them, in raw.things."
+    )
+    expect(result.exitCode).toBe(0)
+  })
+
+  // What an upgrade picks up. Reproduce: drop `lostRunWarnings` from commands/check.ts.
+  test("counts the runs the orchestrator will take up, and those it will end", async () => {
+    lakeFixture.lostRuns = true
+
+    const output = (await check("lake-project")).output.replace(/[\s│]+/g, " ")
+
+    expect(output).toContain("1 sync run(s) lost their job and will go on")
+    expect(output).toContain("1 sync run(s) are too old to go on and will end cancelled.")
   })
 
   test("says nothing about lake cleanup when nothing asks for it", async () => {

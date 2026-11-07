@@ -3,6 +3,14 @@ import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot } from "../../workflows/types"
 import type { AgentExecutionStatus, AgentRunFailureCode, AgentRunFinishReason } from "../agents"
+import type {
+  ClaimRunInput,
+  ConfirmRunExecutionInput,
+  ListLostRunsInput,
+  ReleaseRunExecutionInput,
+  RunClaim,
+  RunExecution,
+} from "../run-claim"
 
 export type { WorkflowIOSnapshot } from "../../workflows/types"
 
@@ -27,17 +35,11 @@ export const WORKFLOW_RUN_FAILURE_CODES = [
 
 export type WorkflowRunFailureCode = (typeof WORKFLOW_RUN_FAILURE_CODES)[number]
 
-export interface WorkflowRunExecution {
-  readonly token: string
-  readonly queueLeaseExpiresAt: Date
-}
+export type WorkflowRunExecution = RunExecution
 
 export type WorkflowAgentNodeRunStatus = AgentExecutionStatus
 
-export interface WorkflowAgentNodeRunExecution {
-  readonly token: string
-  readonly queueLeaseExpiresAt: Date
-}
+export type WorkflowAgentNodeRunExecution = RunExecution
 
 /** Execution details for an agent workflow node. The generic node run owns business IO. */
 export interface WorkflowAgentNodeRunRecord {
@@ -144,6 +146,7 @@ export interface WorkflowRunRecord {
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly error?: SixbFailure<WorkflowRunFailureCode>
+  /** Executions this stretch of the run has used up: a resume from `waiting` starts over at 1. */
   readonly attempt: number
   readonly execution?: WorkflowRunExecution
 }
@@ -165,13 +168,6 @@ export interface WorkflowNodeRunRecord {
   readonly error?: SixbFailure<WorkflowRunFailureCode>
 }
 
-export interface StartWorkflowRunInput {
-  readonly id: string
-  readonly projectId: string
-  readonly startedAt?: Date
-  readonly execution?: WorkflowRunExecution
-}
-
 export interface QueueWorkflowRunInput {
   readonly id: string
   readonly projectId: string
@@ -181,18 +177,7 @@ export interface QueueWorkflowRunInput {
   readonly queuedAt?: Date
 }
 
-export interface ReclaimWorkflowRunInput {
-  readonly id: string
-  readonly projectId: string
-  readonly execution: WorkflowRunExecution
-}
-
-export interface ConfirmWorkflowRunExecutionOwnershipInput {
-  readonly id: string
-  readonly projectId: string
-  readonly executionToken: string
-  readonly queueLeaseExpiresAt: Date
-}
+export type ConfirmWorkflowRunExecutionOwnershipInput = ConfirmRunExecutionInput
 
 export interface WaitWorkflowRunInput {
   readonly id: string
@@ -318,12 +303,15 @@ export interface WorkflowRunStorage {
   readonly agentNodes: WorkflowAgentNodeRunStorage
 
   queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord>
-  /** Atomically claims a queued run by transitioning it to running; competing claims must fail. */
-  start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord>
-  reclaim(input: ReclaimWorkflowRunInput): Promise<WorkflowRunRecord>
+  /** Takes the run for one execution, or says why this delivery cannot. */
+  startOrReclaim(input: ClaimRunInput): Promise<RunClaim<WorkflowRunRecord>>
+  /** Projects a renewed queue lease onto the run. */
   confirmExecutionOwnership(
     input: ConfirmWorkflowRunExecutionOwnershipInput
   ): Promise<WorkflowRunRecord>
+  /** Hands the run back. Does nothing once the token no longer holds a running run. */
+  releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
+  listLost(input: ListLostRunsInput): Promise<readonly WorkflowRunRecord[]>
   wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord>
   resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord>
   finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord>

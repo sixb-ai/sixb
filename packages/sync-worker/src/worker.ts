@@ -1,30 +1,23 @@
-import type {
-  DomainEventLog,
-  LakeStorage,
-  Queues,
-  SixbDefinitions,
-  SixbFailure,
-  Storage,
-} from "@sixb/core"
+import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { captureSixbFailure } from "@sixb/core/internal/errors"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
   bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
 import { resolveSyncConnectorSources } from "@sixb/core/internal/syncs"
-import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
-import { QueueWorker, retryUnstartedRun } from "@sixb/core/internal/workers"
+import { type HeldRunClaim, RunWorker, wakeJobId } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
 import {
+  type RunClaim,
+  type RunExecution,
   SYNC_RUN_FAILURE_CODES,
-  type SyncRunFailureCode,
   type SyncRunRecord,
   type SyncRunStatus,
+  type SyncRunStorage,
 } from "@sixb/core/storage"
-import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
+import { runSyncJob } from "./run-sync-job"
 import type { SyncWorkerContext } from "./types"
 
 const SOURCE = "SixbSyncWorker"
@@ -43,9 +36,10 @@ export interface SyncWorkerOptions {
   readonly concurrency?: number
 }
 
-export class SyncWorker extends QueueWorker<
+export class SyncWorker extends RunWorker<
   SyncRunRequestedQueueJob,
-  typeof SYNC_RUN_FAILURE_CODES
+  typeof SYNC_RUN_FAILURE_CODES,
+  SyncRunRecord
 > {
   private readonly host: SyncWorkerHost
 
@@ -60,134 +54,96 @@ export class SyncWorker extends QueueWorker<
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: `sync-worker-${host.id}`,
       claimLimit: options.concurrency,
+      runs: requireSyncRuns(host),
+      executions: host.storage.executions,
     })
 
-    assertSyncStorage(host)
     this.host = host
   }
 
-  protected async execute(
+  protected claimRun(
     claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
+    execution: RunExecution
+  ): Promise<RunClaim<SyncRunRecord>> {
+    return requireSyncRuns(this.host).startOrReclaim({
+      projectId: this.host.id,
+      id: claimed.job.payload.runId,
+      execution,
+    })
+  }
+
+  protected async executeRun(
+    claim: HeldRunClaim<SyncRunRecord>,
+    _claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
-    const { job } = claimed
-    const syncRuns = this.host.storage.syncRuns
-    if (!syncRuns) {
-      throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
-    }
-    const run = await syncRuns.getById({ projectId: this.host.id, id: job.payload.runId })
-    if (!run) {
-      throw new Error(`[SixbSyncWorker] Sync run '${job.payload.runId}' was not found.`)
-    }
+    const { run } = claim
 
-    // Each trigger that joined this run published its own job for it. Once one of them has started
-    // the run, the others have nothing left to do.
-    if (run.status !== "queued") return
-
-    const durableExecution = await this.host.storage.executions.getById({
-      projectId: this.host.id,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw new Error(
-        `[SixbSyncWorker] Sync run '${run.id}' references missing execution '${run.executionId}'.`
-      )
-    }
+    const durableExecution = await this.requireExecution(run)
 
     const execution = bindDurablePrimitiveExecution(this.host, {
       execution: durableExecution,
       primitive: { kind: "sync", id: run.syncId, runId: run.id },
     })
-    const context = buildSyncContext(this.host, execution.sixb)
 
+    await runSyncJob({
+      runtime: buildSyncContext(this.host, execution.sixb),
+      claim,
+      signal,
+      onRunStarted: (started) =>
+        emitSyncRunStarted(this.host, started, durableExecution.correlationId),
+      onRunFinished: async (finished, createdVersion) => {
+        await emitSyncRunFinishedEvents(
+          this.host,
+          finished,
+          durableExecution.correlationId,
+          createdVersion
+        )
+        await this.wakeNextRun(finished)
+      },
+      onRunFailed: (error, run, failure) => {
+        reportRunFailure(this.host, error, {
+          projectId: this.host.id,
+          attempt: run.attempt,
+          runKind: "sync",
+          run: {
+            runId: run.id,
+            syncId: run.syncId,
+          },
+          failure,
+        })
+      },
+    })
+  }
+
+  /** A run of a Sync that waited for this one need not wait for its next look. */
+  private async wakeNextRun(finished: SyncRunRecord): Promise<void> {
     try {
-      await runSyncJob({
-        runtime: context,
-        run,
-        signal,
-        onRunStarted: (started) =>
-          emitSyncRunStarted(this.host, started, durableExecution.correlationId),
-        onRunFinished: (finished, createdVersion) =>
-          emitSyncRunFinishedEvents(
-            this.host,
-            finished,
-            durableExecution.correlationId,
-            createdVersion
-          ),
-        onRunFailed: (error, run, failure) => {
-          reportRunFailure(this.host, error, {
-            projectId: this.host.id,
-            attempt: job.attempt,
-            runKind: "sync",
-            run: {
-              runId: run.id,
-              syncId: run.syncId,
-            },
-            failure,
-          })
-        },
+      const { runs } = await requireSyncRuns(this.host).list({
+        projectId: this.host.id,
+        syncId: finished.syncId,
+        statuses: ["queued"],
+        order: "asc",
+        limit: 1,
+      })
+
+      const [next] = runs
+      if (!next) return
+
+      await this.host.queues.syncRuns.enqueue({
+        projectId: this.host.id,
+        jobs: [
+          {
+            id: wakeJobId(next.id, finished.id),
+            type: "sync.run.requested",
+            payload: { runId: next.id },
+          },
+        ],
       })
     } catch (error) {
-      if (error instanceof SyncRunAlreadyStartedError) return
-      throw error
+      // It looks again by itself, a little later.
+      console.error(`[SixbSyncWorker] Could not wake the run after '${finished.id}'.`, error)
     }
-  }
-
-  protected override async onExecutionError(
-    claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
-    error: unknown
-  ): Promise<QueueWorkerFailureDecision<(typeof SYNC_RUN_FAILURE_CODES)[number]>> {
-    const run = await this.host.storage.syncRuns?.getById({
-      projectId: this.host.id,
-      id: claimed.job.payload.runId,
-    })
-    if (run?.status === "queued") {
-      const retry = retryUnstartedRun(claimed.job.attempt)
-      if (retry) return retry
-
-      return { kind: "fail", failure: await this.failUnstartedRun(claimed, run, error) }
-    }
-
-    return run?.status === "failed" && run.error
-      ? { kind: "fail", failure: run.error }
-      : { kind: "fail" }
-  }
-
-  /**
-   * Automatic dispatch joins a queued run instead of queueing another, so a run whose job ends
-   * before starting it must not stay queued: every later trigger would wait on it forever.
-   */
-  private async failUnstartedRun(
-    claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
-    run: SyncRunRecord,
-    error: unknown
-  ): Promise<SixbFailure<SyncRunFailureCode>> {
-    const syncRuns = this.host.storage.syncRuns
-    if (!syncRuns) {
-      throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
-    }
-
-    const failure = captureSixbFailure(error, {
-      allowedCodes: SYNC_RUN_FAILURE_CODES,
-      defaultCode: "internal.unexpected",
-      details: { syncId: run.syncId, runId: run.id, datasetId: run.datasetId },
-    })
-
-    await syncRuns.finish({
-      projectId: this.host.id,
-      id: run.id,
-      status: "failed",
-      error: failure,
-    })
-
-    reportRunFailure(this.host, error, {
-      projectId: this.host.id,
-      attempt: claimed.job.attempt,
-      runKind: "sync",
-      run: { runId: run.id, syncId: run.syncId },
-      failure,
-    })
-    return failure
   }
 }
 
@@ -224,7 +180,8 @@ async function emitSyncRunFinishedEvents(
   createdVersion?: DatasetVersion
 ): Promise<void> {
   // Sync owns notification after its run is finalized; the shared dataset writer returns the
-  // created version but does not publish events. Durable delivery is a separate follow-up.
+  // created version but does not publish events. If these are lost, the `projections` and
+  // `triggers` passes find the version in the lake.
   await host.events?.emit(
     {
       events: [
@@ -276,24 +233,20 @@ function requireTerminalStatus(
   return status
 }
 
-function assertSyncStorage(host: SyncWorkerHost): void {
+function requireSyncRuns(host: SyncWorkerHost): SyncRunStorage {
   if (!host.storage.syncRuns) {
     throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
   }
+  return host.storage.syncRuns
 }
 
 function buildSyncContext(
   host: SyncWorkerHost,
   sixb: ReturnType<typeof bindDurablePrimitiveExecution>["sixb"]
 ): SyncWorkerContext {
-  const syncRunsStorage = host.storage.syncRuns
-  if (!syncRunsStorage) {
-    throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
-  }
-
   return {
     id: host.id,
-    syncRunsStorage,
+    syncRunsStorage: requireSyncRuns(host),
     lakeStorage: host.lakeStorage,
     blobs: sixb.blobs,
     logging: host.logging,

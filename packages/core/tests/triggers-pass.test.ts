@@ -14,8 +14,10 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
+import { ORPHANED_RUN_AFTER_MS } from "@sixb/core/internal/storage"
+import { republishLostRuns } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { queueTestPipelineRun, startTestPipelineRun } from "@sixb/core/testing"
+import { queueTestPipelineRun, startTestPipelineRun, startTestRun } from "@sixb/core/testing"
 import { LakeChangeFeed } from "../src/maintenance/passes/lake-change-feed"
 import {
   type DatasetTrigger,
@@ -179,10 +181,20 @@ function createScene() {
   const publishedJobs = async () =>
     queues.pipelines.claim({ projectId: "project", workerId: "test", limit: 100 })
 
+  /** What an older version leaves behind: a running run that holds no lease. */
+  function forgetExecution(id: string): void {
+    const { runs } = storage.pipelineRuns as unknown as { runs: Map<string, object> }
+    const key = `project:${id}`
+
+    runs.set(key, { ...runs.get(key), execution: undefined })
+  }
+
   return {
     storage,
+    queues,
     lakeStorage,
     dispatcher,
+    forgetExecution,
     reads,
     createPass,
     later,
@@ -198,7 +210,64 @@ async function queuedRuns(storage: InMemoryStorage) {
   return runs
 }
 
-describe("DatasetTriggerReconciler", () => {
+describe("beside the `runs` pass", () => {
+  function runsPass(scene: ReturnType<typeof createScene>) {
+    return republishLostRuns({
+      projectId: "project",
+      storage: scene.storage,
+      queues: scene.queues,
+      events: { emit: async () => {} },
+      now: new Date(Date.now() + 2 * INTERVAL_MS),
+    })
+  }
+
+  // Have the `triggers` pass treat a lost run as not active to watch it start a second run.
+  test("a queued run that lost its job gets its job back, and no second run", async () => {
+    const scene = createScene()
+    const first = await scene.commit("order-1")
+    await scene.run("last", "succeeded", [first])
+    await queueTestPipelineRun(scene.storage, {
+      id: "lost",
+      projectId: "project",
+      pipelineId: buildReport.id,
+    })
+    await scene.commit("order-2")
+    const pass = scene.createPass()
+
+    await pass.run(signal, scene.later())
+    await expect(runsPass(scene)).resolves.toMatchObject({ republished: 1 })
+    await pass.run(signal, scene.later())
+
+    expect((await queuedRuns(scene.storage)).map((run) => run.id)).toEqual(["lost"])
+    expect((await scene.publishedJobs()).map((claimed) => claimed.job.id)).toEqual(["lost"])
+  })
+
+  // Have the `triggers` pass count a cancelled run as having read to watch this change be lost.
+  test("a run of an older version that gets ended fires its trigger once", async () => {
+    const scene = createScene()
+    const first = await scene.commit("order-1")
+    await scene.run("last", "succeeded", [first])
+    await scene.commit("order-2")
+    await scene.run("old", "running")
+
+    await scene.forgetExecution("old")
+    tick()
+    setSystemTime(new Date(Date.now() + ORPHANED_RUN_AFTER_MS))
+
+    const pass = scene.createPass()
+    await pass.run(signal, scene.later())
+    expect(await queuedRuns(scene.storage)).toEqual([])
+
+    await expect(runsPass(scene)).resolves.toMatchObject({ settled: 1 })
+
+    await pass.run(signal, scene.later())
+    await pass.run(signal, scene.later())
+
+    expect(await queuedRuns(scene.storage)).toHaveLength(1)
+  })
+})
+
+describe("triggersPass", () => {
   test("dispatches a commit whose event was lost, once", async () => {
     // Red check: leave out the `dispatch` call in `settleTrigger`; nothing is queued.
     const scene = createScene()
@@ -280,7 +349,7 @@ describe("DatasetTriggerReconciler", () => {
       await pass.run(signal, scene.later())
       expect((await queuedRuns(scene.storage)).map((run) => run.id)).toEqual(["waiting"])
 
-      await scene.storage.pipelineRuns.start({ id: "waiting", projectId: "project" })
+      await startTestRun(scene.storage.pipelineRuns, { id: "waiting", projectId: "project" })
       await scene.storage.pipelineRuns.startStep({
         id: "waiting:step",
         projectId: "project",
@@ -390,7 +459,7 @@ describe("DatasetTriggerReconciler", () => {
       const [recovered] = await queuedRuns(scene.storage)
 
       tick()
-      await scene.storage.pipelineRuns.start({ id: recovered!.id, projectId: "project" })
+      await startTestRun(scene.storage.pipelineRuns, { id: recovered!.id, projectId: "project" })
       await scene.storage.pipelineRuns.finish({
         id: recovered!.id,
         projectId: "project",

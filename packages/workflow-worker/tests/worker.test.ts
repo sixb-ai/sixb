@@ -298,6 +298,9 @@ describe("WorkflowWorker", () => {
         )
       )
     ).resolves.toEqual({ kind: "fail" })
+    await requestWorkflowRun(sixb, workflow, "workflow-run-1", {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+    })
     await expect(
       worker.decideExecutionError(claimed, new Error("storage unavailable"))
     ).resolves.toMatchObject({ kind: "retry", availableAt: expect.any(String) })
@@ -863,7 +866,8 @@ describe("WorkflowWorker", () => {
       gatedStepReleases[1]?.()
       const recovered = await waitFor(readRun, (value) => value?.status === "succeeded")
 
-      expect(recovered).toMatchObject({ status: "succeeded", attempt: 2 })
+      // A worker that was stopped hands its attempt back.
+      expect(recovered).toMatchObject({ status: "succeeded", attempt: 1 })
       await flushSixbErrors(sixb)
       expect(reports).toHaveLength(0)
 

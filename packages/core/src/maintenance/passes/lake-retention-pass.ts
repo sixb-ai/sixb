@@ -1,4 +1,5 @@
 import type { Queues } from "../../queues"
+import { lakeRetentionJobId } from "../../workers/job-ids"
 import type { LakeRetentionStatus } from "../lake-retention-status"
 import type { MaintenancePass } from "../loop"
 
@@ -51,7 +52,7 @@ export function lakeRetentionPass(input: LakeRetentionPassInput): MaintenancePas
         projectId,
         jobs: [
           {
-            id: `lake-retention:${intervalStart}`,
+            id: lakeRetentionJobId(intervalStart),
             type: "lake.retention.requested",
             payload: { intervalStart },
           },

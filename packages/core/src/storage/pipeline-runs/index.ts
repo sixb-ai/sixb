@@ -17,7 +17,6 @@ export type {
   PipelineStepRunRecord,
   PipelineStepRunStatus,
   QueuePipelineRunInput,
-  StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./types"
 export { PIPELINE_RUN_FAILURE_CODES } from "./types"

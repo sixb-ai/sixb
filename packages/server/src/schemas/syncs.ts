@@ -45,6 +45,8 @@ export const SyncRunSchema = z.object({
   datasetId: z.string(),
   mode: SyncModeSchema,
   status: SyncRunStatusSchema,
+  /** How many executions took the run: above one, it resumed after losing its worker. */
+  attempt: z.number(),
   queuedAt: z.string(),
   startedAt: z.string().optional(),
   finishedAt: z.string().optional(),

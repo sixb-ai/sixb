@@ -98,6 +98,8 @@ await maintenance.stop()
 
 `OntologyMaintenance` recovers pending event publication and applies the configured retention policy. It runs once at startup, then every 60 seconds by default, and never removes pending work.
 
+Stopping a worker never ends the runs it holds. A sync or pipeline run stays `running`, its job goes back to the queue, and the next delivery resumes it; `cancelled` is a decision recorded on a run, not something a stopping worker writes. See [`packages/core/src/workers/README.md`](../src/workers/README.md).
+
 #### The maintenance loop
 
 One timer wakes for whatever comes next: a pass that is due, a run's budget, or a beat. A pass is an id, a budget, a due time and a run:

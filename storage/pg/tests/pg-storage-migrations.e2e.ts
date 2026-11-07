@@ -19,6 +19,7 @@ import {
   createTestAgentExecution,
   createTestWorkflowExecution,
   startTestProjectionRun,
+  startTestRun,
   startTestSyncRun,
   startTestWebhookRun,
 } from "@sixb/core/testing"
@@ -129,6 +130,7 @@ const SHIPPED_MIGRATIONS = [
   "089-maintenance-heartbeats",
   "090-lake-retention-runs",
   "091-dataset-ingest-inbox",
+  "092-run-recovery",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -2187,7 +2189,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     },
     queuedAt: new Date("2026-04-19T11:59:59.000Z"),
   })
-  await storage.workflowRuns.start({
+  await startTestRun(storage.workflowRuns, {
     id: "workflow-run-1",
     projectId: "project-a",
     startedAt: new Date("2026-04-19T12:00:00.000Z"),

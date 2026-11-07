@@ -1,6 +1,7 @@
 import type { TrustedPrimitiveRef } from "../execution"
 import type { QueueSyncRunInput, Storage, SyncRunRecord } from "../storage"
 import type { ExecutionStorage } from "../storage/executions"
+import { startTestRun } from "./run-claim"
 
 /** Create the durable execution required by a Sync-run storage fixture. */
 export async function createTestSyncExecution(
@@ -53,7 +54,8 @@ export async function startTestSyncRun(
 ): Promise<SyncRunRecord> {
   const { startedAt, ...queuedRun } = input
   await queueTestSyncRun(storage, { ...queuedRun, queuedAt: startedAt })
-  return storage.syncRuns!.start({
+
+  return startTestRun(storage.syncRuns!, {
     id: input.id,
     projectId: input.projectId,
     startedAt,

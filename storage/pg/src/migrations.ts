@@ -462,6 +462,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("089-maintenance-heartbeats", maintenanceHeartbeatsSql),
     pgSql("090-lake-retention-runs", lakeRetentionRunsSql),
     pgSql("091-dataset-ingest-inbox", datasetIngestInboxSql),
+    pgSql("092-run-recovery", runRecoverySql),
   ],
 })
 
@@ -543,3 +544,4 @@ import maintenanceHeartbeatsSql from "./migrations/089-maintenance-heartbeats.sq
 }
 import lakeRetentionRunsSql from "./migrations/090-lake-retention-runs.sql" with { type: "text" }
 import datasetIngestInboxSql from "./migrations/091-dataset-ingest-inbox.sql" with { type: "text" }
+import runRecoverySql from "./migrations/092-run-recovery.sql" with { type: "text" }

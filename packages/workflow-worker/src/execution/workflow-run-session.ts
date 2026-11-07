@@ -98,6 +98,7 @@ export class WorkflowRunSession {
       runId: job.id,
       workflowRuns: runtime.workflowRuns,
       observer: input.observer ?? noopWorkflowRunObserver,
+      alreadyStarted: true,
       execution: job.execution,
     })
     const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
@@ -123,20 +124,12 @@ export class WorkflowRunSession {
     })
   }
 
-  /** Restore a persisted running execution after its previous queue delivery was lost. */
+  /** Restore a run this delivery claimed after an earlier execution left it running. */
   static async recoverRunning(
     input: RunWorkflowJobInput | RunWorkflowResumeJobInput,
     options: { readonly executors: WorkflowNodeExecutorRegistry }
   ): Promise<WorkflowRunSession> {
     const { runtime, job } = input
-    if (!job.execution) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbWorkflowWorker] Running workflow '${job.id}' can only be recovered by a queue-owned execution.`,
-        { details: { workflowId: job.workflowId, runId: job.id } }
-      )
-    }
-
     const signal = input.signal ?? new AbortController().signal
     const workflow = requireWorkflow(runtime.sixb.workflows.getById(job.workflowId), job)
     const valueTypesById = runtime.ontology.getValueTypesById()
@@ -172,12 +165,6 @@ export class WorkflowRunSession {
       nodeRuns: recovery.completed,
       upToNodeIndex: recovery.resumeFromIndex,
       valueTypesById,
-    })
-
-    await runtime.workflowRuns.reclaim({
-      projectId: runtime.projectId,
-      id: run.id,
-      execution: job.execution,
     })
 
     const recorder = new WorkflowRunRecorder({
@@ -579,11 +566,8 @@ export class WorkflowRunSession {
 
   private resumeFromIndex = 0
 
-  async start(): Promise<void> {
-    if (this.dependencies.recorder.hasStarted) {
-      return
-    }
-    await this.dependencies.recorder.startRun()
+  async announceStarted(run: WorkflowRunRecord): Promise<void> {
+    await this.dependencies.recorder.announceStarted(run)
   }
 
   async runAllNodes(): Promise<WorkflowRunRecord | null> {

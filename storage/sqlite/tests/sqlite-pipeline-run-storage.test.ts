@@ -330,13 +330,6 @@ describe("SqlitePipelineRunStorage", () => {
     })
 
     await expect(
-      storage.start({
-        id: "piperun_1",
-        projectId: "my-app",
-      })
-    ).rejects.toBeInstanceOf(PipelineRunError)
-
-    await expect(
       storage.finish({
         id: "missing",
         projectId: "my-app",

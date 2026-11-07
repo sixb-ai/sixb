@@ -1,13 +1,18 @@
-import { randomUUID } from "node:crypto"
 import { reportRunFailure } from "../error-reporting/capability"
-import { createSixbError, toSixbFailure } from "../errors/internal"
-import type { SixbFailure } from "../errors/types"
+import { toSixbFailure } from "../errors/internal"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
-import type { CreateExecutionInput, Storage, SyncRunFailureCode, SyncRunRecord } from "../storage"
+import type { CreateExecutionInput, Storage, SyncRunRecord } from "../storage"
 import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "../storage"
+import {
+  dispatchQueuedRun,
+  hasAutomaticRunProvenance,
+  type QueuedRunPrimitive,
+  type QueuedRunStore,
+  type RunPublication,
+} from "../workers/queued-run-dispatch"
 import { SyncValidationError } from "./errors"
 import type { SyncRunRequestOptions, SyncRunRequestResult } from "./request"
 import type { SyncDefinition } from "./types"
@@ -42,20 +47,11 @@ interface DispatchSyncRunInput extends SyncRunRequestOptions {
   readonly metadata?: Readonly<Record<string, string>>
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
   readonly validateExistingRun?: (run: SyncRunRecord, storage: Storage) => Promise<void>
+  /** A trigger, not a caller (see `dispatchQueuedRun`). */
+  readonly automatic?: boolean
   /** Return a matching run of this Sync that has not started yet instead of queueing another one. */
   readonly joinQueuedRun?: boolean
 }
-
-type PersistedSyncRun =
-  | { readonly publish: false; readonly run: SyncRunRecord }
-  | {
-      readonly publish: true
-      readonly run: SyncRunRecord
-      readonly queuedAt: Date
-      readonly created: boolean
-      /** Defaults to the run id. A trigger that joins a run publishes its own job for it. */
-      readonly jobId?: string
-    }
 
 /** Core-owned durable dispatch boundary used by automatic Sync triggers. */
 export class SyncRunDispatcher implements SyncRunDispatchPort {
@@ -76,6 +72,7 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
       expectedLatestVersionId: input.expectedLatestVersionId,
       commitMessage: input.commitMessage,
       metadata: input.metadata,
+      automatic: true,
       validateExistingRun: (run, storage) =>
         assertAutomaticExecutionIdentity(storage, this.dependencies.id, input, run),
       joinQueuedRun: true,
@@ -96,214 +93,123 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
 
 /** Persist a Sync execution and queued run before publishing its queue job. */
 export async function dispatchSyncRun(input: DispatchSyncRunInput): Promise<SyncRunRequestResult> {
-  const runId = createSyncRunId(input.runId)
-  let persisted = await persistSyncRun(input, runId)
-  if (!persisted.publish && input.validateExistingRun && persisted.run.status === "queued") {
-    persisted = await reuseSyncRun(input, persisted.run)
-  }
-  if (!persisted.publish) return existingSyncRunResult(persisted.run)
-  return publishSyncRun(input, persisted)
+  return dispatchQueuedRun({
+    primitive: syncRunPrimitive(input),
+    projectId: input.projectId,
+    storage: input.storage,
+    runId: input.runId,
+    metadata: input.metadata,
+    createExecution: input.createExecution,
+    validateExistingRun: input.validateExistingRun,
+    automatic: input.automatic,
+    joinQueuedRun: input.joinQueuedRun,
+  })
 }
 
-async function persistSyncRun(
+function syncRunPrimitive(
+  input: DispatchSyncRunInput
+): QueuedRunPrimitive<SyncRunRecord, SyncRunRequestResult> {
+  const { projectId } = input
+
+  return {
+    label: "Sync",
+    failureDetails: (run) => ({ syncId: run.syncId }),
+
+    store: (storage) => syncRunStore(input, requireSyncRunStorage(storage)),
+    matches: (run) => runMatchesRequest(run, input),
+
+    async enqueue(job) {
+      const [enqueued] = await input.queue.enqueue({
+        projectId,
+        jobs: [
+          {
+            id: job.id,
+            type: "sync.run.requested",
+            payload: { runId: job.runId },
+            ...(job.metadata === undefined ? {} : { metadata: job.metadata }),
+          },
+        ],
+      })
+      return enqueued
+    },
+
+    async failPublication(run, failure, cause, at) {
+      const syncFailure = toSixbFailure(failure, { allowedCodes: SYNC_RUN_FAILURE_CODES, at })
+      const failed = await requireSyncRunStorage(input.storage).finish({
+        projectId,
+        id: run.id,
+        status: "failed",
+        finishedAt: at,
+        error: syncFailure,
+      })
+      reportRunFailure(input.errorReporterHost, cause, {
+        projectId,
+        runKind: "sync",
+        run: { runId: failed.id, syncId: failed.syncId },
+        failure: syncFailure,
+      })
+    },
+
+    result: toRequestResult,
+
+    RunError: SyncRunError,
+    RequestError: SyncValidationError,
+  }
+}
+
+function syncRunStore(
   input: DispatchSyncRunInput,
-  runId: string
-): Promise<PersistedSyncRun> {
-  const syncRuns = requireSyncRunStorage(input.storage)
-  const existing = await syncRuns.getById({ projectId: input.projectId, id: runId })
-  if (existing) return reuseSyncRun(input, existing)
+  runs: NonNullable<Storage["syncRuns"]>
+): QueuedRunStore<SyncRunRecord> {
+  const { projectId, sync } = input
 
-  const execution = await input.createExecution(`exec_${randomUUID()}`, runId)
-  const queuedAt = new Date()
-  try {
-    return await input.storage.transaction(
-      async (tx): Promise<PersistedSyncRun> => {
-        const transactionalRuns = requireSyncRunStorage(tx)
-        const raced = await transactionalRuns.getById({ projectId: input.projectId, id: runId })
-        if (raced) {
-          assertExistingRunMatchesRequest(raced, input)
-          await input.validateExistingRun?.(raced, tx)
-          return { publish: false, run: raced }
-        }
+  return {
+    getById: (params) => runs.getById(params),
 
-        if (input.joinQueuedRun) {
-          const waiting = await findQueuedSyncRun(transactionalRuns, input)
-          if (waiting) {
-            return {
-              publish: true,
-              run: waiting,
-              queuedAt: waiting.queuedAt,
-              created: false,
-              jobId: joinJobId(waiting, runId),
-            }
-          }
-        }
+    async oldestQueued() {
+      const { runs: queued } = await runs.list({
+        projectId,
+        syncId: sync.id,
+        statuses: ["queued"],
+        order: "asc",
+        limit: 1,
+      })
 
-        await tx.executions.create(execution)
-        const run = await transactionalRuns.queue({
-          projectId: input.projectId,
-          id: runId,
-          executionId: execution.id,
-          syncId: input.sync.id,
-          datasetId: input.sync.target.dataset.id,
-          mode: input.sync.config.mode,
-          queuedAt,
-          expectedLatestVersionId: input.expectedLatestVersionId,
-          commitMessage: input.commitMessage,
-        })
-        return { publish: true, run, queuedAt, created: true }
-      },
-      { isolation: "serializable" }
-    )
-  } catch (error) {
-    if (!(error instanceof SyncRunError)) throw error
-    const raced = await syncRuns.getById({ projectId: input.projectId, id: runId })
-    if (!raced) throw error
-    assertExistingRunMatchesRequest(raced, input)
-    await input.validateExistingRun?.(raced, input.storage)
-    return { publish: false, run: raced }
+      return queued[0]
+    },
+
+    queue: (run) =>
+      runs.queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        syncId: sync.id,
+        datasetId: sync.target.dataset.id,
+        mode: sync.config.mode,
+        queuedAt: run.queuedAt,
+        expectedLatestVersionId: input.expectedLatestVersionId,
+        commitMessage: input.commitMessage,
+      }),
+
+    requeue: (run, queuedAt) =>
+      runs.queue({
+        projectId,
+        id: run.id,
+        executionId: run.executionId,
+        syncId: run.syncId,
+        datasetId: run.datasetId,
+        mode: run.mode,
+        queuedAt,
+        expectedLatestVersionId: run.expectedLatestVersionId,
+        commitMessage: run.commitMessage,
+      }),
   }
 }
 
 /**
  * A run that has not started reads its source when it starts, so it already covers a trigger that
- * arrives now. The oldest one starts first; one queued with another request payload is not joined.
+ * arrives now. One queued with another request payload is not joined.
  */
-async function findQueuedSyncRun(
-  syncRuns: NonNullable<Storage["syncRuns"]>,
-  input: DispatchSyncRunInput
-): Promise<SyncRunRecord | undefined> {
-  const { runs } = await syncRuns.list({
-    projectId: input.projectId,
-    syncId: input.sync.id,
-    statuses: ["queued"],
-    order: "asc",
-    limit: 1,
-  })
-  const [waiting] = runs
-  return waiting && runMatchesRequest(waiting, input) ? waiting : undefined
-}
-
-/**
- * The job a trigger publishes for the run it joins. The run's own job may be gone (a provider
- * keeps a settled job id, and ignores a new job under it), so each joining trigger brings a job
- * that can start the run; once it has started, the others complete without doing anything. The id
- * derives from the trigger's run id, so a redelivered trigger publishes the same job.
- */
-function joinJobId(waiting: SyncRunRecord, triggerRunId: string): string {
-  return `${waiting.id}:join:${triggerRunId}`
-}
-
-async function reuseSyncRun(
-  input: DispatchSyncRunInput,
-  existing: SyncRunRecord
-): Promise<PersistedSyncRun> {
-  assertExistingRunMatchesRequest(existing, input)
-  await input.validateExistingRun?.(existing, input.storage)
-  if (input.validateExistingRun && existing.status === "queued") {
-    const execution = await input.storage.executions.getById({
-      projectId: input.projectId,
-      id: existing.executionId,
-    })
-    if (!execution)
-      throw new SyncRunError(`[Sixb] Execution '${existing.executionId}' was not found.`)
-    return { publish: true, run: existing, queuedAt: existing.queuedAt, created: false }
-  }
-  if (
-    existing.status !== "failed" ||
-    existing.error?.code !== "queue.enqueue_failed" ||
-    !existing.error.retryable
-  ) {
-    return { publish: false, run: existing }
-  }
-
-  const execution = await input.storage.executions.getById({
-    projectId: input.projectId,
-    id: existing.executionId,
-  })
-  if (!execution) {
-    throw new SyncRunError(
-      `[Sixb] Execution '${existing.executionId}' for Sync run '${existing.id}' was not found.`
-    )
-  }
-
-  const queuedAt = new Date()
-  const run = await requireSyncRunStorage(input.storage).queue({
-    projectId: input.projectId,
-    id: existing.id,
-    executionId: existing.executionId,
-    syncId: existing.syncId,
-    datasetId: existing.datasetId,
-    mode: existing.mode,
-    queuedAt,
-    expectedLatestVersionId: existing.expectedLatestVersionId,
-    commitMessage: existing.commitMessage,
-  })
-  return { publish: true, run, queuedAt, created: false }
-}
-
-async function publishSyncRun(
-  input: DispatchSyncRunInput,
-  persisted: Extract<PersistedSyncRun, { readonly publish: true }>
-): Promise<SyncRunRequestResult> {
-  const jobId = persisted.jobId ?? persisted.run.id
-
-  try {
-    const [job] = await input.queue.enqueue({
-      projectId: input.projectId,
-      jobs: [
-        {
-          id: jobId,
-          type: "sync.run.requested",
-          payload: { runId: persisted.run.id },
-          ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-        },
-      ],
-    })
-    if (!job || job.id !== jobId) {
-      throw new SyncRunError(`[Sixb] Queue did not acknowledge Sync run '${persisted.run.id}'.`)
-    }
-    return {
-      syncId: persisted.run.syncId,
-      runId: persisted.run.id,
-      queuedAt: persisted.queuedAt.toISOString(),
-      ...(job?.id ? { jobId: job.id } : {}),
-      created: persisted.created,
-    }
-  } catch (error) {
-    // Automatic consumers retain the batch and retry. Keep uncertain delivery queued:
-    // a lost reply does not prove that the queue rejected the job.
-    if (input.validateExistingRun) throw error
-    const failedAt = new Date()
-    const failure = toEnqueueFailure(error, persisted.run, failedAt)
-    const failed = await requireSyncRunStorage(input.storage).finish({
-      projectId: input.projectId,
-      id: persisted.run.id,
-      status: "failed",
-      finishedAt: failedAt,
-      error: failure,
-    })
-    reportRunFailure(input.errorReporterHost, error, {
-      projectId: input.projectId,
-      runKind: "sync",
-      run: { runId: failed.id, syncId: failed.syncId },
-      failure,
-    })
-    throw error
-  }
-}
-
-function assertExistingRunMatchesRequest(
-  existing: SyncRunRecord,
-  input: Pick<DispatchSyncRunInput, "sync" | "expectedLatestVersionId" | "commitMessage">
-): void {
-  if (!runMatchesRequest(existing, input)) {
-    throw new SyncRunError(
-      `[Sixb] Sync run '${existing.id}' already exists with a different request payload.`
-    )
-  }
-}
-
 function runMatchesRequest(
   existing: SyncRunRecord,
   input: Pick<DispatchSyncRunInput, "sync" | "expectedLatestVersionId" | "commitMessage">
@@ -317,24 +223,19 @@ function runMatchesRequest(
   )
 }
 
-function existingSyncRunResult(existing: SyncRunRecord): SyncRunRequestResult {
+function toRequestResult(run: SyncRunRecord, publication?: RunPublication): SyncRunRequestResult {
   return {
-    syncId: existing.syncId,
-    runId: existing.id,
-    queuedAt: existing.queuedAt.toISOString(),
-    created: false,
+    syncId: run.syncId,
+    runId: run.id,
+    queuedAt: (publication?.queuedAt ?? run.queuedAt).toISOString(),
+    ...(publication ? { jobId: publication.jobId } : {}),
+    created: publication?.created ?? false,
   }
 }
 
 function requireSyncRunStorage(storage: Storage): NonNullable<Storage["syncRuns"]> {
   if (!storage.syncRuns) throw new SyncValidationError("[Sixb] Sync run storage is not configured.")
   return storage.syncRuns
-}
-
-function createSyncRunId(runId: string | undefined): string {
-  if (runId === undefined) return `run_${randomUUID()}`
-  if (!runId.trim()) throw new SyncValidationError("[Sixb] Sync run id must not be empty")
-  return runId
 }
 
 function assertAutomaticDispatchInput(input: AutomaticSyncRunDispatchInput): void {
@@ -351,33 +252,11 @@ async function assertAutomaticExecutionIdentity(
   run: SyncRunRecord
 ): Promise<void> {
   const execution = await storage.executions.getById({ projectId, id: run.executionId })
-  if (
-    !execution ||
-    execution.source.type !== input.source.type ||
-    execution.source.eventId !== input.source.eventId ||
-    execution.correlationId !== input.correlationId ||
-    execution.requestedBy !== undefined
-  ) {
+  if (!hasAutomaticRunProvenance(execution, input)) {
     throw new SyncValidationError(
       `[Sixb] Sync run '${run.id}' already exists with different automatic provenance.`
     )
   }
-}
-
-function toEnqueueFailure(
-  error: unknown,
-  run: SyncRunRecord,
-  at: Date
-): SixbFailure<SyncRunFailureCode> {
-  const enqueueError = createSixbError(
-    "queue.enqueue_failed",
-    `[Sixb] Could not enqueue Sync run '${run.id}'.`,
-    {
-      cause: error,
-      details: { syncId: run.syncId, runId: run.id, phase: "enqueue" },
-    }
-  )
-  return toSixbFailure(enqueueError, { allowedCodes: SYNC_RUN_FAILURE_CODES, at })
 }
 
 function assertNonBlank(value: string, label: string): void {
