@@ -109,6 +109,10 @@ export {
   runLakeStorageContractSuite,
 } from "./lake-storage-contract"
 export {
+  type LakeRetentionRunStorageContractSuiteOptions,
+  runLakeRetentionRunStorageContractSuite,
+} from "./lake-retention-run-storage-contract"
+export {
   type MaintenanceHeartbeatStorageContractSuiteOptions,
   runMaintenanceHeartbeatStorageContractSuite,
 } from "./maintenance-heartbeat-storage-contract"

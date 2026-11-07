@@ -64,6 +64,12 @@ rewrites its row whole, at start, as each pass ends and every 30 seconds, so a p
 runs leaves it. Nothing purges a row: a project that stops using an orchestrator deletes its row, or
 `/api/status` keeps reading it as stale.
 
+## Lake retention runs
+
+`lake_retention_runs` holds one row per project: when the last automatic run ended, and whether it
+failed. The worker that runs retention rewrites it, and it is the only proof that one does: `Queue`
+has no read path. A write that fails loses that account of the run, never the run.
+
 ## Sequenced dataset writes
 
 Direct snapshot/append sessions and SQL-transform writes to sequenced datasets are rejected. Writes use the merge path to preserve source ordering.
