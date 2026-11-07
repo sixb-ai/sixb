@@ -64,6 +64,8 @@ execution token stays `running` on 0.2.1, whose workers skip it.
 - `sixb api` no longer delivers events left undelivered or purges expired records: run
   `sixb orchestrator`, even with no schedules. It warns at startup. `sixb deploy` runs one unless
   `services.orchestrator` is `false`.
+- Only the orchestrator brings back a run that lost its worker. Without one, a lost sync run stays
+  `running`, and later runs of that sync wait behind it.
 - The new `@sixb/lake-worker` runs lake retention and writes ingested changes, as worker type `lake`.
   `sixb worker-group` with no types and `sixb deploy` include it, in the existing process. A
   deployment that lists its worker `types`, or a `sixb worker-group` given a list, must add `lake`:
