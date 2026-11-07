@@ -4811,27 +4811,23 @@ export type GetStatusResponses = {
    * Response for status 200
    */
   200: {
-    status: "ok" | "degraded"
+    status: "ok" | "degraded" | "unknown"
     objectTypes: number
     maintenance: {
-      running: boolean
-      intervalMs: number
-      lastStartedAt: string | null
-      lastCompletedAt: string | null
-      lastDurationMs: number | null
-      consecutiveFailures: number
-      lastError: string | null
+      beatAt: string | null
+      stale: boolean
+      passes: Array<{
+        id: string
+        lastSucceededAt: string | null
+        consecutiveFailures: number
+        lastError: string | null
+      }>
       outbox: {
         pendingCount: number
         oldestPendingAt: string | null
         retryingCount: number
         maxAttempts: number
-      } | null
-      cleanup: {
-        publishedOutboxRowsDeleted: number
-        terminalSourceRowsDeleted: number
-        terminalSourceMaterializationsDeleted: number
-      } | null
+      }
     }
   }
 }
