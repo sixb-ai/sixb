@@ -20,8 +20,7 @@ export interface SchedulerController {
 
 /**
  * The project's cron schedules. The orchestrator runs `pass` on its maintenance loop; `start()`
- * runs it on a loop of its own, for an embedded host with no orchestrator. Doing both fires every
- * cron twice.
+ * runs it on a loop of its own, for an embedded host with no orchestrator.
  */
 export class SchedulerRuntime implements SchedulerController {
   private readonly cron: CronPass
