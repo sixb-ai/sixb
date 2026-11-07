@@ -2,9 +2,9 @@ import type { DomainEvent } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
-import { Worker } from "@sixb/core/internal/workers"
-import { retryDelay, sleep } from "./backoff"
+import { backoffDelay, Worker, waitUnlessAborted } from "@sixb/core/internal/workers"
 import { type DispatchJob, JobDispatch } from "./job-dispatch"
+import { RETRY_BACKOFF } from "./retry-backoff"
 import { routeKeysForEvent } from "./route-key"
 import type {
   OrchestratorDispatchers,
@@ -117,7 +117,7 @@ async function consumeBatches(
     } catch (error) {
       if (signal.aborted) return
       console.error("[SixbOrchestrator] Subscription failed; retrying:", error)
-      await sleep(retryDelay(attempt++), signal)
+      await waitUnlessAborted(backoffDelay(attempt++, RETRY_BACKOFF), signal)
       continue
     }
     await waitForAbort(signal)
