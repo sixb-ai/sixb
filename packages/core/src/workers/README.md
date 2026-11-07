@@ -42,16 +42,17 @@ running. It announces its `*.run.finished` like any other: schedules and the Con
 
 ### What each primitive supplies
 
-`RunWorker` is the mechanism for syncs, pipelines and workflows: claim, lease, hand-back, attempts.
+`RunWorker` is the mechanism for syncs, pipelines, workflows and projections: claim, lease, hand-back,
+attempts.
 
 | Primitive | Worker | Resume point | Lives in |
 | --- | --- | --- | --- |
 | Sync | `RunWorker` | Its one commit: recorded if it landed, otherwise read again from the last checkpoint | `packages/sync-worker/src/run-sync-job.ts` |
 | Pipeline | `RunWorker` | The steps not on record as succeeded, found by step id | `packages/pipeline-worker/src/run-pipeline-job.ts`, `run-step.ts` |
 | Workflow | `RunWorker` | The first node not on record as finished | `recoverRunning`, `packages/workflow-worker` |
-| Projection | `QueueWorker` | Adopts its candidate; telemetry from its checkpoint | `startOrReclaim`, `packages/projection-worker` |
+| Projection | `RunWorker` | Adopts its candidate; telemetry from its checkpoint | `startOrReclaim`, `packages/projection-worker` |
 | Agent | `QueueWorker` | None: ends `cancelled` with `finishReason: "interrupted"`, since a replay would repeat tools and bill the turn again | `endInterruptedAgentRun` |
-| Webhook | None | Runs the handler again on the provider's retry, if the run failed retryably | `canRetryWebhookRun` |
+| Webhook | None | Runs the handler again on the provider's retry, once its own lease lapsed | `canRetryWebhookRun`, `packages/core/src/webhooks/delivery-lease.ts` |
 | Action | None | None: runs inline, and writes its record once, when it ends | |
 
 What stays specific, and why:
@@ -59,11 +60,20 @@ What stays specific, and why:
 - **Workflows** wake from `waiting` through `resume`, not through a claim: a resume job first checks
   what woke the run (`claimRun`), and a run's `attempt` starts over at each resume, so a workflow
   with ten human steps is not ten attempts in.
-- **Projections** keep their own claim: the materializer fences its commits with their token, a claim
-  also asserts the run's immutable identity, and a run that fails transiently retries without a cap,
-  because each attempt keeps its candidate and its progress. A queued projection run is republished
-  by the orchestrator's reconciler, which knows whether its revision still applies.
-- **Agents** end a lost run instead of claiming it.
+- **Projections** run on `RunWorker`, but the job takes the run, under the token `RunWorker` made:
+  the materializer fences its commits with that token, a claim also asserts the run's immutable
+  identity, and a replay answers from the run's outcome. A run that fails transiently retries without
+  a cap, because each attempt keeps its candidate and its progress, so a hand-back spends nothing. A
+  queued projection run is republished by the orchestrator's reconciler, which knows whether its
+  revision still applies.
+- **Agents** share `RunOwnedElsewhereError`, and end a lost run instead of claiming it.
+- **Webhooks** have no queue, so the API process renews a lease of its own while the handler runs:
+  60 s, every 15 s, the numbers of a dataset flush. It survives three lost renewals, so a database
+  blip does not run a live handler twice, and it ends well before most providers retry. A retry
+  during the lease gets `503` with `Retry-After`, never `202`: the handler may still fail, and a
+  provider stops retrying once it hears "accepted". A provider that never retries loses a delivery
+  the process died on, as it always did. A run an older API started has no lease and is judged from
+  when it started.
 
 ### A lake commit and its record
 
@@ -128,7 +138,7 @@ stopped for longer has its runs end. A job still in such a queue can reach its r
 A delivery can only recover a run it reaches. `republishLostRuns` is the orchestrator's `runs` pass,
 every 30 seconds on its maintenance loop. It brings a job to syncs, pipelines and workflows that have
 none: queued runs whose job was lost, and running runs whose lease lapsed, which covers one handed
-back. A job on its way gets 30 seconds first, so a clean shutdown publishes nothing beside the job
+back. Projections join it for lapsed leases. A job on its way gets 30 seconds first, so a clean shutdown publishes nothing beside the job
 that came back.
 
 It asks each store for those runs alone (`listLost`), from the `(project_id, status, ...)` index:
