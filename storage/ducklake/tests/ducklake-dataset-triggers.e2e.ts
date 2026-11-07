@@ -6,17 +6,24 @@ import {
   col,
   type DatasetRow,
   defineDataset,
+  defineObjectType,
   definePipeline,
   definePipelineStep,
+  defineProjection,
   defineSchedule,
   events,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryQueues,
   InMemoryStorage,
+  prop,
   SixbHost,
 } from "@sixb/core"
 import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
+import {
+  getProjectionDispatchDescriptors,
+  ProjectionRunDispatcher,
+} from "@sixb/core/internal/projections"
 import { startTestPipelineRun } from "@sixb/core/testing"
 import { compileRoutesWithDiagnostics, createReconciliationPasses } from "@sixb/orchestrator"
 import type { DuckLakeStorage } from "../src"
@@ -32,6 +39,15 @@ const ordersWithNote = defineDataset("raw.orders", {
   schema: [col("id", "string"), col("value", "string"), col("note", "string", { nullable: true })],
 })
 const report = defineDataset("orders.report", { schema: [col("id", "string")] })
+
+const ReportLine = defineObjectType({
+  id: "ReportLine",
+  name: "Report line",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+const reportProjection = defineProjection("report-lines", ReportLine)
+  .fromDataset(report)
+  .properties({ id: "id" })
 
 const ordersUpdated = defineSchedule("orders.updated").on(events.dataset(orders).updated())
 const buildReport = definePipeline("build-report")
@@ -60,13 +76,15 @@ describe("dataset triggers on DuckLake", () => {
     rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-triggers-"))
     lake = createLocalDuckLakeStorage(rootDir)
     await lake.createDataset(orders)
+    await lake.createDataset(report)
 
     storage = new InMemoryStorage()
     host = new SixbHost({
       id: "project",
-      ontology: [],
+      ontology: [ReportLine],
       datasets: [orders, report],
       pipelines: [buildReport],
+      projections: [reportProjection],
       schedules: [ordersUpdated],
       broker: new InMemoryBroker(),
       queues: new InMemoryQueues(),
@@ -126,21 +144,30 @@ describe("dataset triggers on DuckLake", () => {
     })
   }
 
-  /** The passes `sixb orchestrator` would run: a fresh one starts as a restart does. */
-  function triggersPass() {
+  /** The passes `sixb orchestrator` would run: fresh ones start as a restart does. */
+  function reconciliationPasses() {
     const { routes } = compileRoutesWithDiagnostics({
       schedules: [ordersUpdated],
       syncs: [],
       pipelines: [buildReport],
+      projections: getProjectionDispatchDescriptors(host),
     })
-    const [pass] = createReconciliationPasses({
+    return createReconciliationPasses({
       projectId: "project",
       routes,
-      dispatchers: { pipelines: new PipelineRunDispatcher(host) },
+      dispatchers: {
+        pipelines: new PipelineRunDispatcher(host),
+        projections: new ProjectionRunDispatcher(host),
+      },
       lakeStorage: lake,
-      datasetTriggers: { lakeStorage: lake, pipelineRuns: storage.pipelineRuns },
+      projectionRuns: storage.projectionRuns,
+      pipelineRuns: storage.pipelineRuns,
     })
-    if (pass?.id !== "triggers") throw new Error("Expected the triggers pass.")
+  }
+
+  function triggersPass() {
+    const pass = reconciliationPasses().find((candidate) => candidate.id === "triggers")
+    if (!pass) throw new Error("Expected the triggers pass.")
     return pass
   }
 
@@ -166,6 +193,36 @@ describe("dataset triggers on DuckLake", () => {
     await pass.run(signal)
 
     expect(await recoveredVersions()).toEqual([second])
+  })
+
+  // Reproduce: leave `datasetVersion` out of `requireProducerExecution` in core; the projection
+  // pass fails on this version every 30 seconds, and the objects stay behind.
+  test("a projection reads what the recovered run wrote", async () => {
+    const first = await commit([{ id: "order-1", value: "a" }])
+    await runThatRead(first)
+    await commit([{ id: "order-2", value: "b" }])
+    letTheEventBeLost()
+    await triggersPass().run(signal)
+
+    const { runs } = await storage.pipelineRuns.list({ projectId: "project", statuses: ["queued"] })
+    const runId = runs[0]!.id
+    await storage.pipelineRuns.start({ id: runId, projectId: "project" })
+    const write = await lake.beginWrite({
+      dataset: report,
+      mode: "snapshot",
+      producer: { kind: "pipeline", id: buildReport.id, runId },
+    })
+    await write.writeRows([{ id: "line-1" }])
+    const output = await write.commit()
+    await storage.pipelineRuns.finish({ id: runId, projectId: "project", status: "succeeded" })
+
+    const passes = reconciliationPasses()
+    await Promise.all(passes.map((pass) => pass.run(signal)))
+
+    const admitted = await storage.projectionRuns.list({ projectId: "project" })
+    expect(admitted.runs.map((run) => run.identity.datasetVersion.versionId)).toEqual([
+      output.versionId,
+    ])
   })
 
   test("a restart finds what was committed while no orchestrator ran", async () => {
