@@ -294,9 +294,8 @@ describe("lake retention", () => {
 describe("dataset ingestion", () => {
   const people = defineDataset("raw.people", { schema: [col("id", "string")], primaryKey: "id" })
 
-  // Reproduce: leave the ingest runtime out of lakeWorkerRequired in worker-registry.ts.
-  test("selects the lake worker for a project that can ingest, without syncs or retention", () => {
-    const sixb = new SixbHost({
+  const canIngest = () =>
+    new SixbHost({
       id: "ingest",
       ontology: [],
       datasets: [people],
@@ -308,6 +307,15 @@ describe("dataset ingestion", () => {
       lakeMaintenance: { enabled: false },
     })
 
-    expect(resolveRegisteredWorkerTypes(sixb)).toContain("lake")
+  // Reproduce: leave the ingest runtime out of lakeWorkerRequired in worker-registry.ts.
+  test("selects the lake worker for a project that can ingest, without syncs or retention", () => {
+    expect(resolveRegisteredWorkerTypes(canIngest())).toContain("lake")
+  })
+
+  // Reproduce: drop the ingest warning from omittedWorkerWarnings in worker-registry.ts.
+  test("warns that ingested changes wait when the list leaves the lake worker out", () => {
+    expect(omittedWorkerWarnings(canIngest(), ["pipeline"])).toEqual([
+      expect.stringContaining("Ingested changes need a lake worker"),
+    ])
   })
 })

@@ -15,11 +15,7 @@ import {
   runDeployStatus,
 } from "../src/commands/deploy"
 import { parseCliArgs } from "../src/lib/command-line"
-import {
-  buildDeployRelease,
-  deployPublicOrigins,
-  lakeRetentionChecks,
-} from "../src/lib/deploy-release"
+import { buildDeployRelease, deployPublicOrigins, lakeWorkChecks } from "../src/lib/deploy-release"
 import { packSource, resolveBunVersion } from "../src/lib/deploy-source"
 import { type ProductionRole, productionRoleFacts } from "../src/lib/production-roles"
 import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
@@ -60,7 +56,9 @@ function release(overrides: Partial<DeployConfig> = {}): DeployRelease {
 }
 
 function lakeRetentionDetails(services: DeployConfig["services"]): readonly string[] {
-  return lakeRetentionChecks({ name: "northline", target, services }).map((check) => check.detail)
+  return lakeWorkChecks({ name: "northline", target, services })
+    .filter((check) => check.id === "lake-retention")
+    .map((check) => check.detail)
 }
 
 function service(built: DeployRelease, name: string) {
@@ -686,7 +684,7 @@ export default {
     expect((await records(recordPath)).every((entry) => "check" in entry)).toBe(true)
   })
 
-  // Reproduce: leave `lakeRetentionChecks` out of runDeployCheck, or `warnings` out of the views.
+  // Reproduce: leave `lakeWorkChecks` out of runDeployCheck, or `warnings` out of the views.
   test("shows a worker list without `lake` in the check, the dry run and the deploy", async () => {
     const root = await repository({
       "package.json": JSON.stringify({ packageManager: "bun@1.4.2" }),
@@ -700,7 +698,8 @@ export default {
     const check = await deploy(env, () => runDeployCheck({ cwd: root }))
     expect(check.exitCode ?? 0).toBe(0)
     expect(check.output).toContain("Not deployed: a `lake` worker runs it.")
-    expect(check.output).toContain("1 to look at")
+    expect(check.output).toContain("Not deployed: a `lake` worker writes what `ingest` stores.")
+    expect(check.output).toContain("2 to look at")
 
     const dryRun = await deploy(env, () => runDeploy({ cwd: root, dryRun: true }))
     expect(dryRun.output).toContain("Lake retention: Not deployed")

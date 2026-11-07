@@ -584,6 +584,37 @@ describe("startSixbRuntime", () => {
     }
   })
 
+  // Reproduce: leave `ingest` out of the createReconciliationPasses call in lib/runtime.ts.
+  test("adds the ingest pass for a project that can ingest", async () => {
+    const people = defineDataset("raw.crm.people", {
+      schema: [col("id", "string"), col("name", "string")],
+      primaryKey: "id",
+    })
+    const sixb = new SixbHost({
+      id: "cli-with-ingest-pass",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      datasets: [people],
+      lakeMaintenance: { enabled: false },
+    })
+
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
+    try {
+      const beats = await waitFor(
+        () => sixb.storage.maintenanceHeartbeats!.list({ projectId: sixb.id }),
+        ([beat]) => beat?.passes.some((pass) => pass.lastSucceededAt !== null) ?? false
+      )
+
+      expect(beats[0]?.passes.map((pass) => pass.id)).toContain("ingest")
+    } finally {
+      await runtime.stop()
+    }
+  })
+
   test("co-hosts projection routes and enqueues projection jobs from dataset commits", async () => {
     const projection = defineProjection("zone-proj", Zone)
       .fromDataset(rawOrdersDataset)
