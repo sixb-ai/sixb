@@ -30,8 +30,10 @@ import {
   SUPERSEDING_PROJECTION_RUN_STATUSES,
   staleProjectionRunExecution,
 } from "@sixb/core/internal/projection-run-storage-provider"
+import { laterLease } from "@sixb/core/internal/storage"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
+  ConfirmRunExecutionInput,
   ExecutionStorage,
   FailProjectionRunEnqueueInput,
   FindSupersedingProjectionRunInput,
@@ -50,6 +52,7 @@ import type {
   QueueProjectionRunInput,
   RecordProjectionAttemptFailureInput,
   RecordProjectionMissingTargetInput,
+  ReleaseRunExecutionInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
@@ -170,13 +173,14 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
       const existingRecord = restoreProjectionRunRow(existing)
       const attempt = planProjectionRunReclaim(existingRecord, input).attempt
 
-      const executionToken = createFreshExecutionToken(existing.execution_token)
+      const executionToken =
+        input.execution?.token ?? createFreshExecutionToken(existing.execution_token)
       const result = this.db
         .query(
           `
             UPDATE projection_runs
             SET status = 'running', started_at = COALESCE(started_at, ?), finished_at = NULL,
-              attempt = ?, execution_token = ?
+              attempt = ?, execution_token = ?, execution_queue_lease_expires_at = ?
             WHERE project_id = ? AND id = ?
               AND (
                 (status = 'queued' AND execution_token IS NULL)
@@ -188,6 +192,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
           (input.startedAt ?? new Date()).toISOString(),
           attempt,
           executionToken,
+          input.execution?.queueLeaseExpiresAt.toISOString() ?? null,
           input.projectId,
           input.id,
           existing.execution_token
@@ -196,6 +201,46 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
 
       return projectionRunClaim(this.requireRow(input.projectId, input.id))
     })
+  }
+
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<ProjectionRunRecord> {
+    return runImmediateTransaction(this.db, () => {
+      const existing = restoreProjectionRunRow(this.requireRow(input.projectId, input.id))
+      if (existing.status !== "running" || existing.executionToken !== input.executionToken) {
+        throw staleProjectionRunExecution(input.id)
+      }
+
+      this.db
+        .query(
+          `
+            UPDATE projection_runs SET execution_queue_lease_expires_at = ?
+            WHERE project_id = ? AND id = ?
+          `
+        )
+        .run(
+          laterLease(existing.queueLeaseExpiresAt, input.queueLeaseExpiresAt).toISOString(),
+          input.projectId,
+          input.id
+        )
+
+      return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
+    })
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    this.db
+      .query(
+        `
+          UPDATE projection_runs SET execution_queue_lease_expires_at = ?
+          WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
+        `
+      )
+      .run(
+        (input.releasedAt ?? new Date()).toISOString(),
+        input.projectId,
+        input.id,
+        input.executionToken
+      )
   }
 
   async failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord> {
@@ -279,6 +324,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             status = ?,
             finished_at = ?,
             execution_token = NULL,
+            execution_queue_lease_expires_at = NULL,
             source_rows_read = ?,
             source_rows_skipped = ?,
             source_changes_read = ?,
@@ -678,6 +724,9 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     attempt: databaseSafeInteger(row.attempt, "attempt"),
     executionToken: row.execution_token ?? undefined,
+    queueLeaseExpiresAt: row.execution_queue_lease_expires_at
+      ? new Date(row.execution_queue_lease_expires_at)
+      : undefined,
     fixedBatchSize: optionalDatabaseSafeInteger(row.fixed_batch_size, "fixedBatchSize"),
     nextBatchOrdinal: optionalDatabaseSafeInteger(row.next_batch_ordinal, "nextBatchOrdinal"),
     nextRowOffset: optionalDatabaseSafeInteger(row.next_row_offset, "nextRowOffset"),
@@ -750,6 +799,7 @@ interface DatabaseRow {
   finished_at: string | null
   attempt: number
   execution_token: string | null
+  execution_queue_lease_expires_at: string | null
   fixed_batch_size: number | null
   next_batch_ordinal: number | null
   next_row_offset: number | null

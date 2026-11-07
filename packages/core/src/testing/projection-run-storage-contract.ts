@@ -9,6 +9,7 @@ import type {
   QueueProjectionRunInput,
   StartOrReclaimProjectionRunInput,
 } from "../storage/projection-runs"
+import { ProjectionRunHeldError } from "../storage/projection-runs"
 
 export interface ProjectionRunStorageContractContext<
   TStorage extends ProjectionRunStorage = ProjectionRunStorage,
@@ -357,6 +358,81 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
             progress: { sourceRowsRead: 3 },
           })
         ).resolves.toMatchObject({ progress: { sourceRowsRead: 3 } })
+      })
+    })
+
+    // Drop the lease check from `planProjectionRunReclaim` to watch a duplicate fence a live run.
+    test("leaves a run held by a live lease, and takes it once that lease is gone", async () => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const input = replacementInput("held-run")
+        const startedAt = new Date("2026-06-01T12:00:00.000Z")
+        const queueLeaseExpiresAt = new Date("2026-06-01T12:15:00.000Z")
+        await admitProjectionRun(context, input)
+
+        const first = await storage.startOrReclaim({
+          ...input,
+          startedAt,
+          execution: { token: "runx_first", queueLeaseExpiresAt },
+        })
+        expect(first.execution.executionToken).toBe("runx_first")
+        expect(first.run.queueLeaseExpiresAt).toEqual(queueLeaseExpiresAt)
+
+        await expect(storage.startOrReclaim({ ...input, startedAt })).rejects.toBeInstanceOf(
+          ProjectionRunHeldError
+        )
+
+        const renewed = new Date("2026-06-01T12:20:00.000Z")
+        await storage.confirmExecutionOwnership({
+          projectId: input.projectId,
+          id: input.id,
+          executionToken: first.execution.executionToken,
+          queueLeaseExpiresAt: renewed,
+        })
+        await expect(
+          storage.startOrReclaim({ ...input, startedAt: queueLeaseExpiresAt })
+        ).rejects.toBeInstanceOf(ProjectionRunHeldError)
+
+        const reclaimed = await storage.startOrReclaim({ ...input, startedAt: renewed })
+        expect(reclaimed.run.attempt).toBe(2)
+
+        await expect(
+          storage.confirmExecutionOwnership({
+            projectId: input.projectId,
+            id: input.id,
+            executionToken: first.execution.executionToken,
+            queueLeaseExpiresAt: renewed,
+          })
+        ).rejects.toThrow("execution token is stale")
+      })
+    })
+
+    test("a handed-back run does not wait out its lease", async () => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const input = replacementInput("released-run")
+        const startedAt = new Date("2026-06-01T12:00:00.000Z")
+        await admitProjectionRun(context, input)
+
+        const first = await storage.startOrReclaim({
+          ...input,
+          startedAt,
+          execution: {
+            token: "runx_first",
+            queueLeaseExpiresAt: new Date("2026-06-01T12:15:00.000Z"),
+          },
+        })
+
+        await storage.releaseExecution({
+          projectId: input.projectId,
+          id: input.id,
+          executionToken: first.execution.executionToken,
+          spentAttempt: true,
+          releasedAt: startedAt,
+        })
+
+        const second = await storage.startOrReclaim({ ...input, startedAt })
+        expect(second.run.attempt).toBe(2)
       })
     })
 
