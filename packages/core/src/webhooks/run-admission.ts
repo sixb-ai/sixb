@@ -40,15 +40,16 @@ export async function admitWebhookRun(input: AdmitWebhookRunInput): Promise<Admi
   assertAdmissionInput(input)
   let attempt = 0
 
-  // Concurrent deliveries may both observe no run before one transaction commits. Retry only
-  // serialization and uniqueness races so the loser can reload the winning run; every other error
-  // fails immediately, and repeated contention remains bounded by MAX_ADMISSION_ATTEMPTS.
+  // The run's unique delivery key decides between concurrent deliveries, at the default isolation:
+  // a serializable transaction would also fail deliveries with distinct keys, whose lookups share
+  // index pages. Two deliveries of one key may both observe no run; the loser's insert fails as a
+  // duplicate once the winner commits, and its next attempt reloads the winning run. A restart
+  // locks the failed run and changes it only while it is still failed, so one of several retries
+  // restarts it and the others reload it running. Every other error fails immediately.
   while (true) {
     attempt += 1
     try {
-      return await input.storage.transaction((tx) => admitWebhookRunTransaction(tx, input), {
-        isolation: "serializable",
-      })
+      return await input.storage.transaction((tx) => admitWebhookRunTransaction(tx, input))
     } catch (error) {
       if (attempt >= MAX_ADMISSION_ATTEMPTS || !isConcurrentAdmissionConflict(error)) {
         throw error

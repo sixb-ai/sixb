@@ -211,12 +211,48 @@ export interface SixbLakeRetentionFailedContext
 }
 
 /**
+ * A dataset's ingested changes have waited too long: its flushes failed this many times in a row,
+ * or none ran at all. The changes stay in the inbox, and flushes go on trying.
+ */
+export interface SixbDatasetIngestFlushFailedContext
+  extends SixbFailureContext<"dataset.ingest.flush.failed"> {
+  readonly failure: SixbFailure<"internal.unexpected" | "runtime.cancelled">
+  readonly datasetId: string
+  /** Flush attempts that failed in a row. 0 when no flush ran. */
+  readonly failureStreak: number
+  readonly pendingDeliveries: number
+  readonly oldestReceivedAt: string | null
+}
+
+/**
+ * The lake refused one ingested delivery when its flush wrote it, after `ingest` had accepted it:
+ * for example a source sequence another delivery holds with other content. The delivery is
+ * dropped and the rest of its batch committed. The context names what to send again.
+ */
+export interface SixbDatasetIngestRejectedContext
+  extends SixbFailureContext<"dataset.ingest.rejected"> {
+  readonly failure: SixbFailure<"dataset.change_refused">
+  readonly datasetId: string
+  readonly deliveryId: string
+  /** The execution that called `ingest`. */
+  readonly executionId: string
+  /** The refused change's position in the delivery, from 0. */
+  readonly changeIndex: number
+  /** The refused change's primary key. */
+  readonly key: Readonly<Record<string, string>>
+  /** Its source sequence, on a dataset with `sequenceBy`. */
+  readonly sequence?: string
+}
+
+/**
  * Context supplied to the global Sixb error handler, discriminated by `type`.
  * Failure notifications never change the outcome of the operation they observe.
  */
 export type SixbErrorContext =
   | SixbVectorIndexingFailedContext
   | SixbLakeRetentionFailedContext
+  | SixbDatasetIngestFlushFailedContext
+  | SixbDatasetIngestRejectedContext
   | SixbActionPhaseFailedContext
   | SixbRunFailedContext
   | SixbEventDeliveryFailedContext

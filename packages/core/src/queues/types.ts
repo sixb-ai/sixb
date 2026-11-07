@@ -224,7 +224,16 @@ export interface LakeRetentionRequestedQueueJob
     }
   > {}
 
-export type LakeQueueJob = LakeRetentionRequestedQueueJob
+/** Write a dataset's ingested changes to the lake. The job id names the flush request. */
+export interface DatasetIngestFlushRequestedQueueJob
+  extends QueueJob<
+    "dataset.ingest.flush.requested",
+    {
+      readonly datasetId: string
+    }
+  > {}
+
+export type LakeQueueJob = LakeRetentionRequestedQueueJob | DatasetIngestFlushRequestedQueueJob
 
 export interface Queues {
   readonly vectorIndexing: Queue<

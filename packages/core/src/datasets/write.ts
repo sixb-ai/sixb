@@ -10,6 +10,7 @@ import type {
   LakeStorage,
 } from "../lake-storage/types"
 import type { MergeChange } from "./changes"
+import { DatasetValidationError } from "./errors"
 import type { DatasetDefinition } from "./types"
 import { getDatasetRowValidationFailure } from "./validation"
 
@@ -142,6 +143,28 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
   }
 }
 
+/**
+ * Validate merge changes exactly as a merge write validates them, without writing: complete rows,
+ * primary-key deletes, source sequences, and the blobs rows reference. Returns them in order.
+ *
+ * A change found invalid throws a `DatasetValidationError`; any other error, such as blob storage
+ * failing to answer, is thrown as it is.
+ */
+export async function validateDatasetMergeChanges(
+  input: Pick<WriteDatasetInput, "dataset" | "blobStorage" | "signal" | "sourceLabel">,
+  values: Iterable<unknown> | AsyncIterable<unknown>
+): Promise<MergeChange<DatasetRow, DatasetRow>[]> {
+  const changes: MergeChange<DatasetRow, DatasetRow>[] = []
+
+  for await (const value of values) {
+    throwIfAborted(input.signal)
+    changes.push(await validateMergeChange(value, input, changes.length + 1))
+  }
+
+  throwIfAborted(input.signal)
+  return changes
+}
+
 async function* validatedValues<TValue extends DatasetWriteValue, TResult>(
   input: WriteDatasetInput<TValue>,
   values: Iterable<TValue> | AsyncIterable<TValue>,
@@ -169,14 +192,16 @@ function sourceLabel(input: Pick<WriteDatasetInput, "dataset" | "sourceLabel">):
   return input.sourceLabel ?? `[Sixb] Dataset '${input.dataset.id}' writer`
 }
 
+type ValidationInput = Pick<WriteDatasetInput, "dataset" | "blobStorage" | "sourceLabel">
+
 async function validateRow(
   value: unknown,
-  input: WriteDatasetInput,
+  input: ValidationInput,
   itemIndex: number
 ): Promise<DatasetRow> {
   const validationError = getDatasetRowValidationFailure(value, input.dataset)
   if (validationError) {
-    throw new Error(
+    throw new DatasetValidationError(
       `${sourceLabel(input)} returned an invalid row at item ${itemIndex}. ${validationError.message}`,
       { cause: validationError }
     )
@@ -189,12 +214,12 @@ async function validateRow(
 
 async function validateMergeChange(
   value: unknown,
-  input: WriteDatasetInput,
+  input: ValidationInput,
   itemIndex: number
 ): Promise<MergeChange<DatasetRow, DatasetRow>> {
   const validationError = getDatasetMergeChangeValidationError(value, input.dataset)
   if (validationError) {
-    throw new Error(
+    throw new DatasetValidationError(
       `${sourceLabel(input)} returned an invalid merge change at item ${itemIndex}. ${validationError}`
     )
   }
@@ -205,7 +230,7 @@ async function validateMergeChange(
 
 async function verifyRowFileRefs(
   row: DatasetRow,
-  input: WriteDatasetInput,
+  input: ValidationInput,
   itemIndex: number
 ): Promise<void> {
   for (const column of input.dataset.schema.columns) {
@@ -217,27 +242,27 @@ async function verifyRowFileRefs(
 
 async function verifyFileRef(
   fileRef: FileRef,
-  input: WriteDatasetInput,
+  input: ValidationInput,
   columnName: string,
   itemIndex: number
 ): Promise<void> {
   const context = `${sourceLabel(input)} returned row ${itemIndex} with dataset '${input.dataset.id}' column '${columnName}'`
   if (!isValidFileRef(fileRef)) {
-    throw new Error(
+    throw new DatasetValidationError(
       `${context} with an invalid mediaType; use one media type, such as "application/pdf".`
     )
   }
   const blobInfo = await input.blobStorage.stat(fileRef.blobId)
   if (!blobInfo) {
-    throw new Error(`${context} referencing unknown blob '${fileRef.blobId}'.`)
+    throw new DatasetValidationError(`${context} referencing unknown blob '${fileRef.blobId}'.`)
   }
   if (blobInfo.digest !== fileRef.digest) {
-    throw new Error(
+    throw new DatasetValidationError(
       `${context} referencing blob '${fileRef.blobId}' with digest '${fileRef.digest}', but blob storage has '${blobInfo.digest}'.`
     )
   }
   if (blobInfo.sizeBytes !== fileRef.sizeBytes) {
-    throw new Error(
+    throw new DatasetValidationError(
       `${context} referencing blob '${fileRef.blobId}' with size ${fileRef.sizeBytes}, but blob storage has ${blobInfo.sizeBytes}.`
     )
   }

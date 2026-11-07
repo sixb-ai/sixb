@@ -88,6 +88,20 @@ behind it. It shows as `orchestrator.dispatch.failed` with `dropped: false` long
 There is no durable consumer registry, definition signature, cursor table, or new application
 configuration.
 
+Ingestion requests are the other lake jobs. `sixb.datasets.ingest` stores its changes in the
+dataset's inbox, and the delivery that opens a flush request emits `dataset.ingest.queued`
+`{ datasetId, request }`; the deliveries that follow join that request. The route turns it into a
+`dataset.ingest.flush.requested` job named `ingest-flush:<dataset>:<request>`, so a request
+queues one job however many deliveries it covers, and a redelivered event queues nothing more.
+SyncWorker's lake lane runs the flush.
+
+The event is a separate write after the delivery is stored, and direct routes are live-only, so
+the orchestrator also runs an ingest reconciler beside the projection one: on start and every 30
+seconds it reads the inbox summary and queues the same job for every dataset whose deliveries
+wait with no flush holding it. A dataset with deliveries waiting and nothing written for 10
+minutes (no flush holding it, none failing on it, no batch completed), as when no sync worker
+runs, is reported once per stall to `onError` as `dataset.ingest.flush.failed`.
+
 Projection admission has an event path and a recovery path:
 
 ```text

@@ -7,7 +7,6 @@ import {
 import type { BlobStorage } from "../blob-storage"
 import type { ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
-import type { DatasetMergeCommitResult } from "../lake-storage/merge"
 import { getDatasetPrimaryKeyColumns } from "../lake-storage/merge-validation"
 import type { DatasetRow, DatasetVersion, LakeStorage } from "../lake-storage/types"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -23,7 +22,7 @@ import {
   walkDatasetLineage,
 } from "./lineage"
 import type { DatasetDefinition } from "./types"
-import { writeDataset } from "./write"
+import { validateDatasetMergeChanges } from "./write"
 
 export interface DatasetIngestInput {
   readonly changes:
@@ -32,8 +31,16 @@ export interface DatasetIngestInput {
   readonly signal?: AbortSignal
 }
 
-/** Source commit result; downstream pipelines and projections run asynchronously. */
-export type DatasetIngestResult = DatasetMergeCommitResult & { readonly rowsRead: number }
+/**
+ * Changes stored for the lake, durably. A flush writes them as part of a dataset version within
+ * about a second, and `dataset.version.committed` announces it.
+ */
+export interface DatasetIngestResult {
+  /** Names this call's changes in the inbox and in failure reports. Null when there were none. */
+  readonly deliveryId: string | null
+  /** Upserts and deletes validated and stored. */
+  readonly changes: number
+}
 
 export interface DatasetReadRowsInput {
   /** Defaults to the latest version. */
@@ -198,41 +205,46 @@ export function createDatasetsRuntime(
       if (typeof lakeStorage.beginMerge !== "function") {
         throw new Error("[Sixb] Dataset ingestion requires a lake provider with merge support.")
       }
-      const producer = { kind: "ingest" as const, id: execution.id }
-      const result = await writeDataset({
-        lakeStorage,
-        blobStorage,
-        dataset: registered,
-        mode: "merge",
-        signal: input.signal ?? new AbortController().signal,
-        producer,
-        readValues: async () =>
-          (async function* () {
-            for await (const value of input.changes) yield { value }
-          })(),
+      const inbox = runtime.storage.datasetIngest
+      if (!inbox) {
+        throw new Error("[Sixb] Dataset ingestion requires storage with a dataset ingest inbox.")
+      }
+
+      const changes = await validateDatasetMergeChanges(
+        {
+          dataset: registered,
+          blobStorage,
+          signal: input.signal ?? new AbortController().signal,
+        },
+        input.changes
+      )
+      if (changes.length === 0) return { deliveryId: null, changes: 0 }
+
+      const { delivery, flush } = await inbox.append({
+        projectId: runtime.projectId,
+        datasetId: registered.id,
+        executionId: execution.id,
+        correlationId: execution.correlationId,
+        changes,
       })
-      if (result.outcome === "created") {
+
+      // Only the delivery that opens a request announces it; the others join that request. The
+      // announcement follows the commit and never fails the call: the orchestrator's reconciler
+      // queues a flush for a request whose announcement was lost.
+      const { request, requested } = flush
+      if (requested) {
         await runtime.events.emit(
           {
             events: [
-              {
-                type: "dataset.version.committed",
-                payload: {
-                  datasetId: registered.id,
-                  versionId: result.version.versionId,
-                  createdAt: result.version.createdAt.toISOString(),
-                  producer,
-                  rowsChanged: result.version.rowsChanged,
-                  lineageChanged: result.version.lineageChanged,
-                },
-              },
+              { type: "dataset.ingest.queued", payload: { datasetId: registered.id, request } },
             ],
             correlationId: execution.correlationId,
           },
           { source: "SixbDatasets" }
         )
       }
-      return result
+
+      return { deliveryId: delivery.id, changes: changes.length }
     },
   }
 }

@@ -7,7 +7,7 @@ This example uses the [`people` dataset](source-ordering.md):
 import { change } from "@sixb/core"
 import { people } from "../datasets/people"
 
-const result = await sixb.datasets.ingest(people, {
+await sixb.datasets.ingest(people, {
   changes: [
     change.upsert({ id: "42", name: "Sam", updatedAt: "2026-09-09T10:00:00.123Z" }),
     change.delete({ id: "9" }, { sequence: "2026-09-09T10:01:00.000Z" }),
@@ -15,24 +15,47 @@ const result = await sixb.datasets.ingest(people, {
 })
 ```
 
+`ingest` validates the changes and stores them. It returns once they are stored, before they are
+in the dataset. A worker then writes the changes waiting for the dataset as one new version, usually
+within a second, so many webhooks give a few versions instead of one each.
+
 | Contract | Behavior |
 | --- | --- |
 | Input | Iterable or async iterable of complete-row upserts and primary-key deletes |
-| Cancellation | Optional `signal: AbortSignal` |
-| Validation | Registered schema, primary key, source sequence, and referenced blobs |
-| Result | `{ outcome: "created" \| "unchanged", version, rowsRead }`; `version` can be `null` for an initial no-op |
-| Downstream work | New versions emit `dataset.version.committed`; pipelines/projections run asynchronously |
+| Cancellation | Optional `signal: AbortSignal`, until the changes are stored |
+| Validation | Registered schema, primary key, source sequence, and referenced blobs; errors throw from `ingest` |
+| Result | `{ deliveryId, changes }`: the id that names this call's changes in failure reports (`null` when there were none), and their count |
+| Order | Changes apply in the order `ingest` calls stored them, as one call after another would |
+| Downstream work | Each new version emits `dataset.version.committed`; pipelines and projections run asynchronously |
 | Authority | Trusted backend executions, or explicitly disabled authorization; dataset-view grants do not permit ingestion |
 
 Use [`sequenceBy`](source-ordering.md) when webhooks and syncs share a dataset.
 
 | Dataset | Concurrent writes | Snapshot sync |
 | --- | --- | --- |
-| With `sequenceBy` | Newer source values win; concurrency conflicts retry | Ordered upserts; omitted rows stay |
-| Without `sequenceBy` | A concurrent version change fails ingestion | Replaces rows |
+| With `sequenceBy` | Newer source values win | Ordered upserts; omitted rows stay |
+| Without `sequenceBy` | The later write wins | Replaces rows |
 
 **Existing unkeyed dataset?** Create a new keyed dataset → backfill → repoint consumers.
 Stored primary keys and `sequenceBy` are immutable.
+
+For bulk loads, use a [sync](../syncs/overview.md): `ingest` keeps each call in the database until a
+worker writes it.
+
+## React to new data
+
+Code that needs the ingested data does not wait for `ingest`. Trigger it from the new version
+instead, here a sync that reads the dataset:
+
+```ts
+import { defineSchedule, events } from "@sixb/core"
+import { people } from "../datasets/people"
+
+export const peopleUpdated = defineSchedule("people-updated").on(events.dataset(people).updated())
+```
+
+Attach it to the sync, pipeline or workflow with `.when(peopleUpdated)`. It fires for versions that
+changed rows, and a burst of them joins one waiting run.
 
 ## Objects and relationships
 
@@ -45,15 +68,15 @@ Ingestion updates source data. Existing pipelines and projections determine the 
 | Source row removed | Projection withdraws its claims; the ontology object is not automatically deleted |
 | Foreign-key target missing | Properties can materialize, but no edge is created; the old source-owned link is withdrawn |
 
-## Recovery
+## Where it runs and what can fail
 
-A crash can leave data saved without notifying downstream work. Automatic notification recovery
-is not available.
+- The `sync` worker writes ingested changes, requested through the orchestrator. A deployment that
+  names its worker `types` must include `sync`, and keep the orchestrator on.
+- Console › Lake health shows the changes still waiting per dataset, and since when.
+- A worker that stops while writing resumes where it stopped, and never writes changes twice.
 
-- Notification failures are reported through `onError`.
-- Identical sequenced retries are no-ops; they do not resend notifications.
-- Rerun the downstream pipeline after missed notifications or pipeline failures:
-
-```ts
-await sixb.pipelines.request({ pipelineId: "merge-contacts" })
-```
+| Failure | What happens |
+| --- | --- |
+| The lake or blob storage is unavailable | Retried until it succeeds; `dataset.ingest.flush.failed` reaches `onError` at the fifth failure in a row |
+| Changes wait 10 minutes and nothing writes them | `dataset.ingest.flush.failed` reaches `onError` |
+| A stored change is refused when written: no longer valid for the schema, a deleted blob, a value the lake cannot hold, or a source sequence another call holds with other content | That call's changes are dropped and `dataset.ingest.rejected` names it and the refused change; the other calls' changes are written |

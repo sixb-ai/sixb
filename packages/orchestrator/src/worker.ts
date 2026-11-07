@@ -3,6 +3,7 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { backoffDelay, Worker, waitUnlessAborted } from "@sixb/core/internal/workers"
+import { enqueueIngestFlush, runIngestReconciler } from "./ingest-reconciler"
 import { type DispatchJob, JobDispatch } from "./job-dispatch"
 import { RETRY_BACKOFF } from "./retry-backoff"
 import { routeKeysForEvent } from "./route-key"
@@ -39,6 +40,18 @@ export class OrchestratorWorker extends Worker {
     }
     for (const eventType of eventScheduleTypes) {
       consumers.push(consumeRetainedEventSchedules(this.options, eventType, signal))
+    }
+
+    if (hasIngestRoute(this.options.routes)) {
+      const reconciliation = this.options.ingestReconciliation
+      if (reconciliation) {
+        consumers.push(
+          runIngestReconciler(
+            { projectId: this.options.projectId, queues: this.options.queues, ...reconciliation },
+            signal
+          )
+        )
+      }
     }
 
     await Promise.all(consumers)
@@ -170,6 +183,8 @@ function directJobTarget(item: OrchestratorJob): string {
       return `projection:${item.job.payload.projectionId}`
     case "workflows":
       return `workflow:${item.job.payload.workflowId}`
+    case "lake":
+      return "lake"
   }
 }
 
@@ -350,6 +365,19 @@ async function enqueueDirectJob(
       })
       return
     }
+    case "lake": {
+      if (sourceEvent.type !== "dataset.ingest.queued") {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Ingest flush route received unsupported event '${sourceEvent.type}'.`,
+          { details: { projectId: options.projectId, sourceEventType: sourceEvent.type } }
+        )
+      }
+
+      // The request names the job: its deliveries, and a redelivered event, queue one flush.
+      await enqueueIngestFlush(options.queues, options.projectId, sourceEvent.payload, metadata)
+      return
+    }
   }
 }
 
@@ -515,4 +543,8 @@ export function requireDispatcher<TKey extends keyof OrchestratorDispatchers>(
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve()
   return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))
+}
+
+function hasIngestRoute(routes: OrchestratorRoutes): boolean {
+  return routes.get("dataset.ingest.queued") !== undefined
 }

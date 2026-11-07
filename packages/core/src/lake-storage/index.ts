@@ -19,7 +19,7 @@ export {
   mergeStrictDatasetDefinition,
   planDatasetDefinitionUpdate,
 } from "./definition-updates"
-export { LakeConcurrencyError, LakeStorageError } from "./errors"
+export { LakeConcurrencyError, LakeStorageError, LakeValueRefusedError } from "./errors"
 export { InMemoryLakeStorage } from "./in-memory"
 export type { LineageAtCommitInput } from "./lineage"
 export { lineageAtCommit, resolveStepLineage } from "./lineage"
@@ -46,6 +46,7 @@ export {
 export type { DatasetSequenceChange, DatasetSequenceState } from "./source-ordering"
 export {
   assertUnsequencedDatasetWrite,
+  DatasetSequenceConflictError,
   datasetSequenceChange,
   isSequenceOnlyChange,
   reconcileDatasetSequences,

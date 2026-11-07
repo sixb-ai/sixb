@@ -7,7 +7,7 @@ import {
   getProjectionDispatchDescriptors,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
-import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
+import { getDatasetIngestRuntime, setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { checkPipelineMarkings, getAppliedMarkings } from "@sixb/core/internal/security"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
@@ -170,6 +170,7 @@ export async function startOrchestratorRuntime(
     pipelines: sixb.definitions.pipelines.list(),
     projections,
     workflows: sixb.definitions.workflows.list(),
+    datasetIngest: getDatasetIngestRuntime(sixb).enabled,
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   const dispatchers = {
@@ -193,6 +194,9 @@ export async function startOrchestratorRuntime(
       routes,
       dispatchers,
       reporter: sixb,
+      ...(sixb.storage.datasetIngest
+        ? { ingestReconciliation: { inbox: sixb.storage.datasetIngest, reporter: sixb } }
+        : {}),
     })
     await orchestratorWorker.start()
   }

@@ -77,6 +77,8 @@ Run your tests with:
 bun test tests/
 ```
 
+`sixb.datasets.ingest` in the test SDK returns once the changes are in a dataset version, so a test reads them right after.
+
 ## Test an action
 
 Add the action to the fixture's `actions`, then request it. The test SDK runs it and returns the finished run:

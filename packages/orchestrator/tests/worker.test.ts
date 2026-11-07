@@ -530,6 +530,36 @@ describe("OrchestratorWorker", () => {
     ])
   })
 
+  // Reproduce: name the flush job after the event id in ingest-reconciler.ts; the redelivered
+  // request queues a second flush.
+  test("an ingestion request queues one flush job, named after the request", async () => {
+    const routes = compileRoutes({ schedules: [], syncs: [], pipelines: [], datasetIngest: true })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    await startWorker(eventRuntime, queues, routes)
+
+    const request = (datasetId: string, request: number): EventDraft => ({
+      type: "dataset.ingest.queued",
+      payload: { datasetId, request },
+    })
+    // The first request arrives twice, as a redelivered event would.
+    await eventRuntime.append({
+      events: [request("crm.people", 3), request("crm.people", 3), request("crm.orgs", 0)],
+    })
+
+    const claimed: { id: string; payload: unknown }[] = []
+    await waitFor(async () => {
+      const jobs = await queues.lake.claim({ projectId: PROJECT_ID, workerId: "lake", limit: 10 })
+      claimed.push(...jobs.map(({ job }) => ({ id: job.id, payload: job.payload })))
+      return claimed.some((job) => job.id.startsWith("ingest-flush:crm.orgs"))
+    })
+
+    expect(claimed).toEqual([
+      { id: "ingest-flush:crm.people:3", payload: { datasetId: "crm.people" } },
+      { id: "ingest-flush:crm.orgs:0", payload: { datasetId: "crm.orgs" } },
+    ])
+  })
+
   // Events reach a subscription in publication order, so once the edge is dispatched, the earlier
   // events have been judged too.
   test("event schedules fire only on their own project's false-to-true transitions", async () => {
