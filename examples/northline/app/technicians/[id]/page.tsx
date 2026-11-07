@@ -16,7 +16,6 @@ import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
-  caseClock,
   Fact,
   formatDateTime,
   humanize,
@@ -27,6 +26,8 @@ import {
   StatusIndicator,
 } from "../../_components/ui"
 import type { QueryRow } from "../../_lib/query-types"
+import { caseClock } from "../../_lib/service-cases"
+import { currentWork } from "../../_lib/technicians"
 
 const techniciansQuery = objects(Technician).query()
 
@@ -72,6 +73,8 @@ const dispositions: ReadonlyArray<readonly [Disposition, string]> = [
   ["quote_required", "Quote required"],
 ]
 
+const visitUnderWay = new Set(["in_progress"])
+
 const visitStages = [
   { id: "scheduled", label: "Scheduled" },
   { id: "on_site", label: "On site" },
@@ -88,8 +91,12 @@ export default function TechnicianWorkspacePage() {
   const notesResult = useObjectsQuery(useMemo(() => notesQuery(id), [id]))
   const technician = technicianResult.data?.objects[0]
   const technicianVisits = visitsResult.data?.objects ?? []
-  const activeVisit = technicianVisits.find(
-    (visit) => !["completed", "cancelled"].includes(visit.properties.status)
+  const activeVisit = currentWork(
+    technicianVisits.filter(
+      (visit) =>
+        visit.properties.status === "scheduled" || visit.properties.status === "in_progress"
+    ),
+    visitUnderWay
   )
   const visit = requestedVisit
     ? technicianVisits.find((item) => item.primaryId === requestedVisit)

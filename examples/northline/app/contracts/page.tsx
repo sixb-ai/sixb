@@ -16,6 +16,7 @@ import {
   QueryState,
   StatusBadge,
 } from "../_components/ui"
+import { contractTypeLabel, isContractCurrent } from "../_lib/contracts"
 import type { QueryRow } from "../_lib/query-types"
 
 const contractsQuery = objects(ServiceContract)
@@ -40,12 +41,6 @@ const sortOptions = [
   ["customer", "Customer"],
   ["number", "Contract number"],
 ] as const
-
-const contractTypes: Record<string, string> = {
-  full_service: "Full service",
-  priority_care: "PriorityCare",
-  preventive: "Preventive",
-}
 
 // One template for the header and every row, so the columns line up like a table.
 const columns =
@@ -79,7 +74,7 @@ export default function ContractsPage() {
           contract.properties.number,
           contract.properties.name,
           humanize(contract.properties.contractType),
-          contractTypes[contract.properties.contractType],
+          contractTypeLabel(contract.properties.contractType),
           contract.links.customer?.properties.name,
           ...contract.links.coveredFacilities.map((facility) => facility.properties.name),
         ].some((value) => value?.toLowerCase().includes(normalized))
@@ -189,7 +184,7 @@ function ContractListRow({ contract }: { contract: ContractRow }) {
         </span>
       </span>
       <Cell
-        primary={contractTypes[properties.contractType] ?? properties.contractType}
+        primary={contractTypeLabel(properties.contractType)}
         secondary={
           properties.majorComponentsExcluded ? "Major parts excluded" : "Major parts included"
         }
@@ -261,10 +256,9 @@ function Cell({
 function matchesView(contract: ContractRow, view: View): boolean {
   if (view === "all") return true
   if (view === "renewing") return needsRenewalAttention(contract)
-  if (["full_service", "priority_care", "preventive"].includes(view)) {
-    return contract.properties.contractType === view
-  }
-  return contract.properties.status === view
+  // Active includes contracts nearing their end: they are in force until they expire.
+  if (view === "active") return isContractCurrent(contract.properties.status)
+  return contract.properties.contractType === view
 }
 
 function compareContracts(left: ContractRow, right: ContractRow, sort: Sort): number {

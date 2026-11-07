@@ -24,7 +24,6 @@ import { StageRail } from "../../_components/stage-rail"
 import { Timeline, type TimelineEntry } from "../../_components/timeline"
 import {
   CaseClockText,
-  caseClock,
   Fact,
   formatCoverageHours,
   formatDateTime,
@@ -40,7 +39,8 @@ import {
 } from "../../_components/ui"
 import { equipmentIllustration } from "../../_lib/equipment"
 import type { QueryRow } from "../../_lib/query-types"
-import { quotePath } from "../../_lib/quotes"
+import { isQuoteOpen, quotePath } from "../../_lib/quotes"
+import { caseClock, caseDecision, isCaseOpen } from "../../_lib/service-cases"
 
 const serviceCaseBase = objects(ServiceCase)
   .query()
@@ -124,9 +124,7 @@ export default function ServiceCaseDetailPage() {
   const visits = visitsResult.data?.objects ?? []
   const notes = notesResult.data?.objects ?? []
   const quotes = quotesResult.data?.objects ?? []
-  const openQuote = quotes.find((quote) =>
-    ["internal_review", "sent"].includes(quote.properties.status)
-  )
+  const openQuote = quotes.find((quote) => isQuoteOpen(quote.properties.status))
 
   const acknowledge = useActionRunMutation<{ operatorName?: string }>({
     actionId: "acknowledge-service-case",
@@ -146,7 +144,6 @@ export default function ServiceCaseDetailPage() {
     invalidateOnCommit: true,
   })
 
-  const completedVisit = visits.find((visit) => visit.properties.status === "completed")
   const assignedWorkOrder = workOrders.find((workOrder) => workOrder.links.assignee)
   const assignedTechnician = assignedWorkOrder?.links.assignee
   const currentVisit =
@@ -160,10 +157,15 @@ export default function ServiceCaseDetailPage() {
     .filter((note) => note.properties.noteType === "diagnostic")
     .sort((left, right) => time(right.properties.recordedAt) - time(left.properties.recordedAt))[0]
 
-  let next: NextStep | null = null
   const status = serviceCase?.properties.status
   const clock = caseClock(serviceCase?.properties ?? {})
-  if (serviceCase && status === "new") {
+  const decision = caseDecision(
+    status,
+    workOrders.some((workOrder) => workOrder.properties.status === "completed")
+  )
+  const equipmentId = serviceCase?.links.equipment?.primaryId
+  let next: NextStep | null = null
+  if (serviceCase && decision === "Acknowledge") {
     next = {
       title: "Acknowledge the case",
       detail: "Take ownership so the response clock is covered and dispatch can begin.",
@@ -178,7 +180,7 @@ export default function ServiceCaseDetailPage() {
       ),
       error: acknowledge.isError ? "The case could not be acknowledged. Try again." : undefined,
     }
-  } else if (serviceCase && status === "triage") {
+  } else if (serviceCase && decision === "Dispatch") {
     next = {
       title: "Review the dispatch recommendation",
       detail:
@@ -186,7 +188,7 @@ export default function ServiceCaseDetailPage() {
         "Pick the technician and window that meet the response target.",
       primary: <PillLink to="/dispatch">Review dispatch</PillLink>,
     }
-  } else if (serviceCase && status === "awaiting_authorization") {
+  } else if (serviceCase && decision === "Review quote") {
     next = {
       title: "Review the repair quote",
       detail: "The repair falls outside contract coverage and needs customer authorization.",
@@ -196,12 +198,7 @@ export default function ServiceCaseDetailPage() {
         </PillLink>
       ),
     }
-  } else if (
-    serviceCase &&
-    status === "in_service" &&
-    completedVisit &&
-    serviceCase.links.equipment
-  ) {
+  } else if (serviceCase && decision === "Verify recovery" && equipmentId) {
     next = {
       title: "Verify the equipment recovered",
       detail: "Field work is complete. Confirm the readings are back in range before resolving.",
@@ -209,12 +206,7 @@ export default function ServiceCaseDetailPage() {
         <PillButton
           disabled={verify.isPending}
           onClick={() =>
-            verify.mutate({
-              equipment: {
-                objectTypeId: "Equipment",
-                primaryId: serviceCase.links.equipment?.primaryId ?? "",
-              },
-            })
+            verify.mutate({ equipment: { objectTypeId: "Equipment", primaryId: equipmentId } })
           }
         >
           {verify.isPending ? "Verifying…" : "Verify recovery"}
@@ -222,7 +214,7 @@ export default function ServiceCaseDetailPage() {
       ),
       error: verify.isError ? "Recovery could not be verified. Try again." : undefined,
     }
-  } else if (serviceCase && status === "resolved") {
+  } else if (serviceCase && decision === "Close") {
     next = {
       title: "Close the case",
       detail: serviceCase.properties.resolutionSummary ?? "Recovery is verified.",
@@ -236,13 +228,15 @@ export default function ServiceCaseDetailPage() {
       ),
       error: close.isError ? "The case could not be closed. Try again." : undefined,
     }
-  } else if (serviceCase && workspaceHref && status !== "closed" && status !== "cancelled") {
+  } else if (serviceCase && workspaceHref && isCaseOpen(status)) {
     next = {
       title: "Follow the field work",
       detail: serviceCase.properties.nextAction ?? "The technician is working the case.",
       primary: <PillLink to={workspaceHref}>Open field workspace</PillLink>,
     }
   }
+  // A decision can also open the field workspace; following the field work already does.
+  const workspaceAside = decision !== undefined && workspaceHref
 
   return (
     <QueryState
@@ -307,8 +301,8 @@ export default function ServiceCaseDetailPage() {
                 <NextStepCard title={next.title} detail={next.detail}>
                   <div className="flex flex-wrap items-center gap-2.5">
                     {next.primary}
-                    {workspaceHref && next.title !== "Follow the field work" ? (
-                      <PillLink to={workspaceHref} tone="secondary">
+                    {workspaceAside ? (
+                      <PillLink to={workspaceAside} tone="secondary">
                         Field workspace
                       </PillLink>
                     ) : null}

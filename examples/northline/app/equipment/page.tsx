@@ -14,6 +14,7 @@ import {
   StatusIndicator,
 } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
+import { openServiceCases } from "../_lib/service-cases"
 
 const equipmentQuery = objects(Equipment)
   .query()
@@ -21,7 +22,7 @@ const equipmentQuery = objects(Equipment)
   .orderBy(Equipment.p.name, "asc")
   .limit(200)
 
-const casesQuery = objects(ServiceCase).query().expand(ServiceCase.l.equipment).limit(100)
+const casesQuery = openServiceCases.expand(ServiceCase.l.equipment).limit(100)
 
 const views = [
   ["all", "All"],
@@ -42,9 +43,7 @@ export default function EquipmentPage() {
     const map = new Map<string, string>()
     for (const serviceCase of cases.data?.objects ?? []) {
       const equipmentId = serviceCase.links.equipment?.primaryId
-      if (equipmentId && !["closed", "cancelled"].includes(serviceCase.properties.status ?? "")) {
-        map.set(equipmentId, serviceCase.properties.number ?? "")
-      }
+      if (equipmentId) map.set(equipmentId, serviceCase.properties.number)
     }
     return map
   }, [cases.data])

@@ -1,5 +1,6 @@
 import { defineAction, param, ref } from "@sixb/core"
 import { fieldServiceConnector } from "../connectors/field-service"
+import { findRow } from "../lib/sources/client-utils"
 import { Equipment } from "../ontology/equipment"
 import { ServiceCase } from "../ontology/service-case"
 import { ServiceVisit } from "../ontology/service-visit"
@@ -28,7 +29,8 @@ export const dispatchWorkOrder = defineAction("dispatch-work-order", {
   })
   .writeback(async ({ params, run, sixb, target }) => {
     const fieldService = await sixb.connector(fieldServiceConnector)
-    const technician = (await fieldService.listTechnicians()).rows.find(
+    const technician = await findRow(
+      (input) => fieldService.listTechnicians(input),
       (item) => item.technician_id === params.technician.primaryId
     )
     if (!technician) {

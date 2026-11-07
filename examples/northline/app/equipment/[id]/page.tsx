@@ -4,6 +4,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, Radio } from "lucide-react"
 import { useMemo } from "react"
 import { Link, useParams } from "react-router-dom"
+import { operatingLimits } from "../../../lib/operating-limits"
 import { BuildingAlarm } from "../../../ontology/building-alarm"
 import { Equipment } from "../../../ontology/equipment"
 import { ServiceCase } from "../../../ontology/service-case"
@@ -20,6 +21,7 @@ import {
   StatusBadge,
   StatusIndicator,
 } from "../../_components/ui"
+import { isCaseOpen } from "../../_lib/service-cases"
 
 /** A unit, its alarms and its cases, newest first, each followed from the unit by the server. */
 function equipmentQueries(id: string) {
@@ -66,9 +68,7 @@ export default function EquipmentDetailPage() {
   const equipment = equipmentResult.data?.objects[0]
   const alarms = alarmsResult.data?.objects ?? []
   const cases = casesResult.data?.objects ?? []
-  const activeCase = cases.find(
-    (serviceCase) => !["closed", "cancelled"].includes(serviceCase.properties.status ?? "")
-  )
+  const activeCase = cases.find((serviceCase) => isCaseOpen(serviceCase.properties.status))
 
   return (
     <QueryState
@@ -169,7 +169,7 @@ export default function EquipmentDetailPage() {
                   unit="°C"
                   points={supply.data ?? []}
                   low={10}
-                  high={19}
+                  high={operatingLimits.supplyAirWatch}
                 />
                 <Reading
                   label="Return air temperature"
@@ -183,7 +183,7 @@ export default function EquipmentDetailPage() {
                   unit="A"
                   points={current.data ?? []}
                   low={8}
-                  high={28}
+                  high={operatingLimits.compressorUnhealthy}
                 />
               </div>
             </Section>

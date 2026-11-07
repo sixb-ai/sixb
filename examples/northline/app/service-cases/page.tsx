@@ -7,16 +7,16 @@ import { Link, useSearchParams } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
 import { EquipmentPicture } from "../_components/equipment-picture"
 import { SearchField, ViewPills } from "../_components/list-controls"
-import {
-  CaseClockText,
-  casePriority,
-  isCaseAtRisk,
-  PageHeader,
-  QueryState,
-  StatusBadge,
-} from "../_components/ui"
+import { CaseClockText, PageHeader, QueryState, StatusBadge } from "../_components/ui"
 import type { QueryRow } from "../_lib/query-types"
-import { caseDecision, useCasesWithFieldWorkDone } from "../_lib/service-cases"
+import {
+  type CaseView,
+  casePriority,
+  caseViews,
+  inCaseView,
+  isCaseOpen,
+  useCasesWithFieldWorkDone,
+} from "../_lib/service-cases"
 
 const allCases = objects(ServiceCase)
   .query()
@@ -27,15 +27,6 @@ const allCases = objects(ServiceCase)
   .orderBy(ServiceCase.p.detectedAt, "desc")
   .limit(100)
 
-const views = [
-  ["open", "Open"],
-  ["action", "Needs you"],
-  ["field", "In the field"],
-  ["risk", "At risk"],
-  ["all", "All"],
-] as const
-
-type View = (typeof views)[number][0]
 type CaseRow = QueryRow<typeof allCases>
 
 export default function ServiceCasesPage() {
@@ -43,17 +34,17 @@ export default function ServiceCasesPage() {
   const fieldWorkDone = useCasesWithFieldWorkDone()
   // The view lives in the URL so Home can link straight to one.
   const [params, setParams] = useSearchParams()
-  const view = views.find(([id]) => id === params.get("view"))?.[0] ?? "open"
-  const setView = (next: View) =>
+  const view = caseViews.find(([id]) => id === params.get("view"))?.[0] ?? "open"
+  const setView = (next: CaseView) =>
     setParams(next === "open" ? {} : { view: next }, { replace: true })
   const [search, setSearch] = useState("")
   const allRows = query.data?.objects ?? []
   const counts = useMemo(
     () =>
       Object.fromEntries(
-        views.map(([id]) => [
+        caseViews.map(([id]) => [
           id,
-          allRows.filter((row) => matchesView(row, id, fieldWorkDone)).length,
+          allRows.filter((row) => inCaseView(row, id, fieldWorkDone)).length,
         ])
       ),
     [allRows, fieldWorkDone]
@@ -61,7 +52,7 @@ export default function ServiceCasesPage() {
   const rows = useMemo(() => {
     const normalized = search.trim().toLowerCase()
     return allRows
-      .filter((item) => matchesView(item, view, fieldWorkDone))
+      .filter((item) => inCaseView(item, view, fieldWorkDone))
       .filter((item) => {
         if (!normalized) return true
         return [
@@ -92,7 +83,7 @@ export default function ServiceCasesPage() {
       >
         <ViewPills
           label="Case views"
-          views={views}
+          views={caseViews}
           value={view}
           counts={counts}
           onChange={setView}
@@ -119,7 +110,7 @@ export default function ServiceCasesPage() {
 
 function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
   const equipment = serviceCase.links.equipment
-  const closed = ["closed", "cancelled"].includes(serviceCase.properties.status ?? "")
+  const closed = !isCaseOpen(serviceCase.properties.status)
 
   return (
     <li className="border-t border-border/70 first:border-t-0">
@@ -175,20 +166,4 @@ function CaseListRow({ serviceCase }: { serviceCase: CaseRow }) {
       </Link>
     </li>
   )
-}
-
-function matchesView(
-  serviceCase: CaseRow,
-  view: View,
-  fieldWorkDone: ReadonlySet<string>
-): boolean {
-  const status = serviceCase.properties.status ?? ""
-  if (view === "all") return true
-  if (["closed", "cancelled"].includes(status)) return false
-  if (view === "action") {
-    return caseDecision(status, fieldWorkDone.has(serviceCase.primaryId)) !== undefined
-  }
-  if (view === "field") return ["dispatching", "in_service"].includes(status)
-  if (view === "risk") return isCaseAtRisk(serviceCase.properties)
-  return true
 }

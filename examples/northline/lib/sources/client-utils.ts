@@ -30,6 +30,17 @@ export async function* allRows<T>(
   } while (cursor)
 }
 
+/** The first row of a paged listing that matches, reading only as many pages as it takes. */
+export async function findRow<T>(
+  list: (input: SourceListInput) => Promise<SourcePage<T>>,
+  matches: (row: T) => boolean
+): Promise<T | undefined> {
+  for await (const row of allRows(list)) {
+    if (matches(row)) return row
+  }
+  return undefined
+}
+
 export function orderedChangesSince<T extends object>(
   changes: readonly T[],
   cursor?: string

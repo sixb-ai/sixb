@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
-import { allRows, orderedChangesSince, pageRows } from "../lib/sources/client-utils"
+import { allRows, findRow, orderedChangesSince, pageRows } from "../lib/sources/client-utils"
 import { AtomicJsonStore } from "../lib/sources/file-store"
 
 const roots = new Set<string>()
@@ -78,5 +78,15 @@ describe("allRows", () => {
       received.push(value)
     }
     expect(received).toEqual(readings)
+  })
+
+  test("findRow reads on until a row matches", async () => {
+    // Reproduce: look only at the first page and a technician listed 101st is "not found".
+    const technicians = Array.from({ length: 150 }, (_, index) => index)
+    const found = await findRow(
+      (input) => Promise.resolve(pageRows(technicians, input)),
+      (value) => value === 120
+    )
+    expect(found).toBe(120)
   })
 })
