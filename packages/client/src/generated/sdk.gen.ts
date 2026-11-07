@@ -222,6 +222,9 @@ import type {
   GetDatasetVersionLineageErrors,
   GetDatasetVersionLineageResponses,
   GetDatasetVersionResponses,
+  GetLakeHealthData,
+  GetLakeHealthErrors,
+  GetLakeHealthResponses,
   GetLatestTelemetryData,
   GetLatestTelemetryErrors,
   GetLatestTelemetryResponses,
@@ -1790,6 +1793,21 @@ export const listDatasetRows = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/datasets/{datasetId}/rows",
+    ...options,
+  })
+
+/**
+ * Describe how the lake stores each dataset, and what its retention does
+ */
+export const getLakeHealth = <ThrowOnError extends boolean = false>(
+  options?: Options<GetLakeHealthData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetLakeHealthResponses, GetLakeHealthErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/lake/health",
     ...options,
   })
 

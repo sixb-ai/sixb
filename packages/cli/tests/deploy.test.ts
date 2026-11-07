@@ -15,7 +15,11 @@ import {
   runDeployStatus,
 } from "../src/commands/deploy"
 import { parseCliArgs } from "../src/lib/command-line"
-import { buildDeployRelease, deployPublicOrigins } from "../src/lib/deploy-release"
+import {
+  buildDeployRelease,
+  deployPublicOrigins,
+  lakeRetentionChecks,
+} from "../src/lib/deploy-release"
 import { packSource, resolveBunVersion } from "../src/lib/deploy-source"
 import { type ProductionRole, productionRoleFacts } from "../src/lib/production-roles"
 import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
@@ -53,6 +57,10 @@ function release(overrides: Partial<DeployConfig> = {}): DeployRelease {
     { name: "northline", domain: "example.com", target, ...overrides },
     { bunVersion: "1.4.2" }
   )
+}
+
+function lakeRetentionDetails(services: DeployConfig["services"]): readonly string[] {
+  return lakeRetentionChecks({ name: "northline", target, services }).map((check) => check.detail)
 }
 
 function service(built: DeployRelease, name: string) {
@@ -332,6 +340,26 @@ describe("deploy source", () => {
 
     await expect(packSource(root, "no-such-branch")).rejects.toThrow("is not a commit")
     await expect(packSource(root)).rejects.toThrow("has no package.json")
+  })
+})
+
+describe("lake retention in a deploy config", () => {
+  test("says nothing when both halves deploy", () => {
+    expect(lakeRetentionDetails(undefined)).toEqual([])
+    expect(lakeRetentionDetails({ workers: { types: "all" } })).toEqual([])
+    expect(lakeRetentionDetails({ workers: { types: ["sync", "lake"] } })).toEqual([])
+  })
+
+  test("names a worker list that leaves `lake` out", () => {
+    expect(lakeRetentionDetails({ workers: { types: ["sync"] } })).toEqual([
+      "Not deployed: a `lake` worker runs it.",
+    ])
+  })
+
+  test("names turned off workers and a turned off orchestrator together", () => {
+    expect(lakeRetentionDetails({ orchestrator: false, workers: false })).toEqual([
+      "Not deployed: the orchestrator requests it, and a `lake` worker runs it.",
+    ])
   })
 })
 
@@ -656,6 +684,30 @@ export default {
     expect(blocked.output).toContain(".env does not exist")
     // Only the checks ran: nothing was uploaded.
     expect((await records(recordPath)).every((entry) => "check" in entry)).toBe(true)
+  })
+
+  // Reproduce: leave `lakeRetentionChecks` out of runDeployCheck, or `warnings` out of the views.
+  test("shows a worker list without `lake` in the check, the dry run and the deploy", async () => {
+    const root = await repository({
+      "package.json": JSON.stringify({ packageManager: "bun@1.4.2" }),
+      "sixb.deploy.ts": recordingConfig.replace(
+        'name: "northline",',
+        'name: "northline",\n  services: { workers: { types: ["sync", "pipeline"] } },'
+      ),
+    })
+    const env = { DEPLOY_RECORD: join(await tempDir(), "record.jsonl") }
+
+    const check = await deploy(env, () => runDeployCheck({ cwd: root }))
+    expect(check.exitCode ?? 0).toBe(0)
+    expect(check.output).toContain("Not deployed: a `lake` worker runs it.")
+    expect(check.output).toContain("1 to look at")
+
+    const dryRun = await deploy(env, () => runDeploy({ cwd: root, dryRun: true }))
+    expect(dryRun.output).toContain("Lake retention: Not deployed")
+
+    const deployed = await deploy(env, () => runDeploy({ cwd: root }))
+    expect(deployed.output).toContain("northline deployed")
+    expect(deployed.output).toContain("Lake retention: Not deployed")
   })
 
   test("sets the target up, then shows what is left", async () => {

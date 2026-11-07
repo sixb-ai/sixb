@@ -44,6 +44,23 @@ Sixb packages are versioned independently. Each release entry names the packages
   meanwhile, instead of being reported once and lost.
 - `onError`'s `orchestrator.dispatch.failed` carries `dropped`, and `InMemoryBroker` now honors
   `idempotencyKey`, as Redis and NATS do.
+- Lake retention now runs on its own in every project with datasets and a provider that supports
+  it, such as DuckLake: replaced versions go after 7 days, and the files only they read 7 days
+  later. To keep more, set `lakeMaintenance: { keepVersionsFor, deleteFilesAfter }` before you
+  deploy; to keep running it by hand, set `lakeMaintenance: { enabled: false }`.
+- The new `@sixb/lake-worker` runs it, as worker type `lake`. `sixb worker-group` with no types and
+  `sixb deploy` include it, in the existing process. A deployment that lists its worker `types`, or
+  a `sixb worker-group` given a list, must add `lake`: both warn when it is missing, and until then
+  nothing cleans the lake.
+- Separate `sixb worker <type>` processes get no such warning at startup: add a `sixb worker lake`
+  process. Until then the orchestrator's output, `sixb check` and Console › Lake health say that no
+  lake worker has run cleanup.
+- `Queues` gains a required `lake` lane, so a third-party queues provider must implement it. Without
+  it `sixb orchestrator` fails to request cleanup, once a minute, and reports it through
+  `maintenance.pass.failed`.
+- `sixb lake cleanup` defaults to the project's `lakeMaintenance` instead of 7 days, and runs until
+  nothing is left instead of one pass.
+- Storage gains `lake_retention_runs`, and `onError` gains `lake.retention.failed`.
 
 ## 2026-11-05 — Sixb 0.2.1
 

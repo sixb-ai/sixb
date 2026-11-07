@@ -86,7 +86,7 @@ const nobody = {
   usage: false,
   activity: false,
 }
-const dataPages = ["connectors", "syncs", "datasets", "pipelines", "projections"]
+const dataPages = ["connectors", "syncs", "datasets", "lake-health", "pipelines", "projections"]
 const allConsolePages = [
   ...dataPages,
   "object-types",

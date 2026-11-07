@@ -58,6 +58,7 @@ Add services as your project needs them:
 | `logger`, `observability` | Log output and capture settings. | [Logging](../logging/overview.md) |
 | `activity` | Record visits and page views in your app. | [App activity](../apps/activity.md) |
 | `onError` | Send failures to your monitoring service. | [Failure notifications](../logging/overview.md#report-failures) |
+| `lakeMaintenance` | How long replaced dataset versions are kept, and how often they are cleaned up. On by default. | [Storage maintenance](../datasets/overview.md#storage-maintenance) |
 | `connectorConnections` | Protect stored OAuth credentials. | [OAuth connectors](../connectors/authentication.md) |
 
 ## Language and time zone

@@ -1,18 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
+  col,
+  defineDataset,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type LakeMaintenanceOptions,
   type ModelCatalogInput,
   SixbHost,
 } from "@sixb/core"
+import type { LakeMaintenance } from "@sixb/core/lake-storage"
 import { SixbCliError } from "../src/lib/errors"
 import {
   agentRuntimeRequired,
   assertWorkerInputs,
   createWorkerForType,
+  omittedWorkerWarnings,
   resolveRegisteredWorkerTypes,
 } from "../src/lib/worker-registry"
 
@@ -223,3 +228,65 @@ for (const capability of ["aiUsage", "aiCosts", "aiLimits"] as const) {
     expect(resolveRegisteredWorkerTypes(host)).not.toContain("agent")
   })
 }
+
+describe("lake retention", () => {
+  class MaintainedLakeStorage extends InMemoryLakeStorage {
+    readonly maintenance: LakeMaintenance = {
+      applyRetention: async () => {
+        throw new Error("not run here")
+      },
+      describeStorage: async () => [],
+    }
+  }
+
+  const rooms = defineDataset("raw.rooms", { schema: [col("id", "string")] })
+
+  function host(lakeMaintenance?: LakeMaintenanceOptions) {
+    return new SixbHost({
+      id: "lake",
+      ontology: [],
+      datasets: [rooms],
+      storage: new InMemoryStorage(),
+      broker: new InMemoryBroker(),
+      queues: new InMemoryQueues(),
+      blobStorage: new InMemoryBlobStorage(),
+      lakeStorage: new MaintainedLakeStorage(),
+      lakeMaintenance,
+    })
+  }
+
+  // Reproduce: drop `lake` from resolveRegisteredWorkerTypes.
+  test("selects the lake worker for a project with datasets, and no sync worker", async () => {
+    const sixb = host()
+    const types = resolveRegisteredWorkerTypes(sixb)
+
+    expect(types).toContain("lake")
+    expect(types).not.toContain("sync")
+
+    const worker = createWorkerForType(sixb, "lake")
+    await worker.start()
+    await worker.stop()
+  })
+
+  test("selects no lake worker when lake retention is off", () => {
+    expect(resolveRegisteredWorkerTypes(host({ enabled: false }))).not.toContain("lake")
+  })
+
+  test("runs the lake worker at the concurrency it was given", () => {
+    const worker = createWorkerForType(host(), "lake", { workerConcurrency: { lake: 3 } })
+
+    expect(worker.concurrency).toBe(3)
+  })
+
+  // Reproduce: return [] from omittedWorkerWarnings in lib/worker-registry.ts.
+  test("warns about a worker list that leaves the lake worker out", () => {
+    expect(omittedWorkerWarnings(host(), ["pipeline"])).toEqual([
+      expect.stringContaining("Lake cleanup needs a lake worker"),
+    ])
+  })
+
+  test("warns about nothing when the list has it, or nothing needs it", () => {
+    expect(omittedWorkerWarnings(host(), ["pipeline", "lake"])).toEqual([])
+    expect(omittedWorkerWarnings(host({ enabled: false }), ["pipeline"])).toEqual([])
+  })
+})

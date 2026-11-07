@@ -21,6 +21,7 @@ export {
   ConsoleConnectorsPage,
 } from "./pages/console/data/connectors"
 export { ConsoleDatasetPage, ConsoleDatasetsPage } from "./pages/console/data/datasets"
+export { ConsoleLakeHealthPage } from "./pages/console/data/lake-health"
 export { ConsolePipelinePage, ConsolePipelinesPage } from "./pages/console/data/pipelines"
 export { ConsoleProjectionPage, ConsoleProjectionsPage } from "./pages/console/data/projections"
 export { ConsoleSyncPage, ConsoleSyncsPage } from "./pages/console/data/syncs"

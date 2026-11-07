@@ -73,6 +73,8 @@ export const sixb = createSixb({
       failure = `maintenance pass '${context.passId}' failed ${context.consecutiveFailures} time(s) in a row`
     } else if (context.type === "orchestrator.dispatch.failed") {
       failure = `'${context.target}' for event ${context.eventId} ${context.dropped ? "dropped" : "still retrying"} after ${context.attempts} attempt(s)`
+    } else if (context.type === "lake.retention.failed") {
+      failure = `lake retention for ${context.intervalStart} failed with ${context.failure.code}`
     } else {
       failure = `${context.source} rule evaluation failed with ${context.failure.code}`
     }

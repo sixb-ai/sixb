@@ -123,7 +123,7 @@ Run these from your project root:
 | `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
-| `sixb lake cleanup --dry-run` | Preview which replaced lake versions and files retention would remove. |
+| `sixb lake cleanup --dry-run` | Preview which replaced lake versions and files [retention](../datasets/overview.md#storage-maintenance) would remove; without `--dry-run`, remove them now. It keeps what `lakeMaintenance` keeps unless its flags say otherwise. |
 
 `dev` serves the app on port 3000 and the API on 3001. The app runs even without an `app/`
 folder, with its built-in pages. Backend changes restart the local stack; app changes use hot
@@ -153,7 +153,7 @@ Each command runs one service. See [Deployment](../deployment/overview.md) for t
 | `sixb worker <type>` | Execute one kind of background job. |
 | `sixb worker-group [types...]` | Run several worker types in one process. |
 
-Worker types are `agent`, `sync`, `pipeline`, `projection`, and `workflow`. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work.
+Worker types are `agent`, `sync`, `pipeline`, `projection`, `workflow`, and `lake`. Actions have no worker: they run in the process that requests them. With no types, `worker-group` selects the project's registered work.
 
 Public-origin flags have matching environment variables:
 

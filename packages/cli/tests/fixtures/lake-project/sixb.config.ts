@@ -8,6 +8,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type LakeMaintenanceOptions,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -32,8 +33,11 @@ const things = defineDataset("raw.things", {
 export const lakeFixture = {
   drift: false,
   maintenance: true,
-  /** Whether the retention pass reports more to clean up. */
-  retentionHasMore: false,
+  lakeMaintenance: undefined as LakeMaintenanceOptions | undefined,
+  /** Whether storage says the orchestrator asks for retention, with no worker answering. */
+  unansweredRequest: false,
+  /** How many retention passes report more to clean up before one reports none. */
+  retentionPassesWithMore: 0,
   /** A dataset version a projection applied, or "unreadable" when reading them fails. */
   appliedVersion: undefined as string | undefined,
   events: [] as Record<string, unknown>[],
@@ -63,6 +67,7 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
   readonly maintenance: LakeMaintenance = {
     async applyRetention(options?: LakeRetentionOptions): Promise<LakeRetentionReport> {
       lakeFixture.events.push({ type: "lake:retention", ...options })
+      const passes = lakeFixture.events.filter((event) => event.type === "lake:retention").length
 
       return {
         dryRun: options?.dryRun ?? false,
@@ -72,7 +77,7 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
         keptVersions: 5,
         deletedFiles: 3,
         orphanedFiles: 4,
-        hasMore: lakeFixture.retentionHasMore,
+        hasMore: passes <= lakeFixture.retentionPassesWithMore,
       }
     },
 
@@ -82,8 +87,22 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
   }
 }
 
+function unansweredBeat() {
+  const now = new Date()
+
+  return {
+    projectId: "cli-lake-project",
+    owner: "orchestrator" as const,
+    beatAt: now,
+    everyMs: 30_000,
+    passes: [{ id: "lake-retention", lastSucceededAt: now, consecutiveFailures: 0 }],
+  }
+}
+
 function createStorage(): InMemoryStorage {
   const storage = new InMemoryStorage()
+  if (lakeFixture.unansweredRequest) void storage.maintenanceHeartbeats.record(unansweredBeat())
+
   const versionId = lakeFixture.appliedVersion
   if (!versionId) return storage
 
@@ -114,6 +133,7 @@ export function sixb(): SixbHost {
     broker: new InMemoryBroker(),
     storage: createStorage(),
     lakeStorage: lakeFixture.maintenance ? new MaintenanceLakeStorage() : new FixtureLakeStorage(),
+    lakeMaintenance: lakeFixture.lakeMaintenance,
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     datasets: [things],

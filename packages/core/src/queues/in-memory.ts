@@ -6,6 +6,7 @@ import type {
   AgentQueueJob,
   AgentQueueJobFailureCode,
   ClaimedQueueJob,
+  LakeQueueJob,
   NewQueueJob,
   PipelineQueueJobFailureCode,
   PipelineRunRequestedQueueJob,
@@ -439,6 +440,10 @@ export class InMemoryQueues implements Queues {
     VectorIndexingQueueJob,
     "internal.unexpected" | "runtime.cancelled"
   >(this.store, "vector.indexing")
+  readonly lake = new InMemoryQueue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">(
+    this.store,
+    "lake"
+  )
   readonly syncRuns = new InMemoryQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
     this.store,
     "sync.runs"

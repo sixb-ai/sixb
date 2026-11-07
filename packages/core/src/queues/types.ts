@@ -215,11 +215,28 @@ export type VectorIndexingQueueJob = QueueJob<
   { readonly indexingId: string }
 >
 
+/** The `lake-retention` pass asks for one interval's retention; the payload says which. */
+export interface LakeRetentionRequestedQueueJob
+  extends QueueJob<
+    "lake.retention.requested",
+    {
+      readonly intervalStart: string
+    }
+  > {}
+
+export type LakeQueueJob = LakeRetentionRequestedQueueJob
+
 export interface Queues {
   readonly vectorIndexing: Queue<
     VectorIndexingQueueJob,
     "internal.unexpected" | "runtime.cancelled"
   >
+  /**
+   * Lake work the framework runs in a worker rather than in the process that asks for it, such as
+   * the retention of replaced dataset versions and their files. LakeWorker consumes this lane, so
+   * lake work never waits behind a sync or takes its slot.
+   */
+  readonly lake: Queue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: Queue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
   readonly pipelines: Queue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: Queue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { resolve } from "node:path"
 import { runLakeCheck } from "../src/commands/lake-check"
 import { runLakeCleanup } from "../src/commands/lake-cleanup"
@@ -15,7 +15,9 @@ afterEach(() => {
   Object.assign(lakeFixture, {
     drift: false,
     maintenance: true,
-    retentionHasMore: false,
+    lakeMaintenance: undefined,
+    unansweredRequest: false,
+    retentionPassesWithMore: 0,
     appliedVersion: undefined,
   })
   lakeFixture.events = []
@@ -83,19 +85,89 @@ describe("sixb lake cleanup", () => {
   })
 
   test("passes the retention flags through as durations", async () => {
-    lakeFixture.retentionHasMore = true
-
     const result = await runInProcess(() =>
       runLakeCleanup({ entry, keepVersionsFor: "2h", deleteFilesAfter: "1h" })
     )
 
     expect(result.output).toContain("Lake cleanup complete")
-    expect(result.output).toContain("more is due: run it again")
     expect(flat(result.output)).toContain("Keep versions for 2h Delete files after 1h")
     expect(lakeFixture.events[0]).toMatchObject({
       keepVersionsForMs: 2 * 60 * 60_000,
       deleteFilesAfterMs: 60 * 60_000,
     })
+  })
+
+  // Reproduce: default to "7d" in commands/lake-cleanup.ts. Cleanup then expires versions the project
+  // asked to keep for a month, and the dry run measures something no run would do.
+  test("keeps what the project's lakeMaintenance keeps when no flag says otherwise", async () => {
+    lakeFixture.lakeMaintenance = { keepVersionsFor: "30d", deleteFilesAfter: "14d" }
+
+    const result = await runInProcess(() => runLakeCleanup({ entry, dryRun: true }))
+
+    expect(flat(result.output)).toContain("Keep versions for 30d Delete files after 14d")
+    expect(lakeFixture.events[0]).toMatchObject({
+      keepVersionsForMs: 30 * DAY_MS,
+      deleteFilesAfterMs: 14 * DAY_MS,
+    })
+  })
+
+  // Reproduce: read both durations from `settings` in commands/lake-cleanup.ts.
+  test("lets a flag override one setting and keeps the other", async () => {
+    lakeFixture.lakeMaintenance = { keepVersionsFor: "30d", deleteFilesAfter: "14d" }
+
+    const result = await runInProcess(() =>
+      runLakeCleanup({ entry, dryRun: true, keepVersionsFor: "2d" })
+    )
+
+    expect(flat(result.output)).toContain("Keep versions for 2d Delete files after 14d")
+    expect(lakeFixture.events[0]).toMatchObject({
+      keepVersionsForMs: 2 * DAY_MS,
+      deleteFilesAfterMs: 14 * DAY_MS,
+    })
+  })
+
+  // Reproduce: call `maintenance.applyRetention` once in commands/lake-cleanup.ts.
+  test("cleans up until no pass reports more, and adds the passes up", async () => {
+    lakeFixture.retentionPassesWithMore = 1
+    jest.useFakeTimers()
+
+    try {
+      const running = runInProcess(() => runLakeCleanup({ entry }))
+      // Passes pause a second between them; move the clock until the command is done.
+      let done = false
+      void running.finally(() => {
+        done = true
+      })
+      for (let turn = 0; turn < 1_000 && !done; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        jest.advanceTimersByTime(100)
+      }
+      const result = await running
+
+      expect(result.error).toBeUndefined()
+      expect(lakeFixture.events.filter((event) => event.type === "lake:retention")).toHaveLength(2)
+      expect(flat(result.output)).toContain(
+        "Expired versions 4 Kept versions 5 Deleted files 6 Orphaned files 8"
+      )
+      expect(result.output).not.toContain("more is due")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Reproduce: print the dry run's counts as they are in ui/screens.ts lakeCleanupView. The
+  // output then reads like the whole backlog.
+  test("measures one pass on a dry run, and says when more remain", async () => {
+    lakeFixture.retentionPassesWithMore = 1
+
+    const result = await runInProcess(() => runLakeCleanup({ entry, dryRun: true }))
+
+    expect(result.error).toBeUndefined()
+    expect(lakeFixture.events.filter((event) => event.type === "lake:retention")).toHaveLength(1)
+    expect(flat(result.output)).toContain(
+      "Expired versions 2+ Kept versions 5 Deleted files 3+ Orphaned files 4+"
+    )
+    expect(result.output).toContain("one pass measured, more remain")
   })
 
   // Reproduce: parse the flags after loading the project in commands/lake-cleanup.ts. The project

@@ -60,9 +60,16 @@ import type {
   SixbReadiness,
 } from "../maintenance"
 import { storageHeartbeat } from "../maintenance/heartbeat"
+import {
+  getLakeRetentionRuntime,
+  type LakeMaintenanceOptions,
+  LakeRetention,
+  registerLakeRetentionRuntime,
+} from "../maintenance/lake-retention"
 import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
 import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
 import { cronPass } from "../maintenance/passes/cron-pass"
+import { lakeRetentionPass } from "../maintenance/passes/lake-retention-pass"
 import { ontologyPass } from "../maintenance/passes/ontology-pass"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { ModelCatalogInput } from "../models"
@@ -136,6 +143,8 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   broker: Broker
   storage: Storage
   lakeStorage: LakeStorage
+  /** Automatic retention of replaced dataset versions and their files. On by default. */
+  lakeMaintenance?: LakeMaintenanceOptions
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory<TParams>
@@ -365,6 +374,17 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       this,
       createVectorIndexingRuntime(this.hostContext, this.materializer)
     )
+
+    const lakeRetention = new LakeRetention({
+      projectId: this.projectId,
+      options: options.lakeMaintenance,
+      lakeStorage: this.lakeStorage,
+      storage: this.storage,
+      sources: this.storage.ontology.sources,
+      datasetCount: definitions.datasets.list().length,
+    })
+    registerLakeRetentionRuntime(this, lakeRetention)
+
     this.cron = cronPass({
       schedules: definitions.schedules.list(),
       events: this.eventService,
@@ -439,18 +459,37 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   }
 
   /**
-   * Run the project's upkeep on one loop: ontology maintenance, cron schedules, and `passes`. The
-   * orchestrator is what hosts it.
+   * Run the project's upkeep on one loop: ontology maintenance, cron schedules, lake retention, and
+   * `passes`. The orchestrator is what hosts it.
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
     const loop = new MaintenanceLoop({
-      passes: [ontologyPass(this.ontologyMaintenance), this.cron, ...passes],
+      passes: [
+        ontologyPass(this.ontologyMaintenance),
+        this.cron,
+        ...this.lakeRetentionPasses(),
+        ...passes,
+      ],
       heartbeat: storageHeartbeat(this.projectId, "orchestrator", this.storage),
       onError: this.onMaintenanceFailure,
     })
     loop.start()
 
     return { stop: () => loop.stop() }
+  }
+
+  private lakeRetentionPasses(): readonly MaintenancePass[] {
+    const retention = getLakeRetentionRuntime(this)
+    if (!retention.automatic) return []
+
+    return [
+      lakeRetentionPass({
+        projectId: this.projectId,
+        cleanupEveryMs: retention.settings.cleanupEveryMs,
+        queue: this.queues.lake,
+        status: () => retention.status(),
+      }),
+    ]
   }
 
   /**

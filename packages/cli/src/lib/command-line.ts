@@ -188,12 +188,13 @@ export const CLI_OPTION_DEFINITIONS = {
   },
   "keep-versions-for": {
     syntax: "--keep-versions-for <duration>",
-    summary: "How long a replaced lake version stays readable (default: 7d, at least 1h)",
+    summary:
+      "How long a replaced lake version stays readable (default: `lakeMaintenance`, at least 1h)",
     kind: "string",
   },
   "delete-files-after": {
     syntax: "--delete-files-after <duration>",
-    summary: "How long unread lake files wait before deletion (default: 7d)",
+    summary: "How long unread lake files wait before deletion (default: `lakeMaintenance`)",
     kind: "string",
   },
 } as const satisfies Record<string, { syntax: string; summary: string; kind: OptionKind }>

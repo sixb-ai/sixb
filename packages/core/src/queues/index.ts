@@ -21,6 +21,8 @@ export type {
   AgentRunRequestedQueueJob,
   AgentWorkflowNodeRequestedQueueJob,
   ClaimedQueueJob,
+  LakeQueueJob,
+  LakeRetentionRequestedQueueJob,
   NewQueueJob,
   PipelineQueueJobFailureCode,
   PipelineRunRequestedQueueJob,

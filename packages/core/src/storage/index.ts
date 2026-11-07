@@ -505,6 +505,7 @@ export {
 } from "./file-upload-sessions"
 export type { InMemoryStorageOptions } from "./in-memory"
 export { InMemoryStorage } from "./in-memory"
+export type { LakeRetentionRunRecord, LakeRetentionRunStorage } from "./lake-retention-runs"
 export type {
   MaintenanceHeartbeatRecord,
   MaintenanceHeartbeatStorage,

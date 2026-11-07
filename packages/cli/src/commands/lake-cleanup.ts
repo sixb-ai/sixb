@@ -1,10 +1,9 @@
+import { getLakeRetentionRuntime } from "@sixb/core/internal/runtime"
 import { parseDurationMs } from "../lib/duration"
 import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import { stopSixbProviders } from "../lib/runtime"
 import { lakeCleanupView, renderStatic, withTask } from "../ui"
-
-const DEFAULT_RETENTION = "7d"
 
 export interface LakeCleanupOptions {
   entry?: string
@@ -14,35 +13,32 @@ export interface LakeCleanupOptions {
 }
 
 export async function runLakeCleanup(options: LakeCleanupOptions = {}) {
-  const keepVersionsFor = options.keepVersionsFor ?? DEFAULT_RETENTION
-  const deleteFilesAfter = options.deleteFilesAfter ?? DEFAULT_RETENTION
-  const keepVersionsForMs = parseDurationMs(keepVersionsFor, "--keep-versions-for")
-  const deleteFilesAfterMs = parseDurationMs(deleteFilesAfter, "--delete-files-after")
+  const keepVersions = durationFlag(options.keepVersionsFor, "--keep-versions-for")
+  const deleteFiles = durationFlag(options.deleteFilesAfter, "--delete-files-after")
 
   const entry = await resolveRuntimeEntry({ entry: options.entry })
   const sixb = await withTask("lake cleanup", "Loading project", () => loadSixbFromEntry(entry))
 
   try {
-    const maintenance = sixb.lakeStorage.maintenance
-    if (maintenance === undefined) {
+    if (sixb.lakeStorage.maintenance === undefined) {
       throw new Error("[SixbCLI] Configured lake storage does not support retention cleanup.")
     }
 
-    // Objects hold the rows of the version each projection applied, and their markings are read
-    // from it: the lake keeps those versions too. Without them, cleanup does not run.
-    const applied = await sixb.storage.ontology.sources.listActive({ projectId: sixb.projectId })
+    const retention = getLakeRetentionRuntime(sixb)
+    const { settings } = retention
+    const keepVersionsFor = options.keepVersionsFor ?? settings.keepVersionsFor
+    const deleteFilesAfter = options.deleteFilesAfter ?? settings.deleteFilesAfter
+
+    // The same passes as automatic retention, without its time budget: they keep the versions
+    // projections applied, and run until none reports more. A dry run measures one pass.
     const report = await withTask(
       "lake cleanup",
       options.dryRun ? "Measuring" : "Cleaning up",
       () =>
-        maintenance.applyRetention({
+        retention.apply({
           dryRun: options.dryRun ?? false,
-          keepVersionsForMs,
-          deleteFilesAfterMs,
-          protect: applied.map(({ datasetVersion }) => ({
-            datasetId: datasetVersion.datasetId,
-            versionId: datasetVersion.versionId,
-          })),
+          keepVersionsForMs: keepVersions ?? settings.keepVersionsForMs,
+          deleteFilesAfterMs: deleteFiles ?? settings.deleteFilesAfterMs,
         })
     )
 
@@ -52,4 +48,9 @@ export async function runLakeCleanup(options: LakeCleanupOptions = {}) {
   } finally {
     await stopSixbProviders(sixb)
   }
+}
+
+/** Read before anything loads, so that a typo fails at once. */
+function durationFlag(value: string | undefined, flag: string): number | null {
+  return value === undefined ? null : parseDurationMs(value, flag)
 }

@@ -1,4 +1,5 @@
 import type {
+  DeployCheck,
   DeployCommand,
   DeployConfig,
   DeployEnv,
@@ -164,6 +165,32 @@ function sixbService(
         : DEFAULT_KILL_TIMEOUT_MS,
     }),
   }
+}
+
+/**
+ * What this config leaves automatic lake retention without. Only the project knows whether it has
+ * datasets, and this reads the config alone, so it warns and never stops a deploy.
+ */
+export function lakeRetentionChecks(config: DeployConfig): readonly DeployCheck[] {
+  const { orchestrator, workers } = config.services ?? {}
+  const types = typeof workers === "object" ? workers.types : undefined
+  const lakeWorkerOmitted = workers === false || (Array.isArray(types) && !types.includes("lake"))
+
+  const missing = [
+    ...(orchestrator === false ? ["the orchestrator requests it"] : []),
+    ...(lakeWorkerOmitted ? ["a `lake` worker runs it"] : []),
+  ]
+  if (missing.length === 0) return []
+
+  return [
+    {
+      id: "lake-retention",
+      label: "Lake retention",
+      status: "warning",
+      detail: `Not deployed: ${missing.join(", and ")}.`,
+      remedy: "Deploy them, or a project with datasets keeps every replaced version.",
+    },
+  ]
 }
 
 function workerGroupArgs(options: DeployWorkersConfig): string[] {

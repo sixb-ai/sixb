@@ -64,7 +64,7 @@ export class DuckLakeConnectionManager {
     readonly release: () => void
   }> {
     this.assertOpen()
-    const combined = signal ? AbortSignal.any([signal, this.shutdown.signal]) : this.shutdown.signal
+    const combined = this.untilShutdown(signal)
     return { signal: combined, release: await this.reads.acquire(combined) }
   }
 
@@ -118,10 +118,18 @@ export class DuckLakeConnectionManager {
     }
   }
 
+  /** Throws `DuckLakeReadsBusy` when reads stay open past the gate's wait. */
   async withMaintenanceRuntime<T>(
+    signal: AbortSignal | undefined,
     run: (runtime: DuckDbExclusiveRuntime) => Promise<T>
   ): Promise<T> {
-    return this.reads.withMaintenance(this.shutdown.signal, () => this.withExclusiveAttached(run))
+    return this.reads.withMaintenance(this.untilShutdown(signal), () =>
+      this.withExclusiveAttached(run)
+    )
+  }
+
+  private untilShutdown(signal: AbortSignal | undefined): AbortSignal {
+    return signal ? AbortSignal.any([signal, this.shutdown.signal]) : this.shutdown.signal
   }
 
   assertOpen(): void {
