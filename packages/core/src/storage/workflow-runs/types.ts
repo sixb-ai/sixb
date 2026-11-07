@@ -6,6 +6,7 @@ import type { AgentExecutionStatus, AgentRunFailureCode, AgentRunFinishReason } 
 import type {
   ClaimRunInput,
   ConfirmRunExecutionInput,
+  ListLostRunsInput,
   ReleaseRunExecutionInput,
   RunClaim,
   RunExecution,
@@ -310,6 +311,7 @@ export interface WorkflowRunStorage {
   ): Promise<WorkflowRunRecord>
   /** Hands the run back. Does nothing once the token no longer holds a running run. */
   releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
+  listLost(input: ListLostRunsInput): Promise<readonly WorkflowRunRecord[]>
   wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord>
   resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord>
   finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord>

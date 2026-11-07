@@ -18,6 +18,7 @@ import type {
   FinishWorkflowRunInput,
   ListLatestWorkflowRunsInput,
   ListLatestWorkflowRunsResult,
+  ListLostRunsInput,
   ListWorkflowAgentNodeRunsInput,
   ListWorkflowAgentNodeRunsResult,
   ListWorkflowNodeRunsInput,
@@ -49,6 +50,7 @@ import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import {
   claimSqliteRun,
   confirmSqliteRunExecution,
+  listLostSqliteRuns,
   releaseSqliteRun,
   type SqliteRunExecutionColumns,
   type SqliteRunTable,
@@ -157,6 +159,10 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
   async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<WorkflowRunRecord>> {
     return this.db.transaction(() => claimSqliteRun(this.db, WORKFLOW_RUNS, input))()
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly WorkflowRunRecord[]> {
+    return listLostSqliteRuns(this.db, WORKFLOW_RUNS, input)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

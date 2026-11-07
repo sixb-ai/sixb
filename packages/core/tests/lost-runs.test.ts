@@ -7,6 +7,7 @@ import { queueTestSyncRun } from "../src/testing/sync-execution"
 import { republishLostRuns } from "../src/workers/lost-runs"
 
 const projectId = "lost-runs"
+const JOB_ON_ITS_WAY_MS = 30_000
 const longAgo = new Date("2026-11-01T00:00:00.000Z")
 const now = new Date("2026-11-01T01:00:00.000Z")
 
@@ -85,7 +86,7 @@ describe("republishLostRuns", () => {
     await fixture.storage.syncRuns.startOrReclaim({
       projectId,
       id: "sync-lapsed",
-      execution: lease(new Date(now.getTime() - 1)),
+      execution: lease(new Date(now.getTime() - JOB_ON_ITS_WAY_MS)),
       claimedAt: longAgo,
     })
     await fixture.storage.syncRuns.startOrReclaim({
@@ -102,6 +103,59 @@ describe("republishLostRuns", () => {
       id: "sync-lapsed:recover:1",
       payload: { runId: "sync-lapsed" },
     })
+  })
+
+  // Pass the lease's end as `lapsedBy` to watch every clean shutdown publish a job beside its own.
+  test("leaves a run just handed back to the job that came back with it", async () => {
+    const fixture = createFixture()
+    await fixture.queueSync("sync-handed-back")
+
+    const claim = await claimTestRun(fixture.storage.syncRuns, {
+      projectId,
+      id: "sync-handed-back",
+    })
+    await fixture.storage.syncRuns.releaseExecution({
+      projectId,
+      id: "sync-handed-back",
+      executionToken: claim.execution.token,
+      spentAttempt: false,
+      releasedAt: new Date(now.getTime() - 1),
+    })
+
+    await expect(fixture.pass()).resolves.toEqual({ republished: 0, settled: 0 })
+  })
+
+  // List running runs oldest first and filter here to watch the live ones use up the limit.
+  test("finds a lapsed run behind more live runs than it looks at", async () => {
+    const fixture = createFixture()
+
+    await fixture.queueSync("sync-live")
+    await fixture.storage.syncRuns.startOrReclaim({
+      projectId,
+      id: "sync-live",
+      execution: { token: "live", queueLeaseExpiresAt: new Date(now.getTime() + 60_000) },
+      claimedAt: new Date(longAgo.getTime() - 1_000),
+    })
+    await fixture.queueSync("sync-lapsed")
+    await fixture.storage.syncRuns.startOrReclaim({
+      projectId,
+      id: "sync-lapsed",
+      execution: { token: "lapsed", queueLeaseExpiresAt: longAgo },
+      claimedAt: longAgo,
+    })
+
+    await expect(fixture.pass(1)).resolves.toEqual({ republished: 1, settled: 0 })
+
+    const [job] = await fixture.claimSyncJobs()
+    expect(job?.job.id).toBe("sync-lapsed:recover:1")
+  })
+
+  test("reads no run, and publishes nothing, when nothing is lost", async () => {
+    const fixture = createFixture()
+    await fixture.queueSync("sync-just-queued", new Date(now.getTime() - 1_000))
+
+    await expect(fixture.pass()).resolves.toEqual({ republished: 0, settled: 0 })
+    await expect(fixture.claimSyncJobs()).resolves.toEqual([])
   })
 
   test("looks at no more than its limit per lane, oldest first", async () => {
@@ -213,6 +267,22 @@ describe("republishLostRuns", () => {
         rowsRead: 0,
       })
     ).resolves.toMatchObject({ status: "succeeded" })
+  })
+
+  // Let the failure leave `recoverLane` at once to watch one bad row hold the lane back for good.
+  test("a run that cannot be ended does not hold back the lane", async () => {
+    const fixture = createFixture()
+    await leaveRunningWithoutLease(fixture, new Date(now.getTime() - ORPHANED_RUN_AFTER_MS))
+    await fixture.queueSync("sync-lost")
+
+    const finish = fixture.storage.syncRuns.finish.bind(fixture.storage.syncRuns)
+    fixture.storage.syncRuns.finish = (input) =>
+      input.id === "sync-old" ? Promise.reject(new Error("row refused")) : finish(input)
+
+    await expect(fixture.pass()).rejects.toThrow("Could not end every run of an older version")
+
+    const [job] = await fixture.claimSyncJobs()
+    expect(job?.job.id).toBe("sync-lost")
   })
 
   // Drop the settling from `recoverLane` to watch the trigger pass wait on this run for good.

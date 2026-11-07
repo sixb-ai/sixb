@@ -16,6 +16,7 @@ import type {
   FinishPipelineStepRunInput,
   ListLatestPipelineRunsInput,
   ListLatestPipelineRunsResult,
+  ListLostRunsInput,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
@@ -34,6 +35,7 @@ import type { SqlParameter } from "./pg-client"
 import {
   claimPgRun,
   confirmPgRunExecution,
+  listLostPgRuns,
   lockPgRun,
   type PgRunExecutionColumns,
   type PgRunTable,
@@ -136,6 +138,10 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
   async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<PipelineRunRecord> {
     return runPgTransaction(this.sql, (tx) => confirmPgRunExecution(tx, PIPELINE_RUNS, input))
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly PipelineRunRecord[]> {
+    return listLostPgRuns(this.sql, PIPELINE_RUNS, input)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

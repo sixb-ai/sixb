@@ -5,11 +5,13 @@ import {
   type ClaimRunInput,
   type ConfirmRunExecutionInput,
   holdsRun,
+  type ListLostRunsInput,
   laterLease,
   mayFinishRun,
   planRunClaim,
   type ReleaseRunExecutionInput,
   type RunClaim,
+  selectLostRuns,
 } from "../run-claim"
 import {
   cloneRecord,
@@ -170,6 +172,10 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
         ),
       },
     })
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly PipelineRunRecord[]> {
+    return selectLostRuns(this.runs.values(), input).map((run) => cloneRecord(run))
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

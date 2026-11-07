@@ -5,11 +5,13 @@ import type { ExecutionStorage } from "../executions"
 import {
   type ClaimRunInput,
   type ConfirmRunExecutionInput,
+  type ListLostRunsInput,
   laterLease,
   mayFinishRun,
   planRunClaim,
   type ReleaseRunExecutionInput,
   type RunClaim,
+  selectLostRuns,
 } from "../run-claim"
 import {
   compareStartedAt,
@@ -175,6 +177,10 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
         ),
       },
     })
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly SyncRunRecord[]> {
+    return selectLostRuns(this.rows.values(), input).map((run) => structuredClone(run))
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

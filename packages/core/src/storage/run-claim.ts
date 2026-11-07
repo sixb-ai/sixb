@@ -54,6 +54,21 @@ export interface ReleaseRunExecutionInput {
   readonly releasedAt?: Date
 }
 
+/**
+ * What the recovery pass asks a store: the runs no delivery can be counted on to reach. Stores answer
+ * from their status index, so a project with nothing lost reads no rows, however many runs it keeps.
+ */
+export interface ListLostRunsInput {
+  readonly projectId: string
+  /** Older than this, a queued run's job should have started it. */
+  readonly queuedBefore: Date
+  /** A running run whose lease ended by this has lost its execution. */
+  readonly lapsedBy: Date
+  /** A running run with no lease, started before this, belongs to an older version that is gone. */
+  readonly orphanedBefore: Date
+  readonly limit: number
+}
+
 export interface ClaimableRun {
   readonly id: string
   readonly status: string
@@ -137,6 +152,45 @@ export function planRunClaim<TRun extends ClaimableRun>(
     attempt: run.attempt + 1,
     execution: input.execution,
   }
+}
+
+type LostRunCandidate = ClaimableRun & {
+  readonly projectId: string
+  readonly queuedAt?: Date
+}
+
+/**
+ * `listLost`, over rows held in memory. Running runs come first, longest lost first: a queued run
+ * may only be waiting for its sibling, and however many of those there are, they must not keep a
+ * lost run from being looked at. Stores that query say the same in their own language.
+ */
+export function selectLostRuns<TRun extends LostRunCandidate>(
+  runs: Iterable<TRun>,
+  input: ListLostRunsInput
+): readonly TRun[] {
+  return [...runs]
+    .filter((run) => run.projectId === input.projectId && isLostRun(run, input))
+    .sort(
+      (left, right) =>
+        Number(right.status === "running") - Number(left.status === "running") ||
+        lostSince(left) - lostSince(right)
+    )
+    .slice(0, input.limit)
+}
+
+function isLostRun(run: LostRunCandidate, input: ListLostRunsInput): boolean {
+  if (run.status === "queued") {
+    return run.queuedAt !== undefined && run.queuedAt.getTime() <= input.queuedBefore.getTime()
+  }
+  if (run.status !== "running") return false
+
+  if (run.execution) return run.execution.queueLeaseExpiresAt.getTime() <= input.lapsedBy.getTime()
+
+  return run.startedAt !== undefined && run.startedAt.getTime() <= input.orphanedBefore.getTime()
+}
+
+function lostSince(run: LostRunCandidate): number {
+  return (run.execution?.queueLeaseExpiresAt ?? run.startedAt ?? run.queuedAt ?? 0).valueOf()
 }
 
 /** A lease only moves forward: confirmations can race, and the latest one must win. */

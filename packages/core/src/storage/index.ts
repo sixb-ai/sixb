@@ -831,6 +831,7 @@ export { InMemoryRulesStorage } from "./rules"
 export type {
   ClaimRunInput,
   ConfirmRunExecutionInput,
+  ListLostRunsInput,
   ReleaseRunExecutionInput,
   RunClaim,
   RunExecution,

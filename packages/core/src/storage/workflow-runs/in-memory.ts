@@ -6,10 +6,12 @@ import type { ExecutionStorage } from "../executions"
 import {
   type ClaimRunInput,
   holdsRun,
+  type ListLostRunsInput,
   mayFinishRun,
   planRunClaim,
   type ReleaseRunExecutionInput,
   type RunClaim,
+  selectLostRuns,
 } from "../run-claim"
 import {
   cloneRecord,
@@ -173,6 +175,10 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
 
     this.runs.set(storageKey(input.projectId, input.id), cloneRecord(run))
     return { outcome, run: cloneRecord(run) }
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly WorkflowRunRecord[]> {
+    return selectLostRuns(this.runs.values(), input).map((run) => cloneRecord(run))
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

@@ -18,6 +18,7 @@ import type {
   FinishWorkflowRunInput,
   ListLatestWorkflowRunsInput,
   ListLatestWorkflowRunsResult,
+  ListLostRunsInput,
   ListWorkflowAgentNodeRunsInput,
   ListWorkflowAgentNodeRunsResult,
   ListWorkflowNodeRunsInput,
@@ -50,6 +51,7 @@ import type { SqlParameter } from "./pg-client"
 import {
   claimPgRun,
   confirmPgRunExecution,
+  listLostPgRuns,
   type PgRunExecutionColumns,
   type PgRunTable,
   pgRunExecutionFields,
@@ -131,6 +133,10 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
   async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<WorkflowRunRecord>> {
     return runPgTransaction(this.sql, (tx) => claimPgRun(tx, WORKFLOW_RUNS, input))
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly WorkflowRunRecord[]> {
+    return listLostPgRuns(this.sql, WORKFLOW_RUNS, input)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
