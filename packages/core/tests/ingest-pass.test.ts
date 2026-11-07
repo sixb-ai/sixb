@@ -20,6 +20,7 @@ function summary(
     pendingDeliveries: 1,
     pendingChanges: 1,
     oldestReceivedAt: new Date(),
+    flushStartedAt: null,
     request: 0,
     leaseExpiresAt: null,
     failureStreak: 0,

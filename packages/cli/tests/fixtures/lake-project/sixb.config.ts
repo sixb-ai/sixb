@@ -141,6 +141,7 @@ function stallIngest(storage: InMemoryStorage): void {
       pendingDeliveries: 2,
       pendingChanges: 2,
       oldestReceivedAt: ago(60 * 60_000),
+      flushStartedAt: null,
       request: 1,
       leaseExpiresAt: null,
       failureStreak: 0,
