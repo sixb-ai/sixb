@@ -18,6 +18,7 @@ import {
   type LakeRetentionReport,
   LakeStorageError,
 } from "@sixb/core/lake-storage"
+import type { SyncRunRecord } from "@sixb/core/storage"
 
 const Room = defineObjectType({
   id: "Room",
@@ -36,6 +37,10 @@ export const lakeFixture = {
   lakeMaintenance: undefined as LakeMaintenanceOptions | undefined,
   /** Whether storage says the orchestrator asks for retention, with no worker answering. */
   unansweredRequest: false,
+  /** Whether a dataset's changes wait in the inbox with nothing writing them. */
+  stalledIngest: false,
+  /** Whether a run lost its job, and a week-old one with it. */
+  lostRuns: false,
   /** How many retention passes report more to clean up before one reports none. */
   retentionPassesWithMore: 0,
   /** A dataset version a projection applied, or "unreadable" when reading them fails. */
@@ -125,9 +130,41 @@ async function refuse(storage: InMemoryStorage, row: Record<string, unknown>): P
   })
 }
 
+function ago(ms: number): Date {
+  return new Date(Date.now() - ms)
+}
+
+function stallIngest(storage: InMemoryStorage): void {
+  storage.datasetIngest.summarize = async () => [
+    {
+      datasetId: things.id,
+      pendingDeliveries: 2,
+      pendingChanges: 2,
+      oldestReceivedAt: ago(60 * 60_000),
+      request: 1,
+      leaseExpiresAt: null,
+      failureStreak: 0,
+      lastFlushedAt: null,
+      rejectedDeliveries: 0,
+    },
+  ]
+}
+
+function loseRuns(storage: InMemoryStorage): void {
+  const lostRun = (id: string, queuedAt: Date) =>
+    ({ id, status: "queued", attempt: 0, queuedAt }) as SyncRunRecord
+
+  storage.syncRuns.listLost = async () => [
+    lostRun("lost", ago(60 * 60_000)),
+    lostRun("stale", ago(8 * 24 * 60 * 60_000)),
+  ]
+}
+
 function createStorage(): InMemoryStorage {
   const storage = new InMemoryStorage()
   if (lakeFixture.unansweredRequest) void storage.maintenanceHeartbeats.record(unansweredBeat())
+  if (lakeFixture.stalledIngest) stallIngest(storage)
+  if (lakeFixture.lostRuns) loseRuns(storage)
 
   const rejectedRow = lakeFixture.rejectedRow
   if (rejectedRow) {
