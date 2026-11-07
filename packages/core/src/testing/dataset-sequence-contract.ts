@@ -201,7 +201,6 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
         })
         expect((await rows(storage)).map((row) => row.name)).toEqual(["Sam"])
         expect(await host.events.read()).toMatchObject([
-          { type: "dataset.ingest.queued", payload: { datasetId: dataset.id } },
           { type: "dataset.version.committed", payload: { versionId: committed?.versionId } },
         ])
       } finally {

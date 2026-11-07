@@ -240,14 +240,6 @@ describe("compileRoutes", () => {
     ])
   })
 
-  // Reproduce: drop the `datasetIngest` route from compile-routes.ts.
-  test("ingestion requests of every dataset route to flush jobs on the lake lane", () => {
-    expect(jobsFor({ datasetIngest: true }, "dataset.ingest.queued")).toEqual([
-      { queue: "lake", job: { type: "dataset.ingest.flush.requested" } },
-    ])
-    expect(jobsFor({}, "dataset.ingest.queued")).toEqual([])
-  })
-
   test("dataset projections keep their direct version-scoped route", () => {
     const descriptor: ProjectionDispatchDescriptor = {
       projectionId: "rooms-projection",

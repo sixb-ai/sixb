@@ -86,6 +86,7 @@ function setup(lakeStorage = new InMemoryLakeStorage()) {
   Object.defineProperty(storage, "datasetIngest", { value: new InMemoryDatasetIngestStorage() })
   const blobStorage = new InMemoryBlobStorage()
   const broker = new InMemoryBroker()
+  const queues = new InMemoryQueues()
   const reports: SixbErrorContext[] = []
   const host = new SixbHost({
     id: "ingest-flush-test",
@@ -94,7 +95,7 @@ function setup(lakeStorage = new InMemoryLakeStorage()) {
     lakeStorage,
     broker,
     storage,
-    queues: new InMemoryQueues(),
+    queues,
     blobStorage,
     onError: (_error, context) => {
       reports.push(context)
@@ -123,6 +124,7 @@ function setup(lakeStorage = new InMemoryLakeStorage()) {
   return {
     host,
     storage,
+    queues,
     lakeStorage,
     blobStorage,
     broker,
@@ -680,7 +682,7 @@ test("a flush that spends its budget asks for the next job and leaves the rest",
   // waits with no request open.
   jest.useFakeTimers()
   const lakeStorage = new InMemoryLakeStorage()
-  const { host, storage, ingest, flush } = setup(lakeStorage)
+  const { host, storage, queues, ingest, flush } = setup(lakeStorage)
 
   // Two deliveries that each fill a batch.
   const batchOf = (from: number) =>
@@ -702,12 +704,10 @@ test("a flush that spends its budget asks for the next job and leaves the rest",
     { datasetId: contacts.id, pendingDeliveries: 1, leaseExpiresAt: null },
   ])
 
-  const queued = (await host.events.read()).filter(
-    (event) => event.type === "dataset.ingest.queued"
-  )
-  expect(queued.map((event) => event.payload)).toEqual([
-    { datasetId: contacts.id, request: 0 },
-    { datasetId: contacts.id, request: 1 },
+  const queued = await queues.lake.claim({ projectId: host.id, workerId: "test", limit: 10 })
+  expect(queued.map(({ job }) => job.id)).toEqual([
+    `ingest-flush:${contacts.id}:0`,
+    `ingest-flush:${contacts.id}:1`,
   ])
 })
 

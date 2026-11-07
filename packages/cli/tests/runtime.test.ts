@@ -536,8 +536,8 @@ describe("startSixbRuntime", () => {
     await runtime.stop()
   })
 
-  // Reproduce: leave `datasetIngest` out of the compileRoutes call in lib/runtime.ts; the delivery
-  // then waits for the reconciler's first pass, 30 s later.
+  // Reproduce: leave the LakeWorker out of startSixbRuntime in lib/runtime.ts; the delivery then
+  // waits, stored, for a worker that never comes.
   test("co-hosts the flush of ingested changes, from ingestion to a dataset version", async () => {
     const people = defineDataset("raw.crm.people", {
       schema: [col("id", "string"), col("name", "string")],

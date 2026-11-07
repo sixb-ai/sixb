@@ -28,11 +28,7 @@ export type {
   PropertyChangeMap,
   PropertyChangeOperation,
 } from "../property-changes"
-export type {
-  DatasetEvent,
-  DatasetIngestQueuedEvent,
-  DatasetVersionCommittedEvent,
-} from "./datasets"
+export type { DatasetEvent, DatasetVersionCommittedEvent } from "./datasets"
 export type {
   LinkCreatedEvent,
   LinkDeletedEvent,
