@@ -92,6 +92,7 @@ function unansweredBeat() {
 
   return {
     projectId: "cli-lake-project",
+    owner: "orchestrator" as const,
     beatAt: now,
     everyMs: 30_000,
     passes: [{ id: "lake-retention", lastSucceededAt: now, consecutiveFailures: 0 }],

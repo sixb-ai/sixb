@@ -138,6 +138,7 @@ describe("GET /api/lake/health", () => {
 
     await storage.maintenanceHeartbeats?.record({
       projectId,
+      owner: "orchestrator",
       beatAt: new Date(),
       everyMs: 30_000,
       passes: [
