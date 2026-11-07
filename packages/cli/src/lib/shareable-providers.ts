@@ -14,12 +14,12 @@ const SLOTS = [
   {
     name: "queues",
     get: (sixb: LoadedSixbHost): Broker | Queues => sixb.queues,
-    replacements: "@sixb/bullmq",
+    replacements: "@sixb/queues-bullmq",
   },
   {
     name: "broker",
     get: (sixb: LoadedSixbHost): Broker | Queues => sixb.broker,
-    replacements: "@sixb/redis or @sixb/nats",
+    replacements: "@sixb/broker-redis or @sixb/broker-nats",
   },
 ] as const
 
