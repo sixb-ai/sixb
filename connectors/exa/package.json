@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-exa",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Exa web search and content retrieval for Sixb, and a web search backend for its agent",
   "keywords": [
     "sixb",

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/agent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "The Sixb agent harness: one loop, prompt and tools for every runner",
   "keywords": [
     "sixb",

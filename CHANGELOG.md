@@ -2,6 +2,63 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-11-07 — Sixb 0.2.2
+
+0.2.2 gives the Agent the web, background commands and the workspace's own instructions, runs it
+on your computer from the desktop app, and plans PostgreSQL member reads over only the types they
+reach.
+
+### Highlights
+
+- Search the web with the Agent's `web_search` tool whenever the project has a web search model,
+  now a model kind of its own in `models.webSearch`. Every Vercel AI Gateway language model
+  carries one (`gateway.webSearch("perplexity" | "exa" | "parallel")`), and `exaSearch` from
+  `@sixb/connector-exa` is another. Searches are recorded and cost-limited like any model call.
+- Read pages with `web_fetch({ url, question? })`, within the sandbox's network: HTML becomes
+  markdown, a large page is saved to a file the Agent reads in pieces, and a question is answered
+  from the page. Narrow both tools with `agent.web: { allowedDomains, blockedDomains }`, or turn
+  them off with `agent.web: false`.
+- Run commands in the background with `bash({ run_in_background })`, `bash_output` and
+  `bash_stop`. A command gets 2 minutes by default and up to 10, where it had 30 seconds. The app
+  and the terminal show a running command as a live card, and either can stop it.
+- Read the workspace's `AGENTS.md` (else `CLAUDE.md`) from the repository root down to the working
+  folder into the Agent's instructions, after Sixb's rules and `SIXB.md`.
+- Run the Agent on your computer from the desktop app: a new conversation runs in a folder you
+  choose, and `sixb connect` keeps the computer available without `sixb` open. `sixb agent` sends
+  to a conversation from anywhere and follows whatever runs it.
+- Plan a member's PostgreSQL reads over their own types' partitions, index view conditions, keep
+  object statistics fresh between publications, and serve descending sorts from ascending sort
+  indexes. Every framework connection starts with `jit = off`.
+- Connect the only account on return from OAuth instead of stopping at account selection.
+- DuckLake fetches missing DuckDB extensions over HTTPS, so a lake opens where plain HTTP is
+  blocked.
+- Delete Pipedrive persons and organizations with `persons.delete(id)` and
+  `organizations.delete(id)`.
+
+### Upgrade notes
+
+- Run the migrations: PostgreSQL `087-agent-computer-background-commands` and
+  `088-web-search-model-kind`, SQLite `084-agent-computer-background-commands` and
+  `085-web-search-model-kind`. PostgreSQL re-prepares each object type's partition once.
+- Vercel AI Gateway projects get `web_search` with no configuration, and every project gets
+  `web_fetch`. Set `agent.web: false` to keep the Agent off the web. `web_search` and `web_fetch`
+  are reserved tool names: a model's own tool by that name fails at startup unless `agent.web` is
+  `false`.
+- `@sixb/connector-exa` `0.2.1` removes `@sixb/connector-exa/agent-tools` (`exaWebSearch`,
+  `exaWebFetch`). Use `models: { webSearch: [exaSearch({ apiKey })] }` instead.
+- A computer runs messages sent from the web only in folders allowed on it, per project, and the
+  list starts empty: allow a folder again from the terminal or the desktop app.
+- Equal values in a sort now follow the last sorted property's direction on every store.
+
+### Package versions
+
+- `0.2.2`: `@sixb/core`, `@sixb/agent`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/ducklake`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`,
+  `@sixb/vercel-ai-gateway`.
+- `0.2.1`: `@sixb/app`, `@sixb/client`, `@sixb/desktop`, `@sixb/cli-core`, `@sixb/anthropic`,
+  `@sixb/connector-exa`, `@sixb/connector-pipedrive`.
+
 ## 2026-11-05 — Sixb 0.2.1
 
 0.2.1 runs pipelines and syncs only when there is something new to read, and keeps cost limits

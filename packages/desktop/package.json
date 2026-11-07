@@ -1,6 +1,6 @@
 {
   "name": "@sixb/desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Ship a Sixb project's app as a desktop app",
   "keywords": [
     "sixb",
