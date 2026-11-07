@@ -213,6 +213,19 @@ describe("github connector", () => {
       { per_page: "50", since: "2026-01-01T00:00:00Z" },
     ],
     [
+      "repo().branches.list",
+      (client: GitHubClient) =>
+        client.repo(webRepo).branches.list({ protected: true, pageSize: 50 }),
+      "/repos/acme/web/branches",
+      { protected: "true", per_page: "50" },
+    ],
+    [
+      "repo().branches.list unprotected",
+      (client: GitHubClient) => client.repo(webRepo).branches.list({ protected: false }),
+      "/repos/acme/web/branches",
+      { protected: "false" },
+    ],
+    [
       "repo().releases.list",
       (client: GitHubClient) => client.repo(webRepo).releases.list({ pageSize: 50 }),
       "/repos/acme/web/releases",
@@ -230,6 +243,150 @@ describe("github connector", () => {
         client.repo(webRepo).releases.reactions.list(7, { content: "rocket", pageSize: 50 }),
       "/repos/acme/web/releases/7/reactions",
       { content: "rocket", per_page: "50" },
+    ],
+    [
+      "repo().pulls.list",
+      (client: GitHubClient) =>
+        client.repo(webRepo).pulls.list({
+          state: "closed",
+          head: "acme:feature/login",
+          base: "main",
+          sort: "long-running",
+          direction: "asc",
+          pageSize: 50,
+        }),
+      "/repos/acme/web/pulls",
+      {
+        state: "closed",
+        head: "acme:feature/login",
+        base: "main",
+        sort: "long-running",
+        direction: "asc",
+        per_page: "50",
+      },
+    ],
+    [
+      "repo().pulls.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).pulls.list(),
+      "/repos/acme/web/pulls",
+      {},
+    ],
+    [
+      "repo().pulls.reviews.list",
+      (client: GitHubClient) => client.repo(webRepo).pulls.reviews.list(12, { pageSize: 50 }),
+      "/repos/acme/web/pulls/12/reviews",
+      { per_page: "50" },
+    ],
+    [
+      "repo().stacks.list for one pull request",
+      (client: GitHubClient) =>
+        client.repo(webRepo).stacks.list({ pullRequest: 1086, pageSize: 50 }),
+      "/repos/acme/web/stacks",
+      { pull_request: "1086", per_page: "50" },
+    ],
+    [
+      "repo().stacks.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).stacks.list(),
+      "/repos/acme/web/stacks",
+      {},
+    ],
+    [
+      "repo().labels.list",
+      (client: GitHubClient) => client.repo(webRepo).labels.list({ pageSize: 100 }),
+      "/repos/acme/web/labels",
+      { per_page: "100" },
+    ],
+    [
+      "repo().assignees.list",
+      (client: GitHubClient) => client.repo(webRepo).assignees.list({ pageSize: 100 }),
+      "/repos/acme/web/assignees",
+      { per_page: "100" },
+    ],
+    [
+      "repo().milestones.list",
+      (client: GitHubClient) =>
+        client
+          .repo(webRepo)
+          .milestones.list({ state: "all", sort: "completeness", direction: "desc", pageSize: 50 }),
+      "/repos/acme/web/milestones",
+      { state: "all", sort: "completeness", direction: "desc", per_page: "50" },
+    ],
+    [
+      "repo().milestones.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).milestones.list(),
+      "/repos/acme/web/milestones",
+      {},
+    ],
+    [
+      "repo().issues.timeline",
+      (client: GitHubClient) => client.repo(webRepo).issues.timeline(7, { pageSize: 100 }),
+      "/repos/acme/web/issues/7/timeline",
+      { per_page: "100" },
+    ],
+    [
+      "repo().issues.subIssues.list",
+      (client: GitHubClient) => client.repo(webRepo).issues.subIssues.list(7, { pageSize: 50 }),
+      "/repos/acme/web/issues/7/sub_issues",
+      { per_page: "50" },
+    ],
+    [
+      "repo().issues.dependencies.blockedBy",
+      (client: GitHubClient) => client.repo(webRepo).issues.dependencies.blockedBy(7),
+      "/repos/acme/web/issues/7/dependencies/blocked_by",
+      {},
+    ],
+    [
+      "repo().issues.dependencies.blocking",
+      (client: GitHubClient) => client.repo(webRepo).issues.dependencies.blocking(7),
+      "/repos/acme/web/issues/7/dependencies/blocking",
+      {},
+    ],
+    [
+      "repo().issues.comments.listForRepository",
+      (client: GitHubClient) =>
+        client.repo(webRepo).issues.comments.listForRepository({
+          since: "2026-11-01T00:00:00Z",
+          sort: "updated",
+          direction: "asc",
+          pageSize: 100,
+        }),
+      "/repos/acme/web/issues/comments",
+      { since: "2026-11-01T00:00:00Z", sort: "updated", direction: "asc", per_page: "100" },
+    ],
+    [
+      "repo().issues.comments.listForRepository unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).issues.comments.listForRepository(),
+      "/repos/acme/web/issues/comments",
+      {},
+    ],
+    [
+      "repo().commits.list",
+      (client: GitHubClient) =>
+        client.repo(webRepo).commits.list({
+          sha: "release/1.0",
+          path: "src/app.ts",
+          author: "mona",
+          committer: "hubot",
+          since: "2026-10-01T00:00:00Z",
+          until: "2026-11-01T00:00:00Z",
+          pageSize: 50,
+        }),
+      "/repos/acme/web/commits",
+      {
+        sha: "release/1.0",
+        path: "src/app.ts",
+        author: "mona",
+        committer: "hubot",
+        since: "2026-10-01T00:00:00Z",
+        until: "2026-11-01T00:00:00Z",
+        per_page: "50",
+      },
+    ],
+    [
+      "repo().commits.list unfiltered",
+      (client: GitHubClient) => client.repo(webRepo).commits.list(),
+      "/repos/acme/web/commits",
+      {},
     ],
   ] as const)("%s maps its filters and returns GitHub's items", async (_name, list, path, query) => {
     const calls = record(() => json(listItems))
@@ -310,6 +467,88 @@ describe("github connector", () => {
       (c) => c.repo(webRepo).issues.comments.delete(99),
       "DELETE",
       "/repos/acme/web/issues/comments/99",
+      undefined,
+    ],
+    [
+      "repo().branches.get",
+      (c) => c.repo(webRepo).branches.get("feature/login"),
+      "GET",
+      "/repos/acme/web/branches/feature%2Flogin",
+      undefined,
+    ],
+    [
+      "repo().pulls.get",
+      (c) => c.repo(webRepo).pulls.get(12),
+      "GET",
+      "/repos/acme/web/pulls/12",
+      undefined,
+    ],
+    [
+      "repo().stacks.get",
+      (c) => c.repo(webRepo).stacks.get(1085),
+      "GET",
+      "/repos/acme/web/stacks/1085",
+      undefined,
+    ],
+    // Reproduce: build the label path with the raw name instead of `pathPart`; the space and the
+    // slash then reach GitHub unencoded and name another path.
+    [
+      "repo().labels.get with a space",
+      (c) => c.repo(webRepo).labels.get("good first issue"),
+      "GET",
+      "/repos/acme/web/labels/good%20first%20issue",
+      undefined,
+    ],
+    [
+      "repo().labels.get with a slash",
+      (c) => c.repo(webRepo).labels.get("area/ui"),
+      "GET",
+      "/repos/acme/web/labels/area%2Fui",
+      undefined,
+    ],
+    [
+      "repo().labels.create",
+      (c) =>
+        c.repo(webRepo).labels.create({ name: "bug", color: "#D73A4A", description: "Broken" }),
+      "POST",
+      "/repos/acme/web/labels",
+      { name: "bug", color: "d73a4a", description: "Broken" },
+    ],
+    [
+      "repo().labels.update",
+      (c) => c.repo(webRepo).labels.update("area/ui", { newName: "area/app", color: "0E8A16" }),
+      "PATCH",
+      "/repos/acme/web/labels/area%2Fui",
+      { new_name: "area/app", color: "0e8a16" },
+    ],
+    [
+      "repo().labels.delete",
+      (c) => c.repo(webRepo).labels.delete("wontfix"),
+      "DELETE",
+      "/repos/acme/web/labels/wontfix",
+      undefined,
+    ],
+    [
+      "repo().milestones.get",
+      (c) => c.repo(webRepo).milestones.get(3),
+      "GET",
+      "/repos/acme/web/milestones/3",
+      undefined,
+    ],
+    [
+      "repo().commits.get by SHA",
+      (c) => c.repo(webRepo).commits.get("6dcb09b5b57875f334f61aebed695e2e4193db5e"),
+      "GET",
+      "/repos/acme/web/commits/6dcb09b5b57875f334f61aebed695e2e4193db5e",
+      undefined,
+    ],
+    // Reproduce: build the commit path with the raw ref instead of `pathPart`; the slash then
+    // splits it into two segments.
+    [
+      "repo().commits.get by branch",
+      (c) => c.repo(webRepo).commits.get("release/1.0"),
+      "GET",
+      "/repos/acme/web/commits/release%2F1.0",
       undefined,
     ],
     [
@@ -455,6 +694,55 @@ describe("github connector", () => {
     expect(second).toMatchObject({ items: [{ id: 2 }], hasMore: false, nextPageToken: undefined })
   })
 
+  test("follows a branch page's next link with its protected filter", async () => {
+    const calls = record((_, index) =>
+      json(
+        [{ name: `release/${index}`, commit: { sha: `sha-${index}`, url: "x" }, protected: true }],
+        index === 1
+          ? nextLink("https://api.github.com/repos/acme/web/branches?protected=true&page=2")
+          : undefined
+      )
+    )
+    const branches = (await connect()).repo(webRepo).branches
+
+    const first = await branches.list({ protected: true })
+    const second = await branches.list({ pageToken: first.nextPageToken })
+
+    expect(first).toMatchObject({ items: [{ name: "release/1" }], hasMore: true })
+    expect(calls[1]?.url.pathname).toBe("/repos/acme/web/branches")
+    expect(Object.fromEntries(calls[1]?.url.searchParams ?? [])).toEqual({
+      protected: "true",
+      page: "2",
+    })
+    expect(second).toMatchObject({ items: [{ name: "release/2" }], hasMore: false })
+  })
+
+  test("follows a commit page's next link with its filters", async () => {
+    const calls = record((_, index) =>
+      json(
+        [{ sha: `sha-${index}` }],
+        index === 1
+          ? nextLink(
+              "https://api.github.com/repos/acme/web/commits?sha=main&since=2026-10-01T00%3A00%3A00Z&page=2"
+            )
+          : undefined
+      )
+    )
+    const commits = (await connect()).repo(webRepo).commits
+
+    const first = await commits.list({ sha: "main", since: "2026-10-01T00:00:00Z" })
+    const second = await commits.list({ pageToken: first.nextPageToken })
+
+    expect(first).toMatchObject({ items: [{ sha: "sha-1" }], hasMore: true })
+    expect(calls[1]?.url.pathname).toBe("/repos/acme/web/commits")
+    expect(Object.fromEntries(calls[1]?.url.searchParams ?? [])).toEqual({
+      sha: "main",
+      since: "2026-10-01T00:00:00Z",
+      page: "2",
+    })
+    expect(second).toMatchObject({ items: [{ sha: "sha-2" }], hasMore: false })
+  })
+
   test("rejects caller-provided pageTokens that decode to absolute URLs", async () => {
     const calls = record()
     const client = await connect()
@@ -497,10 +785,244 @@ describe("github connector", () => {
     expect(calls[1]?.url.pathname).toBe("/api/v3/user/repos")
   })
 
-  test("rejects invalid issue ids, comment ids and release tags before requesting", async () => {
-    const calls = record()
-    const { issues, releases } = (await connect()).repo(webRepo)
+  // Shapes as GitHub returned them for sixb-ai/sixb's stack #1085, trimmed to the fields read.
+  test("reads where a pull request sits in its stack, and the stack's pull requests from the bottom up", async () => {
+    const stack = {
+      id: 3203111,
+      number: 1085,
+      base: { ref: "main", sha: "abae626" },
+      size: 5,
+      position: 5,
+    }
+    const branch = (ref: string) => ({
+      ref,
+      sha: `${ref}-sha`,
+      repo: { id: 1, name: "web", url: "https://api.github.com/repos/acme/web" },
+    })
+    record((request) => {
+      if (request.url.pathname.endsWith("/pulls")) {
+        return json([
+          { number: 1087, title: "Standalone" },
+          { number: 1086, title: "Top of the stack", stack },
+        ])
+      }
+      return json({
+        id: 3203111,
+        node_id: "PRS_1",
+        number: 1085,
+        url: "https://api.github.com/repos/acme/web/stacks/1085",
+        base: { ref: "main" },
+        open: true,
+        created_at: "2026-11-07T20:50:28Z",
+        pull_requests: [
+          {
+            number: 1081,
+            title: "Examples",
+            state: "open",
+            draft: true,
+            merged_at: null,
+            base: branch("main"),
+            head: branch("examples-upgrades"),
+          },
+          {
+            number: 1086,
+            title: "Launch",
+            state: "open",
+            draft: false,
+            merged_at: null,
+            base: branch("phone/shell"),
+            head: branch("phone/launch"),
+          },
+        ],
+      })
+    })
+    const repo = (await connect()).repo(webRepo)
 
+    const page = await repo.pulls.list()
+    const [standalone, stacked] = page.items
+    const detail = await repo.stacks.get(stacked!.stack!.number)
+
+    expect(standalone?.stack).toBeUndefined()
+    expect(stacked?.stack).toEqual(stack)
+    expect(
+      detail.pull_requests.map(({ number, base, head }) => [number, base.ref, head.ref])
+    ).toEqual([
+      [1081, "main", "examples-upgrades"],
+      [1086, "phone/shell", "phone/launch"],
+    ])
+  })
+
+  test("checks whether a user can be assigned", async () => {
+    const calls = record((request) =>
+      request.url.pathname.endsWith("/mona")
+        ? new Response(null, { status: 204 })
+        : request.url.pathname.endsWith("/octocat")
+          ? new Response(null, { status: 404 })
+          : json({ message: "Forbidden" }, { status: 403 })
+    )
+    const assignees = (await connect()).repo(webRepo).assignees
+
+    expect(await assignees.check("mona")).toBe(true)
+    expect(await assignees.check("octocat")).toBe(false)
+    const failure: unknown = await assignees.check("hubot").catch((caught) => caught)
+
+    expect(calls.map(({ url }) => url.pathname)).toEqual([
+      "/repos/acme/web/assignees/mona",
+      "/repos/acme/web/assignees/octocat",
+      "/repos/acme/web/assignees/hubot",
+    ])
+    expect(failure).toBeInstanceOf(GitHubApiError)
+  })
+
+  // Reproduce: drop the 404 branch in `issues.parent()` and the first call throws; return null
+  // without reading the issue and the missing issue resolves instead of throwing.
+  test("reads an issue's parent, null without one, and throws for a missing issue or other failures", async () => {
+    const calls = record((request) => {
+      const [, , , , , number, parent] = request.url.pathname.split("/")
+      if (number === "289183") return json({ number: 289180, title: "Claude agent" })
+      if (number === "334519") {
+        return parent
+          ? json({ message: "No parent issue found" }, { status: 404 })
+          : json({ number: 334519 })
+      }
+      if (number === "404") return json({ message: "Not Found" }, { status: 404 })
+      return json({ message: "Forbidden" }, { status: 403 })
+    })
+    const issues = (await connect()).repo(webRepo).issues
+
+    expect(await issues.parent(334519)).toBeNull()
+    expect(calls.map(({ url }) => url.pathname)).toEqual([
+      "/repos/acme/web/issues/334519/parent",
+      "/repos/acme/web/issues/334519",
+    ])
+    expect(await issues.parent(289183)).toMatchObject({ number: 289180 })
+    expect(await issues.parent(404).catch((caught) => caught)).toMatchObject({ status: 404 })
+    expect(await issues.parent(1).catch((caught) => caught)).toBeInstanceOf(GitHubApiError)
+  })
+
+  // Entries shaped as GitHub returned them for microsoft/vscode#289180 and cli/cli#14963.
+  test("narrows a timeline's entries by event", async () => {
+    const actor = { login: "mona", id: 1 }
+    const event = (fields: Record<string, unknown>) => ({
+      id: 1,
+      node_id: "E_1",
+      url: "https://api.github.com/repos/acme/web/issues/events/1",
+      actor,
+      commit_id: null,
+      commit_url: null,
+      created_at: "2026-01-20T19:24:58Z",
+      ...fields,
+    })
+    record(() =>
+      json([
+        event({ event: "labeled", label: { name: "bug", color: "d73a4a" } }),
+        event({
+          event: "sub_issue_added",
+          sub_issue: {
+            number: 289183,
+            title: "Race condition",
+            state: "closed",
+            state_reason: null,
+            repository: { id: 41881900, name: "vscode", full_name: "microsoft/vscode" },
+          },
+        }),
+        event({ event: "renamed", rename: { from: "Old", to: "New" } }),
+        {
+          event: "commented",
+          id: 2,
+          node_id: "IC_2",
+          url: "u",
+          html_url: "h",
+          issue_url: "i",
+          body: "Looks good",
+          user: actor,
+          actor,
+          author_association: "MEMBER",
+          created_at: "2026-01-21T00:00:00Z",
+          updated_at: "2026-01-21T00:00:00Z",
+        },
+        {
+          event: "cross-referenced",
+          actor,
+          created_at: "2026-01-22T00:00:00Z",
+          updated_at: "2026-01-22T00:00:00Z",
+          source: { type: "issue", issue: { number: 290001, pull_request: { url: "p" } } },
+        },
+        event({ event: "closed", state_reason: "completed" }),
+      ])
+    )
+    const page = await (await connect()).repo(webRepo).issues.timeline(289180)
+
+    const summary = page.items.map((entry) => {
+      switch (entry.event) {
+        case "labeled":
+          return `labeled ${entry.label.name}`
+        case "sub_issue_added":
+          return `added #${entry.sub_issue.number}`
+        case "renamed":
+          return `renamed to ${entry.rename.to}`
+        case "commented":
+          return `${entry.user.login}: ${entry.body}`
+        case "cross-referenced":
+          return `mentioned in #${entry.source.issue.number}`
+        case "closed":
+          return `closed as ${entry.state_reason}`
+        default:
+          return entry.event
+      }
+    })
+
+    expect(summary).toEqual([
+      "labeled bug",
+      "added #289183",
+      "renamed to New",
+      "mona: Looks good",
+      "mentioned in #290001",
+      "closed as completed",
+    ])
+  })
+
+  test("rejects invalid issue, pull and comment ids, release tags, branch names and commit refs before requesting", async () => {
+    const calls = record()
+    const { assignees, branches, commits, issues, labels, milestones, pulls, releases, stacks } = (
+      await connect()
+    ).repo(webRepo)
+
+    await expect(branches.get(" ")).rejects.toThrow("branch must not be empty")
+    await expect(commits.get(" ")).rejects.toThrow("ref must not be empty")
+    await expect(pulls.get(0)).rejects.toThrow("pullNumber must be a positive integer")
+    await expect(pulls.get(1.5)).rejects.toThrow("pullNumber must be a positive integer")
+    await expect(pulls.reviews.list(0)).rejects.toThrow("pullNumber must be a positive integer")
+    // Reproduce: set `pull_request` from the raw option in resources/stacks.ts.
+    await expect(stacks.list({ pullRequest: 0 })).rejects.toThrow(
+      "pullRequest must be a positive integer"
+    )
+    await expect(stacks.get(1.5)).rejects.toThrow("stackNumber must be a positive integer")
+    await expect(labels.get(" ")).rejects.toThrow("name must not be empty")
+    await expect(labels.create({ name: " ", color: "d73a4a" })).rejects.toThrow(
+      "name must not be empty"
+    )
+    await expect(labels.update("bug", { newName: " " })).rejects.toThrow(
+      "newName must not be empty"
+    )
+    // Reproduce: send `input.color` as given in resources/labels.ts.
+    await expect(labels.create({ name: "bug", color: "red" })).rejects.toThrow(
+      "color must be six hex digits"
+    )
+    await expect(labels.update("bug", { color: "#12345" })).rejects.toThrow(
+      "color must be six hex digits"
+    )
+    await expect(assignees.check(" ")).rejects.toThrow("username must not be empty")
+    await expect(milestones.get(0)).rejects.toThrow("milestoneNumber must be a positive integer")
+    await expect(issues.timeline(0)).rejects.toThrow("issueNumber must be a positive integer")
+    await expect(issues.parent(1.5)).rejects.toThrow("issueNumber must be a positive integer")
+    await expect(issues.subIssues.list(0)).rejects.toThrow("issueNumber must be a positive integer")
+    await expect(issues.dependencies.blockedBy(0)).rejects.toThrow(
+      "issueNumber must be a positive integer"
+    )
+    await expect(issues.dependencies.blocking(0)).rejects.toThrow(
+      "issueNumber must be a positive integer"
+    )
     await expect(issues.get(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.get(0)).rejects.toThrow("commentId must be a positive integer")
@@ -512,6 +1034,56 @@ describe("github connector", () => {
       "reactionId must be a positive integer"
     )
 
+    expect(calls).toHaveLength(0)
+  })
+
+  const pullAndCommitCalls: readonly (readonly [
+    name: string,
+    run: (repo: GitHubRepositoryScope, signal: AbortSignal) => Promise<unknown>,
+  ])[] = [
+    ["pulls.list", (r, signal) => r.pulls.list({ signal })],
+    ["pulls.get", (r, signal) => r.pulls.get(12, { signal })],
+    ["pulls.reviews.list", (r, signal) => r.pulls.reviews.list(12, { signal })],
+    ["stacks.list", (r, signal) => r.stacks.list({ signal })],
+    ["labels.list", (r, signal) => r.labels.list({ signal })],
+    ["labels.get", (r, signal) => r.labels.get("bug", { signal })],
+    ["labels.create", (r, signal) => r.labels.create({ name: "bug", color: "d73a4a" }, { signal })],
+    ["labels.update", (r, signal) => r.labels.update("bug", { color: "d73a4a" }, { signal })],
+    ["labels.delete", (r, signal) => r.labels.delete("bug", { signal })],
+    ["assignees.list", (r, signal) => r.assignees.list({ signal })],
+    ["assignees.check", (r, signal) => r.assignees.check("mona", { signal })],
+    ["milestones.list", (r, signal) => r.milestones.list({ signal })],
+    ["milestones.get", (r, signal) => r.milestones.get(3, { signal })],
+    ["issues.timeline", (r, signal) => r.issues.timeline(7, { signal })],
+    ["issues.parent", (r, signal) => r.issues.parent(7, { signal })],
+    ["issues.get", (r, signal) => r.issues.get(7, { signal })],
+    ["issues.list", (r, signal) => r.issues.list({ signal })],
+    ["issues.comments.list", (r, signal) => r.issues.comments.list(7, { signal })],
+    ["issues.comments.get", (r, signal) => r.issues.comments.get(99, { signal })],
+    ["issues.subIssues.list", (r, signal) => r.issues.subIssues.list(7, { signal })],
+    [
+      "issues.dependencies.blockedBy",
+      (r, signal) => r.issues.dependencies.blockedBy(7, { signal }),
+    ],
+    ["issues.dependencies.blocking", (r, signal) => r.issues.dependencies.blocking(7, { signal })],
+    [
+      "issues.comments.listForRepository",
+      (r, signal) => r.issues.comments.listForRepository({ signal }),
+    ],
+    ["stacks.get", (r, signal) => r.stacks.get(1085, { signal })],
+    ["commits.list", (r, signal) => r.commits.list({ signal })],
+    ["commits.get", (r, signal) => r.commits.get("main", { signal })],
+  ]
+
+  // Reproduce: drop `signal` from one method's request init in resources/pulls.ts or
+  // resources/commits.ts; its row then reaches fetch and resolves.
+  test.each(pullAndCommitCalls)("%s forwards the caller's signal", async (_name, run) => {
+    const calls = record(() => json({}))
+    const repo = (await connect()).repo(webRepo)
+
+    const error: unknown = await run(repo, AbortSignal.abort()).catch((caught) => caught)
+
+    expect(error).toMatchObject({ name: "AbortError" })
     expect(calls).toHaveLength(0)
   })
 
@@ -637,6 +1209,200 @@ describe("github connector", () => {
 
     expect(calls).toHaveLength(1)
     expect(calls[0]?.url.pathname).toBe("/api/uploads/repos/acme/web/releases/7/assets")
+  })
+
+  test("asks GitHub for an issue's, pull request's or comment's body in the requested format", async () => {
+    const calls = record((request) =>
+      /\/(comments|issues|pulls)$/.test(request.url.pathname) ? json([]) : json({ id: 1 })
+    )
+    const client = await connect()
+    const issues = client.repo(webRepo).issues
+
+    await issues.get(5)
+    await issues.get(5, { bodyFormat: "full" })
+    await issues.list({ bodyFormat: "html" })
+    await issues.comments.list(5, { bodyFormat: "text" })
+    await issues.comments.get(9, { bodyFormat: "full" })
+    await client.repo(webRepo).pulls.list({ bodyFormat: "html" })
+    await client.repo(webRepo).pulls.get(12, { bodyFormat: "full" })
+    const invalid: unknown = await issues
+      .get(5, { bodyFormat: "markdown" as never })
+      .catch((caught) => caught)
+
+    expect(calls.map(({ headers }) => headers.get("accept"))).toEqual([
+      "application/vnd.github+json",
+      "application/vnd.github.full+json",
+      "application/vnd.github.html+json",
+      "application/vnd.github.text+json",
+      "application/vnd.github.full+json",
+      "application/vnd.github.html+json",
+      "application/vnd.github.full+json",
+    ])
+    expect((invalid as Error).message).toContain("bodyFormat must be one of")
+  })
+
+  describe("attachments", () => {
+    const image = "1f11b016-6048-41fa-b313-5243b18d1399"
+    const video = "b4950445-beaf-455b-9464-7cb66ebc63a8"
+    const legacy = "ec748ba6-c002-4ee2-bd01-c66d510f2666"
+    const signedImage = `https://private-user-images.githubusercontent.com/20358651/663688738-${image}.png?jwt=eyJ.sig&amp;x=1`
+
+    test("finds each image, video and file a body links to, once and in order", async () => {
+      const attachments = (await connect()).attachments
+
+      const found = attachments.find({
+        body: [
+          `<img width="846" alt="Image" src="https://github.com/user-attachments/assets/${image}" />`,
+          "",
+          `https://github.com/user-attachments/assets/${video}`,
+          "",
+          `![old](https://github.com/acme/web/assets/20358651/${legacy}) and again https://github.com/user-attachments/assets/${image}.`,
+          "[report.pdf](https://github.com/user-attachments/files/17923/report%20Q3.pdf)",
+          "Not attachments: https://github.com/acme/web/issues/3 https://evil.example/user-attachments/assets/" +
+            image +
+            " https://github.com.evil.example/user-attachments/assets/" +
+            image,
+        ].join("\n"),
+      })
+
+      expect(found).toEqual([
+        {
+          id: image,
+          kind: "media",
+          url: `https://github.com/user-attachments/assets/${image}`,
+          downloadUrl: `https://github.com/user-attachments/assets/${image}`,
+        },
+        {
+          id: video,
+          kind: "media",
+          url: `https://github.com/user-attachments/assets/${video}`,
+          downloadUrl: `https://github.com/user-attachments/assets/${video}`,
+        },
+        {
+          id: legacy,
+          kind: "media",
+          url: `https://github.com/acme/web/assets/20358651/${legacy}`,
+          downloadUrl: `https://github.com/acme/web/assets/20358651/${legacy}`,
+        },
+        {
+          id: "17923",
+          kind: "file",
+          url: "https://github.com/user-attachments/files/17923/report%20Q3.pdf",
+          downloadUrl: "https://github.com/user-attachments/files/17923/report%20Q3.pdf",
+          name: "report Q3.pdf",
+        },
+      ])
+    })
+
+    test("downloads private media from the signed link in the body's HTML", async () => {
+      const attachments = (await connect()).attachments
+
+      const found = attachments.find({
+        body: `![shot](https://github.com/user-attachments/assets/${image})`,
+        body_html: `<p><a href="${signedImage}"><img src="${signedImage}" alt="shot"></a></p>`,
+      })
+      // Only the HTML was requested: its signed links are the attachments.
+      const htmlOnly = attachments.find({ body_html: `<img src="${signedImage}">` })
+
+      const signed = signedImage.replace("&amp;", "&")
+      expect(found).toEqual([
+        {
+          id: image,
+          kind: "media",
+          url: `https://github.com/user-attachments/assets/${image}`,
+          downloadUrl: signed,
+        },
+      ])
+      expect(htmlOnly).toEqual([{ id: image, kind: "media", url: signed, downloadUrl: signed }])
+    })
+
+    // Reproduce: download through `context.http.get`; the request then carries the token.
+    test("downloads an attachment without the token", async () => {
+      const calls = record(() => new Response(new Uint8Array([1, 2, 3])))
+      const attachments = (await connect()).attachments
+
+      const response = await attachments.download({
+        downloadUrl: signedImage.replace("&amp;", "&"),
+      })
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.url.host).toBe("private-user-images.githubusercontent.com")
+      expect(calls[0]?.url.searchParams.get("jwt")).toBe("eyJ.sig")
+      expect(calls[0]?.headers.get("authorization")).toBeNull()
+      expect([...(await response.bytes())]).toEqual([1, 2, 3])
+    })
+
+    test("refuses links outside GitHub's attachment hosts, and throws on a refused download", async () => {
+      const calls = record(() => new Response("Not Found", { status: 404 }))
+      const attachments = (await connect()).attachments
+
+      const foreign: unknown = await attachments
+        .download({ downloadUrl: `https://evil.example/user-attachments/assets/${image}` })
+        .catch((caught) => caught)
+      const issuePage: unknown = await attachments
+        .download({ downloadUrl: "https://github.com/acme/web/issues/3" })
+        .catch((caught) => caught)
+      expect(calls).toHaveLength(0)
+
+      const refused: unknown = await attachments
+        .download({ downloadUrl: `https://github.com/user-attachments/assets/${image}` })
+        .catch((caught) => caught)
+
+      expect((foreign as Error).message).toContain("Refusing an attachment URL")
+      expect((issuePage as Error).message).toContain("Refusing an attachment URL")
+      expect(refused).toBeInstanceOf(GitHubApiError)
+      expect(refused).toMatchObject({ status: 404 })
+    })
+
+    // Reproduce: return `readContent(...)` directly in `download()`; the sign-in page resolves.
+    test("refuses a web page in place of the attachment", async () => {
+      record(
+        () =>
+          new Response("<html>Sign in</html>", {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          })
+      )
+      const attachments = (await connect()).attachments
+
+      const error: unknown = await attachments
+        .download({ downloadUrl: `https://github.com/user-attachments/assets/${image}` })
+        .catch((caught) => caught)
+
+      expect((error as Error).message).toContain('bodyFormat: "full"')
+    })
+
+    // Reproduce: map only api.github.com in `githubWebHost()`, or reject any port in `classify()`.
+    test("finds GitHub Enterprise Cloud attachments, and an Enterprise Server's on its own port", async () => {
+      const cloud = (await connect("https://api.acme.ghe.com/")).attachments
+      const server = (await connect("https://ghe.corp:8443/api/v3/")).attachments
+
+      const fromCloud = cloud.find({
+        body: `https://acme.ghe.com/user-attachments/assets/${image}`,
+      })
+      const fromServer = server.find({
+        body: [
+          `https://ghe.corp:8443/user-attachments/assets/${image}`,
+          `https://ghe.corp:9999/user-attachments/assets/${video}`,
+        ].join("\n"),
+      })
+
+      expect(fromCloud.map(({ id }) => id)).toEqual([image])
+      expect(fromServer.map(({ id }) => id)).toEqual([image])
+    })
+
+    test("finds an Enterprise Server's attachments on its own host only", async () => {
+      const attachments = (await connect("https://ghe.example.com/api/v3/")).attachments
+
+      const found = attachments.find({
+        body: [
+          `https://ghe.example.com/user-attachments/assets/${image}`,
+          `https://github.com/user-attachments/assets/${video}`,
+          `https://user-images.githubusercontent.com/1/2-${legacy}.png`,
+        ].join("\n"),
+      })
+
+      expect(found.map(({ id }) => id)).toEqual([image])
+    })
   })
 
   test("throws GitHubApiError on non-2xx responses", async () => {

@@ -1,6 +1,7 @@
 import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
+  bodyFormatHeaders,
   pathId,
   readJson,
   readNoContent,
@@ -9,11 +10,13 @@ import {
   resolvePagePath,
   withQuery,
 } from "../http"
-import type { GitHubPage, GitHubRepositoryTarget } from "../types/common"
+import type { GitHubBodyFormatOptions } from "../types/attachments"
+import type { GitHubPage, GitHubRepositoryTarget, GitHubRequestOptions } from "../types/common"
 import type {
   CreateIssueCommentInput,
   GitHubIssueComment,
   ListIssueCommentsOptions,
+  ListRepositoryIssueCommentsOptions,
   RepositoryIssueCommentsApi,
   UpdateIssueCommentInput,
 } from "../types/issue-comments"
@@ -35,7 +38,27 @@ export function createRepositoryIssueCommentsApi(
       if (options?.since) params.set("since", options.since)
       const path = withQuery(`${issuePath}/${pathId(issueNumber, "issueNumber")}/comments`, params)
       return readPage<GitHubIssueComment>(
-        await context.http.get(resolvePagePath(path, options)),
+        await context.http.get(resolvePagePath(path, options), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
+        }),
+        context.apiBaseUrl
+      )
+    },
+
+    async listForRepository(
+      options?: ListRepositoryIssueCommentsOptions
+    ): Promise<GitHubPage<GitHubIssueComment>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      if (options?.since) params.set("since", options.since)
+      if (options?.sort) params.set("sort", options.sort)
+      if (options?.direction) params.set("direction", options.direction)
+      return readPage<GitHubIssueComment>(
+        await context.http.get(resolvePagePath(withQuery(commentsPath, params), options), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
+        }),
         context.apiBaseUrl
       )
     },
@@ -45,9 +68,15 @@ export function createRepositoryIssueCommentsApi(
       return readJson<GitHubIssueComment>(await context.http.post(path, { body: input.body }))
     },
 
-    async get(commentId: number): Promise<GitHubIssueComment> {
+    async get(
+      commentId: number,
+      options?: GitHubRequestOptions & GitHubBodyFormatOptions
+    ): Promise<GitHubIssueComment> {
       return readJson<GitHubIssueComment>(
-        await context.http.get(commentPath(commentsPath, commentId))
+        await context.http.get(commentPath(commentsPath, commentId), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
+        })
       )
     },
 

@@ -167,7 +167,7 @@
     },
     "connectors/github": {
       "name": "@sixb/connector-github",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@octokit/webhooks-types": "^7.6.1",
         "@sixb/connector-rest": "workspace:^",

@@ -1,4 +1,28 @@
+export type { ListAssigneesOptions, RepositoryAssigneesApi } from "./assignees"
+export type {
+  GitHubAttachment,
+  GitHubAttachmentSource,
+  GitHubAttachmentsApi,
+  GitHubBodyFormat,
+  GitHubBodyFormatOptions,
+} from "./attachments"
+export type {
+  GitHubBranch,
+  GitHubBranchCommit,
+  GitHubBranchDetail,
+  ListBranchesOptions,
+  RepositoryBranchesApi,
+} from "./branches"
 export type { GitHubClient, GitHubOrganizationScope, GitHubRepositoryScope } from "./client"
+export type {
+  GitHubCommit,
+  GitHubCommitDetail,
+  GitHubCommitFile,
+  GitHubCommitParent,
+  GitHubGitActor,
+  ListCommitsOptions,
+  RepositoryCommitsApi,
+} from "./commits"
 export type {
   GitHubPage,
   GitHubPaginationOptions,
@@ -10,6 +34,7 @@ export type {
   CreateIssueCommentInput,
   GitHubIssueComment,
   ListIssueCommentsOptions,
+  ListRepositoryIssueCommentsOptions,
   RepositoryIssueCommentsApi,
   UpdateIssueCommentInput,
 } from "./issue-comments"
@@ -17,6 +42,7 @@ export type {
   AuthenticatedUserIssuesApi,
   CreateIssueInput,
   GitHubIssue,
+  GitHubIssueDependenciesSummary,
   GitHubIssueFieldValue,
   GitHubIssueFieldValueInput,
   GitHubIssueFilter,
@@ -25,6 +51,7 @@ export type {
   GitHubLabel,
   GitHubMilestone,
   GitHubPullRequestIssueRef,
+  GitHubSubIssuesSummary,
   ListAuthenticatedUserIssuesOptions,
   ListOrganizationIssuesOptions,
   ListRepositoryIssuesOptions,
@@ -32,6 +59,12 @@ export type {
   RepositoryIssuesApi,
   UpdateIssueInput,
 } from "./issues"
+export type {
+  CreateLabelInput,
+  ListLabelsOptions,
+  RepositoryLabelsApi,
+  UpdateLabelInput,
+} from "./labels"
 export type {
   AuthenticatedUserOrganizationMembershipsApi,
   GitHubOrganizationInvitation,
@@ -51,7 +84,22 @@ export type {
   OrganizationMembersApi,
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
+export type { ListMilestonesOptions, RepositoryMilestonesApi } from "./milestones"
 export type { GitHubConnectorOptions } from "./options"
+export type {
+  GetPullRequestOptions,
+  GitHubPullRequest,
+  GitHubPullRequestBranch,
+  GitHubPullRequestDetail,
+  GitHubPullRequestReview,
+  GitHubPullRequestReviewState,
+  GitHubPullRequestSort,
+  GitHubPullRequestState,
+  ListPullRequestReviewsOptions,
+  ListPullRequestsOptions,
+  RepositoryPullRequestReviewsApi,
+  RepositoryPullRequestsApi,
+} from "./pulls"
 export type {
   CreateReleaseInput,
   CreateReleaseReactionInput,
@@ -86,6 +134,40 @@ export type {
   OrganizationRepositoriesApi,
   RepositoryApi,
 } from "./repos"
+export type {
+  GitHubPullRequestStackPosition,
+  GitHubStack,
+  GitHubStackPullRequest,
+  GitHubStackPullRequestBranch,
+  GitHubStackPullRequestSummary,
+  GitHubStackSummary,
+  ListStacksOptions,
+  RepositoryStacksApi,
+} from "./stacks"
+export type {
+  ListRelatedIssuesOptions,
+  RepositoryIssueDependenciesApi,
+  RepositorySubIssuesApi,
+} from "./sub-issues"
+export type {
+  GitHubTimelineAssigneeEvent,
+  GitHubTimelineCloseEvent,
+  GitHubTimelineCommentEvent,
+  GitHubTimelineCommitEvent,
+  GitHubTimelineCrossReferenceEvent,
+  GitHubTimelineEvent,
+  GitHubTimelineIssueSummary,
+  GitHubTimelineLabelEvent,
+  GitHubTimelineLockEvent,
+  GitHubTimelineMilestoneEvent,
+  GitHubTimelineParentIssueEvent,
+  GitHubTimelinePlainEvent,
+  GitHubTimelineRenameEvent,
+  GitHubTimelineReviewEvent,
+  GitHubTimelineReviewRequestEvent,
+  GitHubTimelineSubIssueEvent,
+  ListIssueTimelineOptions,
+} from "./timeline"
 export type {
   GitHubUserPlan,
   GitHubUserProfile,

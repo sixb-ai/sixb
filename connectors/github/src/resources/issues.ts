@@ -1,6 +1,7 @@
 import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
+  bodyFormatHeaders,
   pathId,
   pathPart,
   readJson,
@@ -9,7 +10,13 @@ import {
   resolvePagePath,
   withQuery,
 } from "../http"
-import type { GitHubPage, GitHubPaginationOptions, GitHubRepositoryTarget } from "../types/common"
+import type { GitHubBodyFormatOptions } from "../types/attachments"
+import type {
+  GitHubPage,
+  GitHubPaginationOptions,
+  GitHubRepositoryTarget,
+  GitHubRequestOptions,
+} from "../types/common"
 import type {
   AuthenticatedUserIssuesApi,
   CreateIssueInput,
@@ -25,7 +32,9 @@ import type {
   UpdateIssueInput,
 } from "../types/issues"
 import type { GitHubSortDirection } from "../types/repos"
+import type { GitHubTimelineEvent, ListIssueTimelineOptions } from "../types/timeline"
 import { createRepositoryIssueCommentsApi } from "./issue-comments"
+import { createRepositoryIssueDependenciesApi, createRepositorySubIssuesApi } from "./sub-issues"
 
 export function createAuthenticatedUserIssuesApi(
   context: GitHubHttpContext
@@ -54,15 +63,60 @@ export function createRepositoryIssuesApi(
   const path = `${repositoryPath(target)}/issues`
   return {
     comments: createRepositoryIssueCommentsApi(context, target),
+    subIssues: createRepositorySubIssuesApi(context, target),
+    dependencies: createRepositoryIssueDependenciesApi(context, target),
 
     list: (options) => listIssues(context, path, options, applyRepositoryIssueParams),
 
-    async get(issueNumber: number): Promise<GitHubIssue> {
-      return readJson<GitHubIssue>(await context.http.get(issuePath(path, issueNumber)))
+    async get(
+      issueNumber: number,
+      options?: GitHubRequestOptions & GitHubBodyFormatOptions
+    ): Promise<GitHubIssue> {
+      return readJson<GitHubIssue>(
+        await context.http.get(issuePath(path, issueNumber), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
+        })
+      )
     },
 
     async create(input: CreateIssueInput): Promise<GitHubIssue> {
       return readJson<GitHubIssue>(await context.http.post(path, issueBody(input)))
+    },
+
+    async timeline(
+      issueNumber: number,
+      options?: ListIssueTimelineOptions
+    ): Promise<GitHubPage<GitHubTimelineEvent>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      const timelinePath = withQuery(`${issuePath(path, issueNumber)}/timeline`, params)
+      return readPage<GitHubTimelineEvent>(
+        await context.http.get(resolvePagePath(timelinePath, options), {
+          headers: bodyFormatHeaders(options?.bodyFormat),
+          signal: options?.signal,
+        }),
+        context.apiBaseUrl
+      )
+    },
+
+    async parent(
+      issueNumber: number,
+      options?: GitHubRequestOptions & GitHubBodyFormatOptions
+    ): Promise<GitHubIssue | null> {
+      const response = await context.http.get(`${issuePath(path, issueNumber)}/parent`, {
+        headers: bodyFormatHeaders(options?.bodyFormat),
+        signal: options?.signal,
+      })
+      if (response.status !== 404) return readJson<GitHubIssue>(response)
+
+      // GitHub answers 404 both for an issue without a parent and for an issue it can't find, as
+      // with a wrong repository or a token that lost access. Only the first is "no parent".
+      await response.body?.cancel()
+      await readJson<GitHubIssue>(
+        await context.http.get(issuePath(path, issueNumber), { signal: options?.signal })
+      )
+      return null
     },
 
     async update(issueNumber: number, patch: UpdateIssueInput): Promise<GitHubIssue> {
@@ -77,7 +131,9 @@ export function createRepositoryIssuesApi(
   }
 }
 
-async function listIssues<TOptions extends GitHubPaginationOptions>(
+async function listIssues<
+  TOptions extends GitHubPaginationOptions & GitHubRequestOptions & GitHubBodyFormatOptions,
+>(
   context: GitHubHttpContext,
   path: string,
   options: TOptions | undefined,
@@ -87,7 +143,10 @@ async function listIssues<TOptions extends GitHubPaginationOptions>(
   applyPaging(params, options)
   applyParams(params, options)
   return readPage<GitHubIssue>(
-    await context.http.get(resolvePagePath(withQuery(path, params), options)),
+    await context.http.get(resolvePagePath(withQuery(path, params), options), {
+      headers: bodyFormatHeaders(options?.bodyFormat),
+      signal: options?.signal,
+    }),
     context.apiBaseUrl
   )
 }
