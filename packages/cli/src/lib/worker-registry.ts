@@ -239,10 +239,19 @@ export function omittedWorkerWarnings(
   sixb: LoadedSixbHost,
   workerTypes: readonly string[]
 ): readonly string[] {
-  if (workerTypes.includes("lake") || !lakeWorkerRequired(sixb)) return []
+  if (workerTypes.includes("lake")) return []
 
   return [
-    "Lake cleanup needs a lake worker and this group has none: run `sixb worker lake`, or the lake keeps growing.",
+    ...(getLakeRetentionRuntime(sixb).automatic
+      ? [
+          "Lake cleanup needs a lake worker and this group has none: run `sixb worker lake`, or the lake keeps growing.",
+        ]
+      : []),
+    ...(getDatasetIngestRuntime(sixb).enabled
+      ? [
+          "Ingested changes need a lake worker and this group has none: run `sixb worker lake`, or they wait and never reach their dataset.",
+        ]
+      : []),
   ]
 }
 

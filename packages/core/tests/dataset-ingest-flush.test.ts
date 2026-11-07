@@ -711,6 +711,29 @@ test("a flush that spends its budget asks for the next job and leaves the rest",
   ])
 })
 
+test("a flush that keeps failing keeps one request, so an outage queues no more jobs", async () => {
+  // Regression proof: move the request in `acquire`; each attempt then lets a delivery open a new
+  // request, whose job retries beside the others for as long as the outage lasts.
+  const lakeStorage = new InMemoryLakeStorage()
+  const { host, queues, ingest, flush } = setup(lakeStorage)
+  lakeStorage.beginMerge = async () => {
+    throw new Error("lake offline")
+  }
+
+  await ingest(contacts, change.upsert({ id: "1", name: "Ada" }))
+  await flush(contacts).catch(() => {})
+  await ingest(contacts, change.upsert({ id: "2", name: "Grace" }))
+  await flush(contacts).catch(() => {})
+  await ingest(contacts, change.upsert({ id: "3", name: "Edsger" }))
+
+  // Taking the batch closed the first request; the deliveries after it share the next.
+  const queued = await queues.lake.claim({ projectId: host.id, workerId: "test", limit: 10 })
+  expect(queued.map(({ job }) => job.id)).toEqual([
+    `ingest-flush:${contacts.id}:0`,
+    `ingest-flush:${contacts.id}:1`,
+  ])
+})
+
 test("a second flush of the dataset waits for the first", async () => {
   const lakeStorage = new InMemoryLakeStorage()
   const { ingest, flush } = setup(lakeStorage)

@@ -150,6 +150,7 @@ export async function startRoleUntilReadyThenStop(options: {
   readonly cwd: string
   readonly logPath: string
   readonly timeoutMs?: number
+  readonly env?: Readonly<Record<string, string | undefined>>
   /** Runs against the started role before it is stopped, e.g. to request what it serves. */
   readonly whileReady?: () => Promise<void>
 }): Promise<StartRoleResult> {
@@ -162,6 +163,7 @@ export async function startRoleUntilReadyThenStop(options: {
     cwd: options.cwd,
     env: {
       ...process.env,
+      ...options.env,
       SIXB_CLI_TEST_LOG: options.logPath,
       SIXB_CLI_TEST_READY_LOG: options.logPath,
     },
