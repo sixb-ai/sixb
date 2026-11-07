@@ -19,6 +19,31 @@ export function createRuntimeCommand(args: readonly string[]): string[] {
   ]
 }
 
+/**
+ * Where `sixb dev` will listen, read from the same `--port` and `--api-port` flags it receives:
+ * the app on `--port` (default 3000) and the API on `--api-port` (default one past the app).
+ */
+export function resolveDevPorts(args: readonly string[]): { appPort: number; apiPort: number } {
+  const appPort = readPortFlag(args, "port") ?? 3000
+  return { appPort, apiPort: readPortFlag(args, "api-port") ?? appPort + 1 }
+}
+
+function readPortFlag(args: readonly string[], name: string): number | undefined {
+  const flag = `--${name}`
+  let value: string | undefined
+  for (const [index, arg] of args.entries()) {
+    if (arg === flag) value = args[index + 1]
+    else if (arg.startsWith(`${flag}=`)) value = arg.slice(flag.length + 1)
+  }
+  if (value === undefined) return undefined
+
+  const port = Number(value)
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`[Northline] ${flag} must be a port number, received '${value}'.`)
+  }
+  return port
+}
+
 export async function probeNorthlineApi(
   baseUrl: string,
   request: (url: string) => Promise<Response> = fetch
@@ -44,7 +69,12 @@ async function main(): Promise<void> {
   const initialized = await initializeDemoSources()
   if (initialized) console.log("[Northline] Initialized deterministic demo sources.")
 
-  const child = Bun.spawn(createRuntimeCommand(process.argv.slice(2)), {
+  const args = process.argv.slice(2)
+  const { appPort, apiPort } = resolveDevPorts(args)
+  // The demo scripts below reach the API through SIXB_API_URL, so point them at this server.
+  process.env.SIXB_API_URL ??= `http://localhost:${apiPort}/api`
+
+  const child = Bun.spawn(createRuntimeCommand(args), {
     cwd: resolve(import.meta.dir, ".."),
     stdin: "inherit",
     stdout: "inherit",
@@ -105,7 +135,7 @@ async function main(): Promise<void> {
     if (counts.some((count, index) => count < requiredObjects[index][1])) {
       console.log("[Northline] Populating Northline Operations through the Sixb data plane...")
       await synchronizeDemo()
-      console.log("[Northline] Northline Operations is ready. Open http://localhost:3000")
+      console.log(`[Northline] Northline Operations is ready. Open http://localhost:${appPort}`)
     }
   } catch (error) {
     child.kill("SIGTERM")
