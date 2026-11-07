@@ -2,6 +2,7 @@ import { type ClaimableRun, laterLease, planRunClaim } from "@sixb/core/internal
 import type {
   ClaimRunInput,
   ConfirmRunExecutionInput,
+  ListLostRunsInput,
   ReleaseRunExecutionInput,
   RunClaim,
   RunExecution,
@@ -123,6 +124,33 @@ export async function confirmPgRunExecution<
   if (!updated) throw table.notFound(input.projectId, input.id)
 
   return table.toRun(updated)
+}
+
+/**
+ * Starts from `(project_id, status, ...)`, where queued and running rows are few however long the
+ * table's history. Running runs come first, so queued ones waiting for a sibling starve nothing.
+ */
+export async function listLostPgRuns<TRow extends PgRunExecutionColumns, TRun>(
+  sql: PgStoreClient,
+  table: PgRunTable<TRow, TRun>,
+  input: ListLostRunsInput
+): Promise<readonly TRun[]> {
+  const rows = await sql.unsafe<TRow[]>(
+    `SELECT ${table.returning} FROM ${table.name}
+     WHERE project_id = $1
+       AND status IN ('queued', 'running')
+       AND (
+         (status = 'queued' AND queued_at <= $2)
+         OR (status = 'running' AND execution_queue_lease_expires_at <= $3)
+         OR (status = 'running' AND execution_queue_lease_expires_at IS NULL AND started_at <= $4)
+       )
+     ORDER BY status = 'running' DESC,
+       COALESCE(execution_queue_lease_expires_at, started_at, queued_at)
+     LIMIT $5`,
+    [input.projectId, input.queuedBefore, input.lapsedBy, input.orphanedBefore, input.limit]
+  )
+
+  return rows.map(table.toRun)
 }
 
 export async function releasePgRun(

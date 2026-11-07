@@ -16,6 +16,7 @@ import type {
   FinishPipelineStepRunInput,
   ListLatestPipelineRunsInput,
   ListLatestPipelineRunsResult,
+  ListLostRunsInput,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
@@ -33,6 +34,7 @@ import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import {
   claimSqliteRun,
   confirmSqliteRunExecution,
+  listLostSqliteRuns,
   releaseSqliteRun,
   requireSqliteRun,
   type SqliteRunExecutionColumns,
@@ -173,6 +175,10 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
 
   async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<PipelineRunRecord> {
     return this.db.transaction(() => confirmSqliteRunExecution(this.db, PIPELINE_RUNS, input))()
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly PipelineRunRecord[]> {
+    return listLostSqliteRuns(this.db, PIPELINE_RUNS, input)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

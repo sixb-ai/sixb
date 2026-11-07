@@ -3,6 +3,7 @@ import type { SixbFailure } from "../errors/types"
 import type {
   ClaimRunInput,
   ConfirmRunExecutionInput,
+  ListLostRunsInput,
   PipelineRunRecord,
   PipelineRunStorage,
   ReleaseRunExecutionInput,
@@ -30,6 +31,12 @@ export interface RunClaimStorageContractSuiteOptions<
   /** Factory that returns one isolated store for each test. */
   readonly createStorage: () => TStorage | Promise<TStorage>
   readonly cleanup?: (storage: TStorage) => void | Promise<void>
+  /** What an older version leaves behind: a run that holds no lease, as no API can write it. */
+  readonly forgetExecution: (
+    storage: TStorage,
+    table: "sync_runs" | "pipeline_runs" | "workflow_runs",
+    id: string
+  ) => void | Promise<void>
 }
 
 const projectId = "run-claim-contract"
@@ -55,10 +62,12 @@ interface ClaimableRecord {
 
 /** The operations every recoverable run has, whichever store holds it. */
 interface RunClaimContractPrimitive<TRun extends ClaimableRecord> {
-  queue(id: string): Promise<TRun>
+  /** `sync` keeps a run of a Sync from waiting on another: only Syncs run one at a time. */
+  queue(id: string, sync?: string): Promise<TRun>
   startOrReclaim(input: ClaimRunInput): Promise<RunClaim<TRun>>
   confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<TRun>
   releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
+  listLost(input: Omit<ListLostRunsInput, "projectId">): Promise<readonly TRun[]>
   getById(params: { projectId: string; id: string }): Promise<TRun | null>
   succeed(id: string, executionToken?: string): Promise<TRun>
   cancel(id: string, executionToken?: string): Promise<TRun>
@@ -70,17 +79,18 @@ function syncPrimitive(
   const runs = requireRuns(storage.syncRuns)
 
   return {
-    queue: (id) =>
+    queue: (id, sync = "orders") =>
       queueTestSyncRun(storage, {
         id,
         projectId,
-        syncId: "orders",
+        syncId: sync,
         datasetId: "orders",
         mode: "merge",
       }),
     startOrReclaim: (input) => runs.startOrReclaim(input),
     confirmExecutionOwnership: (input) => runs.confirmExecutionOwnership(input),
     releaseExecution: (input) => runs.releaseExecution(input),
+    listLost: (input) => runs.listLost({ ...input, projectId }),
     getById: (params) => runs.getById(params),
     succeed: (id, executionToken) =>
       runs.finish({ projectId, id, executionToken, status: "succeeded", rowsRead: 0 }),
@@ -99,6 +109,7 @@ function pipelinePrimitive(
     startOrReclaim: (input) => runs.startOrReclaim(input),
     confirmExecutionOwnership: (input) => runs.confirmExecutionOwnership(input),
     releaseExecution: (input) => runs.releaseExecution(input),
+    listLost: (input) => runs.listLost({ ...input, projectId }),
     getById: (params) => runs.getById(params),
     succeed: (id, executionToken) =>
       runs.finish({ projectId, id, executionToken, status: "succeeded" }),
@@ -124,6 +135,7 @@ function workflowPrimitive(
     startOrReclaim: (input) => runs.startOrReclaim(input),
     confirmExecutionOwnership: (input) => runs.confirmExecutionOwnership(input),
     releaseExecution: (input) => runs.releaseExecution(input),
+    listLost: (input) => runs.listLost({ ...input, projectId }),
     getById: (params) => runs.getById(params),
     succeed: (id, executionToken) =>
       runs.finish({ projectId, id, executionToken, status: "succeeded", output: {} }),
@@ -156,9 +168,21 @@ export function runRunClaimStorageContractSuite<TStorage extends RunClaimStorage
   }
 
   describe(label, () => {
-    describeClaims("Sync", withStorage, syncPrimitive)
-    describeClaims("Pipeline", withStorage, pipelinePrimitive)
-    describeClaims("Workflow", withStorage, workflowPrimitive)
+    describeClaims("Sync", withStorage, syncPrimitive, "sync_runs", options.forgetExecution)
+    describeClaims(
+      "Pipeline",
+      withStorage,
+      pipelinePrimitive,
+      "pipeline_runs",
+      options.forgetExecution
+    )
+    describeClaims(
+      "Workflow",
+      withStorage,
+      workflowPrimitive,
+      "workflow_runs",
+      options.forgetExecution
+    )
 
     test("Sync: a commit is prepared by the execution that holds the run, and survives it", async () => {
       await withStorage(async (storage) => {
@@ -329,7 +353,9 @@ function describeClaims<
 >(
   name: string,
   withStorage: (body: (storage: TStorage) => Promise<void>) => Promise<void>,
-  primitiveOf: (storage: RunClaimStorageContractStorage) => RunClaimContractPrimitive<TRun>
+  primitiveOf: (storage: RunClaimStorageContractStorage) => RunClaimContractPrimitive<TRun>,
+  table: "sync_runs" | "pipeline_runs" | "workflow_runs",
+  forgetExecution: RunClaimStorageContractSuiteOptions<TStorage>["forgetExecution"]
 ): void {
   const withRun = (
     body: (primitive: RunClaimContractPrimitive<TRun>) => Promise<void>
@@ -419,6 +445,93 @@ function describeClaims<
       })
 
       expect(late).toMatchObject({ outcome: "settled", run: { status: "succeeded" } })
+    })
+  })
+
+  // What each store's query says, one case per branch of it. The dates are in the far future so
+  // that a run queued "now" counts as queued long before `queuedBefore`.
+  const lostBy = {
+    queuedBefore: stillLater,
+    lapsedBy: later,
+    orphanedBefore: new Date(claimedAt.getTime() + 1),
+    limit: 10,
+  }
+
+  test(`${name}: nothing is lost while every run is held or has ended`, async () => {
+    await withStorage(async (storage) => {
+      const runs = primitiveOf(storage)
+      await runs.queue("live", "live")
+      await runs.queue("ended", "ended")
+      await runs.startOrReclaim({
+        projectId,
+        id: "live",
+        execution: held("a", stillLater),
+        claimedAt,
+      })
+      await runs.startOrReclaim({ projectId, id: "ended", execution: held("b"), claimedAt })
+      await runs.succeed("ended", "b")
+
+      await expect(runs.listLost(lostBy)).resolves.toEqual([])
+    })
+  })
+
+  test(`${name}: a queued run is lost past its grace, and not before`, async () => {
+    await withRun(async (runs) => {
+      const lost = await runs.listLost(lostBy)
+      expect(lost.map((run) => run.id)).toEqual(["run"])
+
+      const notYet = await runs.listLost({ ...lostBy, queuedBefore: new Date(0) })
+      expect(notYet).toEqual([])
+    })
+  })
+
+  test(`${name}: a run is lost once its lease lapsed, and a handed-back one with it`, async () => {
+    await withStorage(async (storage) => {
+      const runs = primitiveOf(storage)
+      await runs.queue("lapsed", "lapsed")
+      await runs.queue("handed-back", "handed-back")
+      await runs.startOrReclaim({ projectId, id: "lapsed", execution: held("a", later), claimedAt })
+      await runs.startOrReclaim({ projectId, id: "handed-back", execution: held("b"), claimedAt })
+      await runs.releaseExecution({
+        projectId,
+        id: "handed-back",
+        executionToken: "b",
+        spentAttempt: false,
+        releasedAt: claimedAt,
+      })
+
+      const lost = await runs.listLost(lostBy)
+      expect(lost.map((run) => run.id)).toEqual(["handed-back", "lapsed"])
+    })
+  })
+
+  test(`${name}: a run with no lease is lost only once its old worker cannot be alive`, async () => {
+    await withStorage(async (storage) => {
+      const runs = primitiveOf(storage)
+      await runs.queue("old")
+      await runs.startOrReclaim({ projectId, id: "old", execution: held("a"), claimedAt })
+      await forgetExecution(storage, table, "old")
+
+      await expect(
+        runs.listLost({ ...lostBy, orphanedBefore: new Date(claimedAt.getTime() - 1) })
+      ).resolves.toEqual([])
+
+      const lost = await runs.listLost(lostBy)
+      expect(lost.map((run) => run.id)).toEqual(["old"])
+    })
+  })
+
+  // Sort by age alone to watch runs waiting for a sibling keep a lost run from ever being looked at.
+  test(`${name}: running runs come first, however many queued ones are older`, async () => {
+    await withStorage(async (storage) => {
+      const runs = primitiveOf(storage)
+      await runs.queue("waiting-1")
+      await runs.queue("waiting-2")
+      await runs.queue("lapsed")
+      await runs.startOrReclaim({ projectId, id: "lapsed", execution: held("a", later), claimedAt })
+
+      const lost = await runs.listLost({ ...lostBy, limit: 1 })
+      expect(lost.map((run) => run.id)).toEqual(["lapsed"])
     })
   })
 

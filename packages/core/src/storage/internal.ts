@@ -56,6 +56,7 @@ export {
   holdsRun,
   laterLease,
   mayFinishRun,
+  ORPHANED_RUN_AFTER_MS,
   planRunClaim,
   type RunClaimPlan,
 } from "./run-claim"

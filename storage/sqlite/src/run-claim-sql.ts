@@ -3,6 +3,7 @@ import { type ClaimableRun, laterLease, planRunClaim } from "@sixb/core/internal
 import type {
   ClaimRunInput,
   ConfirmRunExecutionInput,
+  ListLostRunsInput,
   ReleaseRunExecutionInput,
   RunClaim,
   RunExecution,
@@ -113,6 +114,39 @@ export function confirmSqliteRunExecution<
   )
 
   return requireSqliteRun(db, table, input.projectId, input.id)
+}
+
+/** Running runs come first, so queued ones waiting for a sibling starve nothing. */
+export function listLostSqliteRuns<TRow extends SqliteRunExecutionColumns, TRun>(
+  db: Database,
+  table: SqliteRunTable<TRow, TRun>,
+  input: ListLostRunsInput
+): readonly TRun[] {
+  const rows = db
+    .query(
+      `
+      SELECT * FROM ${table.name}
+      WHERE project_id = ?
+        AND status IN ('queued', 'running')
+        AND (
+          (status = 'queued' AND queued_at <= ?)
+          OR (status = 'running' AND execution_queue_lease_expires_at <= ?)
+          OR (status = 'running' AND execution_queue_lease_expires_at IS NULL AND started_at <= ?)
+        )
+      ORDER BY status = 'running' DESC,
+        COALESCE(execution_queue_lease_expires_at, started_at, queued_at)
+      LIMIT ?
+      `
+    )
+    .all(
+      input.projectId,
+      input.queuedBefore.toISOString(),
+      input.lapsedBy.toISOString(),
+      input.orphanedBefore.toISOString(),
+      input.limit
+    ) as TRow[]
+
+  return rows.map(table.toRun)
 }
 
 export function releaseSqliteRun(

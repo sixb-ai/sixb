@@ -4,6 +4,7 @@ import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 import type {
   ClaimRunInput,
   ConfirmRunExecutionInput,
+  ListLostRunsInput,
   ReleaseRunExecutionInput,
   RunClaim,
   RunExecution,
@@ -145,6 +146,7 @@ export interface SyncRunStorage {
   confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<SyncRunRecord>
   /** Hands the run back. Does nothing once the token no longer holds a running run. */
   releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
+  listLost(input: ListLostRunsInput): Promise<readonly SyncRunRecord[]>
   prepareCommit(input: PrepareSyncRunCommitInput): Promise<SyncRunRecord>
   finish(input: FinishSyncRunInput): Promise<SyncRunRecord>
   getById(params: { projectId: string; id: string }): Promise<SyncRunRecord | null>

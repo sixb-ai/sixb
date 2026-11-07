@@ -2,11 +2,14 @@ import { captureSixbFailure, withFailureMessage } from "../errors/internal"
 import type { SixbFailure } from "../errors/types"
 import type { DomainEventLog, EventsAppendInput } from "../events/service"
 import type { Queues } from "../queues"
-import type { Storage } from "../storage"
-import { type ClaimableRun, hasLapsedLease, isOrphanedRun } from "../storage/run-claim"
+import type { ListLostRunsInput, Storage } from "../storage"
+import { type ClaimableRun, isOrphanedRun, ORPHANED_RUN_AFTER_MS } from "../storage/run-claim"
 
-/** A run younger than this may still be in its first publication. */
-const QUEUED_GRACE_MS = 30_000
+/**
+ * A job may still be on its way for this long: a queued run may be in its first publication, and a
+ * run handed back has its job back in the queue.
+ */
+const JOB_ON_ITS_WAY_MS = 30_000
 const DEFAULT_LIMIT = 100
 
 const SOURCE = "SixbRunRecovery"
@@ -18,7 +21,7 @@ export interface RepublishLostRunsInput {
   readonly queues: Pick<Queues, "syncRuns" | "pipelines" | "workflows">
   readonly events: Pick<DomainEventLog, "emit">
   readonly now: Date
-  /** Most runs of each primitive and status one call looks at, oldest first. */
+  /** Most runs of each primitive one call looks at, longest lost first. */
   readonly limit?: number
 }
 
@@ -37,11 +40,7 @@ type LostRunFailure = SixbFailure<"runtime.cancelled">
 
 /** What differs between the primitives this pass looks after. */
 interface RunLane<TRun extends LostRunCandidate> {
-  list(input: {
-    readonly statuses: ["queued"] | ["running"]
-    readonly startedBefore?: Date
-    readonly limit: number
-  }): Promise<readonly TRun[]>
+  listLost(input: Omit<ListLostRunsInput, "projectId">): Promise<readonly TRun[]>
   enqueue(job: readonly { readonly id: string; readonly runId: string }[]): Promise<void>
   /** End what the run left running, its steps or its nodes. */
   cancelChildren(run: TRun, failure: LostRunFailure): Promise<void>
@@ -94,38 +93,50 @@ async function recoverLane<TRun extends LostRunCandidate>(
   if (!lane) return { republished: 0, settled: 0 }
 
   const { now } = input
-  const limit = input.limit ?? DEFAULT_LIMIT
+  const jobOnItsWay = new Date(now.getTime() - JOB_ON_ITS_WAY_MS)
 
-  const [queued, running] = await Promise.all([
-    lane.list({
-      statuses: ["queued"],
-      startedBefore: new Date(now.getTime() - QUEUED_GRACE_MS),
-      limit,
-    }),
-    lane.list({ statuses: ["running"], limit }),
-  ])
+  const lost = await lane.listLost({
+    queuedBefore: jobOnItsWay,
+    lapsedBy: jobOnItsWay,
+    orphanedBefore: new Date(now.getTime() - ORPHANED_RUN_AFTER_MS),
+    limit: input.limit ?? DEFAULT_LIMIT,
+  })
 
-  const orphans = running.filter((run) => isOrphanedRun(run, now))
+  const orphans = lost.filter((run) => isOrphanedRun(run, now))
+  const failures: unknown[] = []
+
+  // One run that cannot be ended must not keep the next pass from the others.
   for (const run of orphans) {
-    const failure = lostWorkerFailure(input, run)
-
-    await lane.cancelChildren(run, failure)
-    const finished = await lane.cancel(run, failure)
-
-    await input.events.emit(
-      { events: [finished], correlationId: await readCorrelationId(input, run) },
-      { source: SOURCE }
-    )
+    await settleOrphan(input, lane, run).catch((error) => failures.push(error))
   }
 
-  const jobs = [
-    // Stable, so a job still waiting in the queue absorbs this one.
-    ...queued.map((run) => ({ id: run.id, runId: run.id })),
-    ...running.filter((run) => hasLapsedLease(run, now)).map(recoveryJob),
-  ]
+  const jobs = lost
+    .filter((run) => !isOrphanedRun(run, now))
+    // A queued run's id is stable, so a job still waiting in the queue absorbs this one.
+    .map((run) => (run.status === "queued" ? { id: run.id, runId: run.id } : recoveryJob(run)))
 
   if (jobs.length > 0) await lane.enqueue(jobs)
-  return { republished: jobs.length, settled: orphans.length }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "[Sixb] Could not end every run of an older version.")
+  }
+
+  return { republished: jobs.length, settled: orphans.length - failures.length }
+}
+
+async function settleOrphan<TRun extends LostRunCandidate>(
+  input: RepublishLostRunsInput,
+  lane: RunLane<TRun>,
+  run: TRun
+): Promise<void> {
+  const failure = lostWorkerFailure(input, run)
+
+  await lane.cancelChildren(run, failure)
+  const finished = await lane.cancel(run, failure)
+
+  await input.events.emit(
+    { events: [finished], correlationId: await readCorrelationId(input, run) },
+    { source: SOURCE }
+  )
 }
 
 /**
@@ -144,7 +155,7 @@ function syncLane({ projectId, storage, queues }: RepublishLostRunsInput) {
   if (!runs) return undefined
 
   return {
-    list: async (filter) => (await runs.list({ ...filter, projectId, order: "asc" })).runs,
+    listLost: (filter) => runs.listLost({ ...filter, projectId }),
 
     async enqueue(jobs) {
       await queues.syncRuns.enqueue({
@@ -181,7 +192,7 @@ function pipelineLane({ projectId, storage, queues }: RepublishLostRunsInput) {
   if (!runs) return undefined
 
   return {
-    list: async (filter) => (await runs.list({ ...filter, projectId, order: "asc" })).runs,
+    listLost: (filter) => runs.listLost({ ...filter, projectId }),
 
     async enqueue(jobs) {
       await queues.pipelines.enqueue({
@@ -227,7 +238,7 @@ function workflowLane({ projectId, storage, queues, now }: RepublishLostRunsInpu
   if (!runs) return undefined
 
   return {
-    list: async (filter) => (await runs.list({ ...filter, projectId, order: "asc" })).runs,
+    listLost: (filter) => runs.listLost({ ...filter, projectId }),
 
     async enqueue(jobs) {
       await queues.workflows.enqueue({

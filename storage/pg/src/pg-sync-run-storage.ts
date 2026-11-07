@@ -13,6 +13,7 @@ import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
+  ListLostRunsInput,
   ListSyncRunsInput,
   ListSyncRunsResult,
   PrepareSyncRunCommitInput,
@@ -28,6 +29,7 @@ import type { SqlParameter } from "./pg-client"
 import {
   claimPgRun,
   confirmPgRunExecution,
+  listLostPgRuns,
   lockHeldPgRun,
   lockPgRun,
   type PgRunExecutionColumns,
@@ -148,6 +150,10 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
   async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<SyncRunRecord> {
     return runPgTransaction(this.sql, (tx) => confirmPgRunExecution(tx, SYNC_RUNS, input))
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly SyncRunRecord[]> {
+    return listLostPgRuns(this.sql, SYNC_RUNS, input)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

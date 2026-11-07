@@ -14,6 +14,7 @@ import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
+  ListLostRunsInput,
   ListSyncRunsInput,
   ListSyncRunsResult,
   PrepareSyncRunCommitInput,
@@ -28,6 +29,7 @@ import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import {
   claimSqliteRun,
   confirmSqliteRunExecution,
+  listLostSqliteRuns,
   releaseSqliteRun,
   requireHeldSqliteRun,
   requireSqliteRun,
@@ -189,6 +191,10 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
 
   async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<SyncRunRecord> {
     return this.db.transaction(() => confirmSqliteRunExecution(this.db, SYNC_RUNS, input))()
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly SyncRunRecord[]> {
+    return listLostSqliteRuns(this.db, SYNC_RUNS, input)
   }
 
   async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {

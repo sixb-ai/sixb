@@ -3,6 +3,7 @@ import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 import type {
   ClaimRunInput,
   ConfirmRunExecutionInput,
+  ListLostRunsInput,
   ReleaseRunExecutionInput,
   RunClaim,
   RunExecution,
@@ -181,6 +182,7 @@ export interface PipelineRunStorage {
   confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<PipelineRunRecord>
   /** Hands the run back. Does nothing once the token no longer holds a running run. */
   releaseExecution(input: ReleaseRunExecutionInput): Promise<void>
+  listLost(input: ListLostRunsInput): Promise<readonly PipelineRunRecord[]>
   finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord>
   /**
    * Starting a step an earlier execution left running starts it over on the inputs given. It keeps

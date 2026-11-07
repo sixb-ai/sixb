@@ -1022,6 +1022,9 @@ describe("runSyncJob", () => {
       confirmExecutionOwnership(input) {
         return delegate.confirmExecutionOwnership(input)
       },
+      listLost(input) {
+        return delegate.listLost(input)
+      },
       releaseExecution(input) {
         return delegate.releaseExecution(input)
       },
