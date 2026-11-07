@@ -15,10 +15,11 @@ interface IngestReconcilerInput extends IngestReconciliationPorts {
 
 /**
  * The only part of ingestion that runs in the orchestrator, and a safety net: `ingest` queues its
- * own flush, so changes reach the lake with or without this pass.
+ * own flush and asks again for a request left open, so changes reach the lake with or without this
+ * pass.
  *
- * It recovers a flush that was never queued: a queue that refused the job, or a process that
- * stopped between storing a delivery and queueing it. Each pass queues a flush for every dataset
+ * It recovers a flush that was never queued when no later delivery asks: a queue that refused the
+ * job, or a process that stopped between storing a delivery and queueing it. Each pass queues a flush for every dataset
  * whose deliveries wait with no flush holding it, under the request the inbox holds, so a request
  * that already has a job queues nothing more.
  *

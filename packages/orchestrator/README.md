@@ -161,7 +161,7 @@ own failure count. See `packages/core/docs/runtime-lifecycle.md`.
 | `cron` | Each occurrence, to the second | Appends `schedule.triggered`, which the direct route consumes like any other event. An occurrence the broker refuses fails the pass and is retried every 10 seconds |
 | `projections` | 30 s, with projection routes | See above |
 | `triggers` | 30 s, with dataset-triggered pipelines | See above |
-| `ingest` | 30 s, when a dataset can be ingested | The only part of ingestion here, and a safety net: `ingest` queues its own flush. Queues the flush of every dataset whose deliveries wait with no flush holding it, under the request the inbox holds, so a request that has a job queues nothing more. Reports a dataset nothing wrote for 10 minutes, once per stall, as `dataset.ingest.flush.failed` |
+| `ingest` | 30 s, when a dataset can be ingested | The only part of ingestion here, and a safety net: `ingest` queues its own flush, and asks again when a request stays open for 30 s. Queues the flush of every dataset whose deliveries wait with no flush holding it, under the request the inbox holds, so a request that has a job queues nothing more. Reports a dataset nothing wrote for 10 minutes, once per stall, as `dataset.ingest.flush.failed` |
 | `lake-retention` | Each `cleanupEvery` from the epoch, when retention runs on its own | Enqueues `lake.retention.requested` on the `lake` queue, under the interval as job id. A lake worker runs it: one slow catalog write here would stall the project's other upkeep |
 
 Outbox rows are claimed under a lease, so passes in two processes never claim the same row together.

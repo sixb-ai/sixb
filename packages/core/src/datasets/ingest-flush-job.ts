@@ -3,6 +3,12 @@ import type { Queues } from "../queues/types"
 
 export type DatasetIngestFlushQueue = Pick<Queues["lake"], "enqueue">
 
+/**
+ * The longest a caller waits for the queue. The changes are already stored, so a queue that does
+ * not answer costs a webhook this much at most, and the attempt goes on behind it.
+ */
+const ENQUEUE_BOUND_MS = 1_000
+
 /** A dataset's flush request, as the inbox names it. */
 export interface DatasetIngestFlushRef {
   readonly datasetId: string
@@ -33,8 +39,9 @@ export async function enqueueIngestFlush(
 }
 
 /**
- * Queues a flush from code whose changes are already stored: a queue that fails must not fail it.
- * The request stays in the inbox, and the orchestrator's `ingest` pass queues the job.
+ * Queues a flush from code whose changes are already stored: a queue that fails or hangs must not
+ * fail or hold it. The request stays open in the inbox, so a later delivery asks again, and so does
+ * the orchestrator's `ingest` pass.
  */
 export async function tryEnqueueIngestFlush(
   queue: DatasetIngestFlushQueue,
@@ -42,12 +49,28 @@ export async function tryEnqueueIngestFlush(
   flush: DatasetIngestFlushRef,
   metadata: Readonly<Record<string, JsonValue>>
 ): Promise<void> {
-  try {
-    await enqueueIngestFlush(queue, projectId, flush, metadata)
-  } catch (error) {
+  const warn = (reason: unknown) => {
     console.warn(
-      `[Sixb] Could not queue the flush of dataset '${flush.datasetId}'; its changes are stored, and the next ingest pass queues it.`,
-      error
+      `[Sixb] Could not queue the flush of dataset '${flush.datasetId}'; its changes are stored, and it is asked for again.`,
+      reason
     )
   }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const answered = enqueueIngestFlush(queue, projectId, flush, metadata).then(
+    () => true,
+    (error: unknown) => {
+      warn(error)
+      return true
+    }
+  )
+  const outOfTime = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ENQUEUE_BOUND_MS)
+  })
+
+  if (!(await Promise.race([answered, outOfTime]))) {
+    warn(`The queue did not answer within ${ENQUEUE_BOUND_MS} ms.`)
+  }
+
+  clearTimeout(timer)
 }

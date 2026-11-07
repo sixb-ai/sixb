@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { LocalLakeStorage } from "@sixb/lake-local"
+import { SqliteStorage } from "@sixb/sqlite"
 import { $ } from "bun"
 import { startRoleUntilReadyThenStop } from "./shared/cli-process"
 
@@ -25,15 +26,22 @@ const TEST_TIMEOUT_MS = 90_000
 const redisContainer = `sixb-ingest-roles-${randomUUID()}`
 let redisUrl = ""
 
+/** The enqueue's bound, with room for the request around it on a loaded machine. */
+const ANSWERS_WITHOUT_REDIS_MS = 5_000
+
 const directories: string[] = []
 
+async function startRedis(container: string): Promise<string> {
+  await $`docker run -d --rm --name ${container} -p 127.0.0.1::6379 redis:7-alpine`.quiet()
+
+  const published = await $`docker port ${container} 6379`.text()
+  await untilRedisAnswers(container)
+
+  return `redis://${published.trim().split("\n")[0]}`
+}
+
 beforeAll(async () => {
-  await $`docker run -d --rm --name ${redisContainer} -p 127.0.0.1::6379 redis:7-alpine`.quiet()
-
-  const published = await $`docker port ${redisContainer} 6379`.text()
-  redisUrl = `redis://${published.trim().split("\n")[0]}`
-
-  await untilRedisAnswers()
+  redisUrl = await startRedis(redisContainer)
 }, REDIS_TIMEOUT_MS)
 
 afterAll(async () => {
@@ -46,11 +54,11 @@ afterEach(async () => {
   )
 })
 
-async function untilRedisAnswers(): Promise<void> {
+async function untilRedisAnswers(container: string): Promise<void> {
   const deadline = Date.now() + REDIS_TIMEOUT_MS / 2
 
   while (Date.now() < deadline) {
-    const pong = await $`docker exec ${redisContainer} redis-cli ping`.quiet().nothrow().text()
+    const pong = await $`docker exec ${container} redis-cli ping`.quiet().nothrow().text()
     if (pong.trim() === "PONG") return
 
     await Bun.sleep(100)
@@ -148,6 +156,18 @@ async function untilInLake(directory: string, rows: number) {
   throw new Error(`${rows} row(s) did not reach the lake within ${REACHES_LAKE_TIMEOUT_MS} ms.`)
 }
 
+/** What the inbox holds, read through the storage the roles share. */
+async function pendingDeliveries(directory: string): Promise<number> {
+  const storage = new SqliteStorage({ path: join(directory, "storage.db") })
+
+  try {
+    const summaries = await storage.datasetIngest.summarize({ projectId: "ingest-roles" })
+    return summaries.reduce((count, summary) => count + summary.pendingDeliveries, 0)
+  } finally {
+    await storage.close()
+  }
+}
+
 describe("ingestion across roles", () => {
   // Reproduce: drop the `tryEnqueueIngestFlush` call from `ingest` (datasets/execution.ts).
   test(
@@ -182,6 +202,35 @@ describe("ingestion across roles", () => {
           expect(await untilInLake(directory, 20)).toHaveLength(1)
         })
       })
+    },
+    TEST_TIMEOUT_MS
+  )
+
+  // Reproduce: await the enqueue without its bound in `tryEnqueueIngestFlush`; the webhook then
+  // waits on the queue's reconnects.
+  test(
+    "a webhook answers promptly once Redis is gone, with its changes stored",
+    async () => {
+      const { directory, env } = await project()
+      const container = `sixb-ingest-roles-${randomUUID()}`
+
+      try {
+        const ownRedis = { ...env, SIXB_E2E_REDIS_URL: await startRedis(container) }
+
+        await whileServing(ownRedis, async (send) => {
+          await $`docker rm -f ${container}`.quiet()
+
+          const startedAt = Date.now()
+          const response = await send("1")
+
+          expect(response.status).toBe(200)
+          expect(Date.now() - startedAt).toBeLessThan(ANSWERS_WITHOUT_REDIS_MS)
+        })
+
+        expect(await pendingDeliveries(directory)).toBe(1)
+      } finally {
+        await $`docker rm -f ${container}`.quiet().nothrow()
+      }
     },
     TEST_TIMEOUT_MS
   )

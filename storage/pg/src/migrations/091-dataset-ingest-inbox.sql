@@ -23,7 +23,7 @@ CREATE TABLE dataset_ingest_state (
   project_id TEXT NOT NULL,
   dataset_id TEXT NOT NULL,
   request BIGINT NOT NULL DEFAULT 0,
-  requested BOOLEAN NOT NULL DEFAULT FALSE,
+  requested_at TIMESTAMPTZ,
   lease_owner TEXT,
   lease_expires_at TIMESTAMPTZ,
   flush_id TEXT,

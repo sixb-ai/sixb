@@ -316,6 +316,31 @@ describe("LakeWorker", () => {
     expect(await inbox.summarize({ projectId: PROJECT_ID })).toEqual([])
   })
 
+  // No orchestrator runs here: the worker and the deliveries are all there is.
+  // Reproduce: join any open request in `requestFlushIn` (provider.ts).
+  test("a later delivery restarts ingestion after the queue lost a request", async () => {
+    jest.useFakeTimers()
+    const { sixb, lakeStorage, queues } = createHost({ ingest: true })
+    const handler = sixb.withScope(createTestingScope({ projectId: PROJECT_ID }))
+    const ingest = (id: string) =>
+      handler.datasets.ingest(people, { changes: [change.upsert(person(id))] })
+
+    await start(sixb)
+
+    const enqueue = queues.lake.enqueue.bind(queues.lake)
+    queues.lake.enqueue = async () => {
+      throw new Error("queue offline")
+    }
+    await quietly(() => ingest("1"))
+    queues.lake.enqueue = enqueue
+
+    jest.advanceTimersByTime(30_000)
+    await ingest("2")
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 1)
+    expect(await sixb.storage.datasetIngest!.summarize({ projectId: PROJECT_ID })).toEqual([])
+  })
+
   // Reproduce: complete the job when the flush answers "busy", and the delivery waits for a
   // request no job serves; or retry it when the other lease expires, and it waits up to a minute
   // after that flush has finished.

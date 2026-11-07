@@ -49,7 +49,7 @@ test("a delivery waits for a batch closing the request it would have joined", as
       lockHeld()
       await closing
       await sql`
-        UPDATE dataset_ingest_state SET requested = FALSE, request = request + 1
+        UPDATE dataset_ingest_state SET requested_at = NULL, request = request + 1
         WHERE project_id = ${projectId} AND dataset_id = ${datasetId}
       `
     })
