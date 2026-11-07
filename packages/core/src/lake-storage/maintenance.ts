@@ -8,7 +8,8 @@ import type { DatasetVersionRef } from "./types"
 export interface LakeMaintenance {
   /**
    * Expires versions nothing may read anymore, then deletes the files only they read. One call is
-   * one bounded pass: run it again while `hasMore` is true.
+   * one bounded pass, however long the provider's own reads stay open: run it again while `hasMore`
+   * is true.
    *
    * A version expires once a newer version of its dataset has replaced it for `keepVersionsForMs`.
    * A reader that resolved a dataset's latest version, such as a pipeline step reading its
@@ -38,6 +39,8 @@ export interface LakeRetentionOptions {
   readonly dryRun?: boolean
   /** Most versions one pass expires, and most files it deletes. Default: 1,000. */
   readonly limit?: number
+  /** Stops a pass that is waiting. A pass that is deleting finishes what it started. */
+  readonly signal?: AbortSignal
 }
 
 export interface LakeRetentionReport {
@@ -52,7 +55,7 @@ export interface LakeRetentionReport {
   readonly deletedFiles: number
   /** Files no version references, such as those an interrupted write left, deleted. */
   readonly orphanedFiles: number
-  /** The pass stopped at its limit: another pass has more to expire or delete. */
+  /** The pass stopped at its limit, or open reads kept it out: another has more to do. */
   readonly hasMore: boolean
 }
 

@@ -13,6 +13,8 @@ import {
 import type { BeginDatasetWriteInput, DatasetVersion } from "@sixb/core/lake-storage"
 import { createDatasetVersionMarkings } from "../../../packages/core/src/security/dataset-version-markings"
 import { DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
+import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
+import { DuckLakeReadsBusy } from "../src/internal/ducklake-read-gate"
 import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "../src/internal/names"
 import { duckLakeMetadataTableName, quoteSqlString } from "../src/internal/sql"
 import { parseVersionId } from "../src/internal/versions"
@@ -509,6 +511,72 @@ describe("DuckLakeStorage retention", () => {
 
     expect(orders).toMatchObject({ rowCount: 1, partitionBy: [], warnings: [] })
     expect(missing).toMatchObject({ datasetId: "never.created", materialized: false })
+  })
+
+  describe("beside this process's reads", () => {
+    // Co-hosted workers read while retention runs: a projection holds its read for as long as it
+    // writes objects. Reproduce: drop the `due` check from deleteScheduledFiles, or the dry run from
+    // deleteOrphanedFiles. The pass then waits for the read and times out.
+    test("a pass with no file to delete never waits for reads", async () => {
+      await writeSnapshot([{ orderId: "ord_1", total: 1 }])
+      const read = await openRead()
+
+      const report = await storage.maintenance.applyRetention(ONE_HOUR)
+      await read.close()
+
+      expect(report).toMatchObject({ deletedFiles: 0, orphanedFiles: 0, hasMore: false })
+    })
+
+    // Reproduce: drop `retention.signal` from deleteScheduledFiles. Shutdown then waits for the
+    // read, which stops only after the worker that runs retention.
+    test("a signal stops a pass that waits for reads, and the read goes on", async () => {
+      await scheduleFiles(["2 days"])
+      const read = await openRead()
+      const controller = new AbortController()
+      const stopped = new Error("shutting down")
+
+      const pass = storage.maintenance.applyRetention({ ...ONE_HOUR, signal: controller.signal })
+      const outcome = pass.catch((error: unknown) => error)
+      controller.abort(stopped)
+
+      expect(await outcome).toBe(stopped)
+      expect((await read.next()).done).toBe(false)
+      await read.close()
+    })
+
+    // Reads that stay open are no failure, however long they last. Reproduce: report busy reads as a
+    // yield in yieldingToConcurrentPass; the third pass then throws.
+    test("leaves files to a later pass when reads keep it out, as often as they do", async () => {
+      await scheduleFiles(["2 days"])
+      const busy = spyOn(
+        DuckLakeConnectionManager.prototype,
+        "withMaintenanceRuntime"
+      ).mockRejectedValue(new DuckLakeReadsBusy())
+
+      for (let pass = 0; pass < 4; pass++) {
+        const report = await storage.maintenance.applyRetention(ONE_HOUR)
+        expect(report).toMatchObject({ deletedFiles: 0, hasMore: true })
+      }
+
+      busy.mockRestore()
+      const report = await storage.maintenance.applyRetention(ONE_HOUR)
+      expect(report.deletedFiles).toBeGreaterThan(0)
+    })
+
+    /** A read holding its lease partway through, as a projection does while it writes objects. */
+    async function openRead() {
+      await writeSnapshot(Array.from({ length: 3 }, (_, n) => ({ orderId: `ord_${n}`, total: 9 })))
+
+      const rows = storage.readRows({ datasetId: ordersDataset.id })[Symbol.asyncIterator]()
+      await rows.next()
+
+      return {
+        next: () => rows.next(),
+        close: async () => {
+          await rows.return?.()
+        },
+      }
+    }
   })
 
   async function writeSnapshot(rows: readonly { orderId: string; total: number }[]) {

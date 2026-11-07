@@ -104,6 +104,12 @@ const health = await lakeStorage.maintenance.describeStorage(["invoices"])
 // [{ dataFiles, smallDataFiles, deleteFiles, inlinedRows, retainedSnapshots, warnings, ... }]
 ```
 
+Deleting files keeps this provider's reads out, and a pass with no file to delete never does. A
+pass that has files to delete waits 30 seconds for open reads, then holds new reads back for 5 seconds
+so that overlapping reads cannot keep it out for good. If a read still outlasts that, the pass leaves
+the files to a later one with `hasMore: true`, and new reads are not held back again for 5 minutes.
+Pass `signal` to stop a pass that is waiting.
+
 `sixb lake cleanup` runs one pass, protecting the version each projection applied.
 
 **What expires.** A version's age counts from the commit that replaced it, not its own: a version
