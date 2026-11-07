@@ -95,14 +95,14 @@ async function start(sixb: SixbHost, options?: LakeWorkerOptions) {
   return worker
 }
 
-async function enqueueRetention(queues: InMemoryQueues, requestedAt: string) {
+async function enqueueRetention(queues: InMemoryQueues, intervalStart: string) {
   await queues.lake.enqueue({
     projectId: PROJECT_ID,
     jobs: [
       {
-        id: `lake-retention:${requestedAt}`,
+        id: `lake-retention:${intervalStart}`,
         type: "lake.retention.requested",
-        payload: { requestedAt },
+        payload: { intervalStart },
       },
     ],
   })
@@ -118,6 +118,15 @@ async function eventually(predicate: () => boolean, turns = 500): Promise<void> 
 }
 
 describe("LakeWorker", () => {
+  // Retention is its only job, so a second slot would only run two retentions at once. Reproduce:
+  // default `claimLimit` to 2 in worker.ts.
+  test("runs one job at a time unless told otherwise", () => {
+    const { sixb } = createHost()
+
+    expect(new LakeWorker(sixb).concurrency).toBe(1)
+    expect(new LakeWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("runs a retention request", async () => {
     const { sixb, lakeStorage, queues } = createHost()
     await start(sixb)
@@ -128,26 +137,17 @@ describe("LakeWorker", () => {
     lakeStorage.passes[0]!.resolve()
   })
 
-  // Reproduce: drop the refusal from LakeWorker's constructor in worker.ts.
-  test("refuses to start when lake retention does not run on its own", () => {
-    const { sixb } = createHost({ lakeMaintenance: { enabled: false } })
+  // Listing `lake` is what the docs ask of a deployment, and `enabled: false` what they offer as
+  // the way out: the two together must not take the worker group down.
+  test("idles when lake retention does not run on its own", async () => {
+    const { sixb, queues } = createHost({ lakeMaintenance: { enabled: false } })
+    const worker = await start(sixb)
 
-    expect(() => new LakeWorker(sixb)).toThrow(
-      "[SixbLakeWorker] Lake retention does not run on its own in this project."
-    )
-  })
+    await enqueueRetention(queues, new Date().toISOString())
+    await eventually(() => false, 20).catch(() => {})
 
-  // Reproduce: set DEFAULT_CONCURRENCY to 1 in worker.ts.
-  test("runs two lake jobs at once by default", async () => {
-    const { sixb, lakeStorage, queues } = createHost()
-    await start(sixb)
-    const now = Date.now()
-
-    await enqueueRetention(queues, new Date(now - MINUTE).toISOString())
-    await enqueueRetention(queues, new Date(now).toISOString())
-
-    await eventually(() => lakeStorage.passes.length === 2)
-    for (const pass of lakeStorage.passes) pass.resolve()
+    await worker.stop()
+    expect(await sixb.storage.lakeRetentionRuns?.getLast({ projectId: PROJECT_ID })).toBeNull()
   })
 
   // Reproduce: return `{ kind: "retry" }` from onExecutionError in worker.ts.
@@ -161,20 +161,20 @@ describe("LakeWorker", () => {
       failed.push(input.jobId)
     }
     await start(sixb)
-    const requestedAt = new Date().toISOString()
+    const intervalStart = new Date().toISOString()
 
-    await enqueueRetention(queues, requestedAt)
+    await enqueueRetention(queues, intervalStart)
     await eventually(() => lakeStorage.passes.length === 1)
     lakeStorage.passes[0]!.reject(new Error("catalog unreachable"))
     await eventually(() => failed.length === 1)
 
-    expect(failed).toEqual([`lake-retention:${requestedAt}`])
+    expect(failed).toEqual([`lake-retention:${intervalStart}`])
     expect(errors).toEqual([
       expect.objectContaining({
         type: "lake.retention.failed",
         projectId: PROJECT_ID,
-        requestedAt,
-        notificationId: `lake-retention:${PROJECT_ID}:${requestedAt}`,
+        intervalStart,
+        notificationId: `lake-retention:${PROJECT_ID}:${intervalStart}`,
         failure: expect.objectContaining({ code: "internal.unexpected" }),
       }),
     ])
@@ -206,9 +206,9 @@ describe("LakeWorker", () => {
     const errors: SixbErrorContext[] = []
     const { sixb, lakeStorage, queues } = createHost({ errors })
     const worker = await start(sixb)
-    const requestedAt = new Date().toISOString()
+    const intervalStart = new Date().toISOString()
 
-    await enqueueRetention(queues, requestedAt)
+    await enqueueRetention(queues, intervalStart)
     await eventually(() => lakeStorage.passes.length === 1)
 
     const stopping = worker.stop()
@@ -217,7 +217,7 @@ describe("LakeWorker", () => {
 
     const [redelivered] = await queues.lake.claim({ projectId: PROJECT_ID, workerId: "next" })
 
-    expect(redelivered?.job).toMatchObject({ id: `lake-retention:${requestedAt}`, attempt: 2 })
+    expect(redelivered?.job).toMatchObject({ id: `lake-retention:${intervalStart}`, attempt: 2 })
     expect(errors).toEqual([])
   })
 })

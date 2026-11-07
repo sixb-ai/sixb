@@ -258,7 +258,7 @@ describe("lake retention passes", () => {
 })
 
 describe("a requested retention run", () => {
-  const requestedAt = NOW.toISOString()
+  const intervalStart = NOW.toISOString()
   const signal = new AbortController().signal
 
   // Reproduce: drop `budgetMs` from runRequested in maintenance/lake-retention.ts.
@@ -266,7 +266,7 @@ describe("a requested retention run", () => {
     const { maintenance, passes } = fakeMaintenance({ passesWithMore: 5, passMs: 4 * MINUTE })
     const retention = runtime({ maintenance, options: { cleanupEvery: "10m" } })
 
-    const report = await drive(retention.runRequested(requestedAt, signal))
+    const report = await drive(retention.runRequested(intervalStart, signal))
 
     expect(passes).toHaveLength(2)
     expect(report?.hasMore).toBe(true)
@@ -277,7 +277,7 @@ describe("a requested retention run", () => {
     const { maintenance, passes } = fakeMaintenance({ passesWithMore: 5, passMs: 4 * MINUTE })
     const retention = runtime({ maintenance, options: { cleanupEvery: "6h" } })
 
-    await drive(retention.runRequested(requestedAt, signal))
+    await drive(retention.runRequested(intervalStart, signal))
 
     expect(passes).toHaveLength(3)
   })
@@ -288,11 +288,11 @@ describe("a requested retention run", () => {
     const retention = runtime({ maintenance })
 
     jest.setSystemTime(NOW.getTime() + HOUR)
-    expect(await retention.runRequested(requestedAt, signal)).toBeNull()
+    expect(await retention.runRequested(intervalStart, signal)).toBeNull()
     expect(passes).toHaveLength(0)
 
     jest.setSystemTime(NOW.getTime() + HOUR - 1)
-    expect(await retention.runRequested(requestedAt, signal)).not.toBeNull()
+    expect(await retention.runRequested(intervalStart, signal)).not.toBeNull()
     expect(passes).toHaveLength(1)
   })
 
@@ -303,7 +303,7 @@ describe("a requested retention run", () => {
       options: { keepVersionsFor: "2d", deleteFilesAfter: "12h" },
     })
 
-    await retention.runRequested(requestedAt, signal)
+    await retention.runRequested(intervalStart, signal)
 
     expect(passes[0]).toMatchObject({
       keepVersionsForMs: 48 * HOUR,
@@ -312,18 +312,56 @@ describe("a requested retention run", () => {
     })
   })
 
-  // Reproduce: drop `recordRun(false)` from runRequested in maintenance/lake-retention.ts.
+  // Reproduce: drop `finish(false)` from runRequested in maintenance/lake-retention.ts.
   test("records that it ran", async () => {
-    const { maintenance } = fakeMaintenance()
+    const { maintenance } = fakeMaintenance({ passMs: MINUTE })
     const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
 
-    await runtime({ maintenance, lakeRetentionRuns }).runRequested(requestedAt, signal)
+    await runtime({ maintenance, lakeRetentionRuns }).runRequested(intervalStart, signal)
 
     expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toEqual({
       projectId: "project",
-      finishedAt: NOW,
+      startedAt: NOW,
+      finishedAt: new Date(NOW.getTime() + MINUTE),
       failed: false,
     })
+  })
+
+  // A first run can last ten minutes, and it is the proof that a worker exists. Reproduce: drop the
+  // first `recordRun` from runRequested in maintenance/lake-retention.ts.
+  test("records that it started before its first pass ends", async () => {
+    const { maintenance, passes } = fakeMaintenance({ passesWithMore: 1 })
+    const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
+
+    const running = runtime({ maintenance, lakeRetentionRuns }).runRequested(intervalStart, signal)
+    await settle()
+
+    expect(passes).toHaveLength(1)
+    expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toMatchObject({
+      startedAt: NOW,
+      finishedAt: null,
+    })
+
+    await drive(running)
+  })
+
+  // Reproduce: drop `!automatic` from runRequested in maintenance/lake-retention.ts. A request
+  // queued before the project turned retention off would then run.
+  test("does nothing once the project turned retention off", async () => {
+    const { maintenance, passes } = fakeMaintenance()
+    const retention = runtime({ maintenance, options: { enabled: false } })
+
+    expect(await retention.runRequested(intervalStart, signal)).toBeNull()
+    expect(passes).toHaveLength(0)
+  })
+
+  // Reproduce: drop `signal` from the applyRetention call in maintenance/lake-retention.ts.
+  test("hands its signal to each pass, so a provider can stop waiting", async () => {
+    const { maintenance, passes } = fakeMaintenance()
+
+    await runtime({ maintenance }).runRequested(intervalStart, signal)
+
+    expect(passes[0]?.signal).toBe(signal)
   })
 
   // Reproduce: drop the catch from runRequested in maintenance/lake-retention.ts.
@@ -335,7 +373,7 @@ describe("a requested retention run", () => {
     const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
     const retention = runtime({ maintenance, lakeRetentionRuns })
 
-    const error = await retention.runRequested(requestedAt, signal).catch((caught) => caught)
+    const error = await retention.runRequested(intervalStart, signal).catch((caught) => caught)
 
     expect(String(error)).toContain("the catalog is unreachable")
     expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toMatchObject({
@@ -343,13 +381,13 @@ describe("a requested retention run", () => {
     })
   })
 
-  // Reproduce: remove the `signal.aborted` guard from runRequested in maintenance/lake-retention.ts.
-  test("records nothing when shutdown stops it, since the job returns to the queue", async () => {
+  // Reproduce: pass `true` to `finish` in the catch of runRequested in maintenance/lake-retention.ts.
+  test("records no failure when shutdown stops it, since the job returns to the queue", async () => {
     const { maintenance } = fakeMaintenance({ passesWithMore: 5 })
     const lakeRetentionRuns = new InMemoryLakeRetentionRunStorage()
     const controller = new AbortController()
     const running = runtime({ maintenance, lakeRetentionRuns }).runRequested(
-      requestedAt,
+      intervalStart,
       controller.signal
     )
 
@@ -357,7 +395,10 @@ describe("a requested retention run", () => {
     controller.abort()
     await running.catch((caught) => caught)
 
-    expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toBeNull()
+    expect(await lakeRetentionRuns.getLast({ projectId: "project" })).toMatchObject({
+      finishedAt: NOW,
+      failed: false,
+    })
   })
 
   // Reproduce: drop the `.catch` from `recordRun` in maintenance/lake-retention.ts.
@@ -370,7 +411,7 @@ describe("a requested retention run", () => {
     }
 
     const report = await runtime({ maintenance, lakeRetentionRuns }).runRequested(
-      requestedAt,
+      intervalStart,
       signal
     )
 

@@ -12,26 +12,35 @@ export class SqliteLakeRetentionRunStorage implements LakeRetentionRunStorage {
   async record(run: LakeRetentionRunRecord): Promise<void> {
     this.db
       .query(
-        `INSERT INTO lake_retention_runs (project_id, finished_at, failed)
-         VALUES (?, ?, ?)
+        `INSERT INTO lake_retention_runs (project_id, started_at, finished_at, failed)
+         VALUES (?, ?, ?, ?)
          ON CONFLICT (project_id) DO UPDATE SET
+           started_at = excluded.started_at,
            finished_at = excluded.finished_at,
            failed = excluded.failed`
       )
-      .run(run.projectId, run.finishedAt.toISOString(), run.failed ? 1 : 0)
+      .run(
+        run.projectId,
+        run.startedAt.toISOString(),
+        run.finishedAt?.toISOString() ?? null,
+        run.failed ? 1 : 0
+      )
   }
 
   async getLast(input: { readonly projectId: string }): Promise<LakeRetentionRunRecord | null> {
     const row = this.db
       .query<SqliteLakeRetentionRunRow, [string]>(
-        `SELECT project_id, finished_at, failed FROM lake_retention_runs WHERE project_id = ?`
+        `SELECT project_id, started_at, finished_at, failed
+         FROM lake_retention_runs
+         WHERE project_id = ?`
       )
       .get(input.projectId)
     if (!row) return null
 
     return {
       projectId: row.project_id,
-      finishedAt: new Date(row.finished_at),
+      startedAt: new Date(row.started_at),
+      finishedAt: row.finished_at ? new Date(row.finished_at) : null,
       failed: row.failed === 1,
     }
   }
@@ -39,6 +48,7 @@ export class SqliteLakeRetentionRunStorage implements LakeRetentionRunStorage {
 
 interface SqliteLakeRetentionRunRow {
   readonly project_id: string
-  readonly finished_at: string
+  readonly started_at: string
+  readonly finished_at: string | null
   readonly failed: number
 }

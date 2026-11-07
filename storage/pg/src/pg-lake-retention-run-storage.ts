@@ -6,9 +6,10 @@ export class PgLakeRetentionRunStorage implements LakeRetentionRunStorage {
 
   async record(run: LakeRetentionRunRecord): Promise<void> {
     await this.sql`
-      INSERT INTO lake_retention_runs (project_id, finished_at, failed)
-      VALUES (${run.projectId}, ${run.finishedAt}, ${run.failed})
+      INSERT INTO lake_retention_runs (project_id, started_at, finished_at, failed)
+      VALUES (${run.projectId}, ${run.startedAt}, ${run.finishedAt}, ${run.failed})
       ON CONFLICT (project_id) DO UPDATE SET
+        started_at = EXCLUDED.started_at,
         finished_at = EXCLUDED.finished_at,
         failed = EXCLUDED.failed
     `
@@ -16,7 +17,7 @@ export class PgLakeRetentionRunStorage implements LakeRetentionRunStorage {
 
   async getLast(input: { readonly projectId: string }): Promise<LakeRetentionRunRecord | null> {
     const [row] = await this.sql<PgLakeRetentionRunRow[]>`
-      SELECT project_id, finished_at, failed
+      SELECT project_id, started_at, finished_at, failed
       FROM lake_retention_runs
       WHERE project_id = ${input.projectId}
     `
@@ -24,7 +25,8 @@ export class PgLakeRetentionRunStorage implements LakeRetentionRunStorage {
 
     return {
       projectId: row.project_id,
-      finishedAt: new Date(row.finished_at),
+      startedAt: new Date(row.started_at),
+      finishedAt: row.finished_at ? new Date(row.finished_at) : null,
       failed: row.failed,
     }
   }
@@ -32,6 +34,7 @@ export class PgLakeRetentionRunStorage implements LakeRetentionRunStorage {
 
 interface PgLakeRetentionRunRow {
   readonly project_id: string
-  readonly finished_at: Date
+  readonly started_at: Date
+  readonly finished_at: Date | null
   readonly failed: boolean
 }

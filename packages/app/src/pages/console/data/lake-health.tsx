@@ -75,7 +75,8 @@ const CLEANUP_TONES: Record<Cleanup["state"], Tone> = {
   "not-requested": "warn",
   "no-worker": "warn",
   failing: "error",
-  running: "ok",
+  cleaning: "info",
+  ok: "ok",
 }
 
 function CleanupSection({ cleanup }: { readonly cleanup: Cleanup }) {
@@ -91,10 +92,11 @@ function CleanupSection({ cleanup }: { readonly cleanup: Cleanup }) {
         <Facts
           items={[
             { label: messages.status, value: <CleanupState cleanup={cleanup} /> },
-            { label: messages.lastRequested, value: when(cleanup.requestedAt) },
+            { label: messages.interval, value: format.duration(cleanup.cleanupEvery) },
+            { label: messages.lastRequested, value: when(cleanup.lastRequestedAt) },
             { label: messages.lastRun, value: when(cleanup.lastRunAt) },
-            { label: messages.keepVersionsFor, value: cleanup.keepVersionsFor },
-            { label: messages.deleteFilesAfter, value: cleanup.deleteFilesAfter },
+            { label: messages.keepVersionsFor, value: format.duration(cleanup.keepVersionsFor) },
+            { label: messages.deleteFilesAfter, value: format.duration(cleanup.deleteFilesAfter) },
           ]}
         />
       </Panel>
@@ -104,13 +106,11 @@ function CleanupSection({ cleanup }: { readonly cleanup: Cleanup }) {
 
 /** The state as a pill, over what it means. */
 function CleanupState({ cleanup }: { readonly cleanup: Cleanup }) {
-  const { states, stateNotes, on } = useDataMessages().lakeHealth
+  const { states, stateNotes } = useDataMessages().lakeHealth
 
   return (
     <span className="flex flex-col items-start gap-1.5">
-      <Pill tone={CLEANUP_TONES[cleanup.state]}>
-        {cleanup.state === "running" ? on(cleanup.cleanupEvery) : states[cleanup.state]}
-      </Pill>
+      <Pill tone={CLEANUP_TONES[cleanup.state]}>{states[cleanup.state]}</Pill>
       <span className="text-muted-foreground">{stateNotes[cleanup.state]}</span>
     </span>
   )
@@ -209,7 +209,7 @@ function storageFacts(
   const facts = [
     messages.common.rows(dataset.rowCount, count(dataset.rowCount)),
     dataset.smallDataFiles > 0
-      ? `${files} (${lake.smallFiles(count(dataset.smallDataFiles))})`
+      ? `${files} (${lake.smallFiles(dataset.smallDataFiles, count(dataset.smallDataFiles))})`
       : files,
     numbers.bytes(dataset.dataBytes),
   ]

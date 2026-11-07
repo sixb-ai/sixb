@@ -479,14 +479,15 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   }
 
   private lakeRetentionPasses(): readonly MaintenancePass[] {
-    const { automatic, settings } = getLakeRetentionRuntime(this)
-    if (!automatic) return []
+    const retention = getLakeRetentionRuntime(this)
+    if (!retention.automatic) return []
 
     return [
       lakeRetentionPass({
         projectId: this.projectId,
-        cleanupEveryMs: settings.cleanupEveryMs,
+        cleanupEveryMs: retention.settings.cleanupEveryMs,
         queue: this.queues.lake,
+        status: () => retention.status(),
       }),
     ]
   }

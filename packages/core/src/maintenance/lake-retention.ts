@@ -6,7 +6,7 @@ import type {
 } from "../lake-storage"
 import { RuntimeError } from "../runtime/errors"
 import { parseDuration } from "../shared/duration"
-import type { Storage } from "../storage"
+import type { LakeRetentionRunRecord, Storage } from "../storage"
 import type { OntologySourceStorage } from "../storage/ontology/sources"
 import { type LakeRetentionStatus, lakeRetentionStatus } from "./lake-retention-status"
 
@@ -42,7 +42,7 @@ export interface LakeRetentionPassOptions {
   readonly signal?: AbortSignal
 }
 
-/** Internal entry point for the worker, the CLI and the API; it never exposes the providers. */
+/** Internal entry point for the worker, the CLI and the API. */
 export interface LakeRetentionRuntime {
   readonly settings: LakeMaintenanceSettings
   /** Whether retention runs on its own: enabled, a provider with maintenance, and datasets. */
@@ -55,11 +55,11 @@ export interface LakeRetentionRuntime {
    */
   apply(options: LakeRetentionPassOptions): Promise<LakeRetentionReport>
   /**
-   * Runs what the `lake-retention` pass requested for one interval, within a budget, and records how
-   * it ended. Null when that interval is over: the next one's request covers it, so a backlog left
-   * by a stopped worker runs once.
+   * Runs what the `lake-retention` pass requested for the interval starting at `intervalStart`,
+   * within a budget, and records it. Null when retention was turned off since, or the interval is
+   * over: the next request covers it, so a backlog left by a stopped worker runs once.
    */
-  runRequested(requestedAt: string, signal: AbortSignal): Promise<LakeRetentionReport | null>
+  runRequested(intervalStart: string, signal: AbortSignal): Promise<LakeRetentionReport | null>
   /** What durable state says about automatic retention, whichever process asks. */
   status(): Promise<LakeRetentionStatus>
 }
@@ -148,12 +148,14 @@ export function createLakeRetentionRuntime(input: {
   }
 
   // The run happened whatever this says, so a failed write costs the Console its account, no more.
-  const recordRun = async (failed: boolean): Promise<void> => {
-    const run = { projectId: input.projectId, finishedAt: new Date(), failed }
+  const recordRun = async (run: Omit<LakeRetentionRunRecord, "projectId">): Promise<void> => {
+    const { projectId } = input
 
-    await input.storage.lakeRetentionRuns?.record(run).catch((failure: unknown) => {
-      console.error("[Sixb] Could not record a lake retention run:", failure)
-    })
+    await input.storage.lakeRetentionRuns
+      ?.record({ ...run, projectId })
+      .catch((failure: unknown) => {
+        console.error("[Sixb] Could not record a lake retention run:", failure)
+      })
   }
 
   return {
@@ -162,8 +164,14 @@ export function createLakeRetentionRuntime(input: {
     maintenance,
     apply,
 
-    async runRequested(requestedAt, signal) {
-      if (Date.now() - Date.parse(requestedAt) >= settings.cleanupEveryMs) return null
+    async runRequested(intervalStart, signal) {
+      const intervalOver = Date.now() - Date.parse(intervalStart) >= settings.cleanupEveryMs
+      if (!automatic || intervalOver) return null
+
+      const startedAt = new Date()
+      await recordRun({ startedAt, finishedAt: null, failed: false })
+
+      const finish = (failed: boolean) => recordRun({ startedAt, finishedAt: new Date(), failed })
 
       try {
         const report = await apply({
@@ -172,12 +180,12 @@ export function createLakeRetentionRuntime(input: {
           budgetMs: Math.min(settings.cleanupEveryMs / 2, MAX_RUN_BUDGET_MS),
           signal,
         })
-        await recordRun(false)
+        await finish(false)
 
         return report
       } catch (error) {
         // Shutdown returns the job to the queue: that is no failed run.
-        if (!signal.aborted) await recordRun(true)
+        await finish(!signal.aborted)
         throw error
       }
     },
@@ -227,6 +235,7 @@ async function runRetentionPasses(input: {
       deleteFilesAfterMs: options.deleteFilesAfterMs,
       dryRun: options.dryRun ?? false,
       protect: await protect(),
+      signal: options.signal,
     })
     total = total === undefined ? report : addReports(total, report)
 

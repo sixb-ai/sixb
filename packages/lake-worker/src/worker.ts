@@ -7,16 +7,13 @@ import type { ClaimedQueueJob, LakeQueueJob, Queues } from "@sixb/core/queues"
 
 const FAILURE_CODES = ["internal.unexpected", "runtime.cancelled"] as const
 
-/** Two at a time, so lake work behind a long retention pass does not wait for it. */
-const DEFAULT_CONCURRENCY = 2
-
 export interface LakeWorkerHost {
   readonly id: string
   readonly queues: Pick<Queues, "lake">
 }
 
 export interface LakeWorkerOptions {
-  /** Maximum lake jobs this worker claims and executes at once. Defaults to 2. */
+  /** Maximum lake jobs this worker claims and executes at once. Defaults to 1. */
   readonly concurrency?: number
 }
 
@@ -26,25 +23,20 @@ export class LakeWorker extends QueueWorker<LakeQueueJob, typeof FAILURE_CODES> 
   private readonly retention: LakeRetentionRuntime
 
   constructor(host: LakeWorkerHost, options: LakeWorkerOptions = {}) {
-    const retention = getLakeRetentionRuntime(host)
-    if (!retention.automatic) {
-      throw new Error("[SixbLakeWorker] Lake retention does not run on its own in this project.")
-    }
-
     super({
       projectId: host.id,
       queue: host.queues.lake,
       failureCodes: FAILURE_CODES,
       workerId: `lake-worker-${host.id}`,
-      claimLimit: options.concurrency ?? DEFAULT_CONCURRENCY,
+      claimLimit: options.concurrency,
     })
 
     this.host = host
-    this.retention = retention
+    this.retention = getLakeRetentionRuntime(host)
   }
 
   protected async execute(claimed: ClaimedQueueJob<LakeQueueJob>, signal: AbortSignal) {
-    const report = await this.retention.runRequested(claimed.job.payload.requestedAt, signal)
+    const report = await this.retention.runRequested(claimed.job.payload.intervalStart, signal)
 
     if (report && changedAnything(report)) {
       console.info(
@@ -67,7 +59,7 @@ export class LakeWorker extends QueueWorker<LakeQueueJob, typeof FAILURE_CODES> 
 
     reportLakeRetentionFailure(this.host, error, {
       projectId: this.host.id,
-      requestedAt: claimed.job.payload.requestedAt,
+      intervalStart: claimed.job.payload.intervalStart,
       failure,
     })
 

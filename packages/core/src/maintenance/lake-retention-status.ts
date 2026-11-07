@@ -14,13 +14,16 @@ export type LakeRetentionState =
   | "no-worker"
   /** The last request or the last run failed. */
   | "failing"
-  | "running"
+  /** A lake worker is running it now. */
+  | "cleaning"
+  /** Requests go out and a lake worker ran the last one. */
+  | "ok"
 
 export interface LakeRetentionStatus {
   readonly state: LakeRetentionState
   /** When the orchestrator last asked for retention. */
-  readonly requestedAt: string | null
-  /** When a lake worker last finished a run, whatever its outcome. */
+  readonly lastRequestedAt: string | null
+  /** When a lake worker last started a run. */
   readonly lastRunAt: string | null
 }
 
@@ -38,8 +41,8 @@ export interface LakeRetentionStatusInput {
 export function lakeRetentionStatus(input: LakeRetentionStatusInput): LakeRetentionStatus {
   return {
     state: stateOf(input),
-    requestedAt: passOf(input.heartbeat)?.lastSucceededAt?.toISOString() ?? null,
-    lastRunAt: input.lastRun?.finishedAt.toISOString() ?? null,
+    lastRequestedAt: passOf(input.heartbeat)?.lastSucceededAt?.toISOString() ?? null,
+    lastRunAt: input.lastRun?.startedAt.toISOString() ?? null,
   }
 }
 
@@ -54,8 +57,11 @@ function stateOf(input: LakeRetentionStatusInput): LakeRetentionState {
   if (pass.consecutiveFailures > 0) return "failing"
   if (pass.lastSucceededAt === null) return "not-requested"
 
+  if (lastRun === null) return "no-worker"
   if (isBehind(pass.lastSucceededAt, lastRun, settings.cleanupEveryMs)) return "no-worker"
-  return lastRun?.failed ? "failing" : "running"
+  if (lastRun.finishedAt === null) return "cleaning"
+
+  return lastRun.failed ? "failing" : "ok"
 }
 
 function passOf(heartbeat: MaintenanceHeartbeatRecord | null) {
@@ -63,15 +69,13 @@ function passOf(heartbeat: MaintenanceHeartbeatRecord | null) {
 }
 
 /**
- * A run ends shortly after its request, so a request one whole interval past the last run means
+ * A run starts shortly after its request, so a request one whole interval past the last run means
  * the one before it went unanswered.
  */
 function isBehind(
-  requestedAt: Date,
-  lastRun: LakeRetentionRunRecord | null,
+  lastRequestedAt: Date,
+  lastRun: LakeRetentionRunRecord,
   cleanupEveryMs: number
 ): boolean {
-  if (lastRun === null) return true
-
-  return requestedAt.getTime() - lastRun.finishedAt.getTime() > cleanupEveryMs
+  return lastRequestedAt.getTime() - lastRun.startedAt.getTime() > cleanupEveryMs
 }

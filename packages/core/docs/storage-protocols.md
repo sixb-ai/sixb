@@ -66,9 +66,9 @@ runs leaves it. Nothing purges a row: a project that stops using an orchestrator
 
 ## Lake retention runs
 
-`lake_retention_runs` holds one row per project: when the last automatic run ended, and whether it
-failed. The worker that runs retention rewrites it, and it is the only proof that one does: `Queue`
-has no read path. A write that fails loses that account of the run, never the run.
+`lake_retention_runs` holds one row per project: when the last automatic run started and ended, and
+whether it failed. The worker rewrites it at both moments, and it is the only proof that one runs:
+`Queue` has no read path. A write that fails loses that account of the run, never the run.
 
 ## Sequenced dataset writes
 

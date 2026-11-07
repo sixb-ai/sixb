@@ -220,8 +220,7 @@ export interface LakeRetentionRequestedQueueJob
   extends QueueJob<
     "lake.retention.requested",
     {
-      /** When that interval started. */
-      readonly requestedAt: string
+      readonly intervalStart: string
     }
   > {}
 

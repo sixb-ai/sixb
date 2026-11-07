@@ -162,6 +162,14 @@ export function useLoadFailure(
   }
 }
 
+const DURATION_UNITS: Readonly<Record<string, string>> = {
+  m: "minute",
+  h: "hour",
+  d: "day",
+  w: "week",
+  y: "year",
+}
+
 /** Dates and times in the reader's locale. */
 export function useFormat() {
   const locale = useLocale()
@@ -182,6 +190,18 @@ export function useFormat() {
         const date = parse(timestamp)
         if (!date) return unknown
         return date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })
+      },
+      /** A setting such as "7d" as "7 days", in the reader's language. Anything else stays as is. */
+      duration(value: string): string {
+        const [, amount, unit] = value.match(/^(\d+)([mhdwy])$/) ?? []
+        if (amount === undefined || unit === undefined) return value
+
+        const durationUnit = DURATION_UNITS[unit]
+        return new Intl.NumberFormat(locale, {
+          style: "unit",
+          unit: durationUnit,
+          unitDisplay: "long",
+        }).format(Number(amount))
       },
       /** "now", "5 minutes ago", "yesterday", in the reader's language. */
       relative(timestamp: string): string {

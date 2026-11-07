@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
 import {
   col,
   defineDataset,
@@ -11,6 +11,7 @@ import {
 import type { LakeMaintenance } from "../src/lake-storage"
 import { MaintenanceLoop } from "../src/maintenance"
 import { lakeRetentionPass } from "../src/maintenance/lake-retention-pass"
+import type { LakeRetentionState } from "../src/maintenance/lake-retention-status"
 import { InMemoryQueues } from "../src/queues"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -32,14 +33,25 @@ function lanes(queues = new InMemoryQueues()) {
         await queues.lake.complete({ projectId, jobId: job.id, leaseId })
       }
 
-      return claimed.map(({ job }) => job.payload.requestedAt)
+      return claimed.map(({ job }) => job.payload.intervalStart)
     },
   }
 }
 
-function startLoop(queue: Pick<InMemoryQueues["lake"], "enqueue">, failures: unknown[] = []) {
+function startLoop(
+  queue: Pick<InMemoryQueues["lake"], "enqueue">,
+  failures: unknown[] = [],
+  state: LakeRetentionState = "ok"
+) {
   const loop = new MaintenanceLoop({
-    passes: [lakeRetentionPass({ projectId, cleanupEveryMs: HOUR, queue })],
+    passes: [
+      lakeRetentionPass({
+        projectId,
+        cleanupEveryMs: HOUR,
+        queue,
+        status: async () => ({ state }),
+      }),
+    ],
     onError: (error) => failures.push(error),
   })
   loop.start()
@@ -64,6 +76,7 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers()
+  jest.restoreAllMocks()
 })
 
 describe("the lake-retention pass", () => {
@@ -77,7 +90,7 @@ describe("the lake-retention pass", () => {
     expect(claimed?.job).toMatchObject({
       id: "lake-retention:2026-11-05T10:00:00.000Z",
       type: "lake.retention.requested",
-      payload: { requestedAt: "2026-11-05T10:00:00.000Z" },
+      payload: { intervalStart: "2026-11-05T10:00:00.000Z" },
     })
     await loop.stop()
   })
@@ -168,6 +181,34 @@ describe("the lake-retention pass", () => {
     expect(await requested()).toEqual(["2026-11-05T10:00:00.000Z"])
 
     await loop.stop()
+  })
+})
+
+describe("a request nobody answers", () => {
+  // Separate `sixb worker <type>` processes leave no one able to tell at startup. Reproduce: drop
+  // the `status` check from run in lake-retention-pass.ts.
+  test("says so in the orchestrator's output", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const { queues } = lanes()
+
+    const loop = startLoop(queues.lake, [], "no-worker")
+    await settle()
+    await loop.stop()
+
+    expect(String(warn.mock.calls[0])).toContain("no lake worker has run it")
+  })
+
+  test("says nothing when a worker answers", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const { queues, requested } = lanes()
+
+    const loop = startLoop(queues.lake)
+    await settle()
+    await loop.stop()
+
+    // The pass got as far as the status: the request is out, so this silence can be trusted.
+    expect(await requested()).toEqual(["2026-11-05T10:00:00.000Z"])
+    expect(warn).not.toHaveBeenCalled()
   })
 })
 
