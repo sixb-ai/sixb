@@ -5,18 +5,27 @@ import { join } from "node:path"
 import { change, col, type DatasetDefinition, type DatasetRow, defineDataset } from "@sixb/core"
 import type { DatasetStorageHealth, DatasetVersion } from "@sixb/core/lake-storage"
 import type { DuckLakeStorage } from "../src"
-import type { DuckDbExclusiveRuntime } from "../src/internal/duckdb-runtime"
+import type { DuckDbExclusiveRuntime, DuckDbQueryRuntime } from "../src/internal/duckdb-runtime"
 import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "../src/internal/names"
-import { quoteSqlString } from "../src/internal/sql"
+import { quoteIdentifier, quoteSqlString } from "../src/internal/sql"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
+
+type CommitRuntime = <T>(run: (runtime: DuckDbQueryRuntime) => Promise<T>) => Promise<T>
 
 interface DuckLakeStorageInternals {
   readonly connections: {
     withExclusiveAttached<T>(run: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T>
     detachLocalCatalogAfterCommit(runtime: DuckDbExclusiveRuntime): Promise<void>
+    /** The provider's DuckDB runtime; its instance takes more connections. */
+    runtime(): Promise<{
+      readonly instance: {
+        connect(): Promise<{ run(sql: string): Promise<unknown>; closeSync(): void }>
+      }
+    }>
   }
   readonly compaction: {
     plan(dataset: DatasetDefinition): Promise<unknown>
+    withCommitRuntime: CommitRuntime
   }
 }
 
@@ -232,6 +241,38 @@ describe("DuckLakeStorage compaction", () => {
     }, 30_000)
   }
 
+  // Regression proof: in DuckLakeCompaction.compactOnce, commit the flush with
+  // COMPACTION_COMMIT_RETRIES. DuckLake then commits the flush on top of the other client's
+  // commit, and leaves the deletes it moved in the catalog too: the seed file's deletes stop
+  // applying, and 999 replaced rows read again beside their replacements. A merge in that state
+  // can lose its upsert: its insert sees the row its delete removed. Seen with DuckLake build
+  // ac7595b0, where a pipeline worker's commits overtook the lake worker's flushes.
+  test("a flush that another client's commit overtakes yields, and every delete still applies", async () => {
+    await storage.createDataset(accounts)
+    await storage.createDataset(events)
+    await merge(
+      accounts,
+      rows(10_100, (i) => ({ id: `a${i}`, score: 0 }))
+    )
+    await setInliningLimit(2_000)
+
+    // A new provider checks its first commit: 1,000 rows replaced, kept in the catalog with their
+    // deletes. Another client commits to `events` while the flush that follows is open.
+    await reopen()
+    const overtaken = commitElsewhereDuringFlush()
+    await merge(
+      accounts,
+      rows(1_000, (i) => ({ id: `a${i}`, score: 1 }))
+    )
+    await settled(accounts)
+    expect(overtaken.commits()).toBe(1)
+
+    const read = await collectRows(storage.readRows({ datasetId: accounts.id }))
+    expect(new Set(read.map((row) => row.id)).size).toBe(10_100)
+    expect(read).toHaveLength(10_100)
+    expect(read.find((row) => row.id === "a999")).toEqual({ id: "a999", score: "1" })
+  }, 30_000)
+
   // Regression proof: drop the compaction marker from commitMaintenance. DuckLake records a flush
   // of a table's deletes alone as `deleted_from_table`, an ordinary delete: here the tombstones
   // cross the threshold in the sequence table, and the main table gets a version written by nobody.
@@ -371,6 +412,51 @@ describe("DuckLakeStorage compaction", () => {
     await reopen()
     const [health] = await storage.maintenance.describeStorage([dataset.id])
     return health as DatasetStorageHealth
+  }
+
+  /**
+   * Once this provider's next flush has moved what the catalog holds, and before it commits,
+   * appends a row to `events` from another connection, as another process writing another dataset
+   * would.
+   */
+  function commitElsewhereDuringFlush() {
+    const compaction = internals(storage).compaction
+    const withCommitRuntime = compaction.withCommitRuntime
+    let commits = 0
+
+    const commitElsewhere = async () => {
+      const { instance } = await internals(storage).connections.runtime()
+      const connection = await instance.connect()
+
+      try {
+        const eventsTable = quoteIdentifier(encodeDatasetTableName(events.id))
+        await connection.run(`INSERT INTO sixb_lake.main.${eventsTable} VALUES ('elsewhere', 1)`)
+      } finally {
+        connection.closeSync()
+      }
+    }
+
+    compaction.withCommitRuntime = (run) =>
+      withCommitRuntime((runtime) =>
+        run({
+          run: (sql, values) => runtime.run(sql, values),
+          runStatements: (statements) => runtime.runStatements(statements),
+          withAppender: (tableName, useAppender) => runtime.withAppender(tableName, useAppender),
+
+          async query(sql, values) {
+            const result = await runtime.query(sql, values)
+
+            if (commits === 0 && sql.includes("ducklake_flush_inlined_data")) {
+              commits += 1
+              await commitElsewhere()
+            }
+
+            return result
+          },
+        })
+      )
+
+    return { commits: () => commits }
   }
 
   /** Holds every compaction check until released, and records how each one settled. */

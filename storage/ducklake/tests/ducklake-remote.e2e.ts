@@ -1492,7 +1492,7 @@ describe("DuckLakeStorage automatic compaction on a PostgreSQL catalog", () => {
           compactor as unknown as {
             compaction: {
               plan(dataset: DatasetDefinition): Promise<unknown>
-              commit(runtime: unknown, dataset: DatasetDefinition): Promise<void>
+              commit(runtime: unknown, dataset: DatasetDefinition, retries: number): Promise<void>
             }
           }
         ).compaction
@@ -1506,10 +1506,10 @@ describe("DuckLakeStorage automatic compaction on a PostgreSQL catalog", () => {
         const released = new Promise<void>((resolve) => {
           release = resolve
         })
-        spyOn(compaction, "commit").mockImplementation(async (runtime, dataset) => {
+        spyOn(compaction, "commit").mockImplementation(async (runtime, dataset, retries) => {
           ready()
           await released
-          await commit(runtime, dataset)
+          await commit(runtime, dataset, retries)
           committed.push("compaction")
         })
 

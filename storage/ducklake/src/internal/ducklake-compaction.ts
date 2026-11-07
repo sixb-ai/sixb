@@ -35,10 +35,19 @@ const MERGE_MAX_FILES = 256
 /**
  * DuckLake commits a transaction on top of non-conflicting commits that landed since it began,
  * waiting before each retry: 10 retries and about 11 s of waiting by default, while this
- * provider's connection waits too. Compaction retries 3 times, about half a second. A conflict
- * fails at once whatever the count, and the compaction yields to the write.
+ * provider's connection waits too. A rewrite and a merge retry 3 times, about half a second; a
+ * flush never does. A conflict fails at once whatever the count, and the compaction yields.
  */
 const COMPACTION_COMMIT_RETRIES = 3
+
+/**
+ * A flush never commits on top of another commit. Overtaken by one, of any table and from any
+ * client, DuckLake (build ac7595b0) writes the flush's delete file but leaves the deletes it moved
+ * in the catalog too, and scans of that data file then skip them: replaced rows read again, and a
+ * merge's insert finds the row its own delete removed, so the upsert is lost. An overtaken flush
+ * fails as a conflict instead, compaction yields, and a later check flushes again.
+ */
+const FLUSH_COMMIT_RETRIES = 0
 
 /**
  * How long compaction waits for another process's writes to a dataset on a PostgreSQL catalog. A
@@ -165,13 +174,18 @@ export class DuckLakeCompaction {
       progressed = await this.commitMaintenance(
         dataset,
         this.flushCalls(plan.table),
+        FLUSH_COMMIT_RETRIES,
         plan.flushesDeletes
       )
     }
 
     if (plan.compact) {
       progressed =
-        (await this.commitMaintenance(dataset, this.compactCalls(plan.table))) || progressed
+        (await this.commitMaintenance(
+          dataset,
+          this.compactCalls(plan.table),
+          COMPACTION_COMMIT_RETRIES
+        )) || progressed
     }
 
     return progressed
@@ -232,6 +246,7 @@ export class DuckLakeCompaction {
   private async commitMaintenance(
     dataset: DatasetDefinition,
     calls: readonly string[],
+    retries: number,
     movesUnreported = false
   ): Promise<boolean> {
     return this.withCommitRuntime(async (runtime) => {
@@ -249,7 +264,7 @@ export class DuckLakeCompaction {
           moved = (await runtime.query(call)).some(movedAnything) || moved
         }
 
-        await this.commit(runtime, dataset)
+        await this.commit(runtime, dataset, retries)
         committed = true
       } catch (error) {
         await runtime.run("ROLLBACK").catch(() => {
@@ -304,8 +319,12 @@ export class DuckLakeCompaction {
     }
   }
 
-  private async commit(runtime: DuckDbQueryRuntime, dataset: DatasetDefinition): Promise<void> {
-    await runtime.run(`SET ducklake_max_retry_count = ${COMPACTION_COMMIT_RETRIES}`)
+  private async commit(
+    runtime: DuckDbQueryRuntime,
+    dataset: DatasetDefinition,
+    retries: number
+  ): Promise<void> {
+    await runtime.run(`SET ducklake_max_retry_count = ${retries}`)
     try {
       await commitVersionTransaction(runtime, dataset.id)
     } finally {
