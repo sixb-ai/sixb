@@ -117,6 +117,12 @@ const READ_PAGE_SIZE = 50
  * the state row to request a flush, in one transaction. `takeBatch` closes the request and reads
  * the deliveries under that same lock. So either the append commits first and the batch sees its
  * delivery, or the batch closes the request first and the append opens a new one.
+ *
+ * Why no delivery waits for a job that already ran: a job's id names a request, and a job only ends
+ * after moving the request past it, by finding nothing left to take or by handing over. A job that
+ * fails stays queued under its id. So the id the inbox holds is always free or still in the queue,
+ * and asking under it again is safe. Only a batch or a hand-over moves the request: moving it at
+ * every attempt would open a job per failed attempt during an outage.
  */
 export class DurableDatasetIngestStorage implements DatasetIngestStorage {
   constructor(private readonly backend: DatasetIngestPersistenceBackend) {}
@@ -147,15 +153,6 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
       const { changes: _changes, ...delivery } = record
       return { delivery: { id, ...delivery }, flush }
     })
-  }
-
-  async requestFlush(input: {
-    readonly projectId: string
-    readonly datasetId: string
-  }): Promise<DatasetIngestFlushRequest> {
-    return this.backend.transaction((persistence) =>
-      requestFlushIn(persistence, input.projectId, input.datasetId)
-    )
   }
 
   async acquire(input: {
@@ -382,6 +379,26 @@ export class DurableDatasetIngestStorage implements DatasetIngestStorage {
         leaseOwner: null,
         leaseExpiresAt: null,
       })
+    })
+  }
+
+  async handOver(input: {
+    readonly lease: DatasetIngestLease
+  }): Promise<{ readonly request: number }> {
+    const { lease } = input
+
+    return this.backend.transaction(async (persistence) => {
+      const state = await lockOwnedState(persistence, lease)
+      const request = state.request + 1
+
+      await persistence.writeState(lease.projectId, {
+        ...state,
+        request,
+        requested: true,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      })
+      return { request }
     })
   }
 

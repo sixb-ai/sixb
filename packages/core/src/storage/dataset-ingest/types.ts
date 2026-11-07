@@ -98,12 +98,6 @@ export interface DatasetIngestStorage {
    */
   append(input: AppendDatasetIngestDeliveryInput): Promise<DatasetIngestAppendResult>
 
-  /** Asks for a flush of the dataset's deliveries, as `append` does. */
-  requestFlush(input: {
-    readonly projectId: string
-    readonly datasetId: string
-  }): Promise<DatasetIngestFlushRequest>
-
   /** Takes the dataset for one owner, unless another owner's lease is live. */
   acquire(input: {
     readonly projectId: string
@@ -148,6 +142,13 @@ export interface DatasetIngestStorage {
 
   /** Releases the lease without counting a failure. */
   release(input: { readonly lease: DatasetIngestLease }): Promise<void>
+
+  /**
+   * Releases the lease and opens a new request for the deliveries a flush leaves, in one
+   * transaction. Always a new one: the request open until now may name the job that is ending, and
+   * a queue ignores an id it remembers, so asking under it would queue nothing.
+   */
+  handOver(input: { readonly lease: DatasetIngestLease }): Promise<{ readonly request: number }>
 
   /** Datasets with pending deliveries or a flush in progress. All of them without `datasetIds`. */
   summarize(input: {

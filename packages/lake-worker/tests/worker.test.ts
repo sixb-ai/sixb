@@ -15,6 +15,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import type { LakeMaintenance, LakeRetentionReport } from "@sixb/core/lake-storage"
+import { createTestingScope } from "../../core/src/execution/scopes"
 import { LakeWorker, type LakeWorkerOptions } from "../src"
 
 const Room = defineObjectType({
@@ -112,8 +113,21 @@ async function ingestPerson(sixb: SixbHost, id: string) {
     datasetId: people.id,
     executionId: `exec-${id}`,
     correlationId: `corr-${id}`,
-    changes: [change.upsert({ id, name: `Person ${id}` })],
+    changes: [change.upsert(person(id))],
   })
+}
+
+function person(id: string) {
+  return { id, name: `Person ${id}` }
+}
+
+/** Queues a flush for what waits, as the orchestrator's `ingest` pass does. */
+async function askLikeTheIngestPass(sixb: SixbHost, queues: InMemoryQueues) {
+  const summaries = await sixb.storage.datasetIngest!.summarize({ projectId: PROJECT_ID })
+
+  for (const { request, pendingDeliveries, leaseExpiresAt } of summaries) {
+    if (pendingDeliveries > 0 && leaseExpiresAt === null) await enqueueFlush(queues, request)
+  }
 }
 
 async function enqueueFlush(queues: InMemoryQueues, request: number) {
@@ -259,6 +273,47 @@ describe("LakeWorker", () => {
 
     expect(failed).toBe(0)
     expect(errors).toEqual([])
+  })
+
+  // The job that resumes a dead flush's batch runs under the open request, which only a new batch
+  // moves. Past its budget, asking again under that request names the job itself, and a queue
+  // ignores an id it remembers: the delivery joins the request, the `ingest` pass asks under the
+  // same id, and nothing flushes the dataset until the queue forgets the job.
+  // Reproduce: leave `request` as it is in `handOver` (provider.ts).
+  test("a job that resumes a batch and spends its budget leaves a job for what came after", async () => {
+    jest.useFakeTimers()
+    const { sixb, lakeStorage, queues } = createHost({ ingest: true })
+    const inbox = sixb.storage.datasetIngest!
+
+    await ingestPerson(sixb, "1")
+
+    const dead = await inbox.acquire({
+      projectId: PROJECT_ID,
+      datasetId: people.id,
+      owner: "dead-flush",
+      leaseMs: 0,
+    })
+    if (!dead.acquired) throw new Error("expected the test to hold the lease")
+    await inbox.takeBatch({ lease: dead.lease, flushId: "flush_dead", maxChanges: 10 })
+
+    // The resumed batch takes the whole budget, and a delivery arrives while it does.
+    const handler = sixb.withScope(createTestingScope({ projectId: PROJECT_ID }))
+    const beginMerge = lakeStorage.beginMerge.bind(lakeStorage)
+    lakeStorage.beginMerge = async (input) => {
+      lakeStorage.beginMerge = beginMerge
+      jest.setSystemTime(new Date(Date.now() + 31_000))
+      await handler.datasets.ingest(people, { changes: [change.upsert(person("2"))] })
+      return beginMerge(input)
+    }
+
+    await start(sixb)
+    await askLikeTheIngestPass(sixb, queues)
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length >= 1)
+    await askLikeTheIngestPass(sixb, queues)
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 2)
+    expect(await inbox.summarize({ projectId: PROJECT_ID })).toEqual([])
   })
 
   // Reproduce: complete the job when the flush answers "busy", and the delivery waits for a

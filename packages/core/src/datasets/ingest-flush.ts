@@ -188,8 +188,7 @@ class DatasetIngestFlush {
 
       if (batch === null) {
         if (Date.now() - startedAt >= BUDGET_MS) {
-          await this.inbox.release({ lease })
-          await this.requestAgain()
+          await this.requestAgain(lease)
           return { kind: "flushed", versions, deliveries }
         }
 
@@ -496,13 +495,9 @@ class DatasetIngestFlush {
     })
   }
 
-  /** The budget is spent with deliveries left: ask for the next job as `ingest` does. */
-  private async requestAgain(): Promise<void> {
-    const { request, requested } = await this.inbox.requestFlush({
-      projectId: this.dependencies.projectId,
-      datasetId: this.datasetId,
-    })
-    if (!requested) return
+  /** The budget is spent: leaves what remains to the next job, as `ingest` asks for one. */
+  private async requestAgain(lease: DatasetIngestLease): Promise<void> {
+    const { request } = await this.inbox.handOver({ lease })
 
     await tryEnqueueIngestFlush(
       this.dependencies.queue,

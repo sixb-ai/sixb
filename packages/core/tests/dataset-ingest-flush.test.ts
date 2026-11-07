@@ -707,7 +707,7 @@ test("a flush that spends its budget asks for the next job and leaves the rest",
   const queued = await queues.lake.claim({ projectId: host.id, workerId: "test", limit: 10 })
   expect(queued.map(({ job }) => job.id)).toEqual([
     `ingest-flush:${contacts.id}:0`,
-    `ingest-flush:${contacts.id}:1`,
+    `ingest-flush:${contacts.id}:2`,
   ])
 })
 
