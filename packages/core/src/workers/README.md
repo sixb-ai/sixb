@@ -72,6 +72,10 @@ sees, so before the commit there is nothing to undo, and after it the version ex
 to the run. Whoever takes over asks the lake: `findProducedVersion` looks up the version by
 `producer.runId` (and `stepId`), the way an ingest flush finds its batch.
 
+The version must still be there. Retention keeps every version back to the earliest commit a live
+run or a waiting inbox may have left unrecorded (`LakeRetention.keepVersionsForMs`), or a resumed run
+would miss its own commit, and write it twice.
+
 A commit can also land and answer with an error: a connection lost during `COMMIT`, or a query after
 it. So any error once a run has reached its commit goes through the same lookup before anything calls
 the run failed, and if the lake cannot say, the run stays open for the next delivery to ask.
@@ -83,9 +87,10 @@ the run failed, and if the lake cannot say, the run stays open for the next deli
 - A plain write then commits against the version it read just before that (`guardLatestVersion`), and
   an execution that slept past its fence is refused. A merge already commits against its base, or
   rebases on source sequences. This guard, and not one run per sync, is what stops a stale process:
-  a rule about runs says nothing about a process that already passed it. A resumed run looks for its
-  commit once more after taking the guard, so a commit it misses lands after the guard. If another
-  writer wins that race, nothing was written, and the run goes round again.
+  a rule about runs says nothing about a process that already passed it, or about a run an older
+  version left. A resumed run looks for its commit once more after taking the guard, so a commit it
+  misses lands after the guard. If another writer wins that race, nothing was written, and the run
+  goes round again.
 - A **pipeline step** does the same with the guard it always had. A step that loses it to the commit
   it was redoing records that commit instead of failing. Steps are found on record by step id, so a
   deploy that moves a step does not run it again; a step the deploy removed ends `cancelled`.
@@ -100,9 +105,9 @@ syncs and not about the dataset: guarding every sync from its start would fail i
 landed while it read.
 
 A run that ends wakes the oldest run waiting for it, with a job of its own. The waiting job comes back
-once a minute in case that word gets lost. If it finds the sibling's lease lapsed, it brings that
-sibling a job: a queue held in memory dies with its process, and the runs behind that sibling would
-otherwise wait for good.
+once a minute in case that word gets lost, and the `runs` pass brings a job to a sibling whose lease
+lapsed. Only a sibling with an execution counts: an older version's run never promised this rule, so
+it holds nothing back, as on that version.
 
 ### Runs of an older version
 
@@ -111,6 +116,12 @@ still hold it during a rolling deploy, and nothing can tell. For `ORPHANED_RUN_A
 its start) such a run counts as held: new workers leave it alone, and its old worker finishes it
 without a token. After that a delivery finds it settled, and only `republishLostRuns` ends it:
 `cancelled`, with an error saying the worker was lost, so the trigger rule fires again.
+
+Rows an older version left can be months old, since nothing swept them. Any run lost for a week ends
+the same way instead of going on, so a queued workflow does not fire its side effects by surprise.
+`sixb check` counts both what will go on and what will end before the orchestrator starts. A lost job
+cannot be told from a stopped queue, so a week is past any outage we mean to survive, and a queue
+stopped for longer has its runs end. A job still in such a queue can reach its run first.
 
 ### Jobs that never come back
 
