@@ -1,5 +1,5 @@
 import type { DomainEventLog } from "../events"
-import { MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
+import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
 import type { CronScheduleDefinition, ScheduleDefinition } from "../schedules/types"
 import { CronPass } from "./cron-pass"
 import { SchedulerValidationError } from "./errors"
@@ -10,6 +10,8 @@ export interface SchedulerRuntimeOptions {
   /** Evaluates cron schedules that set no time zone of their own. Defaults to UTC. */
   timeZone?: string
   now?: () => Date
+  /** Hears a failed run of the pass. Defaults to the console. */
+  onError?: (error: unknown, failure: MaintenanceFailure) => void
 }
 
 /** Process lifecycle surface exposed by SixbHost. */
@@ -41,7 +43,7 @@ export class SchedulerRuntime implements SchedulerController {
     })
     this.loop = new MaintenanceLoop({
       passes: [this.cron],
-      onError: (error) => console.error("[Sixb] Scheduler error:", error),
+      onError: options.onError ?? ((error) => console.error("[Sixb] Scheduler error:", error)),
       now,
     })
   }
@@ -63,7 +65,7 @@ export class SchedulerRuntime implements SchedulerController {
 
     this.cron.reset()
     this.started = false
-    await this.cron.drainEmits()
+    await this.cron.drainAppends()
   }
 }
 

@@ -1,20 +1,15 @@
-import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
-import type { SixbErrorContext } from "../src"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { InMemoryBroker } from "../src"
-import {
-  attachSixbErrorReporter,
-  type ErrorReporter,
-  flushSixbErrors,
-} from "../src/error-reporting/internal"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { DomainEventService } from "../src/events"
+import type { MaintenanceFailure } from "../src/maintenance"
 import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
 import { defineSchedule } from "../src/schedules"
 
 const PROJECT = "test"
 
-function createEvents(errorReporter?: ErrorReporter) {
-  return new DomainEventService({ projectId: PROJECT, broker: new InMemoryBroker(), errorReporter })
+function createEvents() {
+  return new DomainEventService({ projectId: PROJECT, broker: new InMemoryBroker() })
 }
 
 function createTestClock(initial: Date) {
@@ -225,53 +220,82 @@ describe("SchedulerRuntime", () => {
     await runtime.stop()
   })
 
-  test("a lost trigger reaches onError instead of vanishing", async () => {
-    const originalError = console.error
-    console.error = () => {}
+  // Reproduce: move on in `fireDue` when `appendOccurrence` rejects; the occurrence is gone and the
+  // pass counts as a success.
+  test("an occurrence the broker refuses is retried until accepted, then only it fires", async () => {
+    const clock = createTestClock(new Date("2026-01-01T01:59:30Z"))
+    const events = createEvents()
+    const append = events.append.bind(events)
+    let refusing = true
+    events.append = (input) =>
+      refusing ? Promise.reject(new Error("broker unavailable")) : append(input)
+    const failures: MaintenanceFailure[] = []
+    const scheduler = new SchedulerRuntime({
+      schedules: [defineSchedule("hourly").cron("0 * * * *")],
+      events,
+      now: clock.now,
+      onError: (_error, failure) => failures.push(failure),
+    })
+    await scheduler.start()
 
-    try {
-      const reports: { error: Error; context: SixbErrorContext }[] = []
-      const host = {}
-      const errorReporter = attachSixbErrorReporter(host, (error, context) => {
-        reports.push({ error, context })
-      })
-
-      const eventsRuntime = createEvents(errorReporter)
-      const appendFailure = new Error("broker unavailable")
-      eventsRuntime.append = () => Promise.reject(appendFailure)
-
-      const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
-      const runtime = new SchedulerRuntime({
-        schedules: [defineSchedule("hourly").cron("0 * * * *")],
-        events: eventsRuntime,
-        now: clock.now,
-      })
-
-      await runtime.start()
-      clock.advance(30 * MINUTE)
-      jest.advanceTimersByTime(30 * MINUTE)
-      // `stop()` drains the emit the tick started, so the rejection is observed before we assert.
-      await runtime.stop()
-      await flushSixbErrors(host)
-
-      expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBe(appendFailure)
-      const context = reports[0]?.context
-      expect(context?.type).toBe("event.delivery.failed")
-      if (context?.type !== "event.delivery.failed") throw new Error("expected a delivery failure")
-      expect(context.eventTypes).toEqual(["schedule.triggered"])
-      expect(context.attempts).toBe(1)
-      expect(context.eventIds).toBeUndefined()
-      expect(context.projectId).toBe(PROJECT)
-    } finally {
-      console.error = originalError
+    const pass = async (ms: number) => {
+      clock.advance(ms)
+      jest.advanceTimersByTime(ms)
+      await flushAsync()
     }
+
+    await pass(30_000)
+    expect(failures).toEqual([{ passId: "cron", consecutiveFailures: 1 }])
+    expect(await firedOccurrences(events)).toEqual([])
+
+    await pass(10_000)
+    expect(failures).toHaveLength(2)
+
+    // The outage outlasts the next occurrence, which is not caught up.
+    for (let elapsed = 0; elapsed < 65; elapsed++) await pass(MINUTE)
+    refusing = false
+    await pass(10_000)
+
+    expect(await firedOccurrences(events)).toEqual(["hourly@2026-01-01T02:00:00.000Z"])
+
+    const fired = failures.length
+    await pass(HOUR)
+    expect(failures).toHaveLength(fired)
+    expect((await firedOccurrences(events)).length).toBe(2)
+
+    await scheduler.stop()
   })
 
-  // Guards the `MAX_TIMER_DELAY_MS` clamp in `armTimer`. To prove it still guards, drop the
-  // `Math.min(..., MAX_TIMER_DELAY_MS)` and this test fails: Node coerces the oversized delay to
-  // 1ms, so the timer fires immediately, finds nothing due, and re-arms forever.
-  // Reproduce: drop `idempotencyKey` from `emitOccurrence`; each scheduler stores its own event.
+  test("a schedule the broker refuses costs the others nothing", async () => {
+    const clock = createTestClock(new Date("2026-01-01T00:00:30Z"))
+    const events = createEvents()
+    const append = events.append.bind(events)
+    events.append = (input) => {
+      const [event] = input.events
+      const refused = event?.type === "schedule.triggered" && event.payload.scheduleId === "bad"
+      return refused ? Promise.reject(new Error("too large")) : append(input)
+    }
+    const scheduler = new SchedulerRuntime({
+      schedules: [
+        defineSchedule("bad").cron("* * * * *"),
+        defineSchedule("good").cron("* * * * *"),
+      ],
+      events,
+      now: clock.now,
+      onError: () => {},
+    })
+    await scheduler.start()
+
+    clock.advance(30_000)
+    jest.advanceTimersByTime(30_000)
+    await flushAsync()
+
+    expect(await firedOccurrences(events)).toEqual(["good@2026-01-01T00:01:00.000Z"])
+
+    await scheduler.stop()
+  })
+
+  // Reproduce: drop `idempotencyKey` from `appendOccurrence`; each scheduler stores its own event.
   test("two schedulers on one broker fire an occurrence once", async () => {
     const start = new Date("2026-01-01T00:00:30.000Z")
     const clock = createTestClock(start)
@@ -292,38 +316,36 @@ describe("SchedulerRuntime", () => {
     await second.stop()
   })
 
-  // Reproduce: await the emits alone in `CronPass.run`; the hung emit holds the pass's slot, so the
-  // next occurrence never fires.
-  test("an emit that never settles does not hold the next occurrence", async () => {
-    const start = new Date("2026-01-01T00:00:30.000Z")
-    const clock = createTestClock(start)
+  // Reproduce: remove the race with `aborted` in `appendOccurrence`; the hung append holds the
+  // pass's slot, so nothing fires after it.
+  test("an append that never settles does not hold the pass", async () => {
+    const clock = createTestClock(new Date("2026-01-01T00:00:30.000Z"))
     const events = createEvents()
-    const emit = events.emit.bind(events)
+    const append = events.append.bind(events)
     let hung = false
-    events.emit = (input, options) => {
-      if (hung) return emit(input, options)
+    events.append = (input) => {
+      if (hung) return append(input)
 
       hung = true
-      void emit(input, options)
+      void append(input)
       return new Promise(() => {})
     }
+    const failures: MaintenanceFailure[] = []
     const scheduler = new SchedulerRuntime({
       schedules: [defineSchedule("minutely").cron("* * * * *")],
       events,
       now: clock.now,
+      onError: (_error, failure) => failures.push(failure),
     })
     await scheduler.start()
 
-    const error = spyOn(console, "error").mockImplementation(() => {})
-
-    for (const elapsed of [30_000, 5_000, 55_000]) {
+    for (const elapsed of [30_000, 5_000, 10_000, 45_000]) {
       clock.advance(elapsed)
       jest.advanceTimersByTime(elapsed)
       await flushAsync()
     }
 
-    error.mockRestore()
-
+    expect(failures[0]).toEqual({ passId: "cron", consecutiveFailures: 1 })
     expect(await firedOccurrences(events)).toEqual([
       "minutely@2026-01-01T00:01:00.000Z",
       "minutely@2026-01-01T00:02:00.000Z",
