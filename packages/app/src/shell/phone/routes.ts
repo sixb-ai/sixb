@@ -3,9 +3,6 @@
  * top-level screen, `/quotes/q-1` a record pushed on it, and its first segment is its section.
  */
 
-/** The phone layout's breakpoint, as the stylesheets write it. */
-export const PHONE_QUERY = "(max-width: 767px)"
-
 /** The page's scroll container, which the shell marks with `data-app-scroll`. */
 export function appScroller(): HTMLElement | null {
   return document.querySelector<HTMLElement>("[data-app-scroll]")

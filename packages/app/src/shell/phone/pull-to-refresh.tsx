@@ -1,6 +1,7 @@
+import { isIOS, PHONE_QUERY } from "@sixb/ui/components"
 import { useQueryClient } from "@tanstack/react-query"
 import { type CSSProperties, useEffect, useRef } from "react"
-import { appScroller, PHONE_QUERY } from "./routes"
+import { appScroller } from "./routes"
 
 // How far the page travels, after resistance, before a release refreshes, and where it rests
 // while the refresh runs.
@@ -63,7 +64,16 @@ export function PullToRefresh() {
       }, 400)
     }
 
+    // Moves are only blocked while a pull may start, so every other scroll starts without waiting
+    // on script.
+    const track = (page: HTMLElement | null) => {
+      if (page && !scroller) document.addEventListener("touchmove", onMove, { passive: false })
+      if (!page && scroller) document.removeEventListener("touchmove", onMove)
+      scroller = page
+    }
+
     const onStart = (event: TouchEvent) => {
+      track(null)
       if (!phone.matches || refreshing || event.touches.length !== 1) return
       const target = event.target instanceof Element ? event.target : null
       const page = appScroller()
@@ -74,9 +84,8 @@ export function PullToRefresh() {
         )
       )
         return
-      if (document.querySelector("[data-no-pull-refresh]")) return
       if (scrolledAbove(target, page)) return
-      scroller = page
+      track(page)
       startY = event.touches[0].clientY
       startX = event.touches[0].clientX
       pulling = false
@@ -87,10 +96,7 @@ export function PullToRefresh() {
       const touch = event.touches[0]
       const dy = touch.clientY - startY
       if (!pulling) {
-        if (Math.abs(touch.clientX - startX) > Math.abs(dy) || dy < 0) {
-          scroller = null
-          return
-        }
+        if (Math.abs(touch.clientX - startX) > Math.abs(dy) || dy < 0) return track(null)
         if (dy < 6) return
         pulling = true
         content = [...scroller.children].filter(
@@ -105,11 +111,9 @@ export function PullToRefresh() {
     }
 
     const onEnd = async () => {
-      if (!scroller || !pulling) {
-        scroller = null
-        return
-      }
-      scroller = null
+      const wasPulling = scroller !== null && pulling
+      track(null)
+      if (!wasPulling) return
       pulling = false
       if (pull < TRIGGER) {
         hide()
@@ -132,12 +136,11 @@ export function PullToRefresh() {
     }
 
     document.addEventListener("touchstart", onStart, { passive: true })
-    document.addEventListener("touchmove", onMove, { passive: false })
     document.addEventListener("touchend", onEnd)
     document.addEventListener("touchcancel", onEnd)
     return () => {
+      track(null)
       document.removeEventListener("touchstart", onStart)
-      document.removeEventListener("touchmove", onMove)
       document.removeEventListener("touchend", onEnd)
       document.removeEventListener("touchcancel", onEnd)
       for (const child of content) {
@@ -181,7 +184,7 @@ function scrolledAbove(target: Element, page: HTMLElement): boolean {
  * including one toggled through its label from script while a touch is being handled.
  */
 function haptic(): void {
-  if (/iP(hone|ad|od)/.test(navigator.userAgent)) {
+  if (isIOS()) {
     const label = document.createElement("label")
     label.ariaHidden = "true"
     label.style.display = "none"

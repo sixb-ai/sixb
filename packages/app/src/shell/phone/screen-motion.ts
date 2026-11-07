@@ -1,11 +1,5 @@
-import {
-  appScroller,
-  historyIndex,
-  isRootPath,
-  normalizePath,
-  PHONE_QUERY,
-  sectionOf,
-} from "./routes"
+import { PHONE_QUERY } from "@sixb/ui/components"
+import { appScroller, historyIndex, isRootPath, normalizePath, sectionOf } from "./routes"
 
 /*
  * Native screen transitions on a phone.
@@ -29,6 +23,8 @@ const EASING = "cubic-bezier(0.32, 0.72, 0, 1)"
 const PARALLAX = 0.3
 // A copy larger than this costs more than the transition is worth.
 const MAX_NODES = 6000
+const ID_REFERENCES =
+  '[fill^="url"], [stroke^="url"], [clip-path], [mask], [filter], [marker-start], [marker-mid], [marker-end], [style*="url("], [href^="#"], [*|href^="#"]'
 
 interface Pending {
   readonly motion: ScreenMotion
@@ -90,10 +86,11 @@ export function watchScreenChanges(): () => void {
 }
 
 /**
- * Called once the next page has rendered, before the browser paints it: moves the screens.
+ * Called once the next page has rendered, before the browser paints it: moves the screens. Reads
+ * the address itself, as the history calls it watches carry it, router basename and all.
  */
-export function runScreenMotion(pathname: string): void {
-  const to = normalizePath(pathname)
+export function runScreenMotion(): void {
+  const to = normalizePath(window.location.pathname)
   lastPath = to
   lastIndex = historyIndex()
 
@@ -123,6 +120,10 @@ function mountGhost(
   dim.className = "screen-dim"
   dim.setAttribute("aria-hidden", "true")
   scroller.dataset.screenMoving = place === "under" ? "over" : "under"
+  // Over the scroller alone: its parent can also hold a panel beside it, such as the agent dock.
+  const box = `top:${scroller.offsetTop}px;left:${scroller.offsetLeft}px;width:${scroller.offsetWidth}px;height:${scroller.offsetHeight}px`
+  dim.style.cssText = box
+  ghost.style.cssText += `;${box}`
   parent.append(dim)
   ghost.dataset.place = place
   parent.append(ghost)
@@ -230,7 +231,8 @@ function renameIds(ghost: HTMLElement) {
     value.replace(reference, (match, quote: string, id: string) =>
       renamed.has(id) ? `url(${quote}#${id}${suffix}${quote})` : match
     )
-  for (const element of ghost.querySelectorAll("*")) {
+  // Only what can point at an id: an SVG paint, clip, mask or filter, a style, or a local href.
+  for (const element of ghost.querySelectorAll(ID_REFERENCES)) {
     for (const { name, value } of [...element.attributes]) {
       if (value.includes("url(")) {
         element.setAttribute(name, follow(value))
@@ -273,6 +275,7 @@ function slide(scroller: HTMLElement, ghost: HTMLElement, motion: ScreenMotion, 
     for (const animation of animations) animation.cancel()
     remove()
     done()
+    if (stopCurrent === finish) stopCurrent = null
   }
   void Promise.all(animations.map((animation) => animation.finished)).then(finish, finish)
   // A new navigation mid-flight ends this one at once.

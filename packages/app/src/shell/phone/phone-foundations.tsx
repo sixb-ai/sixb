@@ -32,7 +32,7 @@ function ScreenMotion() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per navigation, keyed by it.
   useLayoutEffect(() => {
-    runScreenMotion(location.pathname)
+    runScreenMotion()
   }, [location.key])
 
   return null
