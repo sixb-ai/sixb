@@ -100,7 +100,7 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import { renderOntologyDocs } from "@sixb/core/internal/ontology"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
-import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
+import { QueueDeliveryLeaseLostError, RunOwnedElsewhereError } from "@sixb/core/internal/workers"
 import { workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
   ImageModel,
@@ -143,6 +143,7 @@ import {
   createTestAgentExecution,
   createTestSixb,
   createTestWorkflowExecution,
+  runRunRecoveryContractSuite,
   startTestRun,
 } from "@sixb/core/testing"
 import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
@@ -192,7 +193,6 @@ import { normalizeApiBaseUrl } from "../src/api-url"
 import { workerChildren } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import { ephemeralRunSandbox } from "../src/ephemeral-run-sandbox"
-import { AgentRunOwnedElsewhereError } from "../src/errors"
 import { runnerContext } from "../src/execution-context"
 import { isTerminalRun } from "../src/run-fate"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
@@ -240,6 +240,9 @@ const COMPACTION_USAGE: ModelUsage = {
 afterEach(() => {
   jest.useRealTimers()
 })
+
+/** How long a run outlives its worker's last renewal, which is `AgentWorker`'s default lease. */
+const DEFAULT_AGENT_LEASE_MS = 60_000
 
 /** The shared poll at 1ms: every condition polled in this file is an in-memory read. */
 const waitFor: typeof pollFor = (fn, options = {}) => pollFor(fn, { intervalMs: 1, ...options })
@@ -991,7 +994,10 @@ function controlledBlockingAnswerModel(): {
             started += 1
             const callId = started
             let released = false
-            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+            const abort = () => {
+              released = true
+              controller.error(new DOMException("Aborted", "AbortError"))
+            }
             const release = () => {
               if (released) return
               released = true
@@ -13832,7 +13838,7 @@ describe("AgentWorker", () => {
   })
 
   test("keeps a deferred duplicate deferred, even during shutdown or under clock skew", async () => {
-    // Regression proof: drop the AgentRunOwnedElsewhereError case from onAbortError; a duplicate
+    // Regression proof: drop the RunOwnedElsewhereError case from onAbortError; a duplicate
     // delivered during shutdown is failed and its live run is orphaned.
     const sixb = buildSixb(answerModel())
     const worker = new InspectableAgentWorker(sixb, workerOptions())
@@ -13852,7 +13858,7 @@ describe("AgentWorker", () => {
       },
     }
     const ownedUntil = new Date(Date.now() + 60_000)
-    const owned = new AgentRunOwnedElsewhereError("run-1", ownedUntil)
+    const owned = new RunOwnedElsewhereError("run-1", ownedUntil)
     for (const decision of [
       await worker.decideExecutionError(claimed, owned),
       worker.decideAbortError(claimed, owned),
@@ -13861,7 +13867,7 @@ describe("AgentWorker", () => {
     }
 
     // A lease that lapses in a moment, or by a skewed clock already has, still waits a second.
-    const skewed = new AgentRunOwnedElsewhereError("run-1", new Date(Date.now() + 10))
+    const skewed = new RunOwnedElsewhereError("run-1", new Date(Date.now() + 10))
     const decision = await worker.decideExecutionError(claimed, skewed)
     expect(decision.kind).toBe("retry")
     expect(
@@ -17451,4 +17457,92 @@ describe("tool outputs too large for the context", () => {
       await worker.stop()
     }
   })
+})
+
+/** Tells a test when a delivery has nothing left to do, which `stop` would otherwise decide for it. */
+class WatchedAgentWorker extends AgentWorker {
+  ended?: Promise<void>
+
+  protected override execute(...args: Parameters<AgentWorker["execute"]>): Promise<void> {
+    const execution = super.execute(...args)
+    // It has room for more than one job: the first is the one being watched.
+    this.ended ??= execution.then(
+      () => {},
+      () => {}
+    )
+    return execution
+  }
+}
+
+// A turn already streamed and billed: it ends interrupted, and the user chooses to run it again.
+runRunRecoveryContractSuite("Agent", async () => {
+  const controlled = controlledBlockingAnswerModel()
+  const sixb = buildSixb(controlled.model)
+  const storage = agentStorageOf(sixb)
+
+  const first = new WatchedAgentWorker(sixb, workerOptions())
+  let runId = ""
+  let threadId = ""
+
+  const readRun = () => storage.runs.getById({ projectId: PROJECT_ID, id: runId })
+  const isOver = async () => {
+    const status = (await readRun())?.status
+    return status !== "queued" && status !== "running" ? true : null
+  }
+
+  return {
+    afterCrash: "ends",
+    afterShutdown: "ends",
+    leaseMs: DEFAULT_AGENT_LEASE_MS,
+
+    async begin() {
+      const request = await requestAgent(sixb, { text: "go" })
+      runId = request.run.id
+      threadId = request.run.threadId
+
+      await first.start()
+      await controlled.waitForStarted(1)
+    },
+    unblock: () => controlled.releaseAll(),
+    firstExecutionEnded: async () => first.ended,
+    stop: () => first.stop(),
+
+    async redeliver() {
+      const worker = new AgentWorker(sixb, workerOptions())
+      await worker.start()
+      try {
+        await waitFor(isOver, { label: "the run ended" })
+      } finally {
+        await worker.stop()
+      }
+    },
+
+    async deliverDuplicate() {
+      const settled = new Promise<void>((resolve) => {
+        const retry = sixb.queues.agents.retry.bind(sixb.queues.agents)
+        sixb.queues.agents.retry = async (input) => {
+          await retry(input)
+          resolve()
+        }
+      })
+      await sixb.queues.agents.enqueue({
+        projectId: PROJECT_ID,
+        jobs: [{ id: `${runId}:duplicate`, type: "agent.run.requested", payload: { runId } }],
+      })
+
+      const worker = new AgentWorker(sixb, workerOptions())
+      await worker.start()
+      await settled
+      await worker.stop()
+    },
+
+    status: async () => String((await readRun())?.status),
+    workStarts: () => controlled.startedCount(),
+
+    async outputCopies() {
+      const messages = await listMessages(storage, threadId)
+      return messages.filter((message) => message.role === "assistant").length
+    },
+    dispose: () => first.stop(),
+  }
 })
