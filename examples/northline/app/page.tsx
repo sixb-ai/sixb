@@ -74,7 +74,6 @@ export default function NorthlineHomePage() {
 
       <Composer
         {...conversation.composerProps}
-        placeholder="Ask about today’s work"
         className="nl-home-composer nl-home-rise md:mt-8 bg-transparent px-0 pt-0 pb-0 [--rise-delay:60ms]"
       />
 

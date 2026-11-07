@@ -1,19 +1,20 @@
-/* On a phone, home is one screen, as Internal's is: the brand in the open space, the tiles under
-   it, and the composer at the foot, resting on the tab bar. The shell pads its content column by
-   2rem in all; the column fills what is left. When the keyboard opens the tab bar steps aside
-   (--phone-tab-bar becomes 0) and the composer rides just above the keyboard. */
+/* On a phone, home is one screen, as Internal's is: the brand and tiles centered, and a one-line
+   composer at the foot, resting on the tab bar. The shell pads its content column by 2rem in all;
+   the column fills what is left. When the keyboard opens the tab bar steps aside (--phone-tab-bar
+   becomes 0) and the composer rides just above the keyboard. */
 @media (max-width: 767px) {
   .nl-home {
     min-height: calc(var(--app-height) - var(--phone-top-bar) - var(--phone-tab-bar) - 2rem);
   }
 
+  /* The brand and tiles center together in the open space, apart from the composer below. */
   .nl-home-brand {
-    flex: 1;
-    justify-content: center;
+    margin-top: auto;
   }
 
   .nl-home-tiles {
     order: 1;
+    margin-bottom: auto;
   }
 
   /* The scroller's padding already clears the tab bar, so the offset is only a small gap. */
@@ -28,24 +29,6 @@
   /* On a short screen the tiles scroll under it, so it has to be opaque. */
   .nl-home-composer .sixb-composer-surface {
     background: var(--card);
-  }
-}
-
-/* On a phone the model picker leaves a one-line draft too little room, so the draft always takes
-   the top row with the controls under it: the layout the composer switches to once a draft wraps. */
-@media (max-width: 767px) {
-  .nl-home-composer .sixb-composer-surface {
-    row-gap: 0.25rem;
-  }
-
-  .nl-home-composer .sixb-composer-surface textarea {
-    order: -1;
-    flex-basis: 100%;
-    padding: 0.375rem 0.625rem 0.25rem;
-  }
-
-  .nl-home-composer .sixb-composer-surface > span[aria-hidden="true"] {
-    display: block;
   }
 }
 
