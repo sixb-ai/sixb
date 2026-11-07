@@ -8,6 +8,7 @@ import type {
 } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { PrimitiveExecutionHost } from "@sixb/core/internal/primitive-execution"
+import type { HeldRunClaim } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type {
   PipelineRunFailureCode,
@@ -40,12 +41,14 @@ export interface PipelineWorkerHost extends PrimitiveExecutionHost {
 export interface PipelineJob {
   readonly id: string
   readonly pipelineId: string
+  /** Fences what this execution writes to the run's record. */
+  readonly executionToken: string
 }
 
 export interface RunPipelineJobInput {
   readonly runtime: PipelineWorkerContext
-  /** Durable run loaded before the execution scope is restored. */
-  readonly run: PipelineRunRecord
+  /** The run this delivery holds, and whether an earlier execution already worked on it. */
+  readonly claim: HeldRunClaim<PipelineRunRecord>
   readonly signal?: AbortSignal
   readonly onRunStarted?: PipelineRunStartedHandler
   readonly onRunFinished?: PipelineRunFinishedHandler
@@ -91,6 +94,7 @@ export interface PipelineStepRunResult {
 
 export interface PipelineRunResult {
   readonly run: PipelineRunRecord
+  /** The steps this delivery ran. Those an earlier one finished are on the durable run. */
   readonly steps: readonly PipelineStepRunResult[]
   readonly version?: DatasetVersion
 }

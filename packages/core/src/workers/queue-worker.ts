@@ -10,7 +10,7 @@ import {
 } from "./queue-delivery"
 import { Worker } from "./worker"
 
-type QueueWorkerFailureCodes = readonly [
+export type QueueWorkerFailureCodes = readonly [
   "internal.unexpected",
   "runtime.cancelled",
   ...SixbErrorCode[],

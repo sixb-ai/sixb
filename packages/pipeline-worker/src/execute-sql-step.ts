@@ -139,7 +139,6 @@ export async function executeSqlStep(input: {
     commitMessage: `pipeline ${pipeline.id} step ${step.id} run ${job.id}`,
   })
 
-  throwIfAborted(signal)
   const { outcome, ...version } = commit
 
   return {

@@ -21,6 +21,7 @@ import {
 import { writeDataset } from "@sixb/core/internal/datasets"
 import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
 import type { ExecutionStorage, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
+import { claimTestRun, startTestRun } from "@sixb/core/testing"
 import { runSyncJob as runSyncJobWithDurableRun } from "../src/run-sync-job"
 import type { RunSyncJobInput, SyncWorkerContext } from "../src/types"
 
@@ -138,7 +139,7 @@ interface TestSyncJob {
   readonly commitMessage?: string
 }
 
-type TestRunSyncJobInput = Omit<RunSyncJobInput, "run"> & {
+type TestRunSyncJobInput = Omit<RunSyncJobInput, "claim"> & {
   readonly job: TestSyncJob
 }
 
@@ -177,7 +178,8 @@ async function queueTestSyncRun(runtime: SyncWorkerContext, job: TestSyncJob) {
 async function runSyncJob(input: TestRunSyncJobInput) {
   const { job, ...options } = input
   const run = await queueTestSyncRun(input.runtime, job)
-  return runSyncJobWithDurableRun({ ...options, run })
+  const claim = await claimTestRun(input.runtime.syncRunsStorage, run)
+  return runSyncJobWithDurableRun({ ...options, claim })
 }
 
 async function startSyncRun(
@@ -207,11 +209,7 @@ async function startSyncRun(
   })
   const { startedAt, ...queuedRun } = input
   await storage.queue({ ...queuedRun, executionId, queuedAt: startedAt })
-  return storage.start({
-    id: input.id,
-    projectId: input.projectId,
-    startedAt: input.startedAt,
-  })
+  return startTestRun(storage, input)
 }
 
 async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<DatasetRow[]> {
@@ -502,14 +500,6 @@ describe("runSyncJob", () => {
         versionId: "ver_previous",
       },
       checkpoint: { cursor: "cursor-1" },
-    })
-    await startSyncRun(syncRunsStorage, {
-      id: "run_running",
-      projectId: "project-1",
-      syncId: "sync-orders",
-      datasetId: "raw.erp.orders",
-      mode: "append",
-      startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
 
     let seenCheckpoint: { cursor: string } | undefined
@@ -950,7 +940,8 @@ describe("runSyncJob", () => {
     })
   })
 
-  test("marks the run cancelled when the signal aborts during iteration", async () => {
+  // A stopped worker says nothing about the run. Finish it on an aborted signal to watch this fail.
+  test("leaves the run running when the signal aborts during iteration", async () => {
     const controller = new AbortController()
     const syncRunsStorage = createSyncRunStorage()
 
@@ -981,16 +972,9 @@ describe("runSyncJob", () => {
       projectId: "project-1",
       id: "run_1",
     })
-    expect(run).toMatchObject({
-      status: "cancelled",
-      rowsRead: 1,
-      error: {
-        code: "runtime.cancelled",
-        retryable: false,
-        at: expect.any(String),
-        details: { syncId: "sync-orders", runId: "run_1" },
-      },
-    })
+    expect(run).toMatchObject({ status: "running" })
+    expect(run?.error).toBeUndefined()
+    expect(run?.finishedAt).toBeUndefined()
   })
 
   test("forwards optimistic commit expectations and keeps rowsRead distinct from version rowCount", async () => {
@@ -1032,8 +1016,17 @@ describe("runSyncJob", () => {
       queue(input) {
         return delegate.queue(input)
       },
-      start(input) {
-        return delegate.start(input)
+      startOrReclaim(input) {
+        return delegate.startOrReclaim(input)
+      },
+      confirmExecutionOwnership(input) {
+        return delegate.confirmExecutionOwnership(input)
+      },
+      releaseExecution(input) {
+        return delegate.releaseExecution(input)
+      },
+      prepareCommit(input) {
+        return delegate.prepareCommit(input)
       },
       finish(input) {
         if (input.status === "succeeded") {
@@ -1078,7 +1071,7 @@ describe("runSyncJob", () => {
       })
     ).rejects.toMatchObject({
       code: "internal.unexpected",
-      message: expect.stringContaining("dataset commit may already have succeeded"),
+      message: expect.stringContaining("failed to finalize sync run 'run_1'"),
       details: {
         syncId: "sync-orders",
         runId: "run_1",

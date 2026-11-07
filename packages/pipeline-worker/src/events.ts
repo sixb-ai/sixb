@@ -113,7 +113,7 @@ export async function emitPipelineRunStepFinished(
 
 export async function emitDatasetVersionCommitted(
   events: DomainEventLog | undefined,
-  job: PipelineJob,
+  job: Pick<PipelineJob, "id" | "pipelineId">,
   step: PipelineStepRunResult,
   correlationId: string
 ): Promise<void> {

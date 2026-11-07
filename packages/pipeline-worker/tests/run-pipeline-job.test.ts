@@ -27,6 +27,7 @@ import type {
   PipelineRunStorage,
 } from "@sixb/core/storage"
 import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
+import { claimTestRun } from "@sixb/core/testing"
 import { runPipelineJob as runPipelineJobWithDurableRun } from "../src/run-pipeline-job"
 import type { PipelineWorkerContext, RunPipelineJobInput } from "../src/types"
 
@@ -83,7 +84,7 @@ interface TestPipelineJob {
   readonly pipelineId: string
 }
 
-type TestRunPipelineJobInput = Omit<RunPipelineJobInput, "run"> & {
+type TestRunPipelineJobInput = Omit<RunPipelineJobInput, "claim"> & {
   readonly job: TestPipelineJob
 }
 
@@ -119,7 +120,8 @@ async function queueTestPipelineRun(runtime: PipelineWorkerContext, job: TestPip
 async function runPipelineJob(input: TestRunPipelineJobInput) {
   const { job, ...options } = input
   const run = await queueTestPipelineRun(input.runtime, job)
-  return runPipelineJobWithDurableRun({ ...options, run })
+  const claim = await claimTestRun(input.runtime.pipelineRunsStorage, run)
+  return runPipelineJobWithDurableRun({ ...options, claim })
 }
 
 async function seedDatasetVersion(
@@ -241,35 +243,21 @@ describe("runPipelineJob", () => {
       job: { id: "run_step_finish_failed", pipelineId: pipeline.id },
     }).catch((caught: unknown) => caught)
 
-    // The dataset version is already durable: the error names it so the step run can be repaired.
+    // The dataset version is already durable: the run stays open for the next delivery to find it.
     expect(error).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
+      name: "CommitNotRecordedError",
       cause: finishCause,
-      details: {
-        pipelineId: pipeline.id,
-        pipelineRunId: "run_step_finish_failed",
-        stepId: step.id,
-        stepRunId: "run_step_finish_failed:step:1:clean-customers",
-        datasetId: customersDataset.id,
-        versionId: (await lakeStorage.getLatestVersion(customersDataset.id))?.versionId,
-      },
+      message: expect.stringContaining(
+        String((await lakeStorage.getLatestVersion(customersDataset.id))?.versionId)
+      ),
     })
 
     const run = await pipelineRunsStorage.getById({
       projectId: runtime.id,
       id: "run_step_finish_failed",
     })
-    expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      details: {
-        pipelineId: pipeline.id,
-        pipelineRunId: "run_step_finish_failed",
-        stepId: step.id,
-        stepRunId: "run_step_finish_failed:step:1:clean-customers",
-      },
-    })
+    expect(run).toMatchObject({ status: "running" })
+    expect(run?.error).toBeUndefined()
   })
 
   test("fails clearly when an input has no committed version", async () => {
@@ -349,8 +337,6 @@ describe("runPipelineJob", () => {
     })
     const finishedRuns: PipelineRunRecord[] = []
 
-    // Both finishes are rejected: the succeeded one after the commit, then the failed one the
-    // error path attempts. Neither transition happened, so nothing may be notified.
     const error = await runPipelineJob({
       runtime,
       job: { id: "run_finish_rejected", pipelineId: "customers" },
@@ -360,15 +346,11 @@ describe("runPipelineJob", () => {
     }).catch((caught: unknown) => caught)
 
     expect(error).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
+      name: "CommitNotRecordedError",
       cause: new Error("pipeline run storage unavailable"),
-      details: {
-        pipelineId: "customers",
-        runId: "run_finish_rejected",
-        datasetId: customersDataset.id,
-        versionId: (await lakeStorage.getLatestVersion(customersDataset.id))?.versionId,
-      },
+      message: expect.stringContaining(
+        String((await lakeStorage.getLatestVersion(customersDataset.id))?.versionId)
+      ),
     })
     expect(finishedRuns).toHaveLength(0)
     expect(

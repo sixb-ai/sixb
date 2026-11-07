@@ -1,6 +1,7 @@
 import type { BlobStorage, LakeStorage, SixbDefinitions, SixbFailure, SyncMode } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
+import type { HeldRunClaim } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { SyncRunFailureCode, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 
@@ -18,8 +19,8 @@ export interface SyncWorkerContext {
 
 export interface RunSyncJobInput {
   readonly runtime: SyncWorkerContext
-  /** Durable run loaded before the execution scope is restored. */
-  readonly run: SyncRunRecord
+  /** The run this delivery holds, and whether an earlier execution already worked on it. */
+  readonly claim: HeldRunClaim<SyncRunRecord>
   readonly signal?: AbortSignal
   readonly onRunStarted?: SyncRunStartedHandler
   readonly onRunFinished?: SyncRunFinishedHandler

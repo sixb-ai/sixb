@@ -315,12 +315,9 @@ describe("SyncWorker", () => {
 
     await worker.stop()
 
-    const cancelledRun = await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-retry" }),
-      (value) => value?.status === "cancelled"
-    )
-
-    expect(cancelledRun?.status).toBe("cancelled")
+    const stopped = await sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-retry" })
+    expect(stopped).toMatchObject({ status: "running", attempt: 0 })
+    expect(stopped?.execution?.queueLeaseExpiresAt.getTime()).toBeLessThanOrEqual(Date.now())
 
     const [retried] = await sixb.queues.syncRuns.claim({
       projectId: sixb.id,
@@ -329,16 +326,7 @@ describe("SyncWorker", () => {
 
     expect(retried?.job.id).toBe(queued?.id)
     expect(retried?.job.attempt).toBe(2)
-    if (!cancelledRun) throw new Error("Expected the cancelled sync run to be persisted.")
-    const events = await sixb.events.read({ types: ["sync.run.finished"] })
-    expect(events).toHaveLength(1)
-    expect(events[0]?.payload).toEqual({
-      syncId: cancelledRun.syncId,
-      runId: cancelledRun.id,
-      status: "cancelled",
-      datasetId: cancelledRun.datasetId,
-      error: cancelledRun.error,
-    })
+    expect(await sixb.events.read({ types: ["sync.run.finished"] })).toEqual([])
     expect(reportCount).toBe(0)
   })
 
@@ -523,46 +511,16 @@ describe("SyncWorker", () => {
     })
   })
 
-  // Automatic dispatch joins a queued run, so its job must not end while the run stays queued.
-  // Drop the queued branch of `onExecutionError` to watch both cases fail; drop the status check
-  // after a failed start in `runSyncJob` to watch the first one complete its job instead.
+  // Automatic dispatch joins a queued run, so its job must not end while the run stays queued, and
+  // the job's delivery count says nothing about a run that has spent nothing. Fail the run from
+  // `onExecutionError` to watch every trigger that joined it get dropped by one storage error.
   test.each([
-    "the run cannot start",
-    "the execution cannot be read",
-  ] as const)("fails a run whose job runs out of attempts before it starts when %s", async (cause) => {
+    [1, 1_000],
+    [2, 2_000],
+    [40, 60_000],
+  ])("retries attempt %i of a job that could not take its run after %i ms", async (attempt, delayMs) => {
     const fixture = await createUnstartedRunFixture()
-    fixture.failBeforeStart(cause)
-    await fixture.spendAttempts(2)
-
-    await fixture.runWorkerUntilSettled()
-
-    const run = await fixture.readRun()
-    expect(run).toMatchObject({
-      status: "failed",
-      error: {
-        code: "internal.unexpected",
-        details: {
-          syncId: fixture.sync.id,
-          runId: "run-never-starts",
-          datasetId: fixture.sync.target.dataset.id,
-        },
-      },
-    })
-    expect(run?.startedAt).toBeUndefined()
-    expect(fixture.settled).toEqual([{ kind: "fail", failure: run!.error }])
-    expect(fixture.reports).toMatchObject([
-      { type: "run.failed", runKind: "sync", attempt: 3, failure: run!.error },
-    ])
-  })
-
-  // Fail the run on its first attempt in `onExecutionError` to watch this fail: one transient error
-  // would drop every trigger that joined the run.
-  test.each([
-    [1, 250],
-    [2, 500],
-  ])("retries attempt %i of a job that fails before starting its run after %i ms", async (attempt, delayMs) => {
-    const fixture = await createUnstartedRunFixture()
-    fixture.failBeforeStart("the run cannot start")
+    fixture.failBeforeStart()
     await fixture.spendAttempts(attempt - 1)
 
     const before = Date.now()
@@ -577,16 +535,9 @@ describe("SyncWorker", () => {
     expect(fixture.reports).toEqual([])
   })
 
-  // Remove the status check at the top of `execute` to watch the late job try to start the run.
+  // Treat a settled claim as a start in `execute` to watch the late job run the sync again.
   test("completes the job of a trigger that joined a run another job already ran", async () => {
     const fixture = await createUnstartedRunFixture()
-    const syncRuns = fixture.sixb.storage.syncRuns!
-    const start = syncRuns.start.bind(syncRuns)
-    let starts = 0
-    syncRuns.start = (input) => {
-      starts += 1
-      return start(input)
-    }
     await fixture.sixb.queues.syncRuns.enqueue({
       projectId: fixture.sixb.id,
       jobs: [
@@ -602,7 +553,6 @@ describe("SyncWorker", () => {
 
     expect(await fixture.readRun()).toMatchObject({ status: "succeeded" })
     expect(fixture.settled).toEqual([{ kind: "complete" }, { kind: "complete" }])
-    expect(starts).toBe(1)
     expect(await fixture.sixb.events.read({ types: ["sync.run.started"] })).toHaveLength(1)
     expect(fixture.reports).toEqual([])
   })
@@ -646,13 +596,8 @@ async function createUnstartedRunFixture() {
     settled,
     readRun: () => syncRuns.getById({ projectId: sixb.id, id: "run-never-starts" }),
 
-    failBeforeStart(cause: "the run cannot start" | "the execution cannot be read") {
-      const unavailable = new Error("storage unavailable")
-      if (cause === "the run cannot start") {
-        syncRuns.start = () => Promise.reject(unavailable)
-      } else {
-        sixb.storage.executions.getById = () => Promise.reject(unavailable)
-      }
+    failBeforeStart() {
+      syncRuns.startOrReclaim = () => Promise.reject(new Error("storage unavailable"))
     },
 
     /** Claim and release the job as earlier deliveries would, so the worker sees a later attempt. */

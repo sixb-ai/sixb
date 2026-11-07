@@ -217,7 +217,7 @@ describe("managed connector Sync safety", () => {
     })
   })
 
-  test("cancels while a connector source is still connecting", async () => {
+  test("stops while a connector source is still connecting", async () => {
     let sourceSignal: AbortSignal | undefined
     const pendingSource: SyncConnectorSource = {
       ...source("connection-a", "account-a", "brand-a"),
@@ -236,11 +236,11 @@ describe("managed connector Sync safety", () => {
 
     await waitFor(() => sourceSignal !== undefined)
     controller.abort(new DOMException("cancelled while connecting", "AbortError"))
-    await expectCancelled(fixture, "run-cancel-connect", running)
+    await expectInterrupted(fixture, "run-cancel-connect", running)
     expect(sourceSignal?.aborted).toBe(true)
   })
 
-  test("cancels while awaiting the read handler", async () => {
+  test("stops while awaiting the read handler", async () => {
     let handlerStarted = false
     const sync = defineSync("sync-cancel-handler")
       .from(social)
@@ -255,10 +255,10 @@ describe("managed connector Sync safety", () => {
 
     await waitFor(() => handlerStarted)
     controller.abort(new DOMException("cancelled while reading", "AbortError"))
-    await expectCancelled(fixture, "run-cancel-handler", running)
+    await expectInterrupted(fixture, "run-cancel-handler", running)
   })
 
-  test("cancels while awaiting the next async source value", async () => {
+  test("stops while awaiting the next async source value", async () => {
     let nextStarted = false
     let iteratorClosed = false
     const sync = defineSync("sync-cancel-iterator")
@@ -286,12 +286,12 @@ describe("managed connector Sync safety", () => {
 
     await waitFor(() => nextStarted)
     controller.abort(new DOMException("cancelled while iterating", "AbortError"))
-    await expectCancelled(fixture, "run-cancel-iterator", running)
+    await expectInterrupted(fixture, "run-cancel-iterator", running)
     await waitFor(() => iteratorClosed)
   })
 })
 
-async function expectCancelled(
+async function expectInterrupted(
   fixture: ReturnType<typeof createFixture>,
   runId: string,
   running: Promise<unknown>
@@ -309,8 +309,6 @@ async function expectCancelled(
     projectId: fixture.runtime.id,
     id: runId,
   })
-  expect(record).toMatchObject({
-    status: "cancelled",
-    error: { code: "runtime.cancelled" },
-  })
+  expect(record).toMatchObject({ status: "running" })
+  expect(record?.error).toBeUndefined()
 }

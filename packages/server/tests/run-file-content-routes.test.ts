@@ -21,6 +21,7 @@ import {
   createTestSixb,
   createTestWorkflowExecution,
   recordTestActionRun,
+  startTestRun,
 } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -128,7 +129,7 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     },
     queuedAt: new Date("2026-06-30T12:00:59.000Z"),
   })
-  await storage.workflowRuns.start({
+  await startTestRun(storage.workflowRuns, {
     id: "workflow_run_1",
     projectId: sixb.id,
     startedAt: new Date("2026-06-30T12:01:00.000Z"),

@@ -1,9 +1,10 @@
 import type { DatasetDefinition, PipelineDefinition, PipelineStepDefinition } from "@sixb/core"
-import { lakeDatasetDefinition } from "@sixb/core/internal/datasets"
+import { findProducedVersion, lakeDatasetDefinition } from "@sixb/core/internal/datasets"
 import { captureSixbFailure } from "@sixb/core/internal/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { PIPELINE_RUN_FAILURE_CODES, type PipelineStepRunRecord } from "@sixb/core/storage"
 import {
+  CommitNotRecordedError,
   createPipelineStepFailure,
   createStepBookkeepingError,
   requireRegisteredDataset,
@@ -17,6 +18,7 @@ import type {
   PipelineJob,
   PipelineLogSession,
   PipelineStepFinishedHandler,
+  PipelineStepLifecycleContext,
   PipelineStepRunResult,
   PipelineStepStartedHandler,
   PipelineWorkerContext,
@@ -28,7 +30,7 @@ type StepExecutionResult = {
   readonly rowsWritten?: number
 }
 
-export async function runStep(input: {
+interface RunStepInput {
   readonly runtime: PipelineWorkerContext
   readonly pipeline: PipelineDefinition
   readonly step: PipelineStepDefinition
@@ -36,14 +38,25 @@ export async function runStep(input: {
   readonly job: PipelineJob
   readonly signal: AbortSignal
   readonly logSession: PipelineLogSession
+  /** An earlier execution started this step and left no outcome, so it may have committed. */
+  readonly recorded?: PipelineStepRunRecord
+  /** The run has no attempts left: what landed is recorded, and nothing new starts. */
+  readonly givenUp?: Error
   readonly onStepStarted?: PipelineStepStartedHandler
   readonly onStepFinished?: PipelineStepFinishedHandler
-}): Promise<PipelineStepRunResult> {
+}
+
+function pipelineStepRunId(
+  job: Pick<PipelineJob, "id">,
+  stepIndex: number,
+  step: Pick<PipelineStepDefinition, "id">
+): string {
+  return `${job.id}:step:${stepIndex + 1}:${step.id}`
+}
+
+export async function runStep(input: RunStepInput): Promise<PipelineStepRunResult> {
   const { runtime, pipeline, step, stepIndex, job, signal } = input
-  const lifecycleContext = {
-    stepIndex,
-    totalSteps: pipeline.graph.nodes.length,
-  }
+  const stepRunId = input.recorded?.id ?? pipelineStepRunId(job, stepIndex, step)
 
   throwIfAborted(signal)
   let resolvedInputs: readonly ResolvedStepInput[]
@@ -66,6 +79,16 @@ export async function runStep(input: {
     // overwriting a concurrent run with results computed from older inputs.
     expectedLatestVersionId =
       (await runtime.lakeStorage.getLatestVersion(outputDataset.id))?.versionId ?? null
+
+    // Asked after capturing the guard: a commit this misses lands after the guard, which then
+    // refuses this step's own. An append written twice is what this order rules out.
+    const landed = input.recorded
+      ? await findLandedStep(input, outputDataset, input.recorded.startedAt)
+      : null
+    if (landed) return await recordLandedStep(input, stepRunId, landed)
+
+    if (input.givenUp) throw input.givenUp
+
     resolvedInputs = await resolveStepInputs({
       runtime,
       pipeline,
@@ -73,7 +96,9 @@ export async function runStep(input: {
       pipelineRunId: job.id,
     })
   } catch (error) {
-    if (statusForFailure(signal, error) === "failed") {
+    if (error instanceof CommitNotRecordedError) throw error
+
+    if (!signal.aborted && statusForFailure(error) === "failed") {
       throw createPipelineStepFailure({
         pipelineId: pipeline.id,
         pipelineRunId: job.id,
@@ -85,10 +110,10 @@ export async function runStep(input: {
   }
   const inputRefs = resolvedInputs.map((resolved) => resolved.ref)
 
-  const stepRunId = `${job.id}:step:${stepIndex + 1}:${step.id}`
   const startedStepRun = await runtime.pipelineRunsStorage.startStep({
     projectId: runtime.id,
     id: stepRunId,
+    executionToken: job.executionToken,
     pipelineRunId: job.id,
     pipelineId: pipeline.id,
     stepId: step.id,
@@ -96,7 +121,7 @@ export async function runStep(input: {
     mode: step.mode,
     inputs: inputRefs,
   })
-  await input.onStepStarted?.(startedStepRun, lifecycleContext)
+  await input.onStepStarted?.(startedStepRun, stepLifecycle(input))
 
   let committedVersion: DatasetVersion | undefined
   let rowsWritten: number | undefined
@@ -121,6 +146,7 @@ export async function runStep(input: {
       stepRun = await runtime.pipelineRunsStorage.finishStep({
         projectId: runtime.id,
         id: stepRunId,
+        executionToken: job.executionToken,
         status: "succeeded",
         output: {
           datasetId: committedVersion.datasetId,
@@ -138,7 +164,7 @@ export async function runStep(input: {
         cause: error,
       })
     }
-    await input.onStepFinished?.(stepRun, lifecycleContext)
+    await input.onStepFinished?.(stepRun, stepLifecycle(input))
 
     return {
       run: stepRun,
@@ -146,46 +172,107 @@ export async function runStep(input: {
       versionCreated: execution.versionCreated,
     }
   } catch (error) {
-    if (!committedVersion) {
-      const status = statusForFailure(signal, error)
-      const failureError =
-        status === "failed"
-          ? createPipelineStepFailure({
-              pipelineId: pipeline.id,
-              pipelineRunId: job.id,
-              stepId: step.id,
-              stepRunId,
-              cause: error,
-            })
-          : error
-      const failedStepRun = await runtime.pipelineRunsStorage
-        .finishStep({
-          projectId: runtime.id,
-          id: stepRunId,
-          status,
-          rowsWritten,
-          error: captureSixbFailure(failureError, {
-            allowedCodes: PIPELINE_RUN_FAILURE_CODES,
-            defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-            details: {
-              pipelineId: pipeline.id,
-              pipelineRunId: job.id,
-              stepId: step.id,
-              stepRunId,
-            },
-          }),
-        })
-        .catch(() => null)
+    if (committedVersion || signal.aborted) throw error
 
-      if (failedStepRun) {
-        await input.onStepFinished?.(failedStepRun, lifecycleContext)
+    // A commit can land and still answer with an error, and a redo can lose its guard to the commit
+    // it was redoing: only the lake can say. If it cannot, the run stays open for the next delivery.
+    const landed = await findLandedStep(input, outputDataset, startedStepRun.startedAt).catch(
+      (cause: unknown) => {
+        throw new CommitNotRecordedError(
+          `[SixbPipelineWorker] Pipeline '${pipeline.id}' could not tell whether step '${step.id}' committed.`,
+          { cause }
+        )
       }
+    )
+    if (landed) return recordLandedStep(input, stepRunId, landed)
 
-      throw failureError
+    const status = statusForFailure(error)
+    const failureError =
+      status === "failed"
+        ? createPipelineStepFailure({
+            pipelineId: pipeline.id,
+            pipelineRunId: job.id,
+            stepId: step.id,
+            stepRunId,
+            cause: error,
+          })
+        : error
+    const failedStepRun = await runtime.pipelineRunsStorage
+      .finishStep({
+        projectId: runtime.id,
+        id: stepRunId,
+        executionToken: job.executionToken,
+        status,
+        rowsWritten,
+        error: captureSixbFailure(failureError, {
+          allowedCodes: PIPELINE_RUN_FAILURE_CODES,
+          defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+          details: {
+            pipelineId: pipeline.id,
+            pipelineRunId: job.id,
+            stepId: step.id,
+            stepRunId,
+          },
+        }),
+      })
+      .catch(() => null)
+
+    if (failedStepRun) {
+      await input.onStepFinished?.(failedStepRun, stepLifecycle(input))
     }
 
-    throw error
+    throw failureError
   }
+}
+
+function stepLifecycle(input: RunStepInput): PipelineStepLifecycleContext {
+  return { stepIndex: input.stepIndex, totalSteps: input.pipeline.graph.nodes.length }
+}
+
+/** The version this step committed, whichever execution did it. */
+function findLandedStep(
+  input: RunStepInput,
+  outputDataset: DatasetDefinition,
+  since: Date
+): Promise<DatasetVersion | null> {
+  return findProducedVersion({
+    lakeStorage: input.runtime.lakeStorage,
+    datasetId: outputDataset.id,
+    producer: { kind: "pipeline", runId: input.job.id, stepId: input.step.id },
+    since,
+  })
+}
+
+/** Record a commit that nothing recorded yet: the step does not run again. */
+async function recordLandedStep(
+  input: RunStepInput,
+  stepRunId: string,
+  version: DatasetVersion
+): Promise<PipelineStepRunResult> {
+  const { runtime, pipeline, step, job } = input
+
+  let stepRun: PipelineStepRunRecord
+  try {
+    stepRun = await runtime.pipelineRunsStorage.finishStep({
+      projectId: runtime.id,
+      id: stepRunId,
+      executionToken: job.executionToken,
+      status: "succeeded",
+      output: { datasetId: version.datasetId, versionId: version.versionId },
+    })
+  } catch (error) {
+    throw createStepBookkeepingError({
+      pipelineId: pipeline.id,
+      pipelineRunId: job.id,
+      stepId: step.id,
+      stepRunId,
+      version,
+      cause: error,
+    })
+  }
+
+  await input.onStepFinished?.(stepRun, stepLifecycle(input))
+  return { run: stepRun, version, versionCreated: true }
 }
 
 async function executeStep(input: {
