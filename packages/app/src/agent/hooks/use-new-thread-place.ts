@@ -1,7 +1,15 @@
-import { type DesktopComputer, type DesktopComputerAccess, useDesktop } from "@sixb/client/hooks"
+import {
+  type DesktopComputer,
+  type DesktopComputerAccess,
+  listAgentComputersOptions,
+  useDesktop,
+} from "@sixb/client/hooks"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useState } from "react"
 
 const STORAGE_KEY = "sixb.agent.new-thread-place"
+/** In a browser: the folder chosen last, on one of the person's computers. */
+const ONLINE_STORAGE_KEY = "sixb.agent.new-thread-place.online"
 
 /** The last choice, on this computer: where a new conversation starts. */
 interface StoredPlace {
@@ -34,28 +42,40 @@ export type NewThreadPlaceBody =
       readonly computer: DesktopComputer & { readonly folder: string }
     }
 
-/** The composer's choice of where a new conversation runs. */
-export interface NewThreadPlace {
-  /** Null while what runs the agent here can't start: the cloud is still a choice. */
-  readonly computerName: string | null
-  readonly cloud: boolean
-  /** Null before the person has chosen one: the first message asks. */
-  readonly folder: string | null
-  /** Folders chosen before, to choose from again. */
+/** A computer a new conversation can run on, with the folders to choose from there. */
+export interface PlaceComputer {
+  /** Both null while what runs the agent on this computer can't start: the cloud is still a choice. */
+  readonly id: string | null
+  readonly name: string | null
   readonly folders: readonly string[]
-  readonly chooseCloud: () => void
-  readonly chooseFolder: (folder: string) => void
-  /** Ask the person for a folder, and use it. */
-  readonly pickFolder: () => Promise<void>
-  readonly forgetFolder: (folder: string) => void
-  readonly refreshFolders: () => void
 }
 
-/**
- * Where a new conversation runs, in a desktop app that can run the agent here: this computer unless
- * the person chooses the cloud. In a browser there's nothing to choose, and this says so.
- */
-export function useNewThreadPlace(): {
+/** The composer's choice of where a new conversation runs. */
+export interface NewThreadPlace {
+  /**
+   * In a desktop app, this computer alone. In a browser, the person's computers with `sixb` open,
+   * which aren't the one the page is on.
+   */
+  readonly computers: readonly PlaceComputer[]
+  /** The computers are elsewhere: what's shown names the computer as well as the folder. */
+  readonly remote: boolean
+  readonly cloud: boolean
+  /** Null before the person has chosen one: in a desktop app, the first message asks. */
+  readonly chosen: { readonly computer: PlaceComputer; readonly folder: string } | null
+  readonly chooseCloud: () => void
+  readonly chooseFolder: (computer: PlaceComputer, folder: string) => void
+  /** In a desktop app: ask the person for a folder, and use it. */
+  readonly pickFolder?: () => Promise<void>
+  /** In a desktop app: take a folder back. */
+  readonly forgetFolder?: (folder: string) => void
+  /**
+   * In a desktop app: read this computer's folders again, as the menu opens. A browser's list
+   * follows the activity feed instead.
+   */
+  readonly refreshFolders?: () => void
+}
+
+export interface NewThreadPlaceState {
   /** Null where the only place is the cloud, or until it's known that there's another. */
   readonly place: NewThreadPlace | null
   /** A desktop app that hasn't said yet whether it can run the agent here. */
@@ -67,8 +87,24 @@ export function useNewThreadPlace(): {
    * person cancels, so that their message stays in the composer.
    */
   readonly resolveBody: () => Promise<NewThreadPlaceBody | null>
-} {
+}
+
+/**
+ * Where a new conversation runs. In a desktop app that can run the agent here: this computer
+ * unless the person chooses the cloud. In a browser: the cloud unless they choose a folder on one
+ * of their computers where `sixb` is open now, and there's nothing to choose while none is.
+ *
+ * `starting`: a new conversation is open. Only then does a browser list the person's computers.
+ */
+export function useNewThreadPlace(starting: boolean): NewThreadPlaceState {
   const access: DesktopComputerAccess | null = useDesktop()?.computer ?? null
+  const desktop = useDesktopPlace(access)
+  const online = useOnlineComputersPlace(starting && access === null)
+  return desktop ?? online
+}
+
+/** In a desktop app that can run the agent here; null elsewhere. */
+function useDesktopPlace(access: DesktopComputerAccess | null): NewThreadPlaceState | null {
   // Undefined until the desktop app answers; null where it can't run the agent.
   const [computer, setComputer] = useState<DesktopComputer | null | undefined>(undefined)
   const [cannotStart, setCannotStart] = useState(false)
@@ -114,9 +150,7 @@ export function useNewThreadPlace(): {
     }
   }, [access, refreshFolders])
 
-  if (!access) {
-    return { place: null, waiting: false, computerId: null, resolveBody: async () => ({}) }
-  }
+  if (!access) return null
 
   const pick = async (): Promise<string | null> => {
     const folder = await access.pickFolder()
@@ -146,16 +180,23 @@ export function useNewThreadPlace(): {
     return { place: null, waiting: computer === undefined, computerId: null, resolveBody }
   }
 
+  const here: PlaceComputer = {
+    id: computer?.id ?? null,
+    name: computer?.name ?? null,
+    folders: folders ?? [],
+  }
+  const folder =
+    stored.folder && (!folders || folders.includes(stored.folder)) ? stored.folder : null
   return {
     waiting: false,
     computerId: computer?.id ?? null,
     place: {
-      computerName: computer?.name ?? null,
+      computers: [here],
+      remote: false,
       cloud: stored.cloud,
-      folder: stored.folder && (!folders || folders.includes(stored.folder)) ? stored.folder : null,
-      folders: folders ?? [],
+      chosen: folder ? { computer: here, folder } : null,
       chooseCloud: () => remember({ ...stored, cloud: true }),
-      chooseFolder: (folder) => remember({ cloud: false, folder }),
+      chooseFolder: (_here, folder) => remember({ cloud: false, folder }),
       pickFolder: async () => {
         await pick()
       },
@@ -164,6 +205,89 @@ export function useNewThreadPlace(): {
         if (stored.folder === folder) remember({ ...stored, folder: null })
       },
       refreshFolders,
+    },
+    resolveBody,
+  }
+}
+
+/** The folder a browser last chose, on one of the person's computers: null for the cloud. */
+interface StoredOnlinePlace {
+  readonly computerId: string
+  readonly folder: string
+}
+
+function readStoredOnline(): StoredOnlinePlace | null {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ONLINE_STORAGE_KEY) ?? "null") as unknown
+    if (!stored || typeof stored !== "object") return null
+    const { computerId, folder } = stored as Partial<StoredOnlinePlace>
+    return typeof computerId === "string" && typeof folder === "string"
+      ? { computerId, folder }
+      : null
+  } catch {
+    return null
+  }
+}
+
+type OnlineComputer = PlaceComputer & { readonly id: string; readonly name: string }
+
+/**
+ * In a browser: the person's computers where `sixb` is open now. A folder chosen before is the
+ * place only while it's open there: what's shown is what a message is sent to, and the cloud
+ * otherwise.
+ */
+function useOnlineComputersPlace(enabled: boolean): NewThreadPlaceState {
+  const queryClient = useQueryClient()
+  const listed = useQuery({ ...listAgentComputersOptions(), enabled })
+  const [stored, setStored] = useState(readStoredOnline)
+
+  const remember = useCallback((next: StoredOnlinePlace | null) => {
+    setStored(next)
+    try {
+      localStorage.setItem(ONLINE_STORAGE_KEY, JSON.stringify(next))
+    } catch {
+      // Private storage: the choice lasts as long as the page.
+    }
+  }, [])
+
+  const chosenIn = (computers: readonly OnlineComputer[]) => {
+    const computer = stored ? computers.find((known) => known.id === stored.computerId) : undefined
+    return stored && computer?.folders.includes(stored.folder)
+      ? { computer, folder: stored.folder }
+      : null
+  }
+
+  // Before the list arrives, a message waits for it rather than going to the cloud by default.
+  const resolveBody = async (): Promise<NewThreadPlaceBody> => {
+    if (!enabled || !stored) return {}
+    const computers = await queryClient
+      .ensureQueryData(listAgentComputersOptions())
+      .then(({ computers }) => computers)
+      .catch(() => [])
+    const chosen = chosenIn(computers)
+    if (!chosen) return {}
+    const { id, name } = chosen.computer
+    return { runsOn: "computer", computer: { id, name, folder: chosen.folder } }
+  }
+
+  const computers = listed.data?.computers ?? []
+  if (!enabled || computers.length === 0) {
+    return { place: null, waiting: false, computerId: null, resolveBody }
+  }
+
+  const chosen = chosenIn(computers)
+  return {
+    waiting: false,
+    computerId: null,
+    place: {
+      computers,
+      remote: true,
+      cloud: chosen === null,
+      chosen,
+      chooseCloud: () => remember(null),
+      chooseFolder: (computer, folder) => {
+        if (computer.id) remember({ computerId: computer.id, folder })
+      },
     },
     resolveBody,
   }
