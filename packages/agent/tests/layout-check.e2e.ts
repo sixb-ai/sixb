@@ -392,6 +392,60 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   )
 
   test(
+    "pictures no board whose page did not load whole, and says so",
+    async () => {
+      // Reproduce by picturing every board that was checked: Pricing's picture, unstyled for its
+      // missing stylesheet, is kept under its key and shown to every reader.
+      mkdirSync(join(root, "partial"), { recursive: true })
+      const page = (head: string) =>
+        `<!doctype html><html><head>${head}</head><body><main><h1>Plans</h1></main></body></html>`
+      const whole = page("")
+      const partial = page('<link rel="stylesheet" href="missing.css">')
+      writeFileSync(join(root, "partial", "plans.html"), whole)
+      writeFileSync(join(root, "partial", "pricing.html"), partial)
+
+      const result = await checkLayout({
+        layout: "canvas",
+        boards: [
+          {
+            id: "plans",
+            file: "plans.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(whole),
+            pictured: true,
+          },
+          {
+            id: "pricing",
+            file: "pricing.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(partial),
+            pictured: true,
+          },
+        ],
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: env(),
+        },
+        directory: join(root, "partial"),
+        files: ["plans.html", "pricing.html"],
+        name: "partial",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+
+      expect(new Set(result.previews.map((picture) => picture.board))).toEqual(new Set(["plans"]))
+      expect(result.screenshots).toHaveLength(2)
+      const untaken = result.warnings.find((warning) => warning.code === "preview_not_taken")
+      expect(untaken).toMatchObject({ part: "pricing" })
+      expect(untaken?.message).toContain("missing.css did not load (404)")
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
     "checks each of a canvas's boards at its own size, naming the board",
     async () => {
       // A phone board that reads well, and one whose fixed-width box is wider than the board.

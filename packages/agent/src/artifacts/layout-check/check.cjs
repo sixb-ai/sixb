@@ -6,9 +6,11 @@
 // screenshot at each width. A canvas's boards load each at its own size, four at a time, measured
 // as a page is and screenshot as boards/<id>.png; a board boards.json marks `pictured` also in
 // each other theme, as boards/<id>.<theme>.png, and each of its pictures for readers also at most
-// `smallWidth` wide, as boards/<id>.<theme>.small.webp. With overview.html, the
+// `smallWidth` wide, as boards/<id>.<theme>.small.webp; a board whose page did not load whole is
+// not pictured, but listed in `unpictured`, as a broken picture would stay. With overview.html, the
 // whole canvas as it opens is screenshot as overview.png. It writes one line of JSON:
-// { layout, slides, problems, errors, screenshots, previews, stalls, overview?, stopped? } or
+// { layout, slides, problems, errors, screenshots, previews, unpictured, stalls, overview?,
+// stopped? } or
 // { skipped }.
 //
 //   node check.cjs <directory> <output directory> <library directory> <deadline in ms> <layout>
@@ -89,6 +91,7 @@ const found = {
   // A canvas's: each board's picture in each theme the reader sees it in, the boards that stopped
   // answering, and the whole canvas as it opens.
   previews: [],
+  unpictured: [],
   stalls: [],
   overview: undefined,
 }
@@ -154,6 +157,12 @@ function isStall(error) {
  */
 function openTab(page, stepOf) {
   const { errors } = found
+  // What failed to load since the page last loaded: a picture of it would show it broken.
+  const failures = []
+  const failed = (message) => {
+    errors.push(message)
+    failures.push(message)
+  }
   page.on("pageerror", (error) => errors.push(error.message))
   // A file that fails names itself; Chromium's console line for it does not.
   const local = (url) => url.replace(/^http:\/\/127\.0\.0\.1:\d+\//, "")
@@ -162,18 +171,19 @@ function openTab(page, stepOf) {
       errors.push(message.text())
     }
   })
-  page.on("requestfailed", (request) => errors.push(`${local(request.url())} did not load`))
+  page.on("requestfailed", (request) => failed(`${local(request.url())} did not load`))
   page.on("response", (response) => {
     if (response.status() >= 400) {
-      errors.push(`${local(response.url())} did not load (${response.status()})`)
+      failed(`${local(response.url())} did not load (${response.status()})`)
     }
   })
 
   // A font or a library from a CDN may be out of reach; the entry is measured as it loaded.
   const load = async (url) => {
+    failures.length = 0
     await page
       .goto(url, { waitUntil: "load", timeout: 15_000 })
-      .catch((error) => errors.push(`${NOUN} did not finish loading: ${error.message}`))
+      .catch((error) => failed(`${NOUN} did not finish loading: ${error.message}`))
     // Each theme is measured as it settles, not on its way there.
     await within(
       stepOf(),
@@ -197,7 +207,7 @@ function openTab(page, stepOf) {
         { protocol: PROTOCOL, method, params }
       )
     )
-  return { page, load, settle, send }
+  return { page, load, settle, send, failures }
 }
 
 /**
@@ -229,6 +239,7 @@ async function checkCanvas(browser, port, probe, themes) {
     await tab.page.setViewportSize({ width: board.w, height: Math.min(board.h, PAGE_HEIGHT) })
     await tab.load(`http://127.0.0.1:${port}/${board.file.split("/").map(encodeURIComponent).join("/")}`)
 
+    const pictures = []
     for (const [index, name] of names.entries()) {
       const step = tab.at(`board '${board.id}' in ${name} mode`)
       await tab.send("theme", themes[name])
@@ -241,15 +252,24 @@ async function checkCanvas(browser, port, probe, themes) {
       const file = path.join(out, "boards", index === 0 ? `${board.id}.png` : `${board.id}.${name}.png`)
       const png = await tab.page.screenshot({ path: file, timeout: STEP_MS })
       if (index === 0) found.screenshots.push(file)
-      if (!board.pictured) continue
+      if (!board.pictured || tab.failures.length > 0) continue
 
       const small = path.join(out, "boards", `${board.id}.${name}.small.webp`)
       await shrink(browser, png, board.smallWidth, small)
-      found.previews.push(
+      pictures.push(
         { board: board.id, theme: name, size: "full", path: file, bytes: png.length },
         { board: board.id, theme: name, size: "small", path: small, bytes: fs.statSync(small).size }
       )
     }
+
+    // A page that did not load whole is pictured broken, and its picture would stay: none is
+    // taken, and the board keeps its outline until it loads.
+    if (!board.pictured) return
+    if (tab.failures.length > 0) {
+      found.unpictured.push({ board: board.id, reason: tab.failures[0] })
+      return
+    }
+    found.previews.push(...pictures)
   }
 
   const lane = async () => {
