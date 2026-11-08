@@ -7,15 +7,14 @@ import {
   resolveArtifactComment,
 } from "@sixb/client"
 import { listArtifactCommentsOptions, listArtifactCommentsQueryKey } from "@sixb/client/hooks"
-import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo } from "react"
+import { type QueryClient, useQuery } from "@tanstack/react-query"
+import { useMemo } from "react"
 import { useCurrentUser } from "../../../session"
-import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 
-// The comments on a canvas: read once, kept in step as anyone adds, resolves or deletes one, over
-// the live socket while the canvas is held live and over the events socket otherwise, and changed
-// in place by the reader's own actions, so the panel answers at once.
+// The comments on a canvas: read once, kept in step as anyone adds, resolves or deletes one by the
+// `artifact.commented` events the viewer follows, and changed in place by the reader's own
+// actions, so the panel answers at once.
 
 export type ArtifactComment = ListArtifactCommentsResponse["comments"][number]
 export type ArtifactCommentAnchor = ArtifactComment["anchor"]
@@ -61,30 +60,19 @@ export function commentThreads(comments: readonly ArtifactComment[]): CommentThr
 const NO_COMMENTS: readonly ArtifactComment[] = []
 
 /**
- * The comments on an artifact, as threads, read again whenever someone changes one: the live
- * artifact says so while the canvas is held live; the events socket otherwise.
+ * The comments on an artifact, as threads. They are read again whenever someone changes one, as
+ * `useArtifactUpdates` hears it on the events socket.
  */
-export function useArtifactComments(
-  artifactId: string | null,
-  live: LiveArtifact | null
-): {
+export function useArtifactComments(artifactId: string | null): {
   readonly threads: readonly CommentThread[]
   readonly loading: boolean
   readonly failed: boolean
 } {
-  const queries = useQueryClient()
   const query = useQuery({
     ...listArtifactCommentsOptions({ path: { artifactId: artifactId ?? "" } }),
     enabled: artifactId !== null,
     retry: false,
   })
-
-  useEffect(() => {
-    if (!live || !artifactId) return
-    return live.onCommented(() => {
-      void queries.invalidateQueries({ queryKey: commentsKey(artifactId) })
-    })
-  }, [live, artifactId, queries])
 
   const comments = query.data?.comments ?? NO_COMMENTS
   const threads = useMemo(() => commentThreads(comments), [comments])

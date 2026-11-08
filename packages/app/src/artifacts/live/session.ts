@@ -183,7 +183,6 @@ export class LiveArtifact {
   readonly awareness = new awarenessProtocol.Awareness(this.doc)
   private state: LiveArtifactState = INITIAL
   private readonly listeners = new Set<() => void>()
-  private readonly commentListeners = new Set<() => void>()
   private joined = false
   /** What this page changed that the server has not said it saved, merged into one update. */
   private unsaved: Uint8Array | null = null
@@ -215,12 +214,6 @@ export class LiveArtifact {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
-  }
-
-  /** Calls `listener` each time someone adds, resolves, reopens or deletes a comment on it. */
-  onCommented = (listener: () => void): (() => void) => {
-    this.commentListeners.add(listener)
-    return () => this.commentListeners.delete(listener)
   }
 
   /** The socket is ready: join, or join again after a reconnect. */
@@ -294,9 +287,6 @@ export class LiveArtifact {
         if (message.reason !== "left") this.forget(null)
         this.update({ left: message.reason })
         return
-      case "commented":
-        for (const listener of this.commentListeners) listener()
-        return
       case "error":
         console.warn(`[SixbApp] Live artifact '${this.artifactId}': ${message.message}`)
         return
@@ -315,7 +305,6 @@ export class LiveArtifact {
     this.awareness.destroy()
     this.doc.destroy()
     this.listeners.clear()
-    this.commentListeners.clear()
   }
 
   private onUpdate = (update: Uint8Array, origin: unknown): void => {

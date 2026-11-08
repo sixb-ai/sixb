@@ -49,7 +49,7 @@ export function useCanvasCommenting({
   const view = useArtifactView()
   const user = useCurrentUser()
   const agentDraft = useAgentDraft()
-  const { threads, loading, failed } = useArtifactComments(artifactId, live)
+  const { threads, loading, failed } = useArtifactComments(artifactId)
   const nameOf = useCommentAuthors()
 
   const [commenting, setCommenting] = useState(false)

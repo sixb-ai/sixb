@@ -222,8 +222,7 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 - Each comment names its author in `authorName`, as their profile does, or `null` for someone the
   project no longer knows. One the Agent wrote for its author has `origin`, its run and
   conversation.
-- Each change sends `artifact.commented` to whoever reads the artifact, and to everyone editing it
-  live.
+- Each change sends `artifact.commented` to whoever reads the artifact.
 - An artifact holds at most 1,000 comments, each up to 4,000 characters.
 - `quoteArtifactComment(comment)` from `@sixb/core/artifacts` writes a comment as the Agent reads
   it, with where it is and its id, for a message that asks the Agent to act on it. The Agent then

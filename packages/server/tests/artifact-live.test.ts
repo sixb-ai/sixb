@@ -1044,65 +1044,6 @@ describe("an artifact edited live", () => {
     )
   })
 
-  // Guard proof: drop the recheck from LiveRoom.commented; Bob, who lost the canvas, still hears
-  // of Olivia's comment.
-  test("tells of a comment only those who may still read the artifact", async () => {
-    jest.useFakeTimers()
-    const context = await setup()
-    const rooms = context.rooms()
-    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
-    await bob.join()
-    await bob.settle()
-
-    await context.storage.agents.threads.removeParticipant({
-      projectId,
-      threadId: "thr_marie",
-      principal: { type: "user", id: "bob" },
-    })
-    await context.olivia.artifacts.addComment(context.artifactId, { body: "Hm" })
-    await bob.settle()
-
-    expect(bob.messages.some((message) => message.type === "commented")).toBe(false)
-    expect(bob.messages).toContainEqual({
-      type: "left",
-      artifactId: context.artifactId,
-      reason: "not_shared",
-    })
-  })
-
-  // Guard proof: drop "artifact.commented" from LiveRooms' events feed; Marie never hears of
-  // Olivia's comment.
-  test("tells everyone here when a comment is added, resolved or deleted", async () => {
-    jest.useFakeTimers()
-    const context = await setup()
-    const rooms = context.rooms()
-    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
-    await marie.join()
-    await marie.settle()
-
-    const comment = await context.olivia.artifacts.addComment(context.artifactId, {
-      body: "Warmer, please",
-      anchor: { board: "welcome", element: "body>main:0>h1:0" },
-    })
-    await context.marie.artifacts.resolveComment(context.artifactId, comment.id)
-    await marie.settle()
-
-    expect(marie.messages.filter((message) => message.type === "commented")).toEqual([
-      {
-        type: "commented",
-        artifactId: context.artifactId,
-        commentId: comment.id,
-        action: "created",
-      },
-      {
-        type: "commented",
-        artifactId: context.artifactId,
-        commentId: comment.id,
-        action: "resolved",
-      },
-    ])
-  })
-
   // Guard proof: build the room's document from the version's files in LiveRoom.open instead of
   // loading the stored one; the new room's `canvas.json` then collides with Marie's, and her move
   // lands only when her client id wins.

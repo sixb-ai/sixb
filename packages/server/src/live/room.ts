@@ -344,23 +344,6 @@ export class LiveRoom {
     this.closeWhenDone()
   }
 
-  /** A comment changed: everyone here reads it, so everyone is told. */
-  commented(change: {
-    readonly commentId: string
-    readonly parentId?: string
-    readonly action: "created" | "resolved" | "reopened" | "deleted"
-  }): void {
-    for (const member of this.members.values()) {
-      member.connection.send({
-        type: "commented",
-        artifactId: this.artifactId,
-        commentId: change.commentId,
-        ...(change.parentId === undefined ? {} : { parentId: change.parentId }),
-        action: change.action,
-      })
-    }
-  }
-
   /** Writes the document back now, if it changed. */
   save(): void {
     this.clearTimers()
