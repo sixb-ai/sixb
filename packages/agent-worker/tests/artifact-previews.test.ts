@@ -92,11 +92,13 @@ function check(output: string, served: Record<string, unknown>[]) {
   const previews = boards
     .filter((board) => board.pictured)
     .flatMap((board) =>
-      themes.map((theme) => {
-        const path = join(output, `${board.id}.${theme}.png`)
-        writeFileSync(path, `${board.id} ${theme}`)
-        return { board: board.id, theme, path }
-      })
+      themes.flatMap((theme) =>
+        (["full", "small"] as const).map((size) => {
+          const path = join(output, `${board.id}.${theme}.${size === "full" ? "png" : "webp"}`)
+          writeFileSync(path, `${board.id} ${theme}${size === "small" ? " small" : ""}`)
+          return { board: board.id, theme, size, path }
+        })
+      )
     )
   return { layout: "canvas", problems: [], errors: [], screenshots: [], previews }
 }
@@ -202,9 +204,13 @@ describe("a canvas version's previews", () => {
 
     expect(await pictures(version)).toEqual([
       "region dark: region dark",
+      "region dark: region dark small",
       "region light: region light",
+      "region light: region light small",
       "welcome dark: welcome dark",
+      "welcome dark: welcome dark small",
       "welcome light: welcome light",
+      "welcome light: welcome light small",
     ])
     expect(sandboxes.created).toMatchObject([{ environment: {}, network: { mode: "none" } }])
     expect(sandboxes.destroyed).toBe(1)
@@ -309,7 +315,9 @@ describe("a canvas version's previews", () => {
     await render(live)
     expect(await pictures(live)).toEqual([
       "welcome dark: welcome dark",
+      "welcome dark: welcome dark small",
       "welcome light: welcome light",
+      "welcome light: welcome light small",
     ])
 
     // A script beside the boards may be what any of them reads its query with: Regions, whose
@@ -318,7 +326,9 @@ describe("a canvas version's previews", () => {
     await render(scripted)
     expect(await pictures(scripted)).toEqual([
       "welcome dark: welcome dark",
+      "welcome dark: welcome dark small",
       "welcome light: welcome light",
+      "welcome light: welcome light small",
     ])
     expect(sandboxes.served).toHaveLength(1)
   })
@@ -337,6 +347,6 @@ describe("a canvas version's previews", () => {
       await worker.stop()
     }
 
-    expect(await pictures(version)).toHaveLength(4)
+    expect(await pictures(version)).toHaveLength(8)
   })
 })

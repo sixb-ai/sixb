@@ -10,7 +10,12 @@ import {
   layoutProbe,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
-import { type ArtifactQueryAnswer, artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
+import {
+  type ArtifactQueryAnswer,
+  artifactThemeModes,
+  SMALL_BOARD_PREVIEW_WIDTH,
+} from "@sixb/core/internal/artifacts/publish"
+import type { ArtifactBoardPreviewSize } from "@sixb/core/storage"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
@@ -63,10 +68,12 @@ export interface CheckedBoard {
   readonly pictured?: boolean
 }
 
-/** A board's picture in one mode, which the check took. */
+/** A board's picture in one mode and size, which the check took. */
 export interface CheckedPreview {
   readonly board: string
   readonly theme: ArtifactThemeMode
+  /** `full`, a PNG of the board; `small`, a WebP at most 480 pixels wide. */
+  readonly size: ArtifactBoardPreviewSize
   /** Absolute, in the sandbox. */
   readonly path: string
 }
@@ -185,6 +192,7 @@ export async function checkLayout(
                 w,
                 h,
                 pictured: pictured === true,
+                ...(pictured ? { smallWidth: SMALL_BOARD_PREVIEW_WIDTH } : {}),
               }))
             ),
           },

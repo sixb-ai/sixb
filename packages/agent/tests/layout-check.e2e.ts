@@ -128,7 +128,10 @@ const HANGING_DECK = `<!doctype html>
  * matching on the profile's name alone once counted one as a browser the check left behind.
  */
 async function browsers(root: string): Promise<Set<string>> {
-  const ps = Bun.spawn(["ps", "-ww", "-A", "-o", "pid=,command="], { stdout: "pipe", stderr: "ignore" })
+  const ps = Bun.spawn(["ps", "-ww", "-A", "-o", "pid=,command="], {
+    stdout: "pipe",
+    stderr: "ignore",
+  })
   const kill = setTimeout(() => ps.kill("SIGKILL"), 10_000)
   try {
     const [output] = await Promise.all([new Response(ps.stdout).text(), ps.exited])
@@ -141,6 +144,17 @@ async function browsers(root: string): Promise<Set<string>> {
   } finally {
     clearTimeout(kill)
   }
+}
+
+/** A WebP's width and height, from its first chunk: lossy, lossless, or extended. */
+function webpSize(bytes: Buffer): [number, number] {
+  const chunk = bytes.subarray(12, 16).toString("latin1")
+  if (chunk === "VP8 ") return [bytes.readUInt16LE(26) & 0x3fff, bytes.readUInt16LE(28) & 0x3fff]
+  if (chunk === "VP8L") {
+    const bits = bytes.readUInt32LE(21)
+    return [(bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1]
+  }
+  return [bytes.readUIntLE(24, 3) + 1, bytes.readUIntLE(27, 3) + 1]
 }
 
 describe.skipIf(!playwright)("the layout check in a browser", () => {
@@ -457,11 +471,12 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         ...ids.slice(4).map((id) => ({ id, file: `${id}.html`, html: html(id) })),
       ].map((board, index) => ({
         ...board,
-        w: 390,
-        h: 844,
+        // A laptop's screen first, which its small picture shrinks to 480 pixels wide.
+        w: index === 0 ? 1280 : 390,
+        h: index === 0 ? 800 : 844,
         html: new TextEncoder().encode(board.html),
         pictured: true,
-        x: (index % 5) * 480,
+        x: index === 0 ? -1400 : (index % 5) * 480,
         y: Math.floor(index / 5) * 1000,
       }))
 
@@ -503,13 +518,23 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         "hangs layout_incomplete"
       )
 
-      // Every other board in both themes, the dark picture apart from the light one.
-      expect(result.previews).toHaveLength(24)
+      // Every other board in both themes and both sizes, the dark picture apart from the light
+      // one, and the small one a WebP no wider than 480 pixels, its aspect kept.
+      expect(result.previews).toHaveLength(48)
+      const picture = (id: string, theme: string, size: string) => {
+        const found = result.previews.find(
+          (each) => each.board === id && each.theme === theme && each.size === size
+        )
+        if (!found) throw new Error(`Board '${id}' was not pictured ${size} in ${theme} mode.`)
+        return readFileSync(found.path)
+      }
       for (const id of ids) {
-        const light = result.previews.find((each) => each.board === id && each.theme === "light")
-        const dark = result.previews.find((each) => each.board === id && each.theme === "dark")
-        if (!light || !dark) throw new Error(`Board '${id}' was not pictured in both themes.`)
-        expect(readFileSync(light.path).equals(readFileSync(dark.path))).toBe(false)
+        expect(picture(id, "light", "full").equals(picture(id, "dark", "full"))).toBe(false)
+        for (const theme of ["light", "dark"]) {
+          const small = picture(id, theme, "small")
+          expect(small.subarray(8, 12).toString("latin1")).toBe("WEBP")
+          expect(webpSize(small)).toEqual(id === ids[0] ? [480, 300] : [390, 844])
+        }
       }
 
       expect(result.overview).toBe(".sixb/agent/checks/many/overview.png")

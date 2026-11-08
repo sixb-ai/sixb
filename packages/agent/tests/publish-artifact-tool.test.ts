@@ -292,11 +292,29 @@ const canvasCheck: Check = (output) => {
     previews: boards
       .filter((board) => board.pictured)
       .flatMap((board) => [
-        { board: board.id, theme: "light", path: join(output, "boards", `${board.id}.png`) },
+        {
+          board: board.id,
+          theme: "light",
+          size: "full",
+          path: join(output, "boards", `${board.id}.png`),
+        },
+        {
+          board: board.id,
+          theme: "light",
+          size: "small",
+          path: shot(`${board.id}.light.small.webp`, `${board.id} light small`),
+        },
         {
           board: board.id,
           theme: "dark",
+          size: "full",
           path: shot(`${board.id}.dark.png`, `${board.id} dark`),
+        },
+        {
+          board: board.id,
+          theme: "dark",
+          size: "small",
+          path: shot(`${board.id}.dark.small.webp`, `${board.id} dark small`),
         },
       ]),
     overview: join(output, "overview.png"),
@@ -501,9 +519,13 @@ describe("publish_artifact", () => {
     )) as { artifactId: string; layoutCheck: { overview: string } }
     expect((await pictures(first.artifactId, 1)).sort()).toEqual([
       "dark: region dark",
+      "dark: region dark small",
       "dark: welcome dark",
+      "dark: welcome dark small",
       "light: region light",
+      "light: region light small",
       "light: welcome light",
+      "light: welcome light small",
     ])
     expect(first.layoutCheck.overview).toBe(
       `.sixb/agent/checks/${first.artifactId}-v1/overview.png`
@@ -530,9 +552,13 @@ describe("publish_artifact", () => {
     ])
     expect((await pictures(first.artifactId, 2)).sort()).toEqual([
       "dark: region dark",
+      "dark: region dark small",
       "dark: welcome dark",
+      "dark: welcome dark small",
       "light: region light",
+      "light: region light small",
       "light: welcome light",
+      "light: welcome light small",
     ])
   })
 
