@@ -7,12 +7,24 @@ import type {
   SandboxFileRecord,
 } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
+import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { AgentFileBudget, createAgentToolFiles } from "../src/tools/tool-files"
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
 describe("agent tool files", () => {
+  test("let a run store an artifact's version as large as one may be", () => {
+    // Reproduce by giving a run less than a version holds: publishing the largest version is
+    // refused for the run's budget, past what the artifact itself allows.
+    const reservation = new AgentFileBudget().reserve(0, "publish_artifact")
+
+    expect(() =>
+      reservation.addContent("a".repeat(64), ARTIFACT_LIMITS.maxVersionBytes)
+    ).not.toThrow()
+    expect(() => reservation.add(1)).toThrow()
+  })
+
   test("stores detected image bytes and materializes them under a safe sandbox path", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const sandbox = new ToolFileSandbox()
