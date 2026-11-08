@@ -11,11 +11,13 @@ import type { QuickBooksCreditMemosResource } from "./resources/credit-memos"
 import type { QuickBooksCustomerTypesResource } from "./resources/customer-types"
 import type { QuickBooksCustomersResource } from "./resources/customers"
 import type { QuickBooksDepartmentsResource } from "./resources/departments"
+import type { QuickBooksDepositsResource } from "./resources/deposits"
 import type { QuickBooksEmployeesResource } from "./resources/employees"
 import type { QuickBooksEstimatesResource } from "./resources/estimates"
 import type { QuickBooksExchangeRatesResource } from "./resources/exchange-rates"
 import type { QuickBooksInvoicesResource } from "./resources/invoices"
 import type { QuickBooksItemsResource } from "./resources/items"
+import type { QuickBooksJournalEntriesResource } from "./resources/journal-entries"
 import type { QuickBooksPaymentMethodsResource } from "./resources/payment-methods"
 import type { QuickBooksPaymentsResource } from "./resources/payments"
 import type { QuickBooksPreferencesResource } from "./resources/preferences"
@@ -29,6 +31,8 @@ import type { QuickBooksTaxClassificationsResource } from "./resources/tax-class
 import type { QuickBooksTaxCodesResource } from "./resources/tax-codes"
 import type { QuickBooksTaxRatesResource } from "./resources/tax-rates"
 import type { QuickBooksTermsResource } from "./resources/terms"
+import type { QuickBooksTimeActivitiesResource } from "./resources/time-activities"
+import type { QuickBooksTransfersResource } from "./resources/transfers"
 import type { QuickBooksVendorCreditsResource } from "./resources/vendor-credits"
 import type { QuickBooksVendorsResource } from "./resources/vendors"
 import type { QuickBooksCompanyInfoUpdate, QuickBooksWriteOptions } from "./types/writes"
@@ -99,6 +103,10 @@ export interface QuickBooksClient {
   readonly items: QuickBooksItemsResource
   readonly terms: QuickBooksTermsResource
   readonly preferences: QuickBooksPreferencesResource
+  readonly journalEntries: QuickBooksJournalEntriesResource
+  readonly transfers: QuickBooksTransfersResource
+  readonly deposits: QuickBooksDepositsResource
+  readonly timeActivities: QuickBooksTimeActivitiesResource
   readonly purchaseOrders: QuickBooksPurchaseOrdersResource
   readonly purchases: QuickBooksPurchasesResource
   readonly refundReceipts: QuickBooksRefundReceiptsResource

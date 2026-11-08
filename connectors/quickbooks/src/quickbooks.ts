@@ -13,11 +13,13 @@ import { createCreditMemosResource } from "./resources/credit-memos"
 import { createCustomerTypesResource } from "./resources/customer-types"
 import { createCustomersResource } from "./resources/customers"
 import { createDepartmentsResource } from "./resources/departments"
+import { createDepositsResource } from "./resources/deposits"
 import { createEmployeesResource } from "./resources/employees"
 import { createEstimatesResource } from "./resources/estimates"
 import { createExchangeRatesResource } from "./resources/exchange-rates"
 import { createInvoicesResource } from "./resources/invoices"
 import { createItemsResource } from "./resources/items"
+import { createJournalEntriesResource } from "./resources/journal-entries"
 import { createPaymentMethodsResource } from "./resources/payment-methods"
 import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
@@ -31,6 +33,8 @@ import { createTaxClassificationsResource } from "./resources/tax-classification
 import { createTaxCodesResource } from "./resources/tax-codes"
 import { createTaxRatesResource } from "./resources/tax-rates"
 import { createTermsResource } from "./resources/terms"
+import { createTimeActivitiesResource } from "./resources/time-activities"
+import { createTransfersResource } from "./resources/transfers"
 import { createVendorCreditsResource } from "./resources/vendor-credits"
 import { createVendorsResource } from "./resources/vendors"
 import type { QuickBooksClient, QuickBooksCompanyInfo, QuickBooksConnectorOptions } from "./types"
@@ -103,6 +107,10 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
         bills: createBillsResource(http),
         billPayments: createBillPaymentsResource(http),
         vendorCredits: createVendorCreditsResource(http),
+        journalEntries: createJournalEntriesResource(http),
+        transfers: createTransfersResource(http),
+        deposits: createDepositsResource(http),
+        timeActivities: createTimeActivitiesResource(http),
         purchaseOrders: createPurchaseOrdersResource(http),
         purchases: createPurchasesResource(http),
         refundReceipts: createRefundReceiptsResource(http),

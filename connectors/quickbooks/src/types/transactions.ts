@@ -321,3 +321,95 @@ export interface QuickBooksBillPayment extends QuickBooksTransaction {
   readonly CreditCardPayment?: { readonly CCAccountRef?: QuickBooksReference }
   readonly Line?: readonly QuickBooksPaymentLine[]
 }
+
+/** Time worked by an employee or vendor, optionally billable to a customer. */
+export interface QuickBooksTimeActivity extends QuickBooksEntity {
+  readonly TxnDate?: string
+  readonly NameOf?: "Employee" | "Vendor" | (string & {})
+  readonly EmployeeRef?: QuickBooksReference
+  readonly VendorRef?: QuickBooksReference
+  readonly CustomerRef?: QuickBooksReference
+  readonly ProjectRef?: QuickBooksReference
+  readonly ItemRef?: QuickBooksReference
+  readonly ClassRef?: QuickBooksReference
+  readonly DepartmentRef?: QuickBooksReference
+  readonly PayrollItemRef?: QuickBooksReference
+  readonly BillableStatus?: "Billable" | "NotBillable" | "HasBeenBilled" | (string & {})
+  readonly Taxable?: boolean
+  readonly HourlyRate?: number
+  readonly CostRate?: number
+  readonly Hours?: number
+  readonly Minutes?: number
+  readonly Seconds?: number
+  readonly BreakHours?: number
+  readonly BreakMinutes?: number
+  readonly BreakSeconds?: number
+  readonly StartTime?: string
+  readonly EndTime?: string
+  readonly Description?: string
+  readonly TimeChargeId?: number
+  readonly TransactionLocationType?: string
+}
+
+export interface QuickBooksDepositLine extends QuickBooksLineBase {
+  /** Absent on lines that deposit a linked payment or sales receipt (see LinkedTxn). */
+  readonly DetailType?: "DepositLineDetail"
+  readonly DepositLineDetail?: {
+    /** Received from; `type` is Customer, Vendor or Employee. */
+    readonly Entity?: QuickBooksReference
+    readonly AccountRef?: QuickBooksReference
+    readonly ClassRef?: QuickBooksReference
+    readonly PaymentMethodRef?: QuickBooksReference
+    readonly CheckNum?: string
+    readonly TxnType?: string
+    readonly TaxCodeRef?: QuickBooksReference
+    readonly TaxApplicableOn?: string
+  }
+}
+
+export interface QuickBooksDeposit extends QuickBooksTransaction {
+  readonly DepositToAccountRef?: QuickBooksReference
+  readonly CashBack?: {
+    readonly AccountRef?: QuickBooksReference
+    readonly Amount?: number
+    readonly Memo?: string
+  }
+  readonly Line?: readonly QuickBooksDepositLine[]
+  readonly TxnTaxDetail?: QuickBooksTaxDetail
+  readonly GlobalTaxCalculation?: string
+  readonly TxnSource?: string
+  readonly RecurDataRef?: QuickBooksReference
+}
+
+export interface QuickBooksTransfer extends QuickBooksTransaction {
+  readonly FromAccountRef?: QuickBooksReference
+  readonly ToAccountRef?: QuickBooksReference
+  readonly Amount?: number
+  readonly TransactionLocationType?: string
+  readonly RecurDataRef?: QuickBooksReference
+}
+
+export interface QuickBooksJournalEntryLine extends QuickBooksLineBase {
+  readonly DetailType?: "JournalEntryLineDetail" | "DescriptionOnly" | (string & {})
+  readonly JournalEntryLineDetail?: {
+    readonly PostingType?: "Debit" | "Credit"
+    readonly AccountRef?: QuickBooksReference
+    /** Name on the line, e.g. `{ Type: "Customer", EntityRef: { value: "9" } }`. */
+    readonly Entity?: { readonly Type?: string; readonly EntityRef?: QuickBooksReference }
+    readonly ClassRef?: QuickBooksReference
+    readonly DepartmentRef?: QuickBooksReference
+    readonly TaxCodeRef?: QuickBooksReference
+    readonly TaxApplicableOn?: string
+    readonly TaxAmount?: number
+    readonly BillableStatus?: string
+  }
+}
+
+export interface QuickBooksJournalEntry extends QuickBooksTransaction {
+  readonly Adjustment?: boolean
+  readonly Line?: readonly QuickBooksJournalEntryLine[]
+  readonly TxnTaxDetail?: QuickBooksTaxDetail
+  readonly GlobalTaxCalculation?: string
+  readonly JournalCodeRef?: QuickBooksReference
+  readonly RecurDataRef?: QuickBooksReference
+}

@@ -17,11 +17,15 @@ import type {
   QuickBooksBill,
   QuickBooksBillPayment,
   QuickBooksCreditMemo,
+  QuickBooksDeposit,
+  QuickBooksDepositLine,
   QuickBooksDescriptionLine,
   QuickBooksEstimate,
   QuickBooksEstimateStatus,
   QuickBooksInvoice,
   QuickBooksItemExpenseLine,
+  QuickBooksJournalEntry,
+  QuickBooksJournalEntryLine,
   QuickBooksLinkedTransaction,
   QuickBooksPayment,
   QuickBooksPurchase,
@@ -30,6 +34,8 @@ import type {
   QuickBooksSalesItemLine,
   QuickBooksSalesLine,
   QuickBooksSalesReceipt,
+  QuickBooksTimeActivity,
+  QuickBooksTransfer,
   QuickBooksVendorCredit,
 } from "./transactions"
 
@@ -616,3 +622,109 @@ export type QuickBooksPaymentMethodCreate = Pick<QuickBooksPaymentMethod, "Name"
 }
 export type QuickBooksPaymentMethodUpdate = QuickBooksRevision &
   Partial<QuickBooksPaymentMethodCreate>
+
+type TimeActivityFields = Pick<
+  QuickBooksTimeActivity,
+  | "TxnDate"
+  | "CustomerRef"
+  | "ProjectRef"
+  | "ItemRef"
+  | "ClassRef"
+  | "DepartmentRef"
+  | "PayrollItemRef"
+  | "Taxable"
+  | "HourlyRate"
+  | "CostRate"
+  | "Hours"
+  | "Minutes"
+  | "Seconds"
+  | "BreakHours"
+  | "BreakMinutes"
+  | "BreakSeconds"
+  | "StartTime"
+  | "EndTime"
+  | "Description"
+> & { readonly BillableStatus?: "Billable" | "NotBillable" | "HasBeenBilled" }
+
+/** Who did the work: an employee or a vendor, matching NameOf. */
+export type QuickBooksTimeActivityWorker =
+  | {
+      readonly NameOf: "Employee"
+      readonly EmployeeRef: QuickBooksReference
+      readonly VendorRef?: never
+    }
+  | {
+      readonly NameOf: "Vendor"
+      readonly VendorRef: QuickBooksReference
+      readonly EmployeeRef?: never
+    }
+
+/** Supply a duration (Hours/Minutes) or both StartTime and EndTime. */
+export type QuickBooksTimeActivityCreate = TimeActivityFields & QuickBooksTimeActivityWorker
+export type QuickBooksTimeActivityUpdate = QuickBooksRevision &
+  Partial<TimeActivityFields> &
+  (QuickBooksTimeActivityWorker | { readonly NameOf?: never })
+
+/** A direct deposit line from an account, or a line depositing a linked payment. */
+export type QuickBooksDepositWriteLine =
+  | (QuickBooksDepositLine & {
+      readonly Amount: number
+      readonly DetailType: "DepositLineDetail"
+      readonly DepositLineDetail: NonNullable<QuickBooksDepositLine["DepositLineDetail"]> & {
+        readonly AccountRef: QuickBooksReference
+      }
+    })
+  | (Pick<QuickBooksDepositLine, "Id" | "Description" | "LineNum"> & {
+      readonly Amount: number
+      readonly LinkedTxn: readonly QuickBooksLinkedTransaction[]
+    })
+
+export type QuickBooksDepositCreate = Pick<
+  QuickBooksDeposit,
+  | TransactionFields
+  | "DocNumber"
+  | "DepartmentRef"
+  | "CashBack"
+  | "TxnTaxDetail"
+  | "GlobalTaxCalculation"
+> & {
+  readonly DepositToAccountRef: QuickBooksReference
+  readonly Line: readonly QuickBooksDepositWriteLine[]
+}
+/** QuickBooks requires DepositToAccountRef on every Deposit update, even sparse (error 2020). */
+export type QuickBooksDepositUpdate = QuickBooksRevision &
+  Partial<QuickBooksDepositCreate> &
+  Pick<QuickBooksDepositCreate, "DepositToAccountRef">
+
+export type QuickBooksTransferCreate = Pick<QuickBooksTransfer, TransactionFields | "DocNumber"> & {
+  readonly FromAccountRef: QuickBooksReference
+  readonly ToAccountRef: QuickBooksReference
+  readonly Amount: number
+}
+/** QuickBooks requires both accounts and Amount on every Transfer update (error 2020). */
+export type QuickBooksTransferUpdate = QuickBooksRevision & QuickBooksTransferCreate
+
+export type QuickBooksJournalEntryWriteLine = QuickBooksJournalEntryLine & {
+  readonly Amount: number
+  readonly DetailType: "JournalEntryLineDetail"
+  readonly JournalEntryLineDetail: NonNullable<
+    QuickBooksJournalEntryLine["JournalEntryLineDetail"]
+  > & {
+    readonly PostingType: "Debit" | "Credit"
+    readonly AccountRef: QuickBooksReference
+  }
+}
+
+/** QuickBooks rejects entries whose debits and credits do not balance. */
+export type QuickBooksJournalEntryCreate = Pick<
+  QuickBooksJournalEntry,
+  | TransactionFields
+  | "DocNumber"
+  | "DepartmentRef"
+  | "Adjustment"
+  | "TxnTaxDetail"
+  | "GlobalTaxCalculation"
+> & { readonly Line: readonly QuickBooksJournalEntryWriteLine[] }
+/** Sparse update; supplying Line replaces the entry's lines by Intuit's line-ID semantics. */
+export type QuickBooksJournalEntryUpdate = QuickBooksRevision &
+  Partial<QuickBooksJournalEntryCreate>
