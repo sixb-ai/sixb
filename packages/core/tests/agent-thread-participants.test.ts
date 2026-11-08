@@ -459,6 +459,76 @@ describe("adding and removing participants", () => {
   })
 })
 
+/**
+ * Alice's canvas of one board, shared in the conversation at version 2, its board pictured in
+ * light as her worker rendered it. A live canvas's board reads her invoices. Bob may read them too.
+ */
+async function sharedCanvas(host: Host, options: { readonly live?: true } = {}) {
+  const reads = { "view:object": new Set([Invoice.id]) }
+  const shared = await sharedThread(host, { owner: reads, participant: reads, cleared: true })
+  const artifacts = host.storage.artifacts
+  if (!artifacts) throw new Error("Expected artifact storage.")
+
+  const put = async (path: string, body: string) => ({
+    path,
+    file: await host.blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
+  })
+  const canvas = (x: number) =>
+    put(
+      "canvas.json",
+      JSON.stringify({
+        items: [{ id: "due", type: "board", file: "due.html", x, y: 0, w: 640, h: 480 }],
+      })
+    )
+  // Only the invoices' ids: Bob is not cleared for their amounts.
+  const due = { kind: "start", objectTypeId: Invoice.id }
+  const query = JSON.stringify({ kind: "project", input: due, properties: ["id"] })
+  const pages = [
+    await put("due.html", '<main><script>sixb.query("due")</script></main>'),
+    ...(options.live ? [await put("queries/due.json", query)] : []),
+  ]
+
+  const created = await shared.owner.artifacts.create({
+    kind: "canvas",
+    title: "Invoices",
+    files: [await canvas(0), ...pages],
+  })
+  const { version } = await artifacts.publish({
+    projectId,
+    artifactId: created.artifact.id,
+    kind: "canvas",
+    version: { ...created.version, origin: { threadId: shared.thread.id, runId: "run_alice" } },
+  })
+
+  // Her worker pictured the board.
+  const outline = version.outline
+  const renderKey =
+    outline.kind === "canvas" && outline.items[0]?.type === "board"
+      ? outline.items[0].renderKey
+      : undefined
+  if (!renderKey) throw new Error("Expected the board's render key.")
+  const picture = await host.blobStorage.put({
+    body: new TextEncoder().encode("Alice's invoices"),
+    mediaType: "image/png",
+  })
+  await artifacts.putBoardPreviews({
+    projectId,
+    previews: [{ renderKey, theme: "light", size: "full", file: picture, createdAt: new Date() }],
+  })
+
+  /** The board's light picture in a version, as the preview route serves it: none is a 404. */
+  const pictured = async (artifactId: string, number: number) => {
+    const stored = await artifacts.getVersion({ projectId, artifactId, version: number })
+    if (!stored) throw new Error(`Expected version ${number} of '${artifactId}'.`)
+    return boardPreview((await boardPreviews(artifacts, stored)).get("due"), "light", "full")
+  }
+
+  /** The canvas with its board moved: the board's page as it was. */
+  const moved = async () => [await canvas(40), ...pages]
+
+  return { ...shared, artifacts, artifactId: created.artifact.id, picture, pictured, moved }
+}
+
 describe("forking a shared conversation", () => {
   // Guard proof: fork only when the caller owns the source; Bob's fork is then refused.
   test("a participant forks it into a thread they own alone", async () => {
@@ -487,66 +557,37 @@ describe("forking a shared conversation", () => {
   // version does, and the route serves him the picture of Alice's rows.
   test("gives no preview of the owner's live boards to whoever forks it", async () => {
     const { host } = setup()
-    const { owner, participant, thread } = await sharedThread(host, {
-      owner: { "view:object": new Set([Invoice.id]) },
-      cleared: true,
-    })
-    const artifacts = host.storage.artifacts
-    if (!artifacts) throw new Error("Expected artifact storage.")
-
-    // Alice's canvas, whose board reads her invoices, shared in the conversation.
-    const put = async (path: string, body: string) => ({
-      path,
-      file: await host.blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
-    })
-    const created = await owner.artifacts.create({
-      kind: "canvas",
-      title: "Invoices",
-      files: [
-        await put(
-          "canvas.json",
-          JSON.stringify({
-            items: [{ id: "due", type: "board", file: "due.html", x: 0, y: 0, w: 640, h: 480 }],
-          })
-        ),
-        await put("due.html", '<main><script>sixb.query("due")</script></main>'),
-        await put("queries/due.json", JSON.stringify({ kind: "start", objectTypeId: Invoice.id })),
-      ],
-    })
-    const { version } = await artifacts.publish({
-      projectId,
-      artifactId: created.artifact.id,
-      kind: "canvas",
-      version: { ...created.version, origin: { threadId: thread.id, runId: "run_alice" } },
-    })
-
-    // Her worker pictured the board with her rows.
-    const outline = version.outline
-    const renderKey =
-      outline.kind === "canvas" && outline.items[0]?.type === "board"
-        ? outline.items[0].renderKey
-        : undefined
-    if (!renderKey) throw new Error("Expected the board's render key.")
-    const picture = await host.blobStorage.put({
-      body: new TextEncoder().encode("Alice's invoices"),
-      mediaType: "image/png",
-    })
-    await artifacts.putBoardPreviews({
-      projectId,
-      previews: [{ renderKey, theme: "light", size: "full", file: picture, createdAt: new Date() }],
-    })
-    const pictured = async (artifactId: string) => {
-      const copy = await artifacts.getVersion({ projectId, artifactId, version: 2 })
-      if (!copy) throw new Error(`Expected version 2 of '${artifactId}'.`)
-      // What the preview route serves: none is a 404.
-      return boardPreview((await boardPreviews(artifacts, copy)).get("due"), "light", "full")
-    }
-    expect(await pictured(created.artifact.id)).toMatchObject({ file: picture })
+    const { participant, thread, artifacts, artifactId, picture, pictured } = await sharedCanvas(
+      host,
+      { live: true }
+    )
+    expect(await pictured(artifactId, 2)).toMatchObject({ file: picture })
 
     const fork = await participant.agent.threads.fork(thread.id)
     const { artifacts: copies } = await artifacts.list({ projectId, threadId: fork.id })
     expect(copies).toHaveLength(1)
-    expect(await pictured(copies[0]?.id ?? "")).toBeUndefined()
+    expect(await pictured(copies[0]?.id ?? "", 2)).toBeUndefined()
+  })
+
+  // Guard proof: leave out `previews.carry` in fork.ts; the copy's board, named anew, has no
+  // picture and shows its outline.
+  test("keeps the previews of the owner's static boards in the copy", async () => {
+    const { host } = setup()
+    const { participant, thread, artifacts, artifactId, picture, pictured } =
+      await sharedCanvas(host)
+
+    const fork = await participant.agent.threads.fork(thread.id)
+    const { artifacts: copies } = await artifacts.list({ projectId, threadId: fork.id })
+    const copy = await artifacts.getVersion({
+      projectId,
+      artifactId: copies[0]?.id ?? "",
+      version: 2,
+    })
+    const source = await artifacts.getVersion({ projectId, artifactId, version: 2 })
+
+    // Named for the copy, with the same picture.
+    expect(copy?.outline).not.toEqual(source?.outline)
+    expect(await pictured(copies[0]?.id ?? "", 2)).toMatchObject({ file: picture })
   })
 
   test("anyone else, an observer, or a removed participant cannot fork it", async () => {
@@ -713,6 +754,37 @@ describe("artifacts a shared conversation shares", () => {
       participant.artifacts.publish(artifact.id, { ...content, title: "Too late" })
     ).rejects.toMatchObject({ code: "not_shared" })
     expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
+  })
+
+  // Guard proof: keep the author in every render key in previews.ts; Bob moving the board names it
+  // anew, and every reader sees its outline until the worker renders it again.
+  test("a participant's save keeps a static board's preview", async () => {
+    const { host } = setup()
+    const { participant, artifactId, picture, pictured, moved } = await sharedCanvas(host)
+
+    const saved = await participant.artifacts.publish(artifactId, {
+      kind: "canvas",
+      title: "Invoices",
+      files: await moved(),
+    })
+
+    expect(saved.version).toMatchObject({ version: 3, author: bob })
+    expect(await pictured(artifactId, 3)).toMatchObject({ file: picture })
+  })
+
+  // Guard proof: leave the author out of a live board's render key; Bob's version then shows
+  // readers the picture of Alice's rows.
+  test("a participant's save renders a live board's preview again, with their data", async () => {
+    const { host } = setup()
+    const { participant, artifactId, pictured, moved } = await sharedCanvas(host, { live: true })
+
+    await participant.artifacts.publish(artifactId, {
+      kind: "canvas",
+      title: "Invoices",
+      files: await moved(),
+    })
+
+    expect(await pictured(artifactId, 3)).toBeUndefined()
   })
 
   test("nobody else reaches them, nor the owner's artifacts the conversation does not share", async () => {

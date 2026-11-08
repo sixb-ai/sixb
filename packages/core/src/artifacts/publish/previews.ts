@@ -86,11 +86,16 @@ const RENDER_KEY_FORMAT = "sixb-board-preview/1"
 /**
  * What a board's picture is of, as a SHA-256: its HTML and size, every file it could load (each
  * of the version's but `canvas.json` and the other boards' HTML), the frame's kit, runtime and
- * themes it runs in, and its author, so no one can hand over a picture under another author's key.
- * `theme.json` is one of the files, so the modes and tokens it sets are in the key too.
+ * themes it runs in, and its artifact. `theme.json` is one of the files, so the modes and tokens it
+ * sets are in the key too.
  *
- * When the version holds queries the picture shows its author's data, to the artifact's readers:
- * the key names the artifact too, so a copy, read by others, never shows the original's picture.
+ * Naming the artifact keeps each artifact's pictures its own: whoever may hand over a picture for
+ * one may already change its boards, but not another's. Who saves the version does not count: a
+ * person moving a note, or an Agent turn someone else asked for, keeps the pictures of the boards
+ * it left as they were.
+ *
+ * When the version holds queries the picture shows its author's data: the key names the author
+ * too, so a version saved by someone else renders their data, not the previous author's.
  */
 export function boardRenderKey(input: {
   readonly board: Pick<CanvasOutlineBoard, "file" | "w" | "h">
@@ -100,7 +105,7 @@ export function boardRenderKey(input: {
   readonly author: Principal
   readonly artifactId: string
 }): string {
-  const { board, files, boardFiles, author } = input
+  const { board, files, boardFiles, author, artifactId } = input
 
   const loaded = files
     .filter(
@@ -110,7 +115,7 @@ export function boardRenderKey(input: {
     .map((entry) => [entry.path, entry.file.digest] as const)
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
 
-  const audience = boardsReadLiveData({ files }) ? input.artifactId : null
+  const reader = boardsReadLiveData({ files }) ? [author.type, author.id] : null
 
   return createHash("sha256")
     .update(
@@ -120,8 +125,8 @@ export function boardRenderKey(input: {
         board.file,
         board.w,
         board.h,
-        [author.type, author.id],
-        audience,
+        artifactId,
+        reader,
         loaded,
       ])
     )
@@ -172,17 +177,53 @@ export function withBoardRenderKeys<
 }
 
 /**
- * The outline a copy's version takes in place of the source's: a canvas whose boards show their
- * author's data is named anew for the copy, so it gets none of the source's pictures and its
- * boards run live for its readers. `undefined` when the version's outline stays as it is.
+ * What a copy of an artifact, such as a forked conversation's, does with its canvases' pictures.
+ * Each board is named anew for the copy. A board kept from a static version keeps the source's
+ * pictures under its new name: it is the same page. A board that shows its author's data gets
+ * none, and runs live for the copy's readers.
  */
-export function copiedVersionOutline(
-  version: ArtifactVersionRecord,
-  copyId: string
-): ArtifactOutline | undefined {
-  if (version.outline.kind !== "canvas" || !boardsReadLiveData(version)) return undefined
+export function boardPreviewsOfCopy(copyId: string): {
+  /** The outline each copied version takes; see `CopyArtifactInput.outlineOf`. */
+  readonly outlineOf: (version: ArtifactVersionRecord) => ArtifactOutline | undefined
+  /** Keeps the static boards' pictures under their new names, once the copy is stored. */
+  readonly carry: (
+    storage: Pick<ArtifactStorage, "listBoardPreviews" | "putBoardPreviews">,
+    projectId: string
+  ) => Promise<void>
+} {
+  const renamed = new Map<string, string>()
 
-  return withBoardRenderKeys(version, copyId).outline
+  const outlineOf = (version: ArtifactVersionRecord): ArtifactOutline | undefined => {
+    if (version.outline.kind !== "canvas") return undefined
+
+    const copied = withBoardRenderKeys(version, copyId)
+    if (boardsReadLiveData(version)) return copied.outline
+
+    const source = new Map(previewedBoards(version).boards.map((each) => [each.id, each.renderKey]))
+    for (const board of previewedBoards(copied).boards) {
+      const from = source.get(board.id)
+      if (from) renamed.set(from, board.renderKey)
+    }
+
+    return copied.outline
+  }
+
+  const carry = async (
+    storage: Pick<ArtifactStorage, "listBoardPreviews" | "putBoardPreviews">,
+    projectId: string
+  ) => {
+    if (renamed.size === 0) return
+
+    const pictures = await storage.listBoardPreviews({ projectId, renderKeys: [...renamed.keys()] })
+    const previews = pictures.flatMap((picture) => {
+      const renderKey = renamed.get(picture.renderKey)
+      return renderKey ? [{ ...picture, renderKey }] : []
+    })
+
+    if (previews.length > 0) await storage.putBoardPreviews({ projectId, previews })
+  }
+
+  return { outlineOf, carry }
 }
 
 /** The boards of a version with a render key, and the modes each has a picture in. */

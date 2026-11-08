@@ -157,23 +157,24 @@ describe("a board's render key", () => {
     expect(key()).toMatch(/^[0-9a-f]{64}$/)
     expect(key({ files: [...files].reverse() })).toBe(key())
 
-    // Where the board sits and the other boards it does not show; a static board is the same
-    // picture in a copy of its artifact.
+    // Where the board sits, the other boards it does not show, and who saved the version: Bob
+    // moving a note on Alice's canvas keeps every picture. Reproduce by keeping the author in a
+    // static board's key: his save names every board anew.
     const moved = files.map((entry) =>
       entry.path === "canvas.json" || entry.path === "boards/region.html"
         ? file(entry.path, "9")
         : entry
     )
     expect(key({ files: moved })).toBe(key())
-    expect(key({ artifactId: "art_copy" })).toBe(key())
+    expect(key({ author: bob })).toBe(key())
   })
 
-  test("changes with its HTML, what it loads, its size, its theme, and its author", () => {
+  test("changes with its HTML, what it loads, its size, its theme, and its artifact", () => {
     const changed = (path: string) =>
       files.map((entry) => (entry.path === path ? file(path, "9") : entry))
 
-    // Reproduce the author's by leaving them out of a static board's key: Bob, editing Alice's
-    // canvas, hands over a picture under the key of hers, and every reader sees his.
+    // Reproduce the artifact's by leaving it out: whoever may picture one artifact's boards hands
+    // over a picture for the same board in another artifact, which they cannot change.
     const seen = new Set([
       key(),
       key({ files: changed("boards/welcome.html") }),
@@ -181,16 +182,16 @@ describe("a board's render key", () => {
       key({ files: [...files, file("theme.json", "5")] }),
       key({ board: { ...welcome, w: 1280 } }),
       key({ board: { ...welcome, h: 900 } }),
-      key({ author: bob }),
+      key({ artifactId: "art_copy" }),
     ])
     expect(seen.size).toBe(7)
   })
 
-  test("names a live board's artifact, whose readers its author's data is shown to", () => {
-    // Reproduce by leaving the artifact out: a fork's copy shows the original's picture, with the
-    // original author's rows, to whoever forked it.
+  test("names a live board's author, whose data it shows", () => {
+    // Reproduce by leaving the author out: Bob's version shows readers the picture of Alice's
+    // rows, not his.
     const live = [...files, file("queries/regions.json", "6")]
-    expect(key({ files: live, artifactId: "art_copy" })).not.toBe(key({ files: live }))
+    expect(key({ files: live, author: bob })).not.toBe(key({ files: live }))
   })
 })
 
@@ -376,6 +377,29 @@ describe("a board's pictures", () => {
         ({ board, themes }) => `${board.id}: ${themes.join(", ")}`
       )
     ).toEqual(["welcome: dark", "region: light, dark"])
+  })
+
+  // Guard proof: leave the artifact out of boardRenderKey; the copy's boards are then pictured
+  // by whatever was handed over for the original's.
+  test("are an artifact's own: another with the same boards shares none of them", async () => {
+    const { deps, as, put, version, store, pictures } = await published()
+    await store([
+      ...(await pictures("welcome", ["light", "dark"])),
+      ...(await pictures("region", ["light", "dark"])),
+    ])
+
+    const same = await as(alice).artifacts.create({
+      kind: "canvas",
+      title: "Onboarding",
+      files: await put({ "canvas.json": CANVAS, ...BOARDS }),
+    })
+
+    expect(await missingBoardPreviews(deps.storage.artifacts, version)).toEqual([])
+    expect(
+      (await missingBoardPreviews(deps.storage.artifacts, same.version)).map(
+        ({ board }) => board.id
+      )
+    ).toEqual(["welcome", "region"])
   })
 
   test("read as ready, pending while one may still come, and none past the wait", async () => {

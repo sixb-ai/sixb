@@ -147,8 +147,8 @@ export interface CopyArtifactInput {
   readonly copiedAt?: Date
   /**
    * The outline a copied version takes instead of its own, when it returns one: what the copy's
-   * new id changes in it, such as the render keys of boards that show their author's data. Called
-   * with each version as the copy holds it, in the copy's transaction.
+   * new id changes in it, such as its canvas's render keys. Called with each version as the copy
+   * holds it, in the copy's transaction.
    */
   readonly outlineOf?: (version: ArtifactVersionRecord) => ArtifactOutline | undefined
 }
@@ -227,8 +227,8 @@ export interface ArtifactStateEntry {
 
 /**
  * A picture of a canvas's board in one mode and one size, kept under its render key: what the
- * board shows, as its version's outline names it. Versions that keep a board as it was share its
- * picture, so none belongs to one artifact.
+ * board shows, in which artifact, as its version's outline names it. Versions that keep a board as
+ * it was share its picture.
  */
 export interface ArtifactBoardPreviewRecord {
   readonly projectId: string
