@@ -1,4 +1,5 @@
 import { ARTIFACT_KINDS, ARTIFACT_STATE_LIMITS } from "@sixb/core/artifacts"
+import { ARTIFACT_RESTORE_POINTS } from "@sixb/core/internal/storage"
 import { z } from "zod"
 import { ErrorResponseSchema, PrincipalSchema } from "./common"
 import { FileRefSchema } from "./files"
@@ -92,6 +93,14 @@ const ArtifactWarningSchema = z.object({
   part: z.string().optional(),
 })
 
+const RevisionSchema = z
+  .number()
+  .int()
+  .positive()
+  .describe(
+    "Counts the artifact's changes: a write, a version created, a restore. It only grows, so content read at one revision is that revision's for good"
+  )
+
 const ArtifactSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -99,8 +108,9 @@ const ArtifactSchema = z.object({
   title: z.string(),
   owner: PrincipalSchema,
   latestVersion: z.number().int().positive(),
+  revision: RevisionSchema,
   createdAt: z.string(),
-  updatedAt: z.string(),
+  updatedAt: z.string().describe("When the artifact last changed"),
 })
 
 const ArtifactOriginSchema = z.object({ threadId: z.string(), runId: z.string() })
@@ -108,14 +118,26 @@ const ArtifactOriginSchema = z.object({ threadId: z.string(), runId: z.string() 
 export const ArtifactVersionSchema = z.object({
   artifactId: z.string(),
   version: z.number().int().positive(),
+  revision: RevisionSchema.describe(
+    "The artifact's revision when this version last changed: the latest version's is the artifact's"
+  ),
+  frozen: z
+    .boolean()
+    .describe(
+      "Someone created this version: it never changes again. The latest version is open until then, and each write replaces its content"
+    ),
   title: z.string(),
   entry: z.string(),
   files: z.array(ArtifactFileSchema),
   outline: ArtifactOutlineSchema,
   references: z.array(ArtifactReferenceSchema),
-  author: PrincipalSchema,
-  origin: ArtifactOriginSchema.optional(),
-  createdAt: z.string(),
+  author: PrincipalSchema.describe("Who last wrote its content"),
+  origin: ArtifactOriginSchema.optional().describe(
+    "The Agent turn and thread its content was last written from"
+  ),
+  createdAt: z.string().describe("When the version was opened"),
+  updatedAt: z.string().describe("When its content was last written"),
+  frozenAt: z.string().optional().describe("When it was created, which froze it"),
   boardPreviews: z
     .record(z.string(), z.enum(["ready", "pending", "none"]))
     .optional()
@@ -126,10 +148,14 @@ export const ArtifactVersionSchema = z.object({
 
 const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
   version: true,
+  revision: true,
+  frozen: true,
   title: true,
   author: true,
   origin: true,
   createdAt: true,
+  updatedAt: true,
+  frozenAt: true,
 })
 
 export const ArtifactParamsSchema = z.object({ artifactId: z.string().min(1) })
@@ -169,7 +195,7 @@ export const ArtifactListQuerySchema = z
       .string()
       .min(1)
       .optional()
-      .describe("Only artifacts with a version the Agent published in this thread"),
+      .describe("Only artifacts this conversation shares: the Agent wrote them in it"),
     kind: ArtifactKindSchema.optional().describe("Only artifacts of this kind"),
     limit: z.string().optional(),
     offset: z.string().optional(),
@@ -203,15 +229,69 @@ export const PublishArtifactBodySchema = z
   })
   .strict()
 
+const BaseRevisionSchema = z
+  .number()
+  .int()
+  .positive()
+  .optional()
+  .describe(
+    "The revision this was made from. When the artifact changed since, it is refused with 409 artifact_moved, naming the revision and who last wrote the latest version."
+  )
+
 export const PublishArtifactVersionBodySchema = PublishArtifactBodySchema.extend({
-  baseVersion: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe(
-      "The version this one was made from. When another was published since, the publish is refused with 409 artifact_moved, naming the latest version."
-    ),
+  baseRevision: BaseRevisionSchema,
+})
+
+export const FreezeArtifactBodySchema = z
+  .object({ baseRevision: BaseRevisionSchema })
+  .strict()
+  .default({})
+
+export const RestoreArtifactBodySchema = z
+  .object({ baseRevision: BaseRevisionSchema })
+  .strict()
+  .default({})
+
+export const ArtifactRestorePointParamsSchema = ArtifactParamsSchema.extend({
+  revision: z
+    .string()
+    .regex(/^[1-9]\d*$/)
+    .describe("The revision whose content the restore point holds"),
+})
+
+/** A restore point without its files: the list a Restore menu shows. */
+const ArtifactRestorePointSummarySchema = z.object({
+  artifactId: z.string(),
+  revision: RevisionSchema.describe("The revision whose content it holds, which restores it"),
+  version: z.number().int().positive().describe("The version it was taken of"),
+  frozen: z.boolean().describe("That version was frozen then: restoring opens the next one"),
+  title: z.string(),
+  author: PrincipalSchema.describe("Who had last written that content"),
+  origin: ArtifactOriginSchema.optional(),
+  updatedAt: z.string().describe("When that content was written"),
+  reason: z
+    .enum(["turn", "restore"])
+    .describe("Taken before an Agent turn's first write to the artifact, or before a restore"),
+  turnRunId: z.string().optional().describe("With turn: the turn's run"),
+  createdAt: z.string().describe("When it was taken"),
+})
+
+export const ArtifactRestorePointSchema = ArtifactRestorePointSummarySchema.extend({
+  entry: z.string(),
+  files: z.array(ArtifactFileSchema),
+  outline: ArtifactOutlineSchema,
+  references: z.array(ArtifactReferenceSchema),
+})
+
+export const ArtifactRestorePointListResponseSchema = z.object({
+  restorePoints: z
+    .array(ArtifactRestorePointSummarySchema)
+    .describe(`Newest first: an artifact keeps its last ${ARTIFACT_RESTORE_POINTS}`),
+})
+
+export const ArtifactChangeResponseSchema = z.object({
+  artifact: ArtifactSchema,
+  version: ArtifactVersionSchema,
 })
 
 export const PublishedArtifactResponseSchema = z.object({
@@ -271,10 +351,12 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
-    .object({ version: z.number().int(), author: PrincipalSchema })
+    .object({ version: z.number().int(), revision: z.number().int(), author: PrincipalSchema })
     .optional()
-    .describe("With artifact_moved: the latest version and who published it"),
+    .describe(
+      "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+    ),
 })

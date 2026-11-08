@@ -169,9 +169,16 @@ async function canvas(options: { readonly dark?: boolean } = {}) {
 }
 
 describe("a canvas board's preview", () => {
-  test("is served to a reader of its version, cached for good at a numbered version", async () => {
-    const { alice, preview } = await canvas()
+  // Guard proof: cache any numbered version's preview for good in the route; version 1's is then
+  // kept while it is open, and a write to it shows its reader a stale picture.
+  test("is served to a reader of its version, cached for good once the version is created", async () => {
+    const { storage, alice, artifactId, preview } = await canvas()
 
+    // While the version is open, each write may change what the board shows.
+    const open = await preview(alice, "1/boards/welcome/preview?theme=light")
+    expect(open.headers.get("cache-control")).toBe("private, no-cache")
+
+    await storage.artifacts.freeze({ projectId: PROJECT_ID, artifactId, frozenAt: new Date() })
     const light = await preview(alice, "1/boards/welcome/preview?theme=light")
     expect(light.status).toBe(200)
     expect(light.headers.get("content-type")).toBe("image/png")
@@ -181,7 +188,7 @@ describe("a canvas board's preview", () => {
     const dark = await preview(alice, "1/boards/welcome/preview?theme=dark")
     expect(await dark.text()).toBe("welcome dark")
 
-    // The latest version moves with each publish: it is checked each time.
+    // The latest version moves with each write: it is checked each time.
     const latest = await preview(alice, "latest/boards/welcome/preview")
     expect(latest.headers.get("cache-control")).toBe("private, no-cache")
 

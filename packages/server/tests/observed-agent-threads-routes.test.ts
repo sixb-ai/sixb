@@ -166,7 +166,7 @@ function createFixture() {
     return { authorization: `Bearer ${credential.tokenValue}` }
   }
 
-  /** Marie's document: version 1 from her conversation, version 2 from code. */
+  /** Marie's document: version 1 from her conversation, created, then version 2 from code. */
   async function seedArtifact() {
     const file = await blobStorage.put({
       body: new TextEncoder().encode("# Late invoices"),
@@ -179,7 +179,7 @@ function createFixture() {
       outline: { kind: "document" as const, headings: [] },
       references: [],
       author: { type: "user" as const, id: "marie" },
-      createdAt: new Date(),
+      updatedAt: new Date(),
     }
     await storage.artifacts.create({
       projectId,
@@ -191,6 +191,11 @@ function createFixture() {
         title: "Late invoices",
         origin: { threadId: "thr_marie", runId: "run_marie" },
       },
+    })
+    await storage.artifacts.freeze({
+      projectId,
+      artifactId: "art_0000000001",
+      frozenAt: new Date(),
     })
     await storage.artifacts.publish({
       projectId,
@@ -382,6 +387,11 @@ describe("observed agent thread routes", () => {
     })
     expect(publish.status).toBe(403)
     expect(await publish.json()).toMatchObject({ code: "read_only" })
+    const freeze = await fixture.request("/api/artifacts/art_0000000001/freeze", observer, {
+      method: "POST",
+    })
+    expect(freeze.status).toBe(403)
+    expect(await freeze.json()).toMatchObject({ code: "read_only" })
     const state = await fixture.request("/api/artifacts/art_0000000001/state", observer)
     expect(state.status).toBe(403)
     expect(await state.json()).toMatchObject({ code: "read_only" })

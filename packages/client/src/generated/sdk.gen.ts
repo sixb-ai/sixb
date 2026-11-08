@@ -106,6 +106,9 @@ import type {
   ForkAgentThreadData,
   ForkAgentThreadErrors,
   ForkAgentThreadResponses,
+  FreezeArtifactVersionData,
+  FreezeArtifactVersionErrors,
+  FreezeArtifactVersionResponses,
   GenerateImagesData,
   GenerateImagesErrors,
   GenerateImagesResponses,
@@ -187,6 +190,12 @@ import type {
   GetArtifactQueryErrors,
   GetArtifactQueryResponses,
   GetArtifactResponses,
+  GetArtifactRestorePointData,
+  GetArtifactRestorePointErrors,
+  GetArtifactRestorePointFileContentData,
+  GetArtifactRestorePointFileContentErrors,
+  GetArtifactRestorePointFileContentResponses,
+  GetArtifactRestorePointResponses,
   GetArtifactStateData,
   GetArtifactStateErrors,
   GetArtifactStateResponses,
@@ -384,6 +393,9 @@ import type {
   ListAiModelCallsData,
   ListAiModelCallsErrors,
   ListAiModelCallsResponses,
+  ListArtifactRestorePointsData,
+  ListArtifactRestorePointsErrors,
+  ListArtifactRestorePointsResponses,
   ListArtifactsData,
   ListArtifactsErrors,
   ListArtifactsResponses,
@@ -529,6 +541,9 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunErrors,
   RequestWorkflowRunResponses,
+  RestoreArtifactData,
+  RestoreArtifactErrors,
+  RestoreArtifactResponses,
   RetryAgentRunData,
   RetryAgentRunErrors,
   RetryAgentRunResponses,
@@ -3893,9 +3908,9 @@ export const setArtifactState = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Publish an artifact's next version
+ * Update an artifact
  *
- * The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since. With a run token, only an artifact the run's conversation shares or its requester owns; the version is shared in that conversation. A run that lost its execution gets 409 execution_lost.
+ * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
  */
 export const publishArtifactVersion = <ThrowOnError extends boolean = false>(
   options: Options<PublishArtifactVersionData, ThrowOnError>
@@ -3919,9 +3934,118 @@ export const publishArtifactVersion = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Create a version
+ *
+ * Freezes the artifact's open latest version: it never changes again, and the next write opens the next version. A latest version already frozen is returned as it is. Whoever may update the artifact may create a version. With baseRevision, it is refused with 409 artifact_moved when the open version changed since.
+ */
+export const freezeArtifactVersion = <ThrowOnError extends boolean = false>(
+  options: Options<FreezeArtifactVersionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    FreezeArtifactVersionResponses,
+    FreezeArtifactVersionErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/freeze",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * List an artifact's restore points
+ *
+ * What the artifact's latest version held before each Agent turn's first write to it, and before each restore, newest first. They are not versions: restoring one puts its content back in the latest version.
+ */
+export const listArtifactRestorePoints = <ThrowOnError extends boolean = false>(
+  options: Options<ListArtifactRestorePointsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListArtifactRestorePointsResponses,
+    ListArtifactRestorePointsErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/restore-points",
+    ...options,
+  })
+
+/**
+ * Get an artifact's restore point
+ *
+ * Its files, outline, and references, as the latest version held them. Read a file's bytes with GET /api/artifacts/{artifactId}/restore-points/{revision}/content.
+ */
+export const getArtifactRestorePoint = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactRestorePointData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetArtifactRestorePointResponses,
+    GetArtifactRestorePointErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/restore-points/{revision}",
+    ...options,
+  })
+
+/**
+ * Get a file of an artifact's restore point
+ */
+export const getArtifactRestorePointFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactRestorePointFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetArtifactRestorePointFileContentResponses,
+    GetArtifactRestorePointFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/restore-points/{revision}/content",
+    ...options,
+  })
+
+/**
+ * Restore an artifact
+ *
+ * Puts a restore point's content back in the latest version, as an update writes it: in place while it is open, as the next version when it is frozen. What it replaces becomes a restore point, so the restore can be undone. Whoever may update the artifact may restore it. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since.
+ */
+export const restoreArtifact = <ThrowOnError extends boolean = false>(
+  options: Options<RestoreArtifactData, ThrowOnError>
+) =>
+  (options.client ?? client).post<RestoreArtifactResponses, RestoreArtifactErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/restore-points/{revision}/restore",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
  * Open a version in a frame
  *
- * A short-lived path that serves the files of a version that opens in a sandboxed frame, as slides do. It expires within an hour. A kind that does not open in a frame is refused with 409 artifact_kind_mismatch.
+ * A short-lived path that serves the files of a version that opens in a sandboxed frame, as slides do, at the revision it has now: once the version is written again, the path serves nothing and a new one is needed. It expires within an hour. A kind that does not open in a frame is refused with 409 artifact_kind_mismatch.
  */
 export const createArtifactFrame = <ThrowOnError extends boolean = false>(
   options: Options<CreateArtifactFrameData, ThrowOnError>
@@ -3964,7 +4088,7 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
 /**
  * Get the preview of a canvas's board
  *
- * A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A numbered version's preview never changes, and is cached as such; "latest" is revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.
+ * A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A frozen version's preview never changes, and is cached as such; an open version's, and "latest", are revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.
  */
 export const getArtifactBoardPreview = <ThrowOnError extends boolean = false>(
   options: Options<GetArtifactBoardPreviewData, ThrowOnError>

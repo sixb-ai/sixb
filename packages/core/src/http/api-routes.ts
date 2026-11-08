@@ -572,6 +572,43 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
     agentEffect: "artifact",
   },
+  // Creating a version and restoring are a person's: a run token neither freezes what it wrote
+  // nor puts earlier content back.
+  {
+    operationId: "freezeArtifactVersion",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/freeze",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "listArtifactRestorePoints",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/restore-points",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "getArtifactRestorePoint",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/restore-points/:revision",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "getArtifactRestorePointFileContent",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/restore-points/:revision/content",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "restoreArtifact",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/restore-points/:revision/restore",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "getArtifactVersion",
     method: "GET",
