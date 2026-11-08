@@ -297,17 +297,23 @@ async function publish(
   // it takes the merged result, and its next update, from there, holds its own changes alone.
   const folder = publishedFolder(handle, request.path, sources)
   if (folder) installed.publishedFrom(artifact.id, folder)
+  // Revising from $SIXB_ARTIFACTS_DIR must start from this revision, not the one before. When the
+  // merged result cannot be read or installed, the copy, the folder and the base all stay as they
+  // were: the next update is merged from that base, and keeps what others wrote.
   let copy: string | undefined
-  try {
-    // Revising from $SIXB_ARTIFACTS_DIR must start from this revision, not the one before.
-    await installed.replace(handle.sandbox, published, written ?? contents, signal)
-    copy = installed.directoryOf(artifact.id)
-  } catch (error) {
-    if (signal.aborted) throw error
-    console.warn(
-      `[SixbAgent] Could not install revision ${version.revision} of artifact '${artifact.id}':`,
-      error
-    )
+  let installedRevision = written !== undefined
+  if (written) {
+    try {
+      await installed.replace(handle.sandbox, published, written, signal)
+      copy = installed.directoryOf(artifact.id)
+    } catch (error) {
+      if (signal.aborted) throw error
+      installedRevision = false
+      console.warn(
+        `[SixbAgent] Could not install revision ${version.revision} of artifact '${artifact.id}':`,
+        error
+      )
+    }
   }
   // A published deck, page, or canvas is laid out in the sandbox's browser, so the Agent sees what
   // the reader will, and fixes it in its next update.
@@ -391,6 +397,9 @@ async function publish(
     // An Agent's write always leaves the version open: only the user creates a version.
     open: version.frozenAt === undefined,
     ...(published.merged ? { mergedSince: baseRevision ?? null } : {}),
+    ...(installedRevision
+      ? {}
+      : { notInstalled: true, nextUpdateFrom: installed.revisionOf(artifact.id) ?? null }),
     kind: artifact.kind,
     title: version.title,
     warnings: [
@@ -419,7 +428,7 @@ async function publish(
 
 /**
  * The files of a version merged with what others wrote, as its bytes; none when they cannot be
- * read, and the copy then holds the Agent's own files until the next install.
+ * read, and the copy, the folder and the base of the next update then stay as they were.
  */
 async function mergedFiles(
   input: PublishToolsInput,
@@ -747,10 +756,25 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
       ? "The version is frozen."
       : `The version is open: each update replaces it until the user creates a version. To change it, call ${UPDATE_TOOL} with this id.`,
   ]
-  if ("mergedSince" in output) {
+  const copy = `$SIXB_ARTIFACTS_DIR/${String(output.artifactId)}/`
+  const since =
+    typeof output.mergedSince === "number"
+      ? `, since revision ${output.mergedSince}, which you started from`
+      : ""
+  const from =
+    typeof output.nextUpdateFrom === "number"
+      ? `your next update starts from revision ${output.nextUpdateFrom} again`
+      : "your next update starts from what it held before"
+  if ("mergedSince" in output && output.notInstalled === true) {
     lines.push(
-      `Merged with changes made meanwhile${typeof output.mergedSince === "number" ? `, since revision ${output.mergedSince}, which you started from` : ""}: your folder now holds the merged result, as does $SIXB_ARTIFACTS_DIR/${String(output.artifactId)}/. Keep editing from it, and say in your reply that others were editing it.`
+      `Merged with changes made meanwhile${since}, but the merged result could not be installed: your folder and ${copy} still hold your own files, and ${from}, so what others wrote stays. Read the version before editing what others may have changed, and say in your reply that others were editing it.`
     )
+  } else if ("mergedSince" in output) {
+    lines.push(
+      `Merged with changes made meanwhile${since}: your folder now holds the merged result, as does ${copy}. Keep editing from it, and say in your reply that others were editing it.`
+    )
+  } else if (output.notInstalled === true) {
+    lines.push(`This revision could not be installed in ${copy}: ${from}.`)
   }
   const warnings = Array.isArray(output.warnings) ? output.warnings : []
   for (const warning of warnings) {

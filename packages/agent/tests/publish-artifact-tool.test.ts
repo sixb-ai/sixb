@@ -13,6 +13,7 @@ import { dirname, join } from "node:path"
 import {
   AgentToolPublicError,
   AuthorizationError,
+  type BlobStorage,
   defineMarking,
   defineObjectType,
   InMemoryBlobStorage,
@@ -240,6 +241,8 @@ type ToolOptions = {
   readonly clearances?: ReadonlySet<string>
   /** Changes the requester's view of artifacts, as their rights changing mid-turn would. */
   readonly reader?: (reader: ReturnType<typeof readerFor>) => void
+  /** The blob storage the tools store and read the Agent's files in; the project's when omitted. */
+  readonly blobStorage?: BlobStorage
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -337,7 +340,7 @@ function tools(options: ToolOptions = {}) {
     artifacts: runArtifactsFor({ ...options, user: options.author ?? owner }),
     threadId: (options.run ?? run).threadId,
     owner,
-    blobStorage,
+    blobStorage: options.blobStorage ?? blobStorage,
     budget: options.budget ?? new AgentFileBudget(),
     resolveSandbox: async () => ({
       sandbox: sandbox(options.check),
@@ -1146,6 +1149,101 @@ describe("publish_artifact", () => {
       "<main>\n  <p>Notes: w1 w2 w3 w4 w5 w6</p>\n  <h1>Hello, team</h1>\n</main>\n"
     )
     expect(text().toString()).toBe(html)
+  })
+
+  // Reproduce by installing the Agent's own files when the merged ones cannot be read, as before:
+  // the base moves to the merged revision while the folder lacks the person's word, and the next
+  // update, from the folder, takes it out.
+  test("keeps a person's words when the merged result cannot be read back into the Agent's folder", async () => {
+    const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({
+        items: [{ id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 }],
+      })
+    )
+    write("work/flow/welcome.html", board("Welcome"))
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person types a word in the board, live.
+    const { artifact, version } = await (async () => {
+      const stored = await storage.artifacts.get({ projectId, id: artifactId })
+      const latest =
+        stored &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: stored.latestVersion,
+        }))
+      if (!stored || !latest) throw new Error("Expected the canvas.")
+      return { artifact: stored, version: latest }
+    })()
+    const doc = await loadArtifactDocument(blobStorage, artifact, version.files)
+    const text = doc.getMap("files").get("welcome.html") as Y.Text
+    text.insert(text.toString().indexOf("</p>"), " w1")
+    await writeLiveArtifact(readerFor(owner), artifactId, {
+      title: artifact.title,
+      baseTitle: artifact.title,
+      files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
+      baseRevision: artifact.revision,
+      update: Y.encodeStateAsUpdate(doc),
+    })
+
+    // The Agent retitles the board: merged and stored, but the blob store fails as the tool reads
+    // the merged files back.
+    const unreadable = new Proxy(blobStorage, {
+      get(target, key) {
+        if (key === "open") {
+          return async () => {
+            throw new Error("The blob store is unavailable.")
+          }
+        }
+        const value = Reflect.get(target, key)
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    })
+    write("work/flow/welcome.html", board("Hello"))
+    const output = await publishVersion(
+      { id: artifactId, path: "work/flow", title: "Flow" },
+      { installed, blobStorage: unreadable }
+    )
+
+    expect(output).toMatchObject({ mergedSince: 1, notInstalled: true, nextUpdateFrom: 1 })
+    expect(tools().version.toModelOutput?.(output, context)).toMatchObject({
+      value: expect.stringContaining(
+        "the merged result could not be installed: your folder and $SIXB_ARTIFACTS_DIR/"
+      ),
+    })
+    expect(read("work/flow/welcome.html")).toBe(board("Hello"))
+
+    // From its folder, which lacks the word, it retitles the board again.
+    write("work/flow/welcome.html", board("Hello again"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+
+    const { version: latest } = await (async () => {
+      const stored = await storage.artifacts.get({ projectId, id: artifactId })
+      const at =
+        stored &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: stored.latestVersion,
+        }))
+      if (!at) throw new Error("Expected the canvas.")
+      return { version: at }
+    })()
+    const welcome = latest.files.find((entry) => entry.path === "welcome.html")
+    expect(
+      welcome ? await new Response(await blobStorage.open(welcome.file.blobId)).text() : ""
+    ).toBe("<main>\n  <p>Notes: w1</p>\n  <h1>Hello again</h1>\n</main>\n")
   })
 
   // Reproduce by recording the files the Agent submitted as the base of its next update, instead
