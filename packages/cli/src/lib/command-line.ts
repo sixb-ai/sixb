@@ -307,6 +307,7 @@ const INSTANCE_SUMMARIES = {
   workflows: "Discover and start workflows",
   "workflow-runs": "Inspect workflow execution history",
   users: "List and search project members",
+  artifacts: "Read, resolve and reply to an artifact's comments",
   models: "List the project's models and their prices",
   datasets: "Read datasets, their versions and rows",
   syncs: "List the syncs you may run",
