@@ -9,6 +9,7 @@ import { createBudgetsResource } from "./resources/budgets"
 import { createCdcResource } from "./resources/cdc"
 import { createClassesResource } from "./resources/classes"
 import { createCompanyCurrenciesResource } from "./resources/company-currencies"
+import { createCreditCardPaymentsResource } from "./resources/credit-card-payments"
 import { createCreditMemosResource } from "./resources/credit-memos"
 import { createCustomerTypesResource } from "./resources/customer-types"
 import { createCustomersResource } from "./resources/customers"
@@ -17,6 +18,7 @@ import { createDepositsResource } from "./resources/deposits"
 import { createEmployeesResource } from "./resources/employees"
 import { createEstimatesResource } from "./resources/estimates"
 import { createExchangeRatesResource } from "./resources/exchange-rates"
+import { createInventoryAdjustmentsResource } from "./resources/inventory-adjustments"
 import { createInvoicesResource } from "./resources/invoices"
 import { createItemsResource } from "./resources/items"
 import { createJournalEntriesResource } from "./resources/journal-entries"
@@ -25,12 +27,15 @@ import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
 import { createPurchaseOrdersResource } from "./resources/purchase-orders"
 import { createPurchasesResource } from "./resources/purchases"
+import { createRecurringTransactionsResource } from "./resources/recurring-transactions"
 import { createRefundReceiptsResource } from "./resources/refund-receipts"
+import { createReimburseChargesResource } from "./resources/reimburse-charges"
 import { createReportsResource } from "./resources/reports"
 import { createSalesReceiptsResource } from "./resources/sales-receipts"
 import { createTaxAgenciesResource } from "./resources/tax-agencies"
 import { createTaxClassificationsResource } from "./resources/tax-classifications"
 import { createTaxCodesResource } from "./resources/tax-codes"
+import { createTaxPaymentsResource } from "./resources/tax-payments"
 import { createTaxRatesResource } from "./resources/tax-rates"
 import { createTermsResource } from "./resources/terms"
 import { createTimeActivitiesResource } from "./resources/time-activities"
@@ -107,6 +112,11 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
         bills: createBillsResource(http),
         billPayments: createBillPaymentsResource(http),
         vendorCredits: createVendorCreditsResource(http),
+        taxPayments: createTaxPaymentsResource(http),
+        recurringTransactions: createRecurringTransactionsResource(http),
+        inventoryAdjustments: createInventoryAdjustmentsResource(http),
+        creditCardPayments: createCreditCardPaymentsResource(http),
+        reimburseCharges: createReimburseChargesResource(http),
         journalEntries: createJournalEntriesResource(http),
         transfers: createTransfersResource(http),
         deposits: createDepositsResource(http),

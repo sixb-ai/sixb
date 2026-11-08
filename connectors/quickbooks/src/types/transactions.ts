@@ -413,3 +413,91 @@ export interface QuickBooksJournalEntry extends QuickBooksTransaction {
   readonly JournalCodeRef?: QuickBooksReference
   readonly RecurDataRef?: QuickBooksReference
 }
+
+/** Billable expense waiting to be invoiced. Read-only; created by QuickBooks from expenses. */
+export interface QuickBooksReimburseCharge extends QuickBooksTransaction {
+  readonly CustomerRef?: QuickBooksReference
+  readonly HasBeenInvoiced?: boolean
+  readonly Amount?: number
+  readonly Line?: readonly (QuickBooksLineBase & {
+    readonly DetailType?: "ReimburseLineDetail" | (string & {})
+    readonly ReimburseLineDetail?: {
+      readonly ItemAccountRef?: QuickBooksReference
+      readonly TaxCodeRef?: QuickBooksReference
+    }
+  })[]
+}
+
+/** Payment from a bank account toward a credit-card balance. */
+export interface QuickBooksCreditCardPayment extends QuickBooksTransaction {
+  readonly CreditCardAccountRef?: QuickBooksReference
+  readonly BankAccountRef?: QuickBooksReference
+  readonly VendorRef?: QuickBooksReference
+  readonly Amount?: number
+  readonly Memo?: string
+  readonly PrintStatus?: string
+  readonly CheckNum?: string
+}
+
+export interface QuickBooksInventoryAdjustment extends QuickBooksTransaction {
+  readonly AdjustAccountRef?: QuickBooksReference
+  readonly Line?: readonly (QuickBooksLineBase & {
+    readonly DetailType?: "ItemAdjustmentLineDetail" | (string & {})
+    readonly ItemAdjustmentLineDetail?: {
+      readonly ItemRef?: QuickBooksReference
+      readonly QtyDiff?: number
+      readonly ClassRef?: QuickBooksReference
+    }
+  })[]
+}
+
+export interface QuickBooksRecurringInfo {
+  readonly Name?: string
+  readonly RecurType?: "Automated" | "Reminded" | "Unscheduled" | (string & {})
+  readonly Active?: boolean
+  readonly ScheduleInfo?: {
+    readonly IntervalType?: string
+    readonly NumInterval?: number
+    readonly DayOfMonth?: number
+    readonly DayOfWeek?: string
+    readonly WeekOfMonth?: number
+    readonly MonthOfYear?: string
+    readonly StartDate?: string
+    readonly EndDate?: string
+    readonly NextDate?: string
+    readonly PreviousDate?: string
+    readonly MaxOccurrences?: number
+    readonly RemindDays?: number
+    readonly DaysBefore?: number
+  }
+}
+
+/** Template entities QuickBooks can schedule, keyed by the wrapper name it uses. */
+export interface QuickBooksRecurringTemplateMap {
+  readonly Bill: QuickBooksBill
+  readonly CreditMemo: QuickBooksCreditMemo
+  readonly Deposit: QuickBooksDeposit
+  readonly Estimate: QuickBooksEstimate
+  readonly Invoice: QuickBooksInvoice
+  readonly JournalEntry: QuickBooksJournalEntry
+  readonly Purchase: QuickBooksPurchase
+  readonly PurchaseOrder: QuickBooksPurchaseOrder
+  readonly RefundReceipt: QuickBooksRefundReceipt
+  readonly SalesReceipt: QuickBooksSalesReceipt
+  readonly Transfer: QuickBooksTransfer
+  readonly VendorCredit: QuickBooksVendorCredit
+}
+
+export type QuickBooksRecurringTemplateType = keyof QuickBooksRecurringTemplateMap
+
+/**
+ * One recurring template wrapped under its entity name, e.g. `{ Bill: { Id, RecurringInfo } }`.
+ * The template's own `Id` identifies the recurring transaction; it has no top-level `Id`.
+ */
+export type QuickBooksRecurringTransaction = {
+  [K in QuickBooksRecurringTemplateType]: {
+    readonly [P in K]: QuickBooksRecurringTemplateMap[K] & {
+      readonly RecurringInfo?: QuickBooksRecurringInfo
+    }
+  }
+}[QuickBooksRecurringTemplateType]

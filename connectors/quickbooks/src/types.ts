@@ -7,6 +7,7 @@ import type { QuickBooksBudgetsResource } from "./resources/budgets"
 import type { QuickBooksCdcResource } from "./resources/cdc"
 import type { QuickBooksClassesResource } from "./resources/classes"
 import type { QuickBooksCompanyCurrenciesResource } from "./resources/company-currencies"
+import type { QuickBooksCreditCardPaymentsResource } from "./resources/credit-card-payments"
 import type { QuickBooksCreditMemosResource } from "./resources/credit-memos"
 import type { QuickBooksCustomerTypesResource } from "./resources/customer-types"
 import type { QuickBooksCustomersResource } from "./resources/customers"
@@ -15,6 +16,7 @@ import type { QuickBooksDepositsResource } from "./resources/deposits"
 import type { QuickBooksEmployeesResource } from "./resources/employees"
 import type { QuickBooksEstimatesResource } from "./resources/estimates"
 import type { QuickBooksExchangeRatesResource } from "./resources/exchange-rates"
+import type { QuickBooksInventoryAdjustmentsResource } from "./resources/inventory-adjustments"
 import type { QuickBooksInvoicesResource } from "./resources/invoices"
 import type { QuickBooksItemsResource } from "./resources/items"
 import type { QuickBooksJournalEntriesResource } from "./resources/journal-entries"
@@ -23,12 +25,15 @@ import type { QuickBooksPaymentsResource } from "./resources/payments"
 import type { QuickBooksPreferencesResource } from "./resources/preferences"
 import type { QuickBooksPurchaseOrdersResource } from "./resources/purchase-orders"
 import type { QuickBooksPurchasesResource } from "./resources/purchases"
+import type { QuickBooksRecurringTransactionsResource } from "./resources/recurring-transactions"
 import type { QuickBooksRefundReceiptsResource } from "./resources/refund-receipts"
+import type { QuickBooksReimburseChargesResource } from "./resources/reimburse-charges"
 import type { QuickBooksReportsResource } from "./resources/reports"
 import type { QuickBooksSalesReceiptsResource } from "./resources/sales-receipts"
 import type { QuickBooksTaxAgenciesResource } from "./resources/tax-agencies"
 import type { QuickBooksTaxClassificationsResource } from "./resources/tax-classifications"
 import type { QuickBooksTaxCodesResource } from "./resources/tax-codes"
+import type { QuickBooksTaxPaymentsResource } from "./resources/tax-payments"
 import type { QuickBooksTaxRatesResource } from "./resources/tax-rates"
 import type { QuickBooksTermsResource } from "./resources/terms"
 import type { QuickBooksTimeActivitiesResource } from "./resources/time-activities"
@@ -103,6 +108,11 @@ export interface QuickBooksClient {
   readonly items: QuickBooksItemsResource
   readonly terms: QuickBooksTermsResource
   readonly preferences: QuickBooksPreferencesResource
+  readonly taxPayments: QuickBooksTaxPaymentsResource
+  readonly recurringTransactions: QuickBooksRecurringTransactionsResource
+  readonly inventoryAdjustments: QuickBooksInventoryAdjustmentsResource
+  readonly creditCardPayments: QuickBooksCreditCardPaymentsResource
+  readonly reimburseCharges: QuickBooksReimburseChargesResource
   readonly journalEntries: QuickBooksJournalEntriesResource
   readonly transfers: QuickBooksTransfersResource
   readonly deposits: QuickBooksDepositsResource
