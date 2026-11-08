@@ -43,8 +43,8 @@ export interface ArtifactPreviewsHost {
  * Renders what a version's boards miss and keeps it as their previews. Repeating it renders
  * nothing more: what an earlier delivery kept is no longer missing. A project without sandboxes
  * renders nothing, and neither does a version deleted or whose content was written again since:
- * the job asked for then renders that, with the query answers of its own. A version created since
- * holds the same content, and is rendered.
+ * the write that asks for that content replaces this job with its own, and its own query answers.
+ * A version created since holds the same content, and is rendered.
  */
 export async function renderArtifactPreviews(input: {
   readonly host: ArtifactPreviewsHost

@@ -17,8 +17,10 @@ const projectId = "agent-run-artifacts"
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
 
+// A test that times out never reaches its own `finally`.
 afterEach(() => {
   jest.useRealTimers()
+  jest.setSystemTime()
 })
 
 /** What a live canvas's boards read. */
@@ -328,6 +330,7 @@ describe("a run's artifacts", () => {
       files: await files(),
     })
     expect(query).toHaveBeenCalledTimes(1)
+    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
     const job = await claim()
     expect(job).toMatchObject({
       type: "agent.artifact-previews.requested",

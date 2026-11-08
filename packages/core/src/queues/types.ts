@@ -220,7 +220,8 @@ export interface AgentAiUsageRecordRequestedQueueJob
 
 /**
  * A canvas version's boards miss pictures: the agent worker renders them in a blank sandbox of
- * the project, with the data the version's author can see. One job per revision of the version.
+ * the project, with the data the version's author can see. One job per artifact, which each write
+ * that asks replaces: it names the latest revision asked for.
  */
 export interface AgentArtifactPreviewsRequestedQueueJob
   extends QueueJob<
@@ -230,8 +231,9 @@ export interface AgentArtifactPreviewsRequestedQueueJob
       readonly version: number
       /**
        * When the version's content was last written as it was asked for, its `updatedAt` as ISO:
-       * once its content is written again, the job asked for then renders it. Creating the version
-       * leaves its content, so its job still renders it. Absent on jobs asked for before.
+       * once its content is written again, the job renders nothing, and the write that asks for
+       * it replaces it. Creating the version leaves its content, so its job still renders it.
+       * Absent on jobs asked for before.
        */
       readonly updatedAt?: string
       /**

@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import type {
   ArtifactFile,
   ArtifactRequestErrorCode,
@@ -15,6 +15,7 @@ import {
   ref,
   SixbHost,
 } from "../src"
+import { BOARD_PREVIEW_JOB } from "../src/artifacts/canvas-display"
 import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
 import { parseArtifactQueryAnswers, prepareArtifactVersion } from "../src/artifacts/publish"
 import { serializeArtifactQueryResult } from "../src/artifacts/serialize-query"
@@ -631,6 +632,10 @@ describe("publishing queries from query builders", () => {
 })
 
 describe("picturing a canvas's boards that read queries", () => {
+  afterEach(() => {
+    jest.setSystemTime()
+  })
+
   /** The project's sandboxes, which only the agent worker opens. */
   const sandboxes: SandboxFactory = {
     supportsRequestCredentials: true,
@@ -660,8 +665,9 @@ describe("picturing a canvas's boards that read queries", () => {
       ),
     ]
 
-    /** The answers the job that pictures the version's boards carries. */
+    /** The answers the job that pictures the version's boards carries, once it is due. */
     const answers = async () => {
+      jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
       const claimed = await context.deps.queues.agents.claim({
         projectId,
         workerId: "test",

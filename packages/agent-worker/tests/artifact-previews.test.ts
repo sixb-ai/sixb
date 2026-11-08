@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
@@ -14,6 +14,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
+import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
@@ -192,6 +193,10 @@ function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
 }
 
 describe("a canvas version's previews", () => {
+  afterEach(() => {
+    jest.setSystemTime()
+  })
+
   test("are rendered in a blank sandbox with no network, which is destroyed after", async () => {
     // Reproduce by rendering in the run's ephemeral sandbox: the job has no run credential to
     // give it, and the API on its network serves nothing a board needs.
@@ -409,6 +414,8 @@ describe("a canvas version's previews", () => {
 
     const rendered = sandboxes.destroyedOnce()
     const { version } = await canvas()
+    // The job waits for the canvas to rest.
+    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
     await worker.start()
     try {
       await rendered
