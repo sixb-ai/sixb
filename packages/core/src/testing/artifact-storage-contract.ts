@@ -1504,11 +1504,11 @@ function frameGrant(
     version: 1,
     revision: 1,
     targets: [
+      { address: "artifact:art_other@3/figures/revenue.svg", artifactId: "art_other", version: 3 },
       {
-        address: "artifact:art_other/figures/revenue.svg",
+        address: "artifact:art_other/figures/cost.svg",
         artifactId: "art_other",
-        version: 3,
-        revision: 5,
+        version: "latest",
       },
     ],
     createdAt: t0,

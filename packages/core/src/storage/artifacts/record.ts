@@ -314,18 +314,17 @@ function frameTargets(value: unknown, where: string): ArtifactFrameTarget[] {
       !isObject(entry) ||
       typeof entry.address !== "string" ||
       typeof entry.artifactId !== "string" ||
-      !Number.isSafeInteger(entry.version) ||
-      (entry.version as number) < 1 ||
-      !Number.isSafeInteger(entry.revision) ||
-      (entry.revision as number) < 1
+      !(
+        entry.version === "latest" ||
+        (Number.isSafeInteger(entry.version) && (entry.version as number) >= 1)
+      )
     ) {
-      throw corrupt(where, "a target is not an address, an artifact, a version, and a revision")
+      throw corrupt(where, "a target is not an address, an artifact, and a version")
     }
     return {
       address: entry.address,
       artifactId: entry.artifactId,
-      version: entry.version as number,
-      revision: entry.revision as number,
+      version: entry.version as number | "latest",
     }
   })
 }

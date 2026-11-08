@@ -66,9 +66,10 @@ export async function createArtifactFrame(input: {
 
 /**
  * The files from other artifacts a version's frame may show its reader: each file it embeds
- * (`<img src="artifact:…/figure.svg">`) that `read`, as the reader, finds, at the version the
- * address pins or the latest, and at that version's revision. A chart, range, or section is drawn by the app over the frame, under
- * the reader's own session, and needs nothing here.
+ * (`<img src="artifact:…/figure.svg">`) that `read`, as the reader, finds. A pinned address shows
+ * the created version it names, which never changes; an unpinned one follows its artifact's latest
+ * version as it changes, the way the app shows it. A chart, range, or section is drawn by the app
+ * over the frame, under the reader's own session, and needs nothing here.
  */
 async function frameTargets(
   version: ArtifactVersionRecord,
@@ -89,8 +90,7 @@ async function frameTargets(
     targets.push({
       address: reference.address,
       artifactId: target.artifactId,
-      version: target.version,
-      revision: target.revision,
+      version: address.version ?? "latest",
     })
   }
   return targets
