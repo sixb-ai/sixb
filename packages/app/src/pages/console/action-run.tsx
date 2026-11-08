@@ -26,6 +26,7 @@ import {
 import { RunLogs } from "./logs"
 import { useConsoleMessages } from "./messages"
 import { ACTION_RUNS_HREF } from "./ontology/action-runs"
+import { PillSkeleton, StatsSkeleton } from "./skeletons"
 
 type ActionRun = GetActionRunResponse
 
@@ -99,6 +100,25 @@ export function ConsoleActionRunPage() {
         id={runId}
         icon={Zap}
         error={runQuery.error}
+        loading={{
+          icon: <IconTile icon={Zap} size="lg" />,
+          meta: (
+            <>
+              <PillSkeleton />
+              <span className="font-mono text-xs">{runId}</span>
+            </>
+          ),
+          children: (
+            <StatsSkeleton
+              labels={[
+                messages.run.started,
+                messages.run.took,
+                messages.action.phase,
+                messages.action.subject,
+              ]}
+            />
+          ),
+        }}
       />
     )
   }

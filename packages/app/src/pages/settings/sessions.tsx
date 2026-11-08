@@ -32,7 +32,7 @@ import {
   Pill,
   useFormat,
 } from "../section-ui"
-import { type DeviceKind, useDescribeDevice } from "./controls"
+import { type DeviceKind, GhostButtonSkeleton, useDescribeDevice } from "./controls"
 import { useSettingsMessages } from "./messages"
 
 const deviceIcons: Record<DeviceKind, typeof Monitor> = {
@@ -108,7 +108,11 @@ export function SessionsSection() {
     >
       <Panel>
         {sessionsQuery.isPending ? (
-          <PanelSkeleton rows={2} />
+          <>
+            {/* This device leads, and has no Sign out. */}
+            <PanelSkeleton rows={1} />
+            <PanelSkeleton rows={1} trailing={<GhostButtonSkeleton className="w-14" />} />
+          </>
         ) : sessionsQuery.isError ? (
           <PanelEmpty
             tone="error"

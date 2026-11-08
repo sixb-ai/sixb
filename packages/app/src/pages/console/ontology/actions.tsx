@@ -50,11 +50,12 @@ import { actionRunHref } from "../../routes"
 import { notify, SectionPage } from "../../section-page"
 import {
   PanelEmpty,
-  PanelSkeleton,
   RunStatusPill,
+  SkeletonText,
   ToolbarTabs,
   useLoadFailure,
 } from "../../section-ui"
+import { CardSkeleton, CountSkeleton } from "../skeletons"
 import { ActionRuns } from "./action-runs"
 import { ActionParamNullControl } from "./components/action-param-null-control"
 import { CollectionToolbar } from "./components/collection-toolbar"
@@ -88,7 +89,8 @@ const RUN_HISTORY_REFETCH_MS = 10_000
  * action run, to find one that failed and open it.
  */
 export function ConsoleActionsPage() {
-  const count = useQuery({ ...listActionsOptions(), retry: false }).data?.length
+  const countQuery = useQuery({ ...listActionsOptions(), retry: false })
+  const count = countQuery.data?.length
   const [searchParams, setSearchParams] = useSearchParams()
   const view = searchParams.get("view") === "runs" ? "runs" : "actions"
   // Each view has its own filters, so switching starts them clear.
@@ -116,7 +118,11 @@ export function ConsoleActionsPage() {
       width="wide"
       title="Actions"
       meta={
-        count === undefined ? undefined : <span>{`${count} action${count === 1 ? "" : "s"}`}</span>
+        countQuery.isPending ? (
+          <CountSkeleton />
+        ) : count === undefined ? undefined : (
+          <span>{`${count} action${count === 1 ? "" : "s"}`}</span>
+        )
       }
     >
       <ToolbarTabs
@@ -213,21 +219,16 @@ function ActionDefinitionsTab() {
     )
   }
 
-  if (actionsQuery.isPending) {
-    return (
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <PanelSkeleton rows={4} />
-      </div>
-    )
-  }
-
   if (actionsQuery.isError) {
     return <ActionsFailure error={actionsQuery.error} />
   }
 
+  // While the actions load, the toolbar is already in place and cards hold their places.
+  const loading = actionsQuery.isPending
+
   return (
     <section className="-mt-4 space-y-4">
-      {actions.length === 0 ? (
+      {!loading && actions.length === 0 ? (
         <PanelEmpty
           icon={SquareActivity}
           title="No actions registered"
@@ -297,12 +298,25 @@ function ActionDefinitionsTab() {
 
           {filtersActive ? (
             <p className="text-xs text-muted-foreground">
-              Showing <span className="font-medium text-foreground">{filteredActions.length}</span>{" "}
-              of {actions.length} actions
+              {loading ? (
+                <SkeletonText className="h-2 w-32" />
+              ) : (
+                <>
+                  Showing{" "}
+                  <span className="font-medium text-foreground">{filteredActions.length}</span> of{" "}
+                  {actions.length} actions
+                </>
+              )}
             </p>
           ) : null}
 
-          {filteredActions.length > 0 ? (
+          {loading ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {Array.from({ length: 4 }, (_, index) => (
+                <CardSkeleton key={index} />
+              ))}
+            </div>
+          ) : filteredActions.length > 0 ? (
             <div className="grid gap-3 lg:grid-cols-2">
               {filteredActions.map((action) => (
                 <ActionCard

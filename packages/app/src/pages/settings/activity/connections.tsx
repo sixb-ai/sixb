@@ -3,14 +3,7 @@ import { Button } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { MonitorSmartphone } from "lucide-react"
-import {
-  MetaDot,
-  PageSection,
-  Panel,
-  PanelEmpty,
-  PanelSkeleton,
-  useNumbers,
-} from "../../section-ui"
+import { MetaDot, PageSection, Panel, PanelEmpty, SkeletonText, useNumbers } from "../../section-ui"
 import { useUtcFormat } from "./format"
 import { useActivityMessages } from "./messages"
 import { activityQueryKey } from "./period"
@@ -68,7 +61,7 @@ export function UserConnections({
         }
       >
         {query.isPending ? (
-          <PanelSkeleton rows={2} />
+          <ConnectionsSkeleton rows={2} />
         ) : query.isError ? (
           <PanelEmpty
             tone="error"
@@ -140,5 +133,29 @@ export function UserConnections({
         )}
       </Panel>
     </PageSection>
+  )
+}
+
+/** The sign-ins while they load, laid out like their rows: device and status, facts, a visit. */
+function ConnectionsSkeleton({ rows }: { readonly rows: number }) {
+  return (
+    <ul aria-hidden className="divide-y divide-border">
+      {Array.from({ length: rows }, (_, index) => (
+        <li key={index} className="flex flex-col gap-2 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-sm">
+              <SkeletonText className="h-3 w-32" />
+            </span>
+            <SkeletonText className="h-5 w-14 rounded-full" />
+          </div>
+          <p className="text-xs">
+            <SkeletonText className="w-64 bg-muted/70" />
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <SkeletonText className="h-7 w-40 rounded-md" />
+          </div>
+        </li>
+      ))}
+    </ul>
   )
 }

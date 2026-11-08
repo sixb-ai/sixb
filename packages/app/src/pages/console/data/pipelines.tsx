@@ -47,12 +47,14 @@ import {
   PanelSkeleton,
   Pill,
   RunStatusPill,
+  SkeletonText,
   UnrecordedHistory,
   useFormat,
   useLoadFailure,
   useNumbers,
   useRunStatusLabels,
 } from "../../section-ui"
+import { MetaSkeleton, PillSkeleton, SkeletonBlock, TrailingSkeleton } from "../skeletons"
 import { datasetGridColumns } from "./datasets"
 import { useDatasetLiveUpdates, usePipelineLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
@@ -75,7 +77,7 @@ export function ConsolePipelinesPage() {
     >
       <Panel>
         {pipelinesQuery.isPending ? (
-          <PanelSkeleton rows={3} />
+          <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
         ) : pipelinesQuery.isError ? (
           <PanelEmpty
             tone="error"
@@ -222,6 +224,30 @@ function PipelineDetail({ pipelineId }: { readonly pipelineId: string }) {
         id={pipelineId}
         icon={Workflow}
         error={pipelineQuery.error}
+        workspace={
+          <>
+            <WorkspaceHeader
+              back={back}
+              icon={<IconTile icon={Workflow} />}
+              title={humanize(pipelineId)}
+              meta={<MetaSkeleton />}
+              actions={
+                <>
+                  <SkeletonBlock className="h-8 w-8 sm:w-20" />
+                  <SkeletonBlock className="h-8 w-24" />
+                </>
+              }
+            />
+            <div className="flex min-h-0 flex-1">
+              <div className="min-w-0 flex-1 bg-muted/25" />
+              {runsOpen ? (
+                <aside className="h-full w-[22rem] max-w-[calc(100vw-1rem)] shrink-0 border-l border-border bg-card">
+                  <div className="h-12 border-b border-border" />
+                </aside>
+              ) : null}
+            </div>
+          </>
+        }
       />
     )
   }
@@ -403,7 +429,7 @@ function RunsPanel({
       <PanelBar title={messages.common.runs} onClose={onClose} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {runsQuery.isPending ? (
-          <PanelSkeleton rows={4} />
+          <RunListSkeleton />
         ) : runsQuery.isError ? (
           isUnrecorded(runsQuery.error) ? (
             <UnrecordedHistory what={messages.pipelines.runWhat} />
@@ -492,7 +518,7 @@ function RunPanel({
       </PanelBar>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {runQuery.isPending ? (
-          <PanelSkeleton rows={3} />
+          <RunSkeleton />
         ) : runQuery.isError || !run ? (
           <PanelEmpty
             tone="error"
@@ -579,6 +605,67 @@ function RunPanel({
         )}
       </div>
     </>
+  )
+}
+
+/** The runs panel's list while it loads, shaped like its rows. */
+function RunListSkeleton() {
+  return (
+    <ul aria-hidden className="divide-y divide-border">
+      {Array.from({ length: 6 }, (_, index) => (
+        <li key={index} className="flex items-start gap-3 px-4 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[0.8125rem]">
+              <SkeletonText className="w-36" />
+            </span>
+            <span className="block text-xs">
+              <SkeletonText className="h-2 w-24 bg-muted/70" />
+            </span>
+          </span>
+          <PillSkeleton />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** A run's figures and steps while they load. */
+function RunSkeleton() {
+  const messages = useDataMessages().common
+  return (
+    <div aria-hidden className="flex flex-col gap-5 p-4">
+      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
+        {[messages.started, messages.took].map((label) => (
+          <div key={label} className="bg-card px-3 py-2">
+            <dt className="text-[0.6875rem] text-muted-foreground">{label}</dt>
+            <dd className="text-[0.8125rem]">
+              <SkeletonText className="w-14" />
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <section className="flex flex-col gap-2">
+        <h3 className="text-xs">
+          <SkeletonText className="h-2 w-12" />
+        </h3>
+        <ol className="flex flex-col gap-2">
+          {Array.from({ length: 2 }, (_, index) => (
+            <li key={index} className="rounded-lg border border-border px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 text-[0.8125rem]">
+                  <SkeletonText className="w-32" />
+                </span>
+                <PillSkeleton />
+              </div>
+              <div className="mt-1 text-xs">
+                <SkeletonText className="h-2 w-40 bg-muted/70" />
+              </div>
+              <SkeletonBlock className="mt-2 h-[1.375rem] w-36" />
+            </li>
+          ))}
+        </ol>
+      </section>
+    </div>
   )
 }
 

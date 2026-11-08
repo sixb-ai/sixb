@@ -22,6 +22,7 @@ import {
   PanelEmpty,
   PanelRow,
   PanelSkeleton,
+  SkeletonText,
   useLoadFailure,
   useNumbers,
 } from "../../section-ui"
@@ -38,7 +39,7 @@ import {
   parseActivityDay,
   parseActivityRange,
 } from "./period"
-import { ConnectionLine, sharedLinkName, VisitEntries } from "./timeline"
+import { ConnectionLine, sharedLinkName, VisitEntries, VisitEntriesSkeleton } from "./timeline"
 import { UserFilter, useActivityUsers } from "./users"
 
 type Visit = ListActivityVisitsResponse["visits"][number]
@@ -356,7 +357,7 @@ function Visits({
         }
       >
         {query.isPending ? (
-          <PanelSkeleton rows={4} />
+          <PanelSkeleton rows={4} leading="avatar" interactive />
         ) : query.isError ? (
           <PanelEmpty tone="error" icon={MousePointerClick} title={messages.unavailable} />
         ) : visits.length === 0 ? (
@@ -442,7 +443,13 @@ function VisitTimeline({
           </Panel>
         ) : (
           <Panel
-            toolbar={timeline ? <VisitHeader timeline={timeline} names={names} /> : undefined}
+            toolbar={
+              timeline ? (
+                <VisitHeader timeline={timeline} names={names} />
+              ) : query.isPending ? (
+                <VisitHeaderSkeleton />
+              ) : undefined
+            }
             footer={
               timeline?.truncated ? (
                 <>
@@ -455,7 +462,7 @@ function VisitTimeline({
             }
           >
             {query.isPending ? (
-              <PanelSkeleton rows={3} />
+              <VisitEntriesSkeleton />
             ) : query.isError || !timeline ? (
               <PanelEmpty
                 tone="error"
@@ -521,6 +528,26 @@ function VisitHeader({
         ))}
       </dl>
       {timeline.connection ? <ConnectionLine connection={timeline.connection} /> : null}
+    </div>
+  )
+}
+
+/** The visit's header while it loads: who, when, where from, and the connection it came through. */
+function VisitHeaderSkeleton() {
+  return (
+    <div aria-hidden className="flex min-w-0 flex-1 flex-col gap-1.5 px-1 py-0.5">
+      <div className="text-sm">
+        <SkeletonText className="h-3 w-36" />
+      </div>
+      <div className="text-xs">
+        <SkeletonText className="w-52 bg-muted/70" />
+      </div>
+      <div className="text-xs">
+        <SkeletonText className="w-28 bg-muted/70" />
+      </div>
+      <div className="text-xs leading-5">
+        <SkeletonText className="w-60 bg-muted/70" />
+      </div>
     </div>
   )
 }

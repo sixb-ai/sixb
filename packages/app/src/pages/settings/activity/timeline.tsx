@@ -11,6 +11,7 @@ import {
   MetaDot,
   Pill,
   RunStatusPill,
+  SkeletonText,
   ToolbarTabs,
   useNumbers,
 } from "../../section-ui"
@@ -83,6 +84,44 @@ export function VisitEntries({ timeline }: { readonly timeline: Timeline }) {
           ))}
         </ol>
       )}
+    </>
+  )
+}
+
+/** The steps while a visit loads: the same filter chips, without counts, over a few steps. */
+export function VisitEntriesSkeleton() {
+  const messages = useActivityMessages().visit
+  const widths = ["w-40", "w-56", "w-32"]
+
+  return (
+    <>
+      <div aria-hidden inert className="border-b border-border px-3 py-2">
+        <ToolbarTabs
+          className="flex-wrap gap-y-1"
+          tabs={filters.map((id) => ({ id, label: messages.filters[id] }))}
+          value="all"
+          onChange={() => {}}
+        />
+      </div>
+
+      <ol aria-hidden className="py-1.5">
+        {widths.map((width, index) => (
+          <li key={width} className="relative flex items-start gap-3 px-4 py-2">
+            {index < widths.length - 1 ? (
+              <span className="absolute top-[1.0625rem] -bottom-[1.0625rem] left-[1.28rem] w-px bg-border" />
+            ) : null}
+            <span className="relative mt-1.5 size-2.5 shrink-0 rounded-full border-2 border-border bg-card" />
+            <div className="flex min-w-0 flex-1 items-baseline gap-x-2">
+              <span className="font-mono text-[0.8125rem]">
+                <SkeletonText className={width} />
+              </span>
+              <span className="ml-auto text-xs">
+                <SkeletonText className="w-16 bg-muted/70" />
+              </span>
+            </div>
+          </li>
+        ))}
+      </ol>
     </>
   )
 }

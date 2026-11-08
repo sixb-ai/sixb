@@ -7,7 +7,8 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { objectTypeHref } from "../../routes"
 import { SectionPage } from "../../section-page"
-import { apiErrorMessage, PanelEmpty, PanelSkeleton } from "../../section-ui"
+import { apiErrorMessage, PanelEmpty, SkeletonText } from "../../section-ui"
+import { CountSkeleton, SkeletonBlock } from "../skeletons"
 import { CollectionToolbar } from "./components/collection-toolbar"
 import { LetterAvatar } from "./components/common"
 import { humanizeIdentifier } from "./lib/labels"
@@ -39,7 +40,13 @@ export function ConsoleObjectTypesPage() {
       page="object-types"
       width="wide"
       title="Object types"
-      meta={<span>{countLabel(objectTypes.length, "type")}</span>}
+      meta={
+        typesQuery.isPending ? (
+          <CountSkeleton />
+        ) : (
+          <span>{countLabel(objectTypes.length, "type")}</span>
+        )
+      }
     >
       <div className="-mt-4 flex flex-col">
         <CollectionToolbar
@@ -50,9 +57,7 @@ export function ConsoleObjectTypesPage() {
           }}
         />
         {typesQuery.isPending ? (
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <PanelSkeleton rows={4} />
-          </div>
+          <TypeListSkeleton />
         ) : typesQuery.isError ? (
           <PanelEmpty
             tone="error"
@@ -67,7 +72,7 @@ export function ConsoleObjectTypesPage() {
             No types matching "{search}".
           </div>
         ) : (
-          <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]">
+          <div className={typeListClass}>
             <ul className="divide-y divide-border">
               {filtered.map((type) => (
                 <li key={type.id}>
@@ -84,6 +89,47 @@ export function ConsoleObjectTypesPage() {
         )}
       </div>
     </SectionPage>
+  )
+}
+
+const typeListClass =
+  "mt-2 overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]"
+const typeRowClass = "flex items-start gap-4 px-4 py-3.5"
+
+/** The list while the types load, row for row the shape of `TypeRow`. */
+function TypeListSkeleton() {
+  return (
+    <div aria-hidden className={typeListClass}>
+      <ul className="divide-y divide-border">
+        {["w-64", "w-52", "w-72", "w-48", "w-60"].map((width) => (
+          <li key={width} className={typeRowClass}>
+            <div className="pt-0.5">
+              <SkeletonBlock className="size-7" />
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="text-sm">
+                <SkeletonText className="h-3 w-32" />
+              </div>
+              {/* Most types describe themselves; the line is there until the list says otherwise. */}
+              <p className="text-xs leading-5">
+                <SkeletonText className="w-56 bg-muted/70" />
+              </p>
+              <div className="font-mono text-[11px]">
+                <SkeletonText className={cn("h-2 bg-muted/70", width)} />
+              </div>
+            </div>
+            <div className="hidden shrink-0 items-center gap-4 pt-1 text-[11px] sm:flex">
+              <span>
+                <SkeletonText className="h-2 w-8" />
+              </span>
+              <span>
+                <SkeletonText className="h-2 w-8" />
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -115,7 +161,10 @@ function TypeRow({ type, parent, onSelect, onSelectType }: TypeRowProps) {
           onSelect()
         }
       }}
-      className="group flex cursor-pointer items-start gap-4 px-4 py-3.5 transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+      className={cn(
+        typeRowClass,
+        "group cursor-pointer transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+      )}
     >
       <div className="pt-0.5">
         <LetterAvatar label={name} size="sm" />

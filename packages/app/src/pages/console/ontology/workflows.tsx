@@ -4,7 +4,8 @@ import { Search, Workflow } from "lucide-react"
 import { useMemo } from "react"
 import { useSearchParams } from "react-router-dom"
 import { SectionPage } from "../../section-page"
-import { PanelEmpty, PanelSkeleton, useLoadFailure } from "../../section-ui"
+import { PanelEmpty, useLoadFailure } from "../../section-ui"
+import { CardSkeleton, CountSkeleton } from "../skeletons"
 import { CollectionToolbar } from "./components/collection-toolbar"
 import { useWorkflowLiveUpdates } from "./hooks/workflow-live-updates"
 import { humanizeIdentifier } from "./lib/labels"
@@ -14,7 +15,8 @@ import { WorkflowCard } from "./workflows/workflow-card"
 /** Console › Workflows: every workflow with its latest run; each opens its canvas. */
 export function ConsoleWorkflowsPage() {
   useWorkflowLiveUpdates()
-  const count = useQuery({ ...listWorkflowsOptions(), retry: false }).data?.length
+  const countQuery = useQuery({ ...listWorkflowsOptions(), retry: false })
+  const count = countQuery.data?.length
   return (
     <SectionPage
       section="console"
@@ -22,7 +24,9 @@ export function ConsoleWorkflowsPage() {
       width="wide"
       title="Workflows"
       meta={
-        count === undefined ? undefined : (
+        countQuery.isPending ? (
+          <CountSkeleton />
+        ) : count === undefined ? undefined : (
           <span>{`${count} workflow${count === 1 ? "" : "s"}`}</span>
         )
       }
@@ -55,11 +59,34 @@ function WorkflowDefinitionsTab() {
     )
   }
 
+  const toolbar = (
+    <CollectionToolbar
+      search={{
+        value: query,
+        onChange: updateQuery,
+        placeholder: "Search workflows, nodes, triggers, or inputs…",
+      }}
+      // The header counts every workflow; while searching, this counts the matches.
+      actions={
+        query.trim() && !workflowsQuery.isPending ? (
+          <p className="px-1 text-xs tabular-nums text-muted-foreground">
+            {`${filteredWorkflows.length} of ${workflows.length} workflows`}
+          </p>
+        ) : undefined
+      }
+    />
+  )
+
   if (workflowsQuery.isPending) {
     return (
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <PanelSkeleton rows={4} />
-      </div>
+      <section className="-mt-4 space-y-4">
+        {toolbar}
+        <div className="grid gap-3 lg:grid-cols-2">
+          {Array.from({ length: 4 }, (_, index) => (
+            <CardSkeleton key={index} />
+          ))}
+        </div>
+      </section>
     )
   }
 
@@ -79,21 +106,7 @@ function WorkflowDefinitionsTab() {
 
   return (
     <section className="-mt-4 space-y-4">
-      <CollectionToolbar
-        search={{
-          value: query,
-          onChange: updateQuery,
-          placeholder: "Search workflows, nodes, triggers, or inputs…",
-        }}
-        // The header counts every workflow; while searching, this counts the matches.
-        actions={
-          query.trim() ? (
-            <p className="px-1 text-xs tabular-nums text-muted-foreground">
-              {`${filteredWorkflows.length} of ${workflows.length} workflows`}
-            </p>
-          ) : undefined
-        }
-      />
+      {toolbar}
 
       {filteredWorkflows.length === 0 ? (
         <PanelEmpty

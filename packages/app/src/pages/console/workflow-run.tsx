@@ -41,6 +41,7 @@ import { useWorkflowRunLiveUpdates } from "./live-updates"
 import { RunLogs } from "./logs"
 import { useConsoleMessages } from "./messages"
 import { workflowNodeIoSchemas, workflowSchemas } from "./ontology/workflows/utils"
+import { PillSkeleton, StatsSkeleton } from "./skeletons"
 
 type Run = GetWorkflowRunResponse["run"]
 type RunNode = GetWorkflowRunResponse["nodes"][number]
@@ -97,6 +98,25 @@ function WorkflowRunDetail({ runId }: { readonly runId: string }) {
         id={runId}
         icon={Workflow}
         error={runQuery.error}
+        loading={{
+          icon: <IconTile icon={Workflow} size="lg" />,
+          meta: (
+            <>
+              <PillSkeleton />
+              <span className="font-mono text-xs">{runId}</span>
+            </>
+          ),
+          children: (
+            <StatsSkeleton
+              labels={[
+                messages.run.started,
+                messages.run.took,
+                messages.run.queued,
+                messages.run.finished,
+              ]}
+            />
+          ),
+        }}
       />
     )
   }

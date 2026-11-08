@@ -389,21 +389,84 @@ export function Pill({ tone, children }: { readonly tone?: Tone; readonly childr
   )
 }
 
-/** The panel body while its rows load. */
-export function PanelSkeleton({ rows = 3 }: { readonly rows?: number }) {
+/**
+ * A placeholder for a line of text. It is inline, so inside an element with the real text's size
+ * the line keeps that text's height, and the content takes its place without anything moving.
+ * A flex container makes it a flex item, which drops that line height: wrap it in a `<span>`
+ * carrying the text's classes there.
+ */
+export function SkeletonText({ className }: { readonly className?: string }) {
   return (
-    <>
-      {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="flex items-center gap-3.5 px-4 py-3.5">
-          <span className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
-          <span className="flex flex-1 flex-col gap-2">
-            <span className="h-3 w-40 animate-pulse rounded bg-muted" />
-            <span className="h-2.5 w-64 max-w-full animate-pulse rounded bg-muted/70" />
-          </span>
-        </div>
-      ))}
-    </>
+    <span
+      aria-hidden
+      className={cn(
+        "inline-block h-2.5 max-w-full animate-pulse rounded bg-muted align-middle",
+        className
+      )}
+    />
   )
+}
+
+/**
+ * The panel body while its rows load, shaped like the `PanelRow`s that replace it: the same
+ * padding, the same leading mark, and lines on the title's and meta's own line heights.
+ */
+export function PanelSkeleton({
+  rows = 3,
+  leading = "tile",
+  meta = true,
+  trailing,
+  interactive = false,
+}: {
+  readonly rows?: number
+  /** The rows' leading mark: an `IconTile`, a round avatar, or nothing. */
+  readonly leading?: "tile" | "avatar" | "none"
+  /** Whether the rows have a second line. */
+  readonly meta?: boolean
+  /** What sits at the rows' end, such as a placeholder for a pill or a button. */
+  readonly trailing?: ReactNode
+  /** Rows that open something (`href` or `onClick`), which space their end differently. */
+  readonly interactive?: boolean
+}) {
+  // The meta lines vary in length, as real ones do.
+  const widths = ["w-64", "w-52", "w-72", "w-48"]
+  const end = trailing ? <div className="flex shrink-0 items-center gap-2">{trailing}</div> : null
+  return Array.from({ length: rows }, (_, index) => {
+    const body = (
+      <>
+        {leading === "none" ? null : (
+          <span
+            className={cn(
+              "size-9 shrink-0 animate-pulse bg-muted",
+              leading === "avatar" ? "rounded-full" : "rounded-lg"
+            )}
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="text-sm">
+            <SkeletonText className="h-3 w-40" />
+          </div>
+          {meta ? (
+            <div className="mt-0.5 text-[0.8125rem]">
+              <SkeletonText className={cn("bg-muted/70", widths[index % widths.length])} />
+            </div>
+          ) : null}
+        </div>
+      </>
+    )
+    // The same two layouts as `PanelRow`'s.
+    return interactive ? (
+      <div key={index} aria-hidden className="flex items-center gap-3 pr-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3.5 py-3.5 pl-4">{body}</div>
+        {end}
+      </div>
+    ) : (
+      <div key={index} aria-hidden className="flex items-center gap-3.5 px-4 py-3.5">
+        {body}
+        {end}
+      </div>
+    )
+  })
 }
 
 /** What a panel shows with nothing in it, or when it could not load. */

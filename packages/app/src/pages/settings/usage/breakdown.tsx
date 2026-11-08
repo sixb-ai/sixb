@@ -3,7 +3,7 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueries, useQuery } from "@tanstack/react-query"
 import { useState } from "react"
-import { PanelSkeleton } from "../../section-ui"
+import { SkeletonText } from "../../section-ui"
 import { personValue, useNames } from "./filter-menu"
 import type { Overview } from "./format"
 import { useAiUsageMessages } from "./messages"
@@ -188,7 +188,9 @@ export function Breakdown({
             <span className="text-right">{messages.columns.trend}</span>
           </div>
           {base.isPending ? (
-            <PanelSkeleton rows={4} />
+            ["w-36", "w-28", "w-32", "w-24"].map((width) => (
+              <RowSkeleton key={width} lens={lens} width={width} day={filters.day !== undefined} />
+            ))
           ) : visible.length === 0 ? (
             <div className="border-t border-border/50 px-5 py-8 text-center text-sm text-muted-foreground">
               {messages.empty}
@@ -343,6 +345,64 @@ export function Breakdown({
 
 const gridRow =
   "grid grid-cols-[minmax(220px,2.2fr)_64px_72px_64px_84px_80px_minmax(120px,1.2fr)_64px] items-center gap-4 px-5"
+
+/** A row while the lens loads: the same cells, with placeholders on their text's lines. */
+function RowSkeleton({
+  lens,
+  width,
+  day,
+}: {
+  readonly lens: Lens
+  readonly width: string
+  readonly day: boolean
+}) {
+  return (
+    <div aria-hidden className={cn(gridRow, "min-h-[54px] border-t border-border/50")}>
+      <span className="flex min-w-0 items-center gap-2.5">
+        {lens === "model" ? (
+          <span className="size-2.5 shrink-0 animate-pulse rounded-[3px] bg-muted" />
+        ) : (
+          <span className="size-[22px] shrink-0 animate-pulse rounded-[7px] bg-muted" />
+        )}
+        <span className="flex min-w-0 flex-col leading-[1.3]">
+          <span>
+            <SkeletonText className={width} />
+          </span>
+          {/* Kinds are the one lens without a second line. */}
+          {lens === "kind" ? null : (
+            <span className="text-xs">
+              <SkeletonText className="h-2 w-20 bg-muted/70" />
+            </span>
+          )}
+        </span>
+      </span>
+      <span className="text-right">
+        <SkeletonText className="w-7" />
+      </span>
+      <span className="text-right">
+        <SkeletonText className="w-10" />
+      </span>
+      <span className="text-right">
+        <SkeletonText className="w-8" />
+      </span>
+      <span className="text-right">
+        <SkeletonText className="w-14" />
+      </span>
+      <span className="text-right text-[0.8125rem]">
+        {day ? null : <SkeletonText className="w-12" />}
+      </span>
+      <span className="flex items-center gap-2.5">
+        <span className="h-1.5 flex-1 animate-pulse rounded-[3px] bg-muted" />
+        <span className="w-11 text-right text-[0.78rem]">
+          <SkeletonText className="w-8" />
+        </span>
+      </span>
+      <span className="flex h-5 items-end justify-end">
+        <span className="h-3 w-14 animate-pulse rounded-[1.5px] bg-muted" />
+      </span>
+    </div>
+  )
+}
 
 function rowsFor(
   lens: Lens,

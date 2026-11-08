@@ -24,6 +24,7 @@ import {
   useNumbers,
   useRunStatusLabels,
 } from "../../section-ui"
+import { MetaSkeleton, SkeletonBlock, StatsSkeleton, TrailingSkeleton } from "../skeletons"
 import { useSyncLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
 import { SchemaPanel } from "./schema"
@@ -47,7 +48,7 @@ export function ConsoleSyncsPage() {
     >
       <Panel>
         {syncsQuery.isPending ? (
-          <PanelSkeleton rows={3} />
+          <PanelSkeleton rows={3} interactive trailing={<TrailingSkeleton chevron />} />
         ) : syncsQuery.isError ? (
           <PanelEmpty
             tone="error"
@@ -135,6 +136,31 @@ export function ConsoleSyncPage() {
         id={syncId}
         icon={RefreshCw}
         error={syncQuery.error}
+        loading={{
+          icon: <SkeletonBlock className="size-12 rounded-xl" />,
+          meta: <MetaSkeleton />,
+          actions: <SyncButton sync={syncId} variant="default" />,
+          children: (
+            <>
+              <StatsSkeleton
+                labels={[
+                  messages.common.lastRun,
+                  messages.common.started,
+                  messages.common.took,
+                  messages.syncs.rowsRead,
+                ]}
+              />
+              <PageSection
+                title={messages.common.runs}
+                description={messages.common.runsDescription}
+              >
+                <Panel>
+                  <RunsSkeleton />
+                </Panel>
+              </PageSection>
+            </>
+          ),
+        }}
       />
     )
   }
@@ -203,7 +229,7 @@ export function ConsoleSyncPage() {
       <PageSection title={messages.common.runs} description={messages.common.runsDescription}>
         <Panel>
           {runsQuery.isPending ? (
-            <PanelSkeleton rows={3} />
+            <RunsSkeleton />
           ) : runsQuery.isError ? (
             isUnrecorded(runsQuery.error) ? (
               <UnrecordedHistory what={messages.syncs.runWhat} />
@@ -323,4 +349,9 @@ export function ConsoleSyncPage() {
       <SchemaPanel dataset={dataset} />
     </SectionPage>
   )
+}
+
+/** A sync's runs while they load: rows with no mark, each ending in its status. */
+function RunsSkeleton() {
+  return <PanelSkeleton rows={3} leading="none" trailing={<TrailingSkeleton />} />
 }

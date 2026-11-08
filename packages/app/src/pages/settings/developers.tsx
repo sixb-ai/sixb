@@ -22,7 +22,7 @@ import {
   PanelRow,
   PanelSkeleton,
 } from "../section-ui"
-import { type CreatedTokenState, TokenFormDialog, TokenRows } from "./controls"
+import { type CreatedTokenState, GhostButtonSkeleton, TokenFormDialog, TokenRows } from "./controls"
 import { useSettingsMessages } from "./messages"
 
 /** Settings › Developers: your access tokens, and signing in to the CLI. */
@@ -98,7 +98,7 @@ export function SettingsDevelopersPage() {
       >
         <Panel>
           {tokensQuery.isPending ? (
-            <PanelSkeleton rows={2} />
+            <PanelSkeleton rows={2} trailing={<GhostButtonSkeleton className="w-12" />} />
           ) : tokensQuery.isError ? (
             <PanelEmpty
               tone="error"

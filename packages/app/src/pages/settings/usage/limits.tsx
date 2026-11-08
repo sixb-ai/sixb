@@ -50,8 +50,8 @@ import {
   PageSection,
   Panel,
   PanelEmpty,
-  PanelSkeleton,
   Pill,
+  SkeletonText,
   type Tone,
   useLoadFailure,
 } from "../../section-ui"
@@ -176,8 +176,12 @@ export function AiLimits() {
       }
     >
       <Panel>
-        {statusQuery.isPending && policyQuery.isPending ? (
-          <PanelSkeleton rows={2} />
+        {/* A row drawn before its status arrives would grow when its usage did. */}
+        {statusQuery.isPending || policyQuery.isPending ? (
+          <>
+            <LimitRowSkeleton />
+            <LimitRowSkeleton />
+          </>
         ) : !statusQuery.data && !policyQuery.data ? (
           <PanelEmpty
             tone="error"
@@ -220,6 +224,44 @@ export function AiLimits() {
         />
       ) : null}
     </PageSection>
+  )
+}
+
+/** A limit while the page loads: `LimitRow`'s lines, with placeholders. */
+function LimitRowSkeleton() {
+  return (
+    <div aria-hidden className="flex flex-col gap-3 px-5 py-4">
+      <div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">
+            <SkeletonText className="h-3 w-32" />
+          </span>
+          <span className="h-5 w-16 animate-pulse rounded-full bg-muted" />
+        </div>
+        <p className="mt-0.5 text-[0.8125rem]">
+          <SkeletonText className="w-40 bg-muted/70" />
+        </p>
+      </div>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between gap-x-4 text-[0.8125rem]">
+          <span>
+            <SkeletonText className="w-36" />
+          </span>
+          <span className="text-xs">
+            <SkeletonText className="h-2 w-14" />
+          </span>
+        </div>
+        <div className="h-1.5 animate-pulse rounded-full bg-muted" />
+        <div className="flex gap-x-4 text-xs">
+          <span>
+            <SkeletonText className="h-2 w-24" />
+          </span>
+          <span>
+            <SkeletonText className="h-2 w-40" />
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }
 
