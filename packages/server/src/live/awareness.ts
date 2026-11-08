@@ -29,6 +29,25 @@ const COLORS = [
   "#d6409f",
 ] as const
 
+/** What the project's own code, and everyone where nobody signs in, is called. */
+export const PROJECT_NAME = "Project"
+
+/**
+ * The name others see for someone: a member's profile name, else their email, and the project's
+ * for its own code. Null for anyone else, or a member the project no longer knows.
+ */
+export async function principalName(
+  storage: Pick<Storage, "auth">,
+  projectId: string,
+  principal: { readonly type: string; readonly id: string }
+): Promise<string | null> {
+  if (principal.type === "system") return PROJECT_NAME
+  if (principal.type !== "user") return null
+
+  const record = await storage.auth?.users.getById({ projectId, id: principal.id })
+  return record?.displayName ?? record?.email ?? null
+}
+
 /**
  * Who a connection is: the member it signed in as, by their profile's name, or the service
  * account or project code it runs as.
@@ -38,14 +57,10 @@ export async function liveUserOf(
   projectId: string,
   principal: { readonly type: string; readonly id: string } | undefined
 ): Promise<ArtifactLiveUser> {
-  if (!principal) return { id: "system", name: "Project", color: colorOf("system") }
+  if (!principal) return { id: "system", name: PROJECT_NAME, color: colorOf("system") }
 
   const id = `${principal.type}:${principal.id}`
-  const record =
-    principal.type === "user"
-      ? await storage.auth?.users.getById({ projectId, id: principal.id })
-      : null
-  const name = record?.displayName ?? record?.email ?? principal.id
+  const name = (await principalName(storage, projectId, principal)) ?? principal.id
   return { id, name, color: colorOf(id) }
 }
 

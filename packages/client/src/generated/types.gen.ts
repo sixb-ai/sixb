@@ -19925,6 +19925,10 @@ export type ListArtifactCommentsResponses = {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
+      /**
+       * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+       */
+      authorName: string | null
       createdAt: string
       /**
        * When someone marked it resolved
@@ -20164,6 +20168,10 @@ export type AddArtifactCommentResponses = {
       type: "user" | "serviceAccount" | "system"
       id: string
     }
+    /**
+     * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+     */
+    authorName: string | null
     createdAt: string
     /**
      * When someone marked it resolved
@@ -20347,6 +20355,10 @@ export type ResolveArtifactCommentResponses = {
       type: "user" | "serviceAccount" | "system"
       id: string
     }
+    /**
+     * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+     */
+    authorName: string | null
     createdAt: string
     /**
      * When someone marked it resolved
