@@ -14,7 +14,7 @@ import { LiveHubProvider } from "../src/artifacts/live/hooks"
 import { LiveHub } from "../src/artifacts/live/session"
 import { Viewer } from "../src/artifacts/viewer"
 import { installDom } from "./helpers/dom"
-import { canvasOf, FakeServer, settle } from "./helpers/live-server"
+import { canvasOf, FakeConnection, FakeServer, settle } from "./helpers/live-server"
 
 installDom([
   "document",
@@ -125,37 +125,38 @@ afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
+function viewer(hub: LiveHub) {
+  return render(
+    <QueryClientProvider client={seeded()}>
+      <MemoryRouter>
+        <LiveHubProvider hub={hub}>
+          <Viewer
+            target={{ type: "artifact", artifactId: ARTIFACT_ID }}
+            onTargetChange={() => {}}
+          />
+        </LiveHubProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+}
+
 describe("a canvas held live in the viewer", () => {
   test("is edited live, with no Save, and stops being edited when the reader may only watch", async () => {
     // Reproduce by keeping the reader editing whatever their access says in useLiveView: the
     // edit bar stays after the server took away their right to change the canvas.
     const server = new FakeServer(ARTIFACT_ID, CANVAS)
-    const hub = new LiveHub(server.open)
-    const ui = render(
-      <QueryClientProvider client={seeded()}>
-        <MemoryRouter>
-          <LiveHubProvider hub={hub}>
-            <Viewer
-              target={{ type: "artifact", artifactId: ARTIFACT_ID }}
-              onTargetChange={() => {}}
-            />
-          </LiveHubProvider>
-        </MemoryRouter>
-      </QueryClientProvider>
-    )
+    const ui = viewer(new LiveHub(server.open))
     await act(settle)
-    // The board's code loads apart, as the viewer loads it.
-    await act(async () => {
-      await new Promise((done) => setTimeout(done, 50))
-    })
 
+    const edit = await ui.findByRole("button", { name: "Edit" })
     await act(async () => {
-      fireEvent.click(ui.getByRole("button", { name: "Edit" }))
+      fireEvent.click(edit)
     })
     expect(ui.getByRole("button", { name: "Done" })).toBeDefined()
     expect(ui.queryByRole("button", { name: "Save" })).toBeNull()
     expect(ui.container.querySelector("[data-save]")?.getAttribute("data-save")).toBe("saved")
-    expect(ui.getByRole("toolbar", { name: "Canvas tools" })).toBeDefined()
+    // The board's code loads apart, as the viewer loads it.
+    expect(await ui.findByRole("toolbar", { name: "Canvas tools" })).toBeDefined()
 
     await act(async () => {
       for (const connection of server.connections) {
@@ -169,6 +170,38 @@ describe("a canvas held live in the viewer", () => {
     expect(ui.container.querySelector('[data-live-notice="access"]')?.textContent).toBe(
       "You can now only view this canvas."
     )
+    ui.unmount()
+  })
+
+  test("waits to be edited until its document holds it, never offering a draft meanwhile", async () => {
+    // Reproduce by offering the draft's Edit until the live document syncs in ArtifactHeader:
+    // an edit begun then is dropped as the canvas starts drawing from the document, and goes on
+    // live under the draft's Save.
+    const server = new FakeServer(ARTIFACT_ID, CANVAS)
+    let connection: FakeConnection | undefined
+    const ui = viewer(
+      new LiveHub((handlers) => {
+        connection = new FakeConnection(server, handlers)
+        server.connections.add(connection)
+        return connection
+      })
+    )
+    await act(settle)
+
+    const waiting = ui.getByRole("button", { name: "Connecting…" })
+    expect(waiting.hasAttribute("disabled")).toBe(true)
+    expect(ui.queryByRole("button", { name: "Edit" })).toBeNull()
+
+    await act(async () => {
+      connection?.connect()
+      await settle()
+    })
+    expect(ui.queryByRole("button", { name: "Connecting…" })).toBeNull()
+    await act(async () => {
+      fireEvent.click(ui.getByRole("button", { name: "Edit" }))
+    })
+    expect(ui.getByRole("button", { name: "Done" })).toBeDefined()
+    expect(ui.queryByRole("button", { name: "Save" })).toBeNull()
     ui.unmount()
   })
 })
