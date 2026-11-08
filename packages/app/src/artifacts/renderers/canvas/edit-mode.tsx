@@ -42,7 +42,19 @@ export interface CanvasEditor {
   readonly apply: (change: CanvasChange) => void
   readonly undo: () => void
   readonly redo: () => void
+  /**
+   * Edits everyone sees as they are made: a drag moves its items for the others while it goes,
+   * and ends one undo step as it starts and as it ends.
+   */
+  readonly live?: {
+    readonly stopCapturing: () => void
+    /** Tells the others what is selected. */
+    readonly select: (ids: readonly string[]) => void
+  }
 }
+
+/** How often a drag tells the others where its items are, at most. */
+const DRAG_SHARE_MS = 50
 
 /** The grid items snap to as they move and resize. */
 const GRID = 8
@@ -71,27 +83,60 @@ export function useBoardEditing(
   const editing = !!edit
   const [nodes, setNodes] = useState<Node[]>(graph.nodes)
   const [edges, setEdges] = useState<Edge[]>(graph.edges)
+  // Which of the graph's nodes and edges each one drawn now was made from: one whose item did
+  // not change is kept as it is, so React Flow draws again only the items that changed.
+  const [madeFrom] = useState(() => new WeakMap<object, object>())
   const selected = useRef<ReadonlySet<string>>(new Set())
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set())
   const [typing, setTyping] = useState<string | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
 
-  // Drawn from the canvas as it changes, what was selected still selected.
+  // Drawn from the canvas as it changes, what was selected still selected, what React Flow
+  // measured kept, and an item being dragged where the drag has it.
   useEffect(() => {
     const chosen = selected.current
-    setNodes(
-      graph.nodes.map((node) =>
-        editing && node.type !== "point"
-          ? { ...node, draggable: true, selectable: true, selected: chosen.has(node.id) }
-          : node
-      )
-    )
-    setEdges(
-      graph.edges.map((edge) =>
-        editing ? { ...edge, selectable: true, selected: chosen.has(edge.id) } : edge
-      )
-    )
-  }, [graph, editing])
+    setNodes((current) => {
+      const drawn = new Map(current.map((node) => [node.id, node]))
+      return graph.nodes.map((node) => {
+        const was = drawn.get(node.id)
+        const choose = editing && node.type !== "point"
+        const isSelected = choose && chosen.has(node.id)
+        const same =
+          was &&
+          madeFrom.get(was) === node &&
+          !!was.draggable === choose &&
+          !!was.selected === isSelected &&
+          !was.dragging
+        if (same) return was
+
+        const next: Node = {
+          ...node,
+          ...(choose ? { draggable: true, selectable: true, selected: isSelected } : {}),
+          ...(was?.measured ? { measured: was.measured } : {}),
+          ...(was?.dragging ? { position: was.position, dragging: true } : {}),
+        }
+        madeFrom.set(next, node)
+        return next
+      })
+    })
+    setEdges((current) => {
+      const drawn = new Map(current.map((edge) => [edge.id, edge]))
+      return graph.edges.map((edge) => {
+        const was = drawn.get(edge.id)
+        const isSelected = editing && chosen.has(edge.id)
+        const same =
+          was &&
+          madeFrom.get(was) === edge &&
+          !!was.selectable === editing &&
+          !!was.selected === isSelected
+        if (same) return was
+
+        const next: Edge = editing ? { ...edge, selectable: true, selected: isSelected } : edge
+        madeFrom.set(next, edge)
+        return next
+      })
+    })
+  }, [graph, editing, madeFrom])
   useEffect(() => {
     if (!editing) {
       selected.current = new Set()
@@ -122,6 +167,16 @@ export function useBoardEditing(
   }
 
   const focusBoard = useCallback(() => root.current?.focus({ preventScroll: true }), [])
+
+  // The others see what this reader selects.
+  const share = edit?.live?.select
+  useEffect(() => {
+    share?.([...selection])
+  }, [share, selection])
+  useEffect(() => () => share?.([]), [share])
+
+  // A drag tells the others where its items are as it goes, a few times a second at most.
+  const dragShared = useRef(0)
 
   const items: CanvasItemEditing | null = useMemo(
     () =>
@@ -276,8 +331,18 @@ export function useBoardEditing(
         setEdges((current) => applyEdgeChanges(changes, current))
         if (changes.some((change) => change.type === "select")) chose(changes)
       },
-      onNodeDragStop: (_: unknown, __: Node, dragged: Node[]) =>
-        edit.apply(moveItems(new Map(dragged.map((node) => [node.id, node.position] as const)))),
+      onNodeDragStart: () => edit.live?.stopCapturing(),
+      onNodeDrag: (_: unknown, __: Node, dragged: Node[]) => {
+        if (!edit.live) return
+        const now = performance.now()
+        if (now - dragShared.current < DRAG_SHARE_MS) return
+        dragShared.current = now
+        edit.apply(moveItems(new Map(dragged.map((node) => [node.id, node.position] as const))))
+      },
+      onNodeDragStop: (_: unknown, __: Node, dragged: Node[]) => {
+        edit.apply(moveItems(new Map(dragged.map((node) => [node.id, node.position] as const))))
+        edit.live?.stopCapturing()
+      },
       onConnect: (connection: Connection) =>
         edit.apply(connectItems(connection.source, connection.target)),
       onNodeDoubleClick: (_: unknown, node: Node) => {

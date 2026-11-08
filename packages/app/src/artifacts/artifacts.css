@@ -266,3 +266,50 @@
 .sixb-artboard .sixb-resize-line {
   border-color: color-mix(in oklab, var(--primary) 80%, transparent) !important;
 }
+
+/*
+ * A canvas drawn from its live document (renderers/canvas/presence.tsx). An item someone else
+ * moves glides to where they put it, as their drag reaches here a few times a second; one the
+ * reader drags follows the pointer. Presence draws over every item.
+ */
+.sixb-artboard[data-live] .react-flow__node:not(.dragging) {
+  transition: transform 90ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sixb-artboard[data-live] .react-flow__node:not(.dragging) {
+    transition: none;
+  }
+}
+
+.sixb-artboard .react-flow__viewport-portal {
+  z-index: 2000;
+}
+
+/* A board an Agent turn is changing: its outline shimmers, a light passing round it. */
+.sixb-agent-board {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
+  background: linear-gradient(
+      110deg,
+      transparent 35%,
+      color-mix(in oklab, var(--primary) 9%, transparent) 50%,
+      transparent 65%
+    )
+    0 0 / 250% 100%;
+  animation: sixb-agent-shimmer 2.4s ease-in-out infinite;
+}
+
+@keyframes sixb-agent-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sixb-agent-board {
+    animation: none;
+  }
+}

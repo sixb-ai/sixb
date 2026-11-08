@@ -14,6 +14,7 @@ import {
   useStoreApi,
 } from "@xyflow/react"
 import { memo, type RefObject, useCallback, useEffect, useMemo, useState } from "react"
+import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
 import { CANVAS_EDGE_TYPES } from "./arrows"
@@ -23,6 +24,7 @@ import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider } from "./editing"
 import { BoardFocus } from "./focus"
 import { CANVAS_NODE_TYPES, NAME_SCALE, nameScale } from "./items"
+import { PresenceLayer } from "./presence"
 import { boardPreviewUrl, useBoardPreviews } from "./previews"
 
 /**
@@ -39,6 +41,7 @@ export default memo(function CanvasBoard({
   mode,
   focus,
   edit,
+  live,
 }: {
   readonly canvas: Canvas
   /** The version the canvas is, whose frames its boards run in; none draws boards as tiles. */
@@ -53,6 +56,8 @@ export default memo(function CanvasBoard({
   readonly focus?: string
   /** Edits the canvas; without it, it is read. */
   readonly edit?: CanvasEditor
+  /** The live artifact the canvas is drawn from: who else is on it shows over it. */
+  readonly live?: LiveArtifact
 }) {
   return (
     <ReactFlowProvider>
@@ -63,6 +68,7 @@ export default memo(function CanvasBoard({
         {...(version ? { version } : {})}
         {...(focus ? { focus } : {})}
         {...(edit ? { edit } : {})}
+        {...(live ? { liveArtifact: live } : {})}
       />
     </ReactFlowProvider>
   )
@@ -75,6 +81,7 @@ function Board({
   mode,
   focus,
   edit,
+  liveArtifact,
 }: {
   readonly canvas: Canvas
   readonly version?: ArtifactVersion
@@ -82,6 +89,7 @@ function Board({
   readonly mode: "light" | "dark"
   readonly focus?: string
   readonly edit?: CanvasEditor
+  readonly liveArtifact?: LiveArtifact
 }) {
   const messages = useArtifactMessages().canvas
   const boards = useMemo(
@@ -174,6 +182,7 @@ function Board({
       tabIndex={board.editing ? -1 : undefined}
       className="sixb-canvas sixb-artboard relative size-full bg-background outline-none"
       data-editing={board.editing ? "" : undefined}
+      data-live={liveArtifact ? "" : undefined}
       role="region"
       aria-label={messages.canvas(title)}
       onKeyDown={(event) => {
@@ -218,6 +227,7 @@ function Board({
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.3} />
             <CanvasControls padding={CANVAS_FIT_PADDING} />
+            {liveArtifact ? <PresenceLayer live={liveArtifact} /> : null}
             {board.editing ? board.toolbar : null}
           </ReactFlow>
         </CanvasEditingProvider>
