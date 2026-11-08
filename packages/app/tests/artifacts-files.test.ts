@@ -71,8 +71,10 @@ describe("file sources", () => {
 
     expect(source.id).toBe("artifact:art_0123456789@3/figures/revenue chart.png")
     expect(source.name).toBe("figures/revenue chart.png")
+    // Keyed by its bytes: an open version's file that changes changes its URL, and an image the
+    // browser kept is never shown for another. Reproduce by dropping `v` from artifactFileSource.
     expect(source.inlineUrl).toBe(
-      "https://example.test/api/artifacts/art_0123456789/versions/3/content?path=figures%2Frevenue+chart.png&disposition=inline"
+      `https://example.test/api/artifacts/art_0123456789/versions/3/content?path=figures%2Frevenue+chart.png&disposition=inline&v=${encodeURIComponent(fileRef.digest)}`
     )
   })
 

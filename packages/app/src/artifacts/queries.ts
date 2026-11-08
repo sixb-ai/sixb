@@ -4,7 +4,7 @@ import {
   getArtifactQuery,
   isSixbApiError,
 } from "@sixb/client"
-import { events, getArtifactVersionOptions, useEvents } from "@sixb/client/hooks"
+import { events, getArtifactVersionOptions, useEvents, useEventsRegistry } from "@sixb/client/hooks"
 import {
   ARTIFACT_THEME_FILE,
   type ArtifactTheme,
@@ -71,16 +71,18 @@ export function useArtifactVersion(
 /**
  * Follows changes to an artifact while a view shows it: each `artifact.updated` reads again what
  * the change made stale, so a reader anywhere sees what someone else saved, the Agent wrote, or a
- * version created.
+ * version created. It listens on the app's event socket: a view mounted without one, as a test
+ * mounts it, opens none of its own, and reads the open version again as it goes stale.
  */
 export function useArtifactUpdates(artifactId: string | undefined): void {
   const queries = useQueryClient()
+  const shared = useEventsRegistry() !== null
   useEvents(
     events.artifacts(),
     (event) => {
       if (event.payload.artifactId === artifactId) artifactChanged(queries, artifactId)
     },
-    { enabled: artifactId !== undefined }
+    { enabled: artifactId !== undefined && shared }
   )
 }
 
