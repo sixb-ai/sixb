@@ -1,5 +1,6 @@
 import { type DefaultTreeAdapterTypes, parse } from "parse5"
 import type * as Y from "yjs"
+import { mergeText } from "./diff"
 
 // A canvas's board as an editor changes it in place: the static elements of its HTML, each at an
 // address that names where it is in the source, and edits to them as changes to the source's
@@ -261,6 +262,23 @@ export function setBoardText(source: string, address: string, text: string): Boa
     changes.push({ index: each.start, remove: each.end - each.start, insert: escapeText(value) })
   }
   return changes.filter((change) => change.remove > 0 || change.insert.length > 0)
+}
+
+/**
+ * Sets a text element's words from what someone typed into it, starting from `base`, its words as
+ * they saw them: what others changed in it since is kept, merged as the live document merges
+ * concurrent edits. Throws when the address names no text any more: the board changed, and the
+ * editor reloads it.
+ */
+export function mergeBoardText(
+  source: string,
+  address: string,
+  base: string,
+  typed: string
+): BoardEdit {
+  const { node } = elementAt(source, address, ["text"])
+  const live = textOf(node)
+  return setBoardText(source, address, live === base ? typed : mergeText(base, typed, live))
 }
 
 /** Replaces an image's picture, its description, or both. */
@@ -580,9 +598,13 @@ function startTagEnd(node: Element): number | null {
 function startTagClose(source: string, node: Element): number | null {
   const end = startTagEnd(node)
   if (end === null) return null
+
+  // A `/` before the `>` closes the tag unless it ends an unquoted value, as `src=/a/b/` does.
+  const attributes = Object.values(node.sourceCodeLocation?.attrs ?? {})
+  const lastValueEnd = Math.max(0, ...attributes.map((location) => location.endOffset))
   let at = end - 1
-  if (source[at - 1] === "/") at -= 1
-  while (at > 0 && /\s/.test(source[at - 1] ?? "")) at -= 1
+  if (source[at - 1] === "/" && lastValueEnd < at) at -= 1
+  while (at > lastValueEnd && /\s/.test(source[at - 1] ?? "")) at -= 1
   return at
 }
 
