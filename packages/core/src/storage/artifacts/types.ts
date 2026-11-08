@@ -180,6 +180,11 @@ export interface ArtifactTurnWriteRecord {
   /** The turn created the artifact. */
   readonly created: boolean
   readonly revision: number
+  /**
+   * How many changes the turn made to it, creating it included: each moves the revision by one,
+   * so a change by anyone else between two of them shows as a revision past the turn's count.
+   */
+  readonly writes: number
 }
 
 export interface ArtifactTurnInput {
@@ -406,11 +411,12 @@ export interface ArtifactStorage {
   /** The artifacts a turn wrote, its sub-agents' writes among them, by artifact id. */
   listTurnWrites(input: ArtifactTurnInput): Promise<ArtifactTurnWriteRecord[]>
   /**
-   * Undoes what a turn wrote, for a retry of it: an artifact nobody changed since the turn's last
-   * write is put back as its restore point holds it, and deleted when the turn created it; one that
-   * changed since keeps the changes, its restore point, and the threads it is shared in. An
-   * artifact put back is no longer shared in the threads the turn alone shared it in, unless it was
-   * copied for them. The turn's writes are forgotten.
+   * Undoes what a turn wrote, for a retry of it: an artifact only the turn changed since its
+   * restore point, as `turnUndoable` says, is put back as that point holds it, and deleted
+   * when the turn created it; one anyone else changed, before, between, or after the turn's writes,
+   * keeps the changes, its restore point, and the threads it is shared in, and so does one whose
+   * version someone created. An artifact put back is no longer shared in the threads the turn alone
+   * shared it in, unless it was copied for them. The turn's writes are forgotten.
    */
   undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn>
   get(input: GetArtifactInput): Promise<ArtifactRecord | null>

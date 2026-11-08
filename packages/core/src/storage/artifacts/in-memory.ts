@@ -1,7 +1,12 @@
 import { ARTIFACT_RESTORE_POINTS } from "../../artifacts/limits"
 import { type Principal, principalsEqual } from "../../auth"
 import { paginate } from "../pagination"
-import { artifactStateBytes, artifactStorageErrors, checkArtifactStateWrite } from "./record"
+import {
+  artifactStateBytes,
+  artifactStorageErrors,
+  checkArtifactStateWrite,
+  turnUndoable,
+} from "./record"
 import type {
   ArtifactBoardPreviewRecord,
   ArtifactFrameGrantRecord,
@@ -233,16 +238,25 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       if (stored.record.projectId !== input.projectId) continue
 
       const write = stored.turnWrites.get(turnRunId)
-      const untouched = write?.revision === stored.record.revision
-      if (write && untouched && write.created) {
+      if (!write) continue
+
+      const revision = stored.record.revision
+      if (write.created && turnUndoable({ write, revision })) {
         this.deleteArtifact(key)
         deleted.push(stored.record.id)
         continue
       }
 
-      if (!write) continue
-
       const point = stored.restorePoints.find((each) => each.turnRunId === turnRunId)
+      const target = point && stored.versions.find((each) => each.version === point.version)
+      const untouched =
+        !write.created &&
+        turnUndoable({
+          write,
+          revision,
+          ...(point ? { point } : {}),
+          ...(target ? { target: { frozen: target.frozenAt !== undefined } } : {}),
+        })
       const undone = untouched && point ? undo(stored, point) : null
 
       // Undone, the turn's restore point is what the artifact holds again, and the threads it
@@ -675,10 +689,12 @@ function turnWrote(
 ): StoredArtifact {
   if (turnRunId === undefined) return stored
 
+  const earlier = stored.turnWrites.get(turnRunId)
   const write: ArtifactTurnWriteRecord = {
     artifactId: stored.record.id,
-    created: stored.turnWrites.get(turnRunId)?.created ?? created,
+    created: earlier?.created ?? created,
     revision: stored.record.revision,
+    writes: (earlier?.writes ?? 0) + 1,
   }
   const others = [...stored.turnWrites].filter(([turn]) => turn !== turnRunId)
   const kept = [[turnRunId, write] as const, ...others]
