@@ -446,6 +446,27 @@ describe("live boards", () => {
 })
 
 describe("board previews", () => {
+  /** An `Image` whose pictures decode when the test says, which happy-dom has none of. */
+  function decodedImages() {
+    const decoding: { src: string; done: () => void; fail: () => void }[] = []
+    const Image = class {
+      src = ""
+      decode() {
+        return new Promise<void>((resolve, reject) => {
+          decoding.push({ src: this.src, done: resolve, fail: reject })
+        })
+      }
+    }
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "Image")
+    Object.defineProperty(globalThis, "Image", { configurable: true, value: Image })
+
+    const restore = () => {
+      if (previous) Object.defineProperty(globalThis, "Image", previous)
+      else Reflect.deleteProperty(globalThis, "Image")
+    }
+    return { decoding, restore }
+  }
+
   const version = (boardPreviews?: Record<string, "ready" | "pending" | "none">) =>
     ({
       artifactId: "art_0nb0ard1ng",
@@ -503,6 +524,44 @@ describe("board previews", () => {
     bare.unmount()
   })
 
+  test("keep a changed board's last picture while its new one is rendered", async () => {
+    // Reproduce by dropping the shown picture when the next one is not ready: the board turns
+    // into its outline as soon as it changes, and stays blank until the worker renders it.
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    const board = (previewed: GetArtifactVersionResponse) => (
+      <QueryClientProvider client={cache}>
+        <CanvasBoard canvas={CANVAS} version={previewed} title="Checkout" mode="light" />
+      </QueryClientProvider>
+    )
+    const { restore } = decodedImages()
+    try {
+      let view: ReturnType<typeof render> | undefined
+      await act(async () => {
+        view = render(board(version({ home: "ready", pay: "ready" })))
+      })
+      if (!view) throw new Error("The board did not render.")
+      const home = () =>
+        view?.container.querySelector<HTMLElement>('.react-flow__node[data-id="home"] img')
+
+      // Version 4 changed Home: its picture is on its way, and the last one stays, breathing.
+      await act(async () => {
+        view?.rerender(board({ ...version({ home: "pending", pay: "ready" }), version: 4 }))
+      })
+      expect(home()?.getAttribute("src")).toContain("/versions/3/boards/home/preview")
+      expect(home()?.getAttribute("aria-busy")).toBe("true")
+
+      // Version 5 changed it again, and no picture will come: the outline, at rest.
+      await act(async () => {
+        view?.rerender(board({ ...version({ home: "none", pay: "ready" }), version: 5 }))
+      })
+      expect(home()).toBeNull()
+      view.unmount()
+    } finally {
+      restore()
+    }
+  })
+
   test("keep the picture under a board's frame as it starts, so it never flashes blank", async () => {
     // The frame fades in over the picture once its page is ready. Reproduce by giving the frame
     // the tile as its fallback again: the picture is drawn anew as the board starts.
@@ -551,17 +610,7 @@ describe("board previews", () => {
   test("keep the picture shown until the next has decoded, and fall back when one fails", async () => {
     // A sharper picture, or one in the other mode, takes the shown one's place once it can be
     // drawn. Reproduce by showing each new source at once: the tile shows the one still loading.
-    const decoding: { src: string; done: () => void; fail: () => void }[] = []
-    const Image = class {
-      src = ""
-      decode() {
-        return new Promise<void>((resolve, reject) => {
-          decoding.push({ src: this.src, done: resolve, fail: reject })
-        })
-      }
-    }
-    const previous = Object.getOwnPropertyDescriptor(globalThis, "Image")
-    Object.defineProperty(globalThis, "Image", { configurable: true, value: Image })
+    const { decoding, restore } = decodedImages()
     try {
       const view = render(<ItemTile icon={AppWindow} preview="small.png" fallback="full.png" />)
       const shown = () => view.container.querySelector("img")?.getAttribute("src")
@@ -582,8 +631,7 @@ describe("board previews", () => {
       expect(view.container.querySelector("img")).toBeNull()
       view.unmount()
     } finally {
-      if (previous) Object.defineProperty(globalThis, "Image", previous)
-      else Reflect.deleteProperty(globalThis, "Image")
+      restore()
     }
   })
 

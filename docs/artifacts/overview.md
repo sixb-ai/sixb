@@ -411,8 +411,8 @@ gets each board's warnings and screenshot, and `overview.png`, the canvas as it 
 Each board also gets a preview: a picture of it in light and dark, or in the mode `theme.json`
 pins, shown in place of the board until it runs, in the reader's mode. Each comes in two sizes:
 `full`, a PNG of the board at its own size, and `small`, a WebP at most 480 pixels wide, shown
-while the board is drawn small. While it is rendered, the board shows its outline, and the viewer
-shows the preview as soon as it is ready.
+while the board is drawn small. While it is rendered, the board shows its outline, or its last
+preview when it changed, and the viewer shows the new one as soon as it is ready.
 
 - The Agent's check takes them as it publishes. A version published otherwise, such as one whose
   boards were resized in the app, is pictured by the agent worker in a blank sandbox of the

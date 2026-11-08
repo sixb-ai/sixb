@@ -192,8 +192,9 @@ export function LiveBoardsProvider({
 /**
  * What a board or an embed shows while it doesn't run: a picture of it when there is one, else
  * its outline, the icon of what it is in the middle, breathing while its picture is on its way.
- * A picture that can't be loaded gives way to its fallback, then to the outline. The name above
- * says which it is.
+ * A board that changes keeps its last picture, breathing, until the new one is ready. A picture
+ * that can't be loaded gives way to its fallback, then to the outline. The name above says which
+ * it is.
  */
 export function ItemTile({
   icon: Icon,
@@ -208,7 +209,7 @@ export function ItemTile({
   readonly fallback?: string
   readonly pending?: boolean
 }) {
-  const picture = usePicture(preview, fallback)
+  const picture = usePicture(preview, fallback, pending)
 
   if (picture.src) {
     return (
@@ -221,7 +222,11 @@ export function ItemTile({
         onError={picture.fail}
         // From the top at the item's width: a board taller than its picture, which stops 4000
         // pixels down, shows the rest empty rather than a picture zoomed to fill it.
-        className="block size-full object-contain object-top"
+        className={cn(
+          "block size-full object-contain object-top",
+          pending && "motion-safe:animate-pulse"
+        )}
+        {...(pending ? { "aria-busy": true } : {})}
       />
     )
   }
@@ -243,12 +248,14 @@ const NOTHING_FAILED: ReadonlySet<string> = new Set()
 /**
  * The picture to show of `preview`, else of `fallback` once it fails, without going blank as it
  * changes: the one shown stays until the next has decoded, so a sharper picture, or one in the
- * other mode, takes its place in one frame. Nothing is shown before the first one, which loads in
- * place, as an image does.
+ * other mode, takes its place in one frame. While the next is `pending`, the one shown stays too:
+ * a board that changed shows its last picture until the new one is rendered. Nothing is shown
+ * before the first one, which loads in place, as an image does.
  */
 function usePicture(
   preview: string | undefined,
-  fallback: string | undefined
+  fallback: string | undefined,
+  pending: boolean
 ): { readonly src: string | null; readonly fail: () => void } {
   const [failed, setFailed] = useState(NOTHING_FAILED)
   const wanted = [preview, fallback].find((src) => src !== undefined && !failed.has(src)) ?? null
@@ -258,7 +265,10 @@ function usePicture(
   useEffect(() => {
     if (wanted === shown) return
 
-    // Nothing worth keeping on screen: the next one loads in place.
+    // The next one is on its way: the one shown stays until it is ready.
+    if (!wanted && pending && showing) return
+
+    // Nothing worth keeping on screen, or nothing to come: the next one loads in place.
     if (!wanted || !showing) {
       setShown(wanted)
       return
@@ -278,7 +288,7 @@ function usePicture(
     return () => {
       current = false
     }
-  }, [wanted, shown, showing])
+  }, [wanted, shown, showing, pending])
 
   return {
     src: showing ? shown : wanted,
