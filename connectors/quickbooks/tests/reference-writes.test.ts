@@ -141,8 +141,16 @@ test("invalid reference write inputs reject before network access", async () => 
     return Response.json({})
   })
   const qb = await client()
-  await expect(qb.employees.create({ Title: "Crew lead" })).rejects.toThrow("Employee creation")
-  await expect(qb.employees.create({ GivenName: " " })).rejects.toThrow("GivenName")
+  // Live: QuickBooks rejected DisplayName-only and GivenName-only employees with 2020.
+  await expect(
+    // @ts-expect-error GivenName and FamilyName are both required.
+    qb.employees.create({ DisplayName: "Crew lead" })
+  ).rejects.toThrow("GivenName")
+  // @ts-expect-error FamilyName is required.
+  await expect(qb.employees.create({ GivenName: "Ada" })).rejects.toThrow("FamilyName")
+  await expect(qb.employees.create({ GivenName: " ", FamilyName: "Example" })).rejects.toThrow(
+    "GivenName"
+  )
   await expect(qb.employees.update({ ...identity, DisplayName: "" })).rejects.toThrow("DisplayName")
   await expect(qb.classes.create({ Name: "" })).rejects.toThrow("Name")
   // @ts-expect-error QuickBooks requires Name on every Class update.

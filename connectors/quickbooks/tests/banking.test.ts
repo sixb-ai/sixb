@@ -186,6 +186,11 @@ test("invalid time, deposit, transfer and journal inputs reject before network a
     qb.timeActivities.create({ ...time, Hours: undefined, Minutes: undefined })
   ).rejects.toThrow("StartTime")
   await expect(qb.timeActivities.create({ ...time, Hours: 1.5 })).rejects.toThrow("Hours")
+  // Removal proof: drop the NameOf check for updates in timeActivity; this reaches fetch.
+  await expect(
+    // @ts-expect-error A new worker reference needs NameOf.
+    qb.timeActivities.update({ ...identity, EmployeeRef: { value: "56" } })
+  ).rejects.toThrow("requires NameOf")
   await expect(
     // @ts-expect-error BillableStatus is one of the provider values.
     qb.timeActivities.update({ ...identity, BillableStatus: "Invoiced" })

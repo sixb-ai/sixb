@@ -4,8 +4,8 @@ import type { QuickBooksPage, QuickBooksRefundReceiptListOptions } from "../type
 import type { QuickBooksRefundReceipt } from "../types/transactions"
 import type {
   QuickBooksDeleteResult,
-  QuickBooksInvoiceSendOptions,
   QuickBooksRefundReceiptCreate,
+  QuickBooksRefundReceiptSendOptions,
   QuickBooksRefundReceiptUpdate,
   QuickBooksRevision,
   QuickBooksWriteOptions,
@@ -39,7 +39,7 @@ export interface QuickBooksRefundReceiptsResource {
     input: QuickBooksRevision,
     options?: QuickBooksWriteOptions
   ): Promise<QuickBooksRefundReceipt>
-  send(id: string, options?: QuickBooksInvoiceSendOptions): Promise<QuickBooksRefundReceipt>
+  send(id: string, options?: QuickBooksRefundReceiptSendOptions): Promise<QuickBooksRefundReceipt>
   /** GET /v3/company/{realmId}/refundreceipt/{id} */
   get(id: string): Promise<QuickBooksRefundReceipt>
   /** GET /v3/company/{realmId}/refundreceipt/{id}/pdf */

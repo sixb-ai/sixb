@@ -15,6 +15,7 @@ import {
   updateEntity,
   writeEntity,
 } from "../write"
+import { parentRef } from "../write-validation"
 
 /** Classes are deactivated, not deleted. */
 export interface QuickBooksClassesResource {
@@ -40,12 +41,12 @@ export function createClassesResource(http: QuickBooksWriteHttp): QuickBooksClas
     async create(input, options) {
       createInput(input)
       nonEmpty(input.Name, "Name")
-      parent(input.SubClass, input.ParentRef)
+      parentRef(input.SubClass, input.ParentRef)
       return writeEntity(http, "Class", "class", input, options)
     },
     async update(input, options) {
       nonEmpty(input.Name, "Name")
-      parent(input.SubClass, input.ParentRef)
+      parentRef(input.SubClass, input.ParentRef)
       return updateEntity(http, "Class", input, options)
     },
     deactivate: async (input, options) =>
@@ -57,8 +58,4 @@ export function createClassesResource(http: QuickBooksWriteHttp): QuickBooksClas
     listAll: (options) => listAll(resource.list, options),
   }
   return resource
-}
-
-function parent(sub: boolean | undefined, ref: { value: string } | undefined) {
-  if (sub === true) nonEmpty(ref?.value, "ParentRef.value")
 }

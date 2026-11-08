@@ -15,6 +15,7 @@ import {
   updateEntity,
   writeEntity,
 } from "../write"
+import { parentRef } from "../write-validation"
 
 /** Departments (Locations in the QuickBooks UI) are deactivated, not deleted. */
 export interface QuickBooksDepartmentsResource {
@@ -48,12 +49,12 @@ export function createDepartmentsResource(
     async create(input, options) {
       createInput(input)
       nonEmpty(input.Name, "Name")
-      parent(input.SubDepartment, input.ParentRef)
+      parentRef(input.SubDepartment, input.ParentRef)
       return writeEntity(http, "Department", "department", input, options)
     },
     async update(input, options) {
       nonEmpty(input.Name, "Name")
-      parent(input.SubDepartment, input.ParentRef)
+      parentRef(input.SubDepartment, input.ParentRef)
       return updateEntity(http, "Department", input, options)
     },
     deactivate: async (input, options) =>
@@ -65,8 +66,4 @@ export function createDepartmentsResource(
     listAll: (options) => listAll(resource.list, options),
   }
   return resource
-}
-
-function parent(sub: boolean | undefined, ref: { value: string } | undefined) {
-  if (sub === true) nonEmpty(ref?.value, "ParentRef.value")
 }

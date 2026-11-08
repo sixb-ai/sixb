@@ -3,8 +3,8 @@ import type { QuickBooksReadHttp } from "./query"
 import { pathId } from "./query"
 import type {
   QuickBooksDeleteResult,
-  QuickBooksInvoiceSendOptions,
   QuickBooksRevision,
+  QuickBooksSendOptions,
   QuickBooksWriteOptions,
 } from "./types/writes"
 import { isRecord, nonEmpty } from "./validation"
@@ -76,7 +76,7 @@ export function sendEntity<T>(
   http: QuickBooksWriteHttp,
   entity: string,
   id: string,
-  options: QuickBooksInvoiceSendOptions = {}
+  options: QuickBooksSendOptions = {}
 ): Promise<T> {
   let path = `${entity.toLowerCase()}/${pathId(id)}/send`
   if (options.sendTo !== undefined) {

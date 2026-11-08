@@ -6,6 +6,7 @@ import type {
   QuickBooksExpenseWriteLine,
   QuickBooksInvoiceLine,
   QuickBooksJournalEntryWriteLine,
+  QuickBooksTimeActivityCreate,
   QuickBooksTimeActivityUpdate,
 } from "./types/writes"
 import { nonEmpty } from "./validation"
@@ -67,11 +68,13 @@ export function allocations(lines: readonly QuickBooksAllocationLine[]) {
     finiteAmount(line.Amount, "Line.Amount")
     if (!Array.isArray(line.LinkedTxn) || !line.LinkedTxn.length)
       throw new Error("[SixbQuickBooks] Allocation lines require LinkedTxn.")
-    for (const link of line.LinkedTxn) {
-      nonEmpty(link.TxnId, "LinkedTxn.TxnId")
-      nonEmpty(link.TxnType, "LinkedTxn.TxnType")
-    }
+    linkedTransactions(line.LinkedTxn)
   }
+}
+
+/** A sub-class or sub-department needs its parent. */
+export function parentRef(sub: boolean | undefined, parent: { value: string } | undefined) {
+  if (sub === true) nonEmpty(parent?.value, "ParentRef.value")
 }
 
 export function billPayment(input: QuickBooksBillPaymentCreate) {
@@ -88,39 +91,34 @@ export function billPayment(input: QuickBooksBillPaymentCreate) {
     )
 }
 
-export function timeActivity(input: QuickBooksTimeActivityUpdate | object, create: boolean) {
-  const value = input as {
-    NameOf?: unknown
-    EmployeeRef?: { value?: string }
-    VendorRef?: { value?: string }
-    Hours?: number
-    Minutes?: number
-    StartTime?: string
-    EndTime?: string
-    BillableStatus?: unknown
-  }
-  if (create || value.NameOf !== undefined) {
-    if (value.NameOf === "Employee" && value.VendorRef === undefined)
-      nonEmpty(value.EmployeeRef?.value, "EmployeeRef.value")
-    else if (value.NameOf === "Vendor" && value.EmployeeRef === undefined)
-      nonEmpty(value.VendorRef?.value, "VendorRef.value")
+export function timeActivity(
+  input: QuickBooksTimeActivityCreate | QuickBooksTimeActivityUpdate,
+  create: boolean
+) {
+  if (create || input.NameOf !== undefined) {
+    if (input.NameOf === "Employee" && input.VendorRef === undefined)
+      nonEmpty(input.EmployeeRef?.value, "EmployeeRef.value")
+    else if (input.NameOf === "Vendor" && input.EmployeeRef === undefined)
+      nonEmpty(input.VendorRef?.value, "VendorRef.value")
     else
       throw new Error(
         "[SixbQuickBooks] NameOf must be Employee with EmployeeRef or Vendor with VendorRef."
       )
-  }
+  } else if (input.EmployeeRef !== undefined || input.VendorRef !== undefined)
+    throw new Error("[SixbQuickBooks] Changing EmployeeRef or VendorRef requires NameOf.")
   for (const field of ["Hours", "Minutes"] as const) {
-    const amount = value[field]
+    const amount = input[field]
     if (amount !== undefined && (!Number.isSafeInteger(amount) || amount < 0))
       throw new Error(`[SixbQuickBooks] ${field} must be a nonnegative integer.`)
   }
-  if (create && value.Hours === undefined && value.Minutes === undefined) {
-    nonEmpty(value.StartTime, "StartTime (or Hours/Minutes)")
-    nonEmpty(value.EndTime, "EndTime")
+  if (create && input.Hours === undefined && input.Minutes === undefined) {
+    nonEmpty(input.StartTime, "StartTime (or Hours/Minutes)")
+    nonEmpty(input.EndTime, "EndTime")
   }
+  const status: unknown = input.BillableStatus
   if (
-    value.BillableStatus !== undefined &&
-    !["Billable", "NotBillable", "HasBeenBilled"].includes(value.BillableStatus as string)
+    status !== undefined &&
+    !["Billable", "NotBillable", "HasBeenBilled"].includes(status as string)
   )
     throw new Error(
       "[SixbQuickBooks] BillableStatus must be Billable, NotBillable, or HasBeenBilled."

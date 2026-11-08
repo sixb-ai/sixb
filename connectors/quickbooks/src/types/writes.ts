@@ -108,57 +108,8 @@ export type QuickBooksInvoiceLine =
     })
   | Exclude<QuickBooksSalesLine, QuickBooksSalesItemLine>
 
-type InvoiceFields = Pick<
-  QuickBooksInvoice,
-  | "TxnDate"
-  | "DocNumber"
-  | "PrivateNote"
-  | "CurrencyRef"
-  | "ExchangeRate"
-  | "DepartmentRef"
-  | "ClassRef"
-  | "CustomField"
-  | "TxnTaxDetail"
-  | "GlobalTaxCalculation"
-  | "BillAddr"
-  | "ShipAddr"
-  | "BillEmail"
-  | "BillEmailCc"
-  | "BillEmailBcc"
-  | "CustomerMemo"
-  | "SalesTermRef"
-  | "ShipMethodRef"
-  | "ShipDate"
-  | "TrackingNum"
-  | "PrintStatus"
-  | "EmailStatus"
-  | "ApplyTaxAfterDiscount"
-  | "DueDate"
-  | "Deposit"
-  | "DepositToAccountRef"
-  | "AllowOnlineCreditCardPayment"
-  | "AllowOnlineACHPayment"
-  | "ProjectRef"
-> & {
-  /** Link an accepted estimate (`TxnType: "Estimate"`) or other source transaction. */
-  readonly LinkedTxn?: readonly QuickBooksLinkedTransaction[]
-}
-
-export type QuickBooksInvoiceCreate = InvoiceFields & {
-  readonly CustomerRef: QuickBooksReference
-  readonly Line: readonly QuickBooksInvoiceLine[]
-}
-
-/** Sparse update; supplying Line follows Intuit's line-ID replacement semantics. */
-export type QuickBooksInvoiceUpdate = QuickBooksRevision & Partial<QuickBooksInvoiceCreate>
-
-export interface QuickBooksInvoiceSendOptions extends QuickBooksWriteOptions {
-  /** Omit to use the invoice's BillEmail.Address. Intuit may update BillEmail when supplied. */
-  readonly sendTo?: string
-}
-
-type EstimateFields = Pick<
-  QuickBooksEstimate,
+/** Header fields every sales form here accepts (invoices, estimates, sales and refund receipts). */
+type SalesFormField =
   | "TxnDate"
   | "DocNumber"
   | "PrivateNote"
@@ -174,15 +125,56 @@ type EstimateFields = Pick<
   | "ShipAddr"
   | "ShipFromAddr"
   | "BillEmail"
+  | "CustomerMemo"
+  | "PrintStatus"
+  | "ApplyTaxAfterDiscount"
+
+type InvoiceFields = Pick<
+  QuickBooksInvoice,
+  | SalesFormField
   | "BillEmailCc"
   | "BillEmailBcc"
-  | "CustomerMemo"
   | "SalesTermRef"
   | "ShipMethodRef"
   | "ShipDate"
-  | "PrintStatus"
+  | "TrackingNum"
   | "EmailStatus"
-  | "ApplyTaxAfterDiscount"
+  | "DueDate"
+  | "Deposit"
+  | "DepositToAccountRef"
+  | "AllowOnlineCreditCardPayment"
+  | "AllowOnlineACHPayment"
+> & {
+  /** Link an accepted estimate (`TxnType: "Estimate"`) or other source transaction. */
+  readonly LinkedTxn?: readonly QuickBooksLinkedTransaction[]
+}
+
+export type QuickBooksInvoiceCreate = InvoiceFields & {
+  readonly CustomerRef: QuickBooksReference
+  readonly Line: readonly QuickBooksInvoiceLine[]
+}
+
+/** Sparse update; supplying Line follows Intuit's line-ID replacement semantics. */
+export type QuickBooksInvoiceUpdate = QuickBooksRevision & Partial<QuickBooksInvoiceCreate>
+
+export interface QuickBooksSendOptions extends QuickBooksWriteOptions {
+  /**
+   * Omit to use the stored address (`BillEmail`, or `POEmail` for purchase orders). QuickBooks
+   * may store an explicit recipient as the new address.
+   */
+  readonly sendTo?: string
+}
+export type QuickBooksInvoiceSendOptions = QuickBooksSendOptions
+
+type EstimateFields = Pick<
+  QuickBooksEstimate,
+  | SalesFormField
+  | "BillEmailCc"
+  | "BillEmailBcc"
+  | "SalesTermRef"
+  | "ShipMethodRef"
+  | "ShipDate"
+  | "EmailStatus"
   | "DueDate"
   | "ExpirationDate"
   | "AcceptedBy"
@@ -197,7 +189,7 @@ export type QuickBooksEstimateCreate = EstimateFields & {
 /** Sparse update; supplying Line follows Intuit's line-ID replacement semantics. */
 export type QuickBooksEstimateUpdate = QuickBooksRevision & Partial<QuickBooksEstimateCreate>
 
-export type QuickBooksEstimateSendOptions = QuickBooksInvoiceSendOptions
+export type QuickBooksEstimateSendOptions = QuickBooksSendOptions
 
 export interface QuickBooksInvoiceDeleteResult {
   readonly Id: string
@@ -210,28 +202,8 @@ export interface QuickBooksDeleteResult {
 }
 
 type ReceiptFields =
+  | SalesFormField
   | "CustomerRef"
-  | "TxnDate"
-  | "DocNumber"
-  | "PrivateNote"
-  | "CurrencyRef"
-  | "ExchangeRate"
-  | "DepartmentRef"
-  | "ClassRef"
-  | "ProjectRef"
-  | "CustomField"
-  | "TxnTaxDetail"
-  | "GlobalTaxCalculation"
-  | "BillAddr"
-  | "ShipAddr"
-  | "ShipFromAddr"
-  | "BillEmail"
-  | "CustomerMemo"
-  | "ShipMethodRef"
-  | "ShipDate"
-  | "TrackingNum"
-  | "PrintStatus"
-  | "ApplyTaxAfterDiscount"
   | "DepositToAccountRef"
   | "PaymentMethodRef"
   | "PaymentRefNum"
@@ -239,26 +211,30 @@ type ReceiptFields =
 /** CustomerRef is optional: a sales receipt can record an anonymous sale. */
 export type QuickBooksSalesReceiptCreate = Pick<
   QuickBooksSalesReceipt,
-  ReceiptFields | "EmailStatus"
+  ReceiptFields | "ShipMethodRef" | "ShipDate" | "TrackingNum" | "EmailStatus"
 > & { readonly Line: readonly QuickBooksInvoiceLine[] }
 /** Sparse update; supplying Line follows Intuit's line-ID replacement semantics. */
 export type QuickBooksSalesReceiptUpdate = QuickBooksRevision &
   Partial<QuickBooksSalesReceiptCreate>
-export type QuickBooksSalesReceiptSendOptions = QuickBooksInvoiceSendOptions
+export type QuickBooksSalesReceiptSendOptions = QuickBooksSendOptions
 
-/** DepositToAccountRef is the account the refund is paid from. */
+/**
+ * DepositToAccountRef is the account the refund is paid from. Addresses persist, but QuickBooks
+ * dropped ShipMethodRef, ShipDate and TrackingNum on refund receipts, so they are not accepted.
+ */
 export type QuickBooksRefundReceiptCreate = Pick<QuickBooksRefundReceipt, ReceiptFields> & {
   readonly Line: readonly QuickBooksInvoiceLine[]
   readonly DepositToAccountRef: QuickBooksReference
 }
 export type QuickBooksRefundReceiptUpdate = QuickBooksRevision &
   Partial<QuickBooksRefundReceiptCreate>
+export type QuickBooksRefundReceiptSendOptions = QuickBooksSendOptions
 
 export interface QuickBooksPaymentSendOptions extends QuickBooksWriteOptions {
   /** Payment receipt emails require an explicit recipient. */
   readonly sendTo: string
 }
-export type QuickBooksCreditMemoSendOptions = QuickBooksInvoiceSendOptions
+export type QuickBooksCreditMemoSendOptions = QuickBooksSendOptions
 
 type TransactionFields = "TxnDate" | "PrivateNote" | "CurrencyRef" | "ExchangeRate"
 
@@ -404,7 +380,7 @@ export type QuickBooksPurchaseOrderCreate = Pick<
 }
 export type QuickBooksPurchaseOrderUpdate = QuickBooksRevision &
   Partial<QuickBooksPurchaseOrderCreate>
-export type QuickBooksPurchaseOrderSendOptions = QuickBooksInvoiceSendOptions
+export type QuickBooksPurchaseOrderSendOptions = QuickBooksSendOptions
 
 export type QuickBooksBillPaymentCreate = Pick<
   QuickBooksBillPayment,
@@ -571,14 +547,13 @@ export interface QuickBooksPreferencesUpdate extends QuickBooksRevision {
   }
 }
 
+/** QuickBooks requires GivenName and FamilyName (error 2020); DisplayName defaults from them. */
 export type QuickBooksEmployeeCreate = Pick<
   QuickBooksEmployee,
   | "DisplayName"
   | "Active"
   | "Title"
-  | "GivenName"
   | "MiddleName"
-  | "FamilyName"
   | "Suffix"
   | "PrintOnCheckName"
   | "PrimaryPhone"
@@ -593,7 +568,7 @@ export type QuickBooksEmployeeCreate = Pick<
   | "Gender"
   | "HiredDate"
   | "ReleasedDate"
->
+> & { readonly GivenName: string; readonly FamilyName: string }
 /** Always a sparse update. Employees are deactivated, not deleted. */
 export type QuickBooksEmployeeUpdate = QuickBooksRevision & Partial<QuickBooksEmployeeCreate>
 
@@ -661,9 +636,13 @@ export type QuickBooksTimeActivityWorker =
 
 /** Supply a duration (Hours/Minutes) or both StartTime and EndTime. */
 export type QuickBooksTimeActivityCreate = TimeActivityFields & QuickBooksTimeActivityWorker
+/** Changing who did the work needs NameOf with the matching reference. */
 export type QuickBooksTimeActivityUpdate = QuickBooksRevision &
   Partial<TimeActivityFields> &
-  (QuickBooksTimeActivityWorker | { readonly NameOf?: never })
+  (
+    | QuickBooksTimeActivityWorker
+    | { readonly NameOf?: never; readonly EmployeeRef?: never; readonly VendorRef?: never }
+  )
 
 /** A direct deposit line from an account, or a line depositing a linked payment. */
 export type QuickBooksDepositWriteLine =

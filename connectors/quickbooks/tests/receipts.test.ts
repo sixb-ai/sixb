@@ -43,6 +43,15 @@ const receipt = { Line, DepositToAccountRef: { value: "35" }, PaymentRefNum: "10
 const refund = { CustomerRef: { value: "9" }, Line, DepositToAccountRef: { value: "35" } }
 const pdf = new Uint8Array([37, 80, 68, 70, 45, 0, 255])
 
+// Compile-time guard, enforced by `bun run typecheck:tests`: QuickBooks dropped these fields on
+// refund receipts (live), so the input type must not offer them. Addresses persist and stay.
+type DroppedRefundFields = Extract<
+  keyof QuickBooksRefundReceiptCreate,
+  "ShipMethodRef" | "ShipDate" | "TrackingNum"
+>
+const refundShippingIsUntyped: [DroppedRefundFields] extends [never] ? true : never = true
+void refundShippingIsUntyped
+
 for (const [resource, entity, path] of [
   ["salesReceipts", "SalesReceipt", "salesreceipt"],
   ["refundReceipts", "RefundReceipt", "refundreceipt"],

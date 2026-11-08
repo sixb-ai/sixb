@@ -45,14 +45,9 @@ export function createEmployeesResource(http: QuickBooksWriteHttp): QuickBooksEm
   const resource: QuickBooksEmployeesResource = {
     async create(input, options) {
       createInput(input)
-      if (
-        input.DisplayName === undefined &&
-        input.GivenName === undefined &&
-        input.FamilyName === undefined
-      )
-        throw new Error(
-          "[SixbQuickBooks] Employee creation requires DisplayName, GivenName, or FamilyName."
-        )
+      // QuickBooks rejects employees without both names (error 2020), even with DisplayName.
+      nonEmpty(input.GivenName, "GivenName")
+      nonEmpty(input.FamilyName, "FamilyName")
       names(input)
       return writeEntity(http, "Employee", "employee", input, options)
     },
