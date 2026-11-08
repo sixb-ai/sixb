@@ -102,7 +102,34 @@ export function parseArtifactTurnWriteRow(row: Row): ArtifactTurnWriteRecord {
     artifactId,
     created: flag(row.created, "created", where),
     revision: positiveInteger(row.revision, "revision", where),
+    writes: positiveInteger(row.writes, "writes", where),
   }
+}
+
+/**
+ * Whether a retry may undo a turn's writes to an artifact: nobody else changed it since the turn
+ * began. Every change moves an artifact's revision by exactly one, so the turn's writes alone took
+ * it from its restore point's revision, or from nothing when the turn created it, to `revision`;
+ * a write, a version created, or a restore by anyone else between two of them leaves it further.
+ * And the version the restore point held open must still be open: undoing never rewrites or
+ * reopens a version someone created.
+ */
+export function turnUndoable(input: {
+  readonly write: Pick<ArtifactTurnWriteRecord, "created" | "writes">
+  /** The artifact's revision now. */
+  readonly revision: number
+  /** The turn's restore point; none for an artifact the turn created. */
+  readonly point?: Pick<ArtifactRestorePointRecord, "revision" | "frozen">
+  /** The version the restore point was taken of, as it is now; none when it is gone. */
+  readonly target?: { readonly frozen: boolean }
+}): boolean {
+  const { write, revision, point, target } = input
+  if (write.created) return revision === write.writes
+
+  if (!point || !target) return false
+  if (target.frozen && !point.frozen) return false
+
+  return revision - point.revision === write.writes
 }
 
 /** What a version or a restore point holds, and who last wrote it from where. */

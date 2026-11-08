@@ -10,6 +10,7 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  turnUndoable,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactBoardPreviewRecord,
@@ -82,7 +83,7 @@ const RESTORE_POINT_COLUMNS = `
   ${CONTENT_COLUMNS}, reason, turn_run_id AS "turnRunId", created_at AS "createdAt"
 `
 
-const TURN_WRITE_COLUMNS = `artifact_id AS "artifactId", created, revision`
+const TURN_WRITE_COLUMNS = `artifact_id AS "artifactId", created, revision, writes`
 
 const FRAME_GRANT_COLUMNS = `
   project_id AS "projectId", token_hash AS "tokenHash", artifact_id AS "artifactId", version,
@@ -285,25 +286,30 @@ export class PgArtifactStorage implements ArtifactStorage {
         ORDER BY id
         FOR UPDATE
       `
-      const writes = await tx<PgRow[]>`
-        SELECT w.artifact_id AS "artifactId", w.created, w.revision
+      const rows = await tx<PgRow[]>`
+        SELECT w.artifact_id AS "artifactId", w.created, w.revision, w.writes,
+          a.revision AS "currentRevision"
         FROM artifact_turn_writes w
         JOIN artifacts a ON a.project_id = w.project_id AND a.id = w.artifact_id
         WHERE w.project_id = ${projectId} AND w.turn_run_id = ${turnRunId}
-          AND a.revision = w.revision
         ORDER BY w.artifact_id COLLATE "C"
       `
 
       const restored: PublishedArtifactVersion[] = []
       const deleted: string[] = []
-      for (const write of writes.map(parseArtifactTurnWriteRow)) {
+      for (const row of rows) {
+        const write = parseArtifactTurnWriteRow(row)
+        const revision = Number(row.currentRevision)
+
         if (write.created) {
+          if (!turnUndoable({ write, revision })) continue
+
           await tx`DELETE FROM artifacts WHERE project_id = ${projectId} AND id = ${write.artifactId}`
           deleted.push(write.artifactId)
           continue
         }
 
-        const undone = await undoTurn(tx, projectId, write.artifactId, turnRunId)
+        const undone = await undoTurn(tx, projectId, write, turnRunId)
         if (undone) restored.push(undone)
       }
 
@@ -870,7 +876,10 @@ async function turnWrote(
   return rows.length > 0
 }
 
-/** Remembers the revision a turn's write left, and forgets the oldest turns past those kept. */
+/**
+ * Remembers the revision a turn's write left and counts the write, and forgets the oldest turns
+ * past those kept.
+ */
 async function recordTurnWrite(
   sql: SQLClient,
   input: {
@@ -883,9 +892,11 @@ async function recordTurnWrite(
 ): Promise<void> {
   const { projectId, artifactId } = input
   await sql`
-    INSERT INTO artifact_turn_writes (project_id, artifact_id, turn_run_id, created, revision)
-    VALUES (${projectId}, ${artifactId}, ${input.turnRunId}, ${input.created}, ${input.revision})
-    ON CONFLICT (project_id, artifact_id, turn_run_id) DO UPDATE SET revision = excluded.revision
+    INSERT INTO artifact_turn_writes
+      (project_id, artifact_id, turn_run_id, created, revision, writes)
+    VALUES (${projectId}, ${artifactId}, ${input.turnRunId}, ${input.created}, ${input.revision}, 1)
+    ON CONFLICT (project_id, artifact_id, turn_run_id) DO UPDATE SET
+      revision = excluded.revision, writes = artifact_turn_writes.writes + 1
   `
   await sql`
     DELETE FROM artifact_turn_writes
@@ -900,14 +911,15 @@ async function recordTurnWrite(
 /**
  * Puts a locked artifact back as the turn's restore point holds it, at a new revision: an open
  * version takes its content back, and a version the turn opened past a frozen one goes. `null`
- * when the turn kept no restore point of it, or its version is gone.
+ * when anyone else changed it since the point, as `turnUndoable` says, or its version is gone.
  */
 async function undoTurn(
   sql: SQLClient,
   projectId: string,
-  artifactId: string,
+  write: ArtifactTurnWriteRecord,
   turnRunId: string
 ): Promise<PublishedArtifactVersion | null> {
+  const { artifactId } = write
   const [row] = await sql<PgRow[]>`
     SELECT ${sql.unsafe(RESTORE_POINT_COLUMNS)} FROM artifact_restore_points
     WHERE project_id = ${projectId} AND artifact_id = ${artifactId}
@@ -919,11 +931,19 @@ async function undoTurn(
   const [current] = await sql<{ revision: number }[]>`
     SELECT revision FROM artifacts WHERE project_id = ${projectId} AND id = ${artifactId}
   `
-  const [kept] = await sql`
-    SELECT 1 FROM artifact_versions
+  const [target] = await sql<{ frozenAt: Date | null }[]>`
+    SELECT frozen_at AS "frozenAt" FROM artifact_versions
     WHERE project_id = ${projectId} AND artifact_id = ${artifactId} AND version = ${point.version}
   `
-  if (!current || !kept) return null
+  if (!current || !target) return null
+
+  const untouched = turnUndoable({
+    write,
+    revision: Number(current.revision),
+    point,
+    target: { frozen: target.frozenAt !== null },
+  })
+  if (!untouched) return null
   const revision = Number(current.revision) + 1
 
   await sql`

@@ -11,6 +11,7 @@ import {
   parseArtifactStateRow,
   parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
+  turnUndoable,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactBoardPreviewRecord,
@@ -75,7 +76,7 @@ const RESTORE_POINT_COLUMNS = `
   ${CONTENT_COLUMNS}, reason, turn_run_id AS turnRunId, created_at AS createdAt
 `
 
-const TURN_WRITE_COLUMNS = "artifact_id AS artifactId, created, revision"
+const TURN_WRITE_COLUMNS = "artifact_id AS artifactId, created, revision, writes"
 
 const FRAME_GRANT_COLUMNS = `
   project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId, version, revision,
@@ -283,21 +284,27 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     return runImmediateTransaction(this.db, () => {
       const { projectId, turnRunId } = input
 
-      // The writes nobody changed the artifact past: the write transaction holds every other.
-      const writes = this.db
+      // Each write beside the artifact's revision now: the write transaction holds every change.
+      const rows = this.db
         .query(
-          `SELECT w.artifact_id AS artifactId, w.created, w.revision
+          `SELECT w.artifact_id AS artifactId, w.created, w.revision, w.writes,
+             a.revision AS currentRevision
            FROM artifact_turn_writes w
            JOIN artifacts a ON a.project_id = w.project_id AND a.id = w.artifact_id
-           WHERE w.project_id = ? AND w.turn_run_id = ? AND a.revision = w.revision
+           WHERE w.project_id = ? AND w.turn_run_id = ?
            ORDER BY w.artifact_id`
         )
         .all(projectId, turnRunId) as Row[]
 
       const restored: PublishedArtifactVersion[] = []
       const deleted: string[] = []
-      for (const write of writes.map(parseArtifactTurnWriteRow)) {
+      for (const row of rows) {
+        const write = parseArtifactTurnWriteRow(row)
+        const revision = Number(row.currentRevision)
+
         if (write.created) {
+          if (!turnUndoable({ write, revision })) continue
+
           this.db
             .query("DELETE FROM artifacts WHERE project_id = ? AND id = ?")
             .run(projectId, write.artifactId)
@@ -305,7 +312,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           continue
         }
 
-        const undone = this.undoTurn(projectId, write.artifactId, turnRunId)
+        const undone = this.undoTurn(projectId, write, turnRunId)
         if (!undone) continue
 
         restored.push(undone)
@@ -890,7 +897,10 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     )
   }
 
-  /** Remembers the revision a turn's write left, and forgets the oldest turns past those kept. */
+  /**
+   * Remembers the revision a turn's write left and counts the write, and forgets the oldest turns
+   * past those kept.
+   */
   private recordTurnWrite(input: {
     readonly projectId: string
     readonly artifactId: string
@@ -901,10 +911,11 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     const { projectId, artifactId } = input
     this.db
       .query(
-        `INSERT INTO artifact_turn_writes (project_id, artifact_id, turn_run_id, created, revision)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO artifact_turn_writes
+           (project_id, artifact_id, turn_run_id, created, revision, writes)
+         VALUES (?, ?, ?, ?, ?, 1)
          ON CONFLICT (project_id, artifact_id, turn_run_id) DO UPDATE SET
-           revision = excluded.revision`
+           revision = excluded.revision, writes = artifact_turn_writes.writes + 1`
       )
       .run(projectId, artifactId, input.turnRunId, input.created ? 1 : 0, input.revision)
     this.db
@@ -920,14 +931,15 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
   /**
    * Puts an artifact back as the turn's restore point holds it, at a new revision: an open version
-   * takes its content back, and a version the turn opened past a frozen one goes. `null` when the
-   * turn kept no restore point of it, or its version is gone.
+   * takes its content back, and a version the turn opened past a frozen one goes. `null` when
+   * anyone else changed it since the point, as `turnUndoable` says, or its version is gone.
    */
   private undoTurn(
     projectId: string,
-    artifactId: string,
+    write: ArtifactTurnWriteRecord,
     turnRunId: string
   ): PublishedArtifactVersion | null {
+    const { artifactId } = write
     const row = this.db
       .query(
         `SELECT ${RESTORE_POINT_COLUMNS} FROM artifact_restore_points
@@ -938,12 +950,21 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     const point = parseArtifactRestorePointRow(row)
 
     const current = this.readArtifact(projectId, artifactId)
-    const kept = this.db
+    const target = this.db
       .query(
-        "SELECT 1 FROM artifact_versions WHERE project_id = ? AND artifact_id = ? AND version = ?"
+        `SELECT frozen_at AS frozenAt FROM artifact_versions
+         WHERE project_id = ? AND artifact_id = ? AND version = ?`
       )
-      .get(projectId, artifactId, point.version)
-    if (!current || !kept) return null
+      .get(projectId, artifactId, point.version) as Row | null
+    if (!current || !target) return null
+
+    const untouched = turnUndoable({
+      write,
+      revision: current.artifact.revision,
+      point,
+      target: { frozen: target.frozenAt !== null },
+    })
+    if (!untouched) return null
     const revision = current.artifact.revision + 1
 
     this.db

@@ -602,10 +602,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         })
 
         expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_1" })).toEqual([
-          { artifactId: "art_report", created: false, revision: 4 },
+          { artifactId: "art_report", created: false, revision: 4, writes: 3 },
         ])
         expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_2" })).toEqual([
-          { artifactId: "art_new", created: true, revision: 1 },
+          { artifactId: "art_new", created: true, revision: 1, writes: 1 },
         ])
         expect(
           await artifacts.listTurnWrites({ projectId: otherProjectId, turnRunId: "run_1" })
@@ -850,6 +850,72 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           restored: [],
           deleted: [],
         })
+      })
+    })
+
+    // Regression proof: compare the artifact's revision with the turn's last write alone, as
+    // providers once did; the version created between the turn's writes is rewritten, and the
+    // person's save between them is lost with no restore point of it.
+    test("keeps what anyone changed between two of a turn's writes", async () => {
+      await withStorage(async (artifacts) => {
+        const write = (artifactId: string, updatedAt: Date) =>
+          artifacts.publish({
+            ...publishInput(
+              { title: "Turn's", origin: { threadId: "thr_turn", runId: "run_turn" }, updatedAt },
+              artifactId
+            ),
+            turnRunId: "run_turn",
+          })
+
+        // Someone created version 1 between the turn's writes: the second opened version 2.
+        await artifacts.create(createInput({ id: "art_created_between" }))
+        await write("art_created_between", at(1))
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_created_between",
+          frozenAt: at(2),
+          frozenBy: otherOwner,
+        })
+        await write("art_created_between", at(3))
+
+        // Someone saved between them, and the turn wrote again on top.
+        await artifacts.create(createInput({ id: "art_saved_between" }))
+        await write("art_saved_between", at(1))
+        await artifacts.publish(
+          publishInput(
+            { title: "Person's", origin: undefined, updatedAt: at(2) },
+            "art_saved_between"
+          )
+        )
+        await write("art_saved_between", at(3))
+
+        expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_turn" })).toEqual([
+          { artifactId: "art_created_between", created: false, revision: 4, writes: 2 },
+          { artifactId: "art_saved_between", created: false, revision: 4, writes: 2 },
+        ])
+        expect(await artifacts.undoTurnWrites({ projectId, turnRunId: "run_turn" })).toEqual({
+          restored: [],
+          deleted: [],
+        })
+
+        // Version 1 stays as its creator created it, and version 2 stays open.
+        expect(
+          await artifacts.getVersion({ projectId, artifactId: "art_created_between", version: 1 })
+        ).toMatchObject({ title: "Turn's", frozenAt: at(2), frozenBy: otherOwner })
+        expect(await artifacts.get({ projectId, id: "art_created_between" })).toMatchObject({
+          latestVersion: 2,
+          revision: 4,
+        })
+        // The turn's write on top of the save stays, and the turn's restore point with it.
+        expect(await artifacts.get({ projectId, id: "art_saved_between" })).toMatchObject({
+          title: "Turn's",
+          revision: 4,
+        })
+        expect(
+          (await artifacts.listRestorePoints({ projectId, id: "art_saved_between" })).map(
+            (point) => point.turnRunId
+          )
+        ).toEqual(["run_turn"])
       })
     })
 

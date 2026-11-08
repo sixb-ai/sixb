@@ -73,15 +73,17 @@ CREATE TABLE artifact_restore_points (
 CREATE UNIQUE INDEX idx_artifact_restore_points_turn
   ON artifact_restore_points (project_id, artifact_id, turn_run_id) WHERE turn_run_id IS NOT NULL;
 
--- The artifacts each Agent turn wrote, its sub-agents' writes among them, and the revision its
--- last write left: a retry of the turn undoes them while nobody changed the artifact since. Each
--- artifact keeps its newest 20 turns.
+-- The artifacts each Agent turn wrote, its sub-agents' writes among them, the revision its last
+-- write left and how many changes it made. Every change moves an artifact's revision by one, so a
+-- retry undoes an artifact only while those changes are all its revision moved by since the turn
+-- began: anyone's change in between keeps it. Each artifact keeps its newest 20 turns.
 CREATE TABLE artifact_turn_writes (
   project_id TEXT NOT NULL,
   artifact_id TEXT NOT NULL,
   turn_run_id TEXT NOT NULL CHECK (length(turn_run_id) > 0),
   created INTEGER NOT NULL CHECK (created IN (0, 1)),
   revision INTEGER NOT NULL CHECK (revision > 0),
+  writes INTEGER NOT NULL CHECK (writes > 0),
   PRIMARY KEY (project_id, artifact_id, turn_run_id),
   FOREIGN KEY (project_id, artifact_id) REFERENCES artifacts (project_id, id) ON DELETE CASCADE
 );
