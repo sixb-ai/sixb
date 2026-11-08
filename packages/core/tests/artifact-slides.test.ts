@@ -320,6 +320,7 @@ describe("the frame runtime", () => {
       listeners.get("message")?.({
         source: parent,
         data: { protocol: FRAME_PROTOCOL, id, method: "query.changed", params },
+        stopImmediatePropagation: () => {},
       })
     request(1, { name: "overdue" })
     request(2, { name: "../state" })
