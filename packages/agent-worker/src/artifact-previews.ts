@@ -1,6 +1,13 @@
 import { renderBoardPreviews } from "@sixb/agent"
-import type { BlobStorage, FileRef, SandboxFactory, Storage } from "@sixb/core"
+import type {
+  BlobStorage,
+  FileRef,
+  SandboxFactory,
+  SandboxNetworkPolicy,
+  Storage,
+} from "@sixb/core"
 import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/canvas"
+import { FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
 import {
   type ArtifactQueryAnswers,
   missingBoardPreviews,
@@ -11,9 +18,19 @@ import type { AgentArtifactPreviewsRequestedQueueJob } from "@sixb/core/queues"
 
 // The pictures of a canvas version's boards that nobody rendered: a version a person edited in
 // the app, or one whose layout check could not take them. The worker opens a blank sandbox of the
-// project, with nothing on its network, renders what is missing there as the Agent's check does,
-// and destroys it. Boards that read queries read the answers the job carries: what the version's
-// publisher could read when they published it.
+// project, which reaches only the CDNs a frame may load from, renders what is missing there as the
+// Agent's check does, and destroys it. Boards that read queries read the answers the job carries:
+// what the version's publisher could read when they published it.
+
+/**
+ * What a board's page may reach while it is pictured: what a frame may load besides its files,
+ * libraries and fonts from public CDNs, and nothing else. Without them a board that uses one would
+ * be pictured unstyled.
+ */
+const PREVIEW_NETWORK: SandboxNetworkPolicy = {
+  mode: "restricted",
+  allow: FRAME_CDN_ALLOWLIST.map((origin) => ({ name: new URL(origin).hostname, origin })),
+}
 
 export interface ArtifactPreviewsHost {
   readonly id: string
@@ -51,7 +68,7 @@ export async function renderArtifactPreviews(input: {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(BOARD_PREVIEW_JOB.timeoutMs)])
   const sandbox = await host.sandboxes.create({
     environment: {},
-    network: { mode: "none" },
+    network: PREVIEW_NETWORK,
     signal,
   })
   try {
