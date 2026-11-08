@@ -9,6 +9,7 @@ import {
   prop,
   SixbHost,
 } from "../src"
+import { boardPreview, boardPreviews } from "../src/artifacts/publish"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { createTestAgentExecution, createTestSixb } from "../src/testing"
@@ -480,6 +481,72 @@ describe("forking a shared conversation", () => {
     ])
     expect(await owner.agent.threads.getById(fork.id)).toBeNull()
     expect((await owner.agent.threads.getById(thread.id))?.participants).toHaveLength(1)
+  })
+
+  // Guard proof: copy without outlineOf in fork.ts; Bob's copy names its board as Alice's
+  // version does, and the route serves him the picture of Alice's rows.
+  test("gives no preview of the owner's live boards to whoever forks it", async () => {
+    const { host } = setup()
+    const { owner, participant, thread } = await sharedThread(host, {
+      owner: { "view:object": new Set([Invoice.id]) },
+      cleared: true,
+    })
+    const artifacts = host.storage.artifacts
+    if (!artifacts) throw new Error("Expected artifact storage.")
+
+    // Alice's canvas, whose board reads her invoices, shared in the conversation.
+    const put = async (path: string, body: string) => ({
+      path,
+      file: await host.blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
+    })
+    const created = await owner.artifacts.create({
+      kind: "canvas",
+      title: "Invoices",
+      files: [
+        await put(
+          "canvas.json",
+          JSON.stringify({
+            items: [{ id: "due", type: "board", file: "due.html", x: 0, y: 0, w: 640, h: 480 }],
+          })
+        ),
+        await put("due.html", '<main><script>sixb.query("due")</script></main>'),
+        await put("queries/due.json", JSON.stringify({ kind: "start", objectTypeId: Invoice.id })),
+      ],
+    })
+    const { version } = await artifacts.publish({
+      projectId,
+      artifactId: created.artifact.id,
+      kind: "canvas",
+      version: { ...created.version, origin: { threadId: thread.id, runId: "run_alice" } },
+    })
+
+    // Her worker pictured the board with her rows.
+    const outline = version.outline
+    const renderKey =
+      outline.kind === "canvas" && outline.items[0]?.type === "board"
+        ? outline.items[0].renderKey
+        : undefined
+    if (!renderKey) throw new Error("Expected the board's render key.")
+    const picture = await host.blobStorage.put({
+      body: new TextEncoder().encode("Alice's invoices"),
+      mediaType: "image/png",
+    })
+    await artifacts.putBoardPreviews({
+      projectId,
+      previews: [{ renderKey, theme: "light", size: "full", file: picture, createdAt: new Date() }],
+    })
+    const pictured = async (artifactId: string) => {
+      const copy = await artifacts.getVersion({ projectId, artifactId, version: 2 })
+      if (!copy) throw new Error(`Expected version 2 of '${artifactId}'.`)
+      // What the preview route serves: none is a 404.
+      return boardPreview((await boardPreviews(artifacts, copy)).get("due"), "light", "full")
+    }
+    expect(await pictured(created.artifact.id)).toMatchObject({ file: picture })
+
+    const fork = await participant.agent.threads.fork(thread.id)
+    const { artifacts: copies } = await artifacts.list({ projectId, threadId: fork.id })
+    expect(copies).toHaveLength(1)
+    expect(await pictured(copies[0]?.id ?? "")).toBeUndefined()
   })
 
   test("anyone else, an observer, or a removed participant cannot fork it", async () => {

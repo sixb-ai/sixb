@@ -145,6 +145,12 @@ export interface CopyArtifactInput {
   /** The thread the copy is shared in, as long as it lasts: a fork's. */
   readonly threadId: string
   readonly copiedAt?: Date
+  /**
+   * The outline a copied version takes instead of its own, when it returns one: what the copy's
+   * new id changes in it, such as the render keys of boards that show their author's data. Called
+   * with each version as the copy holds it, in the copy's transaction.
+   */
+  readonly outlineOf?: (version: ArtifactVersionRecord) => ArtifactOutline | undefined
 }
 
 export interface ListReferencingVersionsInput {

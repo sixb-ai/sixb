@@ -16,7 +16,7 @@ import { BOARD_PREVIEW_JOB, BOARD_PREVIEW_WAIT_MS } from "../canvas-display"
 import { ArtifactRequestError } from "../errors"
 import { FRAME_ASSETS } from "../frames/assets"
 import { FRAME_DEFAULT_THEMES } from "../frames/kit"
-import type { CanvasOutline, CanvasOutlineItem } from "../outline"
+import type { ArtifactOutline, CanvasOutline, CanvasOutlineItem } from "../outline"
 import { type ArtifactQueryResult, artifactQueryName } from "../queries"
 import type { ArtifactThemeMode } from "../theme"
 import { answerArtifactQueries } from "./query-answers"
@@ -87,8 +87,11 @@ const RENDER_KEY_FORMAT = "sixb-board-preview/1"
 /**
  * What a board's picture is of, as a SHA-256: its HTML and size, every file it could load (each
  * of the version's but `canvas.json` and the other boards' HTML), the frame's kit, runtime and
- * themes it runs in, and, when the version holds queries, its author, whose data it shows.
+ * themes it runs in, and its author, so no one can hand over a picture under another author's key.
  * `theme.json` is one of the files, so the modes and tokens it sets are in the key too.
+ *
+ * When the version holds queries the picture shows its author's data, to the artifact's readers:
+ * the key names the artifact too, so a copy, read by others, never shows the original's picture.
  */
 export function boardRenderKey(input: {
   readonly board: Pick<CanvasOutlineBoard, "file" | "w" | "h">
@@ -96,6 +99,7 @@ export function boardRenderKey(input: {
   /** Every board's HTML file in the version: the others are not this board's to load. */
   readonly boardFiles: ReadonlySet<string>
   readonly author: Principal
+  readonly artifactId: string
 }): string {
   const { board, files, boardFiles, author } = input
 
@@ -107,8 +111,7 @@ export function boardRenderKey(input: {
     .map((entry) => [entry.path, entry.file.digest] as const)
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
 
-  // Two authors' identical boards show each one's rows: they are two pictures.
-  const live = files.some((entry) => artifactQueryName(entry.path) !== undefined)
+  const audience = boardsReadLiveData({ files }) ? input.artifactId : null
 
   return createHash("sha256")
     .update(
@@ -118,43 +121,69 @@ export function boardRenderKey(input: {
         board.file,
         board.w,
         board.h,
-        live ? [author.type, author.id] : null,
+        [author.type, author.id],
+        audience,
         loaded,
       ])
     )
     .digest("hex")
 }
 
-/** A canvas's outline with each board's render key and the modes its pictures are in. */
+/** A canvas's outline with the modes its boards are pictured in. */
 export function canvasPreviewOutline(
   outline: CanvasOutline,
-  input: {
-    readonly files: readonly ArtifactFile[]
-    readonly author: Principal
-    readonly themes: readonly ArtifactThemeMode[]
-  }
+  themes: readonly ArtifactThemeMode[]
 ): CanvasOutline {
+  return { ...outline, themes: [...themes] }
+}
+
+/**
+ * A version with each of its canvas's boards named by its render key, for the artifact it is
+ * stored in. Any other kind stays as it is.
+ */
+export function withBoardRenderKeys<
+  TVersion extends Pick<ArtifactVersionRecord, "outline" | "files" | "author">,
+>(version: TVersion, artifactId: string): TVersion {
+  const { outline } = version
+  if (outline.kind !== "canvas") return version
+
   const boardFiles = new Set(
     outline.items.flatMap((item) => (item.type === "board" ? [item.file] : []))
   )
-
   return {
-    ...outline,
-    themes: [...input.themes],
-    items: outline.items.map((item) =>
-      item.type === "board"
-        ? {
-            ...item,
-            renderKey: boardRenderKey({
-              board: item,
-              files: input.files,
-              boardFiles,
-              author: input.author,
-            }),
-          }
-        : item
-    ),
+    ...version,
+    outline: {
+      ...outline,
+      items: outline.items.map((item) =>
+        item.type === "board"
+          ? {
+              ...item,
+              renderKey: boardRenderKey({
+                board: item,
+                files: version.files,
+                boardFiles,
+                author: version.author,
+                artifactId,
+              }),
+            }
+          : item
+      ),
+    },
   }
+}
+
+/**
+ * The outline a copy's version takes in place of the source's: a canvas whose boards show their
+ * author's data is named anew for the copy, so it gets none of the source's pictures and its
+ * boards run live for its readers. `undefined` when the version's outline stays as it is.
+ */
+export function copiedVersionOutline(
+  version: ArtifactVersionRecord,
+  copyId: string
+): ArtifactOutline | undefined {
+  if (version.outline.kind !== "canvas" || !boardsReadLiveData(version)) return undefined
+
+  return withBoardRenderKeys(version, copyId).outline
 }
 
 /** The boards of a version with a render key, and the modes each has a picture in. */

@@ -1,5 +1,6 @@
 import { createRuntimeArtifactAccessRule } from "../artifacts/execution"
 import { createArtifactId } from "../artifacts/ids"
+import { copiedVersionOutline } from "../artifacts/publish/previews"
 import type { Principal } from "../auth"
 import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -146,7 +147,13 @@ async function createCopy(
   for (let attempt = 1; ; attempt += 1) {
     const id = createArtifactId()
     try {
-      await artifacts.copy({ ...input, id })
+      // A board that shows its author's data is pictured for its artifact's readers only: the
+      // copy's boards are named anew, get none of the source's pictures, and run live.
+      await artifacts.copy({
+        ...input,
+        id,
+        outlineOf: (version) => copiedVersionOutline(version, id),
+      })
       return id
     } catch (error) {
       const collided = error instanceof ArtifactStorageError && error.code === "artifact_exists"

@@ -143,26 +143,36 @@ describe("a board's render key", () => {
   const boardFiles = new Set(["boards/welcome.html", "boards/region.html"])
   const welcome = { file: "boards/welcome.html", w: 390, h: 844 }
   const key = (overrides: Partial<Parameters<typeof boardRenderKey>[0]> = {}) =>
-    boardRenderKey({ board: welcome, files, boardFiles, author: alice, ...overrides })
+    boardRenderKey({
+      board: welcome,
+      files,
+      boardFiles,
+      author: alice,
+      artifactId: "art_onboarding",
+      ...overrides,
+    })
 
   test("stays while nothing the board shows changes", () => {
     expect(key()).toMatch(/^[0-9a-f]{64}$/)
     expect(key({ files: [...files].reverse() })).toBe(key())
 
-    // Where the board sits, the other boards, and who published, it does not show.
+    // Where the board sits and the other boards it does not show; a static board is the same
+    // picture in a copy of its artifact.
     const moved = files.map((entry) =>
       entry.path === "canvas.json" || entry.path === "boards/region.html"
         ? file(entry.path, "9")
         : entry
     )
     expect(key({ files: moved })).toBe(key())
-    expect(key({ author: bob })).toBe(key())
+    expect(key({ artifactId: "art_copy" })).toBe(key())
   })
 
-  test("changes with its HTML, what it loads, its size, its theme, and a live version's author", () => {
+  test("changes with its HTML, what it loads, its size, its theme, and its author", () => {
     const changed = (path: string) =>
       files.map((entry) => (entry.path === path ? file(path, "9") : entry))
 
+    // Reproduce the author's by leaving them out of a static board's key: Bob, editing Alice's
+    // canvas, hands over a picture under the key of hers, and every reader sees his.
     const seen = new Set([
       key(),
       key({ files: changed("boards/welcome.html") }),
@@ -170,12 +180,16 @@ describe("a board's render key", () => {
       key({ files: [...files, file("theme.json", "5")] }),
       key({ board: { ...welcome, w: 1280 } }),
       key({ board: { ...welcome, h: 900 } }),
+      key({ author: bob }),
     ])
-    expect(seen.size).toBe(6)
+    expect(seen.size).toBe(7)
+  })
 
-    // A board of a version with queries shows its author's rows: two authors, two pictures.
+  test("names a live board's artifact, whose readers its author's data is shown to", () => {
+    // Reproduce by leaving the artifact out: a fork's copy shows the original's picture, with the
+    // original author's rows, to whoever forked it.
     const live = [...files, file("queries/regions.json", "6")]
-    expect(key({ files: live, author: bob })).not.toBe(key({ files: live }))
+    expect(key({ files: live, artifactId: "art_copy" })).not.toBe(key({ files: live }))
   })
 })
 
