@@ -12461,7 +12461,7 @@ describe("AgentWorker", () => {
       const artifact = await onlyArtifact(sixb)
 
       // What the failed turn published goes with what it said.
-      // Reproduce by dropping `deleteVersionsByOrigin` from `retryAgentRun`.
+      // Reproduce by dropping `undoTurnWrites` from `retryAgentRun`.
       await createTestSixb(sixb).agent.runs.retry(request.run.id)
       expect(
         await artifactStorageOf(sixb).get({ projectId: PROJECT_ID, id: artifact.id })
