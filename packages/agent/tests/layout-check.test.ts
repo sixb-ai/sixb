@@ -459,6 +459,7 @@ exports.chromium = {
         ],
         stalls: [{ board: "region", message: "board 'region' in light mode did not respond" }],
         unpictured: [{ board: "pricing", reason: "pricing.css did not load (404)" }],
+        oversized: [{ board: "deck", w: 520, h: 292, page: { w: 1280, h: 720 } }],
         overview: join(output, "overview.png"),
       }),
     })
@@ -501,6 +502,12 @@ exports.chromium = {
       ],
       overview: ".sixb/agent/checks/art_0000000000-v2/overview.png",
       warnings: [
+        {
+          code: "layout_board_too_small",
+          part: "deck",
+          message:
+            'Board \'deck\' is 520×292 but its page draws 1280×720, so the canvas, its preview and the opened board show only its top left. Set its "w" and "h" in canvas.json to 1280 and 720: the canvas\'s zoom draws it small, never a smaller board.',
+        },
         {
           code: "preview_not_taken",
           part: "pricing",

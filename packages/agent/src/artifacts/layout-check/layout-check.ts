@@ -85,6 +85,8 @@ interface CheckReport {
   readonly errors?: readonly string[]
   readonly screenshots?: readonly string[]
   readonly previews?: readonly CheckedPreview[]
+  /** A canvas's boards whose page draws larger than the board's `w` by `h`. */
+  readonly oversized?: readonly OversizedBoard[]
   /** A canvas's boards not pictured: something on their page did not load. */
   readonly unpictured?: readonly { readonly board: string; readonly reason: string }[]
   /** A canvas's boards that stopped answering, which the check went on without. */
@@ -265,6 +267,7 @@ export async function checkLayout(
     ...(report.overview ? { overview: named(report.overview) } : {}),
     warnings: [
       ...layoutWarnings(report.problems ?? []),
+      ...oversizedWarnings(report.oversized ?? []),
       ...(report.unpictured ?? []).map(({ board, reason }) => ({
         code: "preview_not_taken",
         part: board,
@@ -364,6 +367,34 @@ function parseReport(stdout: string): CheckReport | null {
   } catch {
     return null
   }
+}
+
+/** A board whose page draws larger than the board, in CSS pixels. */
+interface OversizedBoard {
+  readonly board: string
+  readonly w: number
+  readonly h: number
+  readonly page: { readonly w: number; readonly h: number }
+}
+
+/**
+ * Each board whose page is larger than the board: the canvas, its preview, and the opened board
+ * all show only its top left. The board takes the page's size; the canvas's zoom makes it small.
+ */
+export function oversizedWarnings(boards: readonly OversizedBoard[]): LayoutWarning[] {
+  const warnings: LayoutWarning[] = boards.slice(0, MAX_WARNINGS).map(({ board, w, h, page }) => ({
+    code: "layout_board_too_small",
+    part: board,
+    message: `Board '${board}' is ${w}×${h} but its page draws ${page.w}×${page.h}, so the canvas, its preview and the opened board show only its top left. Set its "w" and "h" in canvas.json to ${Math.max(w, page.w)} and ${Math.max(h, page.h)}: the canvas's zoom draws it small, never a smaller board.`,
+  }))
+  const more = boards.length - warnings.length
+  if (more > 0) {
+    warnings.push({
+      code: "layout_board_too_small",
+      message: `${more} more board${more === 1 ? "" : "s"} draw a page larger than the board; give each board its page's size.`,
+    })
+  }
+  return warnings
 }
 
 /** The most a check reports; the screenshots show the rest. */

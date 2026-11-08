@@ -479,6 +479,30 @@ describe("publish_artifact", () => {
     })
   })
 
+  test("tells the Agent of a board smaller than its page, with the size to give it", () => {
+    // Reproduce by leaving the check's warnings out of the summary: the Agent reads only the
+    // screenshots, each the page's top left, and never learns why.
+    const output = {
+      artifactId: "art_0nb0ard1ng",
+      version: 1,
+      kind: "canvas",
+      title: "Pitch",
+      warnings: [
+        {
+          code: "layout_board_too_small",
+          part: "cover",
+          message: "Board 'cover' is 520×292 but its page draws 1280×720.",
+        },
+      ],
+      layoutCheck: { screenshots: [".sixb/agent/checks/art_0nb0ard1ng-v1/boards/cover.png"] },
+    }
+    expect(tools().create.toModelOutput?.(output, context)).toMatchObject({
+      value: expect.stringContaining(
+        "Warning (cover): Board 'cover' is 520×292 but its page draws 1280×720."
+      ),
+    })
+  })
+
   test("keeps every picture it could read, and warns of a board one of whose was lost", async () => {
     // Reproduce by handing the pictures over all or nothing: the one picture the sandbox lost
     // leaves both boards without any, and the Agent is never told.

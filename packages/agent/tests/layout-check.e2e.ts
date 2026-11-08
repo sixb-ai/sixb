@@ -392,6 +392,50 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   )
 
   test(
+    "names a board smaller than its page, with both sizes",
+    async () => {
+      // A slide drawn as a fixed 1280×720 frame, on a board of 520×292: every view of the board
+      // shows the frame's top left. Reproduce by measuring only what the board scrolls: the body
+      // clips the frame, and nothing is said.
+      mkdirSync(join(root, "frames"), { recursive: true })
+      const frame = `<!doctype html><html><head><style>html, body { margin: 0; overflow: hidden } .frame { width: 1280px; height: 720px; background: #123 }</style></head><body><div class="frame"><h1>Q3</h1></div></body></html>`
+      const fits = `<!doctype html><html><head><style>body { margin: 0 }</style></head><body><main><h1>Fits</h1></main></body></html>`
+      writeFileSync(join(root, "frames", "cover.html"), frame)
+      writeFileSync(join(root, "frames", "fits.html"), fits)
+
+      const result = await checkLayout({
+        layout: "canvas",
+        boards: [
+          {
+            id: "cover",
+            file: "cover.html",
+            w: 520,
+            h: 292,
+            html: new TextEncoder().encode(frame),
+          },
+          { id: "fits", file: "fits.html", w: 520, h: 292, html: new TextEncoder().encode(fits) },
+        ],
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: env(),
+        },
+        directory: join(root, "frames"),
+        files: ["cover.html", "fits.html"],
+        name: "frames",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+
+      const small = result.warnings.filter((warning) => warning.code === "layout_board_too_small")
+      expect(small.map((warning) => warning.part)).toEqual(["cover"])
+      expect(small[0]?.message).toStartWith("Board 'cover' is 520×292 but its page draws 1280×720")
+      expect(small[0]?.message).toContain('Set its "w" and "h" in canvas.json to 1280 and 720')
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
     "pictures no board whose page did not load whole, and says so",
     async () => {
       // Reproduce by picturing every board that was checked: Pricing's picture, unstyled for its
