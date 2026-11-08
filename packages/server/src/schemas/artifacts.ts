@@ -184,6 +184,14 @@ export const ArtifactBoardPreviewQuerySchema = z
       .describe(
         "full, the default: a PNG of the board at its own size. small: a WebP at most 480 pixels wide, for a canvas that shows many boards at once"
       ),
+    revision: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "The version's revision the picture is of. Another than the version's current one is 404 preview_not_found: the version changed, and says which pictures it has now. One that matches is cached for good"
+      ),
   })
   .strict()
 

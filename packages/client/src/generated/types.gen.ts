@@ -20940,6 +20940,10 @@ export type GetArtifactBoardPreviewData = {
      * full, the default: a PNG of the board at its own size. small: a WebP at most 480 pixels wide, for a canvas that shows many boards at once
      */
     size?: "full" | "small"
+    /**
+     * The version's revision the picture is of. Another than the version's current one is 404 preview_not_found: the version changed, and says which pictures it has now. One that matches is cached for good
+     */
+    revision?: number
   }
   url: "/api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview"
 }
