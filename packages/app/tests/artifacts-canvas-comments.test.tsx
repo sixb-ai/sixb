@@ -4,6 +4,7 @@ import {
   getArtifactQueryKey,
   getArtifactVersionQueryKey,
   getAuthSessionQueryKey,
+  SixbEventsProvider,
 } from "@sixb/client/hooks"
 import { formatCanvas } from "@sixb/core/artifacts"
 import { LIVE_FILES } from "@sixb/core/artifacts/live"
@@ -230,24 +231,57 @@ function serveComments(initial: readonly ArtifactComment[]) {
   return state
 }
 
+/** The app's event socket, which the test speaks through for the server. */
+class EventsSocket {
+  static opened: EventsSocket[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: (() => void) | null = null
+
+  constructor() {
+    EventsSocket.opened.push(this)
+  }
+
+  send(): void {}
+
+  close(): void {}
+}
+
+const originalWebSocket = globalThis.WebSocket
+afterEach(() => {
+  globalThis.WebSocket = originalWebSocket
+  EventsSocket.opened = []
+})
+
 async function open(
-  options: { readonly draft?: (draft: AgentDraft) => void; readonly edits?: boolean } = {}
+  options: {
+    readonly draft?: (draft: AgentDraft) => void
+    readonly edits?: boolean
+    /** The app's event socket is open, as the app opens it, and the test plays the server. */
+    readonly events?: boolean
+  } = {}
 ) {
   const server = new FakeServer(ARTIFACT_ID, CANVAS)
   server.access = options.edits ? "edit" : "watch"
   const hub = new LiveHub(server.open)
+  if (options.events) globalThis.WebSocket = EventsSocket as unknown as typeof WebSocket
+
+  const viewer = (
+    <MemoryRouter>
+      <AgentDraftContext.Provider value={options.draft ?? null}>
+        <LiveHubProvider hub={hub}>
+          <Viewer
+            target={{ type: "artifact", artifactId: ARTIFACT_ID }}
+            onTargetChange={() => {}}
+          />
+        </LiveHubProvider>
+      </AgentDraftContext.Provider>
+    </MemoryRouter>
+  )
   const ui = render(
     <QueryClientProvider client={seeded(options.edits ? "update" : "read")}>
-      <MemoryRouter>
-        <AgentDraftContext.Provider value={options.draft ?? null}>
-          <LiveHubProvider hub={hub}>
-            <Viewer
-              target={{ type: "artifact", artifactId: ARTIFACT_ID }}
-              onTargetChange={() => {}}
-            />
-          </LiveHubProvider>
-        </AgentDraftContext.Provider>
-      </MemoryRouter>
+      {options.events ? <SixbEventsProvider>{viewer}</SixbEventsProvider> : viewer}
     </QueryClientProvider>
   )
   await act(settle)
@@ -256,6 +290,26 @@ async function open(
     await new Promise((done) => setTimeout(done, 50))
   })
   return { ui, server }
+}
+
+/** The server tells the app's event socket that a comment changed. */
+async function commented(commentId: string) {
+  const [socket] = EventsSocket.opened
+  if (!socket) throw new Error("Expected the app's event socket.")
+
+  const event = {
+    id: `evt_${commentId}`,
+    cursor: `c_${commentId}`,
+    projectId: "proj",
+    occurredAt: at,
+    type: "artifact.commented",
+    topic: "artifacts",
+    partitionKey: ARTIFACT_ID,
+    payload: { artifactId: ARTIFACT_ID, commentId, action: "created" },
+  }
+  await act(async () => {
+    socket.onmessage?.({ data: JSON.stringify({ type: "event", event }) })
+  })
 }
 
 async function openPanel(ui: ReturnType<typeof render>) {
@@ -356,28 +410,18 @@ describe("comments on a canvas", () => {
     ui.unmount()
   })
 
-  // Guard proof: drop the `onCommented` subscription in useArtifactComments; Alice's new comment
+  // Guard proof: drop the `artifact.commented` branch in useArtifactUpdates; Alice's new comment
   // never shows.
-  test("are read again when the live canvas says one changed", async () => {
+  test("are read again when the events socket says one changed", async () => {
     const api = serveComments([comment("cmt_1", alice, "Warmer colors")])
-    const { ui, server } = await open()
+    const { ui } = await open({ events: true })
     const panel = await openPanel(ui)
     await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
 
     api.comments.push(comment("cmt_2", alice, "And a bigger button"))
-    await act(async () => {
-      for (const connection of server.connections) {
-        connection.deliver({
-          type: "commented",
-          artifactId: ARTIFACT_ID,
-          commentId: "cmt_2",
-          action: "created",
-        })
-      }
-      await settle()
-    })
+    await commented("cmt_2")
 
-    await waitFor(() => expect(within(panel).getByText("And a bigger button")).toBeTruthy())
+    expect(await within(panel).findByText("And a bigger button")).toBeTruthy()
     ui.unmount()
   })
 
