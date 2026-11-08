@@ -380,6 +380,48 @@ describe("a canvas's board", () => {
     view.unmount()
   })
 
+  test("hands React Flow, read, only what a change of the canvas changed", async () => {
+    // Reproduce by returning the graph's lists as they are from useReadGraph: each change of the
+    // canvas hands React Flow new arrows, which it takes in again, and a moved note without the
+    // size React Flow measured, which it measures again in a commit that redraws every arrow.
+    const { useBoardEditing } = await import("../src/artifacts/renderers/canvas/edit-mode")
+    const { useStoreApi } = await import("@xyflow/react")
+    const view = renderHook(
+      ({ canvas }: { readonly canvas: Canvas }) => ({
+        board: useBoardEditing(canvas, undefined, undefined),
+        store: useStoreApi(),
+      }),
+      { initialProps: { canvas: CANVAS }, wrapper: ReactFlowProvider }
+    )
+    const before = view.result.current.board
+    const ask = before.nodes.find((node) => node.id === "ask")
+    if (!ask) throw new Error("Expected the note's node.")
+    // What React Flow measured of the note as it drew it.
+    view.result.current.store.getState().nodeLookup.set("ask", {
+      ...ask,
+      measured: { width: 260, height: 88 },
+      internals: { positionAbsolute: ask.position, z: 0, userNode: ask },
+    })
+
+    await act(async () => {
+      view.rerender({
+        canvas: {
+          items: CANVAS.items.map((entry) => (entry.id === "ask" ? { ...entry, x: 640 } : entry)),
+        },
+      })
+    })
+    const after = view.result.current.board
+    expect(after.edges).toBe(before.edges)
+    expect(after.nodes.find((node) => node.id === "home")).toBe(
+      before.nodes.find((node) => node.id === "home")
+    )
+    expect(after.nodes.find((node) => node.id === "ask")).toMatchObject({
+      position: { x: 640 },
+      measured: { width: 260, height: 88 },
+    })
+    view.unmount()
+  })
+
   test("draws an xxl title at 120 pixels, bold, over full-size boards", async () => {
     // Reproduce by drawing xxl at xl's 44 pixels: a canvas of seven 1280-wide boards opens near
     // 15%, where its title is 6 pixels tall.
@@ -1080,3 +1122,4 @@ describe("a board opened over its canvas", () => {
     view?.unmount()
   })
 })
+

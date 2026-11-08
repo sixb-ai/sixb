@@ -165,16 +165,20 @@ function Board({
     [open]
   )
 
-  const fitOptions = useMemo<FitViewOptions>(() => {
+  // An item with a box opens filling the view; an arrow or a text opens the whole canvas. The
+  // options stay the same object as the canvas changes: React Flow takes in each new one.
+  const framed = useMemo(() => {
     const item = focus ? canvas.items.find((candidate) => candidate.id === focus) : undefined
-    // An item with a box opens filling the view; an arrow or a text opens the whole canvas.
-    const framed = item && item.type !== "arrow" && item.type !== "text"
-    return {
+    return item && item.type !== "arrow" && item.type !== "text" ? item.id : undefined
+  }, [canvas, focus])
+  const fitOptions = useMemo<FitViewOptions>(
+    () => ({
       padding: CANVAS_FIT_PADDING,
       maxZoom: 1,
-      ...(framed ? { nodes: [{ id: item.id }] } : {}),
-    }
-  }, [canvas, focus])
+      ...(framed ? { nodes: [{ id: framed }] } : {}),
+    }),
+    [framed]
+  )
   return (
     <div
       ref={board.root}
