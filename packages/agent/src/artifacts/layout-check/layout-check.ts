@@ -73,6 +73,8 @@ export interface CheckedPreview {
   readonly size: ArtifactBoardPreviewSize
   /** Absolute, in the sandbox. */
   readonly path: string
+  /** How large the check wrote it. */
+  readonly bytes?: number
 }
 
 interface CheckReport {

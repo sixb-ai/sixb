@@ -28,6 +28,7 @@ import {
   answerArtifactQueries,
   isArtifactId,
   type PublishedArtifact,
+  type RefusedBoardPreview,
 } from "@sixb/core/internal/artifacts/publish"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
@@ -354,9 +355,10 @@ async function publish(
       check = { status: "skipped", reason: "the check failed in the sandbox" }
     }
   }
-  if (check?.status === "checked" && missing.length > 0) {
-    await storePreviews({ input, handle, published, missing, checked: check.previews, signal })
-  }
+  const previewWarnings =
+    check?.status === "checked" && missing.length > 0
+      ? await storePreviews({ input, handle, published, missing, checked: check.previews, signal })
+      : []
   return {
     artifactId: published.artifact.id,
     version: published.version.version,
@@ -366,6 +368,7 @@ async function publish(
       ...published.warnings,
       ...queries.warnings,
       ...(check?.status === "checked" ? check.warnings : []),
+      ...previewWarnings,
     ].map(({ code, message, part }) => ({
       code,
       message,
@@ -408,8 +411,9 @@ async function missingPreviews(
 }
 
 /**
- * Hands the pictures the check took over as the version's previews. The version exists by now,
- * so a failure is only logged: the worker renders what is still missing.
+ * Hands the pictures the check took over as the version's previews, and warns of each board one
+ * of whose pictures was not kept: it shows its outline in that size and mode. The version exists
+ * by now, so a failure is only logged: the worker renders what is still missing.
  */
 async function storePreviews(context: {
   readonly input: PublishToolsInput
@@ -418,28 +422,45 @@ async function storePreviews(context: {
   readonly missing: readonly AgentRunMissingPreview[]
   readonly checked: readonly CheckedPreview[]
   readonly signal: AbortSignal
-}): Promise<void> {
+}): Promise<LayoutWarning[]> {
   const { input, published, signal } = context
   try {
-    const previews = await storeCheckedPreviews({
+    const { previews, dropped } = await storeCheckedPreviews({
       handle: context.handle,
       checked: context.checked,
       missing: context.missing,
       blobStorage: input.blobStorage,
       signal,
     })
-    await input.artifacts.storePreviews({
+    const refused = await input.artifacts.storePreviews({
       artifactId: published.artifact.id,
       version: published.version.version,
       previews,
     })
+    return unkeptPreviewWarnings([...dropped, ...refused])
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
       `[SixbAgent] Could not keep the previews of version ${published.version.version} of '${published.artifact.id}':`,
       error
     )
+    return []
   }
+}
+
+/** One warning per board whose pictures were not all kept, naming each and why. */
+function unkeptPreviewWarnings(unkept: readonly RefusedBoardPreview[]): LayoutWarning[] {
+  const boards = [...new Set(unkept.map(({ board }) => board))]
+  return boards.map((board) => {
+    const pictures = unkept
+      .filter((picture) => picture.board === board)
+      .map(({ theme, size, reason }) => `the ${size} one in ${theme} mode (${reason})`)
+    return {
+      code: "preview_not_kept",
+      part: board,
+      message: `Board '${board}' has no preview for ${pictures.join(", ")}: readers see its outline there until they open it.`,
+    }
+  })
 }
 
 /** A canvas's items, for the check's picture of it as it opens; none when it cannot be read. */

@@ -8,10 +8,11 @@ import {
   type BoardPreviewInput,
   MAX_BOARD_PREVIEW_BYTES,
   type MissingBoardPreview,
+  type RefusedBoardPreview,
 } from "@sixb/core/internal/artifacts/publish"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../run-sandbox"
-import { readSandboxFile } from "../sandbox-files"
+import { readSandboxFiles } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import { type CheckedPreview, type CheckedQuery, checkLayout } from "./layout-check/layout-check"
 import { type PublishedArtifactFile, readArtifactVersionFiles } from "./materialize"
@@ -21,15 +22,26 @@ import { type PublishedArtifactFile, readArtifactVersionFiles } from "./material
 // blobs, for the version's previews. The agent worker renders the same way in a sandbox of its
 // own, for a version nobody rendered: one a person edited in the app.
 
-const READ_TIMEOUT_MS = 30_000
-/** How many pictures are read out of the sandbox at once. */
-const READS = 8
+const READ_TIMEOUT_MS = 60_000
+/**
+ * The most one command reads out of the sandbox, base64 on its stdout: a canvas of a hundred
+ * boards' pictures takes a few commands, not one each.
+ */
+const READ_BATCH_BYTES = 24 * 1024 * 1024
 /** Where the worker writes the version it renders, in its blank sandbox. */
 const WORK_DIRECTORY = "canvas"
 
+/** The pictures read and stored, and those that were not, with why. */
+export interface CheckedPreviews {
+  readonly previews: readonly BoardPreviewInput[]
+  readonly dropped: readonly RefusedBoardPreview[]
+}
+
 /**
- * The pictures the check took that `missing` asks for, each read out of the sandbox and stored in
- * `blobStorage`. A picture the check did not take is left out: the worker renders it later.
+ * The pictures the check took that `missing` asks for, read out of the sandbox a batch at a time
+ * and each stored in `blobStorage`. A picture the check did not take is left out: the worker
+ * renders it later. Each stands alone: one too large or that cannot be read or stored is dropped,
+ * and returned with why, and the others are kept.
  */
 export async function storeCheckedPreviews(input: {
   readonly handle: AgentSandboxHandle
@@ -37,37 +49,81 @@ export async function storeCheckedPreviews(input: {
   readonly missing: readonly AgentRunMissingPreview[]
   readonly blobStorage: Pick<BlobStorage, "put">
   readonly signal: AbortSignal
-}): Promise<BoardPreviewInput[]> {
+}): Promise<CheckedPreviews> {
   const wanted = new Set(
     input.missing.flatMap(({ board, themes }) => themes.map((theme) => `${board}\0${theme}`))
   )
   const pictures = input.checked.filter(({ board, theme }) => wanted.has(`${board}\0${theme}`))
 
-  const stored: BoardPreviewInput[] = []
-  for (let start = 0; start < pictures.length; start += READS) {
-    const batch = pictures.slice(start, start + READS)
-    stored.push(
-      ...(await Promise.all(
-        batch.map(async ({ board, theme, size, path }) => {
-          const bytes = await readSandboxFile(input.handle, {
-            path,
-            maxBytes: MAX_BOARD_PREVIEW_BYTES,
-            signal: input.signal,
-            timeoutMs: READ_TIMEOUT_MS,
-          })
-          const file = await input.blobStorage.put({
-            body: bytes,
-            expectedSizeBytes: bytes.byteLength,
-            signal: input.signal,
-            fileName: posix.basename(path),
-            mediaType: BOARD_PREVIEW_MEDIA_TYPES[size],
-          })
-          return { board, theme, size, file }
-        })
-      ))
-    )
+  const previews: BoardPreviewInput[] = []
+  const dropped: RefusedBoardPreview[] = []
+  const drop = (picture: CheckedPreview, reason: string) => {
+    const { board, theme, size } = picture
+    dropped.push({ board, theme, size, reason })
   }
-  return stored
+
+  for (const batch of readBatches(pictures)) {
+    const read = await readSandboxFiles(input.handle, {
+      paths: batch.map((picture) => picture.path),
+      maxBytes: MAX_BOARD_PREVIEW_BYTES,
+      signal: input.signal,
+      timeoutMs: READ_TIMEOUT_MS,
+    })
+
+    for (const [index, picture] of batch.entries()) {
+      const file = read[index]
+      if (!file || "error" in file) {
+        drop(
+          picture,
+          file?.error === "too_large"
+            ? `it is past the ${MAX_BOARD_PREVIEW_BYTES} bytes kept`
+            : "it could not be read"
+        )
+        continue
+      }
+
+      try {
+        const stored = await input.blobStorage.put({
+          body: file.bytes,
+          expectedSizeBytes: file.bytes.byteLength,
+          signal: input.signal,
+          fileName: posix.basename(picture.path),
+          mediaType: BOARD_PREVIEW_MEDIA_TYPES[picture.size],
+        })
+        previews.push({
+          board: picture.board,
+          theme: picture.theme,
+          size: picture.size,
+          file: stored,
+        })
+      } catch (error) {
+        if (input.signal.aborted) throw error
+        console.warn(`[SixbAgent] Could not store the picture '${picture.path}':`, error)
+        drop(picture, "it could not be stored")
+      }
+    }
+  }
+
+  return { previews, dropped }
+}
+
+/** The pictures in batches of at most {@link READ_BATCH_BYTES}, as the check sized them. */
+function readBatches(pictures: readonly CheckedPreview[]): CheckedPreview[][] {
+  const batches: CheckedPreview[][] = []
+  let batch: CheckedPreview[] = []
+  let bytes = 0
+  for (const picture of pictures) {
+    const size = picture.bytes ?? MAX_BOARD_PREVIEW_BYTES
+    if (batch.length > 0 && bytes + size > READ_BATCH_BYTES) {
+      batches.push(batch)
+      batch = []
+      bytes = 0
+    }
+    batch.push(picture)
+    bytes += Math.min(size, MAX_BOARD_PREVIEW_BYTES)
+  }
+  if (batch.length > 0) batches.push(batch)
+  return batches
 }
 
 /**
@@ -85,9 +141,9 @@ export async function renderBoardPreviews(input: {
   readonly blobStorage: Pick<BlobStorage, "put" | "open" | "stat">
   readonly queries?: Readonly<Record<string, CheckedQuery>>
   readonly signal: AbortSignal
-}): Promise<BoardPreviewInput[]> {
+}): Promise<CheckedPreviews> {
   const { sandbox, version, signal } = input
-  if (input.missing.length === 0) return []
+  if (input.missing.length === 0) return { previews: [], dropped: [] }
 
   const handle: AgentSandboxHandle = { sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }
   const files = await readArtifactVersionFiles(input.blobStorage, version, signal)
@@ -95,7 +151,7 @@ export async function renderBoardPreviews(input: {
 
   const reading = input.queries ? undefined : boardsReadingQueries(files)
   const missing = input.missing.filter(({ board }) => !reading?.(board.file))
-  if (missing.length === 0) return []
+  if (missing.length === 0) return { previews: [], dropped: [] }
 
   const directory = posix.resolve(sandbox.workingDirectory, WORK_DIRECTORY)
   await sandbox.writeFiles(
@@ -126,7 +182,7 @@ export async function renderBoardPreviews(input: {
     console.warn(
       `[SixbAgent] The boards of version ${version.version} of '${version.artifactId}' were not pictured: ${check.reason}.`
     )
-    return []
+    return { previews: [], dropped: [] }
   }
 
   return storeCheckedPreviews({

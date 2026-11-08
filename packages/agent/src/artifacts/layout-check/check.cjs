@@ -246,8 +246,8 @@ async function checkCanvas(browser, port, probe, themes) {
       const small = path.join(out, "boards", `${board.id}.${name}.small.webp`)
       await shrink(browser, png, board.smallWidth, small)
       found.previews.push(
-        { board: board.id, theme: name, size: "full", path: file },
-        { board: board.id, theme: name, size: "small", path: small }
+        { board: board.id, theme: name, size: "full", path: file, bytes: png.length },
+        { board: board.id, theme: name, size: "small", path: small, bytes: fs.statSync(small).size }
       )
     }
   }
