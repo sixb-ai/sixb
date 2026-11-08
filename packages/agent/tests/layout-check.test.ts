@@ -166,6 +166,7 @@ describe("the layout check", () => {
     })
     expect(await check(handle)).toEqual({
       status: "checked",
+      previews: [],
       screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
       warnings: [
         {
@@ -234,6 +235,7 @@ describe("the layout check", () => {
     )
     expect(result).toEqual({
       status: "checked",
+      previews: [],
       screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
       warnings: [
         {
@@ -305,6 +307,7 @@ exports.chromium = {
       expect(requested).toEqual([{ deadline: "500", timeout: 600 }])
       expect(result).toEqual({
         status: "checked",
+        previews: [],
         screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
         warnings: [
           {
@@ -342,6 +345,7 @@ exports.chromium = {
     })
     expect(await check(handle, { layout: "page" })).toEqual({
       status: "checked",
+      previews: [],
       screenshots: [
         ".sixb/agent/checks/art_0000000000-v1/desktop.png",
         ".sixb/agent/checks/art_0000000000-v1/phone.png",
@@ -402,6 +406,7 @@ exports.chromium = {
     })
     expect(result).toEqual({
       status: "checked",
+      previews: [],
       screenshots: [
         ".sixb/agent/checks/art_0000000000-v1/boards/welcome.png",
         ".sixb/agent/checks/art_0000000000-v1/boards/region.png",
@@ -416,8 +421,8 @@ exports.chromium = {
       ],
     })
     expect(JSON.parse(readFileSync(join(output, "boards.json"), "utf8"))).toEqual([
-      { id: "welcome", file: "boards/welcome.html", w: 390, h: 844 },
-      { id: "region", file: "boards/region.html", w: 390, h: 844 },
+      { id: "welcome", file: "boards/welcome.html", w: 390, h: 844, pictured: false },
+      { id: "region", file: "boards/region.html", w: 390, h: 844, pictured: false },
     ])
     expect(JSON.parse(readFileSync(join(output, "entries.json"), "utf8"))).toEqual({
       "boards/welcome.html": "entries/boards/welcome.html",
@@ -427,6 +432,78 @@ exports.chromium = {
       '<link rel="stylesheet" href="../__sixb/page.css"><script src="../__sixb/runtime.js" data-sixb-layout="page">'
     )
     expect(commands[0]?.options.env).toMatchObject({ SIXB_CHECK_LAYOUT: "canvas" })
+  })
+
+  test("pictures the boards that need it, names one that stopped answering, and draws the canvas", async () => {
+    const output = join(root, ".sixb/agent/checks/art_0000000000-v2")
+    const html = new TextEncoder().encode("<html><head></head><body>Board</body></html>")
+    const { handle } = sandbox({
+      stdout: JSON.stringify({
+        layout: "canvas",
+        problems: [],
+        errors: [],
+        screenshots: [join(output, "boards/welcome.png")],
+        previews: [
+          { board: "welcome", theme: "light", path: join(output, "boards/welcome.png") },
+          { board: "welcome", theme: "dark", path: join(output, "boards/welcome.dark.png") },
+        ],
+        stalls: [{ board: "region", message: "board 'region' in light mode did not respond" }],
+        overview: join(output, "overview.png"),
+      }),
+    })
+    const result = await checkLayout({
+      handle,
+      layout: "canvas",
+      boards: [
+        { id: "welcome", file: "welcome.html", w: 390, h: 844, html, pictured: true },
+        { id: "region", file: "region.html", w: 390, h: 844, html },
+      ],
+      canvas: {
+        items: [
+          { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          { id: "region", type: "board", file: "region.html", x: 480, y: 0, w: 390, h: 844 },
+          { id: "next", type: "arrow", from: "welcome", to: "region", dashed: false },
+          { id: "why", type: "note", x: 0, y: 900, w: 280, text: "Ask <why> first" },
+        ],
+      },
+      directory: join(root, "canvas"),
+      files: ["canvas.json", "welcome.html", "region.html"],
+      name: "art_0000000000-v2",
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({
+      status: "checked",
+      previews: [
+        { board: "welcome", theme: "light", path: join(output, "boards/welcome.png") },
+        { board: "welcome", theme: "dark", path: join(output, "boards/welcome.dark.png") },
+      ],
+      overview: ".sixb/agent/checks/art_0000000000-v2/overview.png",
+      warnings: [
+        {
+          code: "layout_incomplete",
+          part: "region",
+          message:
+            "Board 'region' stopped answering: board 'region' in light mode did not respond. The check went on without it.",
+        },
+      ],
+    })
+    expect(
+      JSON.parse(readFileSync(join(output, "boards.json"), "utf8")).map(
+        (board: { pictured: boolean }) => board.pictured
+      )
+    ).toEqual([true, false])
+
+    // The canvas as it opens: both boards' pictures, the arrow, and the note's words, escaped.
+    const overview = readFileSync(join(output, "overview.html"), "utf8")
+    expect(overview).toContain('<img src="boards/welcome.png"')
+    expect(overview).toContain('<img src="boards/region.png"')
+    expect(overview).toContain("<line ")
+    expect(overview).toContain("Ask &lt;why&gt; first")
+    expect(JSON.parse(readFileSync(join(output, "overview.json"), "utf8"))).toEqual({
+      width: 1440,
+      height: 900,
+    })
   })
 
   test("counts a report for another layout as a failed check", async () => {

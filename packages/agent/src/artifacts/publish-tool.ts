@@ -10,11 +10,19 @@ import {
   type Principal,
   principalsEqual,
 } from "@sixb/core"
-import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
+import {
+  ARTIFACT_KINDS,
+  ARTIFACT_THEME_FILE,
+  CANVAS_FILE,
+  type Canvas,
+  parseArtifactTheme,
+  parseCanvas,
+} from "@sixb/core/artifacts"
 import {
   AgentExecutionLostError,
   type AgentRunArtifacts,
   type AgentRunFileStore,
+  type AgentRunMissingPreview,
 } from "@sixb/core/internal/agents"
 import { frameLayout, serializeArtifactQueryResult } from "@sixb/core/internal/artifacts/frames"
 import {
@@ -35,7 +43,9 @@ import {
 } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
+import { storeCheckedPreviews } from "./board-previews"
 import {
+  type CheckedPreview,
   type CheckedQuery,
   checkLayout,
   type LayoutCheck,
@@ -242,6 +252,8 @@ async function publish(
         : { kind }),
       title: request.title,
       files,
+      // The layout check pictures a canvas's boards as it checks them.
+      rendersPreviews: kind === "canvas",
     })
   } catch (error) {
     // Nothing was published, so the bytes do not count against the run.
@@ -293,6 +305,10 @@ async function publish(
   const themeFile = contents.find((file) => file.path === ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
   const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
+  // A reader sees a canvas's boards as pictures until they open one: the check takes those its
+  // boards miss, in every mode. A board kept as it was keeps the pictures it had.
+  const missing = outline.kind === "canvas" ? await missingPreviews(input.artifacts, published) : []
+  const pictured = new Set(missing.map(({ board }) => board))
   // What the check opens: a canvas's boards, each at its own size, or the entry.
   const pages =
     outline.kind === "canvas"
@@ -301,9 +317,19 @@ async function publish(
           boards: outline.items.flatMap((item) => {
             const html = item.type === "board" ? bytesOf(item.file) : undefined
             return item.type === "board" && html
-              ? [{ id: item.id, file: item.file, w: item.w, h: item.h, html }]
+              ? [
+                  {
+                    id: item.id,
+                    file: item.file,
+                    w: item.w,
+                    h: item.h,
+                    html,
+                    pictured: pictured.has(item.id),
+                  },
+                ]
               : []
           }),
+          ...canvasOf(bytesOf(CANVAS_FILE)),
         }
       : layout && bytesOf(entry)
         ? { layout, entry: bytesOf(entry) as Uint8Array }
@@ -330,6 +356,9 @@ async function publish(
       check = { status: "skipped", reason: "the check failed in the sandbox" }
     }
   }
+  if (check?.status === "checked" && missing.length > 0) {
+    await storePreviews({ input, handle, published, missing, checked: check.previews, signal })
+  }
   return {
     artifactId: published.artifact.id,
     version: published.version.version,
@@ -349,10 +378,76 @@ async function publish(
       : {
           layoutCheck:
             check.status === "checked"
-              ? { screenshots: [...check.screenshots] }
+              ? {
+                  screenshots: [...check.screenshots],
+                  ...(check.overview ? { overview: check.overview } : {}),
+                }
               : { skipped: check.reason },
         }),
   }
+}
+
+/**
+ * The boards of the version just published that miss a picture. A preview never costs a publish:
+ * when they cannot be read, the check pictures none and the worker renders what is missing.
+ */
+async function missingPreviews(
+  artifacts: Pick<AgentRunArtifacts, "missingPreviews">,
+  published: PublishedArtifact
+): Promise<readonly AgentRunMissingPreview[]> {
+  try {
+    return await artifacts.missingPreviews({
+      artifactId: published.artifact.id,
+      version: published.version.version,
+    })
+  } catch (error) {
+    console.warn(
+      `[SixbAgent] Could not read which boards of '${published.artifact.id}' miss a preview:`,
+      error
+    )
+    return []
+  }
+}
+
+/**
+ * Hands the pictures the check took over as the version's previews. The version exists by now,
+ * so a failure is only logged: the worker renders what is still missing.
+ */
+async function storePreviews(context: {
+  readonly input: PublishToolsInput
+  readonly handle: AgentSandboxHandle
+  readonly published: PublishedArtifact
+  readonly missing: readonly AgentRunMissingPreview[]
+  readonly checked: readonly CheckedPreview[]
+  readonly signal: AbortSignal
+}): Promise<void> {
+  const { input, published, signal } = context
+  try {
+    const previews = await storeCheckedPreviews({
+      handle: context.handle,
+      checked: context.checked,
+      missing: context.missing,
+      blobStorage: input.blobStorage,
+      signal,
+    })
+    await input.artifacts.storePreviews({
+      artifactId: published.artifact.id,
+      version: published.version.version,
+      previews,
+    })
+  } catch (error) {
+    if (signal.aborted) throw error
+    console.warn(
+      `[SixbAgent] Could not keep the previews of version ${published.version.version} of '${published.artifact.id}':`,
+      error
+    )
+  }
+}
+
+/** A canvas's items, for the check's picture of it as it opens; none when it cannot be read. */
+function canvasOf(bytes: Uint8Array | undefined): { readonly canvas?: Canvas } {
+  const parsed = bytes ? parseCanvas(new TextDecoder().decode(bytes)) : undefined
+  return parsed && "canvas" in parsed ? { canvas: parsed.canvas } : {}
 }
 
 interface CheckedQueries {
@@ -618,7 +713,11 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
         kind === "page"
           ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and publish the next version.`
           : kind === "canvas"
-            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with view_file, fix what the warnings name, and publish the next version.`
+            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with view_file, fix what the warnings name, and publish the next version.${
+                typeof check.overview === "string"
+                  ? ` Open ${check.overview} to see the canvas as it opens, fitted to a 1440×900 window, and check that it reads at that zoom.`
+                  : ""
+              }`
             : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
       )
     }
