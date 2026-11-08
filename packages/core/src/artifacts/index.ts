@@ -28,6 +28,7 @@ export {
   type CanvasShapeItem,
   type CanvasText,
   type CanvasTextSize,
+  formatCanvas,
   parseCanvas,
 } from "./canvas"
 export {

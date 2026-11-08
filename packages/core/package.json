@@ -47,6 +47,12 @@
       "import": "./dist/artifacts/index.js",
       "default": "./dist/artifacts/index.js"
     },
+    "./artifacts/live": {
+      "types": "./dist/artifacts/live/index.d.ts",
+      "bun": "./src/artifacts/live/index.ts",
+      "import": "./dist/artifacts/live/index.js",
+      "default": "./dist/artifacts/live/index.js"
+    },
     "./auth/strategy": {
       "types": "./dist/auth/strategy.d.ts",
       "bun": "./src/auth/strategy.ts",
@@ -136,6 +142,12 @@
       "bun": "./src/artifacts/frames/index.ts",
       "import": "./dist/artifacts/frames/index.js",
       "default": "./dist/artifacts/frames/index.js"
+    },
+    "./internal/artifacts/live": {
+      "types": "./dist/artifacts/live/server.d.ts",
+      "bun": "./src/artifacts/live/server.ts",
+      "import": "./dist/artifacts/live/server.js",
+      "default": "./dist/artifacts/live/server.js"
     },
     "./internal/artifacts/publish": {
       "types": "./dist/artifacts/publish/index.d.ts",
@@ -539,5 +551,8 @@
     "src",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "yjs": "13.6.33"
+  }
 }
