@@ -331,6 +331,7 @@ export type {
   PutArtifactBoardPreviewsInput,
   RestoreArtifactInput,
   SetArtifactStateInput,
+  UndoArtifactTurnInput,
   UndoneArtifactTurn,
 } from "./artifacts"
 export type {

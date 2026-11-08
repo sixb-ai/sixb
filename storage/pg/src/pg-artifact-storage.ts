@@ -1,3 +1,4 @@
+import type { FileRef } from "@sixb/core"
 import {
   ARTIFACT_RESTORE_POINTS,
   artifactStateBytes,
@@ -46,6 +47,7 @@ import type {
   PutArtifactBoardPreviewsInput,
   RestoreArtifactInput,
   SetArtifactStateInput,
+  UndoArtifactTurnInput,
   UndoneArtifactTurn,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
@@ -61,7 +63,7 @@ const ARTIFACT_COLUMNS = `
   project_id AS "projectId", id, kind, title,
   owner_principal_type AS "ownerPrincipalType", owner_principal_id AS "ownerPrincipalId",
   latest_version AS "latestVersion", revision, created_at AS "createdAt",
-  updated_at AS "updatedAt"
+  updated_at AS "updatedAt", document
 `
 
 /** What a version and a restore point both hold, and who last wrote it from where. */
@@ -106,11 +108,11 @@ export class PgArtifactStorage implements ArtifactStorage {
       const [artifact] = await tx<PgRow[]>`
         INSERT INTO artifacts (
           project_id, id, kind, title, owner_principal_type, owner_principal_id,
-          latest_version, next_version, revision, created_at, updated_at
+          latest_version, next_version, revision, created_at, updated_at, document
         ) VALUES (
           ${input.projectId}, ${input.id}, ${input.kind}, ${content.title},
           ${input.owner.type}, ${input.owner.id}, 1, 2, 1,
-          ${content.updatedAt}, ${content.updatedAt}
+          ${content.updatedAt}, ${content.updatedAt}, ${documentJson(input.document)}::text::jsonb
         )
         ON CONFLICT (project_id, id) DO NOTHING
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
@@ -162,7 +164,7 @@ export class PgArtifactStorage implements ArtifactStorage {
         })
       }
 
-      const written = await writeLatest(tx, current, latest, input.version)
+      const written = await writeLatest(tx, current, latest, input.version, input.document)
       await shareIn(tx, input.projectId, input.artifactId, input.version, turnRunId)
       if (turnRunId) {
         await recordTurnWrite(tx, {
@@ -249,15 +251,21 @@ export class PgArtifactStorage implements ArtifactStorage {
 
       // What the restore replaces is kept first, so the restore can be undone.
       await keepRestorePoint(tx, latest, { reason: "restore", createdAt: input.restoredAt })
-      return writeLatest(tx, current, latest, {
-        title: point.title,
-        entry: point.entry,
-        files: point.files,
-        outline: point.outline,
-        references: point.references,
-        author: input.author,
-        updatedAt: input.restoredAt,
-      })
+      return writeLatest(
+        tx,
+        current,
+        latest,
+        {
+          title: point.title,
+          entry: point.entry,
+          files: point.files,
+          outline: point.outline,
+          references: point.references,
+          author: input.author,
+          updatedAt: input.restoredAt,
+        },
+        input.document
+      )
     })
   }
 
@@ -270,7 +278,7 @@ export class PgArtifactStorage implements ArtifactStorage {
     return rows.map(parseArtifactTurnWriteRow)
   }
 
-  async undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn> {
+  async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
     return runPgTransaction(this.sql, async (tx) => {
       const { projectId, turnRunId } = input
 
@@ -309,7 +317,13 @@ export class PgArtifactStorage implements ArtifactStorage {
           continue
         }
 
-        const undone = await undoTurn(tx, projectId, write, turnRunId)
+        const undone = await undoTurn(
+          tx,
+          projectId,
+          write,
+          turnRunId,
+          input.documents?.[write.artifactId]
+        )
         if (undone) restored.push(undone)
       }
 
@@ -415,10 +429,10 @@ export class PgArtifactStorage implements ArtifactStorage {
       const [artifact] = await tx<PgRow[]>`
         INSERT INTO artifacts (
           project_id, id, kind, title, owner_principal_type, owner_principal_id,
-          latest_version, next_version, revision, created_at, updated_at
+          latest_version, next_version, revision, created_at, updated_at, document
         )
         SELECT project_id, ${input.id}, kind, title, ${input.owner.type}, ${input.owner.id},
-               latest_version, next_version, revision, created_at, updated_at
+               latest_version, next_version, revision, created_at, updated_at, document
         FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.sourceId}
         ON CONFLICT (project_id, id) DO NOTHING
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
@@ -674,6 +688,11 @@ export class PgArtifactStorage implements ArtifactStorage {
   }
 }
 
+/** A Yjs document's reference as its column holds it: null clears it. */
+function documentJson(document: FileRef | undefined): string | null {
+  return document ? JSON.stringify(document) : null
+}
+
 /** The artifact, locked for the write: writes to one artifact take turns. */
 async function lockArtifact(
   sql: SQLClient,
@@ -725,10 +744,12 @@ async function writeLatest(
   sql: SQLClient,
   { artifact, nextVersion }: { readonly artifact: ArtifactRecord; readonly nextVersion: number },
   latest: ArtifactVersionRecord,
-  content: ArtifactVersionInput
+  content: ArtifactVersionInput,
+  document: FileRef | undefined
 ): Promise<PublishedArtifactVersion> {
   const { projectId, id: artifactId } = artifact
   const revision = artifact.revision + 1
+  const state = documentJson(document)
 
   if (latest.frozenAt) {
     const version = await insertVersion(sql, {
@@ -742,7 +763,7 @@ async function writeLatest(
       UPDATE artifacts
       SET title = ${content.title}, latest_version = ${version.version},
           next_version = ${version.version + 1}, revision = ${revision},
-          updated_at = ${content.updatedAt}
+          updated_at = ${content.updatedAt}, document = ${state}::text::jsonb
       WHERE project_id = ${projectId} AND id = ${artifactId}
       RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
     `
@@ -758,7 +779,8 @@ async function writeLatest(
   })
   const [row] = await sql<PgRow[]>`
     UPDATE artifacts
-    SET title = ${content.title}, revision = ${revision}, updated_at = ${content.updatedAt}
+    SET title = ${content.title}, revision = ${revision}, updated_at = ${content.updatedAt},
+        document = ${state}::text::jsonb
     WHERE project_id = ${projectId} AND id = ${artifactId}
     RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
   `
@@ -917,7 +939,8 @@ async function undoTurn(
   sql: SQLClient,
   projectId: string,
   write: ArtifactTurnWriteRecord,
-  turnRunId: string
+  turnRunId: string,
+  document: FileRef | undefined
 ): Promise<PublishedArtifactVersion | null> {
   const { artifactId } = write
   const [row] = await sql<PgRow[]>`
@@ -972,7 +995,7 @@ async function undoTurn(
   const [artifact] = await sql<PgRow[]>`
     UPDATE artifacts
     SET title = ${undone.title}, latest_version = ${undone.version}, revision = ${revision},
-        updated_at = ${updatedAt}
+        updated_at = ${updatedAt}, document = ${documentJson(document)}::text::jsonb
     WHERE project_id = ${projectId} AND id = ${artifactId}
     RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
   `

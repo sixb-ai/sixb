@@ -29,6 +29,12 @@ export interface ArtifactRecord {
   readonly createdAt: Date
   /** When it last changed. */
   readonly updatedAt: Date
+  /**
+   * The latest version's content as a Yjs document, encoded whole in a blob: what everyone
+   * editing a canvas live shares, and what every write to it merges into. A write that changes
+   * the content stores the document with it, or clears it; a freeze keeps it.
+   */
+  readonly document?: FileRef
 }
 
 /** One file of a version, at its path inside the artifact. */
@@ -95,6 +101,8 @@ export interface CreateArtifactInput {
   readonly version: ArtifactVersionInput
   /** The Agent turn that creates it: a retry of the turn deletes it, unless it changed since. */
   readonly turnRunId?: string
+  /** The content as a Yjs document: the artifact's {@link ArtifactRecord.document}. */
+  readonly document?: FileRef
 }
 
 export interface PublishArtifactVersionInput {
@@ -113,6 +121,8 @@ export interface PublishArtifactVersionInput {
    * write keeps a restore point of what it replaces, and a retry of the turn undoes its writes.
    */
   readonly turnRunId?: string
+  /** The content as a Yjs document; without it, the artifact's is cleared. */
+  readonly document?: FileRef
 }
 
 export interface FreezeArtifactVersionInput {
@@ -172,6 +182,8 @@ export interface RestoreArtifactInput {
   /** Who restores: the restored content's author from now on. */
   readonly author: Principal
   readonly restoredAt: Date
+  /** The restored content as a Yjs document; without it, the artifact's is cleared. */
+  readonly document?: FileRef
 }
 
 /** An artifact an Agent turn wrote, and the artifact's revision after the turn's last write. */
@@ -191,6 +203,15 @@ export interface ArtifactTurnInput {
   readonly projectId: string
   /** The turn's run: a conversation's, never a sub-agent's. */
   readonly turnRunId: string
+}
+
+export interface UndoArtifactTurnInput extends ArtifactTurnInput {
+  /**
+   * The Yjs document of each artifact put back, by id, as its turn's restore point holds it: made
+   * at the revision the turn's last write left, which is the only one an artifact is put back
+   * from. An artifact put back without one has its document cleared.
+   */
+  readonly documents?: Readonly<Record<string, FileRef>>
 }
 
 /** What undoing a turn's writes changed. */
@@ -420,7 +441,7 @@ export interface ArtifactStorage {
    * version someone created. An artifact put back is no longer shared in the threads the turn alone
    * shared it in, unless it was copied for them. The turn's writes are forgotten.
    */
-  undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn>
+  undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn>
   get(input: GetArtifactInput): Promise<ArtifactRecord | null>
   /** Most recently updated first. */
   list(input: ListArtifactsInput): Promise<ListArtifactsResult>
