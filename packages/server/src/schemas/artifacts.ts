@@ -192,6 +192,14 @@ export const ArtifactBoardPreviewQuerySchema = z
       .describe(
         "The version's revision the picture is of. Another than the version's current one is 404 preview_not_found: the version changed, and says which pictures it has now. One that matches is cached for good"
       ),
+    key: z
+      .string()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        "The board's render key the picture is of, as the version's outline names it, in place of revision: the picture stays the same while the board shows the same, however often the canvas around it changes. Another than the board's current one is 404 preview_not_found. One that matches is cached for good"
+      ),
   })
   .strict()
 
