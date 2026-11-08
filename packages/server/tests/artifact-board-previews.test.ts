@@ -116,6 +116,7 @@ async function canvas(options: { readonly dark?: boolean } = {}) {
   expect(response.status).toBe(201)
   const published = (await response.json()) as {
     readonly artifact: { readonly id: string }
+    readonly version: { readonly boardPreviews?: Record<string, string> }
   }
   const artifactId = published.artifact.id
 
@@ -164,7 +165,7 @@ async function canvas(options: { readonly dark?: boolean } = {}) {
         headers: { ...as.headers, ...headers },
       })
     )
-  return { ...fixture, alice, bob, artifactId, preview }
+  return { ...fixture, alice, bob, artifactId, preview, published }
 }
 
 describe("a canvas board's preview", () => {
@@ -235,6 +236,14 @@ describe("a canvas board's preview", () => {
     expect(await pending.json()).toMatchObject({ code: "preview_not_found" })
 
     expect((await preview(alice, "1/boards/pricing/preview")).status).toBe(404)
+  })
+
+  test("is pending in the publish's answer too, which a viewer seeds itself from", async () => {
+    // Reproduce by answering a publish with the bare version: the app, seeded from it after a
+    // save, never asks which pictures are ready and draws every board's outline.
+    const { published } = await canvas()
+
+    expect(published.version.boardPreviews).toEqual({ welcome: "pending", region: "pending" })
   })
 
   test("is ready or pending in the version, as the viewer reads it", async () => {
