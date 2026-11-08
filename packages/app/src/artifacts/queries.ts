@@ -4,7 +4,13 @@ import {
   getArtifactQuery,
   isSixbApiError,
 } from "@sixb/client"
-import { events, getArtifactVersionOptions, useEvents, useEventsRegistry } from "@sixb/client/hooks"
+import {
+  events,
+  getArtifactVersionOptions,
+  listArtifactCommentsQueryKey,
+  useEvents,
+  useEventsRegistry,
+} from "@sixb/client/hooks"
 import {
   ARTIFACT_THEME_FILE,
   type ArtifactTheme,
@@ -73,7 +79,7 @@ export function useArtifactVersion(
 
 /**
  * Follows changes to an artifact while a view shows it: each `artifact.updated` reads again what
- * the change made stale, so a reader anywhere sees what someone else saved, the Agent wrote, or a
+ * the change made stale, and each `artifact.commented` its comments, so a reader anywhere sees what someone else saved, the Agent wrote, or a
  * version created. It listens on the app's event socket: a view mounted without one, as a test
  * mounts it, opens none of its own, and reads the open version again as it goes stale.
  */
@@ -83,7 +89,16 @@ export function useArtifactUpdates(artifactId: string | undefined): void {
   useEvents(
     events.artifacts(),
     (event) => {
-      if (event.payload.artifactId === artifactId) artifactChanged(queries, artifactId)
+      if (event.payload.artifactId !== artifactId) return
+
+      // A comment changes the comments alone.
+      if (event.type === "artifact.commented") {
+        void queries.invalidateQueries({
+          queryKey: listArtifactCommentsQueryKey({ path: { artifactId } }),
+        })
+        return
+      }
+      artifactChanged(queries, artifactId)
     },
     { enabled: artifactId !== undefined && shared }
   )

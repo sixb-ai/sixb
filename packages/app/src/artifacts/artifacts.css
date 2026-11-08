@@ -328,3 +328,14 @@
     animation: none;
   }
 }
+
+/*
+ * Placing a comment on a canvas (renderers/canvas/commenting.tsx): the pointer is a comment's
+ * bubble, its tip where the pin goes.
+ */
+.sixb-artboard[data-commenting] :is(.react-flow__pane, .react-flow__node-board) {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 21V11a8 8 0 1 1 8 8H3z' fill='%23111' stroke='white' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E")
+      3 21,
+    crosshair;
+}

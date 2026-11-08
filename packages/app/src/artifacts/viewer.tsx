@@ -77,6 +77,7 @@ import { SheetRenderer } from "./renderers/sheet/sheet"
 import { SlidesRenderer } from "./renderers/slides/slides"
 import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
 import { VersionMenu } from "./version-menu"
+import { ArtifactViewProvider } from "./view-context"
 
 export interface ViewerChrome {
   /** Show a close button that calls this. */
@@ -215,13 +216,21 @@ function ArtifactView({
       {liveView?.notice ? <LiveNotice reason={liveView.notice} /> : null}
       <EditSessionProvider editing={edit.editing || !!liveView?.editing} report={edit.report}>
         <LiveArtifactProvider artifact={liveView?.live ?? null}>
-          <ArtifactBody
-            key={bodyKey(version, kind, target.part)}
-            version={version}
-            kind={kind}
-            latestVersion={detail.artifact.latestVersion}
-            part={target.part}
-          />
+          <ArtifactViewProvider
+            value={{
+              access: detail.access,
+              latestVersion: detail.artifact.latestVersion,
+              revision: detail.artifact.revision,
+            }}
+          >
+            <ArtifactBody
+              key={bodyKey(version, kind, target.part)}
+              version={version}
+              kind={kind}
+              latestVersion={detail.artifact.latestVersion}
+              part={target.part}
+            />
+          </ArtifactViewProvider>
         </LiveArtifactProvider>
       </EditSessionProvider>
       <DiscardDialog edit={edit} />

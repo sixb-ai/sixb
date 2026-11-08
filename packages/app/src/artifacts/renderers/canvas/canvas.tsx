@@ -8,17 +8,31 @@ import {
   BackgroundVariant,
   type FitViewOptions,
   type Node,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
   useStoreApi,
 } from "@xyflow/react"
-import { memo, type RefObject, useCallback, useEffect, useMemo, useState } from "react"
+import {
+  type MouseEvent,
+  memo,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
+import { useArtifactView } from "../../view-context"
 import { CANVAS_EDGE_TYPES } from "./arrows"
 import { LiveBoardsProvider, useLiveSet } from "./board"
+import type { CommentPick } from "./board-editor"
+import { CanvasCommentPins } from "./comment-pins"
+import { CommentModeHint, CommentTools, useCanvasCommenting } from "./commenting"
+import { CommentsPanel } from "./comments-panel"
 import { CanvasControls } from "./controls"
 import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider } from "./editing"
@@ -148,7 +162,101 @@ function Board({
   )
 
   const board = useBoardEditing(canvas, edit, version ? setOpened : undefined)
+  // What edits a board's elements in place: the live canvas, while the reader edits it.
+  const editBoard = edit?.live?.editBoard
+  const stopCapturing = edit?.live?.stopCapturing
+  const boardEditor = useMemo(
+    () => (editBoard && stopCapturing ? { editBoard, stopCapturing } : null),
+    [editBoard, stopCapturing]
+  )
   useNameScaleVariable(board.root)
+
+  // Comments, on the canvas's latest version shown in the viewer.
+  const view = useArtifactView()
+  const commenting = useCanvasCommenting({
+    artifactId:
+      version && view && version.version === view.latestVersion ? version.artifactId : null,
+    live: liveArtifact ?? null,
+    title,
+    boards,
+    revision: view?.revision ?? version?.revision ?? 1,
+  })
+  const { getInternalNode, screenToFlowPosition } = useReactFlow()
+  const { setCommenting, cancelDraft, draft } = commenting
+
+  // C places a comment, wherever focus is but in a field; Esc gives it up.
+  useEffect(() => {
+    if (!commenting.enabled) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (
+        target instanceof Element &&
+        target.closest("input, textarea, select, [contenteditable]")
+      ) {
+        return
+      }
+      if (event.key.toLowerCase() === "c" && !event.repeat) {
+        event.preventDefault()
+        commenting.toggleCommenting()
+      } else if (event.key === "Escape" && !opened && (draft || commenting.commenting)) {
+        event.preventDefault()
+        if (draft) cancelDraft()
+        else setCommenting(false)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [commenting, opened, draft, cancelDraft, setCommenting])
+
+  // Placing a comment, a click on a board puts it there, and nothing is selected or moved.
+  const placing = useMemo(
+    () =>
+      commenting.commenting
+        ? {
+            nodesDraggable: false,
+            nodesConnectable: false,
+            elementsSelectable: false,
+            onNodeClick: (event: MouseEvent, node: Node) => {
+              if (node.type !== "board") return
+              const internal = getInternalNode(node.id)
+              const item = boards.find((each) => each.id === node.id)
+              if (!internal || !item) return
+
+              const at = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+              const { x, y } = internal.internals.positionAbsolute
+              commenting.pick(
+                node.id,
+                {
+                  point: {
+                    x: Math.min(1, Math.max(0, (at.x - x) / item.w)),
+                    y: Math.min(1, Math.max(0, (at.y - y) / item.h)),
+                  },
+                },
+                "canvas"
+              )
+            },
+            onPaneClick: () => cancelDraft(),
+          }
+        : {},
+    [commenting, getInternalNode, screenToFlowPosition, boards, cancelDraft]
+  )
+
+  /** Shows a thread's pin: its board fitted in view, or opened, when one is. */
+  const showThread = useCallback(
+    (id: string) => {
+      commenting.setActive(id)
+      const thread = commenting.threads.find((each) => each.comment.id === id)
+      const on = thread?.comment.anchor.board
+      if (!on || !boards.some((each) => each.id === on)) return
+      if (opened) {
+        if (opened !== on) setOpened(on)
+        return
+      }
+      void fitView({ nodes: [{ id: on }], padding: CANVAS_FIT_PADDING, maxZoom: 1, duration: 260 })
+    },
+    [commenting, boards, opened, fitView]
+  )
 
   // Read, the board's handlers stay the same from one draw to the next, so React Flow doesn't
   // draw every item again when the board does.
@@ -184,8 +292,9 @@ function Board({
       ref={board.root}
       // Editing, the board takes the keys: it is focused as typing ends.
       tabIndex={board.editing ? -1 : undefined}
-      className="sixb-canvas sixb-artboard relative size-full bg-background outline-none"
+      className="sixb-canvas sixb-artboard @container/canvas relative flex size-full bg-background outline-none"
       data-editing={board.editing ? "" : undefined}
+      data-commenting={commenting.commenting ? "" : undefined}
       data-live={liveArtifact ? "" : undefined}
       role="region"
       aria-label={messages.canvas(title)}
@@ -202,49 +311,123 @@ function Board({
         if (id && boards.some((board) => board.id === id)) live.open(id)
       }}
     >
-      <LiveBoardsProvider value={live}>
-        <CanvasEditingProvider value={board.editing ? board.items : null}>
-          <ReactFlow
-            nodes={board.nodes}
-            edges={board.edges}
-            nodeTypes={CANVAS_NODE_TYPES}
-            edgeTypes={CANVAS_EDGE_TYPES}
-            colorMode={mode}
-            fitView
-            fitViewOptions={fitOptions}
-            // Only what the view shows is drawn: a canvas holds up to a thousand items. Each is
-            // drawn once at first, so notes and texts are measured, and an arrow draws while any
-            // of the box between its ends is in view.
-            onlyRenderVisibleElements
-            minZoom={0.04}
-            maxZoom={2.5}
-            // Scroll pans, as a design tool's board does; a pinch, or ⌘ or Ctrl with scroll, zooms.
-            panOnScroll
-            zoomOnScroll={false}
-            zoomOnPinch
-            zoomActivationKeyCode={["Meta", "Control"]}
-            // A double-click opens a board, or types into an item while editing: it never zooms.
-            zoomOnDoubleClick={false}
-            panOnDrag
-            {...(board.editing ? board.flow : reading)}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1.3} />
-            <CanvasControls padding={CANVAS_FIT_PADDING} />
-            {liveArtifact ? <PresenceLayer live={liveArtifact} /> : null}
-            {board.editing ? board.toolbar : null}
-          </ReactFlow>
-        </CanvasEditingProvider>
-      </LiveBoardsProvider>
-      {opened && version ? (
-        <BoardFocus
-          version={version}
-          boards={boards}
-          arrows={arrows}
-          id={opened}
-          pictureOf={pictureOf}
-          onOpen={setOpened}
-          onClose={close}
+      <div className="relative h-full min-w-0 flex-1">
+        <LiveBoardsProvider value={live}>
+          <CanvasEditingProvider value={board.editing ? board.items : null}>
+            <ReactFlow
+              nodes={board.nodes}
+              edges={board.edges}
+              nodeTypes={CANVAS_NODE_TYPES}
+              edgeTypes={CANVAS_EDGE_TYPES}
+              colorMode={mode}
+              fitView
+              fitViewOptions={fitOptions}
+              // Only what the view shows is drawn: a canvas holds up to a thousand items. Each is
+              // drawn once at first, so notes and texts are measured, and an arrow draws while any
+              // of the box between its ends is in view.
+              onlyRenderVisibleElements
+              minZoom={0.04}
+              maxZoom={2.5}
+              // Scroll pans, as a design tool's board does; a pinch, or ⌘ or Ctrl with scroll, zooms.
+              panOnScroll
+              zoomOnScroll={false}
+              zoomOnPinch
+              zoomActivationKeyCode={["Meta", "Control"]}
+              // A double-click opens a board, or types into an item while editing: it never zooms.
+              zoomOnDoubleClick={false}
+              panOnDrag
+              {...(board.editing ? board.flow : reading)}
+              {...placing}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={24} size={1.3} />
+              <CanvasControls padding={CANVAS_FIT_PADDING} />
+              {liveArtifact ? <PresenceLayer live={liveArtifact} /> : null}
+              {board.editing ? board.toolbar : null}
+              {commenting.enabled ? (
+                <>
+                  <CanvasCommentPins
+                    pins={commenting.pins}
+                    active={commenting.active}
+                    draft={draft?.where === "canvas" ? draft : null}
+                    onOpen={(id) => {
+                      commenting.setActive(id)
+                      commenting.setPanel(true)
+                    }}
+                    onSubmitDraft={commenting.submitDraft}
+                    onCancelDraft={cancelDraft}
+                  />
+                  <Panel position="top-right" className="!m-3">
+                    <CommentTools commenting={commenting} />
+                  </Panel>
+                  {commenting.commenting ? (
+                    <Panel position="top-center" className={board.editing ? "!mt-16" : "!mt-3"}>
+                      <CommentModeHint onExit={() => setCommenting(false)} />
+                    </Panel>
+                  ) : null}
+                </>
+              ) : null}
+            </ReactFlow>
+          </CanvasEditingProvider>
+        </LiveBoardsProvider>
+        {opened && version ? (
+          <BoardFocus
+            version={version}
+            boards={boards}
+            arrows={arrows}
+            id={opened}
+            pictureOf={pictureOf}
+            onOpen={setOpened}
+            onClose={close}
+            live={liveArtifact ?? null}
+            canvas={boardEditor}
+            mode={commenting.commenting ? "comment" : boardEditor ? "edit" : "read"}
+            {...(commenting.enabled
+              ? {
+                  pins: commenting.pins,
+                  activePin: commenting.active,
+                  draft: draft?.where === "focus" ? draft : null,
+                  tools: (
+                    <CommentTools
+                      commenting={commenting}
+                      className="border-0 bg-transparent p-0 shadow-none"
+                    />
+                  ),
+                  onEscape: () => {
+                    if (draft) cancelDraft()
+                    else if (commenting.commenting) setCommenting(false)
+                    else return false
+                    return true
+                  },
+                  onPick: (id: string, pick: CommentPick) => commenting.pick(id, pick, "focus"),
+                  onOpenPin: (id: string) => {
+                    commenting.setActive(id)
+                    commenting.setPanel(true)
+                  },
+                  onSubmitDraft: commenting.submitDraft,
+                  onCancelDraft: cancelDraft,
+                }
+              : {})}
+          />
+        ) : null}
+      </div>
+      {commenting.enabled && commenting.panel ? (
+        <CommentsPanel
+          threads={commenting.threads}
+          loading={commenting.loading}
+          failed={commenting.failed}
+          filter={commenting.filter}
+          active={commenting.active}
+          placeOf={commenting.placeOf}
+          nameOf={commenting.nameOf}
+          canManage={commenting.canManage}
+          onFilter={commenting.setFilter}
+          onActivate={showThread}
+          onReply={commenting.reply}
+          onResolve={commenting.resolve}
+          onDelete={commenting.remove}
+          onSend={commenting.send}
+          onClose={() => commenting.setPanel(false)}
         />
       ) : null}
     </div>

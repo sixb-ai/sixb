@@ -50,6 +50,8 @@ export interface CanvasEditor {
   readonly live?: {
     readonly startDrag: () => void
     readonly endDrag: () => void
+    /** Ends the undo step being made: a board's edit is one step of its own. */
+    readonly stopCapturing: () => void
     /** Tells the others what is selected. */
     readonly select: (ids: readonly string[]) => void
     /** Edits what a board's page shows, as one step of the same undo. */
