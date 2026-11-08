@@ -223,5 +223,9 @@ describe("comments on an artifact", () => {
     expect(quoteArtifactComment({ anchor: { revision: 3 }, body: "Good" })).toBe(
       "[revision 3] Good"
     )
+    // With its id, for the Agent to resolve it or reply to it.
+    expect(quoteArtifactComment({ id: "cmt_4k2a9c0d1e", anchor, body: "Warmer" })).toBe(
+      '[welcome · body>main:0>h1:0 · "Welcome back" · revision 12 · comment cmt_4k2a9c0d1e] Warmer'
+    )
   })
 })
