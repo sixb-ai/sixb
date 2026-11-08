@@ -566,7 +566,7 @@ describe("the version menu", () => {
     await openMenu(observer.getByRole("button", { name: "Current · Versions" }))
     await observer.findAllByRole("menuitemradio")
     expect(observer.queryByRole("menuitem", { name: /Create version/ })).toBeNull()
-    expect(observer.queryByRole("menuitem", { name: "Restore" })).toBeNull()
+    expect(observer.queryByRole("group", { name: "Restore" })).toBeNull()
   })
 
   test("restores a point after asking, from the revision the reader saw, and says when it changed", async () => {
@@ -602,9 +602,6 @@ describe("the version menu", () => {
     const restore = async () => {
       const ui = viewer(sharedArtifact("sheet", "update"))
       await openMenu(ui.getByRole("button", { name: "Current · Versions" }))
-      await act(async () => {
-        fireEvent.click(await ui.findByRole("menuitem", { name: "Restore" }))
-      })
       const point = await ui.findByRole("menuitem", { name: /Before the agent's turn/ })
       await act(async () => {
         fireEvent.click(point)
