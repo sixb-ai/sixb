@@ -10,7 +10,7 @@ import {
   layoutProbe,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
-import { artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
+import { type ArtifactQueryAnswer, artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
@@ -93,7 +93,7 @@ interface CheckReport {
  * What a page's `sixb.query(name)` reads in the check: the query route's JSON as it answers the
  * requester, or why the query failed for them.
  */
-export type CheckedQuery = { readonly result: unknown } | { readonly error: string }
+export type CheckedQuery = ArtifactQueryAnswer
 
 /** A width a page is checked at, as a laptop and a phone show it. */
 export type PageView = "desktop" | "phone"
