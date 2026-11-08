@@ -21,6 +21,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import type { LiveArtifact } from "../../live/session"
@@ -184,11 +185,15 @@ function Board({
   const { getInternalNode, screenToFlowPosition } = useReactFlow()
   const { setCommenting, cancelDraft, draft } = commenting
 
-  // C places a comment, wherever focus is but in a field; Esc gives it up.
+  // C places a comment while the canvas has the focus or the pointer, but in a field; Esc gives
+  // it up.
+  const pointed = useRef(false)
   useEffect(() => {
     if (!commenting.enabled) return
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return
+      const here = board.root.current
+      if (!here || !(pointed.current || here.contains(document.activeElement))) return
       const target = event.target
       if (
         target instanceof Element &&
@@ -207,7 +212,7 @@ function Board({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [commenting, opened, draft, cancelDraft, setCommenting])
+  }, [commenting, opened, draft, cancelDraft, setCommenting, board.root])
 
   // Placing a comment, a click on a board puts it there, and nothing is selected or moved.
   const placing = useMemo(
@@ -295,10 +300,19 @@ function Board({
       className="sixb-canvas sixb-artboard @container/canvas relative flex size-full bg-background outline-none"
       data-editing={board.editing ? "" : undefined}
       data-commenting={commenting.commenting ? "" : undefined}
+      onPointerEnter={() => {
+        pointed.current = true
+      }}
+      onPointerLeave={() => {
+        pointed.current = false
+      }}
       data-live={liveArtifact ? "" : undefined}
       role="region"
       aria-label={messages.canvas(title)}
       onKeyDown={(event) => {
+        // The comments' keys are their own: Delete in the panel deletes no item, Enter on a pin
+        // opens no board.
+        if ((event.target as Element).closest(COMMENTS)) return
         if (board.editing) {
           board.onKeyDown(event)
           return
@@ -433,6 +447,9 @@ function Board({
     </div>
   )
 }
+
+/** What belongs to the comments: their panel, their pins, and a board's element tools. */
+const COMMENTS = "[data-comments-panel], [data-comment-pin], [data-board-tools]"
 
 /**
  * Sets on the board as it zooms how much names grow, {@link NAME_SCALE}, so names, headings, and

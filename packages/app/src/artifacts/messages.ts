@@ -322,6 +322,7 @@ export const en = {
       deleteDescription: "Its replies go with it. This can’t be undone.",
       someone: "Someone",
       you: "You",
+      agentFor: (name: string) => `Agent, for ${name}`,
       replies: (count: number) => (count === 1 ? "1 reply" : `${number(count)} replies`),
       wholeBoard: "Whole board",
       onCanvas: "The canvas",
@@ -881,7 +882,10 @@ export const fr: Translation<ArtifactMessages> = {
     comments: {
       title: "Commentaires",
       panel: "Commentaires",
-      toggle: (count) => (count > 0 ? `Commentaires, ${numberFr(count)} ouverts` : "Commentaires"),
+      toggle: (count) =>
+        count === 0
+          ? "Commentaires"
+          : `Commentaires, ${numberFr(count)} ${count === 1 ? "ouvert" : "ouverts"}`,
       tool: "Commenter",
       toolHint: "Commenter (C)",
       modeHint: "Cliquez sur une planche, ou un élément d’une planche ouverte, pour commenter.",
@@ -905,6 +909,7 @@ export const fr: Translation<ArtifactMessages> = {
       deleteDescription: "Ses réponses partent avec lui. C’est définitif.",
       someone: "Quelqu’un",
       you: "Vous",
+      agentFor: (name) => `Agent, pour ${name}`,
       replies: (count) => (count === 1 ? "1 réponse" : `${numberFr(count)} réponses`),
       wholeBoard: "Toute la planche",
       onCanvas: "Le canevas",
