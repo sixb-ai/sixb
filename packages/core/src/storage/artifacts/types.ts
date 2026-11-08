@@ -416,6 +416,11 @@ export interface ArtifactCommentAnchor {
   readonly element?: string
   /** The element's first words, which name it once it is gone. */
   readonly label?: string
+  /**
+   * Where on the board its pin is, as fractions of the board's width and height from its top left:
+   * where its author clicked.
+   */
+  readonly point?: { readonly x: number; readonly y: number }
   readonly revision: number
 }
 

@@ -400,6 +400,12 @@ const ArtifactCommentAnchorSchema = z.object({
     .max(1000)
     .optional()
     .describe("The element's first words, which name it once it is gone; kept to 120 characters"),
+  point: z
+    .object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })
+    .optional()
+    .describe(
+      "Where on the board its pin is, as fractions of the board's width and height from its top left"
+    ),
   revision: RevisionSchema.describe("The artifact's revision its author saw"),
 })
 

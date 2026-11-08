@@ -19906,6 +19906,13 @@ export type ListArtifactCommentsResponses = {
          */
         label?: string
         /**
+         * Where on the board its pin is, as fractions of the board's width and height from its top left
+         */
+        point?: {
+          x: number
+          y: number
+        }
+        /**
          * The artifact's revision its author saw
          */
         revision: number
@@ -19959,6 +19966,13 @@ export type AddArtifactCommentData = {
        * The element's first words, which name it once it is gone; kept to 120 characters
        */
       label?: string
+      /**
+       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       */
+      point?: {
+        x: number
+        y: number
+      }
       /**
        * The artifact's revision its author saw
        */
@@ -20130,6 +20144,13 @@ export type AddArtifactCommentResponses = {
        * The element's first words, which name it once it is gone; kept to 120 characters
        */
       label?: string
+      /**
+       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       */
+      point?: {
+        x: number
+        y: number
+      }
       /**
        * The artifact's revision its author saw
        */
@@ -20306,6 +20327,13 @@ export type ResolveArtifactCommentResponses = {
        * The element's first words, which name it once it is gone; kept to 120 characters
        */
       label?: string
+      /**
+       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       */
+      point?: {
+        x: number
+        y: number
+      }
       /**
        * The artifact's revision its author saw
        */

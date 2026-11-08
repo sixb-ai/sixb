@@ -103,12 +103,23 @@ describe("comments on an artifact", () => {
 
     const comment = await olivia.artifacts.addComment(artifactId, {
       body: "  Make this warmer  ",
-      anchor: { board: "welcome", element: "body>main:0>h1:0", label: "Welcome\n home" },
+      anchor: {
+        board: "welcome",
+        element: "body>main:0>h1:0",
+        label: "Welcome\n home",
+        point: { x: 0.5, y: 0.1 },
+      },
     })
     expect(comment.id).toMatch(/^cmt_[0-9a-z]{10}$/)
     expect(comment).toMatchObject({
       artifactId,
-      anchor: { board: "welcome", element: "body>main:0>h1:0", label: "Welcome home", revision: 2 },
+      anchor: {
+        board: "welcome",
+        element: "body>main:0>h1:0",
+        label: "Welcome home",
+        point: { x: 0.5, y: 0.1 },
+        revision: 2,
+      },
       body: "Make this warmer",
       author: { type: "user", id: "olivia" },
     })
@@ -173,6 +184,10 @@ describe("comments on an artifact", () => {
         anchor: { board: "welcome", element: `body${">div:0".repeat(200)}` },
       })
     ).toBe("invalid_comment")
+    expect(await add({ body: "Hm", anchor: { point: { x: 0.5, y: 0.5 } } })).toBe("invalid_comment")
+    expect(await add({ body: "Hm", anchor: { board: "welcome", point: { x: 1.5, y: 0 } } })).toBe(
+      "invalid_comment"
+    )
     expect(await add({ body: "Hm", parentId: "cmt_missing" })).toBe("comment_not_found")
   })
 

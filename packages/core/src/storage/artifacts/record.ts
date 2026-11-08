@@ -311,6 +311,13 @@ export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
       throw corrupt(where, `anchor's ${key} is not text`)
     }
   }
+  const { point } = anchor
+  if (
+    point !== undefined &&
+    (!isObject(point) || !Number.isFinite(point.x) || !Number.isFinite(point.y))
+  ) {
+    throw corrupt(where, "anchor's point is not two numbers")
+  }
   return {
     projectId: text(row.projectId, "projectId", where),
     artifactId: text(row.artifactId, "artifactId", where),
@@ -320,6 +327,7 @@ export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
       ...(typeof anchor.board === "string" ? { board: anchor.board } : {}),
       ...(typeof anchor.element === "string" ? { element: anchor.element } : {}),
       ...(typeof anchor.label === "string" ? { label: anchor.label } : {}),
+      ...(isObject(point) ? { point: { x: Number(point.x), y: Number(point.y) } } : {}),
       revision: Number(anchor.revision),
     },
     body: text(row.body, "body", where),

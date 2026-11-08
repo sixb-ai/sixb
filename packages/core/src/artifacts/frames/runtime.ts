@@ -205,6 +205,8 @@ export function frameRuntime(): void {
   // ── Editing a board ─────────────────────────────────────────────────
 
   let editing = false
+  /** Whether a text the reader picks takes their typing: not while they pick what to comment on. */
+  let typable = true
   let pointed: Element | null = null
   let picked: Element | null = null
   let typing: HTMLElement | null = null
@@ -302,8 +304,10 @@ export function frameRuntime(): void {
     if (typeof patch.html === "string") element.innerHTML = patch.html
   }
 
-  const startEditing = (on: boolean) => {
+  const startEditing = (on: boolean, typingAllowed: boolean) => {
     editing = on
+    typable = typingAllowed
+    if (!typable) stopTyping()
     root.toggleAttribute("data-sixb-editing", on)
     if (on && !document.getElementById("sixb-editing")) {
       const style = document.createElement("style")
@@ -332,8 +336,10 @@ export function frameRuntime(): void {
 
       const { element, target } = editTarget(event.target)
       picked = mark("data-sixb-picked", picked, element)
-      post({ event: "edit.select", params: { target } })
-      if (element instanceof HTMLElement && target.kind === "text") {
+      // Where the reader clicked, for a comment's pin.
+      const at = { x: event.clientX, y: event.clientY }
+      post({ event: "edit.select", params: { target, at } })
+      if (typable && element instanceof HTMLElement && target.kind === "text") {
         typing = element
         typedFrom = element.textContent ?? ""
         element.setAttribute("contenteditable", "plaintext-only")
@@ -429,7 +435,7 @@ export function frameRuntime(): void {
         return
       }
       case "edit":
-        startEditing(params.on === true)
+        startEditing(params.on === true, params.typing !== false)
         return
       case "edit.patch": {
         const patches = Array.isArray(params.patches) ? params.patches : []

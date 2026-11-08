@@ -160,6 +160,31 @@ describe("a board's frame, editing", () => {
     expect(heading.hasAttribute("contenteditable")).toBe(false)
   })
 
+  // Guard proof: drop `typable` from the runtime's click handler; the heading picked to comment on
+  // takes the reader's typing.
+  test("picks without typing when the app asks so, and says where the reader clicked", () => {
+    const { request, events, at, fire } = frame(BOARD)
+    request("edit", { on: true, typing: false })
+
+    const heading = at("body>main:0>h1:0")
+    fire(heading, "click")
+    expect(events("edit.select").at(-1)?.params).toEqual({
+      target: {
+        address: "body>main:0>h1:0",
+        kind: "text",
+        label: "Welcome",
+        rect: { x: 0, y: 0, width: 0, height: 0 },
+      },
+      at: { x: 0, y: 0 },
+    })
+    expect(heading.hasAttribute("contenteditable")).toBe(false)
+
+    // Typing again, the next pick takes it.
+    request("edit", { on: true })
+    fire(heading, "click")
+    expect(heading.getAttribute("contenteditable")).toBe("plaintext-only")
+  })
+
   // Guard proof: drop the hash check in the runtime's editTarget; the total a script rewrote is
   // then editable, and the reader's words would overwrite the source's.
   test("reports what scripts built or rewrote as scripted, and lets nobody type into it", () => {

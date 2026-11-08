@@ -69,6 +69,7 @@ export {
   type FrameEditTarget,
   type FrameEmbed,
   type FrameEvent,
+  type FramePoint,
   type FrameRect,
   type FrameRequest,
   type FrameResponse,
