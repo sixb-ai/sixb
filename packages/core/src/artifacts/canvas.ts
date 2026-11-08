@@ -367,3 +367,28 @@ function record(
   }
   return input
 }
+
+/**
+ * A canvas as `canvas.json` writes it, the inverse of `parseCanvas`: its items in order, each
+ * without what is a default, positions and sizes in whole pixels.
+ */
+export function formatCanvas(canvas: Canvas): string {
+  const items = canvas.items.map((item) => {
+    if (item.type === "arrow") {
+      const { dashed, ...rest } = item
+      return dashed ? item : rest
+    }
+    const rounded = Object.fromEntries(
+      Object.entries(item).map(([key, value]) => [
+        key,
+        typeof value === "number" && ["x", "y", "w", "h"].includes(key) ? Math.round(value) : value,
+      ])
+    )
+    if (item.type === "text" && item.size === "m") {
+      const { size: _, ...rest } = rounded
+      return rest
+    }
+    return rounded
+  })
+  return `${JSON.stringify({ items }, null, 2)}\n`
+}
