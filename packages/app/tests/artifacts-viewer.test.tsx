@@ -191,9 +191,12 @@ describe("the viewer", () => {
     })
     const versions = [2, 1].map((version) => ({
       version,
+      revision: version,
+      frozen: true,
       title: "Q3 operating review",
       author: { type: "user" as const, id: "user-1" },
       createdAt: `2026-10-0${version}T12:00:00.000Z`,
+      updatedAt: `2026-10-0${version}T12:00:00.000Z`,
     }))
     cache.setQueryData(getArtifactQueryKey({ path: { artifactId: ARTIFACT_ID } }), {
       artifact: {
@@ -203,6 +206,7 @@ describe("the viewer", () => {
         title: "Q3 operating review",
         owner: { type: "user", id: "user-1" },
         latestVersion: 2,
+        revision: 2,
         createdAt: "2026-10-01T12:00:00.000Z",
         updatedAt: "2026-10-02T12:00:00.000Z",
       },
@@ -231,6 +235,9 @@ describe("the viewer", () => {
       references: [],
       author: { type: "user", id: "user-1" },
       createdAt: "2026-10-02T12:00:00.000Z",
+      updatedAt: "2026-10-02T12:00:00.000Z",
+      revision: input.version ?? 2,
+      frozen: true,
     }
     seedVersion(cache, version, input.texts)
     return renderToStaticMarkup(

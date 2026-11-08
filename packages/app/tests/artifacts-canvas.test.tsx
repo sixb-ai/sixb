@@ -12,6 +12,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { AppWindow } from "lucide-react"
+import { frameLinkKey } from "../src/artifacts/frame"
 import {
   ItemTile,
   LiveBoard,
@@ -642,7 +643,7 @@ describe("board previews", () => {
     // the tile as its fallback again: the picture is drawn anew as the board starts.
     const previewed = version({ home: "ready" })
     const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
-    cache.setQueryData(["artifact-frame", previewed.artifactId, previewed.version], {
+    cache.setQueryData(frameLinkKey(previewed), {
       path: "/api/artifact-frames/token/",
       expiresAt: "2026-10-18T13:00:00.000Z",
     })
@@ -736,8 +737,13 @@ describe("board previews", () => {
   })
 
   test("ask the version again while pictures are rendered, less often each time, and no longer than the server waits", () => {
-    const published = { createdAt: "2026-10-18T12:00:00.000Z" }
-    const at = (minutes: number) => Date.parse(published.createdAt) + minutes * 60_000
+    // An open version waits from its last write. Reproduce by counting from when it was opened:
+    // a version opened long ago and written a minute ago asks no more.
+    const published = {
+      createdAt: "2026-10-01T12:00:00.000Z",
+      updatedAt: "2026-10-18T12:00:00.000Z",
+    }
+    const at = (minutes: number) => Date.parse(published.updatedAt) + minutes * 60_000
 
     expect(nextPreviewCheck({ home: "pending" }, published, 0, at(1))).toBe(2_000)
     expect(nextPreviewCheck({ home: "pending" }, published, 2, at(1))).toBe(4_500)
@@ -828,7 +834,7 @@ describe("a board opened over its canvas", () => {
     // "Continue" leads from home to pay. Reproduce by dropping BoardFocus's onEvent: the press
     // opens nothing.
     const cache = client()
-    cache.setQueryData(["artifact-frame", version.artifactId, version.version], {
+    cache.setQueryData(frameLinkKey(version), {
       path: "/api/artifact-frames/token/",
       expiresAt: "2026-10-18T13:00:00.000Z",
     })

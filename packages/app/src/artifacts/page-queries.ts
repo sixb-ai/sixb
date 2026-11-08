@@ -3,7 +3,6 @@ import type { FrameCall } from "@sixb/core/artifacts"
 import { type QueryClient, useQueries } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import {
-  type ArtifactVersion,
   artifactQueryKey,
   artifactQueryOptions,
   fetchArtifactQuery,
@@ -19,7 +18,7 @@ import {
  */
 export async function answerQueryCall(
   queries: QueryClient,
-  version: Pick<ArtifactVersion, "artifactId" | "version">,
+  version: QueriedVersion,
   call: Extract<FrameCall, { readonly method: "query.run" }>
 ): Promise<unknown> {
   try {
@@ -69,7 +68,7 @@ export function useQueryChanges(
       const rows = results[index]?.data
       if (rows === undefined) return
 
-      const key = JSON.stringify(artifactQueryKey(version.artifactId, version.version, name))
+      const key = JSON.stringify(artifactQueryKey(version, name))
       const known = seen.current.has(key)
       const before = seen.current.get(key)
       seen.current.set(key, rows)

@@ -3,6 +3,7 @@ import type { GetArtifactVersionResponse } from "@sixb/client"
 import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
+import { frameLinkKey } from "../src/artifacts/frame"
 import {
   ArtifactReferencesProvider,
   ReferencingMarkdown,
@@ -50,13 +51,16 @@ function pageVersion(): GetArtifactVersionResponse {
     ],
     author: { type: "user", id: "user-1" },
     createdAt: "2026-10-18T12:00:00.000Z",
+    updatedAt: "2026-10-18T12:00:00.000Z",
+    revision: 1,
+    frozen: true,
   }
 }
 
 /** A cache that reads nothing itself, with the page's frame link minted already. */
 function frameCache(version: GetArtifactVersionResponse): QueryClient {
   const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
-  cache.setQueryData(["artifact-frame", version.artifactId, version.version], {
+  cache.setQueryData(frameLinkKey(version), {
     path: "/api/artifact-frames/token/",
     expiresAt: "2026-10-18T13:00:00.000Z",
   })
@@ -129,6 +133,33 @@ describe("a page", () => {
     expect(opened).toEqual([
       { type: "artifact", artifactId: "art_m3tr1csq3a", part: "chart=sla-trend" },
     ])
+  })
+})
+
+describe("a page that changes", () => {
+  test("loads again at its new revision, on a link minted for it", async () => {
+    // A link serves the revision it was minted at. Reproduce by keying the frame by its version
+    // alone: the open version that changed keeps the link to what it held before.
+    const version = { ...pageVersion(), frozen: false }
+    const cache = frameCache(version)
+    const changed = { ...version, revision: 2 }
+    cache.setQueryData(frameLinkKey(changed), {
+      path: "/api/artifact-frames/token-r2/",
+      expiresAt: "2026-10-18T13:00:00.000Z",
+    })
+    const page = (shown: GetArtifactVersionResponse) => (
+      <QueryClientProvider client={cache}>
+        <ArtifactReferencesProvider open={() => {}}>
+          <PageRenderer version={shown} />
+        </ArtifactReferencesProvider>
+      </QueryClientProvider>
+    )
+    const ui = render(page(version))
+    const source = () => ui.container.querySelector("iframe")?.getAttribute("src")
+    expect(source()).toEndWith("/api/artifact-frames/token/index.html")
+
+    ui.rerender(page(changed))
+    expect(source()).toEndWith("/api/artifact-frames/token-r2/index.html")
   })
 })
 
@@ -255,7 +286,7 @@ describe("a page's embeds", () => {
     }
     const cache = frameCache(version)
     seedVersion(cache, calculator, {}, { as: "latest" })
-    cache.setQueryData(["artifact-frame", calculator.artifactId, 1], {
+    cache.setQueryData(frameLinkKey(calculator), {
       path: "/api/artifact-frames/calculator/",
       expiresAt: "2026-10-18T13:00:00.000Z",
     })
