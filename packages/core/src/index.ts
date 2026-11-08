@@ -1013,6 +1013,7 @@ export type {
 } from "./datasets/lineage"
 export type {
   SixbActionPhaseFailedContext,
+  SixbArtifactLiveWriteFailedContext,
   SixbDatasetIngestFlushFailedContext,
   SixbDatasetIngestRejectedContext,
   SixbErrorContext,
