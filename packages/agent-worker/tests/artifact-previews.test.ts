@@ -13,6 +13,7 @@ import {
   type SandboxFactory,
   SixbHost,
 } from "@sixb/core"
+import { FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import type { ArtifactVersionRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
@@ -212,7 +213,18 @@ describe("a canvas version's previews", () => {
       "welcome light: welcome light",
       "welcome light: welcome light small",
     ])
-    expect(sandboxes.created).toMatchObject([{ environment: {}, network: { mode: "none" } }])
+    // Reachable: the CDNs a frame loads libraries and fonts from, and nothing else. Reproduce with
+    // no network: a board styled from a CDN is pictured unstyled, and its picture stays.
+    expect(sandboxes.created).toMatchObject([
+      {
+        environment: {},
+        network: {
+          mode: "restricted",
+          allow: FRAME_CDN_ALLOWLIST.map((origin) => ({ name: new URL(origin).hostname, origin })),
+        },
+      },
+    ])
+    expect(FRAME_CDN_ALLOWLIST).toContain("https://fonts.gstatic.com")
     expect(sandboxes.destroyed).toBe(1)
 
     // A second delivery finds nothing missing, and opens no sandbox.
