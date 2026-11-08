@@ -1,8 +1,5 @@
 import { client, getArtifactVersion } from "@sixb/client"
-import {
-  BOARD_PREVIEW_WAIT_MS,
-  SMALL_BOARD_PREVIEW_WIDTH,
-} from "@sixb/core/internal/artifacts/canvas"
+import { BOARD_PREVIEW_WAIT_MS, SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/artifacts"
 import { type Query, useQuery } from "@tanstack/react-query"
 import type { ArtifactVersion } from "../../queries"
 

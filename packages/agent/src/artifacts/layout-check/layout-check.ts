@@ -1,7 +1,7 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
 import type { ArtifactTheme, ArtifactThemeMode, Canvas } from "@sixb/core/artifacts"
-import { SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/internal/artifacts/canvas"
+import { SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/artifacts"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,

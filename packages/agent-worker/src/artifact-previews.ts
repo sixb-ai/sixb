@@ -6,10 +6,10 @@ import type {
   SandboxNetworkPolicy,
   Storage,
 } from "@sixb/core"
-import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/canvas"
 import { FRAME_CDN_ALLOWLIST } from "@sixb/core/internal/artifacts/frames"
 import {
   type ArtifactQueryAnswers,
+  BOARD_PREVIEW_JOB,
   missingBoardPreviews,
   parseArtifactQueryAnswers,
   storeBoardPreviews,

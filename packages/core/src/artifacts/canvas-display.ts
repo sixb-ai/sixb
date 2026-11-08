@@ -1,7 +1,8 @@
 import type { CanvasTextSize } from "./canvas"
 
-// How this repo's packages show a canvas, for the app's viewer and whatever pictures a canvas as
-// a reader sees it, such as the Agent's overview of one. Browser-safe: no storage, no Bun APIs.
+// How a canvas is shown: the app's viewer draws it at these sizes, and whatever pictures a canvas
+// as a reader sees it, such as the Agent's overview of one, follows them. Browser-safe: the app
+// reads them from @sixb/core/artifacts, the only core subpath it may import.
 
 /** The size a text of each size is drawn at, in canvas pixels. */
 export const CANVAS_TEXT_PIXELS: Readonly<Record<CanvasTextSize, number>> = {

@@ -4,7 +4,7 @@ import {
   CANVAS_TEXT_PIXELS,
   canvasNoteFontSize,
   canvasShapeFontSize,
-} from "@sixb/core/internal/artifacts/canvas"
+} from "@sixb/core/artifacts"
 
 // The whole canvas as the app opens it, for the Agent to judge what reads at that zoom: fitted to
 // everything in a laptop's window, with the boards as the check pictured them and every other item

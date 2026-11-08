@@ -30,6 +30,14 @@ export {
   type CanvasTextSize,
   parseCanvas,
 } from "./canvas"
+export {
+  BOARD_PREVIEW_WAIT_MS,
+  CANVAS_FIT_PADDING,
+  CANVAS_TEXT_PIXELS,
+  canvasNoteFontSize,
+  canvasShapeFontSize,
+  SMALL_BOARD_PREVIEW_WIDTH,
+} from "./canvas-display"
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
 export {
   checkFormula,
