@@ -22,7 +22,11 @@ import {
   boardPreviewStatuses,
   boardPreviews,
 } from "@sixb/core/internal/artifacts/publish"
-import type { ArtifactRestorePointRecord, PublishedArtifactVersion } from "@sixb/core/storage"
+import type {
+  ArtifactCommentRecord,
+  ArtifactRestorePointRecord,
+  PublishedArtifactVersion,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -34,9 +38,13 @@ import {
 } from "../files/content"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
+  AddArtifactCommentBodySchema,
   ArtifactBoardPreviewParamsSchema,
   ArtifactBoardPreviewQuerySchema,
   ArtifactChangeResponseSchema,
+  ArtifactCommentListResponseSchema,
+  ArtifactCommentParamsSchema,
+  ArtifactCommentSchema,
   ArtifactErrorResponseSchema,
   ArtifactFrameResponseSchema,
   ArtifactListQuerySchema,
@@ -52,11 +60,13 @@ import {
   ArtifactVersionParamsSchema,
   ArtifactVersionSchema,
   ClearArtifactStateResponseSchema,
+  DeleteArtifactCommentResponseSchema,
   DeleteArtifactResponseSchema,
   DeleteArtifactStateResponseSchema,
   FreezeArtifactBodySchema,
   PublishArtifactBodySchema,
   PublishedArtifactResponseSchema,
+  ResolveArtifactCommentBodySchema,
   RestoreArtifactBodySchema,
   SetArtifactStateBodySchema,
   SetArtifactStateResponseSchema,
@@ -100,6 +110,20 @@ function versionBody(version: ArtifactVersionRecord) {
     updatedAt: toIsoString(version.updatedAt),
     ...(version.frozenAt ? { frozenAt: toIsoString(version.frozenAt) } : {}),
     ...(version.frozenBy ? { frozenBy: version.frozenBy } : {}),
+  }
+}
+
+function commentBody(comment: ArtifactCommentRecord) {
+  return {
+    artifactId: comment.artifactId,
+    id: comment.id,
+    ...(comment.parentId === undefined ? {} : { parentId: comment.parentId }),
+    anchor: comment.anchor,
+    body: comment.body,
+    author: comment.author,
+    createdAt: toIsoString(comment.createdAt),
+    ...(comment.resolvedAt ? { resolvedAt: toIsoString(comment.resolvedAt) } : {}),
+    ...(comment.resolvedBy ? { resolvedBy: comment.resolvedBy } : {}),
   }
 }
 
@@ -246,6 +270,7 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
   if (error instanceof ArtifactRequestError) {
     switch (error.code) {
       case "artifact_not_found":
+      case "comment_not_found":
       case "query_not_found":
       case "restore_point_not_found":
         set.status = 404
@@ -256,9 +281,11 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
         set.status = 409
         break
       case "invalid_artifact":
+      case "invalid_comment":
       case "invalid_state":
         set.status = 400
         break
+      case "comments_full":
       case "state_full":
         set.status = 413
         break
@@ -835,6 +862,143 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "freezeArtifactVersion",
           security: accessTokenSecurityRequirement("freezeArtifactVersion"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/comments",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const comments = await requireRequestSixb(context).artifacts.listComments(artifactId)
+          if (!comments) return await refusal(context, artifactId, context.set)
+
+          return ArtifactCommentListResponseSchema.parse({ comments: comments.map(commentBody) })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ArtifactCommentListResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "List an artifact's comments",
+          description:
+            "Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "listArtifactComments",
+          security: accessTokenSecurityRequirement("listArtifactComments"),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/comments",
+      async (context) => {
+        try {
+          const body = AddArtifactCommentBodySchema.parse(context.body)
+          const comment = await requireRequestSixb(context).artifacts.addComment(
+            context.params.artifactId,
+            {
+              body: body.body,
+              ...(body.anchor ? { anchor: body.anchor } : {}),
+              ...(body.parentId ? { parentId: body.parentId } : {}),
+            }
+          )
+          context.set.status = 201
+          return ArtifactCommentSchema.parse(commentBody(comment))
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        body: AddArtifactCommentBodySchema,
+        response: {
+          201: ArtifactCommentSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          413: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Comment on an artifact",
+          description:
+            "Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "addArtifactComment",
+          security: accessTokenSecurityRequirement("addArtifactComment"),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/comments/:commentId/resolve",
+      async (context) => {
+        try {
+          const body = ResolveArtifactCommentBodySchema.parse(context.body ?? {})
+          const comment = await requireRequestSixb(context).artifacts.resolveComment(
+            context.params.artifactId,
+            context.params.commentId,
+            body.resolved
+          )
+          return ArtifactCommentSchema.parse(commentBody(comment))
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactCommentParamsSchema,
+        body: ResolveArtifactCommentBodySchema,
+        response: {
+          200: ArtifactCommentSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Resolve an artifact's comment",
+          description:
+            "Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "resolveArtifactComment",
+          security: accessTokenSecurityRequirement("resolveArtifactComment"),
+        },
+      }
+    )
+    .delete(
+      "/api/artifacts/:artifactId/comments/:commentId",
+      async (context) => {
+        try {
+          await requireRequestSixb(context).artifacts.deleteComment(
+            context.params.artifactId,
+            context.params.commentId
+          )
+          return DeleteArtifactCommentResponseSchema.parse({ deleted: true })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactCommentParamsSchema,
+        response: {
+          200: DeleteArtifactCommentResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Delete an artifact's comment",
+          description:
+            "Deletes the comment and its replies. Its author, or whoever may update the artifact, may.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "deleteArtifactComment",
+          security: accessTokenSecurityRequirement("deleteArtifactComment"),
         },
       }
     )

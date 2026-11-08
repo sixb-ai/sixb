@@ -373,7 +373,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({
@@ -387,3 +387,49 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
       "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
     ),
 })
+
+const ArtifactCommentAnchorSchema = z.object({
+  board: z.string().optional().describe("The id of the canvas's board it is about"),
+  element: z
+    .string()
+    .optional()
+    .describe("The address of the board's element it is about, such as body>main:0>h1:0"),
+  label: z.string().optional().describe("The element's first words, which name it once it is gone"),
+  revision: RevisionSchema.describe("The artifact's revision its author saw"),
+})
+
+export const ArtifactCommentSchema = z.object({
+  artifactId: z.string(),
+  id: z.string(),
+  parentId: z.string().optional().describe("The comment it replies to, for a reply"),
+  anchor: ArtifactCommentAnchorSchema,
+  body: z.string().describe("Plain text"),
+  author: PrincipalSchema,
+  createdAt: z.string(),
+  resolvedAt: z.string().optional().describe("When someone marked it resolved"),
+  resolvedBy: PrincipalSchema.optional().describe("Who marked it resolved"),
+})
+
+export const ArtifactCommentListResponseSchema = z.object({
+  comments: z.array(ArtifactCommentSchema).describe("Comments and replies, oldest first"),
+})
+
+export const ArtifactCommentParamsSchema = ArtifactParamsSchema.extend({
+  commentId: z.string().min(1).max(64),
+})
+
+export const AddArtifactCommentBodySchema = z.object({
+  body: z.string().min(1).max(4_000).describe("Plain text"),
+  anchor: ArtifactCommentAnchorSchema.partial()
+    .optional()
+    .describe(
+      "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+    ),
+  parentId: z.string().min(1).max(64).optional().describe("The comment it replies to"),
+})
+
+export const ResolveArtifactCommentBodySchema = z.object({
+  resolved: z.boolean().default(true).describe("False opens it again"),
+})
+
+export const DeleteArtifactCommentResponseSchema = z.object({ deleted: z.literal(true) })

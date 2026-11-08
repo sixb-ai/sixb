@@ -322,7 +322,7 @@
           },
           "code": {
             "type": "string",
-            "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+            "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
           },
           "latest": {
             "type": "object",
@@ -52321,7 +52321,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -52386,7 +52386,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53130,7 +53130,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53195,7 +53195,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53260,7 +53260,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53325,7 +53325,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53390,7 +53390,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53660,7 +53660,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53725,7 +53725,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53790,7 +53790,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53903,7 +53903,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -53968,7 +53968,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54033,7 +54033,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54161,7 +54161,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54226,7 +54226,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54291,7 +54291,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54404,7 +54404,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54469,7 +54469,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54534,7 +54534,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54706,7 +54706,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54771,7 +54771,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54836,7 +54836,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54901,7 +54901,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -54966,7 +54966,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -55088,7 +55088,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -55153,7 +55153,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -55218,7 +55218,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -55283,7 +55283,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -56058,7 +56058,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -56123,7 +56123,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -56188,7 +56188,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -56253,7 +56253,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -56318,7 +56318,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -56921,7 +56921,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -56986,7 +56986,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -57051,7 +57051,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -57116,7 +57116,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -57181,7 +57181,1614 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifactId}/comments": {
+      "get": {
+        "summary": "List an artifact's comments",
+        "description": "Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.",
+        "tags": ["Artifacts"],
+        "operationId": "listArtifactComments",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "artifactId": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "parentId": {
+                            "type": "string",
+                            "description": "The comment it replies to, for a reply"
+                          },
+                          "anchor": {
+                            "type": "object",
+                            "properties": {
+                              "board": {
+                                "type": "string",
+                                "description": "The id of the canvas's board it is about"
+                              },
+                              "element": {
+                                "type": "string",
+                                "description": "The address of the board's element it is about, such as body>main:0>h1:0"
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "The element's first words, which name it once it is gone"
+                              },
+                              "revision": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0,
+                                "description": "The artifact's revision its author saw"
+                              }
+                            },
+                            "required": ["revision"],
+                            "additionalProperties": false
+                          },
+                          "body": {
+                            "type": "string",
+                            "description": "Plain text"
+                          },
+                          "author": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "resolvedAt": {
+                            "type": "string",
+                            "description": "When someone marked it resolved"
+                          },
+                          "resolvedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false,
+                            "description": "Who marked it resolved"
+                          }
+                        },
+                        "required": ["artifactId", "id", "anchor", "body", "author", "createdAt"],
+                        "additionalProperties": false
+                      },
+                      "description": "Comments and replies, oldest first"
+                    }
+                  },
+                  "required": ["comments"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Comment on an artifact",
+        "description": "Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.",
+        "tags": ["Artifacts"],
+        "operationId": "addArtifactComment",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "description": "Plain text"
+                  },
+                  "anchor": {
+                    "type": "object",
+                    "properties": {
+                      "board": {
+                        "type": "string",
+                        "description": "The id of the canvas's board it is about"
+                      },
+                      "element": {
+                        "type": "string",
+                        "description": "The address of the board's element it is about, such as body>main:0>h1:0"
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "The element's first words, which name it once it is gone"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "exclusiveMinimum": true,
+                        "minimum": 0,
+                        "description": "The artifact's revision its author saw"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                  },
+                  "parentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "The comment it replies to"
+                  }
+                },
+                "required": ["body"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "description": "Plain text"
+                  },
+                  "anchor": {
+                    "type": "object",
+                    "properties": {
+                      "board": {
+                        "type": "string",
+                        "description": "The id of the canvas's board it is about"
+                      },
+                      "element": {
+                        "type": "string",
+                        "description": "The address of the board's element it is about, such as body>main:0>h1:0"
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "The element's first words, which name it once it is gone"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "exclusiveMinimum": true,
+                        "minimum": 0,
+                        "description": "The artifact's revision its author saw"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                  },
+                  "parentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "The comment it replies to"
+                  }
+                },
+                "required": ["body"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "description": "Plain text"
+                  },
+                  "anchor": {
+                    "type": "object",
+                    "properties": {
+                      "board": {
+                        "type": "string",
+                        "description": "The id of the canvas's board it is about"
+                      },
+                      "element": {
+                        "type": "string",
+                        "description": "The address of the board's element it is about, such as body>main:0>h1:0"
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "The element's first words, which name it once it is gone"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "exclusiveMinimum": true,
+                        "minimum": 0,
+                        "description": "The artifact's revision its author saw"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to."
+                  },
+                  "parentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "The comment it replies to"
+                  }
+                },
+                "required": ["body"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "artifactId": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "parentId": {
+                      "type": "string",
+                      "description": "The comment it replies to, for a reply"
+                    },
+                    "anchor": {
+                      "type": "object",
+                      "properties": {
+                        "board": {
+                          "type": "string",
+                          "description": "The id of the canvas's board it is about"
+                        },
+                        "element": {
+                          "type": "string",
+                          "description": "The address of the board's element it is about, such as body>main:0>h1:0"
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "The element's first words, which name it once it is gone"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0,
+                          "description": "The artifact's revision its author saw"
+                        }
+                      },
+                      "required": ["revision"],
+                      "additionalProperties": false
+                    },
+                    "body": {
+                      "type": "string",
+                      "description": "Plain text"
+                    },
+                    "author": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "resolvedAt": {
+                      "type": "string",
+                      "description": "When someone marked it resolved"
+                    },
+                    "resolvedBy": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false,
+                      "description": "Who marked it resolved"
+                    }
+                  },
+                  "required": ["artifactId", "id", "anchor", "body", "author", "createdAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifactId}/comments/{commentId}/resolve": {
+      "post": {
+        "summary": "Resolve an artifact's comment",
+        "description": "Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.",
+        "tags": ["Artifacts"],
+        "operationId": "resolveArtifactComment",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "resolved": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "False opens it again"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "resolved": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "False opens it again"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "resolved": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "False opens it again"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "artifactId": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "parentId": {
+                      "type": "string",
+                      "description": "The comment it replies to, for a reply"
+                    },
+                    "anchor": {
+                      "type": "object",
+                      "properties": {
+                        "board": {
+                          "type": "string",
+                          "description": "The id of the canvas's board it is about"
+                        },
+                        "element": {
+                          "type": "string",
+                          "description": "The address of the board's element it is about, such as body>main:0>h1:0"
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "The element's first words, which name it once it is gone"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0,
+                          "description": "The artifact's revision its author saw"
+                        }
+                      },
+                      "required": ["revision"],
+                      "additionalProperties": false
+                    },
+                    "body": {
+                      "type": "string",
+                      "description": "Plain text"
+                    },
+                    "author": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "resolvedAt": {
+                      "type": "string",
+                      "description": "When someone marked it resolved"
+                    },
+                    "resolvedBy": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false,
+                      "description": "Who marked it resolved"
+                    }
+                  },
+                  "required": ["artifactId", "id", "anchor", "body", "author", "createdAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifactId}/comments/{commentId}": {
+      "delete": {
+        "summary": "Delete an artifact's comment",
+        "description": "Deletes the comment and its replies. Its author, or whoever may update the artifact, may.",
+        "tags": ["Artifacts"],
+        "operationId": "deleteArtifactComment",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["deleted"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "revision", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -57378,7 +58985,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -57443,7 +59050,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -57508,7 +59115,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -57980,7 +59587,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -58045,7 +59652,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -58110,7 +59717,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -58846,7 +60453,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -58911,7 +60518,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -58976,7 +60583,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59041,7 +60648,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59106,7 +60713,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59235,7 +60842,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59300,7 +60907,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59365,7 +60972,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59430,7 +61037,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59920,7 +61527,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -59985,7 +61592,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -60050,7 +61657,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -64049,7 +65656,8 @@
                 "user.reactivated",
                 "user.invited",
                 "user.profile.updated",
-                "artifact.updated"
+                "artifact.updated",
+                "artifact.commented"
               ]
             }
           },
@@ -67550,7 +69158,8 @@
                                   "user.reactivated",
                                   "user.invited",
                                   "user.profile.updated",
-                                  "artifact.updated"
+                                  "artifact.updated",
+                                  "artifact.commented"
                                 ]
                               },
                               "topic": {

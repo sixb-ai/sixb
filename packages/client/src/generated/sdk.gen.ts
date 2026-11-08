@@ -14,6 +14,9 @@ import type {
   AddAgentThreadParticipantsData,
   AddAgentThreadParticipantsErrors,
   AddAgentThreadParticipantsResponses,
+  AddArtifactCommentData,
+  AddArtifactCommentErrors,
+  AddArtifactCommentResponses,
   AddConnectorConnectionData,
   AddConnectorConnectionErrors,
   AddConnectorConnectionResponses,
@@ -80,6 +83,9 @@ import type {
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyErrors,
   DeleteAiLimitPolicyResponses,
+  DeleteArtifactCommentData,
+  DeleteArtifactCommentErrors,
+  DeleteArtifactCommentResponses,
   DeleteArtifactData,
   DeleteArtifactErrors,
   DeleteArtifactResponses,
@@ -393,6 +399,9 @@ import type {
   ListAiModelCallsData,
   ListAiModelCallsErrors,
   ListAiModelCallsResponses,
+  ListArtifactCommentsData,
+  ListArtifactCommentsErrors,
+  ListArtifactCommentsResponses,
   ListArtifactRestorePointsData,
   ListArtifactRestorePointsErrors,
   ListArtifactRestorePointsResponses,
@@ -538,6 +547,9 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunErrors,
   RequestWorkflowRunResponses,
+  ResolveArtifactCommentData,
+  ResolveArtifactCommentErrors,
+  ResolveArtifactCommentResponses,
   RestoreArtifactData,
   RestoreArtifactErrors,
   RestoreArtifactResponses,
@@ -3953,6 +3965,101 @@ export const freezeArtifactVersion = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * List an artifact's comments
+ *
+ * Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.
+ */
+export const listArtifactComments = <ThrowOnError extends boolean = false>(
+  options: Options<ListArtifactCommentsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListArtifactCommentsResponses,
+    ListArtifactCommentsErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/comments",
+    ...options,
+  })
+
+/**
+ * Comment on an artifact
+ *
+ * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
+ */
+export const addArtifactComment = <ThrowOnError extends boolean = false>(
+  options: Options<AddArtifactCommentData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    AddArtifactCommentResponses,
+    AddArtifactCommentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/comments",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Resolve an artifact's comment
+ *
+ * Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.
+ */
+export const resolveArtifactComment = <ThrowOnError extends boolean = false>(
+  options: Options<ResolveArtifactCommentData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    ResolveArtifactCommentResponses,
+    ResolveArtifactCommentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/comments/{commentId}/resolve",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Delete an artifact's comment
+ *
+ * Deletes the comment and its replies. Its author, or whoever may update the artifact, may.
+ */
+export const deleteArtifactComment = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteArtifactCommentData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    DeleteArtifactCommentResponses,
+    DeleteArtifactCommentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/comments/{commentId}",
+    ...options,
   })
 
 /**

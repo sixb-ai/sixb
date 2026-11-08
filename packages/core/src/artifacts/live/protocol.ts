@@ -64,6 +64,14 @@ export type ArtifactLiveServerMessage =
   /** The connection may now only watch: the person lost the right to change the artifact. */
   | { readonly type: "access"; readonly artifactId: string; readonly access: ArtifactLiveAccess }
   | { readonly type: "left"; readonly artifactId: string; readonly reason: ArtifactLiveLeftReason }
+  /** A comment changed, as `artifact.commented` says: read the comments again. */
+  | {
+      readonly type: "commented"
+      readonly artifactId: string
+      readonly commentId: string
+      readonly parentId?: string
+      readonly action: "created" | "resolved" | "reopened" | "deleted"
+    }
   | { readonly type: "error"; readonly artifactId?: string; readonly message: string }
 
 /**
