@@ -340,9 +340,9 @@
     crosshair;
 }
 
-/* The board a click would comment on, outlined as the pin will be colored. */
+/* The board a click would comment on, outlined in the selection blue the opened board uses. */
 .sixb-artboard[data-commenting] .react-flow__node-board:hover {
-  outline: calc(2px / var(--sixb-zoom, 1)) solid var(--primary);
+  outline: calc(2px / var(--sixb-zoom, 1)) solid #0a84ff;
   outline-offset: calc(4px / var(--sixb-zoom, 1));
   border-radius: 10px;
 }
