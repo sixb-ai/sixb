@@ -78,8 +78,11 @@ export function canvasGraph(canvas: Canvas): {
       draggable: false,
       connectable: false,
       selectable: false,
-      // Boards are the items a reader opens; the rest are read where they lie.
+      // Boards are the items a reader opens; the rest are read where they lie. React Flow lets an
+      // item it can't select or drag take no pointer, so a board takes it back: a double-click
+      // reaches it, and a drag across it still pans.
       focusable: item.type === "board",
+      ...(item.type === "board" ? { style: { pointerEvents: "all" } } : {}),
     })
   })
   return { nodes, edges }

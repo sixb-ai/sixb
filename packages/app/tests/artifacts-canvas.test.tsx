@@ -501,6 +501,37 @@ describe("a board opened over its canvas", () => {
     expect(follow("home", "Aside")).toBeNull()
   })
 
+  test("opens a board the reader double-clicks", async () => {
+    // React Flow lets an item it can't select or drag take no pointer, so in a browser the
+    // double-click went to the pane, which zoomed. Reproduce by dropping the board's pointer
+    // style from canvasGraph: the board takes no pointer, as a note doesn't.
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(
+        <QueryClientProvider client={client()}>
+          <CanvasBoard canvas={CANVAS} version={version} title="Checkout" mode="light" />
+        </QueryClientProvider>
+      )
+    })
+    const node = (id: string) =>
+      view?.container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)
+    expect(node("home")?.style.pointerEvents).toBe("all")
+    // The rest are read where they lie: a press on them reaches the pane, which pans.
+    expect(node("ask")?.style.pointerEvents).toBe("none")
+    expect(node("home")?.classList.contains("selectable")).toBe(false)
+
+    const home = node("home")
+    if (!home) throw new Error("Expected the board.")
+    await act(async () => {
+      fireEvent.doubleClick(home)
+    })
+    expect(view?.getByRole("dialog").getAttribute("aria-label")).toBe(
+      "Home, opened from the canvas"
+    )
+    view?.unmount()
+  })
+
   test("opens focused when an address names a board", async () => {
     const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
     let view: ReturnType<typeof render> | undefined
