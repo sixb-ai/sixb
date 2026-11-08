@@ -49,6 +49,7 @@ export function AssistantBody({
   parts,
   live = false,
   nested = false,
+  runId,
 }: {
   parts: readonly NormalizedPart[]
   /** True while this body is driven by an in-flight run, so its headline shows live progress. */
@@ -58,6 +59,8 @@ export function AssistantBody({
    * on the card already.
    */
   nested?: boolean
+  /** The turn's run, whose restore points say what it changed in the artifacts it revised. */
+  runId?: string | null
 }) {
   const blocks: React.ReactNode[] = []
   let textBuffer: string[] = []
@@ -126,7 +129,9 @@ export function AssistantBody({
   flushWork(live)
   blocks.push(<AnswerToolViews key="answer-tools" parts={parts} />)
   const artifacts = turnArtifacts(parts)
-  if (artifacts.length > 0) blocks.push(<ArtifactCards key="artifacts" artifacts={artifacts} />)
+  if (artifacts.length > 0) {
+    blocks.push(<ArtifactCards key="artifacts" artifacts={artifacts} runId={runId ?? null} />)
+  }
   // Saving is work the reply keeps quiet about; what was remembered is the user's to see.
   savedMemories(parts).forEach((save, index) => {
     blocks.push(<SavedToMemory key={`memory:${index}`} {...save} />)

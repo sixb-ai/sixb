@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
+import {
+  getArtifactRestorePointQueryKey,
+  getArtifactVersionQueryKey,
+  listArtifactRestorePointsQueryKey,
+} from "@sixb/client/hooks"
 import { parseCsv } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -24,6 +29,19 @@ function publish(artifactId: string, version: number, title: string): Normalized
       state: "output-available",
       input: { path: "work/review", title },
       output: { artifactId, version, kind: "document", title, warnings: [] },
+    },
+  }
+}
+
+/** An `update_artifact` call that wrote the artifact's current version, at `revision`. */
+function update(artifactId: string, revision: number, title: string): NormalizedPart {
+  return {
+    kind: "tool",
+    tool: {
+      toolName: "update_artifact",
+      state: "output-available",
+      input: { id: artifactId, path: "work/review", title },
+      output: { artifactId, version: 2, revision, open: true, kind: "sheet", title, warnings: [] },
     },
   }
 }
@@ -107,6 +125,27 @@ describe("what a turn published", () => {
       "document.md shows the image &#x27;chart.svg&#x27;, which is not one of the artifact&#x27;s files."
     )
     expect(failed).not.toContain("[SixbAgentWorker]")
+  })
+})
+
+describe("what a turn wrote to the current version", () => {
+  test("is the turn's last write, by revision, and its row names no version", () => {
+    // Reproduce by comparing writes by version: the version stays 2, so the first write stays.
+    const parts = [
+      update("art_review0001", 5, "Q3 review draft"),
+      update("art_review0001", 7, "Q3 review"),
+    ]
+    expect(turnArtifacts(parts).map((artifact) => [artifact.title, artifact.revision])).toEqual([
+      ["Q3 review", 7],
+    ])
+    expect(turnArtifacts(parts)[0]?.created).toBe(false)
+
+    const row = render(
+      <PublishArtifactToolView tool={(parts[1] as { tool: NormalizedTool }).tool} />
+    )
+    expect(row).toContain("Updated Q3 review")
+    // The current version changes until someone creates it: its number says nothing yet.
+    expect(row).not.toContain("· v2")
   })
 })
 
@@ -360,6 +399,46 @@ describe("an artifact a turn revised", () => {
     const html = render(<AssistantBody parts={revision} />)
     expect(html).toContain(">Version 3<")
     expect(html).toContain('aria-label="Open Q3 review"')
+  })
+
+  test("says what the turn changed: its restore point against what it left", () => {
+    // Reproduce by comparing the version with the one before it: version 1 is not this turn's, and
+    // nothing is said.
+    const queries = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+    const artifactId = "art_preview001"
+    const before = sheets(["Overview"])
+    const after = { ...sheets(["Overview", "Charts"]), version: 2, revision: 7, frozen: false }
+    queries.setQueryData(listArtifactRestorePointsQueryKey({ path: { artifactId } }), {
+      restorePoints: [
+        {
+          artifactId,
+          revision: 5,
+          version: 2,
+          frozen: false,
+          title: "Q3 numbers",
+          author: { type: "user", id: "user-1" },
+          updatedAt: "2026-10-02T12:00:00.000Z",
+          reason: "turn",
+          turnRunId: "run_2",
+          createdAt: "2026-10-02T12:05:00.000Z",
+        },
+      ],
+    })
+    queries.setQueryData(
+      getArtifactRestorePointQueryKey({ path: { artifactId, revision: "5" } }),
+      before
+    )
+    queries.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "2" } }), after)
+    queries.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
+      ...sheets(["Overview", "Charts"]),
+    })
+
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queries}>
+        <AssistantBody parts={[update(artifactId, 7, "Q3 numbers")]} runId="run_2" />
+      </QueryClientProvider>
+    )
+    expect(html).toContain(">Added Charts<")
   })
 
   test("says what its version added and removed, read from the structure", () => {

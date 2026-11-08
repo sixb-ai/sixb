@@ -2,17 +2,29 @@ import { ARTIFACT_KINDS } from "@sixb/core/artifacts"
 import type { ArtifactKindName } from "../../artifacts/kind-icon"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 
-/** Creating an artifact, and publishing the next version of one. */
-const PUBLISH_TOOLS = new Set(["publish_artifact", "publish_artifact_version"])
+/**
+ * Creating an artifact, and changing one: `update_artifact` writes its current version, and
+ * `publish_artifact_version`, in threads from before, published the next version.
+ */
+const PUBLISH_TOOLS = new Set(["publish_artifact", "update_artifact", "publish_artifact_version"])
 
 export function isPublishTool(toolName: string): boolean {
   return PUBLISH_TOOLS.has(toolName)
+}
+
+/** Whether a publish call changed an artifact that was there before, rather than created one. */
+export function isUpdateTool(toolName: string): boolean {
+  return toolName === "update_artifact" || toolName === "publish_artifact_version"
 }
 
 /** What one publish call published, read from its result. */
 export interface PublishedArtifact {
   readonly artifactId: string
   readonly version: number
+  /** The artifact's revision once written: absent from calls made before revisions. */
+  readonly revision?: number
+  /** Whether the version written stays open; absent from calls made before open versions. */
+  readonly open?: boolean
   readonly kind: ArtifactKindName
   readonly title: string
   readonly warnings: readonly { readonly message: string; readonly part?: string }[]
@@ -34,6 +46,8 @@ export function publishedArtifact(tool: NormalizedTool): PublishedArtifact | nul
   return {
     artifactId: output.artifactId,
     version: output.version,
+    ...(typeof output.revision === "number" ? { revision: output.revision } : {}),
+    ...(typeof output.open === "boolean" ? { open: output.open } : {}),
     kind: output.kind as ArtifactKindName,
     title: output.title,
     warnings: warnings.flatMap((warning) =>
@@ -62,8 +76,8 @@ export interface TurnArtifact extends PublishedArtifact {
 }
 
 /**
- * Each artifact a turn published, once, at the last version the turn published, in the order the
- * turn first published them.
+ * Each artifact a turn published, once, as the turn last wrote it, in the order the turn first
+ * published them.
  */
 export function turnArtifacts(parts: readonly NormalizedPart[]): TurnArtifact[] {
   const byId = new Map<string, TurnArtifact>()
@@ -73,13 +87,21 @@ export function turnArtifacts(parts: readonly NormalizedPart[]): TurnArtifact[] 
     if (!published) continue
     const earlier = byId.get(published.artifactId)
     const created = earlier?.created === true || part.tool.toolName === "publish_artifact"
-    if (!earlier || published.version > earlier.version) {
+    if (!earlier || writtenAfter(published, earlier)) {
       byId.set(published.artifactId, { ...published, created })
     } else if (created !== earlier.created) {
       byId.set(published.artifactId, { ...earlier, created })
     }
   }
   return [...byId.values()]
+}
+
+/** Whether one write came after another: by revision, else, before revisions, by version. */
+function writtenAfter(later: PublishedArtifact, earlier: PublishedArtifact): boolean {
+  if (later.revision !== undefined && earlier.revision !== undefined) {
+    return later.revision > earlier.revision
+  }
+  return later.version > earlier.version
 }
 
 /**
