@@ -7,6 +7,7 @@ import { act, render } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { ArtifactFrame, frameLinkKey } from "../src/artifacts/frame"
 import {
+  artifactVersionOptions,
   LIVE_QUERY_DEBOUNCE_MS,
   useArtifactQuery,
   useArtifactUpdates,
@@ -427,6 +428,37 @@ describe("an artifact the reader has open", () => {
       await settle()
       expect(reads).toHaveLength(2)
       expect(ui.container.textContent).toBe("2")
+    } finally {
+      client.setConfig({ fetch: previous })
+    }
+  })
+})
+
+describe("a created version", () => {
+  test("is read once by its number, and again as the latest", async () => {
+    // The next write after it opens a newer version, which `latest` names then. Reproduce by
+    // keeping every frozen read fresh in artifactVersionOptions: `latest` is not read again.
+    const reads: string[] = []
+    const previous = client.getConfig().fetch
+    client.setConfig({
+      fetch: Object.assign(
+        async (input: Request) => {
+          reads.push(new URL(input.url).pathname)
+          return Response.json(version)
+        },
+        { preconnect: globalThis.fetch.preconnect }
+      ) as unknown as typeof fetch,
+    })
+    try {
+      const cache = new QueryClient()
+      const minuteAgo = Date.now() - 60_000
+      for (const at of [1, "latest"] as const) {
+        const options = artifactVersionOptions(PAGE, at)
+        cache.setQueryData(options.queryKey, version, { updatedAt: minuteAgo })
+        await cache.fetchQuery(options)
+      }
+
+      expect(reads).toEqual([`/api/artifacts/${PAGE}/versions/latest`])
     } finally {
       client.setConfig({ fetch: previous })
     }
