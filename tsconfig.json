@@ -20,6 +20,7 @@
       "@sixb/broker-nats": ["./broker/nats/src/index.ts"],
       "@sixb/broker-redis": ["./broker/redis/src/index.ts"],
       "@sixb/client": ["./packages/client/src/index.ts"],
+      "@sixb/client/artifact-live": ["./packages/client/src/artifact-live.ts"],
       "@sixb/client/browser": ["./packages/client/src/browser.ts"],
       "@sixb/client/hooks": ["./packages/client/src/hooks.ts"],
       "@sixb/client/logs": ["./packages/client/src/logs.ts"],
