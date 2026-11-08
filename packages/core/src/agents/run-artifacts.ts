@@ -2,9 +2,15 @@ import { ArtifactRequestError } from "../artifacts/errors"
 import {
   type ArtifactsRuntime,
   artifactAccessRule,
+  artifactPreviewRequester,
   artifactQueryChecker,
 } from "../artifacts/execution"
 import type { ArtifactKind } from "../artifacts/kinds"
+import {
+  BOARD_PREVIEW_GRACE_MS,
+  type BoardPreviewInput,
+  storeBoardPreviews,
+} from "../artifacts/publish/previews"
 import {
   artifactVersionWarnings,
   type PublishedArtifact,
@@ -46,12 +52,30 @@ export interface AgentRunArtifacts {
    * parent ended. Refusals are {@link ArtifactRequestError}s.
    */
   publish(input: AgentRunArtifactPublish): Promise<PublishedArtifact>
+  /**
+   * Keeps the pictures the run took of the boards of a version it published, as their previews:
+   * its requester authored the version, and the pictures show what they can see. Refuses any
+   * other version.
+   */
+  storePreviews(input: AgentRunBoardPreviews): Promise<void>
+}
+
+/** The pictures a run took of a version's boards. */
+export interface AgentRunBoardPreviews {
+  readonly artifactId: string
+  readonly version: number
+  readonly previews: readonly BoardPreviewInput[]
 }
 
 /** A version a run publishes: of a new artifact of `kind`, or of the artifact `artifactId`. */
 export type AgentRunArtifactPublish = {
   readonly title: string
   readonly files: readonly ArtifactFile[]
+  /**
+   * The run renders the version's boards itself and hands their pictures over with
+   * `storePreviews`: the worker renders only what is still missing after a grace period.
+   */
+  readonly rendersPreviews?: boolean
 } & (
   | { readonly kind: ArtifactKind }
   | {
@@ -171,7 +195,28 @@ export function agentRunArtifacts(
           (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
         )
       })
+      await artifactPreviewRequester(reader)(
+        stored.version,
+        input.rendersPreviews ? { delayMs: BOARD_PREVIEW_GRACE_MS } : {}
+      )
+
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+    },
+
+    async storePreviews({ artifactId, version: number, previews }) {
+      const { blobs } = await sdk()
+      const artifacts = requireArtifacts(storage)
+
+      // Only the run that published a version took its pictures with its author's rights.
+      const version = await artifacts.getVersion({ projectId, artifactId, version: number })
+      if (!version || version.origin?.runId !== run.id) {
+        throw new ArtifactRequestError(
+          "not_allowed",
+          `[Sixb] Version ${number} of artifact '${artifactId}' was not published by this run.`
+        )
+      }
+
+      await storeBoardPreviews({ storage: artifacts, blobStorage: blobs }, version, previews)
     },
   }
 }

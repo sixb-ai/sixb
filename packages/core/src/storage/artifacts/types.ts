@@ -1,10 +1,11 @@
 import type { ArtifactKind } from "../../artifacts/kinds"
 import type { ArtifactOutline } from "../../artifacts/outline"
 import type { ArtifactReference } from "../../artifacts/references"
+import type { ArtifactThemeMode } from "../../artifacts/theme"
 import type { Principal } from "../../auth"
 import type { FileRef } from "../../blob-storage"
 
-export type { ArtifactKind, ArtifactOutline, ArtifactReference }
+export type { ArtifactKind, ArtifactOutline, ArtifactReference, ArtifactThemeMode }
 
 /** A versioned document, sheet, deck, or file. Its kind never changes. */
 export interface ArtifactRecord {
@@ -219,6 +220,30 @@ export interface ArtifactStateEntry {
 }
 
 /**
+ * A picture of a canvas's board in one mode, kept under its render key: what the board shows, as
+ * its version's outline names it. Versions that keep a board as it was share its picture, so none
+ * belongs to one artifact.
+ */
+export interface ArtifactBoardPreviewRecord {
+  readonly projectId: string
+  readonly renderKey: string
+  readonly theme: ArtifactThemeMode
+  /** A PNG. */
+  readonly file: FileRef
+  readonly createdAt: Date
+}
+
+export interface ListArtifactBoardPreviewsInput {
+  readonly projectId: string
+  readonly renderKeys: readonly string[]
+}
+
+export interface PutArtifactBoardPreviewsInput {
+  readonly projectId: string
+  readonly previews: readonly Omit<ArtifactBoardPreviewRecord, "projectId">[]
+}
+
+/**
  * Persistence only: who may read or publish, and what a version may contain, are decided in Core
  * before a call reaches storage.
  */
@@ -279,6 +304,13 @@ export interface ArtifactStorage {
   listState(input: ArtifactStateScope): Promise<ArtifactStateEntry[]>
   /** Deletes every value a page keeps for a reader, and returns how many. */
   clearState(input: ArtifactStateScope): Promise<number>
+  /** The pictures kept under these render keys, in every mode, ordered by key then mode. */
+  listBoardPreviews(input: ListArtifactBoardPreviewsInput): Promise<ArtifactBoardPreviewRecord[]>
+  /**
+   * Keeps each picture under its render key and mode. One already kept there stays: the key names
+   * what the board shows, so both are pictures of the same page. Deleting an artifact keeps them.
+   */
+  putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void>
   /**
    * Deletes the artifact, every version, its frame grants, and what it keeps for its readers.
    * `false` when it does not exist.

@@ -204,10 +204,24 @@ export interface AgentAiUsageRecordRequestedQueueJob
     }
   > {}
 
+/**
+ * A canvas version's boards miss pictures: the agent worker renders them in a blank sandbox of
+ * the project, with the data the version's author can see. One job per version.
+ */
+export interface AgentArtifactPreviewsRequestedQueueJob
+  extends QueueJob<
+    "agent.artifact-previews.requested",
+    {
+      readonly artifactId: string
+      readonly version: number
+    }
+  > {}
+
 export type AgentQueueJob =
   | AgentRunRequestedQueueJob
   | AgentWorkflowNodeRequestedQueueJob
   | AgentAiUsageRecordRequestedQueueJob
+  | AgentArtifactPreviewsRequestedQueueJob
 
 /** Internal lane hosted by ProjectionWorker. */
 export type VectorIndexingQueueJob = QueueJob<

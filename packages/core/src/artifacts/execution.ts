@@ -26,6 +26,7 @@ import { ArtifactRequestError } from "./errors"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { invalidArtifact, readArtifactText } from "./publish/files"
+import { type BoardPreviewRequester, requestBoardPreviews } from "./publish/previews"
 import {
   artifactVersionWarnings,
   type PreparedArtifactVersion,
@@ -174,6 +175,7 @@ const publishers = new WeakMap<
   {
     readonly rule: (storage?: ArtifactAccessStorage) => ArtifactAccessRule
     readonly checkQuery: ArtifactQueryChecker
+    readonly requestPreviews: BoardPreviewRequester
   }
 >()
 
@@ -197,6 +199,16 @@ export function artifactAccessRule(
 /** What checks a version's queries as the caller `artifacts` acts for. */
 export function artifactQueryChecker(artifacts: Partial<ArtifactsRuntime>): ArtifactQueryChecker {
   return publisherOf(artifacts).checkQuery
+}
+
+/**
+ * What asks for the pictures a stored version's boards miss, in the project `artifacts` belongs
+ * to: nothing in a project without sandboxes, where nothing renders them.
+ */
+export function artifactPreviewRequester(
+  artifacts: Partial<ArtifactsRuntime>
+): BoardPreviewRequester {
+  return publisherOf(artifacts).requestPreviews
 }
 
 /** The access rule for the runtime's caller, reading from `storage`. */
@@ -235,7 +247,11 @@ export function createRuntimeArtifactAccessRule(
 
 export function createArtifactsRuntime(
   runtime: SixbRuntimeContext,
-  blobStorage: BlobStorage
+  blobStorage: BlobStorage,
+  options: {
+    /** The project has sandboxes, where the agent worker renders the pictures of boards. */
+    readonly rendersBoardPreviews?: boolean
+  } = {}
 ): ArtifactsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   // Shared-link sessions and unresolved authority reach no artifact.
@@ -266,6 +282,12 @@ export function createArtifactsRuntime(
   const rule = (storage?: ArtifactAccessStorage): ArtifactAccessRule =>
     createRuntimeArtifactAccessRule(runtime, storage)
   const checkQuery = createArtifactQueryChecker(runtime)
+  const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
+    const storage = runtime.storage.artifacts
+    if (!options.rendersBoardPreviews || !storage) return
+
+    await requestBoardPreviews({ storage, queue: runtime.queues.agents }, version, requestOptions)
+  }
 
   /** The artifact with what the caller may do with it; `null` when there is none. */
   const reach = async (
@@ -350,7 +372,7 @@ export function createArtifactsRuntime(
     async create(input) {
       const author = requireCaller()
 
-      return publishArtifact(
+      const published = await publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
         {
           kind: input.kind,
@@ -362,6 +384,9 @@ export function createArtifactsRuntime(
         },
         (artifact) => rule().publishAccess(artifact)
       )
+      await requestPreviews(published.version)
+
+      return published
     },
 
     async publish(artifactId, input) {
@@ -380,6 +405,7 @@ export function createArtifactsRuntime(
         checkQuery,
       })
       const stored = await store(prepared)
+      await requestPreviews(stored.version)
 
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
     },
@@ -493,7 +519,7 @@ export function createArtifactsRuntime(
     },
   }
 
-  publishers.set(artifacts, { rule, checkQuery })
+  publishers.set(artifacts, { rule, checkQuery, requestPreviews })
   return artifacts
 }
 

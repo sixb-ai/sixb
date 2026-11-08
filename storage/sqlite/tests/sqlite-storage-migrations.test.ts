@@ -209,6 +209,7 @@ const shippedMigrationIds = [
   "088-dataset-ingest-inbox",
   "089-run-recovery",
   "090-webhook-and-projection-leases",
+  "091-artifact-board-previews",
 ]
 
 afterEach(async () => {

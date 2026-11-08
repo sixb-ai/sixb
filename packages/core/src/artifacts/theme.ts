@@ -1,12 +1,15 @@
 /** An artifact may carry this file at its root to override the app's theme. */
 export const ARTIFACT_THEME_FILE = "theme.json"
 
+/** A mode a reader sees an artifact in. */
+export type ArtifactThemeMode = "light" | "dark"
+
 /**
  * An artifact's own theme. `mode` pins light or dark whatever the viewer's app uses; `tokens`
  * override the app's values for the names in {@link ARTIFACT_THEME_TOKENS}.
  */
 export interface ArtifactTheme {
-  readonly mode?: "light" | "dark"
+  readonly mode?: ArtifactThemeMode
   readonly tokens?: Readonly<Record<string, string>>
 }
 
@@ -92,6 +95,11 @@ export function parseArtifactTheme(
       ...(Object.keys(tokens).length === 0 ? {} : { tokens }),
     },
   }
+}
+
+/** The modes a reader sees an artifact in: light and dark, or the one its theme pins. */
+export function artifactThemeModes(theme: ArtifactTheme | undefined): ArtifactThemeMode[] {
+  return theme?.mode ? [theme.mode] : ["light", "dark"]
 }
 
 function tokenValueFits(name: string, value: string): boolean {

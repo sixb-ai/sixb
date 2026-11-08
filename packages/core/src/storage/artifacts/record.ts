@@ -6,6 +6,7 @@ import type { Principal } from "../../auth"
 import { isFileRef } from "../../blob-storage"
 import { type ArtifactLatestVersion, ArtifactStorageError } from "./errors"
 import type {
+  ArtifactBoardPreviewRecord,
   ArtifactFile,
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
@@ -81,6 +82,22 @@ export function parseArtifactFrameGrantRow(row: Row): ArtifactFrameGrantRecord {
     targets: frameTargets(json(row.targets, "targets", where), where),
     createdAt: date(row.createdAt, "createdAt", where),
     expiresAt: date(row.expiresAt, "expiresAt", where),
+  }
+}
+
+export function parseArtifactBoardPreviewRow(row: Row): ArtifactBoardPreviewRecord {
+  const renderKey = text(row.renderKey, "renderKey", "board preview")
+  const where = `board preview '${renderKey}'`
+  const theme = row.theme
+  if (theme !== "light" && theme !== "dark") throw corrupt(where, "theme is not light or dark")
+  const file = json(row.file, "file", where)
+  if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")
+  return {
+    projectId: text(row.projectId, "projectId", where),
+    renderKey,
+    theme,
+    file,
+    createdAt: date(row.createdAt, "createdAt", where),
   }
 }
 

@@ -322,6 +322,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("088-dataset-ingest-inbox", datasetIngestInboxSql),
     sqliteSql("089-run-recovery", runRecoverySql),
     sqliteSql("090-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
+    sqliteSql("091-artifact-board-previews", artifactBoardPreviewsSql),
   ],
 })
 
@@ -739,5 +740,8 @@ import lakeRetentionRunsSql from "./migrations/087-lake-retention-runs.sql" with
 import datasetIngestInboxSql from "./migrations/088-dataset-ingest-inbox.sql" with { type: "text" }
 import runRecoverySql from "./migrations/089-run-recovery.sql" with { type: "text" }
 import webhookAndProjectionLeasesSql from "./migrations/090-webhook-and-projection-leases.sql" with {
+  type: "text",
+}
+import artifactBoardPreviewsSql from "./migrations/091-artifact-board-previews.sql" with {
   type: "text",
 }

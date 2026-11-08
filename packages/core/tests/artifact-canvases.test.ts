@@ -216,7 +216,15 @@ describe("publishing a canvas", () => {
       kind: "canvas",
       items: [
         { id: "signup", type: "section", title: "Sign-up flow" },
-        { id: "home", type: "board", title: "Home", file: "boards/home.html", w: 1280, h: 800 },
+        {
+          id: "home",
+          type: "board",
+          title: "Home",
+          file: "boards/home.html",
+          w: 1280,
+          h: 800,
+          renderKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
         {
           id: "pricing",
           type: "board",
@@ -224,8 +232,10 @@ describe("publishing a canvas", () => {
           file: "boards/pricing.html",
           w: 1280,
           h: 800,
+          renderKey: expect.stringMatching(/^[0-9a-f]{64}$/),
         },
       ],
+      themes: ["light", "dark"],
     })
     expect(
       published.version.references.map(({ address, as, at }) => ({ address, as, at }))

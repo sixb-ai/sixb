@@ -77,6 +77,8 @@ export interface SixbDependencies {
     readonly definition: SandboxDefinition
     readonly supportsPersistence: boolean
   }
+  /** The project has sandboxes, where the agent worker renders the pictures of canvas boards. */
+  readonly rendersBoardPreviews: boolean
   readonly definitions: SixbDefinitions
   readonly logging: LoggingService
   readonly activity: ActivityService
@@ -171,7 +173,9 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
     agent,
-    artifacts: createArtifactsRuntime(runtime, dependencies.blobStorage),
+    artifacts: createArtifactsRuntime(runtime, dependencies.blobStorage, {
+      rendersBoardPreviews: dependencies.rendersBoardPreviews,
+    }),
     models: createModelsRuntime(
       runtime,
       execution,

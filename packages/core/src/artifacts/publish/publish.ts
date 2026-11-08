@@ -16,7 +16,12 @@ import type { ArtifactKind } from "../kinds"
 import { ARTIFACT_LIMITS } from "../limits"
 import type { ArtifactOutline } from "../outline"
 import type { CheckedArtifactQuery } from "../queries"
-import { ARTIFACT_THEME_FILE, parseArtifactTheme } from "../theme"
+import {
+  ARTIFACT_THEME_FILE,
+  type ArtifactTheme,
+  artifactThemeModes,
+  parseArtifactTheme,
+} from "../theme"
 import type { ArtifactWarning } from "../warnings"
 import {
   type ArtifactBlobStorage,
@@ -24,6 +29,7 @@ import {
   invalidArtifact,
   readArtifactText,
 } from "./files"
+import { canvasPreviewOutline } from "./previews"
 import { type ArtifactQueryChecker, checkArtifactQueries } from "./queries"
 import {
   brokenDependents,
@@ -123,7 +129,8 @@ export async function prepareArtifactVersion(
 ): Promise<PreparedArtifactVersion> {
   const title = checkTitle(input.title)
   await checkArtifactFiles(context.blobStorage, input.files)
-  if (input.kind !== "file") await checkTheme(context.blobStorage, input.files)
+  const theme =
+    input.kind === "file" ? undefined : await readTheme(context.blobStorage, input.files)
 
   // The queries first: a live sheet's columns are checked against what its query returns.
   const queries = await checkArtifactQueries(
@@ -151,7 +158,15 @@ export async function prepareArtifactVersion(
       title,
       entry: validated.entry,
       files: input.files.map(({ path, file }) => ({ path, file: { ...file } })),
-      outline: validated.outline,
+      // A canvas's boards are shown as pictures until they are read: each names what it shows.
+      outline:
+        validated.outline.kind === "canvas"
+          ? canvasPreviewOutline(validated.outline, {
+              files: input.files,
+              author: input.author,
+              themes: artifactThemeModes(theme),
+            })
+          : validated.outline,
       references,
       author: input.author,
       ...(input.origin ? { origin: input.origin } : {}),
@@ -256,16 +271,18 @@ async function validateKind(
   }
 }
 
-async function checkTheme(
+/** The version's `theme.json`, refused when it is not one; none without the file. */
+async function readTheme(
   blobStorage: ArtifactBlobStorage,
   files: readonly ArtifactFile[]
-): Promise<void> {
+): Promise<ArtifactTheme | undefined> {
   const themeFile = files.find((file) => file.path === ARTIFACT_THEME_FILE)
-  if (!themeFile) return
+  if (!themeFile) return undefined
   const parsed = parseArtifactTheme(
     await readArtifactText(blobStorage, themeFile, ARTIFACT_LIMITS.maxThemeBytes)
   )
   if ("error" in parsed) throw invalidArtifact(parsed.error)
+  return parsed.theme
 }
 
 function checkTitle(value: string): string {

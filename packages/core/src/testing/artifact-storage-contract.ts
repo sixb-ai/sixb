@@ -728,6 +728,84 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("keeps a board's pictures by render key and mode, the first one kept staying", async () => {
+      await withStorage(async (artifacts) => {
+        const welcome = "a".repeat(64)
+        const region = "b".repeat(64)
+        await artifacts.putBoardPreviews({
+          projectId,
+          previews: [
+            { renderKey: region, theme: "light", file: fileRef("1", "image/png"), createdAt: t0 },
+            { renderKey: welcome, theme: "dark", file: fileRef("2", "image/png"), createdAt: t0 },
+            { renderKey: welcome, theme: "light", file: fileRef("3", "image/png"), createdAt: t0 },
+          ],
+        })
+
+        // A key names what the board shows: a second picture of it is of the same page.
+        await artifacts.putBoardPreviews({
+          projectId,
+          previews: [
+            {
+              renderKey: welcome,
+              theme: "light",
+              file: fileRef("4", "image/png"),
+              createdAt: at(1),
+            },
+          ],
+        })
+
+        expect(
+          await artifacts.listBoardPreviews({ projectId, renderKeys: [region, welcome, "c"] })
+        ).toEqual([
+          {
+            projectId,
+            renderKey: welcome,
+            theme: "dark",
+            file: fileRef("2", "image/png"),
+            createdAt: t0,
+          },
+          {
+            projectId,
+            renderKey: welcome,
+            theme: "light",
+            file: fileRef("3", "image/png"),
+            createdAt: t0,
+          },
+          {
+            projectId,
+            renderKey: region,
+            theme: "light",
+            file: fileRef("1", "image/png"),
+            createdAt: t0,
+          },
+        ])
+        expect(await artifacts.listBoardPreviews({ projectId, renderKeys: [region] })).toHaveLength(
+          1
+        )
+        expect(await artifacts.listBoardPreviews({ projectId, renderKeys: [] })).toEqual([])
+        expect(
+          await artifacts.listBoardPreviews({ projectId: otherProjectId, renderKeys: [welcome] })
+        ).toEqual([])
+      })
+    })
+
+    test("keeps a board's pictures when an artifact that showed it is deleted", async () => {
+      await withStorage(async (artifacts) => {
+        // Another version, of this artifact or a copy, may show the same board.
+        await artifacts.create(createInput())
+        const renderKey = "a".repeat(64)
+        await artifacts.putBoardPreviews({
+          projectId,
+          previews: [{ renderKey, theme: "light", file: fileRef("1", "image/png"), createdAt: t0 }],
+        })
+
+        expect(await artifacts.delete({ projectId, id: "art_report" })).toBe(true)
+        expect(
+          await artifacts.listBoardPreviews({ projectId, renderKeys: [renderKey] })
+        ).toHaveLength(1)
+      })
+    })
+
     test("rolls back with its containing storage transaction", async () => {
       await withStorage(async (artifacts, storage) => {
         await artifacts.create(createInput())
@@ -739,6 +817,17 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
             await tx.artifacts.publish(publishInput({ createdAt: at(1) }))
             await tx.artifacts.create(createInput({ id: "art_rolled_back" }))
             await tx.artifacts.createFrameGrant(frameGrant("a"))
+            await tx.artifacts.putBoardPreviews({
+              projectId,
+              previews: [
+                {
+                  renderKey: "a".repeat(64),
+                  theme: "light",
+                  file: fileRef("1", "image/png"),
+                  createdAt: t0,
+                },
+              ],
+            })
             await tx.artifacts.setState({
               projectId,
               artifactId: "art_report",
@@ -756,6 +845,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(await artifacts.get({ projectId, id: "art_rolled_back" })).toBeNull()
         // To see this fail, leave frame grants out of `InMemoryArtifactStorage.restore`.
         expect(await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })).toBeNull()
+        // To see this fail, leave board previews out of `InMemoryArtifactStorage.restore`.
+        expect(
+          await artifacts.listBoardPreviews({ projectId, renderKeys: ["a".repeat(64)] })
+        ).toEqual([])
         // To see this fail, leave state out of `InMemoryArtifactStorage.restore`.
         expect(
           await artifacts.listState({ projectId, artifactId: "art_report", principal: owner })

@@ -102,7 +102,27 @@ async function setup() {
       }),
     },
   ]
-  return { storage, runSdk, started, artifacts, as, document }
+  const canvas = async () =>
+    Promise.all(
+      Object.entries({
+        "canvas.json": JSON.stringify({
+          items: [
+            { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          ],
+        }),
+        "welcome.html": "<main><h1>Welcome</h1></main>",
+      }).map(async ([path, body]) => ({
+        path,
+        file: await deps.blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
+      }))
+    )
+  const png = () =>
+    deps.blobStorage.put({
+      body: new TextEncoder().encode("png"),
+      fileName: "welcome.png",
+      mediaType: "image/png",
+    })
+  return { storage, runSdk, started, artifacts, as, document, canvas, png }
 }
 
 describe("a run's artifacts", () => {
@@ -173,6 +193,41 @@ describe("a run's artifacts", () => {
 
     expect(refused).toMatchObject({ code: "not_allowed" })
     expect((await storage.artifacts.list({ projectId })).total).toBe(0)
+  })
+
+  // Guard proof: drop the origin check from storePreviews; Alice's version, which shows what she
+  // can see, takes the pictures Bob's turn took with his rights.
+  test("keeps the pictures of a version it published, and of no other", async () => {
+    const { storage, artifacts, as, canvas, png } = await setup()
+    const published = await artifacts.publish({
+      kind: "canvas",
+      title: "Onboarding",
+      files: await canvas(),
+      rendersPreviews: true,
+    })
+    const { id } = published.artifact
+    const previews = [{ board: "welcome", theme: "light" as const, file: await png() }]
+
+    await artifacts.storePreviews({ artifactId: id, version: 1, previews })
+    const outline = published.version.outline
+    const renderKey =
+      outline.kind === "canvas" && outline.items[0]?.type === "board"
+        ? outline.items[0].renderKey
+        : undefined
+    expect(
+      await storage.artifacts.listBoardPreviews({ projectId, renderKeys: [renderKey ?? ""] })
+    ).toMatchObject([{ theme: "light", file: previews[0]?.file }])
+
+    // Alice, the conversation's owner, edits it in the app.
+    const edited = await as(alice).artifacts.publish(id, {
+      kind: "canvas",
+      title: "Onboarding",
+      files: await canvas(),
+    })
+    const refused = await artifacts
+      .storePreviews({ artifactId: id, version: edited.version.version, previews })
+      .catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: "not_allowed" })
   })
 
   // Guard proof: drop assertAgentRunOwned from the publish transaction; the run that ended while
