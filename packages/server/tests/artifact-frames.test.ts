@@ -123,6 +123,18 @@ async function rewrite(
   expect(response.status).toBe(201)
 }
 
+/** Creates an artifact's open version: the next write opens a new one. */
+async function freeze({ app }: Fixture, as: Session, artifactId: string, baseRevision: number) {
+  const response = await app.fetch(
+    new Request(url(`/api/artifacts/${artifactId}/freeze`), {
+      method: "POST",
+      headers: as.mutationHeaders,
+      body: JSON.stringify({ baseRevision }),
+    })
+  )
+  expect(response.status).toBe(200)
+}
+
 async function mint({ app }: Fixture, as: Session, artifactId: string) {
   return app.fetch(
     new Request(url(`/api/artifacts/${artifactId}/versions/1/frame`), {
@@ -522,20 +534,20 @@ describe("a deck's images from other artifacts", () => {
 
     const html = await (await app.fetch(new Request(url(`${frame.path}index.html`)))).text()
     expect(html).toContain(
-      `<img src="__sixb/ref/${figures}@1r1/img/flow.svg" alt="" data-sixb-ref="">`
+      `<img src="__sixb/ref/${figures}@latest/img/flow.svg" alt="" data-sixb-ref="">`
     )
     expect(html).toContain('<img alt="" data-sixb-ref="unavailable">')
 
     const shown = await app.fetch(
-      new Request(url(`${frame.path}__sixb/ref/${figures}@1r1/img/flow.svg`))
+      new Request(url(`${frame.path}__sixb/ref/${figures}@latest/img/flow.svg`))
     )
     expect(shown.status).toBe(200)
     expect(shown.headers.get("content-security-policy")).toContain("sandbox allow-scripts")
     // The same artifact's other files, and its entry, are not the deck's to show.
     for (const path of [
-      `${figures}@1r1/img/other.svg`,
-      `${figures}@1r1/index.html`,
-      `${appendix}@1r1/img/map.svg`,
+      `${figures}@latest/img/other.svg`,
+      `${figures}@latest/index.html`,
+      `${appendix}@latest/img/map.svg`,
     ]) {
       expect((await app.fetch(new Request(url(`${frame.path}__sixb/ref/${path}`)))).status).toBe(
         404
@@ -544,9 +556,11 @@ describe("a deck's images from other artifacts", () => {
   })
 
   // Guard proofs: drop the revision check from resolveArtifactFrame, and the frame serves the
-  // deck's new slides under the link issued for its old ones; drop it from the frame route's lent
-  // files, and the figure written since is mixed into the deck as it was.
-  test("serve one revision: none once the deck or the figure is written again", async () => {
+  // deck's new slides under the link issued for its old ones. Check a lent file's revision against
+  // the one the frame was issued with in the frame route, and the figure written since answers 404
+  // instead of showing as it is now; serve a pinned figure from the lender's latest version, and it
+  // shows what was written after the version it names.
+  test("serve one revision of the deck, and its figures as their addresses name them", async () => {
     const fixture = createApp()
     const alice = await session(fixture.storage, "alice")
     const figures = await publish(fixture, alice, "slides", [
@@ -554,7 +568,8 @@ describe("a deck's images from other artifacts", () => {
       await fixture.put("flow.svg", SVG, "image/svg+xml"),
     ])
     const id = figures.artifact.id
-    const markup = `<img src="artifact:${id}/flow.svg" alt="">`
+    const markup = `<img src="artifact:${id}/flow.svg" alt=""><img src="artifact:${id}@1/flow.svg" alt="">`
+    await freeze(fixture, alice, id, 1)
     const deck = await publish(fixture, alice, "slides", [
       await fixture.put("index.html", `<section class="slide">${markup}</section>`, "text/html"),
     ])
@@ -562,19 +577,24 @@ describe("a deck's images from other artifacts", () => {
       (await (await mint(fixture, alice, deck.artifact.id)).json()) as { path: string }
     ).path
     const fetch = (path: string) => fixture.app.fetch(new Request(url(`${frame}${path}`)))
-    expect((await fetch(`__sixb/ref/${id}@1r1/flow.svg`)).status).toBe(200)
+    const html = await (await fetch("index.html")).text()
+    expect(html).toContain(`<img src="__sixb/ref/${id}@latest/flow.svg" alt="" data-sixb-ref="">`)
+    expect(html).toContain(`<img src="__sixb/ref/${id}@1/flow.svg" alt="" data-sixb-ref="">`)
 
-    // The figure is written again: what the frame was issued with is no longer what it holds.
-    await rewrite(fixture, alice, figures.artifact.id, "slides", [
+    // The figure is written again, in a version 2: the unpinned address follows it, the pinned
+    // one keeps showing version 1.
+    const drawn = "<svg xmlns='http://www.w3.org/2000/svg'><g/></svg>"
+    await rewrite(fixture, alice, id, "slides", [
       await fixture.put("index.html", '<section class="slide"></section>', "text/html"),
-      await fixture.put(
-        "flow.svg",
-        "<svg xmlns='http://www.w3.org/2000/svg'><g/></svg>",
-        "image/svg+xml"
-      ),
+      await fixture.put("flow.svg", drawn, "image/svg+xml"),
     ])
-    expect((await fetch(`__sixb/ref/${id}@1r1/flow.svg`)).status).toBe(404)
-    expect((await fetch(`__sixb/ref/${id}@1r2/flow.svg`)).status).toBe(404)
+    const latest = await fetch(`__sixb/ref/${id}@latest/flow.svg`)
+    expect(latest.status).toBe(200)
+    expect(await latest.text()).toBe(drawn)
+    const pinned = await fetch(`__sixb/ref/${id}@1/flow.svg`)
+    expect(pinned.status).toBe(200)
+    expect(await pinned.text()).toBe(SVG)
+    expect((await fetch(`__sixb/ref/${id}@2/flow.svg`)).status).toBe(404)
     expect((await fetch("index.html")).status).toBe(200)
 
     // The deck is written again: its link serves nothing, and a new one serves the new slides.
@@ -597,7 +617,7 @@ describe("a deck's images from other artifacts", () => {
       alice,
       `<img src="artifact:${figures.artifact.id}/flow.svg" alt="">`
     )
-    const lent = url(`${frame}__sixb/ref/${figures.artifact.id}@1r1/flow.svg`)
+    const lent = url(`${frame}__sixb/ref/${figures.artifact.id}@latest/flow.svg`)
     expect((await fixture.app.fetch(new Request(lent))).status).toBe(200)
 
     await remove(fixture, alice, figures.artifact.id)
@@ -622,9 +642,11 @@ describe("a deck's images from other artifacts", () => {
     )
 
     const html = await (await fixture.app.fetch(new Request(url(`${frame}index.html`)))).text()
-    expect(html).toContain(`<img src="__sixb/ref/${id}@1r1/q3%26q4.svg" alt="" data-sixb-ref="">`)
+    expect(html).toContain(
+      `<img src="__sixb/ref/${id}@latest/q3%26q4.svg" alt="" data-sixb-ref="">`
+    )
     const shown = await fixture.app.fetch(
-      new Request(url(`${frame}__sixb/ref/${id}@1r1/q3%26q4.svg`))
+      new Request(url(`${frame}__sixb/ref/${id}@latest/q3%26q4.svg`))
     )
     expect(shown.status).toBe(200)
   })

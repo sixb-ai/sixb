@@ -12,6 +12,11 @@ import {
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
 import { openFileRef } from "@sixb/core/internal/blob-storage"
+import type {
+  ArtifactFrameTarget,
+  ArtifactStorage,
+  ArtifactVersionRecord,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { frameContentSecurityPolicy } from "../artifacts/frame"
 import type { ResolvedSixbApiBrowserPolicy } from "../auth/browser-origin"
@@ -85,26 +90,19 @@ async function frameResponse(
   }
   let lent = false
   if (path?.startsWith(FRAME_REFERENCE_PREFIX)) {
-    // A file another artifact lends this one: only one its frame was issued with, at that version
-    // and revision. Once the lender changes, the file is gone from the frame, never mixed in.
+    // A file another artifact lends this one: only one its frame was issued with. A pinned
+    // address shows its created version; an unpinned one the lender's latest, as it is now.
     const match = FRAME_REFERENCE_PATH.exec(path.slice(FRAME_REFERENCE_PREFIX.length))
     const target = frame.targets.find(
       (candidate) =>
         candidate.artifactId === match?.[1] &&
-        candidate.version === Number(match?.[2]) &&
-        candidate.revision === Number(match?.[3]) &&
-        parseArtifactAddress(candidate.address)?.path === match?.[4]
+        String(candidate.version) === match?.[2] &&
+        parseArtifactAddress(candidate.address)?.path === match?.[3]
     )
-    const lender = target
-      ? await storage.getVersion({
-          projectId: host.id,
-          artifactId: target.artifactId,
-          version: target.version,
-        })
-      : null
-    if (!lender || !match || lender.revision !== target?.revision) return notFound()
+    const lender = target ? await lenderVersion(storage, host.id, target) : null
+    if (!lender || !match) return notFound()
     version = lender
-    path = match[4] ?? null
+    path = match[3] ?? null
     lent = true
   }
   const file = version.files.find((candidate) => candidate.path === path)
@@ -136,6 +134,21 @@ async function frameResponse(
   for (const [name, value] of headers) response.headers.set(name, value)
   response.headers.set("content-disposition", "inline")
   return response
+}
+
+async function lenderVersion(
+  storage: ArtifactStorage,
+  projectId: string,
+  target: ArtifactFrameTarget
+): Promise<ArtifactVersionRecord | null> {
+  const { artifactId } = target
+  const version =
+    target.version === "latest"
+      ? (await storage.get({ projectId, id: artifactId }))?.latestVersion
+      : target.version
+  if (version === undefined) return null
+
+  return storage.getVersion({ projectId, artifactId, version })
 }
 
 function decodePath(raw: string | undefined): string | null {

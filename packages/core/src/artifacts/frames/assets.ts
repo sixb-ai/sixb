@@ -76,20 +76,20 @@ export function injectFrameAssets(html: string, layout: FrameLayout, entry = "in
 }
 
 /**
- * Where a frame serves a file another artifact lends it, at the revision it was issued with:
- * `__sixb/ref/<id>@<version>r<revision>/<path>`.
+ * Where a frame serves a file another artifact lends it, at the version its address pins or the
+ * latest: `__sixb/ref/<id>@<version>/<path>` or `__sixb/ref/<id>@latest/<path>`.
  */
 export const FRAME_REFERENCE_PREFIX = `${FRAME_ASSET_PREFIX}ref/`
 
-/** A lent file's path under {@link FRAME_REFERENCE_PREFIX}: its artifact, version, revision, path. */
-export const FRAME_REFERENCE_PATH = /^([^/@]+)@(\d+)r(\d+)\/(.+)$/
+/** A lent file's path under {@link FRAME_REFERENCE_PREFIX}: its artifact, version, and path. */
+export const FRAME_REFERENCE_PATH = /^([^/@]+)@(\d+|latest)\/(.+)$/
 
 /** The path, from an entry, of a file one of its frame's targets lends it. */
 function frameReferencePath(target: ArtifactFrameTarget, entry: string): string | null {
   const file = parseArtifactAddress(target.address)?.path
   if (!file) return null
   const path = file.split("/").map(encodeURIComponent).join("/")
-  return `${rootOf(entry)}${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}r${target.revision}/${path}`
+  return `${rootOf(entry)}${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${path}`
 }
 
 /**

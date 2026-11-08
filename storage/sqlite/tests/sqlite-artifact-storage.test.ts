@@ -38,7 +38,9 @@ describe("SqliteArtifactStorage frame grants", () => {
          VALUES ('project', ?, 'art_deck', 1, 1, ?, ?, ?)`
       ).run(
         "a".repeat(64),
-        JSON.stringify([{ address: "artifact:art_chart", artifactId: "art_chart", version: 2 }]),
+        JSON.stringify([
+          { address: "artifact:art_chart", artifactId: "art_chart", version: "newest" },
+        ]),
         createdAt.toISOString(),
         new Date(createdAt.getTime() + 60 * 60 * 1000).toISOString()
       )
@@ -46,7 +48,7 @@ describe("SqliteArtifactStorage frame grants", () => {
       await expect(
         storage.artifacts.findFrameGrant({ projectId: "project", tokenHash: "a".repeat(64) })
       ).rejects.toThrow(
-        "[Sixb] Stored frame grant for artifact 'art_deck' is invalid: a target is not an address, an artifact, a version, and a revision."
+        "[Sixb] Stored frame grant for artifact 'art_deck' is invalid: a target is not an address, an artifact, and a version."
       )
     } finally {
       storage.close()

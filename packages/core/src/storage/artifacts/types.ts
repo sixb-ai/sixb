@@ -295,12 +295,14 @@ export interface ArtifactFrameGrantRecord {
   readonly expiresAt: Date
 }
 
-/** An address a version embeds, and the version of its target a frame shows, at its revision. */
+/**
+ * An address a version embeds, and the version of its target a frame shows: the one the address
+ * pins, a created version that never changes, or `latest`, whatever the target holds now.
+ */
 export interface ArtifactFrameTarget {
   readonly address: string
   readonly artifactId: string
-  readonly version: number
-  readonly revision: number
+  readonly version: number | "latest"
 }
 
 export interface FindArtifactFrameGrantInput {
