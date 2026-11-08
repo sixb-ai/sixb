@@ -10,6 +10,7 @@ import type { ArtifactKind } from "../artifacts/kinds"
 import {
   type BoardPreviewInput,
   missingBoardPreviews,
+  type RefusedBoardPreview,
   storeBoardPreviews,
 } from "../artifacts/publish/previews"
 import {
@@ -61,9 +62,9 @@ export interface AgentRunArtifacts {
   /**
    * Keeps the pictures the run took of the boards of a version it published, as their previews:
    * its requester authored the version, and the pictures show what they can see. Refuses any
-   * other version.
+   * other version. Each picture stands alone: those not kept are returned, with why.
    */
-  storePreviews(input: AgentRunBoardPreviews): Promise<void>
+  storePreviews(input: AgentRunBoardPreviews): Promise<readonly RefusedBoardPreview[]>
   /**
    * The boards of a version the run published still without a picture, and the modes each
    * misses: a board it kept as it was keeps the pictures it had. Refuses any other version.
@@ -232,7 +233,7 @@ export function agentRunArtifacts(
 
     async storePreviews({ previews, ...at }) {
       const [{ blobs }, version] = await Promise.all([sdk(), publishedVersion(at)])
-      await storeBoardPreviews(
+      return storeBoardPreviews(
         { storage: requireArtifacts(storage), blobStorage: blobs },
         version,
         previews

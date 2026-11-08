@@ -18,6 +18,7 @@ export {
   MAX_BOARD_PREVIEW_BYTES,
   type MissingBoardPreview,
   missingBoardPreviews,
+  type RefusedBoardPreview,
   storeBoardPreviews,
 } from "./previews"
 export {
