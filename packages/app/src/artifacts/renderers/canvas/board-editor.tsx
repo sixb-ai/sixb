@@ -631,15 +631,17 @@ function ImageTool({
     }
   }
 
+  // Another picture: the description written for the last one goes with it.
   const show = (path: string, files: Readonly<Record<string, FileRef>> = {}) =>
-    change({ src: boardFilePath(board.file, path) }, files)
+    change({ src: boardFilePath(board.file, path), alt: "" }, files)
 
-  const upload = async (file: File) => {
+  /** Uploads a picture and shows it; false, saying why, when it is not shown. */
+  const upload = async (file: File): Promise<boolean> => {
     if (file.size > ARTIFACT_LIMITS.maxFileBytes) {
       setFailure(
         messages.tooLarge(formatFileSize(ARTIFACT_LIMITS.maxFileBytes, locale, files.files))
       )
-      return
+      return false
     }
     setUploading(true)
     setFailure(null)
@@ -651,9 +653,10 @@ function ImageTool({
         dataUrl(file).catch(() => null),
       ])
       if (preview) previews.set(path, preview)
-      show(path, { [path]: ref })
+      return show(path, { [path]: ref })
     } catch {
       setFailure(messages.uploadFailed)
+      return false
     } finally {
       setUploading(false)
     }
@@ -678,10 +681,8 @@ function ImageTool({
           images={images}
           uploading={uploading}
           failure={failure}
-          onUpload={(file) => void upload(file)}
-          onPick={(path) => {
-            show(path)
-          }}
+          onUpload={upload}
+          onPick={show}
           onAlt={(text) => {
             change({ alt: text })
           }}
