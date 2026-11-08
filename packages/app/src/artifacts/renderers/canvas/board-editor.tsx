@@ -241,6 +241,12 @@ export function BoardStage({
     if (!commenting || frame.moved) setHovered(null)
   }, [commenting, frame.moved])
 
+  // A comment written or given up leaves nothing named: a tap on a touch screen hovers with no
+  // pointer to leave after it.
+  useEffect(() => {
+    if (!draft) setHovered(null)
+  }, [draft])
+
   // Each load of the frame, a port of its own, handed over with its first `edit` request: what
   // editing reports comes through it alone, never through the window, where the board's scripts
   // post too.
@@ -312,10 +318,13 @@ export function BoardStage({
         const { target, at } = event.params
         if (commenting) {
           if (!target) return
+          setHovered(null)
           const element = target.address ?? target.within ?? undefined
           onPick({
             ...(element ? { element } : {}),
             ...(target.label ? { label: target.label } : {}),
+            // The page's body is the whole board, named by its title.
+            ...(target.address === "body" ? { anchor: title } : {}),
             point: point(at, target.rect),
             under: Math.min(1, (target.rect.y + target.rect.height) / board.h),
           })
@@ -460,9 +469,12 @@ export function BoardStage({
   )
 }
 
-/** Whether a new comment's card sits above its pin: what it is about runs to the board's foot. */
+/**
+ * Whether a new comment's card sits above its pin: what it is about runs to the board's foot, and
+ * the pin is low enough to leave room over it.
+ */
 function draftAbove(draft: DraftPlace): boolean {
-  return (draft.under ?? draft.point.y) > 0.7
+  return (draft.under ?? draft.point.y) > 0.7 && draft.point.y > 0.5
 }
 
 /**
@@ -471,11 +483,14 @@ function draftAbove(draft: DraftPlace): boolean {
  */
 function HoverTag({ target, scale }: { readonly target: FrameEditTarget; readonly scale: number }) {
   const messages = useArtifactMessages().canvas
-  const name = target.label
-    ? `“${target.label}”`
-    : target.address === null
-      ? messages.comments.elsewhere
-      : messages.edit.kinds[target.kind]
+  const name =
+    target.address === "body"
+      ? messages.comments.wholeBoard
+      : target.label
+        ? `“${target.label}”`
+        : target.address === null
+          ? messages.comments.elsewhere
+          : messages.edit.kinds[target.kind]
   const top = target.rect.y * scale
   return (
     <div

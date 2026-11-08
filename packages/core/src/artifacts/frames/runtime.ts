@@ -70,7 +70,7 @@ export function frameRuntime(): void {
     "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 21V11a8 8 0 1 1 8 8H3z' fill='%23111' stroke='white' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E\") 3 21, crosshair"
   /**
    * How picking shows: editing, a dashed line around what the pointer is over and a solid one
-   * around what is picked; commenting, both solid, under a bubble pointer. One blue whatever the
+   * around what is picked, under a bubble pointer when commenting. One blue whatever the
    * page or the theme, as a design tool's selection is, so it shows on light and dark alike.
    */
   const EDITING_CSS = [
@@ -78,7 +78,8 @@ export function frameRuntime(): void {
     "[data-sixb-editing] [data-sixb-picked] { outline: 2px solid #0a84ff; outline-offset: 2px; }",
     "[data-sixb-editing] [contenteditable] { cursor: text; }",
     `[data-sixb-commenting], [data-sixb-commenting] * { cursor: ${COMMENT_CURSOR} !important; }`,
-    "[data-sixb-commenting] :is([data-sixb-hover], [data-sixb-picked]) { outline: 2px solid #0a84ff; outline-offset: 3px; }",
+    "[data-sixb-commenting] [data-sixb-hover] { outline: 2px dashed #0a84ff; outline-offset: 3px; }",
+    "[data-sixb-commenting] [data-sixb-picked] { outline: 2px solid #0a84ff; outline-offset: 3px; }",
   ].join(" ")
   const root = document.documentElement
   // Only set while the runtime itself runs, so kept for what reads it later.
@@ -256,6 +257,7 @@ export function frameRuntime(): void {
     const copy = element.cloneNode(true)
     if (!(copy instanceof Element)) return element.textContent ?? ""
     for (const lineBreak of Array.from(copy.querySelectorAll("br"))) lineBreak.replaceWith(" ")
+    for (const code of Array.from(copy.querySelectorAll("script, style, template"))) code.remove()
     return copy.textContent ?? ""
   }
 
@@ -279,7 +281,11 @@ export function frameRuntime(): void {
       height: box?.height ?? 0,
     }
     const kind = element?.getAttribute(KIND) ?? ""
-    const shown = start ? spokenWords(start).replace(/\s+/g, " ").trim() : ""
+    // The page itself is no part of it to quote.
+    const shown =
+      start && start !== root && start !== document.body
+        ? spokenWords(start).replace(/\s+/g, " ").trim()
+        : ""
     const scripted = {
       address: null,
       kind: "scripted",

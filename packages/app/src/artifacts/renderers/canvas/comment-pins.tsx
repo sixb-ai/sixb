@@ -147,7 +147,9 @@ export function CommentComposer({
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     // The canvas's keys stay out of the words.
     event.stopPropagation()
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+    // Not the Enter that ends a word typed through an input method: Safari sends it as 229.
+    const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+    if (event.key === "Enter" && !event.shiftKey && !composing) {
       event.preventDefault()
       void submit()
     }

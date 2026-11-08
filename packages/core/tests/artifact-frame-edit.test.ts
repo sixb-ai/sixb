@@ -242,6 +242,25 @@ describe("a board's frame, editing", () => {
     expect(total.hasAttribute("data-sixb-picked")).toBe(true)
   })
 
+  // Guard proof: drop the `script, style, template` removal from spokenWords; the box's label
+  // quotes the script's source. Drop the `start !== root` check from editTarget; the page itself
+  // is quoted as what is pointed at.
+  test("picking what to comment on, quotes no script's source, and nothing of the page itself", () => {
+    const { request, events, at, fire, document } = frame(BOARD)
+    request("edit", { on: true, typing: false })
+
+    const main = at("body>main:0")
+    const code = document.createElement("script")
+    code.textContent = "window.secret = 1"
+    main.append(code as unknown as Node)
+    fire(main, "mouseover")
+    expect(JSON.stringify(events("edit.hover").at(-1))).not.toContain("secret")
+
+    fire(document.documentElement as unknown as Element, "mouseover")
+    expect(events("edit.hover").at(-1)).toMatchObject({ params: { target: { kind: "scripted" } } })
+    expect(JSON.stringify(events("edit.hover").at(-1))).not.toContain('"label"')
+  })
+
   // Guard proof: apply every patch at once in `edit.patch`; the heading the reader types in is
   // rewritten under their caret.
   test("takes what others changed, keeping the element the reader types in until they leave it", () => {
