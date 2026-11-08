@@ -216,7 +216,8 @@ export interface UndoArtifactTurnInput extends ArtifactTurnInput {
   /**
    * The Yjs document of each artifact put back, by id, as its turn's restore point holds it: made
    * at the revision the turn's last write left, which is the only one an artifact is put back
-   * from. An artifact put back without one has its document cleared.
+   * from. An artifact put back without one leaves its document behind, for the next reader to
+   * bring up to the content.
    */
   readonly documents?: Readonly<Record<string, FileRef>>
 }

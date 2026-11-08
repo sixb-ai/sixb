@@ -308,7 +308,10 @@ export async function retryAgentRun(
   execution: ExecutionContext,
   models: LanguageModelCatalog | undefined,
   failedRun: ConversationAgentRunRecord,
-  /** Where a canvas the retry puts back stores its document; without it, the document is cleared. */
+  /**
+   * Where a canvas the retry puts back stores its document; without it, the document is left
+   * behind, and brought up to the content by whoever loads it next.
+   */
   blobStorage?: Pick<BlobStorage, "open" | "put">
 ): Promise<RequestAgentRunResult> {
   resolveExecutionScopeAuthorization(runtime.projectId, {

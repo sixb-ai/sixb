@@ -53,8 +53,9 @@ await sixb.artifacts.update(artifact.id, { ...input, baseRevision: artifact.revi
 
 A canvas is edited by several people at once, so an update to one is merged instead. Your changes
 since `baseRevision` are applied, item by item and line by line, to what it holds now, and the
-result says `merged: true`. Where you and someone else changed the same value, yours wins. A
-canvas still fails with `artifact_moved` when Sixb no longer holds the files of `baseRevision`.
+result says `merged: true`. Where you and someone else set the same value, such as an item's
+position, yours wins; words you both typed in the same text are both kept. A canvas still fails
+with `artifact_moved` when Sixb no longer holds the files of `baseRevision`.
 
 From outside the server, use `POST /api/artifacts` and `PUT /api/artifacts/{artifactId}/content`
 with files uploaded through `POST /api/files`.
