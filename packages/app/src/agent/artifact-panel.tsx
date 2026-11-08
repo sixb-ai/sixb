@@ -32,6 +32,7 @@ import {
   type ViewerTarget,
   viewerTargetKey,
 } from "../artifacts/target"
+import { AgentDraftContext } from "../artifacts/view-context"
 import { Viewer } from "../artifacts/viewer"
 import {
   type ArtifactPanelPresentation,
@@ -102,6 +103,11 @@ export interface ArtifactPanelRootProps {
   readonly onRouteTargetChange?: (target: ArtifactTarget | null) => void
   /** Offer each artifact's own page, to open or to copy a link to. Off for an observer. */
   readonly pageLinks?: boolean
+  /**
+   * Puts words in the conversation's input, as an artifact asks the Agent something: the panel
+   * closes when it covers the conversation, so the reader sees them there. None for an observer.
+   */
+  readonly onAgentDraft?: (text: string) => void
 }
 
 /**
@@ -118,6 +124,7 @@ export function ArtifactPanelRoot({
   routeTarget = null,
   onRouteTargetChange,
   pageLinks = true,
+  onAgentDraft,
 }: ArtifactPanelRootProps) {
   const messages = useAgentMessages().artifacts
   const idPrefix = useId()
@@ -219,52 +226,65 @@ export function ArtifactPanelRoot({
       />
     ) : null
 
+  const agentDraft = useMemo(
+    () =>
+      onAgentDraft
+        ? (text: string) => {
+            onAgentDraft(text)
+            if (presentation !== "panel") close()
+          }
+        : null,
+    [onAgentDraft, presentation, close]
+  )
+
   return (
     <ArtifactPanelContext.Provider value={value}>
-      {/* A stable parent keeps composer drafts and scroll position across dock and page. */}
-      <ArtifactWorkspace
-        idPrefix={idPrefix}
-        revealKey={
-          presentation === "panel" && target ? `${panelTargetKey(target)}:${revealCount}` : null
-        }
-        viewer={presentation === "panel" ? viewer : null}
-      >
-        {/* An artifact a reply shows or links to opens here, beside the conversation. */}
-        <ArtifactReferencesProvider open={open}>{children}</ArtifactReferencesProvider>
-      </ArtifactWorkspace>
-      <Dialog
-        open={presentation === "dialog" && target !== null}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) close()
-        }}
-      >
-        <DialogContent
-          showCloseButton={false}
-          onEscapeKeyDown={leaveEscapeToDeck}
-          className="flex h-[calc(100dvh-1rem)] max-h-none w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,56rem)] sm:w-[min(92vw,72rem)] sm:max-w-[min(92vw,72rem)]"
+      <AgentDraftContext.Provider value={agentDraft}>
+        {/* A stable parent keeps composer drafts and scroll position across dock and page. */}
+        <ArtifactWorkspace
+          idPrefix={idPrefix}
+          revealKey={
+            presentation === "panel" && target ? `${panelTargetKey(target)}:${revealCount}` : null
+          }
+          viewer={presentation === "panel" ? viewer : null}
         >
-          <DialogTitle className="sr-only">{messages.dialogTitle}</DialogTitle>
-          <DialogDescription className="sr-only">{messages.dialogDescription}</DialogDescription>
-          {presentation === "dialog" ? viewer : null}
-        </DialogContent>
-      </Dialog>
-      {presentation === "canvas" && overlayHost && viewer
-        ? createPortal(
-            <section
-              role="dialog"
-              aria-modal="false"
-              aria-label={messages.dialogTitle}
-              aria-describedby={`${idPrefix}-canvas-description`}
-              className="pointer-events-auto flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-2 motion-safe:duration-200"
-            >
-              <p id={`${idPrefix}-canvas-description`} className="sr-only">
-                {messages.canvasDescription}
-              </p>
-              {viewer}
-            </section>,
-            overlayHost
-          )
-        : null}
+          {/* An artifact a reply shows or links to opens here, beside the conversation. */}
+          <ArtifactReferencesProvider open={open}>{children}</ArtifactReferencesProvider>
+        </ArtifactWorkspace>
+        <Dialog
+          open={presentation === "dialog" && target !== null}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) close()
+          }}
+        >
+          <DialogContent
+            showCloseButton={false}
+            onEscapeKeyDown={leaveEscapeToDeck}
+            className="flex h-[calc(100dvh-1rem)] max-h-none w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,56rem)] sm:w-[min(92vw,72rem)] sm:max-w-[min(92vw,72rem)]"
+          >
+            <DialogTitle className="sr-only">{messages.dialogTitle}</DialogTitle>
+            <DialogDescription className="sr-only">{messages.dialogDescription}</DialogDescription>
+            {presentation === "dialog" ? viewer : null}
+          </DialogContent>
+        </Dialog>
+        {presentation === "canvas" && overlayHost && viewer
+          ? createPortal(
+              <section
+                role="dialog"
+                aria-modal="false"
+                aria-label={messages.dialogTitle}
+                aria-describedby={`${idPrefix}-canvas-description`}
+                className="pointer-events-auto flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-2 motion-safe:duration-200"
+              >
+                <p id={`${idPrefix}-canvas-description`} className="sr-only">
+                  {messages.canvasDescription}
+                </p>
+                {viewer}
+              </section>,
+              overlayHost
+            )
+          : null}
+      </AgentDraftContext.Provider>
     </ArtifactPanelContext.Provider>
   )
 }

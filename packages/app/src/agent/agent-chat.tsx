@@ -1,9 +1,10 @@
 import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
-import { type ReactNode, useId } from "react"
+import { type ReactNode, useCallback, useEffect, useId, useState } from "react"
 import { ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
+import { takeAgentDraft } from "../artifacts/view-context"
 import { ArtifactPanelRoot } from "./artifact-panel"
 import { ComputerBadge, ComputerOfflineNotice } from "./components/computer-place"
 import { ConversationPanel } from "./components/conversation-panel"
@@ -82,6 +83,19 @@ export function AgentChat({
     onThreadCreated: onNavigateThread,
     newThreadSandbox,
   })
+  // Words an artifact puts in the input, as comments it asks the Agent to act on.
+  const [insertion, setInsertion] = useState({ text: "", nonce: 0 })
+  const insert = useCallback(
+    (text: string) => setInsertion((current) => ({ text, nonce: current.nonce + 1 })),
+    []
+  )
+
+  // What an artifact on its own page asked the Agent before coming here starts the input.
+  useEffect(() => {
+    const pending = takeAgentDraft()
+    if (pending) insert(pending)
+  }, [insert])
+
   // Each chat has its own toaster, so a toast shows once however many chats are mounted.
   const toasterId = useId()
   const sharing = useThreadSharing({
@@ -166,6 +180,7 @@ export function AgentChat({
           ...conversation.composerProps,
           ...(dictation ? {} : { dictation: undefined }),
           ...(threadId === null && newThreadControls ? { newThreadControls } : {}),
+          insertion,
         }}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
@@ -209,6 +224,7 @@ export function AgentChat({
         scopeKey={threadId ?? "draft"}
         routeTarget={artifactTarget}
         onRouteTargetChange={onArtifactTargetChange}
+        {...(readOnly ? {} : { onAgentDraft: insert })}
       >
         <div
           data-agent-panel={compact ? "" : undefined}

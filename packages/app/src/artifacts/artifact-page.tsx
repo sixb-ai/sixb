@@ -5,6 +5,7 @@ import {
   artifactTargetHref,
   withArtifactTarget,
 } from "./target"
+import { AgentDraftContext, keepAgentDraft } from "./view-context"
 import { Viewer } from "./viewer"
 
 /**
@@ -26,24 +27,32 @@ export function ArtifactPage() {
     artifactId,
   }
 
+  // Asked of the Agent from here, words wait for the conversation at home, in its input.
+  const draftForAgent = (text: string) => {
+    keepAgentDraft(text)
+    navigate("/")
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
-      <Viewer
-        target={target}
-        chrome={{
-          // Back to where the link was followed from, or into the app for a link opened cold.
-          onBack: () => (canGoBack() ? navigate(-1) : navigate("/")),
-        }}
-        // A version or part of this artifact replaces the address; it is the same page.
-        onTargetChange={(next) => {
-          if (next.type !== "artifact") return
-          const nextParams = withArtifactTarget(searchParams, next)
-          nextParams.delete("artifact")
-          setSearchParams(nextParams, { replace: true })
-        }}
-        // Another artifact is another page, so back returns to this one.
-        onOpenReference={(next) => navigate(artifactTargetHref(next))}
-      />
+      <AgentDraftContext.Provider value={draftForAgent}>
+        <Viewer
+          target={target}
+          chrome={{
+            // Back to where the link was followed from, or into the app for a link opened cold.
+            onBack: () => (canGoBack() ? navigate(-1) : navigate("/")),
+          }}
+          // A version or part of this artifact replaces the address; it is the same page.
+          onTargetChange={(next) => {
+            if (next.type !== "artifact") return
+            const nextParams = withArtifactTarget(searchParams, next)
+            nextParams.delete("artifact")
+            setSearchParams(nextParams, { replace: true })
+          }}
+          // Another artifact is another page, so back returns to this one.
+          onOpenReference={(next) => navigate(artifactTargetHref(next))}
+        />
+      </AgentDraftContext.Provider>
     </div>
   )
 }
