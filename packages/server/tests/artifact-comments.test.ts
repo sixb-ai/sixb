@@ -145,6 +145,13 @@ describe("an artifact's comments over HTTP", () => {
     expect(invalid.status).toBe(400)
     expect(await invalid.json()).toMatchObject({ code: "invalid_comment" })
 
+    // An address no board could hold is refused by the route's schema, before anything reads it.
+    const long = await send(base, "POST", {
+      body: "Hm",
+      anchor: { board: "welcome", element: `body${">div:0".repeat(200)}` },
+    })
+    expect(long.status).toBe(422)
+
     // Someone it is not shared with reads none.
     const bob = await session(storage, "bob")
     const refused = await app.fetch(new Request(url(base), { headers: { cookie: bob.cookie } }))

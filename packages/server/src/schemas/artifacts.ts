@@ -389,12 +389,17 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
 })
 
 const ArtifactCommentAnchorSchema = z.object({
-  board: z.string().optional().describe("The id of the canvas's board it is about"),
+  board: z.string().max(200).optional().describe("The id of the canvas's board it is about"),
   element: z
     .string()
+    .max(1024)
     .optional()
     .describe("The address of the board's element it is about, such as body>main:0>h1:0"),
-  label: z.string().optional().describe("The element's first words, which name it once it is gone"),
+  label: z
+    .string()
+    .max(1000)
+    .optional()
+    .describe("The element's first words, which name it once it is gone; kept to 120 characters"),
   revision: RevisionSchema.describe("The artifact's revision its author saw"),
 })
 

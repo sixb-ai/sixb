@@ -54,8 +54,9 @@ export interface ArtifactCommentsRuntime {
   deleteComment(artifactId: string, commentId: string): Promise<void>
 }
 
-/** An element's address, as `boardElements` writes it. */
+/** An element's address, as `boardElements` writes it, and the longest one a comment keeps. */
 const ELEMENT_ADDRESS = /^body(>[a-z][a-z0-9-]*:\d+)*$/
+const MAX_ELEMENT_ADDRESS_LENGTH = 1024
 
 export function createArtifactCommentsRuntime(input: {
   readonly projectId: string
@@ -185,7 +186,10 @@ async function checkAnchor(
   if (anchor.element !== undefined && anchor.board === undefined) {
     throw invalid("A comment on an element names the board it is on.")
   }
-  if (anchor.element !== undefined && !ELEMENT_ADDRESS.test(anchor.element)) {
+  if (
+    anchor.element !== undefined &&
+    (anchor.element.length > MAX_ELEMENT_ADDRESS_LENGTH || !ELEMENT_ADDRESS.test(anchor.element))
+  ) {
     throw invalid(`'${anchor.element}' is no element's address, as a board's elements have.`)
   }
   if (anchor.board !== undefined) {

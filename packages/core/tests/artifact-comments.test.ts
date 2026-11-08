@@ -167,6 +167,12 @@ describe("comments on an artifact", () => {
       "invalid_comment"
     )
     expect(await add({ body: "Hm", anchor: { revision: 3 } })).toBe("invalid_comment")
+    expect(
+      await add({
+        body: "Hm",
+        anchor: { board: "welcome", element: `body${">div:0".repeat(200)}` },
+      })
+    ).toBe("invalid_comment")
     expect(await add({ body: "Hm", parentId: "cmt_missing" })).toBe("comment_not_found")
   })
 

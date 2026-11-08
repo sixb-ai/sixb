@@ -19902,7 +19902,7 @@ export type ListArtifactCommentsResponses = {
          */
         element?: string
         /**
-         * The element's first words, which name it once it is gone
+         * The element's first words, which name it once it is gone; kept to 120 characters
          */
         label?: string
         /**
@@ -19956,7 +19956,7 @@ export type AddArtifactCommentData = {
        */
       element?: string
       /**
-       * The element's first words, which name it once it is gone
+       * The element's first words, which name it once it is gone; kept to 120 characters
        */
       label?: string
       /**
@@ -20127,7 +20127,7 @@ export type AddArtifactCommentResponses = {
        */
       element?: string
       /**
-       * The element's first words, which name it once it is gone
+       * The element's first words, which name it once it is gone; kept to 120 characters
        */
       label?: string
       /**
@@ -20303,7 +20303,7 @@ export type ResolveArtifactCommentResponses = {
        */
       element?: string
       /**
-       * The element's first words, which name it once it is gone
+       * The element's first words, which name it once it is gone; kept to 120 characters
        */
       label?: string
       /**
