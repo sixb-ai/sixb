@@ -446,8 +446,7 @@ export class LiveHub {
   }) {
     const { artifact } = entry
     entry.linger = setTimeout(() => {
-      const { pending, left } = artifact.getState()
-      if (pending && !left) {
+      if (artifact.hasUnsaved && !artifact.getState().left) {
         this.linger(entry)
         return
       }
