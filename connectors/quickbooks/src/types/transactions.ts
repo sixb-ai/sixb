@@ -428,7 +428,7 @@ export interface QuickBooksReimburseCharge extends QuickBooksTransaction {
   })[]
 }
 
-/** Payment from a bank account toward a credit-card balance. */
+/** Payment from a bank account toward a credit-card balance (wire entity `CreditCardPaymentTxn`). */
 export interface QuickBooksCreditCardPayment extends QuickBooksTransaction {
   readonly CreditCardAccountRef?: QuickBooksReference
   readonly BankAccountRef?: QuickBooksReference

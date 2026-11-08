@@ -58,7 +58,8 @@ export interface QuickBooksCdcEntityMap {
   readonly Vendor: QuickBooksVendor
   readonly Bill: QuickBooksBill
   readonly BillPayment: QuickBooksBillPayment
-  readonly CreditCardPayment: QuickBooksCreditCardPayment
+  /** Card payments; QuickBooks names both the CDC entity and its group CreditCardPaymentTxn. */
+  readonly CreditCardPaymentTxn: QuickBooksCreditCardPayment
   readonly CreditMemo: QuickBooksCreditMemo
   readonly Deposit: QuickBooksDeposit
   readonly Estimate: QuickBooksEstimate

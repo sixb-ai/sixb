@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 import {
+  type QuickBooksCreditCardPaymentListOptions,
   type QuickBooksRecurringTransactionListOptions,
   type QuickBooksReimburseChargeListOptions,
   type QuickBooksTaxPaymentListOptions,
@@ -65,7 +66,8 @@ for (const [resource, entity, path, sample, options, query] of [
   ],
   [
     "creditCardPayments",
-    "CreditCardPayment",
+    // The wire entity is CreditCardPaymentTxn in reads, queries and CDC (verified live).
+    "CreditCardPaymentTxn",
     "creditcardpayment",
     {
       Id: "42",
@@ -74,8 +76,8 @@ for (const [resource, entity, path, sample, options, query] of [
       BankAccountRef: { value: "35" },
       CreditCardAccountRef: { value: "41" },
     },
-    { txnDateFrom: "2026-09-01", docNumber: "1001" },
-    "SELECT * FROM CreditCardPayment WHERE TxnDate >= '2026-09-01' AND DocNumber = '1001' ORDERBY Id ASC STARTPOSITION 1 MAXRESULTS 100",
+    { txnDateFrom: "2026-09-01" },
+    "SELECT * FROM CreditCardPayment WHERE TxnDate >= '2026-09-01' ORDERBY Id ASC STARTPOSITION 1 MAXRESULTS 100",
   ],
   [
     "inventoryAdjustments",
@@ -215,4 +217,21 @@ test("malformed recurring wrappers and options are rejected", async () => {
       qb.recurringTransactions.list(options as unknown as QuickBooksRecurringTransactionListOptions)
     ).rejects.toThrow("[SixbQuickBooks]")
   expect(calls).toBe(0)
+})
+
+// Removal proof: read or list card payments under "CreditCardPayment" again; both cases fail.
+test("card payments are read from the CreditCardPaymentTxn envelope, never CreditCardPayment", async () => {
+  const qb = await client()
+  const row = { Id: "42", Amount: 300 }
+  mock(() => ({ CreditCardPayment: row }))
+  await expect(qb.creditCardPayments.get("42")).rejects.toThrow("Invalid CreditCardPaymentTxn")
+  mock(() => ({ QueryResponse: { CreditCardPayment: [row] } }))
+  await expect(qb.creditCardPayments.list()).rejects.toThrow("unexpected entity")
+  mock(() => ({ QueryResponse: { CreditCardPaymentTxn: [row], startPosition: 1, maxResults: 1 } }))
+  expect((await qb.creditCardPayments.list()).items).toEqual([row])
+  await expect(
+    qb.creditCardPayments.list({
+      docNumber: "1",
+    } as unknown as QuickBooksCreditCardPaymentListOptions)
+  ).rejects.toThrow("Unsupported transaction list option: docNumber")
 })

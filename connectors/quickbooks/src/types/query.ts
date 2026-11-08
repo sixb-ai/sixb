@@ -106,7 +106,11 @@ export type QuickBooksPurchaseListOptions = QuickBooksTransactionListOptions
 export type QuickBooksDepositListOptions = QuickBooksTransactionListOptions
 export type QuickBooksTransferListOptions = QuickBooksTransactionListOptions
 export type QuickBooksJournalEntryListOptions = QuickBooksTransactionListOptions
-export type QuickBooksCreditCardPaymentListOptions = QuickBooksTransactionListOptions
+/** QuickBooks does not store DocNumber on card payments. */
+export type QuickBooksCreditCardPaymentListOptions = Omit<
+  QuickBooksTransactionListOptions,
+  "docNumber"
+>
 export type QuickBooksInventoryAdjustmentListOptions = QuickBooksTransactionListOptions
 /** TimeActivity has no DocNumber. */
 export type QuickBooksTimeActivityListOptions = Omit<

@@ -149,7 +149,7 @@ test("CDC accepts every newly supported entity and keeps their typed groups", as
     "PaymentMethod",
     "TaxCode",
     "TaxRate",
-    "CreditCardPayment",
+    "CreditCardPaymentTxn",
     "Deposit",
     "Estimate",
     "InventoryAdjustment",

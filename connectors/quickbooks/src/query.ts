@@ -97,6 +97,8 @@ export interface QuickBooksTransactionQuery {
 }
 
 export interface QuickBooksQueryExtras {
+  /** Response array name when it differs from the queried entity. */
+  readonly key?: string
   /** Resource-specific predicates, already validated and quoted by the caller. */
   readonly clauses?: readonly string[]
   readonly params?: Readonly<Record<string, string>>
@@ -157,7 +159,7 @@ export async function listTransactions<T>(
     `SELECT * FROM ${entity}${where(clauses)} ORDERBY ${orderBy} STARTPOSITION ${start} MAXRESULTS ${count}`,
     start,
     count,
-    { params: extras.params, validate: extras.validate }
+    { key: extras.key, params: extras.params, validate: extras.validate }
   )
 }
 

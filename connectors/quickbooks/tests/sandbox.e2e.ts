@@ -63,7 +63,7 @@ const readCases: Record<string, ReadCase> = {
   deposits: { kind: "transaction", txnDate: true, docNumber: true },
   transfers: { kind: "transaction", txnDate: true, docNumber: true },
   journalEntries: { kind: "transaction", txnDate: true, docNumber: true },
-  creditCardPayments: { kind: "transaction", txnDate: true, docNumber: true },
+  creditCardPayments: { kind: "transaction", txnDate: true, docNumber: false },
   inventoryAdjustments: { kind: "transaction", txnDate: true, docNumber: true },
 }
 

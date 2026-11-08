@@ -24,7 +24,7 @@ const ENTITIES = new Set<string>([
   "Vendor",
   "Bill",
   "BillPayment",
-  "CreditCardPayment",
+  "CreditCardPaymentTxn",
   "CreditMemo",
   "Deposit",
   "Estimate",
