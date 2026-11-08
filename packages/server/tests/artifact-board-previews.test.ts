@@ -165,7 +165,7 @@ async function canvas(options: { readonly dark?: boolean } = {}) {
         headers: { ...as.headers, ...headers },
       })
     )
-  return { ...fixture, alice, bob, artifactId, preview, published }
+  return { ...fixture, alice, bob, artifactId, preview, published, renderKey }
 }
 
 describe("a canvas board's preview", () => {
@@ -235,6 +235,89 @@ describe("a canvas board's preview", () => {
     expect(moved.status).toBe(404)
     expect(moved.headers.get("cache-control")).toBe("no-store")
     expect(await moved.json()).toMatchObject({ code: "preview_not_found" })
+  })
+
+  test("is the board's, by its render key: the same while the canvas changes around it", async () => {
+    // A canvas edited live is written every few seconds: a picture asked for by revision would be
+    // fetched again each time. Reproduce by ignoring key in the route: the address of Welcome's
+    // old picture serves its new one, which a browser then keeps for good under it.
+    const { app, put, storage, alice, artifactId, preview, renderKey } = await canvas()
+    const write = async (welcome: string, regionX: number) => {
+      const files = [
+        await put(
+          "canvas.json",
+          JSON.stringify({
+            items: [
+              { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+              {
+                id: "region",
+                type: "board",
+                file: "region.html",
+                x: regionX,
+                y: 0,
+                w: 390,
+                h: 844,
+              },
+            ],
+          }),
+          "application/json"
+        ),
+        await put("welcome.html", welcome),
+        await put("region.html", "<main><h1>Regions</h1></main>"),
+      ]
+      const response = await app.fetch(
+        new Request(url(`/api/artifacts/${artifactId}/content`), {
+          method: "PUT",
+          headers: alice.mutationHeaders,
+          body: JSON.stringify({ kind: "canvas", title: "Onboarding", files }),
+        })
+      )
+      expect(response.status).toBe(200)
+    }
+    const byKey = `1/boards/welcome/preview?theme=light&key=${encodeURIComponent(renderKey)}`
+
+    // Another board moves: Welcome's picture stays, kept for good; the revision's does not.
+    await write("<main><h1>Welcome</h1></main>", 960)
+    const kept = await preview(alice, byKey)
+    expect(kept.status).toBe(200)
+    expect(kept.headers.get("cache-control")).toBe("private, max-age=31536000, immutable")
+    expect(await kept.text()).toBe("welcome light")
+    expect((await preview(alice, "1/boards/welcome/preview?theme=light&revision=1")).status).toBe(
+      404
+    )
+
+    // Welcome itself changes, and is pictured again: the address of its old picture serves
+    // nothing, so what a browser kept for it for good is never the new one.
+    await write("<main><h1>Welcome aboard</h1></main>", 960)
+    const version = (await storage.artifacts.getVersion({
+      projectId: PROJECT_ID,
+      artifactId,
+      version: 1,
+    })) as ArtifactVersionRecord
+    const outline = version.outline
+    const welcome = outline.kind === "canvas" ? outline.items[0] : undefined
+    const next = welcome?.type === "board" ? welcome.renderKey : undefined
+    if (!next || next === renderKey) throw new Error("Expected Welcome's new render key.")
+    await storage.artifacts.putBoardPreviews({
+      projectId: PROJECT_ID,
+      previews: [
+        {
+          renderKey: next,
+          theme: "light",
+          size: "full",
+          file: (await put("welcome.new.png", "welcome aboard", "image/png")).file,
+          createdAt: new Date(),
+        },
+      ],
+    })
+    const changed = await preview(alice, byKey)
+    expect(changed.status).toBe(404)
+    expect(await changed.json()).toMatchObject({ code: "preview_not_found" })
+    const current = await preview(
+      alice,
+      `1/boards/welcome/preview?theme=light&key=${encodeURIComponent(next)}`
+    )
+    expect(await current.text()).toBe("welcome aboard")
   })
 
   test("is the mode the canvas pins, whatever the reader's", async () => {

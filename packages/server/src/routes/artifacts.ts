@@ -422,8 +422,12 @@ async function artifactBoardPreviewResponse(
     const version = await requireRequestSixb(context).artifacts.getVersion(artifactId, number)
     if (!version) return await refusal(context, artifactId, context.set)
 
-    // A picture of a revision the version moved past is not this one's.
-    const current = query.revision === undefined || query.revision === version.revision
+    // A picture of a revision the version moved past, or of what the board showed before, is not
+    // this one's.
+    const current =
+      query.key !== undefined
+        ? boardRenderKey(version, board) === query.key
+        : query.revision === undefined || query.revision === version.revision
 
     // The reader's mode, unless the canvas pins another.
     const themes = version.outline.kind === "canvas" ? (version.outline.themes ?? []) : []
@@ -456,7 +460,9 @@ async function artifactBoardPreviewResponse(
     // open version asked for without one does at each write.
     response.headers.set(
       "cache-control",
-      (number !== "latest" && version.frozenAt) || query.revision !== undefined
+      (number !== "latest" && version.frozenAt) ||
+        query.revision !== undefined ||
+        query.key !== undefined
         ? "private, max-age=31536000, immutable"
         : "private, no-cache"
     )
@@ -464,6 +470,18 @@ async function artifactBoardPreviewResponse(
   } catch (error) {
     return handleArtifactRouteError(error, context.set)
   }
+}
+
+/** The render key a canvas version's outline gives one of its boards. */
+function boardRenderKey(
+  version: { readonly outline: ArtifactVersionRecord["outline"] },
+  board: string
+): string | undefined {
+  if (version.outline.kind !== "canvas") return undefined
+  const item = version.outline.items.find(
+    (candidate) => candidate.type === "board" && candidate.id === board
+  )
+  return item?.type === "board" ? item.renderKey : undefined
 }
 
 export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
