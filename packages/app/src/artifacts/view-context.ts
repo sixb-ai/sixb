@@ -31,22 +31,63 @@ export function useAgentDraft(): ((text: string) => void) | null {
 /** Where words for the Agent wait for the next conversation that opens, as a page goes home. */
 const PENDING_DRAFT_KEY = "sixb.agent.pending-draft"
 
-/** Keeps words for the next conversation that opens in this tab. */
-export function keepAgentDraft(text: string): void {
+/** How long words kept for the Agent wait: the next page opens at once, or never takes them. */
+export const PENDING_DRAFT_MS = 2 * 60_000
+
+/** Whose words they are: the next conversation takes them only for the same person and project. */
+export interface AgentDraftOwner {
+  readonly userId: string | null
+  readonly projectId: string
+}
+
+interface PendingAgentDraft extends AgentDraftOwner {
+  readonly artifactId: string
+  readonly text: string
+  readonly at: number
+}
+
+/** Keeps words about an artifact for the next conversation that opens in this tab. */
+export function keepAgentDraft(
+  draft: AgentDraftOwner & { readonly artifactId: string; readonly text: string },
+  now = Date.now()
+): void {
   try {
-    globalThis.sessionStorage?.setItem(PENDING_DRAFT_KEY, text)
+    globalThis.sessionStorage?.setItem(PENDING_DRAFT_KEY, JSON.stringify({ ...draft, at: now }))
   } catch {
     // A tab that keeps nothing opens the conversation without them.
   }
 }
 
-/** The words kept for the next conversation, taken once. */
-export function takeAgentDraft(): string | null {
+/**
+ * The words kept for the next conversation, taken once: only by the same person in the same
+ * project, and only for {@link PENDING_DRAFT_MS}. Anything else is dropped.
+ */
+export function takeAgentDraft(owner: AgentDraftOwner, now = Date.now()): string | null {
+  let kept: unknown
   try {
     const text = globalThis.sessionStorage?.getItem(PENDING_DRAFT_KEY) ?? null
-    if (text !== null) globalThis.sessionStorage?.removeItem(PENDING_DRAFT_KEY)
-    return text
+    if (text === null) return null
+    globalThis.sessionStorage?.removeItem(PENDING_DRAFT_KEY)
+    kept = JSON.parse(text)
   } catch {
     return null
   }
+
+  if (!isPendingDraft(kept)) return null
+  const fresh = now - kept.at >= 0 && now - kept.at <= PENDING_DRAFT_MS
+  return fresh && kept.userId === owner.userId && kept.projectId === owner.projectId
+    ? kept.text
+    : null
+}
+
+function isPendingDraft(value: unknown): value is PendingAgentDraft {
+  if (typeof value !== "object" || value === null) return false
+  const draft = value as Record<string, unknown>
+  return (
+    (draft.userId === null || typeof draft.userId === "string") &&
+    typeof draft.projectId === "string" &&
+    typeof draft.artifactId === "string" &&
+    typeof draft.text === "string" &&
+    typeof draft.at === "number"
+  )
 }

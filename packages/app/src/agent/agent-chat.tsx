@@ -1,5 +1,7 @@
+import { getAuthSessionOptions, getProjectInfoOptions } from "@sixb/client/hooks"
 import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
+import { useQueryClient } from "@tanstack/react-query"
 import { MessagesSquare } from "lucide-react"
 import { type ReactNode, useEffect, useId } from "react"
 import { ArtifactPeopleContext } from "../artifacts/people"
@@ -87,11 +89,25 @@ export function AgentChat({
   // Words an artifact puts in the input, as comments it asks the Agent to act on.
   const { insertion, insert, inserted } = useComposerInsertion()
 
-  // What an artifact on its own page asked the Agent before coming here starts the input.
+  // What an artifact on its own page asked the Agent before coming here starts the input, when
+  // it was this person, in this project, a moment ago.
+  const queries = useQueryClient()
   useEffect(() => {
-    const pending = takeAgentDraft()
-    if (pending) insert(pending)
-  }, [insert])
+    let current = true
+    Promise.all([
+      queries.fetchQuery({ ...getProjectInfoOptions(), staleTime: Number.POSITIVE_INFINITY }),
+      queries.fetchQuery({ ...getAuthSessionOptions(), staleTime: Number.POSITIVE_INFINITY }),
+    ])
+      .then(([project, session]) => {
+        const userId = session.authenticated ? session.user.id : null
+        const pending = current ? takeAgentDraft({ userId, projectId: project.id }) : null
+        if (pending) insert(pending)
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [insert, queries])
 
   // Each chat has its own toaster, so a toast shows once however many chats are mounted.
   const toasterId = useId()
