@@ -135,9 +135,10 @@ connection holds the version as a Yjs document and exchanges
 | `sync`, `awareness` | Apply them to your document and your awareness |
 | `status` | Whether changes are written: `saved` at `revision`, `unsaved`, `saving`, or `failed` with an `error`; `snapshot` is what is written, as a Yjs snapshot, so you can forget the changes it covers |
 | `access` | You may now only watch |
-| `left` | You no longer hold the artifact: `left`, as you asked, `not_found`, `not_shared`, or `not_live` (not a canvas) |
-| `commented` | A comment changed: `commentId`, `parentId` for a reply, and `action`, which is `created`, `resolved`, `reopened` or `deleted` |
+| `left` | You no longer hold it: `left` (asked), `not_found`, `not_shared`, `not_live` |
+| `commented` | A comment changed: `commentId`, `parentId` for a reply, and `action` |
 
+- A comment's `action` is `created`, `resolved`, `reopened` or `deleted`.
 - A watcher's updates are refused with an `error`; it may still send step 1 and awareness.
 - Keep your document when you reconnect, to any server. After `joined`, the server's own step 1
   asks for what your document holds that it lacks, and your answer brings back what you changed

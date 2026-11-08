@@ -39,6 +39,9 @@ const ITEM_TYPES: ReadonlySet<string> = new Set<CanvasItem["type"]>([
   "arrow",
 ])
 
+/** The origin of a file an edit adds: kept whatever the reader undoes. */
+const KEPT_FILES = Symbol("sixb-live-kept-files")
+
 /** How long changes made one after the other are one step for undo, as typing a word is. */
 const UNDO_CAPTURE_MS = 400
 
@@ -109,8 +112,9 @@ export class LiveCanvas {
 
   /**
    * Makes an edit to a board's page, worked out from what it holds now, as one step of this
-   * reader's undo, with the files it needs added in the same step: an image's picture. False when
-   * the document holds no such page; `make` throws when the edit no longer applies.
+   * reader's undo, with the files it needs added first: an image's picture, which undo leaves in
+   * place. False when the document holds no such page; `make` throws when the edit no longer
+   * applies.
    */
   editBoard(
     path: string,
@@ -124,10 +128,14 @@ export class LiveCanvas {
     const edit = make(text.toString())
     if (edit.length === 0 && Object.keys(files).length === 0) return true
 
-    this.doc.transact(() => {
-      for (const [file, ref] of Object.entries(files)) map.set(file, ref)
-      applyBoardEditToText(text, edit)
-    }, this.origin)
+    // A file joins the canvas for good, outside this reader's undo: undoing the edit puts the
+    // page back as it was, and leaves the file to anyone who shows it since.
+    if (Object.keys(files).length > 0) {
+      this.doc.transact(() => {
+        for (const [file, ref] of Object.entries(files)) map.set(file, ref)
+      }, KEPT_FILES)
+    }
+    applyBoardEditToText(text, edit, this.origin)
     return true
   }
 

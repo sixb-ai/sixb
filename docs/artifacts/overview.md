@@ -177,15 +177,21 @@ pictures, and inline styles.
 | --- | --- |
 | `boardElements(source)` | Every static element: its address, kind, source range, and first words |
 | `setBoardText`, `setBoardImage`, `setBoardStyle` | An edit, as changes to the source |
-| `mergeBoardText(source, address, base, typed)` | Typed words, merged with what others changed in the element since `base` |
+| `mergeBoardText(source, address, base, typed)` | Typed words, merged with changes since `base` |
 | `applyBoardEditToText(text, edit)` | Makes it in the board's `Y.Text` |
-| `boardFramePatches(before, after)` | What a frame showing `before` changes in place to show `after` |
+| `boardFramePatches(before, after)` | What a frame showing `before` patches to show `after` |
 
 A board's frame link serves it for editing with `?sixb-edit`. The frame's `edit` request then
-turns editing on: the frame reports `edit.hover`, `edit.select` and `edit.text`, and takes
-`edit.patch`. With `typing: false`, picking an element types nothing into it, as when the reader
-picks what to comment on; `edit.select` says where they clicked. It acts only on the reader's own clicks and keys. A board's scripts can still post
-messages, so take `edit.text` only for the element the reader picked.
+turns editing on, and takes `edit.patch`. With `typing: false`, picking an element types nothing
+into it, as when the reader picks what to comment on.
+
+- Transfer a `MessagePort` with the first `edit` request after the frame loads. The frame reports
+  `edit.hover`, `edit.select` (with where the reader clicked) and `edit.text` through that port
+  alone.
+- The board's scripts can't post on the port: the frame takes it before they run, and they never
+  see the request that hands it over. The frame reports only the reader's own clicks and keys.
+- They can still rewrite what an element holds, so take `edit.text` only for the element the
+  reader picked, and stop taking it once `boardFramePatches` returns null.
 
 ## Comment on an artifact
 
