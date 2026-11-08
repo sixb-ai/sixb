@@ -448,9 +448,9 @@ async function storePreviews(context: {
   }
 }
 
-/** The version a publish wrote, at the revision it left. */
+/** The version a publish wrote, as it left its content. */
 function writtenAt({ artifact, version }: PublishedArtifact) {
-  return { artifactId: artifact.id, version: version.version, revision: version.revision }
+  return { artifactId: artifact.id, version: version.version, updatedAt: version.updatedAt }
 }
 
 /** One warning per board whose pictures were not all kept, naming each and why. */

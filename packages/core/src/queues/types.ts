@@ -216,10 +216,11 @@ export interface AgentArtifactPreviewsRequestedQueueJob
       readonly artifactId: string
       readonly version: number
       /**
-       * The version's revision when it was asked for: once the version is written again, the
-       * job of its new revision renders it. Absent on jobs asked for before revisions.
+       * When the version's content was last written as it was asked for, its `updatedAt` as ISO:
+       * once its content is written again, the job asked for then renders it. Creating the version
+       * leaves its content, so its job still renders it. Absent on jobs asked for before.
        */
-      readonly revision?: number
+      readonly updatedAt?: string
       /**
        * The version's query answers as its publisher read them when publishing, by name: a JSON
        * blob the boards read their queries from. Absent for a version without queries.

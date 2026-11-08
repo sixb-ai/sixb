@@ -239,12 +239,12 @@ describe("publishing a canvas", () => {
       files: await put({ "canvas.json": CANVAS, ...BOARDS }),
     })
 
-    const job = (revision: number) => ({
+    const job = ({ revision, updatedAt }: { revision: number; updatedAt: Date }) => ({
       id: `art_previews_${first.artifact.id}_r${revision}`,
       type: "agent.artifact-previews.requested" as const,
-      payload: { artifactId: first.artifact.id, version: 1, revision },
+      payload: { artifactId: first.artifact.id, version: 1, updatedAt: updatedAt.toISOString() },
     })
-    expect(await claimable()).toEqual([job(1)])
+    expect(await claimable()).toEqual([job(first.version)])
 
     // Asking again for the same revision is the same job.
     await requestBoardPreviews(requester(deps), first.version)
@@ -271,7 +271,7 @@ describe("publishing a canvas", () => {
 
     // Writing the open version again with one board changed asks for that board's pictures, in a
     // job of the new revision's. Reproduce by keying the job by version: it is the first job.
-    await as(alice).artifacts.publish(first.artifact.id, {
+    const changed = await as(alice).artifacts.publish(first.artifact.id, {
       kind: "canvas",
       title: "Onboarding",
       files: await put({
@@ -280,7 +280,8 @@ describe("publishing a canvas", () => {
         "boards/region.html": "<main><h1>Regions, by city</h1></main>",
       }),
     })
-    expect(await claimable()).toEqual([job(3)])
+    expect(changed.version.revision).toBe(3)
+    expect(await claimable()).toEqual([job(changed.version)])
   })
 
   test("asks for nothing in a project without sandboxes, where nothing renders them", async () => {
@@ -311,7 +312,7 @@ describe("publishing a canvas", () => {
 
     jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
     expect((await claimable()).map((job) => job.payload)).toEqual([
-      { artifactId: version.artifactId, version: 1, revision: 1 },
+      { artifactId: version.artifactId, version: 1, updatedAt: version.updatedAt.toISOString() },
     ])
   })
 })

@@ -184,7 +184,7 @@ function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
     payload: {
       artifactId: version.artifactId,
       version: version.version,
-      revision: version.revision,
+      updatedAt: version.updatedAt.toISOString(),
     },
   })
 
@@ -236,8 +236,8 @@ describe("a canvas version's previews", () => {
     expect(sandboxes.created).toHaveLength(1)
   })
 
-  test("are left to the job of the version's next revision once it is written again", async () => {
-    // Reproduce by dropping the revision check in `renderArtifactPreviews`: the job then pictures
+  test("are left to the job of the version's next content once it is written again", async () => {
+    // Reproduce by dropping the content check in `renderArtifactPreviews`: the job then pictures
     // what the version holds now, with the query answers of the content it was asked for.
     const sandboxes = new PicturingSandboxes()
     const { host, canvas, pictures, job } = setup()
@@ -248,7 +248,11 @@ describe("a canvas version's previews", () => {
       projectId,
       artifactId: version.artifactId,
       kind: "canvas",
-      version: { ...version, title: "Written again", updatedAt: new Date() },
+      version: {
+        ...version,
+        title: "Written again",
+        updatedAt: new Date(version.updatedAt.getTime() + 60_000),
+      },
     })
     await renderArtifactPreviews({
       host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
@@ -258,6 +262,31 @@ describe("a canvas version's previews", () => {
 
     expect(sandboxes.created).toEqual([])
     expect(await pictures(version)).toEqual([])
+  })
+
+  test("are still rendered once someone created the version, which keeps its content", async () => {
+    // Reproduce by comparing the job's revision with the version's in `renderArtifactPreviews`:
+    // creating the version moves its revision, and the job asked for its content renders nothing.
+    const sandboxes = new PicturingSandboxes()
+    const { host, canvas, pictures, job } = setup()
+    const { version } = await canvas()
+    const asked = job(version)
+
+    const frozen = await host.storage.artifacts?.freeze({
+      projectId,
+      artifactId: version.artifactId,
+      frozenAt: new Date(version.updatedAt.getTime() + 60_000),
+      frozenBy: alice,
+    })
+    expect(frozen?.version.revision).toBe(version.revision + 1)
+    await renderArtifactPreviews({
+      host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
+      job: asked,
+      signal: new AbortController().signal,
+    })
+
+    expect(sandboxes.created).toHaveLength(1)
+    expect(await pictures(version)).toHaveLength(8)
   })
 
   test("are left to the outlines in a project without sandboxes", async () => {
