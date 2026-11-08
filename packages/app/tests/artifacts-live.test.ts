@@ -185,6 +185,36 @@ describe("a live artifact", () => {
     expect(keeper.kept.has(ARTIFACT)).toBe(false)
   })
 
+  test("never brings back a change it kept over a newer one, even read again after it was saved", async () => {
+    // Reproduce by dropping forget() on `saved` in session.ts: the keeper still holds the change
+    // after the server saved it. Read back late anyway, a kept change is the page's own edits,
+    // which a document takes once: Bob's newer move stays.
+    const server = new FakeServer(ARTIFACT, CANVAS)
+    const keeper = memoryKeeper()
+    const alice = tab(server, keeper)
+    const bob = tab(server)
+    await settle()
+
+    alice.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
+    const stale = keeper.kept.get(ARTIFACT)
+    await settle()
+    alice
+      .connection()
+      .deliver({ type: "status", artifactId: ARTIFACT, state: "saved", revision: 2 })
+    await settle()
+    expect(keeper.kept.has(ARTIFACT)).toBe(false)
+
+    bob.canvas().apply(moveItems(new Map([["ask", { x: 500, y: 100 }]])))
+    await settle()
+    // A copy of the page from before the save, say another tab's storage read late.
+    if (stale) keeper.write(ARTIFACT, stale)
+    const late = tab(server, keeper)
+    await settle()
+    for (const each of [late, alice, bob]) {
+      expect(item(each.canvas().getCanvas(), "ask")).toMatchObject({ x: 500, y: 100 })
+    }
+  })
+
   test("sends nothing once it may only watch, and leaves when the server says so", async () => {
     // Reproduce by sending every change in session.ts whatever the access: the server takes
     // Alice's move after she lost the right to make it.
