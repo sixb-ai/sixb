@@ -1089,7 +1089,7 @@ function ViewerBar({
   const messages = useArtifactMessages().viewer
   return (
     <TooltipProvider delayDuration={400}>
-      <header className="@container flex h-13 shrink-0 items-center gap-2 border-b border-border/60 px-2.5">
+      <header className="@container relative flex h-13 shrink-0 items-center gap-2 border-b border-border/60 px-2.5">
         {chrome.onBack ? (
           <HeaderButton label={messages.back} onClick={chrome.onBack}>
             <ArrowLeft />

@@ -596,6 +596,9 @@ describe("the version menu", () => {
     })
 
     await waitFor(() => expect(ui.getByRole("status").textContent).toBe("Version 3 created"))
+    // Said on a phone too, under the header. The test DOM applies no container queries, so this
+    // reads the classes: reproduce by hiding the status below the md width, as it once was.
+    expect(ui.getByRole("status").className.split(" ")).not.toContain("hidden")
     expect(requests).toContainEqual({
       call: `POST /api/artifacts/${ARTIFACT_ID}/freeze`,
       body: { baseRevision: 3 },

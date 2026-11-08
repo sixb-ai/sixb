@@ -190,11 +190,13 @@ export function VersionMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* Beside the pill on a wide header; on a narrow one, a line under it, over the artifact. */}
       {status ? (
         <span
           role="status"
           className={cn(
-            "hidden shrink-0 text-xs @md:inline",
+            "absolute inset-x-0 top-full z-10 border-b border-border/60 bg-background px-4 py-2 text-[13px] animate-in fade-in-0 duration-200",
+            "@md:static @md:z-auto @md:shrink-0 @md:border-0 @md:bg-transparent @md:p-0 @md:text-xs",
             status.failed ? "text-destructive" : "text-muted-foreground"
           )}
         >
