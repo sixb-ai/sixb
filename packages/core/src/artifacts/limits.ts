@@ -62,3 +62,13 @@ export const ARTIFACT_STATE_LIMITS = {
  * before each restore. Taking one more forgets the oldest.
  */
 export const ARTIFACT_RESTORE_POINTS = 20
+
+/** What an artifact's comments may hold. */
+export const ARTIFACT_COMMENT_LIMITS = {
+  /** Comments and replies, together. */
+  maxComments: 1_000,
+  /** A comment's words, in characters. */
+  maxBodyLength: 4_000,
+  /** The words that name the element it is about. */
+  maxLabelLength: 120,
+} as const

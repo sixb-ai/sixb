@@ -1,4 +1,4 @@
-import { ARTIFACT_RESTORE_POINTS } from "../../artifacts/limits"
+import { ARTIFACT_COMMENT_LIMITS, ARTIFACT_RESTORE_POINTS } from "../../artifacts/limits"
 import { type Principal, principalsEqual } from "../../auth"
 import type { FileRef } from "../../blob-storage"
 import { paginate } from "../pagination"
@@ -10,6 +10,8 @@ import {
 } from "./record"
 import type {
   ArtifactBoardPreviewRecord,
+  ArtifactCommentKey,
+  ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
@@ -23,6 +25,7 @@ import type {
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
+  CreateArtifactCommentInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteExpiredArtifactFrameGrantsInput,
@@ -40,6 +43,7 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   PutArtifactBoardPreviewsInput,
+  ResolveArtifactCommentInput,
   RestoreArtifactInput,
   SetArtifactStateInput,
   UndoArtifactTurnInput,
@@ -58,6 +62,8 @@ interface StoredArtifact {
   readonly restorePoints: readonly ArtifactRestorePointRecord[]
   /** What each Agent turn that wrote it last left it at, by the turn's run. */
   readonly turnWrites: ReadonlyMap<string, ArtifactTurnWriteRecord>
+  /** Oldest first. */
+  readonly comments: readonly ArtifactCommentRecord[]
 }
 
 interface ThreadLink {
@@ -119,6 +125,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
           threads: new Map(),
           restorePoints: [],
           turnWrites: new Map(),
+          comments: [],
         },
         content,
         input.turnRunId
@@ -351,6 +358,8 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       threads: new Map([[input.threadId, { sharedAt, copied: true }]]),
       restorePoints: [],
       turnWrites: new Map(),
+      // Comments stay with the original.
+      comments: [],
     })
     return structuredClone(record)
   }
@@ -462,6 +471,92 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
 
       this.boardPreviews.set(key, structuredClone({ projectId: input.projectId, ...preview }))
     }
+  }
+
+  async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    if (!stored) throw artifactStorageErrors.notFound(input.artifactId)
+
+    if (input.parentId !== undefined) {
+      const parent = stored.comments.find((each) => each.id === input.parentId)
+      if (!parent || parent.parentId !== undefined) {
+        throw artifactStorageErrors.commentNotFound(input.artifactId, input.parentId)
+      }
+    }
+    if (stored.comments.length >= ARTIFACT_COMMENT_LIMITS.maxComments) {
+      throw artifactStorageErrors.commentsFull(input.artifactId)
+    }
+
+    // Field by field, as the SQL providers store it.
+    const comment: ArtifactCommentRecord = structuredClone({
+      projectId: input.projectId,
+      artifactId: input.artifactId,
+      id: input.id,
+      ...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+      anchor: {
+        ...(input.anchor.board === undefined ? {} : { board: input.anchor.board }),
+        ...(input.anchor.element === undefined ? {} : { element: input.anchor.element }),
+        ...(input.anchor.label === undefined ? {} : { label: input.anchor.label }),
+        revision: input.anchor.revision,
+      },
+      body: input.body,
+      author: input.author,
+      createdAt: input.createdAt,
+    })
+    this.artifacts.set(key, { ...stored, comments: [...stored.comments, comment] })
+    return structuredClone(comment)
+  }
+
+  async getComment(input: ArtifactCommentKey): Promise<ArtifactCommentRecord | null> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.artifactId))
+    const comment = stored?.comments.find((each) => each.id === input.id)
+    return comment ? structuredClone(comment) : null
+  }
+
+  async listComments(input: GetArtifactInput): Promise<ArtifactCommentRecord[]> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.id))
+    // By when, and those made in the same instant as they were made: a stable sort keeps them.
+    const ordered = [...(stored?.comments ?? [])].sort(
+      (left, right) => left.createdAt.getTime() - right.createdAt.getTime()
+    )
+    return structuredClone(ordered)
+  }
+
+  async resolveComment(input: ResolveArtifactCommentInput): Promise<ArtifactCommentRecord | null> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    const comment = stored?.comments.find((each) => each.id === input.id)
+    if (!stored || !comment) return null
+
+    const { resolvedAt: _at, resolvedBy: _by, ...open } = comment
+    const next: ArtifactCommentRecord = input.resolved
+      ? {
+          ...open,
+          resolvedAt: new Date(input.resolved.at),
+          resolvedBy: structuredClone(input.resolved.by),
+        }
+      : open
+    this.artifacts.set(key, {
+      ...stored,
+      comments: stored.comments.map((each) => (each.id === input.id ? next : each)),
+    })
+    return structuredClone(next)
+  }
+
+  async deleteComment(input: ArtifactCommentKey): Promise<boolean> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    if (!stored?.comments.some((each) => each.id === input.id)) return false
+
+    // Its replies go with it.
+    this.artifacts.set(key, {
+      ...stored,
+      comments: stored.comments.filter(
+        (each) => each.id !== input.id && each.parentId !== input.id
+      ),
+    })
+    return true
   }
 
   async delete(input: DeleteArtifactInput): Promise<boolean> {

@@ -468,6 +468,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("095-artifact-open-versions", artifactOpenVersionsSql),
     pgSql("096-artifact-documents", artifactDocumentsSql),
     pgSql("097-artifact-frame-files", artifactFrameFilesSql),
+    pgSql("098-artifact-comments", artifactCommentsSql),
   ],
 })
 
@@ -561,3 +562,4 @@ import artifactOpenVersionsSql from "./migrations/095-artifact-open-versions.sql
 }
 import artifactDocumentsSql from "./migrations/096-artifact-documents.sql" with { type: "text" }
 import artifactFrameFilesSql from "./migrations/097-artifact-frame-files.sql" with { type: "text" }
+import artifactCommentsSql from "./migrations/098-artifact-comments.sql" with { type: "text" }

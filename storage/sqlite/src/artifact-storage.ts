@@ -1,11 +1,13 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite"
 import type { FileRef } from "@sixb/core"
+import { ARTIFACT_COMMENT_LIMITS } from "@sixb/core/artifacts"
 import {
   ARTIFACT_RESTORE_POINTS,
   artifactStateBytes,
   artifactStorageErrors,
   checkArtifactStateWrite,
   parseArtifactBoardPreviewRow,
+  parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
@@ -16,6 +18,8 @@ import {
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactBoardPreviewRecord,
+  ArtifactCommentKey,
+  ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
@@ -29,6 +33,7 @@ import type {
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
+  CreateArtifactCommentInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteExpiredArtifactFrameGrantsInput,
@@ -46,6 +51,7 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   PutArtifactBoardPreviewsInput,
+  ResolveArtifactCommentInput,
   RestoreArtifactInput,
   SetArtifactStateInput,
   UndoArtifactTurnInput,
@@ -87,6 +93,14 @@ const FRAME_GRANT_COLUMNS = `
 `
 
 const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS updatedAt"
+
+const COMMENT_COLUMNS = `
+  project_id AS projectId, artifact_id AS artifactId, id, parent_id AS parentId, anchor, body,
+  author_principal_type AS authorPrincipalType, author_principal_id AS authorPrincipalId,
+  created_at AS createdAt, resolved_at AS resolvedAt,
+  resolved_by_principal_type AS resolvedByPrincipalType,
+  resolved_by_principal_id AS resolvedByPrincipalId
+`
 
 const BOARD_PREVIEW_COLUMNS =
   "project_id AS projectId, render_key AS renderKey, theme, size, file, created_at AS createdAt"
@@ -688,6 +702,109 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         )
       }
     })
+  }
+
+  async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
+    return runImmediateTransaction(this.db, () => {
+      const artifact = this.db
+        .query("SELECT 1 FROM artifacts WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.artifactId)
+      if (!artifact) throw artifactStorageErrors.notFound(input.artifactId)
+
+      if (input.parentId !== undefined) {
+        const parent = this.db
+          .query(
+            `SELECT 1 FROM artifact_comments
+             WHERE project_id = ? AND artifact_id = ? AND id = ? AND parent_id IS NULL`
+          )
+          .get(input.projectId, input.artifactId, input.parentId)
+        if (!parent) throw artifactStorageErrors.commentNotFound(input.artifactId, input.parentId)
+      }
+      // In the write transaction: two comments at once cannot both pass the limit.
+      const counted = this.db
+        .query(
+          "SELECT count(*) AS total FROM artifact_comments WHERE project_id = ? AND artifact_id = ?"
+        )
+        .get(input.projectId, input.artifactId) as { readonly total: number }
+      if (counted.total >= ARTIFACT_COMMENT_LIMITS.maxComments) {
+        throw artifactStorageErrors.commentsFull(input.artifactId)
+      }
+
+      const anchor = {
+        ...(input.anchor.board === undefined ? {} : { board: input.anchor.board }),
+        ...(input.anchor.element === undefined ? {} : { element: input.anchor.element }),
+        ...(input.anchor.label === undefined ? {} : { label: input.anchor.label }),
+        revision: input.anchor.revision,
+      }
+      const row = this.db
+        .query(
+          `INSERT INTO artifact_comments (
+            project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
+            author_principal_id, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          RETURNING ${COMMENT_COLUMNS}`
+        )
+        .get(
+          input.projectId,
+          input.artifactId,
+          input.id,
+          input.parentId ?? null,
+          JSON.stringify(anchor),
+          input.body,
+          input.author.type,
+          input.author.id,
+          input.createdAt.toISOString()
+        ) as Row
+      return parseArtifactCommentRow(row)
+    })
+  }
+
+  async getComment(input: ArtifactCommentKey): Promise<ArtifactCommentRecord | null> {
+    const row = this.db
+      .query(
+        `SELECT ${COMMENT_COLUMNS} FROM artifact_comments
+         WHERE project_id = ? AND artifact_id = ? AND id = ?`
+      )
+      .get(input.projectId, input.artifactId, input.id) as Row | null
+    return row ? parseArtifactCommentRow(row) : null
+  }
+
+  async listComments(input: GetArtifactInput): Promise<ArtifactCommentRecord[]> {
+    const rows = this.db
+      .query(
+        `SELECT ${COMMENT_COLUMNS} FROM artifact_comments
+         WHERE project_id = ? AND artifact_id = ? ORDER BY created_at, rowid`
+      )
+      .all(input.projectId, input.id) as Row[]
+    return rows.map(parseArtifactCommentRow)
+  }
+
+  async resolveComment(input: ResolveArtifactCommentInput): Promise<ArtifactCommentRecord | null> {
+    const row = this.db
+      .query(
+        `UPDATE artifact_comments
+         SET resolved_at = ?, resolved_by_principal_type = ?, resolved_by_principal_id = ?
+         WHERE project_id = ? AND artifact_id = ? AND id = ?
+         RETURNING ${COMMENT_COLUMNS}`
+      )
+      .get(
+        input.resolved?.at.toISOString() ?? null,
+        input.resolved?.by.type ?? null,
+        input.resolved?.by.id ?? null,
+        input.projectId,
+        input.artifactId,
+        input.id
+      ) as Row | null
+    return row ? parseArtifactCommentRow(row) : null
+  }
+
+  async deleteComment(input: ArtifactCommentKey): Promise<boolean> {
+    // Its replies go with it, through ON DELETE CASCADE.
+    return (
+      this.db
+        .query("DELETE FROM artifact_comments WHERE project_id = ? AND artifact_id = ? AND id = ?")
+        .run(input.projectId, input.artifactId, input.id).changes > 0
+    )
   }
 
   async delete(input: DeleteArtifactInput): Promise<boolean> {

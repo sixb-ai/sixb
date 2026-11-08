@@ -6,6 +6,8 @@ export type ArtifactStorageErrorCode =
   | "artifact_kind_mismatch"
   | "artifact_moved"
   | "artifact_state_full"
+  | "artifact_comments_full"
+  | "comment_not_found"
   | "restore_point_not_found"
 
 /**
