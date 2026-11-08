@@ -404,8 +404,9 @@ export interface ArtifactStorage {
   /**
    * Undoes what a turn wrote, for a retry of it: an artifact nobody changed since the turn's last
    * write is put back as its restore point holds it, and deleted when the turn created it; one that
-   * changed since keeps the changes. The turn's restore points and writes are forgotten, and the
-   * threads it alone shared an artifact in no longer share it, unless it was copied for them.
+   * changed since keeps the changes, its restore point, and the threads it is shared in. An
+   * artifact put back is no longer shared in the threads the turn alone shared it in, unless it was
+   * copied for them. The turn's writes are forgotten.
    */
   undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn>
   get(input: GetArtifactInput): Promise<ArtifactRecord | null>

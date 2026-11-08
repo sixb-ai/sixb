@@ -235,14 +235,13 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
         continue
       }
 
-      const point = stored.restorePoints.find((each) => each.turnRunId === turnRunId)
-      const undone = write && untouched && point ? undo(stored, point) : null
-      const linked = [...stored.threads].some(
-        ([, link]) => link.linkedByRunId === turnRunId && !link.copied
-      )
-      if (!write && !linked) continue
+      if (!write) continue
 
-      // Undone to it, the turn's restore point is what the artifact holds again.
+      const point = stored.restorePoints.find((each) => each.turnRunId === turnRunId)
+      const undone = untouched && point ? undo(stored, point) : null
+
+      // Undone, the turn's restore point is what the artifact holds again, and the threads it
+      // alone shared the artifact in no longer do. Kept, the artifact stays where it was made.
       const next = forgetTurn(undone ?? stored, turnRunId, { undone: undone !== null })
       this.artifacts.set(key, next)
       if (undone) restored.push(published(next))
@@ -620,7 +619,10 @@ function undo(stored: StoredArtifact, point: ArtifactRestorePointRecord): Stored
   }
 }
 
-/** The artifact without what a turn left on it: its writes, its links, and once undone to it, its restore point. */
+/**
+ * The artifact without the turn's writes, and once undone to the turn's restore point, without
+ * that point and the links the turn made.
+ */
 function forgetTurn(
   stored: StoredArtifact,
   turnRunId: string,
@@ -635,9 +637,11 @@ function forgetTurn(
       ? stored.restorePoints.filter((point) => point.turnRunId !== turnRunId)
       : stored.restorePoints,
     turnWrites,
-    threads: new Map(
-      [...stored.threads].filter(([, link]) => link.copied || link.linkedByRunId !== turnRunId)
-    ),
+    threads: undone
+      ? new Map(
+          [...stored.threads].filter(([, link]) => link.copied || link.linkedByRunId !== turnRunId)
+        )
+      : stored.threads,
   }
 }
 

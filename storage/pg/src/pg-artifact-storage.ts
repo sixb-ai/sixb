@@ -302,21 +302,24 @@ export class PgArtifactStorage implements ArtifactStorage {
         if (undone) restored.push(undone)
       }
 
-      // What the turn left: the restore points it was undone to, its writes, and its links.
+      // An artifact undone holds its restore point again, and leaves the threads only the turn
+      // shared it in; one kept stays where it was made. A deleted one took its own with it.
       if (restored.length > 0) {
+        const undone = restored.map(({ artifact }) => artifact.id)
         await tx`
           DELETE FROM artifact_restore_points
           WHERE project_id = ${projectId} AND turn_run_id = ${turnRunId}
-            AND artifact_id IN ${tx(restored.map(({ artifact }) => artifact.id))}
+            AND artifact_id IN ${tx(undone)}
+        `
+        await tx`
+          DELETE FROM artifact_threads
+          WHERE project_id = ${projectId} AND linked_by_run_id = ${turnRunId} AND NOT copied
+            AND artifact_id IN ${tx(undone)}
         `
       }
       await tx`
         DELETE FROM artifact_turn_writes
         WHERE project_id = ${projectId} AND turn_run_id = ${turnRunId}
-      `
-      await tx`
-        DELETE FROM artifact_threads
-        WHERE project_id = ${projectId} AND linked_by_run_id = ${turnRunId} AND NOT copied
       `
 
       return { restored, deleted }

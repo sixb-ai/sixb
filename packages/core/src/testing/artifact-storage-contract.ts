@@ -796,9 +796,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    // Regression proof: keep every link in a provider's `undoTurnWrites`; thr_2 then keeps
-    // sharing art_mine with nothing from it left.
-    test("unshares an artifact from the threads only a retried turn shared it in", async () => {
+    // Regression proofs: keep every link in a provider's `undoTurnWrites`, and thr_5 keeps sharing
+    // art_undone with nothing from it left; drop every link the turn made, and art_mine, kept
+    // because someone wrote it since, vanishes from thr_2, which made it.
+    test("unshares an undone artifact from the threads only a retried turn shared it in", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_mine" }))
         await artifacts.publish({
@@ -823,20 +824,38 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           turnRunId: "run_4",
         })
 
-        // A retried turn takes back the link it made, even when its writes stay.
+        // Changed since, the artifact keeps the link the retried turn made: it stays in the
+        // conversation that made it.
         await artifacts.undoTurnWrites({ projectId, turnRunId: "run_2" })
         expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
           "thr_1",
+          "thr_2",
           "thr_3",
         ])
-        expect((await artifacts.list({ projectId, threadId: "thr_2" })).total).toBe(0)
 
-        // A turn in a thread that already shared it made no link.
+        // Undone, it would leave the threads the turn shared it in; this one made no link.
         await artifacts.undoTurnWrites({ projectId, turnRunId: "run_4" })
         expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
           "thr_1",
+          "thr_2",
           "thr_3",
         ])
+
+        // Undone, an artifact the turn alone shared in thr_5 leaves it.
+        await artifacts.create(
+          createInput({ id: "art_undone", version: versionInput({ origin: undefined }) })
+        )
+        await artifacts.publish({
+          ...publishInput(
+            { origin: { threadId: "thr_5", runId: "run_5" }, updatedAt: at(4) },
+            "art_undone"
+          ),
+          turnRunId: "run_5",
+        })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_undone" })).toEqual(["thr_5"])
+        await artifacts.undoTurnWrites({ projectId, turnRunId: "run_5" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_undone" })).toEqual([])
+        expect((await artifacts.list({ projectId, threadId: "thr_5" })).total).toBe(0)
       })
     })
 
