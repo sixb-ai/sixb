@@ -63,7 +63,7 @@ const ARTIFACT_COLUMNS = `
   project_id AS "projectId", id, kind, title,
   owner_principal_type AS "ownerPrincipalType", owner_principal_id AS "ownerPrincipalId",
   latest_version AS "latestVersion", revision, created_at AS "createdAt",
-  updated_at AS "updatedAt", document
+  updated_at AS "updatedAt", document, document_revision AS "documentRevision"
 `
 
 /** What a version and a restore point both hold, and who last wrote it from where. */
@@ -108,11 +108,13 @@ export class PgArtifactStorage implements ArtifactStorage {
       const [artifact] = await tx<PgRow[]>`
         INSERT INTO artifacts (
           project_id, id, kind, title, owner_principal_type, owner_principal_id,
-          latest_version, next_version, revision, created_at, updated_at, document
+          latest_version, next_version, revision, created_at, updated_at, document,
+          document_revision
         ) VALUES (
           ${input.projectId}, ${input.id}, ${input.kind}, ${content.title},
           ${input.owner.type}, ${input.owner.id}, 1, 2, 1,
-          ${content.updatedAt}, ${content.updatedAt}, ${documentJson(input.document)}::text::jsonb
+          ${content.updatedAt}, ${content.updatedAt}, ${documentJson(input.document)}::text::jsonb,
+          ${input.document ? 1 : null}
         )
         ON CONFLICT (project_id, id) DO NOTHING
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
@@ -201,7 +203,11 @@ export class PgArtifactStorage implements ArtifactStorage {
         RETURNING ${tx.unsafe(VERSION_COLUMNS)}
       `
       const [updated] = await tx<PgRow[]>`
-        UPDATE artifacts SET revision = ${revision}, updated_at = ${input.frozenAt}
+        UPDATE artifacts
+        SET revision = ${revision}, updated_at = ${input.frozenAt},
+            -- A freeze keeps the content, so a document that held it still does.
+            document_revision = CASE WHEN document_revision = ${artifact.revision}::int
+                                     THEN ${revision}::int ELSE document_revision END
         WHERE project_id = ${input.projectId} AND id = ${input.artifactId}
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
       `
@@ -429,10 +435,12 @@ export class PgArtifactStorage implements ArtifactStorage {
       const [artifact] = await tx<PgRow[]>`
         INSERT INTO artifacts (
           project_id, id, kind, title, owner_principal_type, owner_principal_id,
-          latest_version, next_version, revision, created_at, updated_at, document
+          latest_version, next_version, revision, created_at, updated_at, document,
+          document_revision
         )
         SELECT project_id, ${input.id}, kind, title, ${input.owner.type}, ${input.owner.id},
-               latest_version, next_version, revision, created_at, updated_at, document
+               latest_version, next_version, revision, created_at, updated_at, document,
+               document_revision
         FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.sourceId}
         ON CONFLICT (project_id, id) DO NOTHING
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
@@ -688,7 +696,7 @@ export class PgArtifactStorage implements ArtifactStorage {
   }
 }
 
-/** A Yjs document's reference as its column holds it: null clears it. */
+/** A Yjs document's reference as its column holds it: null leaves the stored one. */
 function documentJson(document: FileRef | undefined): string | null {
   return document ? JSON.stringify(document) : null
 }
@@ -763,7 +771,10 @@ async function writeLatest(
       UPDATE artifacts
       SET title = ${content.title}, latest_version = ${version.version},
           next_version = ${version.version + 1}, revision = ${revision},
-          updated_at = ${content.updatedAt}, document = ${state}::text::jsonb
+          updated_at = ${content.updatedAt},
+          document = COALESCE(${state}::text::jsonb, document),
+          document_revision = CASE WHEN ${state}::text IS NULL THEN document_revision
+                                   ELSE ${revision}::int END
       WHERE project_id = ${projectId} AND id = ${artifactId}
       RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
     `
@@ -780,7 +791,9 @@ async function writeLatest(
   const [row] = await sql<PgRow[]>`
     UPDATE artifacts
     SET title = ${content.title}, revision = ${revision}, updated_at = ${content.updatedAt},
-        document = ${state}::text::jsonb
+        document = COALESCE(${state}::text::jsonb, document),
+        document_revision = CASE WHEN ${state}::text IS NULL THEN document_revision
+                                 ELSE ${revision}::int END
     WHERE project_id = ${projectId} AND id = ${artifactId}
     RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
   `
@@ -995,7 +1008,10 @@ async function undoTurn(
   const [artifact] = await sql<PgRow[]>`
     UPDATE artifacts
     SET title = ${undone.title}, latest_version = ${undone.version}, revision = ${revision},
-        updated_at = ${updatedAt}, document = ${documentJson(document)}::text::jsonb
+        updated_at = ${updatedAt},
+        document = COALESCE(${documentJson(document)}::text::jsonb, document),
+        document_revision = CASE WHEN ${documentJson(document)}::text IS NULL THEN document_revision
+                                 ELSE ${revision}::int END
     WHERE project_id = ${projectId} AND id = ${artifactId}
     RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
   `

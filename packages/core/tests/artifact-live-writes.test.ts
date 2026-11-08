@@ -5,7 +5,7 @@ import { SixbHost } from "../src"
 import { CANVAS_FILE, parseCanvas } from "../src/artifacts/canvas"
 import { documentCanvas, documentFiles } from "../src/artifacts/live/document"
 import { storeLiveFiles } from "../src/artifacts/live/files"
-import { loadArtifactDocument, readDocumentState } from "../src/artifacts/live/state"
+import { loadArtifactDocument } from "../src/artifacts/live/state"
 import { mergeArtifactWrite, undoneTurnDocuments } from "../src/artifacts/publish/merge"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
@@ -87,9 +87,41 @@ function setup() {
   const follow = async (id: string, doc: Y.Doc) => {
     const { artifact } = await latest(id)
     if (!artifact.document) throw new Error("Expected the canvas to keep its document.")
-    Y.applyUpdate(doc, await readDocumentState(deps.blobStorage, artifact.document))
+    const stored = await load(id)
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(stored))
   }
-  return { deps, host, sixb, put, read, items, artifacts, latest, load, writeBack, follow }
+  /** Writes content as a writer that stores no document would, leaving the canvas's behind. */
+  const writeWithout = async (id: string, files: readonly ArtifactFile[]) => {
+    const { version } = await latest(id)
+    const {
+      projectId: _,
+      artifactId: __,
+      version: ___,
+      revision: ____,
+      createdAt: _____,
+      ...content
+    } = version
+    return artifacts().publish({
+      projectId: "live-writes",
+      artifactId: id,
+      kind: "canvas",
+      version: { ...content, files, updatedAt: new Date() },
+    })
+  }
+  return {
+    deps,
+    host,
+    sixb,
+    put,
+    read,
+    items,
+    artifacts,
+    latest,
+    load,
+    writeBack,
+    follow,
+    writeWithout,
+  }
 }
 
 /** A note's words in a document. */
@@ -413,10 +445,6 @@ describe("a canvas's document", () => {
   test("of a canvas that kept none yet is built the same by every server that loads it", async () => {
     const context = setup()
     const { files, published } = await canvas(context)
-    const { id } = published.artifact
-
-    // As a version written before documents were kept: storage holds no document.
-    const { version } = await context.latest(id)
     const {
       projectId: _,
       artifactId: __,
@@ -424,25 +452,70 @@ describe("a canvas's document", () => {
       revision: ____,
       createdAt: _____,
       ...content
-    } = version
-    await context.artifacts().publish({
-      projectId: "live-writes",
-      artifactId: id,
-      kind: "canvas",
-      version: { ...content, files, updatedAt: new Date() },
-    })
-    expect((await context.latest(id)).artifact).not.toHaveProperty("document")
+    } = published.version
 
-    const first = await context.load(id)
-    const second = await context.load(id)
+    // As a canvas written before documents were kept.
+    const { artifact } = await context.artifacts().create({
+      projectId: "live-writes",
+      id: "art_legacy",
+      kind: "canvas",
+      owner: alice,
+      version: { ...content, files },
+    })
+    expect(artifact).not.toHaveProperty("document")
+
+    const first = await context.load(artifact.id)
+    const second = await context.load(artifact.id)
     expect(Y.encodeStateAsUpdate(first)).toEqual(Y.encodeStateAsUpdate(second))
 
     noteText(first).insert(5, ", team")
     noteText(second).insert(0, "Oh. ")
-    await context.writeBack(id, first, 2)
-    const merged = await context.writeBack(id, second, 2)
+    await context.writeBack(artifact.id, first, 1)
+    const merged = await context.writeBack(artifact.id, second, 1)
     expect(await context.items(merged.version.files)).toContainEqual(
       expect.objectContaining({ id: "hi", text: "Oh. Hello, team" })
     )
+  })
+
+  // Guard proof: in loadArtifactDocument, use a stored document whatever revision it holds; the
+  // board the write moved stays where it was, for every editor and in the next write.
+  test("left behind by a write that stored none is brought up to the content, losing nothing", async () => {
+    const context = setup()
+    const { published } = await canvas(context)
+    const { id } = published.artifact
+    const live = await context.load(id)
+    noteText(live).insert(5, ", team")
+
+    // A writer that stores no document, as a server from before them, moves the board.
+    const moved = await context.writeWithout(
+      id,
+      await context.put({
+        [CANVAS_FILE]: JSON.stringify({
+          items: [
+            board("welcome", 80),
+            { id: "hi", type: "note", x: 0, y: 900, w: 200, text: "Hello" },
+          ],
+        }),
+        "boards/welcome.html": WELCOME,
+      })
+    )
+    expect(moved.artifact).toMatchObject({ revision: 2, document: { revision: 1 } })
+
+    // Every server brings it up the same way, and the editor's change stays with the write's.
+    const first = await context.load(id)
+    expect(Y.encodeStateAsUpdate(first)).toEqual(Y.encodeStateAsUpdate(await context.load(id)))
+    expect(documentCanvas(first)?.items.get("welcome")?.get("x")).toBe(80)
+    await context.follow(id, live)
+    expect(documentCanvas(live)?.items.get("welcome")?.get("x")).toBe(80)
+    expect(noteText(live).toString()).toBe("Hello, team")
+
+    // The next write stores the document again, at its revision.
+    const written = await context.writeBack(id, live, 2)
+    expect(written.artifact.document?.revision).toBe(written.artifact.revision)
+    expect(await context.items(written.version.files)).toEqual([
+      board("welcome", 80),
+      { id: "hi", type: "note", x: 0, y: 900, w: 200, text: "Hello, team" },
+    ])
+    expect(documentFiles(await context.load(id))).toEqual(documentFiles(live))
   })
 })

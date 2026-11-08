@@ -289,6 +289,7 @@ export { AiUsageStorageError, aggregateAiModelCallUsage, InMemoryAiUsageStorage 
 export type {
   ArtifactBoardPreviewRecord,
   ArtifactBoardPreviewSize,
+  ArtifactDocument,
   ArtifactFile,
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,

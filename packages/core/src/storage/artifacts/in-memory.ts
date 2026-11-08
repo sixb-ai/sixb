@@ -105,7 +105,9 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       revision: 1,
       createdAt: new Date(content.updatedAt),
       updatedAt: new Date(content.updatedAt),
-      ...(input.document ? { document: structuredClone(input.document) } : {}),
+      ...(input.document
+        ? { document: { file: structuredClone(input.document), revision: 1 } }
+        : {}),
     }
 
     const stored = turnWrote(
@@ -173,9 +175,18 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       frozenAt: new Date(input.frozenAt),
       frozenBy: structuredClone(input.frozenBy),
     }
+    // A freeze keeps the content, so a document that held it still does.
+    const { document } = stored.record
     const next: StoredArtifact = {
       ...stored,
-      record: { ...stored.record, revision, updatedAt: new Date(input.frozenAt) },
+      record: {
+        ...stored.record,
+        revision,
+        updatedAt: new Date(input.frozenAt),
+        ...(document?.revision === stored.record.revision
+          ? { document: { ...document, revision } }
+          : {}),
+      },
       versions: [...stored.versions.slice(0, -1), frozen],
     }
     this.artifacts.set(key, next)
@@ -546,7 +557,7 @@ function written(
   content: ArtifactVersionInput,
   document: FileRef | undefined
 ): StoredArtifact {
-  const { document: _replaced, ...record } = stored.record
+  const { record } = stored
   const latest = latestOf(stored)
   const revision = record.revision + 1
 
@@ -566,7 +577,7 @@ function written(
       latestVersion: version.version,
       revision,
       updatedAt: new Date(content.updatedAt),
-      ...(document ? { document: structuredClone(document) } : {}),
+      ...(document ? { document: { file: structuredClone(document), revision } } : {}),
     },
     versions: opens ? [...stored.versions, version] : [...stored.versions.slice(0, -1), version],
     nextVersion: opens ? stored.nextVersion + 1 : stored.nextVersion,
@@ -642,7 +653,7 @@ function undo(
         createdAt: target.createdAt,
       })
 
-  const { document: _replaced, ...record } = stored.record
+  const { record } = stored
   return {
     ...stored,
     record: {
@@ -651,7 +662,7 @@ function undo(
       latestVersion: version.version,
       revision,
       updatedAt: new Date(Math.max(point.updatedAt.getTime(), target.frozenAt?.getTime() ?? 0)),
-      ...(document ? { document: structuredClone(document) } : {}),
+      ...(document ? { document: { file: structuredClone(document), revision } } : {}),
     },
     versions: [...versions.slice(0, -1), version],
   }

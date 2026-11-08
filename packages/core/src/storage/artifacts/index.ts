@@ -4,6 +4,7 @@ export { InMemoryArtifactStorage } from "./in-memory"
 export type {
   ArtifactBoardPreviewRecord,
   ArtifactBoardPreviewSize,
+  ArtifactDocument,
   ArtifactFile,
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
