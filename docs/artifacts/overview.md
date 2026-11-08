@@ -159,6 +159,62 @@ on, `@sixb/core/artifacts/live/protocol` the messages alone, without Yjs, and
 `@sixb/client/artifact-live` the socket. The [WebSockets](../websockets/overview.md#live-artifacts)
 page lists the messages.
 
+### Edit what a board shows
+
+A board's HTML stays yours to write. What its source holds can also be changed in place: words,
+pictures, and inline styles.
+
+- Each element in a board's source has an address, its path from the `<body>`, such as
+  `body>main:0>h1:0`. What a script builds, such as a chart drawn from live data, has none and
+  can't be edited in place.
+- An element can be a block of text, which you type into, keeping the bold or the link around the
+  rest. It can also be an image, whose picture and description change, or anything else.
+- Every element takes `color`, `background`, `background-color`, `font-size`, `font-weight`,
+  `text-align`, `padding`, `gap` and `border-radius` in its inline style.
+- Edits go to everyone editing the canvas at once, and merge with what the Agent writes.
+
+| `@sixb/core/artifacts/live` | |
+| --- | --- |
+| `boardElements(source)` | Every static element: its address, kind, source range, and first words |
+| `setBoardText`, `setBoardImage`, `setBoardStyle` | An edit, as changes to the source |
+| `applyBoardEditToText(text, edit)` | Makes it in the board's `Y.Text` |
+| `boardFramePatches(before, after)` | What a frame showing `before` changes in place to show `after` |
+
+A board's frame link serves it for editing with `?sixb-edit`. The frame's `edit` request then
+turns editing on: the frame reports `edit.hover`, `edit.select` and `edit.text`, and takes
+`edit.patch`.
+
+## Comment on an artifact
+
+Whoever reads an artifact reads its comments and adds their own. A comment on a canvas can be about
+a board, or an element of one. Its author, or anyone who may change the artifact, resolves or
+deletes it. Replies go one level deep. A copy of the artifact, such as a forked conversation's,
+keeps no comments.
+
+```ts
+const comment = await sixb.artifacts.addComment(artifact.id, {
+  body: "Make the title warmer.",
+  anchor: { board: "welcome", element: "body>main:0>h1:0", label: "Welcome back" },
+})
+await sixb.artifacts.addComment(artifact.id, { body: "Done.", parentId: comment.id })
+await sixb.artifacts.resolveComment(artifact.id, comment.id)
+```
+
+| To | HTTP |
+| --- | --- |
+| List | `GET /api/artifacts/{id}/comments` |
+| Add, or reply | `POST /api/artifacts/{id}/comments` |
+| Resolve, or open again | `POST /api/artifacts/{id}/comments/{commentId}/resolve` |
+| Delete, with its replies | `DELETE /api/artifacts/{id}/comments/{commentId}` |
+
+- An anchor records the revision its author saw, and the element's first words. These still name
+  the element once it is gone.
+- Each change sends `artifact.commented` to whoever reads the artifact, and to everyone editing it
+  live.
+- An artifact holds at most 1,000 comments, each up to 4,000 characters.
+- `quoteArtifactComment(comment)` from `@sixb/core/artifacts` writes a comment as the Agent reads
+  it, with where it is, for a message that asks the Agent to act on it.
+
 ## Write a document
 
 A document is Markdown with tables, footnotes, and task lists. A few conventions shape its page:
