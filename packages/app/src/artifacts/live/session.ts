@@ -66,44 +66,96 @@ const INITIAL: LiveArtifactState = {
   left: null,
 }
 
+/** Changes a copy of an artifact's document kept, and whose they are. */
+export interface KeptChanges {
+  /** Where they are kept: one key per copy of the document, so two tabs keep their own. */
+  readonly key: string
+  /** Who made them, as `joined` named them. */
+  readonly userId: string
+  readonly update: Uint8Array
+}
+
 /**
  * Where a page keeps the changes made to an artifact that the server has not said it saved, so a
- * reload, or a tab closed during an outage, does not lose them: the next copy of the document
- * merges them in, and sends them with its sync.
+ * reload, or a tab closed during an outage, does not lose them: the next copy of the document,
+ * opened by the same person with the right to edit, merges them in and sends them with its sync.
  */
 export interface LiveKeeper {
-  read(artifactId: string): Uint8Array | null
-  write(artifactId: string, update: Uint8Array): void
-  clear(artifactId: string): void
+  /** Every copy's changes kept for an artifact. */
+  list(artifactId: string): KeptChanges[]
+  write(changes: KeptChanges): void
+  remove(key: string): void
 }
+
+/** The key one copy of an artifact's document keeps its changes under. */
+export function keptChangesKey(artifactId: string, clientId: number): string {
+  return `${keptPrefix(artifactId)}${clientId}`
+}
+
+const keptPrefix = (artifactId: string) => `sixb.live.unsaved.${artifactId}.`
 
 /** The browser's local storage, which a private window or a full disk may refuse: then nothing. */
 export const browserKeeper: LiveKeeper = {
-  read(artifactId) {
+  list(artifactId) {
+    const prefix = keptPrefix(artifactId)
+    const kept: KeptChanges[] = []
     try {
-      const kept = globalThis.localStorage?.getItem(keeperKey(artifactId))
-      return kept ? decodeLiveData(kept) : null
+      const storage = globalThis.localStorage
+      if (!storage) return []
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index)
+        if (!key?.startsWith(prefix)) continue
+        const changes = readKept(key, storage.getItem(key))
+        if (changes) kept.push(changes)
+        else storage.removeItem(key)
+      }
     } catch {
-      return null
+      // Nothing can be read back.
     }
+    return kept
   },
-  write(artifactId, update) {
+  write({ key, userId, update }) {
     try {
-      globalThis.localStorage?.setItem(keeperKey(artifactId), encodeLiveData(update))
+      globalThis.localStorage?.setItem(
+        key,
+        JSON.stringify({ user: userId, update: encodeLiveData(update) })
+      )
     } catch {
       // Kept in the document while the page lasts.
     }
   },
-  clear(artifactId) {
+  remove(key) {
     try {
-      globalThis.localStorage?.removeItem(keeperKey(artifactId))
+      globalThis.localStorage?.removeItem(key)
     } catch {
       // Nothing was kept.
     }
   },
 }
 
-const keeperKey = (artifactId: string) => `sixb.live.unsaved.${artifactId}`
+function readKept(key: string, value: string | null): KeptChanges | null {
+  if (!value) return null
+  try {
+    const { user, update } = JSON.parse(value) as { user?: unknown; update?: unknown }
+    const bytes = typeof update === "string" ? decodeLiveData(update) : null
+    return typeof user === "string" && bytes ? { key, userId: user, update: bytes } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * What of `update` a state vector does not cover; null when it covers it all. A change that only
+ * deletes moves no clock, so it reads as covered: it was sent with the rest.
+ */
+function uncovered(update: Uint8Array, vector: Uint8Array): Uint8Array | null {
+  const written = Y.decodeStateVector(vector)
+  const made = Y.decodeStateVector(Y.encodeStateVectorFromUpdate(update))
+  for (const [client, clock] of made) {
+    if ((written.get(client) ?? 0) < clock) return Y.diffUpdate(update, vector)
+  }
+  return null
+}
 
 /** The origin of changes taken back from the keeper: this page's own, sent as any other. */
 const KEPT = Symbol("sixb-live-kept")
@@ -117,6 +169,10 @@ export class LiveArtifact {
   private joined = false
   /** What this page changed that the server has not said it saved, merged into one update. */
   private unsaved: Uint8Array | null = null
+  /** Where this copy keeps them. */
+  private readonly key: string
+  /** Other copies' kept changes merged in, by key: forgotten here once the server wrote them. */
+  private readonly merged = new Map<string, Uint8Array>()
 
   constructor(
     readonly artifactId: string,
@@ -128,17 +184,12 @@ export class LiveArtifact {
     // Others take a state only past its first clock, which the empty one starts at: one set now
     // is the first they see.
     this.awareness.setLocalStateField(SELECTION_FIELD, [])
+    this.key = keptChangesKey(artifactId, this.doc.clientID)
+  }
 
-    // What an earlier copy changed and never saw saved: it waits in the document for what it
-    // was made on, which the first sync brings, and goes with this copy's own changes.
-    const kept = keeper.read(artifactId)
-    if (kept) {
-      try {
-        Y.applyUpdate(this.doc, kept, KEPT)
-      } catch {
-        keeper.clear(artifactId)
-      }
-    }
+  /** What this page changed that the server has not said it saved. */
+  get hasUnsaved(): boolean {
+    return this.unsaved !== null
   }
 
   getState = (): LiveArtifactState => this.state
@@ -176,6 +227,7 @@ export class LiveArtifact {
         syncProtocol.writeSyncStep1(step1, this.doc)
         this.sendSync(encoding.toUint8Array(step1))
         this.sendAwareness([this.doc.clientID])
+        this.takeKept(message.user.id, message.access)
         return
       }
       case "sync": {
@@ -202,7 +254,8 @@ export class LiveArtifact {
       }
       case "status": {
         const { state, revision, error } = message
-        if (state === "saved") this.forget()
+        const written = message.stateVector ? decodeLiveData(message.stateVector) : null
+        if (written) this.forget(written)
         this.update({
           save: { state, revision, ...(error ? { error } : {}) },
           pending: state !== "saved",
@@ -214,7 +267,7 @@ export class LiveArtifact {
         return
       case "left":
         this.joined = false
-        if (message.reason !== "left") this.forget()
+        if (message.reason !== "left") this.forget(null)
         this.update({ left: message.reason })
         return
       case "error":
@@ -248,14 +301,56 @@ export class LiveArtifact {
     }
 
     this.unsaved = this.unsaved ? Y.mergeUpdates([this.unsaved, update]) : update
-    this.keeper.write(this.artifactId, this.unsaved)
+    this.keep()
     if (!this.state.pending) this.update({ pending: true })
   }
 
-  /** The server saved what this page changed, or the artifact is gone: nothing is kept. */
-  private forget(): void {
-    this.unsaved = null
-    this.keeper.clear(this.artifactId)
+  /** Keeps what this page changed, as its person's: not before `joined` says who they are. */
+  private keep(): void {
+    const user = this.state.user
+    if (!user || !this.unsaved) return
+    this.keeper.write({ key: this.key, userId: user.id, update: this.unsaved })
+  }
+
+  /**
+   * Merges in what earlier copies of the document kept for this person, once the server says
+   * who they are and that they may edit: each waits in the document for what it was made on, and
+   * is sent with this copy's own changes. Another person's are never read; this person's, once
+   * they may only watch, are dropped.
+   */
+  private takeKept(userId: string, access: ArtifactLiveAccess): void {
+    for (const kept of this.keeper.list(this.artifactId)) {
+      if (kept.key === this.key || kept.userId !== userId) continue
+      if (access !== "edit") {
+        this.keeper.remove(kept.key)
+        continue
+      }
+      try {
+        Y.applyUpdate(this.doc, kept.update, KEPT)
+        this.merged.set(kept.key, kept.update)
+      } catch {
+        this.keeper.remove(kept.key)
+      }
+    }
+    this.keep()
+  }
+
+  /**
+   * Forgets what the server wrote back, as its state vector says, here and in the copies merged
+   * in, and keeps the rest: a change sent while the server was writing is not in what it wrote.
+   * Null when the artifact is gone: nothing is kept.
+   */
+  private forget(written: Uint8Array | null): void {
+    const rest = written && this.unsaved ? uncovered(this.unsaved, written) : null
+    this.unsaved = rest
+    if (rest) this.keep()
+    else this.keeper.remove(this.key)
+
+    for (const [key, update] of this.merged) {
+      if (written && uncovered(update, written)) continue
+      this.keeper.remove(key)
+      this.merged.delete(key)
+    }
   }
 
   private onAwareness = (
@@ -340,9 +435,10 @@ export class LiveHub {
   }
 
   /**
-   * Leaves an artifact no view holds after {@link LINGER_MS}, once the server took what was
-   * changed in it: changes made offline, or whose view went away before they were saved, wait
-   * in it for the next connection, and a view that comes back finds them.
+   * Leaves an artifact no view holds after {@link LINGER_MS}, once the server wrote what this
+   * page changed in it: changes made offline, or whose view went away before they were saved,
+   * wait in it for the next connection, and a view that comes back finds them. What others
+   * changed is not this page's to wait for.
    */
   private linger(entry: {
     readonly artifact: LiveArtifact
