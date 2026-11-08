@@ -57,15 +57,15 @@ const MEDIA_TYPES: Readonly<Record<string, string>> = {
 }
 
 /**
- * Publishes a draft as the artifact's next version, and fills the cache with it: the new version,
- * and each file's text, the changed ones from the draft and the rest from the version edited, so
- * the new version opens at once, without reading again what the reader already has.
+ * Saves a draft as the artifact's latest, and fills the cache with what it saved: the version, and
+ * each file's text, the changed ones from the draft and the rest from the version edited, so it
+ * shows at once, without reading again what the reader already has.
  */
 export async function saveDraft(
   queries: QueryClient,
   version: ArtifactVersion,
   draft: ArtifactDraft,
-  options: { readonly baseVersion?: number } = {}
+  options: { readonly baseRevision?: number } = {}
 ): Promise<PublishArtifactVersionResponse> {
   const texts = draft.files()
   const changed = new Map(

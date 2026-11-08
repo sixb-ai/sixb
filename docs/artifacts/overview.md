@@ -85,8 +85,9 @@ on its card instead.
 
 Ask for a change and the Agent updates the same artifact: its current version, until you create
 one. The reply shows it as a line with what changed, such as a sheet or section added, and the
-version menu keeps the versions you created. The conversation's header lists every artifact it
-published.
+version menu keeps the versions you created. **Restore** in the version menu puts back what the
+artifact held before one of the Agent's turns, or before a restore, once you confirm. The
+conversation's header lists every artifact it published.
 
 A cancelled reply keeps what it already published. Retrying a reply that failed takes back what it
 changed, along with what it said: an artifact nobody changed since goes back to its restore point,

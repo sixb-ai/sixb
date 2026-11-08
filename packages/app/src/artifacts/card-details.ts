@@ -63,8 +63,8 @@ export function fileExtension(name: string): string | undefined {
  * removed. Edits within them leave no trace in the structure, so they say nothing here.
  */
 export function versionChanges(
-  previous: ArtifactVersion,
-  current: ArtifactVersion,
+  previous: Pick<ArtifactVersion, "outline">,
+  current: Pick<ArtifactVersion, "outline">,
   messages: ArtifactMessages
 ): string[] {
   const { card } = messages
