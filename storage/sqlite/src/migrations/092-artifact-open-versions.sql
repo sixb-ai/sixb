@@ -7,11 +7,18 @@
 ALTER TABLE artifacts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);
 UPDATE artifacts SET revision = latest_version;
 
--- `created_at` is when a version opened, `updated_at` when its content was last written.
+-- `created_at` is when a version opened, `updated_at` when its content was last written, and
+-- `frozen_at` when someone created it, `frozen_by_*`: an existing version by whoever published it.
 ALTER TABLE artifact_versions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0);
 ALTER TABLE artifact_versions ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE artifact_versions ADD COLUMN frozen_at TEXT;
-UPDATE artifact_versions SET revision = version, updated_at = created_at, frozen_at = created_at;
+ALTER TABLE artifact_versions ADD COLUMN frozen_by_principal_type TEXT
+  CHECK (frozen_by_principal_type IN ('user', 'serviceAccount', 'system'));
+ALTER TABLE artifact_versions ADD COLUMN frozen_by_principal_id TEXT
+  CHECK (length(frozen_by_principal_id) > 0);
+UPDATE artifact_versions
+SET revision = version, updated_at = created_at, frozen_at = created_at,
+    frozen_by_principal_type = author_principal_type, frozen_by_principal_id = author_principal_id;
 
 -- At most one open version: the latest, which storage keeps so.
 CREATE UNIQUE INDEX idx_artifact_versions_open

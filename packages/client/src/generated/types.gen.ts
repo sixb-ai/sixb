@@ -109,12 +109,16 @@ export type ArtifactErrorResponse = {
    */
   code?: string
   /**
-   * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+   * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
    */
   latest?: {
     version: number
     revision: number
     author: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    frozenBy?: {
       type: "user" | "serviceAccount" | "system"
       id: string
     }
@@ -17948,12 +17952,16 @@ export type ListArtifactsErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -17969,12 +17977,16 @@ export type ListArtifactsErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18054,12 +18066,16 @@ export type CreateArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18075,12 +18091,16 @@ export type CreateArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18096,12 +18116,16 @@ export type CreateArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18117,12 +18141,16 @@ export type CreateArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18138,12 +18166,16 @@ export type CreateArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18303,6 +18335,13 @@ export type CreateArtifactResponses = {
        */
       frozenAt?: string
       /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
        * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
        */
       boardPreviews?: {
@@ -18339,12 +18378,16 @@ export type DeleteArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18360,12 +18403,16 @@ export type DeleteArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18381,12 +18428,16 @@ export type DeleteArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18427,12 +18478,16 @@ export type GetArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18448,12 +18503,16 @@ export type GetArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18469,12 +18528,16 @@ export type GetArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18549,6 +18612,13 @@ export type GetArtifactResponses = {
        * When it was created, which froze it
        */
       frozenAt?: string
+      /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
     }>
     /**
      * What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it, or only read as an observer of one
@@ -18579,12 +18649,16 @@ export type ClearArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18600,12 +18674,16 @@ export type ClearArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18621,12 +18699,16 @@ export type ClearArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18671,12 +18753,16 @@ export type GetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18692,12 +18778,16 @@ export type GetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18713,12 +18803,16 @@ export type GetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18773,12 +18867,16 @@ export type DeleteArtifactStateValueErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18794,12 +18892,16 @@ export type DeleteArtifactStateValueErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18815,12 +18917,16 @@ export type DeleteArtifactStateValueErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18836,12 +18942,16 @@ export type DeleteArtifactStateValueErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18893,12 +19003,16 @@ export type SetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18914,12 +19028,16 @@ export type SetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18935,12 +19053,16 @@ export type SetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18956,12 +19078,16 @@ export type SetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18977,12 +19103,16 @@ export type SetArtifactStateErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19052,12 +19182,16 @@ export type PublishArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19073,12 +19207,16 @@ export type PublishArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19094,12 +19232,16 @@ export type PublishArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19115,12 +19257,16 @@ export type PublishArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19136,12 +19282,16 @@ export type PublishArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19302,6 +19452,13 @@ export type PublishArtifactVersionResponses = {
        */
       frozenAt?: string
       /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
        * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
        */
       boardPreviews?: {
@@ -19344,12 +19501,16 @@ export type FreezeArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19365,12 +19526,16 @@ export type FreezeArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19386,12 +19551,16 @@ export type FreezeArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19407,12 +19576,16 @@ export type FreezeArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19428,12 +19601,16 @@ export type FreezeArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19594,6 +19771,13 @@ export type FreezeArtifactVersionResponses = {
        */
       frozenAt?: string
       /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
        * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
        */
       boardPreviews?: {
@@ -19626,12 +19810,16 @@ export type ListArtifactRestorePointsErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19647,12 +19835,16 @@ export type ListArtifactRestorePointsErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19668,12 +19860,16 @@ export type ListArtifactRestorePointsErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19765,12 +19961,16 @@ export type GetArtifactRestorePointErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19786,12 +19986,16 @@ export type GetArtifactRestorePointErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19807,12 +20011,16 @@ export type GetArtifactRestorePointErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20046,12 +20254,16 @@ export type RestoreArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20067,12 +20279,16 @@ export type RestoreArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20088,12 +20304,16 @@ export type RestoreArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20109,12 +20329,16 @@ export type RestoreArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20130,12 +20354,16 @@ export type RestoreArtifactErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20295,6 +20523,13 @@ export type RestoreArtifactResponses = {
        */
       frozenAt?: string
       /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
        * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
        */
       boardPreviews?: {
@@ -20330,12 +20565,16 @@ export type CreateArtifactFrameErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20351,12 +20590,16 @@ export type CreateArtifactFrameErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20372,12 +20615,16 @@ export type CreateArtifactFrameErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20393,12 +20640,16 @@ export type CreateArtifactFrameErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20451,12 +20702,16 @@ export type GetArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20472,12 +20727,16 @@ export type GetArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20493,12 +20752,16 @@ export type GetArtifactVersionErrors = {
      */
     code?: string
     /**
-     * With artifact_moved: the artifact's latest version, its revision, and who last wrote it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
       revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -20636,6 +20899,13 @@ export type GetArtifactVersionResponses = {
      * When it was created, which froze it
      */
     frozenAt?: string
+    /**
+     * Who created it
+     */
+    frozenBy?: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
     /**
      * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
      */

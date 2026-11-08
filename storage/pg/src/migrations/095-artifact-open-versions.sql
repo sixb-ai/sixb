@@ -9,16 +9,26 @@ ALTER TABLE artifacts
   ALTER COLUMN revision SET NOT NULL,
   ADD CONSTRAINT artifacts_revision_check CHECK (revision > 0);
 
--- `created_at` is when a version opened, `updated_at` when its content was last written.
+-- `created_at` is when a version opened, `updated_at` when its content was last written, and
+-- `frozen_at` when someone created it, `frozen_by_*`: an existing version by whoever published it.
 ALTER TABLE artifact_versions
   ADD COLUMN revision INTEGER,
   ADD COLUMN updated_at TIMESTAMPTZ,
-  ADD COLUMN frozen_at TIMESTAMPTZ;
-UPDATE artifact_versions SET revision = version, updated_at = created_at, frozen_at = created_at;
+  ADD COLUMN frozen_at TIMESTAMPTZ,
+  ADD COLUMN frozen_by_principal_type TEXT
+    CHECK (frozen_by_principal_type IN ('user', 'serviceAccount', 'system')),
+  ADD COLUMN frozen_by_principal_id TEXT CHECK (length(frozen_by_principal_id) > 0);
+UPDATE artifact_versions
+SET revision = version, updated_at = created_at, frozen_at = created_at,
+    frozen_by_principal_type = author_principal_type, frozen_by_principal_id = author_principal_id;
 ALTER TABLE artifact_versions
   ALTER COLUMN revision SET NOT NULL,
   ALTER COLUMN updated_at SET NOT NULL,
-  ADD CONSTRAINT artifact_versions_revision_check CHECK (revision > 0);
+  ADD CONSTRAINT artifact_versions_revision_check CHECK (revision > 0),
+  ADD CONSTRAINT artifact_versions_frozen_by_check CHECK (
+    (frozen_at IS NULL) = (frozen_by_principal_type IS NULL)
+    AND (frozen_by_principal_type IS NULL) = (frozen_by_principal_id IS NULL)
+  );
 
 -- At most one open version: the latest, which storage keeps so.
 CREATE UNIQUE INDEX idx_artifact_versions_open

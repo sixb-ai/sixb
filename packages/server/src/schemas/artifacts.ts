@@ -138,6 +138,7 @@ export const ArtifactVersionSchema = z.object({
   createdAt: z.string().describe("When the version was opened"),
   updatedAt: z.string().describe("When its content was last written"),
   frozenAt: z.string().optional().describe("When it was created, which froze it"),
+  frozenBy: PrincipalSchema.optional().describe("Who created it"),
   boardPreviews: z
     .record(z.string(), z.enum(["ready", "pending", "none"]))
     .optional()
@@ -156,6 +157,7 @@ const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
   createdAt: true,
   updatedAt: true,
   frozenAt: true,
+  frozenBy: true,
 })
 
 export const ArtifactParamsSchema = z.object({ artifactId: z.string().min(1) })
@@ -354,9 +356,14 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
       "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
-    .object({ version: z.number().int(), revision: z.number().int(), author: PrincipalSchema })
+    .object({
+      version: z.number().int(),
+      revision: z.number().int(),
+      author: PrincipalSchema,
+      frozenBy: PrincipalSchema.optional(),
+    })
     .optional()
     .describe(
-      "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+      "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
     ),
 })

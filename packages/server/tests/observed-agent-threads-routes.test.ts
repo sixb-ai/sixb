@@ -196,6 +196,7 @@ function createFixture() {
       projectId,
       artifactId: "art_0000000001",
       frozenAt: new Date(),
+      frozenBy: { type: "user", id: "marie" },
     })
     await storage.artifacts.publish({
       projectId,

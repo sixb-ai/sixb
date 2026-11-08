@@ -712,6 +712,7 @@ describe("publish_artifact", () => {
       projectId,
       artifactId: review.artifactId,
       frozenAt: new Date(),
+      frozenBy: owner,
     })
     write("work/review/document.md", "# Q3 review\n\nAfter the review.\n")
     const opened = await publishVersion(
@@ -1018,6 +1019,16 @@ describe("publish_artifact", () => {
     expect(
       await publishVersion({ id: artifactId, path: "work/plan", title: "Plan" }, { installed })
     ).toMatchObject({ artifactId, version: 1, revision: 3 })
+
+    // A version created during the run is named with who created it.
+    const bob = { type: "user", id: "usr_bob" } as const
+    await storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date(), frozenBy: bob })
+    const stale = await version
+      .execute(version.parseInput({ id: artifactId, path: "work/plan", title: "Plan" }), context)
+      .catch((error: unknown) => error)
+    expect(version.errorText(stale)).toContain(
+      "whose version 1 was last written earlier in this conversation, and then created as a version by user 'usr_bob', so nothing was published"
+    )
   })
 
   test("lays a deck out with the files it publishes, and only those", async () => {
@@ -1199,7 +1210,7 @@ describe("materializeThreadArtifacts", () => {
     // Reproduce the pins by listing them for open versions too: the Agent's reply then pins
     // content its next update replaces.
     const freeze = (artifactId: string) =>
-      storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date() })
+      storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date(), frozenBy: owner })
     write("a/document.md", "# First\n\nOne.\n")
     write("b/document.md", "# Second\n\nTwo.\n")
     const first = (await publish({ path: "a", kind: "document", title: "First" })) as {
@@ -1350,7 +1361,7 @@ describe("materializeThreadArtifacts", () => {
       artifactId: string
     }
     // Pinned too once the user created the version.
-    await storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date() })
+    await storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date(), frozenBy: owner })
     expect(JSON.parse((await install()).manifestJson).artifacts[0].parts).toEqual([
       {
         address: `artifact:${artifactId}#1`,

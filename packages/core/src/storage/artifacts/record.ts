@@ -54,7 +54,20 @@ export function parseArtifactVersionRow(row: Row): ArtifactVersionRecord {
     ...content(row, where),
     createdAt: date(row.createdAt, "createdAt", where),
     updatedAt: date(row.updatedAt, "updatedAt", where),
-    ...(row.frozenAt == null ? {} : { frozenAt: date(row.frozenAt, "frozenAt", where) }),
+    ...frozen(row, where),
+  }
+}
+
+/** When, and by whom, a version was created: both or neither. */
+function frozen(row: Row, where: string) {
+  if ((row.frozenAt == null) !== (row.frozenByPrincipalType == null)) {
+    throw corrupt(where, "a frozen version names who froze it, and an open one does not")
+  }
+  if (row.frozenAt == null) return {}
+
+  return {
+    frozenAt: date(row.frozenAt, "frozenAt", where),
+    frozenBy: principal(row.frozenByPrincipalType, row.frozenByPrincipalId, "frozenBy", where),
   }
 }
 
@@ -217,7 +230,7 @@ export const artifactStorageErrors = {
   moved: (id: string, baseRevision: number, latest: ArtifactLatestVersion) =>
     new ArtifactStorageError(
       "artifact_moved",
-      `[Sixb] Artifact '${id}' changed since revision ${baseRevision}, which this was based on: it is at revision ${latest.revision}, version ${latest.version}.`,
+      `[Sixb] Artifact '${id}' changed since revision ${baseRevision}, which this was based on: it is at revision ${latest.revision}, version ${latest.version}${latest.frozenBy ? `, which ${latest.frozenBy.type} '${latest.frozenBy.id}' created` : ""}.`,
       latest
     ),
   restorePointNotFound: (id: string, revision: number) =>

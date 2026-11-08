@@ -159,7 +159,12 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     assertBase(stored, input.baseRevision)
 
     const revision = stored.record.revision + 1
-    const frozen = { ...latest, revision, frozenAt: new Date(input.frozenAt) }
+    const frozen = {
+      ...latest,
+      revision,
+      frozenAt: new Date(input.frozenAt),
+      frozenBy: structuredClone(input.frozenBy),
+    }
     const next: StoredArtifact = {
       ...stored,
       record: { ...stored.record, revision, updatedAt: new Date(input.frozenAt) },
@@ -477,6 +482,7 @@ function assertBase(stored: StoredArtifact, baseRevision: number | undefined): v
     version: latest.version,
     revision: latest.revision,
     author: structuredClone(latest.author),
+    ...(latest.frozenBy ? { frozenBy: structuredClone(latest.frozenBy) } : {}),
   })
 }
 
@@ -488,7 +494,6 @@ function versionRecord(
     readonly revision: number
     readonly content: ArtifactVersionInput
     readonly createdAt: Date
-    readonly frozenAt?: Date
   }
 ): ArtifactVersionRecord {
   // Field by field, as the SQL providers store it: nothing else a caller passes is kept.
@@ -507,7 +512,6 @@ function versionRecord(
     ...(content.origin ? { origin: content.origin } : {}),
     createdAt: input.createdAt,
     updatedAt: content.updatedAt,
-    ...(input.frozenAt ? { frozenAt: input.frozenAt } : {}),
   })
 }
 
@@ -557,6 +561,7 @@ function withRestorePoint(
     version,
     revision,
     frozenAt,
+    frozenBy: _frozenBy,
     createdAt: _,
     ...content
   } = latestOf(stored)

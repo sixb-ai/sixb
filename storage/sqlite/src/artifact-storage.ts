@@ -65,7 +65,9 @@ const CONTENT_COLUMNS = `
 
 const VERSION_COLUMNS = `
   project_id AS projectId, artifact_id AS artifactId, version, revision, ${CONTENT_COLUMNS},
-  created_at AS createdAt, frozen_at AS frozenAt
+  created_at AS createdAt, frozen_at AS frozenAt,
+  frozen_by_principal_type AS frozenByPrincipalType,
+  frozen_by_principal_id AS frozenByPrincipalId
 `
 
 const RESTORE_POINT_COLUMNS = `
@@ -201,11 +203,20 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       const frozenAt = input.frozenAt.toISOString()
       const version = this.db
         .query(
-          `UPDATE artifact_versions SET revision = ?, frozen_at = ?
+          `UPDATE artifact_versions
+           SET revision = ?, frozen_at = ?, frozen_by_principal_type = ?, frozen_by_principal_id = ?
            WHERE project_id = ? AND artifact_id = ? AND version = ?
            RETURNING ${VERSION_COLUMNS}`
         )
-        .get(revision, frozenAt, input.projectId, input.artifactId, latest.version) as Row
+        .get(
+          revision,
+          frozenAt,
+          input.frozenBy.type,
+          input.frozenBy.id,
+          input.projectId,
+          input.artifactId,
+          latest.version
+        ) as Row
       const updated = this.db
         .query(
           `UPDATE artifacts SET revision = ?, updated_at = ? WHERE project_id = ? AND id = ?
@@ -462,10 +473,12 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifact_versions (
             project_id, artifact_id, version, revision, title, entry, files, outline, refs,
-            author_principal_type, author_principal_id, created_at, updated_at, frozen_at
+            author_principal_type, author_principal_id, created_at, updated_at, frozen_at,
+            frozen_by_principal_type, frozen_by_principal_id
           )
           SELECT project_id, ?, version, revision, title, entry, files, outline, refs,
-                 author_principal_type, author_principal_id, created_at, updated_at, frozen_at
+                 author_principal_type, author_principal_id, created_at, updated_at, frozen_at,
+                 frozen_by_principal_type, frozen_by_principal_id
           FROM artifact_versions WHERE project_id = ? AND artifact_id = ?`
         )
         .run(input.id, input.projectId, input.sourceId)
@@ -1021,5 +1034,6 @@ function assertBase(
     version: latest.version,
     revision: artifact.revision,
     author: latest.author,
+    ...(latest.frozenBy ? { frozenBy: latest.frozenBy } : {}),
   })
 }

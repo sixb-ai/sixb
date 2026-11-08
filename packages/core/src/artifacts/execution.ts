@@ -487,12 +487,13 @@ export function createArtifactsRuntime(
 
     async freeze(artifactId, input = {}) {
       const frozenAt = new Date()
-      const frozen = await change(artifactId, (storage) =>
+      const frozen = await change(artifactId, (storage, author) =>
         storage.freeze({
           projectId: runtime.projectId,
           artifactId,
           ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
           frozenAt,
+          frozenBy: author,
         })
       )
 
