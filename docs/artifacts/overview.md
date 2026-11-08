@@ -415,8 +415,9 @@ board shows its outline, and the viewer shows the preview as soon as it is ready
   sandboxes, boards have no preview.
 - A board kept as it was keeps its preview: each is named by what the board shows, its HTML, the
   files it can load, and its size.
-- A board that reads a query is pictured with its author's data, which everyone who can open the
-  canvas then sees in its preview; publishing warns of it. The worker does not picture those.
+- A board that reads a query is pictured with the data its publisher could read when they
+  published it, which everyone who can open the canvas then sees in its preview; publishing warns
+  of it.
 - `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark` serves one
   to whoever reads the version, and the version says which boards' previews are `ready`, `pending`,
   or `none`.
