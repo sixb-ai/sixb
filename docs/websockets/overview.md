@@ -135,11 +135,12 @@ connection holds the version as a Yjs document and exchanges
 | `sync`, `awareness` | Apply them to your document and your awareness |
 | `status` | Whether changes are written: `saved` at `revision`, `unsaved`, `saving`, or `failed` with an `error` |
 | `access` | You may now only watch |
-| `left` | You no longer hold the artifact: `not_found`, `not_shared`, or `not_live` (not a canvas) |
+| `left` | You no longer hold the artifact: `left`, as you asked, `not_found`, `not_shared`, or `not_live` (not a canvas) |
 
 - A watcher's updates are refused with an `error`; it may still send step 1 and awareness.
-- Keep your document when you reconnect, to any server: sync step 1 sends what you changed while
-  away.
+- Keep your document when you reconnect, to any server. After `joined`, the server's own step 1
+  asks for what your document holds that it lacks, and your answer brings back what you changed
+  while away.
 - The server sets `user` in every awareness state it shares (`id`, `name` and `color`), whatever
   your own state says. It shares your states only for awareness clients nobody else uses.
 - While an Agent turn changes boards, the server's own awareness state holds `sixbAgent`: each
