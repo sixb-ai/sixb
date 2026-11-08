@@ -199,7 +199,7 @@ Keep a project's values in one place. See [Environment variables](../deployment/
 
 | Command | Purpose |
 | --- | --- |
-| `sixb env init <project>` | Upload `--dev <file>` and `--prod <file>` to the source, and write `sixb.env.ts`. |
+| `sixb env init [project]` | Upload `--dev <file>` and `--prod <file>` to the source. Given a Doppler project, it writes `sixb.env.ts`; without one, it uses the source `sixb.env.ts` names and fills in its empty `vars: {}`. |
 | `sixb env pull` | Write `.env` from the source. |
 | `sixb env set <name> --env <dev\|prod>` | Set one value, from a hidden prompt or standard input. |
 | `sixb env status` | Show which variables have values, without showing them. |

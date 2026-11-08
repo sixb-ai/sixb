@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import { EnvSourceUnreachableError } from "@sixb/core/env"
 import {
   assertDevEnv,
@@ -579,13 +580,28 @@ describe("sixb env init", () => {
     expect(await Bun.file(join(dir, "sixb.env.ts")).exists()).toBe(false)
   })
 
-  test("can run again after an upload that didn't finish", async () => {
+  // Reproduce: send every value. Running init again then writes each one again, a new version
+  // of every secret in Key Vault.
+  test("can run again after an upload that didn't finish, sending only what's missing", async () => {
     const dir = await fresh()
     await writeFile(join(dir, "source.json"), JSON.stringify({ dev: { A: "1" } }))
-    await writeFile(join(dir, ".env"), "A=1\n")
+    await writeFile(join(dir, ".env"), "A=1\nB=2\n")
+    const fake = join(dir, "node_modules/@sixb/env-doppler/index.ts")
+    await writeFile(
+      fake,
+      (await readFile(fake, "utf8")).replace(
+        "async write(env, values) {",
+        "async write(env, values) { await Bun.write(file.replace('source.json', 'writes.json'), JSON.stringify(values));"
+      )
+    )
 
-    await runInProcess(() => runEnvInit({ cwd: dir, project: "client-a", dev: ".env" }))
+    const result = await runInProcess(() =>
+      runEnvInit({ cwd: dir, project: "client-a", dev: ".env" })
+    )
 
+    expect(result.output).toContain("Uploaded 1 variable to dev")
+    expect(result.output).toContain("Already there: 1 in dev")
+    expect(JSON.parse(await readFile(join(dir, "writes.json"), "utf8"))).toEqual({ B: "2" })
     expect(await Bun.file(join(dir, "sixb.env.ts")).exists()).toBe(true)
   })
 
@@ -617,7 +633,132 @@ describe("sixb env init", () => {
   })
 })
 
+describe("sixb env init, to the source sixb.env.ts names", () => {
+  /** A project whose sixb.env.ts names the fake source, laid out as a person would write it. */
+  async function named(vars: string): Promise<string> {
+    const dir = await project({}, {})
+    await writeFile(
+      join(dir, "sixb.env.ts"),
+      `import { source } from "./fake-source"\n\nexport default {\n  source,\n  ${vars},\n}\n`
+    )
+    return dir
+  }
+
+  /**
+   * sixb.env.ts as a new process would load it. This one already imported the old text, and Bun
+   * keeps a module by its path, ignoring any query, so this imports a copy.
+   */
+  async function freshVars(dir: string): Promise<unknown> {
+    const copy = join(dir, `sixb.env.${crypto.randomUUID()}.ts`)
+    await writeFile(copy, await readFile(join(dir, "sixb.env.ts"), "utf8"))
+    return ((await import(pathToFileURL(copy).href)) as { default: { vars: unknown } }).default.vars
+  }
+
+  test("uploads to that source and fills in its empty vars", async () => {
+    const dir = await named("vars: {}")
+    await writeFile(join(dir, ".env"), "BOTH=dev\nDEV_ONLY=1\n")
+    await writeFile(join(dir, ".env.prod"), "BOTH=prod\nPROD_ONLY=2\n")
+
+    const result = await runInProcess(() =>
+      runEnvInit({ cwd: dir, dev: ".env", prod: ".env.prod" })
+    )
+
+    expect(result.error).toBeUndefined()
+    expect(result.output).toContain("Uploaded 2 variables to dev and 2 variables to prod")
+    expect(result.output).toContain("Wrote sixb.env.ts with 3 names")
+    const state = await sourceState(dir)
+    expect(state.dev).toEqual({ BOTH: "dev", DEV_ONLY: "1" })
+    expect(state.prod).toEqual({ BOTH: "prod", PROD_ONLY: "2" })
+    expect(await readFile(join(dir, "sixb.env.ts"), "utf8")).toBe(
+      [
+        'import { source } from "./fake-source"',
+        "",
+        "export default {",
+        "  source,",
+        "  vars: {",
+        '    BOTH: "required",',
+        '    DEV_ONLY: "optional",',
+        '    PROD_ONLY: "prod",',
+        "  },",
+        "}",
+        "",
+      ].join("\n")
+    )
+    expect(await freshVars(dir)).toEqual({
+      BOTH: "required",
+      DEV_ONLY: "optional",
+      PROD_ONLY: "prod",
+    })
+  })
+
+  // Reproduce: let fillVars replace any `vars`. A person's own rules are then lost.
+  test("leaves vars with code of its own alone, and prints a guess for the new names", async () => {
+    const dir = await named('vars: { KEPT: "prod" }')
+    const before = await readFile(join(dir, "sixb.env.ts"), "utf8")
+    await writeFile(join(dir, ".env"), "KEPT=1\nNEW=2\n")
+
+    const result = await runInProcess(() => runEnvInit({ cwd: dir, dev: ".env" }))
+
+    expect(result.error).toBeUndefined()
+    expect((await sourceState(dir)).dev).toEqual({ KEPT: "1", NEW: "2" })
+    expect(await readFile(join(dir, "sixb.env.ts"), "utf8")).toBe(before)
+    expect(result.output).toContain("Add 1 name to `vars` in sixb.env.ts")
+    expect(result.output).toContain('NEW: "required",')
+    expect(result.output).not.toContain("KEPT:")
+  })
+
+  test("with every name already declared, it only uploads", async () => {
+    const dir = await named('vars: { A: "required" }')
+    await writeFile(join(dir, ".env"), "A=1\n")
+
+    const result = await runInProcess(() => runEnvInit({ cwd: dir, dev: ".env" }))
+
+    expect(result.output).toContain("Uploaded 1 variable to dev")
+    expect(result.output).not.toContain("sixb.env.ts")
+  })
+
+  test("changes nothing when the source already has another value", async () => {
+    const dir = await named("vars: {}")
+    await writeFile(join(dir, "source.json"), JSON.stringify({ dev: { A: "other" } }))
+    await writeFile(join(dir, ".env"), "A=mine\n")
+
+    const error = await runEnvInit({ cwd: dir, dev: ".env" }).catch((failure) => failure)
+
+    expect(String(error)).toContain("The source already has other values in dev for A")
+    expect((await sourceState(dir)).dev).toEqual({ A: "other" })
+    expect(await freshVars(dir)).toEqual({})
+  })
+
+  test("stops without sixb.env.ts, saying how to start one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sixb-env-init-"))
+    projects.push(dir)
+    await writeFile(join(dir, ".env"), "A=1\n")
+
+    const error = await runEnvInit({ cwd: dir, dev: ".env" }).catch((failure) => failure)
+
+    expect(String(error)).toContain("no sixb.env.ts naming a source")
+    expect(errorRemediation(error)).toContain("sixb env init <project>")
+  })
+
+  test("stops when sixb.env.ts has no source", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sixb-env-init-"))
+    projects.push(dir)
+    await writeFile(join(dir, "sixb.env.ts"), "export default { vars: {} }\n")
+    await writeFile(join(dir, ".env"), "A=1\n")
+
+    const error = await runEnvInit({ cwd: dir, dev: ".env" }).catch((failure) => failure)
+
+    expect(String(error)).toContain("has no `source` to upload to")
+    expect(errorRemediation(error)).toContain("azureKeyVault")
+  })
+})
+
 describe("command line", () => {
+  test("env init takes the Doppler project or nothing", () => {
+    expect(parseCliArgs(["env", "init", "--dev", ".env"])).toMatchObject({ id: "env:init" })
+    expect(parseCliArgs(["env", "init", "shop", "--dev", ".env"])).toMatchObject({ id: "env:init" })
+  })
+
   test("env commands parse their flags", () => {
     const pull = parseCliArgs(["env", "pull", "--env", "prod", "--token-file", "/t", "--force"])
     expect(pull).toMatchObject({ kind: "command", id: "env:pull" })

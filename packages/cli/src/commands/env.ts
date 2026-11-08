@@ -23,6 +23,7 @@ import { errorMessage, SixbCliError } from "../lib/errors"
 import { promptHidden } from "../lib/hidden-prompt"
 import { renderStatic } from "../ui"
 import {
+  type EnvInitConfig,
   type EnvStatusCell,
   envInitView,
   envKeptView,
@@ -34,6 +35,7 @@ import { canRunLive } from "../ui/live/can-run-live"
 
 const ENV_NAMES: readonly EnvName[] = ["dev", "prod"]
 const DOPPLER_PACKAGE = "@sixb/env-doppler"
+const SOURCE_EXAMPLE = `Add one, such as \`source: doppler({ project: "shop" })\` from ${DOPPLER_PACKAGE}, or \`source: azureKeyVault({ vaults: { dev: "shop-dev", prod: "shop-prod" } })\` from @sixb/env-azure-key-vault.`
 
 // ─── pull ────────────────────────────────────────────────────────────────────
 
@@ -264,16 +266,25 @@ export async function runEnvStatus(options: { readonly cwd?: string } = {}): Pro
 
 // ─── init ────────────────────────────────────────────────────────────────────
 
+/**
+ * Moves a project's values to its source. Given a Doppler project, it also writes `sixb.env.ts`.
+ * Without one, it uploads to the source `sixb.env.ts` already names, whatever it is, and fills in
+ * its empty `vars: {}`.
+ */
 export async function runEnvInit(options: {
-  readonly project: string
+  readonly project?: string
   readonly dev?: string
   readonly prod?: string
   readonly cwd?: string
 }): Promise<void> {
   const cwd = options.cwd ?? process.cwd()
   const configPath = join(cwd, ENV_CONFIG_FILE)
-  if (await Bun.file(configPath).exists()) {
-    throw new SixbCliError(`[SixbEnv] ${ENV_CONFIG_FILE} already exists.`)
+  const { project } = options
+  const configExists = await Bun.file(configPath).exists()
+  if (project !== undefined && configExists) {
+    throw new SixbCliError(`[SixbEnv] ${ENV_CONFIG_FILE} already exists.`, {
+      remediation: `To upload to the source it names, leave out the project: ${INIT_USAGE}`,
+    })
   }
 
   const files = [
@@ -283,11 +294,13 @@ export async function runEnvInit(options: {
   const given = files.flatMap(([env, file]) => (file === undefined ? [] : [{ env, file }]))
   if (given.length === 0) {
     throw new SixbCliError("[SixbEnv] Say where the current values are.", {
-      remediation: "sixb env init <project> --dev .env --prod .env.prod",
+      remediation: project === undefined ? INIT_USAGE : `sixb env init ${project} ${INIT_FILES}`,
     })
   }
 
-  const source = await loadDopplerSource(cwd, options.project)
+  const existing = configExists ? await loadEnvConfig(cwd) : null
+  const source =
+    project === undefined ? sourceToFill(existing) : await loadDopplerSource(cwd, project)
   const uploads = await Promise.all(
     given.map(async ({ env, file }) => {
       const path = resolve(cwd, file)
@@ -298,33 +311,102 @@ export async function runEnvInit(options: {
     })
   )
 
-  // Check every environment before writing to any, so a conflict changes nothing. Running this
-  // again after a failed upload finds the same values, which aren't a conflict.
+  // Check every environment before writing to any, so a conflict changes nothing. A value the
+  // source already has isn't sent again, so running this twice, or after an upload that didn't
+  // finish, changes nothing it doesn't need to.
+  const sends: { readonly env: EnvName; readonly values: Record<string, string> }[] = []
   for (const { env, values } of uploads) {
-    const existing = await source.read(env)
+    const current = await source.read(env)
     const conflicts = Object.keys(values).filter(
-      (name) => name in existing && existing[name] !== values[name]
+      (name) => name in current && current[name] !== values[name]
     )
     if (conflicts.length > 0) {
       throw new SixbCliError(
-        `[SixbEnv] ${options.project} already has other values in ${env} for ${conflicts.sort().join(", ")}.`,
+        `[SixbEnv] ${project ?? "The source"} already has other values in ${env} for ${conflicts.sort().join(", ")}.`,
         {
           remediation:
             "Change them in your source's dashboard, or edit the file, and run this again.",
         }
       )
     }
+    sends.push({
+      env,
+      values: Object.fromEntries(Object.entries(values).filter(([name]) => !(name in current))),
+    })
   }
-  for (const { env, values } of uploads) await source.write(env, values)
+  for (const { env, values } of sends) await source.write(env, values)
 
   const vars = declaredVars(uploads)
-  await writeFile(configPath, renderEnvConfig(options.project, vars))
+  let config: EnvInitConfig
+  if (project !== undefined) {
+    await writeFile(configPath, renderEnvConfig(project, vars))
+    config = { kind: "written", names: Object.keys(vars).length }
+  } else {
+    config = await fillVars(configPath, existing?.vars ?? {}, vars)
+  }
   await renderStatic(
     envInitView({
-      uploaded: uploads.map(({ env, values }) => ({ env, count: Object.keys(values).length })),
-      names: Object.keys(vars).length,
+      uploaded: uploads.map(({ env, values }, index) => {
+        const sent = Object.keys(sends[index]?.values ?? {}).length
+        return { env, count: sent, already: Object.keys(values).length - sent }
+      }),
+      config,
     })
   )
+}
+
+const INIT_FILES = "--dev .env --prod .env.prod"
+const INIT_USAGE = `sixb env init ${INIT_FILES}`
+
+function sourceToFill(config: EnvConfig | null): EnvSource {
+  if (!config) {
+    throw new SixbCliError(`[SixbEnv] There's no ${ENV_CONFIG_FILE} naming a source yet.`, {
+      remediation: `Write one with its source and \`vars: {}\`, then run this again. For Doppler, \`sixb env init <project> ${INIT_FILES}\` writes it for you.`,
+    })
+  }
+  if (!config.source) {
+    throw new SixbCliError(`[SixbEnv] ${ENV_CONFIG_FILE} has no \`source\` to upload to.`, {
+      remediation: SOURCE_EXAMPLE,
+    })
+  }
+  return config.source
+}
+
+/**
+ * Declares the uploaded names in an existing `sixb.env.ts`. Only an empty `vars: {}` is replaced:
+ * anything else is the author's code, so the rules are printed for them to add instead.
+ */
+async function fillVars(
+  path: string,
+  declared: Readonly<Record<string, EnvVarRule>>,
+  guessed: Readonly<Record<string, EnvVarRule>>
+): Promise<EnvInitConfig> {
+  const undeclared = Object.fromEntries(
+    Object.entries(guessed).filter(([name]) => !(name in declared))
+  )
+  const names = Object.keys(undeclared).length
+  if (names === 0) return { kind: "unchanged" }
+
+  const text = await readFile(path, "utf8")
+  const empty = [...text.matchAll(EMPTY_VARS)]
+  if (Object.keys(declared).length > 0 || empty.length !== 1) {
+    return { kind: "paste", names, lines: varLines(undeclared, "") }
+  }
+  await writeFile(
+    path,
+    text.replace(EMPTY_VARS, (_match, indent: string) => renderVars(undeclared, indent))
+  )
+  return { kind: "written", names }
+}
+
+const EMPTY_VARS = /^([ \t]*)vars:\s*\{\s*\}/gm
+
+function renderVars(vars: Readonly<Record<string, EnvVarRule>>, indent: string): string {
+  return [`${indent}vars: {`, ...varLines(vars, `${indent}  `), `${indent}}`].join("\n")
+}
+
+function varLines(vars: Readonly<Record<string, EnvVarRule>>, indent: string): string[] {
+  return Object.entries(vars).map(([name, rule]) => `${indent}${name}: "${rule}",`)
 }
 
 /**
@@ -366,16 +448,13 @@ function uploadableValues(
 }
 
 function renderEnvConfig(project: string, vars: Readonly<Record<string, EnvVarRule>>): string {
-  const lines = Object.entries(vars).map(([name, rule]) => `    ${name}: "${rule}",`)
   return [
     'import { defineEnv } from "@sixb/core/env"',
     `import { doppler } from "${DOPPLER_PACKAGE}"`,
     "",
     "export default defineEnv({",
     `  source: doppler({ project: ${JSON.stringify(project)} }),`,
-    "  vars: {",
-    ...lines,
-    "  },",
+    `${renderVars(vars, "  ")},`,
     "})",
     "",
   ].join("\n")
@@ -410,12 +489,12 @@ async function requireSource(
   const config = await loadEnvConfig(cwd)
   if (!config) {
     throw new SixbCliError(`[SixbEnv] No ${ENV_CONFIG_FILE} in ${cwd}.`, {
-      remediation: "sixb env init <project> --dev .env --prod .env.prod",
+      remediation: `sixb env init <project> ${INIT_FILES}`,
     })
   }
   if (!config.source) {
     throw new SixbCliError(`[SixbEnv] ${ENV_CONFIG_FILE} has no \`source\`.`, {
-      remediation: `Add one, such as \`source: doppler({ project: "shop" })\` from ${DOPPLER_PACKAGE}.`,
+      remediation: SOURCE_EXAMPLE,
     })
   }
   return { config, source: config.source }

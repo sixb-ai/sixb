@@ -119,11 +119,21 @@ export default defineEnv({
 })
 ```
 
-Install the package and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), and sign in with `az login`. If the vaults are in a tenant other than your default, add `tenant: "<tenant ID or domain>"`. Everything above works the same way, with these differences:
+Install the package and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), and sign in with `az login`. If the vaults are in a tenant other than your default, add `tenant: "<tenant ID or domain>"`.
+
+To move a project over, write `sixb.env.ts` as above with `vars: {}`, then upload your current files without naming a project:
+
+```bash
+bun add @sixb/env-azure-key-vault
+bun sixb env init --dev .env --prod .env.prod
+```
+
+It uploads to the vaults `sixb.env.ts` names and fills in `vars` with a first guess at each rule, stopping without changing anything if a vault already has a different value for a name. If `vars` isn't empty, it leaves the file alone and prints the rules to add.
+
+Everything else works the same way, with these differences:
 
 | | With Key Vault |
 | --- | --- |
-| Moving a project over | `sixb env init` sets up Doppler only. Write `sixb.env.ts` yourself, then add values with `sixb env set` or the Azure portal |
 | Access | Pulling needs the Key Vault Secrets User role on the dev vault; `sixb env set` needs Key Vault Secrets Officer. Add and remove teammates in the Azure portal |
 | Names | Key Vault allows hyphens, not underscores, so `DATABASE_URL` is stored as `DATABASE-URL`, and a secret you name `STRIPE-KEY` in the portal arrives as `STRIPE_KEY`. Names ignore case |
 | Disabled secrets | Skipped, as if they weren't there |
