@@ -22,6 +22,7 @@ import {
   withAgentActivityStream,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
+import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/canvas"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import {
@@ -36,11 +37,7 @@ import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals } from "./approval-repair"
-import {
-  MAX_PREVIEW_ATTEMPTS,
-  PREVIEW_RETRY_BACKOFF_MS,
-  renderArtifactPreviews,
-} from "./artifact-previews"
+import { renderArtifactPreviews } from "./artifact-previews"
 import { workerChildren } from "./child-runner"
 import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
 import { runnerContext } from "./execution-context"
@@ -315,8 +312,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         `[SixbAgentWorker] Could not picture the boards of '${claimed.job.payload.artifactId}' version ${claimed.job.payload.version}.`,
         error
       )
-      return claimed.job.attempt < MAX_PREVIEW_ATTEMPTS
-        ? { kind: "retry", availableAt: backoff(PREVIEW_RETRY_BACKOFF_MS) }
+      return claimed.job.attempt < BOARD_PREVIEW_JOB.attempts
+        ? { kind: "retry", availableAt: backoff(BOARD_PREVIEW_JOB.backoffMs) }
         : { kind: "fail" }
     }
     if (error instanceof RunOwnedElsewhereError) return retryOnceReleased(error)

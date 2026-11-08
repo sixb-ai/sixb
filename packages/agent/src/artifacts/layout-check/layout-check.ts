@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
 import type { ArtifactTheme, ArtifactThemeMode, Canvas } from "@sixb/core/artifacts"
+import { SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/internal/artifacts/canvas"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,
@@ -10,11 +11,7 @@ import {
   layoutProbe,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
-import {
-  type ArtifactQueryAnswer,
-  artifactThemeModes,
-  SMALL_BOARD_PREVIEW_WIDTH,
-} from "@sixb/core/internal/artifacts/publish"
+import { type ArtifactQueryAnswer, artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
 import type { ArtifactBoardPreviewSize } from "@sixb/core/storage"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"

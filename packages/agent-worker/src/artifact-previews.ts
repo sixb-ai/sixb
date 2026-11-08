@@ -1,5 +1,6 @@
 import { renderBoardPreviews } from "@sixb/agent"
 import type { BlobStorage, FileRef, SandboxFactory, Storage } from "@sixb/core"
+import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/canvas"
 import {
   type ArtifactQueryAnswers,
   missingBoardPreviews,
@@ -13,13 +14,6 @@ import type { AgentArtifactPreviewsRequestedQueueJob } from "@sixb/core/queues"
 // project, with nothing on its network, renders what is missing there as the Agent's check does,
 // and destroys it. Boards that read queries read the answers the job carries: what the version's
 // publisher could read when they published it.
-
-/** The sandbox's start, the version's files, and the check's 120 seconds, with room to spare. */
-const PREVIEW_JOB_TIMEOUT_MS = 5 * 60_000
-/** A job that fails this often stops: its boards show their outlines. */
-export const MAX_PREVIEW_ATTEMPTS = 3
-/** Before the next attempt: a sandbox that could not start may start a minute later. */
-export const PREVIEW_RETRY_BACKOFF_MS = 60_000
 
 export interface ArtifactPreviewsHost {
   readonly id: string
@@ -54,7 +48,7 @@ export async function renderArtifactPreviews(input: {
     ? await queryAnswers(host.blobStorage, job.payload.queries)
     : undefined
 
-  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(PREVIEW_JOB_TIMEOUT_MS)])
+  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(BOARD_PREVIEW_JOB.timeoutMs)])
   const sandbox = await host.sandboxes.create({
     environment: {},
     network: { mode: "none" },

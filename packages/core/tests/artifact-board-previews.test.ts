@@ -7,10 +7,9 @@ import type {
   SandboxFactory,
 } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
-import { BOARD_PREVIEW_WAIT_MS } from "../src/artifacts/canvas"
+import { BOARD_PREVIEW_JOB, BOARD_PREVIEW_WAIT_MS } from "../src/artifacts/canvas-display"
 import type { CanvasOutline } from "../src/artifacts/outline"
 import {
-  BOARD_PREVIEW_GRACE_MS,
   boardPreviewStatuses,
   boardRenderKey,
   missingBoardPreviews,
@@ -278,10 +277,10 @@ describe("publishing a canvas", () => {
       files: await put({ "canvas.json": CANVAS, ...BOARDS }),
     })
 
-    await requestBoardPreviews(requester(deps), version, { delayMs: BOARD_PREVIEW_GRACE_MS })
+    await requestBoardPreviews(requester(deps), version, { delayMs: BOARD_PREVIEW_JOB.graceMs })
     expect(await claimable()).toEqual([])
 
-    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_GRACE_MS))
+    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
     expect((await claimable()).map((job) => job.payload)).toEqual([
       { artifactId: version.artifactId, version: 1 },
     ])
@@ -361,6 +360,15 @@ describe("a board's pictures", () => {
       )
 
     expect(await statuses(true, version.createdAt)).toEqual({ welcome: "ready", region: "pending" })
+
+    // Still pending while the worker's last attempt may run: its grace, each attempt to its
+    // timeout, and the backoffs between. Reproduce with a wait of 15 minutes: the viewer stops
+    // asking five minutes before the last attempt can end.
+    const { graceMs, attempts, timeoutMs, backoffMs } = BOARD_PREVIEW_JOB
+    const lastAttemptEnds = graceMs + attempts * timeoutMs + (attempts - 1) * backoffMs
+    const during = new Date(version.createdAt.getTime() + lastAttemptEnds - 1)
+    expect(await statuses(true, during)).toEqual({ welcome: "ready", region: "pending" })
+
     const past = new Date(version.createdAt.getTime() + BOARD_PREVIEW_WAIT_MS)
     expect(await statuses(true, past)).toEqual({ welcome: "ready", region: "none" })
     expect(await statuses(false, version.createdAt)).toEqual({ welcome: "ready", region: "none" })

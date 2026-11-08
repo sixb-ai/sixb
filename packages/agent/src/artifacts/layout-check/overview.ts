@@ -1,12 +1,10 @@
+import type { Canvas, CanvasEnd, CanvasItem } from "@sixb/core/artifacts"
 import {
   CANVAS_FIT_PADDING,
   CANVAS_TEXT_PIXELS,
-  type Canvas,
-  type CanvasEnd,
-  type CanvasItem,
   canvasNoteFontSize,
   canvasShapeFontSize,
-} from "@sixb/core/artifacts"
+} from "@sixb/core/internal/artifacts/canvas"
 
 // The whole canvas as the app opens it, for the Agent to judge what reads at that zoom: fitted to
 // everything in a laptop's window, with the boards as the check pictured them and every other item

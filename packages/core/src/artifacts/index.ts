@@ -15,10 +15,7 @@ export {
   type SheetPart,
 } from "./address"
 export {
-  BOARD_PREVIEW_WAIT_MS,
   CANVAS_FILE,
-  CANVAS_FIT_PADDING,
-  CANVAS_TEXT_PIXELS,
   type Canvas,
   type CanvasArrow,
   type CanvasBoard,
@@ -31,10 +28,7 @@ export {
   type CanvasShapeItem,
   type CanvasText,
   type CanvasTextSize,
-  canvasNoteFontSize,
-  canvasShapeFontSize,
   parseCanvas,
-  SMALL_BOARD_PREVIEW_WIDTH,
 } from "./canvas"
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
 export {

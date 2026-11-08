@@ -1,7 +1,7 @@
 import { describe, expect, jest, spyOn, test } from "bun:test"
 import { defineObjectType, prop, type SandboxFactory, SixbHost } from "../src"
 import { AgentExecutionLostError, agentRunArtifacts } from "../src/agents"
-import { BOARD_PREVIEW_GRACE_MS } from "../src/artifacts/publish/previews"
+import { BOARD_PREVIEW_JOB } from "../src/artifacts/canvas-display"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { bindDurableAgentExecution } from "../src/execution/agent"
 import { bindRequestExecution } from "../src/execution/request"
@@ -301,7 +301,7 @@ describe("a run's artifacts", () => {
     expect(await claim()).toBeUndefined()
     jest.useFakeTimers()
     try {
-      jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_GRACE_MS))
+      jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
       const waited = await claim()
       expect(waited?.payload).toEqual({ artifactId: checked.artifact.id, version: 1 })
     } finally {

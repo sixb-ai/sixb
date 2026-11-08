@@ -1,14 +1,16 @@
+import type {
+  CanvasBoard,
+  CanvasEmbed,
+  CanvasNote,
+  CanvasSection,
+  CanvasShapeItem,
+  CanvasText,
+} from "@sixb/core/artifacts"
 import {
   CANVAS_TEXT_PIXELS,
-  type CanvasBoard,
-  type CanvasEmbed,
-  type CanvasNote,
-  type CanvasSection,
-  type CanvasShapeItem,
-  type CanvasText,
   canvasNoteFontSize,
   canvasShapeFontSize,
-} from "@sixb/core/artifacts"
+} from "@sixb/core/internal/artifacts/canvas"
 import { cn } from "@sixb/ui/lib/utils"
 import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
 import { AppWindow, ArrowUpRight, Link2, Maximize2 } from "lucide-react"

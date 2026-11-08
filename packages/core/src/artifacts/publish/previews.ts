@@ -11,7 +11,8 @@ import type {
   ArtifactStorage,
   ArtifactVersionRecord,
 } from "../../storage/artifacts/types"
-import { BOARD_PREVIEW_WAIT_MS, CANVAS_FILE } from "../canvas"
+import { CANVAS_FILE } from "../canvas"
+import { BOARD_PREVIEW_JOB, BOARD_PREVIEW_WAIT_MS } from "../canvas-display"
 import { ArtifactRequestError } from "../errors"
 import { FRAME_ASSETS } from "../frames/assets"
 import { FRAME_DEFAULT_THEMES } from "../frames/kit"
@@ -74,14 +75,12 @@ export interface BoardPreviewRequestOptions {
   readonly withoutAnswers?: boolean
 }
 
-/** The largest picture of a board kept: a board of 8000 by 4000 pixels fits many times over. */
-export const MAX_BOARD_PREVIEW_BYTES = 8 * 1024 * 1024
-
 /**
- * How long a publisher that renders its own pictures, as the Agent's layout check does within its
- * 120 seconds, has before the worker renders what is still missing.
+ * The largest picture of a board kept. Most boards' full pictures are far smaller, but a busy
+ * board as wide as 8000 pixels can pass it: that picture is not kept, and the board shows its
+ * outline in that size.
  */
-export const BOARD_PREVIEW_GRACE_MS = 180_000
+export const MAX_BOARD_PREVIEW_BYTES = 8 * 1024 * 1024
 
 const RENDER_KEY_FORMAT = "sixb-board-preview/1"
 

@@ -131,6 +131,12 @@
       "import": "./dist/agents/streams/internal.js",
       "default": "./dist/agents/streams/internal.js"
     },
+    "./internal/artifacts/canvas": {
+      "types": "./dist/artifacts/canvas-display.d.ts",
+      "bun": "./src/artifacts/canvas-display.ts",
+      "import": "./dist/artifacts/canvas-display.js",
+      "default": "./dist/artifacts/canvas-display.js"
+    },
     "./internal/artifacts/frames": {
       "types": "./dist/artifacts/frames/index.d.ts",
       "bun": "./src/artifacts/frames/index.ts",

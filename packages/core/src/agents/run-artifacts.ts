@@ -1,3 +1,4 @@
+import { BOARD_PREVIEW_JOB } from "../artifacts/canvas-display"
 import { ArtifactRequestError } from "../artifacts/errors"
 import {
   type ArtifactsRuntime,
@@ -7,7 +8,6 @@ import {
 } from "../artifacts/execution"
 import type { ArtifactKind } from "../artifacts/kinds"
 import {
-  BOARD_PREVIEW_GRACE_MS,
   type BoardPreviewInput,
   missingBoardPreviews,
   storeBoardPreviews,
@@ -224,7 +224,7 @@ export function agentRunArtifacts(
       // outline. Every other publish has its answers read now, as its requester.
       await artifactPreviewRequester(reader)(
         stored.version,
-        input.rendersPreviews ? { delayMs: BOARD_PREVIEW_GRACE_MS, withoutAnswers: true } : {}
+        input.rendersPreviews ? { delayMs: BOARD_PREVIEW_JOB.graceMs, withoutAnswers: true } : {}
       )
 
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }

@@ -8,6 +8,7 @@ import {
   FRAME_PROTOCOL,
   parseCanvas,
 } from "@sixb/core/artifacts"
+import { BOARD_PREVIEW_WAIT_MS } from "@sixb/core/internal/artifacts/canvas"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { AppWindow } from "lucide-react"
@@ -554,7 +555,9 @@ describe("board previews", () => {
     expect(nextPreviewCheck({ home: "pending" }, published, 20, at(1))).toBe(30_000)
     // Reproduce by dropping either stop: it asks for good.
     expect(nextPreviewCheck({ home: "ready", pay: "none" }, published, 0, at(1))).toBe(false)
-    expect(nextPreviewCheck({ home: "pending" }, published, 3, at(15))).toBe(false)
+    const waited = BOARD_PREVIEW_WAIT_MS / 60_000
+    expect(nextPreviewCheck({ home: "pending" }, published, 3, at(waited - 1))).toBe(6_750)
+    expect(nextPreviewCheck({ home: "pending" }, published, 3, at(waited))).toBe(false)
   })
 })
 
