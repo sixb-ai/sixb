@@ -12,5 +12,18 @@ export {
   LIVE_FILES,
   type LiveFile,
   type LiveFiles,
+  mergeIntoDocument,
   patchText,
 } from "./document"
+export {
+  AGENT_AWARENESS_FIELD,
+  ARTIFACT_LIVE_ROUTE,
+  type ArtifactAgentPresence,
+  type ArtifactLiveAccess,
+  type ArtifactLiveClientMessage,
+  type ArtifactLiveLeftReason,
+  type ArtifactLiveSaveState,
+  type ArtifactLiveServerMessage,
+  decodeLiveData,
+  encodeLiveData,
+} from "./protocol"
