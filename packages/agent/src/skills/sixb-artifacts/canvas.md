@@ -41,10 +41,11 @@ work/onboarding-flow/
   Captions, specs, voice-over, and rationale go in `text` and `note` items beside or under it, a
   `section` groups each set, and arrows give the order. Never put small explanatory text inside a
   board.
-- **It reads as it opens.** A canvas opens fitted to everything, so its headings, notes, and
-  labels must read at that zoom: an `xl` heading over each group, `l` within it. Lay boards out in
-  rows, four or five wide boards at most, so the fitted view isn't tiny. The reader opens a board
-  for its detail.
+- **Titles and pictures read as it opens.** A canvas opens fitted to everything, so what must
+  read at that zoom is its titles and its pictures: size headings for it, `xxl` over each group
+  when boards are full-size screens or frames, `xl` on a small canvas, and check `overview.png`.
+  Notes and captions are read when the reader zooms in to a row: keep them short, beside their
+  board. Rows of four or five wide boards at most.
 - **Real visuals, or a clean placeholder.** Show real images: one made with
   `sixb models image "…" --model <id> --output work/storyboard/boards/images/03.png`, or a file the
   user attached or the workspace holds, copied into the folder (a copy costs nothing: files are
@@ -70,7 +71,7 @@ across versions) and sits at `x`, `y` in pixels from the canvas's origin, y grow
 | `board` | `file`, `w`, `h`, `title` | A screen, a frame, a poster: an HTML file shown live at `w` by `h` |
 | `section` | `w`, `h`, `title` | A group's heading: the title draws at the region's top left, and the region is what `#id` frames |
 | `note` | `w`, `h`, `text`, `tone` | A sticky note; it grows to hold its text, `h` its least height |
-| `text` | `text`, `size`, `w` | A heading, a caption, or a label: `size` `s`, `m`, `l`, or `xl`; `w` wraps it |
+| `text` | `text`, `size`, `w` | A heading, a caption, or a label: `size` `s`, `m`, `l`, `xl`, or `xxl`; `w` wraps it |
 | `shape` | `shape`, `w`, `h`, `text`, `tone` | A `rect`, `ellipse`, or `diamond`, for a diagram's steps and decisions |
 | `arrow` | `from`, `to`, `label`, `dashed` | From an item's id, or a point `{ "x": 0, "y": 0 }`, to another |
 | `embed` | `src`, `w`, `h`, `title` | Another artifact or a part of one: a chart, a range, a slide, a section |
@@ -87,8 +88,9 @@ holds at most 500 files, boards and images included.
   without covering its arrow; rows 160 pixels apart.
 - A section for each flow or group, its left edge on the group's: boards and embeds start 120
   pixels below its top, since their names sit above them, and notes or shapes 80. Sections 160
-  pixels apart. A heading (`text`, `xl`) above everything says what the canvas is, and a line
-  under it (`m`) what it is for; `s` is small print, read close up.
+  pixels apart. A heading (`text`, `xxl` over full-size boards, `xl` on a small canvas) above
+  everything says what the canvas is, and a line under it (`m`) what it is for; `s` is small
+  print, read close up.
 - Arrows for the order of a flow, labeled with what moves the user on: the button, the choice.
   Dashed arrows for asides: a note about a board. An arrow joins neighbours in a row; a sequence
   that wraps reads on from the start of the next row, with no arrow crossing back over the notes.
