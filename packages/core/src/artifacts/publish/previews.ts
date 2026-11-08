@@ -44,9 +44,6 @@ export const BOARD_PREVIEW_MEDIA_TYPES: Readonly<Record<ArtifactBoardPreviewSize
   small: "image/webp",
 }
 
-/** The widest a small picture is, in pixels: a board drawn small on a phone's canvas. */
-export const SMALL_BOARD_PREVIEW_WIDTH = 480
-
 const SIZES: readonly ArtifactBoardPreviewSize[] = ["full", "small"]
 
 /** A board of a version whose picture is missing, in either size, in some of its modes. */

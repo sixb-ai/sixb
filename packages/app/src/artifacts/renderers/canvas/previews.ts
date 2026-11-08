@@ -1,5 +1,5 @@
 import { client, getArtifactVersion } from "@sixb/client"
-import { BOARD_PREVIEW_WAIT_MS } from "@sixb/core/artifacts"
+import { BOARD_PREVIEW_WAIT_MS, SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/artifacts"
 import { type Query, useQuery } from "@tanstack/react-query"
 import type { ArtifactVersion } from "../../queries"
 
@@ -69,10 +69,7 @@ export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPre
   return query.data
 }
 
-/** The widest a board's small picture is, in device pixels: 480, a third of a laptop's screen. */
-export const SMALL_PREVIEW_WIDTH = 480
-
-/** A board's picture at its own size, or one at most {@link SMALL_PREVIEW_WIDTH} wide. */
+/** A board's picture at its own size, or one at most {@link SMALL_BOARD_PREVIEW_WIDTH} wide. */
 export type BoardPreviewSize = "small" | "full"
 
 /**
@@ -81,7 +78,7 @@ export type BoardPreviewSize = "small" | "full"
  * hundred small pictures, not a hundred screens.
  */
 export function boardPreviewSize(screenWidth: number, pixelRatio: number): BoardPreviewSize {
-  return screenWidth * pixelRatio <= SMALL_PREVIEW_WIDTH ? "small" : "full"
+  return screenWidth * pixelRatio <= SMALL_BOARD_PREVIEW_WIDTH ? "small" : "full"
 }
 
 /**
