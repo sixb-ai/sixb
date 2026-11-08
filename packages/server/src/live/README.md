@@ -68,6 +68,9 @@ The server vouches for every awareness state it shares:
   wrote meanwhile, storage merges both. The room then takes the stored state back under the
   `MERGED` origin, which is never written back again. The document holds no title: the write
   passes the title it last read as `baseTitle`, so a title given since stays.
+- A write-back that changes a board asks for its pictures like any write: in the artifact's one
+  preview job, which it replaces, due `BOARD_PREVIEW_JOB.settleMs` later. That is longer than
+  `SAVE_MAX_MS`, so a board being typed in is pictured once, after its editors pause.
 - A client's change is tried first on a shadow copy of the document. One that leaves it unreadable
   (`documentFiles` throws) is refused with an `error` before anyone gets it, so a poisoned history
   never spreads or wedges the write-back.

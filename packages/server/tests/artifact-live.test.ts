@@ -6,6 +6,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type SandboxFactory,
   SixbHost,
 } from "@sixb/core"
 import { CANVAS_FILE, parseCanvas } from "@sixb/core/artifacts"
@@ -21,6 +22,7 @@ import {
   patchText,
 } from "@sixb/core/artifacts/live"
 import { appendArtifactLive } from "@sixb/core/internal/artifacts/live"
+import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import * as decoding from "lib0/decoding"
@@ -58,11 +60,15 @@ const board = (id: string, x = 0) => ({
 
 const WELCOME = "<main>\n  <h1>Welcome</h1>\n  <p>Pick a region.</p>\n</main>\n"
 
-/** A project with Marie's canvas, shared in her conversation, which Bob takes part in. */
-async function setup() {
+/**
+ * A project with Marie's canvas, shared in her conversation, which Bob takes part in. With
+ * sandboxes, its boards are pictured: the agent worker would claim the jobs in its queue.
+ */
+async function setup(options: { readonly sandboxes?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
   const broker = new InMemoryBroker()
+  const queues = new InMemoryQueues()
   const host = new SixbHost({
     id: projectId,
     ontology: [],
@@ -70,7 +76,8 @@ async function setup() {
     blobStorage,
     broker,
     lakeStorage: new InMemoryLakeStorage(),
-    queues: new InMemoryQueues(),
+    queues,
+    ...(options.sandboxes ? { sandboxes: unusedSandboxes } : {}),
   })
 
   // Signed in with a session, the only credential a conversation shares artifacts with.
@@ -161,6 +168,7 @@ async function setup() {
     storage,
     blobStorage,
     broker,
+    queues,
     artifactId,
     revision: shared.version.revision,
     marie,
@@ -172,6 +180,14 @@ async function setup() {
     latest,
     items,
   }
+}
+
+/** Sandboxes nothing here opens: only the agent worker would, for the jobs it claims. */
+const unusedSandboxes: SandboxFactory = {
+  supportsRequestCredentials: true,
+  create: async () => {
+    throw new Error("Nothing here opens a sandbox.")
+  },
 }
 
 /**
@@ -450,6 +466,49 @@ describe("an artifact edited live", () => {
     await marie.leave()
     await marie.settle()
     expect((await context.items()).find((item) => item.id === "hi")).toMatchObject({ y: 1200 })
+  })
+
+  test("has its boards pictured once its editors pause, at the latest revision only", async () => {
+    // Reproduce by asking for the pictures at once, or in a job per revision: the first write's
+    // job is due while Marie still types, and pictures words she has since changed.
+    jest.useFakeTimers()
+    const context = await setup({ sandboxes: true })
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    await marie.join()
+    await marie.settle()
+
+    const claimable = async () =>
+      (await context.queues.agents.claim({ projectId, workerId: "worker", limit: 10 })).map(
+        ({ job }) => ({ id: job.id, payload: job.payload })
+      )
+
+    // Marie types in the board for half a minute, never pausing long enough to be written back
+    // before SAVE_MAX_MS.
+    for (let typed = 0; typed < 30_000; typed += SAVE_IDLE_MS - 500) {
+      marie.html("boards/welcome.html").insert(0, "x")
+      await marie.settle()
+      jest.advanceTimersByTime(SAVE_IDLE_MS - 500)
+      await marie.settle()
+    }
+    expect((await context.latest()).revision).toBeGreaterThan(context.revision + 2)
+    expect(await claimable()).toEqual([])
+
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await marie.settle()
+    const written = await context.latest()
+    jest.advanceTimersByTime(BOARD_PREVIEW_JOB.settleMs)
+
+    expect(await claimable()).toEqual([
+      {
+        id: `art_previews_${context.artifactId}`,
+        payload: {
+          artifactId: context.artifactId,
+          version: written.version,
+          updatedAt: written.updatedAt.toISOString(),
+        },
+      },
+    ])
   })
 
   // Guard proof: let a watcher's update through in LiveRoom.sync; Olivia's note lands.

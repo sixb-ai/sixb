@@ -91,11 +91,18 @@ function setup(options: { readonly sandboxes?: boolean } = {}) {
       )
     ).flat()
 
-  /** The jobs the agent worker would claim now. */
-  const claimable = async () =>
-    (await deps.queues.agents.claim({ projectId: "previews", workerId: "test", limit: 10 })).map(
-      ({ job }) => ({ id: job.id, type: job.type, payload: job.payload })
-    )
+  /** The jobs the agent worker would claim now, each done once claimed. */
+  const claimable = async () => {
+    const claims = await deps.queues.agents.claim({
+      projectId: "previews",
+      workerId: "test",
+      limit: 10,
+    })
+    for (const { job, leaseId } of claims) {
+      await deps.queues.agents.complete({ projectId: "previews", jobId: job.id, leaseId })
+    }
+    return claims.map(({ job }) => ({ id: job.id, type: job.type, payload: job.payload }))
+  }
 
   return { deps, host, as, put, png, webp, pictures, claimable }
 }
@@ -129,6 +136,15 @@ function keys(version: ArtifactVersionRecord): Record<string, string | undefined
 afterEach(() => {
   jest.useRealTimers()
 })
+
+/** Lets the time a write's job waits pass, from a fixed start. */
+function settling() {
+  jest.useFakeTimers()
+  jest.setSystemTime(new Date("2026-11-08T10:00:00.000Z"))
+  return (ms: number = BOARD_PREVIEW_JOB.settleMs) => {
+    jest.setSystemTime(new Date(Date.now() + ms))
+  }
+}
 
 describe("a board's render key", () => {
   const file = (path: string, seed: string): ArtifactFile => {
@@ -232,6 +248,7 @@ describe("publishing a canvas", () => {
   })
 
   test("asks the agent worker for its missing pictures, and for none it already has", async () => {
+    const pass = settling()
     const { deps, as, put, pictures, claimable } = setup()
     const first = await as(alice).artifacts.create({
       kind: "canvas",
@@ -239,16 +256,13 @@ describe("publishing a canvas", () => {
       files: await put({ "canvas.json": CANVAS, ...BOARDS }),
     })
 
-    const job = ({ revision, updatedAt }: { revision: number; updatedAt: Date }) => ({
-      id: `art_previews_${first.artifact.id}_r${revision}`,
+    const job = ({ updatedAt }: { updatedAt: Date }) => ({
+      id: `art_previews_${first.artifact.id}`,
       type: "agent.artifact-previews.requested" as const,
       payload: { artifactId: first.artifact.id, version: 1, updatedAt: updatedAt.toISOString() },
     })
+    pass()
     expect(await claimable()).toEqual([job(first.version)])
-
-    // Asking again for the same revision is the same job.
-    await requestBoardPreviews(requester(deps), first.version)
-    expect(await claimable()).toEqual([])
 
     // The worker rendered each board in both modes: moving one renders nothing.
     await storeBoardPreviews(
@@ -267,10 +281,12 @@ describe("publishing a canvas", () => {
         ...BOARDS,
       }),
     })
+    pass()
     expect(await claimable()).toEqual([])
 
-    // Writing the open version again with one board changed asks for that board's pictures, in a
-    // job of the new revision's. Reproduce by keying the job by version: it is the first job.
+    // Writing the open version again with one board changed asks for that board's pictures, in
+    // the artifact's job again, done once already. Reproduce by enqueuing it without `replace`:
+    // the done job keeps its id, and nothing is asked.
     const changed = await as(alice).artifacts.update(first.artifact.id, {
       kind: "canvas",
       title: "Onboarding",
@@ -281,7 +297,52 @@ describe("publishing a canvas", () => {
       }),
     })
     expect(changed.version.revision).toBe(3)
+    pass()
     expect(await claimable()).toEqual([job(changed.version)])
+  })
+
+  test("waits for a canvas edited live to rest, and renders only its latest revision", async () => {
+    // Reproduce by keying the job by revision, or by enqueuing it without `replace`: the first
+    // write's job is due while the canvas is still edited, and renders a state already gone.
+    const pass = settling()
+    const { as, put, claimable } = setup()
+    const { artifact } = await as(alice).artifacts.create({
+      kind: "canvas",
+      title: "Onboarding",
+      files: await put({ "canvas.json": CANVAS, ...BOARDS }),
+    })
+
+    // Alice types in a board, and the live room writes it back every few seconds.
+    let latest: ArtifactVersionRecord | undefined
+    for (const words of ["Regions", "Regions, by", "Regions, by city"]) {
+      pass(4_000)
+      const written = await as(alice).artifacts.update(artifact.id, {
+        kind: "canvas",
+        title: "Onboarding",
+        files: await put({
+          "canvas.json": CANVAS,
+          ...BOARDS,
+          "boards/region.html": `<main><h1>${words}</h1></main>`,
+        }),
+      })
+      latest = written.version
+    }
+
+    // 15 seconds after the canvas was created, but not after it was last written.
+    pass(BOARD_PREVIEW_JOB.settleMs - 12_000)
+    expect(await claimable()).toEqual([])
+
+    pass(12_000)
+    expect((await claimable()).map(({ id, payload }) => ({ id, payload }))).toEqual([
+      {
+        id: `art_previews_${artifact.id}`,
+        payload: {
+          artifactId: artifact.id,
+          version: 1,
+          updatedAt: latest?.updatedAt.toISOString(),
+        },
+      },
+    ])
   })
 
   test("asks for nothing in a project without sandboxes, where nothing renders them", async () => {
@@ -297,8 +358,7 @@ describe("publishing a canvas", () => {
   })
 
   test("asks after the grace a publisher that renders its own pictures takes", async () => {
-    jest.useFakeTimers()
-    jest.setSystemTime(new Date("2026-11-08T10:00:00.000Z"))
+    settling()
     // Without sandboxes publishing asks for nothing, so only the request below is queued.
     const { deps, as, put, claimable } = setup({ sandboxes: false })
     const { version } = await as(alice).artifacts.create({

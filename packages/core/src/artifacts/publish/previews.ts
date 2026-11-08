@@ -12,7 +12,7 @@ import type {
   ArtifactVersionRecord,
 } from "../../storage/artifacts/types"
 import { CANVAS_FILE } from "../canvas"
-import { BOARD_PREVIEW_WAIT_MS } from "../canvas-display"
+import { BOARD_PREVIEW_JOB, BOARD_PREVIEW_WAIT_MS } from "../canvas-display"
 import { FRAME_ASSETS } from "../frames/assets"
 import { FRAME_DEFAULT_THEMES } from "../frames/kit"
 import type { ArtifactOutline, CanvasOutline, CanvasOutlineItem } from "../outline"
@@ -65,7 +65,11 @@ export type BoardPreviewRequester = (
 ) => Promise<void>
 
 export interface BoardPreviewRequestOptions {
-  /** The publisher renders the pictures itself: the worker waits this long for them. */
+  /**
+   * How long the worker waits before it renders: by default `BOARD_PREVIEW_JOB.settleMs`, so a
+   * canvas being edited is rendered once it rests. Longer when the publisher renders the pictures
+   * itself, as the Agent's layout check does.
+   */
   readonly delayMs?: number
   /**
    * Leaves the version's queries unanswered: the worker then pictures only the boards that read
@@ -383,20 +387,23 @@ export async function storeBoardPreviews(
 }
 
 /**
- * One job per revision: asking again for the same content is the same job, and a version written
- * again since gets a job of its own for the boards it changed.
+ * One job per artifact. Each write that asks replaces the job still waiting, so a canvas edited
+ * live, written back every few seconds, waits for one job, which renders its latest revision once
+ * it rests, never each state it went through.
  */
-export function boardPreviewsJobId(artifactId: string, revision: number): string {
-  return `art_previews_${artifactId}_r${revision}`
+export function boardPreviewsJobId(artifactId: string): string {
+  return `art_previews_${artifactId}`
 }
 
 /**
- * Asks the agent worker to render what a stored version's boards still miss, after `delayMs` when
- * its publisher renders them itself. Nothing is asked when nothing is missing.
+ * Asks the agent worker to render what a stored version's boards still miss, `delayMs` from now,
+ * in the artifact's one job: it takes the place of any asked for an earlier revision. Nothing is
+ * asked when nothing is missing.
  *
  * Boards that read queries show their author's data, so the version's queries are answered now,
  * by `query`, as whoever just published it, and the job carries the answers: kept as a blob only
- * the job names. A query that fails is answered as its rejection.
+ * the job names. A query that fails is answered as its rejection. Only the write that asks last
+ * has its answers rendered: those of a job it replaced are never read.
  *
  * The version exists by now and its pictures are derived from it, so a request that fails is
  * reported, not thrown: the publish succeeded, and the viewer shows the boards' outlines instead.
@@ -422,11 +429,13 @@ export async function requestBoardPreviews(
         ? await storeQueryAnswers(input, version)
         : undefined
 
+    const delayMs = options.delayMs ?? BOARD_PREVIEW_JOB.settleMs
     await input.queue.enqueue({
       projectId: version.projectId,
       jobs: [
         {
-          id: boardPreviewsJobId(version.artifactId, version.revision),
+          id: boardPreviewsJobId(version.artifactId),
+          replace: true,
           type: "agent.artifact-previews.requested",
           payload: {
             artifactId: version.artifactId,
@@ -434,9 +443,7 @@ export async function requestBoardPreviews(
             updatedAt: version.updatedAt.toISOString(),
             ...(queries ? { queries } : {}),
           },
-          ...(options.delayMs
-            ? { availableAt: new Date(Date.now() + options.delayMs).toISOString() }
-            : {}),
+          availableAt: new Date(Date.now() + delayMs).toISOString(),
         },
       ],
     })
