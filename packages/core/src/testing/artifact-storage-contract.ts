@@ -728,56 +728,46 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    test("keeps a board's pictures by render key and mode, the first one kept staying", async () => {
+    test("keeps a board's pictures by render key, mode, and size, the first one kept staying", async () => {
       await withStorage(async (artifacts) => {
         const welcome = "a".repeat(64)
         const region = "b".repeat(64)
+        const picture = (
+          renderKey: string,
+          theme: "light" | "dark",
+          size: "full" | "small",
+          seed: string,
+          createdAt = t0
+        ) => ({
+          renderKey,
+          theme,
+          size,
+          file: fileRef(seed, size === "full" ? "image/png" : "image/webp"),
+          createdAt,
+        })
         await artifacts.putBoardPreviews({
           projectId,
           previews: [
-            { renderKey: region, theme: "light", file: fileRef("1", "image/png"), createdAt: t0 },
-            { renderKey: welcome, theme: "dark", file: fileRef("2", "image/png"), createdAt: t0 },
-            { renderKey: welcome, theme: "light", file: fileRef("3", "image/png"), createdAt: t0 },
+            picture(region, "light", "full", "1"),
+            picture(welcome, "dark", "small", "2"),
+            picture(welcome, "light", "full", "3"),
+            picture(welcome, "light", "small", "5"),
           ],
         })
 
         // A key names what the board shows: a second picture of it is of the same page.
         await artifacts.putBoardPreviews({
           projectId,
-          previews: [
-            {
-              renderKey: welcome,
-              theme: "light",
-              file: fileRef("4", "image/png"),
-              createdAt: at(1),
-            },
-          ],
+          previews: [picture(welcome, "light", "full", "4", at(1))],
         })
 
         expect(
           await artifacts.listBoardPreviews({ projectId, renderKeys: [region, welcome, "c"] })
         ).toEqual([
-          {
-            projectId,
-            renderKey: welcome,
-            theme: "dark",
-            file: fileRef("2", "image/png"),
-            createdAt: t0,
-          },
-          {
-            projectId,
-            renderKey: welcome,
-            theme: "light",
-            file: fileRef("3", "image/png"),
-            createdAt: t0,
-          },
-          {
-            projectId,
-            renderKey: region,
-            theme: "light",
-            file: fileRef("1", "image/png"),
-            createdAt: t0,
-          },
+          { projectId, ...picture(welcome, "dark", "small", "2") },
+          { projectId, ...picture(welcome, "light", "full", "3") },
+          { projectId, ...picture(welcome, "light", "small", "5") },
+          { projectId, ...picture(region, "light", "full", "1") },
         ])
         expect(await artifacts.listBoardPreviews({ projectId, renderKeys: [region] })).toHaveLength(
           1
@@ -796,7 +786,15 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         const renderKey = "a".repeat(64)
         await artifacts.putBoardPreviews({
           projectId,
-          previews: [{ renderKey, theme: "light", file: fileRef("1", "image/png"), createdAt: t0 }],
+          previews: [
+            {
+              renderKey,
+              theme: "light",
+              size: "full",
+              file: fileRef("1", "image/png"),
+              createdAt: t0,
+            },
+          ],
         })
 
         expect(await artifacts.delete({ projectId, id: "art_report" })).toBe(true)
@@ -823,6 +821,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
                 {
                   renderKey: "a".repeat(64),
                   theme: "light",
+                  size: "full",
                   file: fileRef("1", "image/png"),
                   createdAt: t0,
                 },

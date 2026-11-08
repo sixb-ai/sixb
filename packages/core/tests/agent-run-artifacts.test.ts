@@ -227,7 +227,9 @@ describe("a run's artifacts", () => {
       rendersPreviews: true,
     })
     const { id } = published.artifact
-    const previews = [{ board: "welcome", theme: "light" as const, file: await png() }]
+    const previews = [
+      { board: "welcome", theme: "light" as const, size: "full" as const, file: await png() },
+    ]
 
     await artifacts.storePreviews({ artifactId: id, version: 1, previews })
     const outline = published.version.outline
@@ -237,7 +239,7 @@ describe("a run's artifacts", () => {
         : undefined
     expect(
       await storage.artifacts.listBoardPreviews({ projectId, renderKeys: [renderKey ?? ""] })
-    ).toMatchObject([{ theme: "light", file: previews[0]?.file }])
+    ).toMatchObject([{ theme: "light", size: "full", file: previews[0]?.file }])
 
     // Alice, the conversation's owner, edits it in the app.
     const edited = await as(alice).artifacts.publish(id, {

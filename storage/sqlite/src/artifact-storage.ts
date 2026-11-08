@@ -60,7 +60,7 @@ const FRAME_GRANT_COLUMNS = `
 const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS updatedAt"
 
 const BOARD_PREVIEW_COLUMNS =
-  "project_id AS projectId, render_key AS renderKey, theme, file, created_at AS createdAt"
+  "project_id AS projectId, render_key AS renderKey, theme, size, file, created_at AS createdAt"
 
 /** One reader of one artifact: the bindings that follow `STATE_SCOPE`. */
 const STATE_SCOPE = "project_id = ? AND artifact_id = ? AND principal_type = ? AND principal_id = ?"
@@ -438,7 +438,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       .query(
         `SELECT ${BOARD_PREVIEW_COLUMNS} FROM artifact_board_previews
          WHERE project_id = ? AND render_key IN (SELECT value FROM json_each(?))
-         ORDER BY render_key, theme`
+         ORDER BY render_key, theme, size`
       )
       .all(input.projectId, JSON.stringify(input.renderKeys)) as Row[]
     return rows.map(parseArtifactBoardPreviewRow)
@@ -447,15 +447,16 @@ export class SqliteArtifactStorage implements ArtifactStorage {
   async putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void> {
     runImmediateTransaction(this.db, () => {
       const insert = this.db.query(
-        `INSERT INTO artifact_board_previews (project_id, render_key, theme, file, created_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (project_id, render_key, theme) DO NOTHING`
+        `INSERT INTO artifact_board_previews (project_id, render_key, theme, size, file, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, render_key, theme, size) DO NOTHING`
       )
       for (const preview of input.previews) {
         insert.run(
           input.projectId,
           preview.renderKey,
           preview.theme,
+          preview.size,
           JSON.stringify(preview.file),
           preview.createdAt.toISOString()
         )

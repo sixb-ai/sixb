@@ -220,18 +220,25 @@ export interface ArtifactStateEntry {
 }
 
 /**
- * A picture of a canvas's board in one mode, kept under its render key: what the board shows, as
- * its version's outline names it. Versions that keep a board as it was share its picture, so none
- * belongs to one artifact.
+ * A picture of a canvas's board in one mode and one size, kept under its render key: what the
+ * board shows, as its version's outline names it. Versions that keep a board as it was share its
+ * picture, so none belongs to one artifact.
  */
 export interface ArtifactBoardPreviewRecord {
   readonly projectId: string
   readonly renderKey: string
   readonly theme: ArtifactThemeMode
-  /** A PNG. */
+  readonly size: ArtifactBoardPreviewSize
+  /** A PNG at full size, a WebP when small. */
   readonly file: FileRef
   readonly createdAt: Date
 }
+
+/**
+ * `full`: the board at its own size, as it opens. `small`: at most 480 pixels wide, for a canvas
+ * that shows many boards at once.
+ */
+export type ArtifactBoardPreviewSize = "full" | "small"
 
 export interface ListArtifactBoardPreviewsInput {
   readonly projectId: string
@@ -304,10 +311,10 @@ export interface ArtifactStorage {
   listState(input: ArtifactStateScope): Promise<ArtifactStateEntry[]>
   /** Deletes every value a page keeps for a reader, and returns how many. */
   clearState(input: ArtifactStateScope): Promise<number>
-  /** The pictures kept under these render keys, in every mode, ordered by key then mode. */
+  /** The pictures kept under these render keys, in every mode and size, by key, mode, then size. */
   listBoardPreviews(input: ListArtifactBoardPreviewsInput): Promise<ArtifactBoardPreviewRecord[]>
   /**
-   * Keeps each picture under its render key and mode. One already kept there stays: the key names
+   * Keeps each picture under its render key, mode, and size. One already kept there stays: the key names
    * what the board shows, so both are pictures of the same page. Deleting an artifact keeps them.
    */
   putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void>

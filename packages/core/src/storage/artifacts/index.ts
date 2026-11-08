@@ -3,6 +3,7 @@ export { ArtifactStorageError } from "./errors"
 export { InMemoryArtifactStorage } from "./in-memory"
 export type {
   ArtifactBoardPreviewRecord,
+  ArtifactBoardPreviewSize,
   ArtifactFile,
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,

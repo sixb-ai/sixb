@@ -90,12 +90,15 @@ export function parseArtifactBoardPreviewRow(row: Row): ArtifactBoardPreviewReco
   const where = `board preview '${renderKey}'`
   const theme = row.theme
   if (theme !== "light" && theme !== "dark") throw corrupt(where, "theme is not light or dark")
+  const size = row.size
+  if (size !== "full" && size !== "small") throw corrupt(where, "size is not full or small")
   const file = json(row.file, "file", where)
   if (!isFileRef(file)) throw corrupt(where, "file is not a file reference")
   return {
     projectId: text(row.projectId, "projectId", where),
     renderKey,
     theme,
+    size,
     file,
     createdAt: date(row.createdAt, "createdAt", where),
   }

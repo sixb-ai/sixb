@@ -66,7 +66,8 @@ const FRAME_GRANT_COLUMNS = `
 const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "updatedAt"`
 
 const BOARD_PREVIEW_COLUMNS = `
-  project_id AS "projectId", render_key AS "renderKey", theme, file, created_at AS "createdAt"
+  project_id AS "projectId", render_key AS "renderKey", theme, size, file,
+  created_at AS "createdAt"
 `
 
 export class PgArtifactStorage implements ArtifactStorage {
@@ -423,7 +424,7 @@ export class PgArtifactStorage implements ArtifactStorage {
       SELECT ${this.sql.unsafe(BOARD_PREVIEW_COLUMNS)} FROM artifact_board_previews
       WHERE project_id = ${input.projectId}
         AND render_key = ANY(${this.sql.array([...new Set(input.renderKeys)])}::text[])
-      ORDER BY render_key COLLATE "C", theme COLLATE "C"
+      ORDER BY render_key COLLATE "C", theme COLLATE "C", size COLLATE "C"
     `
     return rows.map(parseArtifactBoardPreviewRow)
   }
@@ -434,12 +435,13 @@ export class PgArtifactStorage implements ArtifactStorage {
     await runPgTransaction(this.sql, async (tx) => {
       for (const preview of input.previews) {
         await tx`
-          INSERT INTO artifact_board_previews (project_id, render_key, theme, file, created_at)
-          VALUES (
-            ${input.projectId}, ${preview.renderKey}, ${preview.theme},
+          INSERT INTO artifact_board_previews (
+            project_id, render_key, theme, size, file, created_at
+          ) VALUES (
+            ${input.projectId}, ${preview.renderKey}, ${preview.theme}, ${preview.size},
             ${JSON.stringify(preview.file)}::text::jsonb, ${preview.createdAt}
           )
-          ON CONFLICT (project_id, render_key, theme) DO NOTHING
+          ON CONFLICT (project_id, render_key, theme, size) DO NOTHING
         `
       }
     })

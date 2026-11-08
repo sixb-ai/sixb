@@ -9,13 +9,16 @@ export { ARTIFACT_LIMITS } from "../limits"
 export { artifactQueryName } from "../queries"
 export { artifactThemeModes } from "../theme"
 export {
+  BOARD_PREVIEW_MEDIA_TYPES,
   type BoardPreviewInput,
   type BoardPreviewStatus,
+  boardPreview,
   boardPreviewStatuses,
   boardPreviews,
   MAX_BOARD_PREVIEW_BYTES,
   type MissingBoardPreview,
   missingBoardPreviews,
+  SMALL_BOARD_PREVIEW_WIDTH,
   storeBoardPreviews,
 } from "./previews"
 export {
