@@ -285,11 +285,20 @@ async function open(
     </QueryClientProvider>
   )
   await act(settle)
+
   // The board's code loads apart, as the viewer loads it.
-  await act(async () => {
-    await new Promise((done) => setTimeout(done, 50))
-  })
+  await ui.findByRole("region", { name: "Canvas Onboarding" })
   return { ui, server }
+}
+
+/**
+ * Lets the requests in flight answer, and what they set off render, until `done` holds: the panel
+ * changes once the API answered.
+ */
+async function until(done: () => boolean) {
+  await act(async () => {
+    while (!done()) await new Promise((next) => setTimeout(next, 0))
+  })
 }
 
 /** The server tells the app's event socket that a comment changed. */
@@ -330,13 +339,6 @@ function type(field: HTMLElement, value: string) {
   fireEvent.keyUp(field, { key: value.at(-1) })
 }
 
-/** Lets the requests in flight answer, and what they set off render. */
-async function flush() {
-  await act(async () => {
-    await new Promise((done) => setTimeout(done, 30))
-  })
-}
-
 const thread = (panel: HTMLElement, id: string) => {
   const found = panel.querySelector<HTMLElement>(`[data-comment-thread="${id}"]`)
   if (!found) throw new Error(`Expected thread ${id}.`)
@@ -364,10 +366,9 @@ describe("comments on a canvas", () => {
     await act(async () => {
       fireEvent.click(within(thread(panel, "cmt_1")).getByRole("button", { name: "Resolve" }))
     })
-    await flush()
-    expect(panel.querySelector('[data-comment-thread="cmt_1"]')).toBeNull()
-    expect(api.requests).toContain("POST /cmt_1/resolve")
+    await until(() => panel.querySelector('[data-comment-thread="cmt_1"]') === null)
     expect(within(panel).getByRole("button", { name: /^Resolved/ }).textContent).toBe("Resolved1")
+    expect(api.requests).toContain("POST /cmt_1/resolve")
 
     // Reopened from the resolved ones, then deleted, replies and all.
     await act(async () => {
@@ -383,9 +384,8 @@ describe("comments on a canvas", () => {
     await act(async () => {
       fireEvent.click(await waitFor(() => ui.getByRole("button", { name: "Delete" })))
     })
-    await flush()
+    await until(() => panel.querySelector('[data-comment-thread="cmt_1"]') === null)
     expect(api.requests).toContain("DELETE /cmt_1")
-    expect(panel.querySelector('[data-comment-thread="cmt_1"]')).toBeNull()
     ui.unmount()
   })
 
@@ -403,8 +403,8 @@ describe("comments on a canvas", () => {
     await act(async () => {
       fireEvent.keyDown(input, { key: "Enter" })
     })
-    await flush()
 
+    await until(() => thread(panel, "cmt_1").textContent?.includes("On it") === true)
     expect(within(thread(panel, "cmt_1")).getByText("On it")).toBeTruthy()
     expect(api.requests).toContain("POST /")
     ui.unmount()
