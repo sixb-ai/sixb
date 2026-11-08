@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
 } from "react"
+import type { LiveCanvas } from "../../live/canvas"
 import { useArtifactMessages } from "../../messages"
 import {
   addItem,
@@ -51,6 +52,8 @@ export interface CanvasEditor {
     readonly endDrag: () => void
     /** Tells the others what is selected. */
     readonly select: (ids: readonly string[]) => void
+    /** Edits what a board's page shows, as one step of the same undo. */
+    readonly editBoard: LiveCanvas["editBoard"]
   }
 }
 
