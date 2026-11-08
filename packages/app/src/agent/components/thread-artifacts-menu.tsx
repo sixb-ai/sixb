@@ -1,3 +1,4 @@
+import type { ListArtifactsResponse } from "@sixb/client"
 import { listArtifactsOptions } from "@sixb/client/hooks"
 import {
   Button,
@@ -13,10 +14,30 @@ import { ArrowUpRight, Layers } from "lucide-react"
 import { Link } from "react-router-dom"
 import { ArtifactKindIcon } from "../../artifacts/kind-icon"
 import { useArtifactMessages } from "../../artifacts/messages"
+import { useArtifactVersion } from "../../artifacts/queries"
 import type { ArtifactTarget } from "../../artifacts/target"
 import { ARTIFACTS_HREF } from "../../pages/routes"
 import { useArtifactPanel } from "../artifact-panel"
 import { useAgentMessages } from "../i18n"
+
+type ArtifactSummary = ListArtifactsResponse["artifacts"][number]
+
+/**
+ * An artifact's kind, and its latest version once someone created it: the current version changes
+ * in place, and has no number to give yet.
+ */
+function ArtifactDetail({ artifact }: { readonly artifact: ArtifactSummary }) {
+  const messages = useArtifactMessages()
+  const { data } = useArtifactVersion(artifact.id, artifact.latestVersion, {
+    revision: artifact.revision,
+  })
+  return (
+    <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+      {messages.kinds[artifact.kind]}
+      {data?.frozen ? ` · ${messages.viewer.version(artifact.latestVersion)}` : null}
+    </span>
+  )
+}
 
 /**
  * The artifacts the Agent published in this conversation, each one opening in the panel, and the
@@ -36,7 +57,6 @@ export function ThreadArtifactsMenu({
 }) {
   const panel = useArtifactPanel()
   const messages = useAgentMessages().artifacts
-  const artifactMessages = useArtifactMessages()
   const { data } = useQuery({
     ...listArtifactsOptions({ query: { thread: threadId } }),
     retry: false,
@@ -70,10 +90,7 @@ export function ThreadArtifactsMenu({
           >
             <ArtifactKindIcon kind={artifact.kind} className="size-4 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">{artifact.title}</span>
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {artifactMessages.kinds[artifact.kind]} ·{" "}
-              {artifactMessages.viewer.version(artifact.latestVersion)}
-            </span>
+            <ArtifactDetail artifact={artifact} />
           </DropdownMenuItem>
         ))}
         {withGallery ? (

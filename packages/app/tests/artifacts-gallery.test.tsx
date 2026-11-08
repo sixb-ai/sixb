@@ -95,8 +95,24 @@ describe("the artifacts gallery", () => {
     seed(cache, undefined, [
       artifact("art_q3dec4000", "slides", "Q3 2026 operations review"),
       artifact("art_m3tr1csq3a", "sheet", "Q3 service metrics", 3),
-      artifact("art_q3rep9rt00", "document", "Q3 report"),
+      artifact("art_q3rep9rt00", "document", "Q3 report", 2),
     ])
+    // Someone created version 3 of the metrics; the report's version 2 is still the current one.
+    const latest = (artifactId: string, version: number, frozen: boolean) =>
+      seedVersion(
+        cache,
+        artifactVersion({
+          artifactId,
+          title: "",
+          entry: "workbook.json",
+          outline: { kind: "sheet", sheets: [], charts: [] },
+          version,
+          revision: version,
+          frozen,
+        })
+      )
+    latest("art_m3tr1csq3a", 3, true)
+    latest("art_q3rep9rt00", 2, false)
     seed(cache, "sheet", [artifact("art_m3tr1csq3a", "sheet", "Q3 service metrics", 3)])
     seed(cache, "file", [])
     const { ui, cards } = renderGallery(cache)
@@ -106,8 +122,10 @@ describe("the artifacts gallery", () => {
       "/artifacts/art_q3rep9rt00",
     ])
     expect(ui.getByText("3 artifacts")).toBeTruthy()
-    // A later version says which one the card shows.
+    // A created version says which one the card shows; the current one, which changes in place,
+    // has no number yet. Reproduce by naming every later version: the report reads v2.
     expect(cards()[1]?.textContent).toContain("v3")
+    expect(cards()[2]?.textContent).not.toContain("v2")
 
     await act(async () => {
       fireEvent.click(ui.getByRole("radio", { name: "Sheets" }))
