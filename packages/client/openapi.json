@@ -57290,15 +57290,18 @@
                             "properties": {
                               "board": {
                                 "type": "string",
+                                "maxLength": 200,
                                 "description": "The id of the canvas's board it is about"
                               },
                               "element": {
                                 "type": "string",
+                                "maxLength": 1024,
                                 "description": "The address of the board's element it is about, such as body>main:0>h1:0"
                               },
                               "label": {
                                 "type": "string",
-                                "description": "The element's first words, which name it once it is gone"
+                                "maxLength": 1000,
+                                "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                               },
                               "revision": {
                                 "type": "integer",
@@ -57607,15 +57610,18 @@
                     "properties": {
                       "board": {
                         "type": "string",
+                        "maxLength": 200,
                         "description": "The id of the canvas's board it is about"
                       },
                       "element": {
                         "type": "string",
+                        "maxLength": 1024,
                         "description": "The address of the board's element it is about, such as body>main:0>h1:0"
                       },
                       "label": {
                         "type": "string",
-                        "description": "The element's first words, which name it once it is gone"
+                        "maxLength": 1000,
+                        "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
                       "revision": {
                         "type": "integer",
@@ -57653,15 +57659,18 @@
                     "properties": {
                       "board": {
                         "type": "string",
+                        "maxLength": 200,
                         "description": "The id of the canvas's board it is about"
                       },
                       "element": {
                         "type": "string",
+                        "maxLength": 1024,
                         "description": "The address of the board's element it is about, such as body>main:0>h1:0"
                       },
                       "label": {
                         "type": "string",
-                        "description": "The element's first words, which name it once it is gone"
+                        "maxLength": 1000,
+                        "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
                       "revision": {
                         "type": "integer",
@@ -57699,15 +57708,18 @@
                     "properties": {
                       "board": {
                         "type": "string",
+                        "maxLength": 200,
                         "description": "The id of the canvas's board it is about"
                       },
                       "element": {
                         "type": "string",
+                        "maxLength": 1024,
                         "description": "The address of the board's element it is about, such as body>main:0>h1:0"
                       },
                       "label": {
                         "type": "string",
-                        "description": "The element's first words, which name it once it is gone"
+                        "maxLength": 1000,
+                        "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
                       "revision": {
                         "type": "integer",
@@ -57755,15 +57767,18 @@
                       "properties": {
                         "board": {
                           "type": "string",
+                          "maxLength": 200,
                           "description": "The id of the canvas's board it is about"
                         },
                         "element": {
                           "type": "string",
+                          "maxLength": 1024,
                           "description": "The address of the board's element it is about, such as body>main:0>h1:0"
                         },
                         "label": {
                           "type": "string",
-                          "description": "The element's first words, which name it once it is gone"
+                          "maxLength": 1000,
+                          "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                         },
                         "revision": {
                           "type": "integer",
@@ -58257,15 +58272,18 @@
                       "properties": {
                         "board": {
                           "type": "string",
+                          "maxLength": 200,
                           "description": "The id of the canvas's board it is about"
                         },
                         "element": {
                           "type": "string",
+                          "maxLength": 1024,
                           "description": "The address of the board's element it is about, such as body>main:0>h1:0"
                         },
                         "label": {
                           "type": "string",
-                          "description": "The element's first words, which name it once it is gone"
+                          "maxLength": 1000,
+                          "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                         },
                         "revision": {
                           "type": "integer",
