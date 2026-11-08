@@ -127,7 +127,8 @@ function useLiveEditor(live: LiveArtifact | null, canvas: LiveCanvas | null): Ca
             undo: () => canvas.undo(),
             redo: () => canvas.redo(),
             live: {
-              stopCapturing: () => canvas.stopCapturing(),
+              startDrag: () => canvas.startDrag(),
+              endDrag: () => canvas.endDrag(),
               select: (ids) => shareSelection(live, ids),
             },
           }

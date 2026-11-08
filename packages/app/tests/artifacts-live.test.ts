@@ -408,6 +408,30 @@ describe("a live canvas", () => {
     expect(item(bob.getCanvas(), "ask")).toMatchObject({ x: 300, y: 560 })
   })
 
+  test("undoes a drag as one step, even one that pauses on the way", () => {
+    // Reproduce by leaving the undo manager's capture timeout as it is during a drag in
+    // LiveCanvas.startDrag: a pause cuts the drag in two, and undo takes back only its end.
+    jest.useFakeTimers()
+    try {
+      jest.setSystemTime(new Date("2026-11-08T09:00:00.000Z"))
+      const { alice } = pair()
+      alice.startDrag()
+      for (const x of [100, 200, 300]) {
+        alice.apply(moveItems(new Map([["ask", { x, y: 560 }]])))
+        jest.setSystemTime(Date.now() + 2_000)
+      }
+      alice.endDrag()
+      alice.apply(moveItems(new Map([["ask", { x: 300, y: 900 }]])))
+
+      alice.undo()
+      expect(item(alice.getCanvas(), "ask")).toMatchObject({ x: 300, y: 560 })
+      alice.undo()
+      expect(item(alice.getCanvas(), "ask")).toMatchObject({ x: 0, y: 560 })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   test("writes typed words as edits to the text, so both readers' words stay", () => {
     // Reproduce by setting a new Y.Text for a changed text in live/canvas.ts: one of the two
     // edits made at once is lost.
