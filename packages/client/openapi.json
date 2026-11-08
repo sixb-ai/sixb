@@ -75514,6 +75514,11 @@
       "ws": {
         "operationId": "wsWsAgents"
       }
+    },
+    "/ws/artifacts": {
+      "ws": {
+        "operationId": "wsWsArtifacts"
+      }
     }
   }
 }
