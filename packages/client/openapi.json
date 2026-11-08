@@ -347,11 +347,26 @@
                 },
                 "required": ["type", "id"],
                 "additionalProperties": false
+              },
+              "frozenBy": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["user", "serviceAccount", "system"]
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["type", "id"],
+                "additionalProperties": false
               }
             },
             "required": ["version", "revision", "author"],
             "additionalProperties": false,
-            "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+            "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
           }
         },
         "required": ["error"],
@@ -52331,11 +52346,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -52381,11 +52411,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53006,6 +53051,22 @@
                           "type": "string",
                           "description": "When it was created, which froze it"
                         },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false,
+                          "description": "Who created it"
+                        },
                         "boardPreviews": {
                           "type": "object",
                           "additionalProperties": {
@@ -53094,11 +53155,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53144,11 +53220,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53194,11 +53285,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53244,11 +53350,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53294,11 +53415,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53469,6 +53605,22 @@
                           "frozenAt": {
                             "type": "string",
                             "description": "When it was created, which froze it"
+                          },
+                          "frozenBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false,
+                            "description": "Who created it"
                           }
                         },
                         "required": [
@@ -53533,11 +53685,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53583,11 +53750,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53633,11 +53815,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53731,11 +53928,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53781,11 +53993,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53831,11 +54058,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53944,11 +54186,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -53994,11 +54251,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54044,11 +54316,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54142,11 +54429,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54192,11 +54494,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54242,11 +54559,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54399,11 +54731,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54449,11 +54796,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54499,11 +54861,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54549,11 +54926,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54599,11 +54991,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54706,11 +55113,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54756,11 +55178,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54806,11 +55243,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -54856,11 +55308,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -55512,6 +55979,22 @@
                           "type": "string",
                           "description": "When it was created, which froze it"
                         },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false,
+                          "description": "Who created it"
+                        },
                         "boardPreviews": {
                           "type": "object",
                           "additionalProperties": {
@@ -55600,11 +56083,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -55650,11 +56148,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -55700,11 +56213,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -55750,11 +56278,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -55800,11 +56343,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56303,6 +56861,22 @@
                           "type": "string",
                           "description": "When it was created, which froze it"
                         },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false,
+                          "description": "Who created it"
+                        },
                         "boardPreviews": {
                           "type": "object",
                           "additionalProperties": {
@@ -56372,11 +56946,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56422,11 +57011,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56472,11 +57076,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56522,11 +57141,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56572,11 +57206,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56754,11 +57403,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56804,11 +57468,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -56854,11 +57533,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -57311,11 +58005,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -57361,11 +58070,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -57411,11 +58135,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58047,6 +58786,22 @@
                           "type": "string",
                           "description": "When it was created, which froze it"
                         },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false,
+                          "description": "Who created it"
+                        },
                         "boardPreviews": {
                           "type": "object",
                           "additionalProperties": {
@@ -58116,11 +58871,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58166,11 +58936,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58216,11 +59001,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58266,11 +59066,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58316,11 +59131,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58430,11 +59260,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58480,11 +59325,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58530,11 +59390,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58580,11 +59455,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -58974,6 +59864,22 @@
                       "type": "string",
                       "description": "When it was created, which froze it"
                     },
+                    "frozenBy": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false,
+                      "description": "Who created it"
+                    },
                     "boardPreviews": {
                       "type": "object",
                       "additionalProperties": {
@@ -59039,11 +59945,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -59089,11 +60010,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],
@@ -59139,11 +60075,26 @@
                           },
                           "required": ["type", "id"],
                           "additionalProperties": false
+                        },
+                        "frozenBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["version", "revision", "author"],
                       "additionalProperties": false,
-                      "description": "With artifact_moved: the artifact's latest version, its revision, and who last wrote it"
+                      "description": "With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen"
                     }
                   },
                   "required": ["error"],

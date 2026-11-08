@@ -557,16 +557,18 @@ async function artifactMoved(
     throw new Error(`[SixbAgent] Version ${artifact.latestVersion} of '${artifactId}' is missing.`)
   }
 
-  const author = principalsEqual(latest.author, input.owner)
-    ? "its owner"
-    : `${latest.author.type} '${latest.author.id}'`
+  const named = (principal: Principal) =>
+    principalsEqual(principal, input.owner) ? "its owner" : `${principal.type} '${principal.id}'`
+  const author = named(latest.author)
   const where =
     latest.origin === undefined
       ? `by ${author} outside a conversation, such as in the app`
       : latest.origin.threadId === input.threadId
         ? "earlier in this conversation"
         : `by ${author} in another conversation`
-  const created = latest.frozenAt ? ", and then created as a version" : ""
+  const created = latest.frozenBy
+    ? `, and then created as a version by ${named(latest.frozenBy)}`
+    : ""
   const moved = `artifact '${artifactId}' changed since revision ${baseRevision}, which you started from: it is at revision ${latest.revision}, whose version ${latest.version} was last written ${where}${created}, so nothing was published`
 
   try {

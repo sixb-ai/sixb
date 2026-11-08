@@ -2814,6 +2814,8 @@ describe("SQLite storage migrations", () => {
         revision: 2,
         updatedAt: new Date("2026-07-01T12:01:00.000Z"),
         frozenAt: new Date("2026-07-01T12:01:00.000Z"),
+        // Created by whoever published it.
+        frozenBy: { type: "user", id: "usr-1" },
       })
 
       // The next write opens version 4: 3 was a retried turn's, and is never reused.

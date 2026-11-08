@@ -10,12 +10,13 @@ export type ArtifactStorageErrorCode =
 
 /**
  * Where an artifact had moved on to when a write found it moved: its latest version, its
- * revision, and who last wrote that version's content.
+ * revision, who last wrote that version's content, and, once it was created, who created it.
  */
 export interface ArtifactLatestVersion {
   readonly version: number
   readonly revision: number
   readonly author: Principal
+  readonly frozenBy?: Principal
 }
 
 /** Error for artifact-storage invariants. Callers branch on `code` rather than message text. */

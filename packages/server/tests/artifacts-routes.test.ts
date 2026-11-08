@@ -146,7 +146,13 @@ describe("artifact routes", () => {
     expect(frozen.status).toBe(200)
     expect(await frozen.json()).toMatchObject({
       artifact: { latestVersion: 1, revision: 2 },
-      version: { version: 1, revision: 2, frozen: true, frozenAt: expect.any(String) },
+      version: {
+        version: 1,
+        revision: 2,
+        frozen: true,
+        frozenAt: expect.any(String),
+        frozenBy: { type: "user", id: "alice" },
+      },
     })
 
     const published = await app.fetch(
@@ -276,6 +282,22 @@ describe("artifact routes", () => {
     const freezeMoved = await post(`/api/artifacts/${artifact.id}/freeze`, { baseRevision: 1 })
     expect(freezeMoved.status).toBe(409)
     expect((await freezeMoved.json()).code).toBe("artifact_moved")
+
+    // After a freeze, a save from before it is told who created the version.
+    expect((await post(`/api/artifacts/${artifact.id}/freeze`, { baseRevision: 2 })).status).toBe(
+      200
+    )
+    const afterFreeze = await post(`/api/artifacts/${artifact.id}/versions`, {
+      kind: "document",
+      title: "Report",
+      files,
+      baseRevision: 2,
+    })
+    expect(afterFreeze.status).toBe(409)
+    expect(await afterFreeze.json()).toMatchObject({
+      code: "artifact_moved",
+      latest: { version: 1, revision: 3, frozenBy: { type: "user", id: "alice" } },
+    })
 
     const badReference = await post("/api/artifacts", {
       kind: "file",

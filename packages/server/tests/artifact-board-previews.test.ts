@@ -178,7 +178,12 @@ describe("a canvas board's preview", () => {
     const open = await preview(alice, "1/boards/welcome/preview?theme=light")
     expect(open.headers.get("cache-control")).toBe("private, no-cache")
 
-    await storage.artifacts.freeze({ projectId: PROJECT_ID, artifactId, frozenAt: new Date() })
+    await storage.artifacts.freeze({
+      projectId: PROJECT_ID,
+      artifactId,
+      frozenAt: new Date(),
+      frozenBy: { type: "user", id: "alice" },
+    })
     const light = await preview(alice, "1/boards/welcome/preview?theme=light")
     expect(light.status).toBe(200)
     expect(light.headers.get("content-type")).toBe("image/png")

@@ -99,6 +99,7 @@ function versionBody(version: ArtifactVersionRecord) {
     createdAt: toIsoString(version.createdAt),
     updatedAt: toIsoString(version.updatedAt),
     ...(version.frozenAt ? { frozenAt: toIsoString(version.frozenAt) } : {}),
+    ...(version.frozenBy ? { frozenBy: version.frozenBy } : {}),
   }
 }
 

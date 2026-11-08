@@ -72,7 +72,9 @@ const CONTENT_COLUMNS = `
 
 const VERSION_COLUMNS = `
   project_id AS "projectId", artifact_id AS "artifactId", version, revision, ${CONTENT_COLUMNS},
-  created_at AS "createdAt", frozen_at AS "frozenAt"
+  created_at AS "createdAt", frozen_at AS "frozenAt",
+  frozen_by_principal_type AS "frozenByPrincipalType",
+  frozen_by_principal_id AS "frozenByPrincipalId"
 `
 
 const RESTORE_POINT_COLUMNS = `
@@ -187,7 +189,10 @@ export class PgArtifactStorage implements ArtifactStorage {
 
       const revision = artifact.revision + 1
       const [version] = await tx<PgRow[]>`
-        UPDATE artifact_versions SET revision = ${revision}, frozen_at = ${input.frozenAt}
+        UPDATE artifact_versions
+        SET revision = ${revision}, frozen_at = ${input.frozenAt},
+            frozen_by_principal_type = ${input.frozenBy.type},
+            frozen_by_principal_id = ${input.frozenBy.id}
         WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
           AND version = ${latest.version}
         RETURNING ${tx.unsafe(VERSION_COLUMNS)}
@@ -417,10 +422,12 @@ export class PgArtifactStorage implements ArtifactStorage {
       await tx`
         INSERT INTO artifact_versions (
           project_id, artifact_id, version, revision, title, entry, files, outline, refs,
-          author_principal_type, author_principal_id, created_at, updated_at, frozen_at
+          author_principal_type, author_principal_id, created_at, updated_at, frozen_at,
+          frozen_by_principal_type, frozen_by_principal_id
         )
         SELECT project_id, ${input.id}, version, revision, title, entry, files, outline, refs,
-               author_principal_type, author_principal_id, created_at, updated_at, frozen_at
+               author_principal_type, author_principal_id, created_at, updated_at, frozen_at,
+               frozen_by_principal_type, frozen_by_principal_id
         FROM artifact_versions
         WHERE project_id = ${input.projectId} AND artifact_id = ${input.sourceId}
       `
@@ -700,6 +707,7 @@ function assertBase(
     version: latest.version,
     revision: artifact.revision,
     author: latest.author,
+    ...(latest.frozenBy ? { frozenBy: latest.frozenBy } : {}),
   })
 }
 

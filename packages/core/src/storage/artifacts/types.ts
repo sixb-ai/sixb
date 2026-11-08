@@ -76,12 +76,14 @@ export interface ArtifactVersionRecord {
   readonly updatedAt: Date
   /** When someone created the version, which froze it; absent while it is open. */
   readonly frozenAt?: Date
+  /** Who created it, with `frozenAt`. */
+  readonly frozenBy?: Principal
 }
 
 /** What a write puts in a version: its content, who wrote it, and when (`updatedAt`). */
 export type ArtifactVersionInput = Omit<
   ArtifactVersionRecord,
-  "projectId" | "artifactId" | "version" | "revision" | "createdAt" | "frozenAt"
+  "projectId" | "artifactId" | "version" | "revision" | "createdAt" | "frozenAt" | "frozenBy"
 >
 
 export interface CreateArtifactInput {
@@ -119,6 +121,8 @@ export interface FreezeArtifactVersionInput {
   /** The revision the caller saw: past it, `artifact_moved`, so nobody freezes content unseen. */
   readonly baseRevision?: number
   readonly frozenAt: Date
+  /** Who creates the version. */
+  readonly frozenBy: Principal
 }
 
 /**

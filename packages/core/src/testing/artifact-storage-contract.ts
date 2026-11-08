@@ -137,9 +137,28 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           artifactId: "art_report",
           baseRevision: 1,
           frozenAt: at(1),
+          frozenBy: otherOwner,
         })
         expect(frozen.artifact).toMatchObject({ latestVersion: 1, revision: 2, updatedAt: at(1) })
-        expect(frozen.version).toMatchObject({ version: 1, revision: 2, frozenAt: at(1) })
+        // Who froze it is kept beside who wrote it.
+        expect(frozen.version).toMatchObject({
+          version: 1,
+          revision: 2,
+          author: owner,
+          frozenAt: at(1),
+          frozenBy: otherOwner,
+        })
+
+        // A write made before the freeze is told who created the version since.
+        // Reproduce by leaving `frozenBy` out of a provider's `assertBase`.
+        const moved = await artifacts
+          .publish({ ...publishInput({ updatedAt: at(2) }), baseRevision: 1 })
+          .catch((error: unknown) => error)
+        expect(moved).toMatchObject({
+          code: "artifact_moved",
+          latest: { version: 1, revision: 2, author: owner, frozenBy: otherOwner },
+        })
+        expect((moved as Error).message).toContain("which user 'usr_other' created")
 
         // Freezing a frozen version changes nothing, from any base.
         expect(
@@ -148,6 +167,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
             artifactId: "art_report",
             baseRevision: 1,
             frozenAt: at(2),
+            frozenBy: otherOwner,
           })
         ).toEqual(frozen)
 
@@ -160,6 +180,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           updatedAt: at(3),
         })
         expect(opened.version).not.toHaveProperty("frozenAt")
+        expect(opened.version).not.toHaveProperty("frozenBy")
         expect(opened.artifact).toMatchObject({ latestVersion: 2, revision: 3, title: "Draft" })
 
         // The next write replaces version 2, and version 1 stays as it was frozen.
@@ -170,7 +191,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         ).toEqual(frozen.version)
 
         await expectArtifactError(
-          artifacts.freeze({ projectId, artifactId: "art_missing", frozenAt: at(5) }),
+          artifacts.freeze({
+            projectId,
+            artifactId: "art_missing",
+            frozenAt: at(5),
+            frozenBy: otherOwner,
+          }),
           "artifact_not_found"
         )
       })
@@ -226,6 +252,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
             artifactId: "art_report",
             baseRevision: 1,
             frozenAt: at(2),
+            frozenBy: otherOwner,
           }),
           "artifact_moved"
         )
@@ -328,7 +355,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         await create("art_elsewhere", ["artifact:art_numbers"], otherProjectId)
         // Only the latest version counts: this one dropped its reference, frozen before.
         await create("art_dropped", ["artifact:art_numbers#Summary"])
-        await artifacts.freeze({ projectId, artifactId: "art_dropped", frozenAt: at(1) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_dropped",
+          frozenAt: at(1),
+          frozenBy: otherOwner,
+        })
         await artifacts.publish(publishInput({ updatedAt: at(2) }, "art_dropped"))
         // And this one dropped it from its open version.
         await create("art_rewritten", ["artifact:art_numbers"])
@@ -400,7 +432,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         )
         await artifacts.publish(publishInput({ updatedAt: at(3) }, "art_a"))
         // A freeze is a change too.
-        await artifacts.freeze({ projectId, artifactId: "art_b", frozenAt: at(4) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_b",
+          frozenAt: at(4),
+          frozenBy: otherOwner,
+        })
 
         const all = await artifacts.list({ projectId })
         expect(all.artifacts.map((artifact) => artifact.id)).toEqual(["art_b", "art_a", "art_c"])
@@ -548,7 +585,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(await artifacts.listRestorePoints({ projectId, id: "art_new" })).toEqual([])
 
         // Another turn keeps its own, of the frozen version it opens the next one past.
-        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(5) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(5),
+          frozenBy: otherOwner,
+        })
         await artifacts.publish({ ...publishInput({ updatedAt: at(6) }), turnRunId: "run_3" })
         const [newest] = await artifacts.listRestorePoints({ projectId, id: "art_report" })
         expect(newest).toMatchObject({
@@ -632,7 +674,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(before).not.toHaveProperty("turnRunId")
 
         // A frozen version stays: restoring opens the next one.
-        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(3) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(3),
+          frozenBy: otherOwner,
+        })
         const reopened = await artifacts.restoreTo({
           projectId,
           artifactId: "art_report",
@@ -703,7 +750,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
 
         // Opened past a frozen version: the version it opened goes.
         await artifacts.create(createInput({ id: "art_frozen" }))
-        await artifacts.freeze({ projectId, artifactId: "art_frozen", frozenAt: at(1) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_frozen",
+          frozenAt: at(1),
+          frozenBy: otherOwner,
+        })
         await write("art_frozen")
 
         // Changed since by someone else: it keeps the change.
@@ -723,7 +775,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           ...createInput({ id: "art_kept", version: versionInput({ origin: turn }) }),
           turnRunId: "run_turn",
         })
-        await artifacts.freeze({ projectId, artifactId: "art_kept", frozenAt: at(3) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_kept",
+          frozenAt: at(3),
+          frozenBy: otherOwner,
+        })
 
         expect(
           await artifacts.undoTurnWrites({ projectId: otherProjectId, turnRunId: "run_turn" })
@@ -859,12 +916,16 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    // Regression proof: copy only the latest version in a provider's `copy`; the copy then has no
-    // version 1, and its next version is 2.
     test("gives a copied version the outline the copy asks for, and the source keeps its own", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        await artifacts.publish(publishInput({ title: "Second", createdAt: at(1) }))
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(1),
+          frozenBy: otherOwner,
+        })
+        await artifacts.publish(publishInput({ title: "Second", updatedAt: at(2) }))
         const renamed = { kind: "document" as const, headings: [] }
         const seen: string[] = []
 
@@ -890,14 +951,26 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    // Regression proof: copy only the latest version in a provider's `copy`; the copy then has no
+    // version 1, and its next version is 2.
     test("copies an artifact with every version under its number, shared in one thread", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(1) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(1),
+          frozenBy: otherOwner,
+        })
         await artifacts.publish(
           publishInput({ title: "Second", author: otherOwner, updatedAt: at(2) })
         )
-        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(3) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(3),
+          frozenBy: otherOwner,
+        })
         // Version 3 was a retried turn's: the copy numbers its next version 4, as the source does.
         await artifacts.publish({
           ...publishInput({
@@ -962,7 +1035,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(await artifacts.listThreadIds({ projectId, id: "art_report" })).toEqual(["thr_1"])
 
         // A turn in the fork revises the copy, and a retry of it keeps the copy shared there.
-        await artifacts.freeze({ projectId, artifactId: "art_copy", frozenAt: at(7) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_copy",
+          frozenAt: at(7),
+          frozenBy: otherOwner,
+        })
         const revised = await artifacts.publish({
           ...publishInput({ origin: { threadId: "thr_fork", runId: "run_fork" } }, "art_copy"),
           turnRunId: "run_fork",
@@ -998,9 +1076,19 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
     test("lists versions newest first, a page at a time", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(1) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(1),
+          frozenBy: otherOwner,
+        })
         await artifacts.publish(publishInput({ updatedAt: at(2) }))
-        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(3) })
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(3),
+          frozenBy: otherOwner,
+        })
         await artifacts.publish(publishInput({ updatedAt: at(4) }))
 
         const all = await artifacts.listVersions({ projectId, artifactId: "art_report" })
@@ -1232,7 +1320,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
               ...publishInput({ updatedAt: at(1) }),
               turnRunId: "run_1",
             })
-            await tx.artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(1) })
+            await tx.artifacts.freeze({
+              projectId,
+              artifactId: "art_report",
+              frozenAt: at(1),
+              frozenBy: otherOwner,
+            })
             await tx.artifacts.create(createInput({ id: "art_rolled_back" }))
             await tx.artifacts.createFrameGrant(frameGrant("a"))
             await tx.artifacts.putBoardPreviews({
