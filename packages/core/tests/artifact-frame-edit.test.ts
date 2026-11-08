@@ -33,9 +33,17 @@ function frame(source: string) {
   window.document.write(annotateBoard(source))
   const document = window.document
 
-  // The app: what the frame posts to its parent, and requests it sends the frame.
+  // The app: what the frame posts to its parent, what it posts on the port the app hands over with
+  // `edit`, and requests it sends the frame. The port is one the test reads at once.
   const posted: Record<string, unknown>[] = []
+  const throughPort: Record<string, unknown>[] = []
   const parent = { postMessage: (message: Record<string, unknown>) => posted.push(message) }
+  class TestPort {
+    postMessage(message: Record<string, unknown>) {
+      throughPort.push(message)
+    }
+  }
+  const port = new TestPort()
   const proxy = <T extends object>(target: T, overrides: Record<string, unknown>): T =>
     new Proxy(target, {
       get(object, property) {
@@ -61,6 +69,7 @@ function frame(source: string) {
     "HTMLElement",
     "Node",
     "CSS",
+    "MessagePort",
     `(${frameRuntime.toString()})()`
   )(
     frameWindow,
@@ -72,22 +81,31 @@ function frame(source: string) {
     window.Element,
     window.HTMLElement,
     window.Node,
-    window.CSS
+    window.CSS,
+    TestPort
   )
 
   let id = 0
-  const request = (method: string, params: Record<string, unknown>) => {
+  /** A request from the app; `edit` hands the port over, as the app's first one does. */
+  const request = (
+    method: string,
+    params: Record<string, unknown>,
+    { withPort = method === "edit" }: { withPort?: boolean } = {}
+  ) => {
     id += 1
-    window.dispatchEvent(
-      new window.MessageEvent("message", {
-        data: { protocol: FRAME_PROTOCOL, id, method, params },
-        source: parent as never,
-      })
-    )
+    const event = new window.MessageEvent("message", {
+      data: { protocol: FRAME_PROTOCOL, id, method, params },
+      source: parent as never,
+    })
+    if (withPort) Object.defineProperty(event, "ports", { value: [port] })
+    window.dispatchEvent(event)
     return posted.find((message) => message.id === id)
   }
+  /** What editing reported, through the port. */
   const events = (name: string) =>
-    posted.filter((message) => message.event === name).map((message) => parseFrameEvent(message))
+    throughPort
+      .filter((message) => message.event === name)
+      .map((message) => parseFrameEvent(message))
   const at = (address: string) =>
     document.querySelector(`[data-sixb-at="${address}"]`) as unknown as HTMLElement
   /** An event as the reader's own, trusted as a browser marks it, or as a page's script's. */
@@ -103,7 +121,7 @@ function frame(source: string) {
     Object.defineProperty(event, "isTrusted", { value: trusted })
     return (target as { dispatchEvent(event: unknown): boolean }).dispatchEvent(event)
   }
-  return { window, document, posted, request, events, at, fire }
+  return { window, document, posted, throughPort, request, events, at, fire }
 }
 
 describe("a board's frame, editing", () => {
@@ -230,6 +248,26 @@ describe("a board's frame, editing", () => {
     heading.dispatchEvent(new window.FocusEvent("focusout", { bubbles: true }) as unknown as Event)
     expect(heading.textContent).toBe("Hello")
     expect(heading.hasAttribute("contenteditable")).toBe(false)
+  })
+
+  // Guard proof: post edit events with `post` again, to the window's parent; they then reach the
+  // parent, where the page's scripts post too. Drop `stopImmediatePropagation` from the runtime's
+  // listener; the page's own listener hears the request that hands the port over.
+  test("reports editing only through the port the app hands over, which the page never sees", () => {
+    const { window, request, posted, throughPort, at, fire } = frame(BOARD)
+    const heard: unknown[] = []
+    window.addEventListener("message", (event: { data: unknown }) => heard.push(event.data))
+
+    // Without a port, nothing of editing is reported.
+    request("edit", { on: true }, { withPort: false })
+    fire(at("body>main:0>h1:0"), "click")
+    expect(throughPort).toEqual([])
+
+    request("edit", { on: true })
+    fire(at("body>main:0>p:0"), "click")
+    expect(throughPort.map((message) => message.event)).toEqual(["edit.select"])
+    expect(posted.some((message) => String(message.event).startsWith("edit."))).toBe(false)
+    expect(heard).toEqual([])
   })
 
   // Guard proof: drop the `isTrusted` check from the runtime's click handler; the page's script
