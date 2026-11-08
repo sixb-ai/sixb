@@ -3,20 +3,15 @@ import type { QuickBooksAccountsResource } from "./resources/accounts"
 import type { QuickBooksAttachmentsResource } from "./resources/attachments"
 import type { QuickBooksBillPaymentsResource } from "./resources/bill-payments"
 import type { QuickBooksBillsResource } from "./resources/bills"
-import type { QuickBooksBudgetsResource } from "./resources/budgets"
 import type { QuickBooksCdcResource } from "./resources/cdc"
 import type { QuickBooksClassesResource } from "./resources/classes"
-import type { QuickBooksCompanyCurrenciesResource } from "./resources/company-currencies"
-import type { QuickBooksCreditCardPaymentsResource } from "./resources/credit-card-payments"
 import type { QuickBooksCreditMemosResource } from "./resources/credit-memos"
-import type { QuickBooksCustomerTypesResource } from "./resources/customer-types"
 import type { QuickBooksCustomersResource } from "./resources/customers"
 import type { QuickBooksDepartmentsResource } from "./resources/departments"
 import type { QuickBooksDepositsResource } from "./resources/deposits"
 import type { QuickBooksEmployeesResource } from "./resources/employees"
 import type { QuickBooksEstimatesResource } from "./resources/estimates"
 import type { QuickBooksExchangeRatesResource } from "./resources/exchange-rates"
-import type { QuickBooksInventoryAdjustmentsResource } from "./resources/inventory-adjustments"
 import type { QuickBooksInvoicesResource } from "./resources/invoices"
 import type { QuickBooksItemsResource } from "./resources/items"
 import type { QuickBooksJournalEntriesResource } from "./resources/journal-entries"
@@ -25,16 +20,25 @@ import type { QuickBooksPaymentsResource } from "./resources/payments"
 import type { QuickBooksPreferencesResource } from "./resources/preferences"
 import type { QuickBooksPurchaseOrdersResource } from "./resources/purchase-orders"
 import type { QuickBooksPurchasesResource } from "./resources/purchases"
+import type {
+  QuickBooksBudgetsResource,
+  QuickBooksCompanyCurrenciesResource,
+  QuickBooksCustomerTypesResource,
+  QuickBooksTaxAgenciesResource,
+  QuickBooksTaxCodesResource,
+  QuickBooksTaxRatesResource,
+} from "./resources/read-only-lists"
+import type {
+  QuickBooksCreditCardPaymentsResource,
+  QuickBooksInventoryAdjustmentsResource,
+  QuickBooksReimburseChargesResource,
+  QuickBooksTaxPaymentsResource,
+} from "./resources/read-only-transactions"
 import type { QuickBooksRecurringTransactionsResource } from "./resources/recurring-transactions"
 import type { QuickBooksRefundReceiptsResource } from "./resources/refund-receipts"
-import type { QuickBooksReimburseChargesResource } from "./resources/reimburse-charges"
 import type { QuickBooksReportsResource } from "./resources/reports"
 import type { QuickBooksSalesReceiptsResource } from "./resources/sales-receipts"
-import type { QuickBooksTaxAgenciesResource } from "./resources/tax-agencies"
 import type { QuickBooksTaxClassificationsResource } from "./resources/tax-classifications"
-import type { QuickBooksTaxCodesResource } from "./resources/tax-codes"
-import type { QuickBooksTaxPaymentsResource } from "./resources/tax-payments"
-import type { QuickBooksTaxRatesResource } from "./resources/tax-rates"
 import type { QuickBooksTermsResource } from "./resources/terms"
 import type { QuickBooksTimeActivitiesResource } from "./resources/time-activities"
 import type { QuickBooksTransfersResource } from "./resources/transfers"
@@ -92,47 +96,7 @@ export interface QuickBooksCompanyInfo {
 }
 
 export interface QuickBooksClient {
-  readonly attachments: QuickBooksAttachmentsResource
-  readonly reports: QuickBooksReportsResource
-  readonly cdc: QuickBooksCdcResource
-  readonly estimates: QuickBooksEstimatesResource
-  readonly invoices: QuickBooksInvoicesResource
-  readonly payments: QuickBooksPaymentsResource
-  readonly creditMemos: QuickBooksCreditMemosResource
-  readonly bills: QuickBooksBillsResource
-  readonly billPayments: QuickBooksBillPaymentsResource
-  readonly vendorCredits: QuickBooksVendorCreditsResource
-  readonly customers: QuickBooksCustomersResource
-  readonly vendors: QuickBooksVendorsResource
-  readonly accounts: QuickBooksAccountsResource
-  readonly items: QuickBooksItemsResource
-  readonly terms: QuickBooksTermsResource
-  readonly preferences: QuickBooksPreferencesResource
-  readonly taxPayments: QuickBooksTaxPaymentsResource
-  readonly recurringTransactions: QuickBooksRecurringTransactionsResource
-  readonly inventoryAdjustments: QuickBooksInventoryAdjustmentsResource
-  readonly creditCardPayments: QuickBooksCreditCardPaymentsResource
-  readonly reimburseCharges: QuickBooksReimburseChargesResource
-  readonly journalEntries: QuickBooksJournalEntriesResource
-  readonly transfers: QuickBooksTransfersResource
-  readonly deposits: QuickBooksDepositsResource
-  readonly timeActivities: QuickBooksTimeActivitiesResource
-  readonly purchaseOrders: QuickBooksPurchaseOrdersResource
-  readonly purchases: QuickBooksPurchasesResource
-  readonly refundReceipts: QuickBooksRefundReceiptsResource
-  readonly salesReceipts: QuickBooksSalesReceiptsResource
-  readonly paymentMethods: QuickBooksPaymentMethodsResource
-  readonly departments: QuickBooksDepartmentsResource
-  readonly classes: QuickBooksClassesResource
-  readonly employees: QuickBooksEmployeesResource
-  readonly exchangeRates: QuickBooksExchangeRatesResource
-  readonly companyCurrencies: QuickBooksCompanyCurrenciesResource
-  readonly budgets: QuickBooksBudgetsResource
-  readonly taxClassifications: QuickBooksTaxClassificationsResource
-  readonly taxAgencies: QuickBooksTaxAgenciesResource
-  readonly taxRates: QuickBooksTaxRatesResource
-  readonly taxCodes: QuickBooksTaxCodesResource
-  readonly customerTypes: QuickBooksCustomerTypesResource
+  // Company
   readonly companyInfo: {
     /** Sparse update using CompanyInfo.Id, which is distinct from the realm ID. */
     update(
@@ -142,6 +106,53 @@ export interface QuickBooksClient {
     /** GET /v3/company/{realmId}/companyinfo/{realmId} */
     get(): Promise<QuickBooksCompanyInfo>
   }
+  readonly preferences: QuickBooksPreferencesResource
+  // Name lists
+  readonly customers: QuickBooksCustomersResource
+  readonly vendors: QuickBooksVendorsResource
+  readonly employees: QuickBooksEmployeesResource
+  readonly accounts: QuickBooksAccountsResource
+  readonly items: QuickBooksItemsResource
+  readonly terms: QuickBooksTermsResource
+  readonly classes: QuickBooksClassesResource
+  readonly departments: QuickBooksDepartmentsResource
+  readonly customerTypes: QuickBooksCustomerTypesResource
+  readonly paymentMethods: QuickBooksPaymentMethodsResource
+  readonly budgets: QuickBooksBudgetsResource
+  readonly companyCurrencies: QuickBooksCompanyCurrenciesResource
+  // Tax and currency
+  readonly taxCodes: QuickBooksTaxCodesResource
+  readonly taxRates: QuickBooksTaxRatesResource
+  readonly taxAgencies: QuickBooksTaxAgenciesResource
+  readonly taxClassifications: QuickBooksTaxClassificationsResource
+  readonly taxPayments: QuickBooksTaxPaymentsResource
+  readonly exchangeRates: QuickBooksExchangeRatesResource
+  // Sales
+  readonly estimates: QuickBooksEstimatesResource
+  readonly invoices: QuickBooksInvoicesResource
+  readonly salesReceipts: QuickBooksSalesReceiptsResource
+  readonly refundReceipts: QuickBooksRefundReceiptsResource
+  readonly payments: QuickBooksPaymentsResource
+  readonly creditMemos: QuickBooksCreditMemosResource
+  // Purchases
+  readonly bills: QuickBooksBillsResource
+  readonly billPayments: QuickBooksBillPaymentsResource
+  readonly vendorCredits: QuickBooksVendorCreditsResource
+  readonly purchases: QuickBooksPurchasesResource
+  readonly purchaseOrders: QuickBooksPurchaseOrdersResource
+  // Banking, time and other transactions
+  readonly deposits: QuickBooksDepositsResource
+  readonly transfers: QuickBooksTransfersResource
+  readonly journalEntries: QuickBooksJournalEntriesResource
+  readonly creditCardPayments: QuickBooksCreditCardPaymentsResource
+  readonly timeActivities: QuickBooksTimeActivitiesResource
+  readonly inventoryAdjustments: QuickBooksInventoryAdjustmentsResource
+  readonly reimburseCharges: QuickBooksReimburseChargesResource
+  readonly recurringTransactions: QuickBooksRecurringTransactionsResource
+  // Sync, files and reports
+  readonly cdc: QuickBooksCdcResource
+  readonly attachments: QuickBooksAttachmentsResource
+  readonly reports: QuickBooksReportsResource
 }
 
 export interface QuickBooksFaultError {

@@ -1,4 +1,3 @@
-import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksPage, QuickBooksRefundReceiptListOptions } from "../types/query"
 import type { QuickBooksRefundReceipt } from "../types/transactions"
@@ -14,7 +13,7 @@ import { nonEmpty } from "../validation"
 import {
   createInput,
   deleteEntity,
-  type QuickBooksWriteHttp,
+  type QuickBooksPdfHttp,
   revision,
   sendEntity,
   updateEntity,
@@ -51,7 +50,7 @@ export interface QuickBooksRefundReceiptsResource {
 }
 
 export function createRefundReceiptsResource(
-  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
+  http: QuickBooksPdfHttp
 ): QuickBooksRefundReceiptsResource {
   const resource: QuickBooksRefundReceiptsResource = {
     async create(input, options) {

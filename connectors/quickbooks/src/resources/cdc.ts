@@ -1,47 +1,47 @@
 import type { QuickBooksReadHttp } from "../query"
-import type { QuickBooksCdcOptions, QuickBooksCdcResponse } from "../types/cdc"
-import { isRecord } from "../validation"
-import { templateOf } from "./recurring-transactions"
+import type { QuickBooksCdcEntity, QuickBooksCdcOptions, QuickBooksCdcResponse } from "../types/cdc"
+import { isRecord, templateOf } from "../validation"
 
 // Accepted by QuickBooks CDC in the sandbox. Excluded: TaxAgency and TaxClassification (the
 // provider fails with 4001), TaxPayment (5030 in US companies), Exchangerate (no entity IDs),
 // and CompanyInfo/Preferences (read directly).
-const ENTITIES = new Set<string>([
-  "Account",
-  "Attachable",
-  "Budget",
-  "Class",
-  "CompanyCurrency",
-  "Customer",
-  "CustomerType",
-  "Department",
-  "Employee",
-  "Item",
-  "PaymentMethod",
-  "TaxCode",
-  "TaxRate",
-  "Term",
-  "Vendor",
-  "Bill",
-  "BillPayment",
-  "CreditCardPaymentTxn",
-  "CreditMemo",
-  "Deposit",
-  "Estimate",
-  "InventoryAdjustment",
-  "Invoice",
-  "JournalEntry",
-  "Payment",
-  "Purchase",
-  "PurchaseOrder",
-  "RecurringTransaction",
-  "RefundReceipt",
-  "ReimburseCharge",
-  "SalesReceipt",
-  "TimeActivity",
-  "Transfer",
-  "VendorCredit",
-])
+const CDC_ENTITIES = {
+  Account: true,
+  Attachable: true,
+  Budget: true,
+  Class: true,
+  CompanyCurrency: true,
+  Customer: true,
+  CustomerType: true,
+  Department: true,
+  Employee: true,
+  Item: true,
+  PaymentMethod: true,
+  TaxCode: true,
+  TaxRate: true,
+  Term: true,
+  Vendor: true,
+  Bill: true,
+  BillPayment: true,
+  CreditCardPaymentTxn: true,
+  CreditMemo: true,
+  Deposit: true,
+  Estimate: true,
+  InventoryAdjustment: true,
+  Invoice: true,
+  JournalEntry: true,
+  Payment: true,
+  Purchase: true,
+  PurchaseOrder: true,
+  RecurringTransaction: true,
+  RefundReceipt: true,
+  ReimburseCharge: true,
+  SalesReceipt: true,
+  TimeActivity: true,
+  Transfer: true,
+  VendorCredit: true,
+} as const satisfies Record<QuickBooksCdcEntity, true>
+const ENTITIES = new Set<string>(Object.keys(CDC_ENTITIES))
 const LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000
 
 export class QuickBooksCdcLimitError extends Error {

@@ -1,4 +1,3 @@
-import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksEstimateListOptions, QuickBooksPage } from "../types/query"
 import type { QuickBooksEstimate } from "../types/transactions"
@@ -14,7 +13,7 @@ import { nonEmpty } from "../validation"
 import {
   createInput,
   deleteEntity,
-  type QuickBooksWriteHttp,
+  type QuickBooksPdfHttp,
   revision,
   sendEntity,
   updateEntity,
@@ -46,9 +45,7 @@ export interface QuickBooksEstimatesResource {
   listAll(options?: QuickBooksEstimateListOptions): AsyncIterable<QuickBooksEstimate>
 }
 
-export function createEstimatesResource(
-  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
-): QuickBooksEstimatesResource {
+export function createEstimatesResource(http: QuickBooksPdfHttp): QuickBooksEstimatesResource {
   const resource: QuickBooksEstimatesResource = {
     async create(input, options) {
       createInput(input)

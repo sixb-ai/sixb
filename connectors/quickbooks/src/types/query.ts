@@ -1,3 +1,5 @@
+import type { QuickBooksRecurringTemplateType } from "./transactions"
+
 export interface QuickBooksPage<T> {
   readonly items: readonly T[]
   /** Provider metadata, absent when omitted by QuickBooks (including empty responses). */
@@ -5,6 +7,13 @@ export interface QuickBooksPage<T> {
   readonly maxResults?: number
   readonly totalCount?: number
   readonly time?: string
+}
+
+/** get, list and listAll for a read-only resource. */
+export interface QuickBooksReadResource<T, TOptions> {
+  get(id: string): Promise<T>
+  list(options?: TOptions): Promise<QuickBooksPage<T>>
+  listAll(options?: TOptions): AsyncIterable<T>
 }
 
 export interface QuickBooksPaginationOptions {
@@ -17,8 +26,8 @@ export interface QuickBooksPaginationOptions {
 /** Sort direction for query `ORDERBY`. */
 export type QuickBooksSortDirection = "ASC" | "DESC"
 
-/** Name-list query subset without an Active predicate or name field. */
-export interface QuickBooksReferenceListOptions<TSort extends string = "Id">
+/** IDs, a modification bound and sorting: the predicates shared by every paged list. */
+export interface QuickBooksBaseListOptions<TSort extends string = "Id">
   extends QuickBooksPaginationOptions {
   readonly ids?: readonly string[]
   /** `MetaData.LastUpdatedTime >=` bound; rows at exactly the bound second can be omitted. */
@@ -30,7 +39,7 @@ export interface QuickBooksReferenceListOptions<TSort extends string = "Id">
 }
 
 export interface QuickBooksListOptions<TName extends string = "Name">
-  extends QuickBooksReferenceListOptions<TName> {
+  extends QuickBooksBaseListOptions<TName> {
   /** Defaults to active records. `all` explicitly includes inactive records. */
   readonly active?: boolean | "all"
   /** Exact provider Name or DisplayName match. */
@@ -52,7 +61,7 @@ export type QuickBooksTaxRateListOptions = QuickBooksListOptions
 export type QuickBooksBudgetListOptions = QuickBooksListOptions
 /** TaxAgency has no Active property; `name` matches the agency display name. */
 export type QuickBooksTaxAgencyListOptions = Omit<QuickBooksListOptions, "active">
-/** CompanyCurrency has no queryable name field; `Code` is filterable only by ID here. */
+/** CompanyCurrency has no name filter; select currencies by ID. */
 export type QuickBooksCompanyCurrencyListOptions = Omit<QuickBooksListOptions<never>, "name">
 
 /** Supported transaction query subset; dates are inclusive, calendar dates in YYYY-MM-DD form. */
@@ -117,20 +126,27 @@ export type QuickBooksTimeActivityListOptions = Omit<
 >
 
 /** ReimburseCharge accepts neither TxnDate nor DocNumber predicates. */
-export interface QuickBooksReimburseChargeListOptions
-  extends QuickBooksReferenceListOptions<never> {
+export interface QuickBooksReimburseChargeListOptions extends QuickBooksBaseListOptions<never> {
   readonly customerIds?: readonly string[]
 }
 
 /** Recurring templates are filtered by template ID, template type and modification time. */
 export interface QuickBooksRecurringTransactionListOptions
-  extends QuickBooksReferenceListOptions<never> {
+  extends QuickBooksBaseListOptions<never> {
   /** Template entity type, e.g. `Bill` or `Invoice`. */
-  readonly type?: string
+  readonly type?: QuickBooksRecurringTemplateType
 }
 
 /** Not available in US companies; QuickBooks returns error 5030 there. */
-export type QuickBooksTaxPaymentListOptions = QuickBooksReferenceListOptions<never>
+export type QuickBooksTaxPaymentListOptions = QuickBooksBaseListOptions<never>
+
+/** Identifies one exchange rate; rates have no entity ID. */
+export interface QuickBooksExchangeRateKey {
+  /** ISO 4217 code of the foreign currency, e.g. `EUR`. */
+  readonly sourceCurrencyCode: string
+  /** YYYY-MM-DD. Omit for the current rate. */
+  readonly asOfDate?: string
+}
 
 export interface QuickBooksExchangeRateListOptions extends QuickBooksPaginationOptions {
   /** `MetaData.LastUpdatedTime >=` bound; rows at exactly the bound second can be omitted. */

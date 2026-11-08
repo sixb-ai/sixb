@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import {
   QuickBooksApiError,
   type QuickBooksClient,
+  type QuickBooksRecurringTemplateType,
   type QuickBooksRevision,
   quickbooksEventsWebhook,
 } from "../src"
@@ -318,7 +319,10 @@ test.skipIf(mode !== "read")(
     const recurring = []
     for await (const row of qb.recurringTransactions.listAll({ maxResults: 1 })) recurring.push(row)
     for (const row of recurring) {
-      const [type, template] = Object.entries(row)[0] as [string, { Id: string }]
+      const [type, template] = Object.entries(row)[0] as [
+        QuickBooksRecurringTemplateType,
+        { Id: string },
+      ]
       expect(Object.keys(await qb.recurringTransactions.get(template.Id))).toEqual([type])
       const typed = await qb.recurringTransactions.list({ type, ids: [template.Id] })
       expect(typed.items).toHaveLength(1)

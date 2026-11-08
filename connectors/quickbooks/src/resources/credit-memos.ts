@@ -1,4 +1,3 @@
-import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksCreditMemoListOptions, QuickBooksPage } from "../types/query"
 import type { QuickBooksCreditMemo } from "../types/transactions"
@@ -14,7 +13,7 @@ import { nonEmpty } from "../validation"
 import {
   createInput,
   deleteEntity,
-  type QuickBooksWriteHttp,
+  type QuickBooksPdfHttp,
   sendEntity,
   updateEntity,
   writeEntity,
@@ -43,9 +42,7 @@ export interface QuickBooksCreditMemosResource {
   listAll(options?: QuickBooksCreditMemoListOptions): AsyncIterable<QuickBooksCreditMemo>
 }
 
-export function createCreditMemosResource(
-  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
-): QuickBooksCreditMemosResource {
+export function createCreditMemosResource(http: QuickBooksPdfHttp): QuickBooksCreditMemosResource {
   const resource: QuickBooksCreditMemosResource = {
     async create(input, options) {
       createInput(input)

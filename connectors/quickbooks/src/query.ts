@@ -2,6 +2,7 @@ import type {
   QuickBooksListOptions,
   QuickBooksPage,
   QuickBooksPaginationOptions,
+  QuickBooksReadResource,
   QuickBooksTransactionListOptions,
 } from "./types/query"
 import { isRecord, nonEmpty } from "./validation"
@@ -30,7 +31,7 @@ export async function readEntity<T>(
   return value as T
 }
 
-export function assertEntity(
+function assertEntity(
   value: unknown,
   entity: string
 ): asserts value is Record<string, unknown> & { Id: string } {
@@ -57,14 +58,10 @@ export async function listEntities<T>(
   config: { readonly active?: boolean } = {}
 ): Promise<QuickBooksPage<T>> {
   const hasActive = config.active ?? true
-  allowedOptions(options, "list", [
-    ...PAGE_OPTIONS,
-    "ids",
-    "updatedSince",
-    "orderBy",
-    ...(hasActive ? ["active"] : []),
-    ...(nameField ? ["name"] : []),
-  ])
+  const allowed = ["startPosition", "maxResults", "ids", "updatedSince", "orderBy"]
+  if (hasActive) allowed.push("active")
+  if (nameField) allowed.push("name")
+  allowedOptions(options, "list", allowed)
   const { start, count } = page(options)
   const clauses: string[] = []
   if (hasActive) {
@@ -87,7 +84,7 @@ export async function listEntities<T>(
 }
 
 /** Provider-verified predicates for one transaction entity. */
-export interface QuickBooksTransactionQuery {
+interface QuickBooksTransactionQuery {
   /** TxnDate predicates and sorting. Defaults to true. */
   readonly txnDate?: boolean
   /** DocNumber equality. Defaults to true. */
@@ -96,7 +93,7 @@ export interface QuickBooksTransactionQuery {
   readonly party?: "customer" | "vendor"
 }
 
-export interface QuickBooksQueryExtras {
+interface QuickBooksQueryExtras {
   /** Response array name when it differs from the queried entity. */
   readonly key?: string
   /** Resource-specific predicates, already validated and quoted by the caller. */
@@ -118,17 +115,12 @@ export async function listTransactions<T>(
   extras: QuickBooksQueryExtras = {}
 ): Promise<QuickBooksPage<T>> {
   const txnDate = query.txnDate ?? true
-  const partyOption =
-    query.party === "customer" ? "customerIds" : query.party === "vendor" ? "vendorIds" : undefined
-  allowedOptions(options, "transaction list", [
-    ...PAGE_OPTIONS,
-    "ids",
-    "updatedSince",
-    "orderBy",
-    ...(txnDate ? ["txnDateFrom", "txnDateTo"] : []),
-    ...((query.docNumber ?? true) ? ["docNumber"] : []),
-    ...(partyOption ? [partyOption] : []),
-  ])
+  const allowed = ["startPosition", "maxResults", "ids", "updatedSince", "orderBy"]
+  if (txnDate) allowed.push("txnDateFrom", "txnDateTo")
+  if (query.docNumber ?? true) allowed.push("docNumber")
+  if (query.party === "customer") allowed.push("customerIds")
+  if (query.party === "vendor") allowed.push("vendorIds")
+  allowedOptions(options, "transaction list", allowed)
   const { start, count } = page(options)
   const clauses: string[] = []
   if (options.ids !== undefined) clauses.push(inList("Id", options.ids, "ids"))
@@ -158,8 +150,6 @@ export async function listTransactions<T>(
     { key: extras.key, params: extras.params, validate: extras.validate }
   )
 }
-
-const PAGE_OPTIONS = ["startPosition", "maxResults"]
 
 export function allowedOptions(options: object, kind: string, allowed: readonly string[]) {
   if (typeof options !== "object" || options === null)
@@ -193,7 +183,7 @@ export function where(clauses: readonly string[]) {
   return clauses.length ? ` WHERE ${clauses.join(" AND ")}` : ""
 }
 
-export function sort(
+function sort(
   orderBy: { readonly field: string; readonly direction?: string } | undefined,
   fields: readonly string[],
   kind = "query"
@@ -230,7 +220,9 @@ export async function readQueryPage<T>(
   } = {}
 ): Promise<QuickBooksPage<T>> {
   const key = options.key ?? entity
-  const body = await http.get(`query?${new URLSearchParams({ query, ...options.params })}`)
+  const search = new URLSearchParams({ query })
+  for (const [name, value] of Object.entries(options.params ?? {})) search.append(name, value)
+  const body = await http.get(`query?${search}`)
   if (!isRecord(body) || !isRecord(body.QueryResponse))
     throw new Error("[SixbQuickBooks] Invalid QueryResponse envelope.")
   const response = body.QueryResponse
@@ -281,4 +273,36 @@ export async function* listAll<T, TOptions extends QuickBooksPaginationOptions>(
     if (page.items.length < maxResults) return
     startPosition += page.items.length
   }
+}
+
+/** get/list/listAll for a read-only name list. */
+export function nameListReader<T, TOptions extends QuickBooksListOptions<string>>(
+  http: QuickBooksReadHttp,
+  entity: string,
+  path: string,
+  nameField: string | undefined,
+  config: { readonly active?: boolean } = {}
+): QuickBooksReadResource<T, TOptions> {
+  const resource: QuickBooksReadResource<T, TOptions> = {
+    get: (id) => readEntity(http, entity, `${path}/${pathId(id)}`, id),
+    list: (options) => listEntities(http, entity, nameField, options, config),
+    listAll: (options) => listAll(resource.list, options),
+  }
+  return resource
+}
+
+/** get/list/listAll for a read-only transaction entity. `key` names its response envelope. */
+export function transactionReader<T, TOptions extends TransactionOptions>(
+  http: QuickBooksReadHttp,
+  entity: string,
+  path: string,
+  query: QuickBooksTransactionQuery = {},
+  key = entity
+): QuickBooksReadResource<T, TOptions> {
+  const resource: QuickBooksReadResource<T, TOptions> = {
+    get: (id) => readEntity(http, key, `${path}/${pathId(id)}`, id),
+    list: (options) => listTransactions(http, entity, options, query, { key }),
+    listAll: (options) => listAll(resource.list, options),
+  }
+  return resource
 }

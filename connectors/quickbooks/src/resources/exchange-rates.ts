@@ -9,20 +9,17 @@ import {
   where,
 } from "../query"
 import type { QuickBooksExchangeRate } from "../types/entities"
-import type { QuickBooksExchangeRateListOptions, QuickBooksPage } from "../types/query"
+import type {
+  QuickBooksExchangeRateKey,
+  QuickBooksExchangeRateListOptions,
+  QuickBooksPage,
+} from "../types/query"
 import { isRecord } from "../validation"
-
-export interface QuickBooksExchangeRateKey {
-  /** ISO 4217 code of the foreign currency, e.g. `EUR`. */
-  readonly sourceCurrencyCode: string
-  /** YYYY-MM-DD. Omit for the current rate. */
-  readonly asOfDate?: string
-}
 
 /**
  * Read-only rates to the home currency. Rates have no entity ID: read one by currency and date.
- * Queries accept SourceCurrencyCode/AsOfDate predicates but QuickBooks ignores them (verified),
- * so `list` exposes only pagination and a modification bound, in provider order.
+ * QuickBooks ignores SourceCurrencyCode and AsOfDate query predicates, so `list` offers only
+ * pagination and a modification bound, in provider order.
  */
 export interface QuickBooksExchangeRatesResource {
   /** GET /v3/company/{realmId}/exchangerate?sourcecurrencycode=..&asofdate=.. */
@@ -57,7 +54,7 @@ export function createExchangeRatesResource(
       allowedOptions(options, "exchange rate list", ["startPosition", "maxResults", "updatedSince"])
       const { start, count } = page(options)
       const clauses = options.updatedSince === undefined ? [] : [updatedSince(options.updatedSince)]
-      // Exchangerate accepts no ORDERBY field other than MetaData.LastUpdatedTime.
+      // No ORDERBY: QuickBooks cannot sort exchange rates by date or currency.
       return readQueryPage(
         http,
         "Exchangerate",

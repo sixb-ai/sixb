@@ -1,4 +1,3 @@
-import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, quoted, readEntity } from "../query"
 import type { QuickBooksPage, QuickBooksPaymentListOptions } from "../types/query"
 import type { QuickBooksPayment } from "../types/transactions"
@@ -15,7 +14,7 @@ import {
   createInput,
   deleteEntity,
   finiteAmount,
-  type QuickBooksWriteHttp,
+  type QuickBooksPdfHttp,
   revision,
   sendEntity,
   updateEntity,
@@ -48,9 +47,7 @@ export interface QuickBooksPaymentsResource {
   listAll(options?: QuickBooksPaymentListOptions): AsyncIterable<QuickBooksPayment>
 }
 
-export function createPaymentsResource(
-  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
-): QuickBooksPaymentsResource {
+export function createPaymentsResource(http: QuickBooksPdfHttp): QuickBooksPaymentsResource {
   const resource: QuickBooksPaymentsResource = {
     async create(input, options) {
       createInput(input)

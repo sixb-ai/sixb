@@ -1,7 +1,10 @@
 import { listAll, listTransactions, pathId, type QuickBooksReadHttp, quoted } from "../query"
 import type { QuickBooksPage, QuickBooksRecurringTransactionListOptions } from "../types/query"
-import type { QuickBooksRecurringTransaction } from "../types/transactions"
-import { isRecord } from "../validation"
+import type {
+  QuickBooksRecurringTemplateType,
+  QuickBooksRecurringTransaction,
+} from "../types/transactions"
+import { isRecord, templateOf } from "../validation"
 
 /**
  * Read-only recurring templates. Each record is wrapped under its template entity name and
@@ -18,6 +21,21 @@ export interface QuickBooksRecurringTransactionsResource {
   ): AsyncIterable<QuickBooksRecurringTransaction>
 }
 
+const TEMPLATE_TYPES = {
+  Bill: true,
+  CreditMemo: true,
+  Deposit: true,
+  Estimate: true,
+  Invoice: true,
+  JournalEntry: true,
+  Purchase: true,
+  PurchaseOrder: true,
+  RefundReceipt: true,
+  SalesReceipt: true,
+  Transfer: true,
+  VendorCredit: true,
+} as const satisfies Record<QuickBooksRecurringTemplateType, true>
+
 export function createRecurringTransactionsResource(
   http: QuickBooksReadHttp
 ): QuickBooksRecurringTransactionsResource {
@@ -25,8 +43,10 @@ export function createRecurringTransactionsResource(
     get: (id) => readRecurring(http, `recurringtransaction/${pathId(id)}`, id),
     async list(options = {}) {
       const { type, ...query } = options
-      if (type !== undefined && (typeof type !== "string" || !/^[A-Za-z]+$/.test(type)))
-        throw new Error("[SixbQuickBooks] Recurring transaction type must be an entity name.")
+      if (type !== undefined && !Object.hasOwn(TEMPLATE_TYPES, type))
+        throw new Error(
+          `[SixbQuickBooks] Recurring transaction type must be one of: ${Object.keys(TEMPLATE_TYPES).join(", ")}.`
+        )
       return listTransactions(
         http,
         "RecurringTransaction",
@@ -53,15 +73,6 @@ async function readRecurring(
   if (recurringTemplate(wrapper).Id !== id)
     throw new Error("[SixbQuickBooks] RecurringTransaction response ID does not match the request.")
   return wrapper as QuickBooksRecurringTransaction
-}
-
-/** The single template inside a `{ EntityName: template }` wrapper, if there is exactly one. */
-export function templateOf(value: unknown): Record<string, unknown> | undefined {
-  const templates = isRecord(value)
-    ? Object.entries(value).filter(([key, entry]) => /^[A-Z]/.test(key) && isRecord(entry))
-    : []
-  const template = templates.length === 1 ? templates[0]?.[1] : undefined
-  return isRecord(template) ? template : undefined
 }
 
 function recurringTemplate(value: unknown): Record<string, unknown> & { Id: string } {

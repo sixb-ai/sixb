@@ -1,4 +1,3 @@
-import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksInvoiceListOptions, QuickBooksPage } from "../types/query"
 import type { QuickBooksInvoice } from "../types/transactions"
@@ -11,7 +10,7 @@ import type {
   QuickBooksWriteOptions,
 } from "../types/writes"
 import { nonEmpty } from "../validation"
-import { createInput, type QuickBooksWriteHttp, revision, writeEntity } from "../write"
+import { createInput, type QuickBooksPdfHttp, revision, writeEntity } from "../write"
 import { linkedTransactions, salesLines } from "../write-validation"
 
 export interface QuickBooksInvoicesResource {
@@ -37,9 +36,7 @@ export interface QuickBooksInvoicesResource {
   listAll(options?: QuickBooksInvoiceListOptions): AsyncIterable<QuickBooksInvoice>
 }
 
-export function createInvoicesResource(
-  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
-): QuickBooksInvoicesResource {
+export function createInvoicesResource(http: QuickBooksPdfHttp): QuickBooksInvoicesResource {
   const resource: QuickBooksInvoicesResource = {
     async create(input, options) {
       createInput(input)

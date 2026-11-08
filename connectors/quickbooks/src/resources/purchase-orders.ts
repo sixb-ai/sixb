@@ -1,4 +1,3 @@
-import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksPage, QuickBooksPurchaseOrderListOptions } from "../types/query"
 import type { QuickBooksPurchaseOrder } from "../types/transactions"
@@ -14,7 +13,7 @@ import { nonEmpty } from "../validation"
 import {
   createInput,
   deleteEntity,
-  type QuickBooksWriteHttp,
+  type QuickBooksPdfHttp,
   revision,
   sendEntity,
   updateEntity,
@@ -47,7 +46,7 @@ export interface QuickBooksPurchaseOrdersResource {
 }
 
 export function createPurchaseOrdersResource(
-  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
+  http: QuickBooksPdfHttp
 ): QuickBooksPurchaseOrdersResource {
   const resource: QuickBooksPurchaseOrdersResource = {
     async create(input, options) {

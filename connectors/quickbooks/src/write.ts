@@ -1,4 +1,5 @@
 import { QuickBooksWriteError } from "./errors"
+import type { createQuickBooksHttp } from "./http"
 import type { QuickBooksReadHttp } from "./query"
 import { pathId } from "./query"
 import type {
@@ -12,6 +13,10 @@ import { isRecord, nonEmpty } from "./validation"
 export interface QuickBooksWriteHttp extends QuickBooksReadHttp {
   post(path: string, body: unknown, requestId: string, send?: boolean): Promise<unknown>
 }
+
+/** Write transport that can also download form PDFs. */
+export type QuickBooksPdfHttp = QuickBooksWriteHttp &
+  Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
 
 export function revision(input: QuickBooksRevision): QuickBooksRevision {
   nonEmpty(input.Id, "Id")
