@@ -18,9 +18,7 @@ import {
   documentCanvas,
   documentFiles,
   encodeLiveData,
-  LIVE_SYNC_PART_BYTES,
   liveSync,
-  patchText,
 } from "@sixb/core/artifacts/live"
 import { appendArtifactLive } from "@sixb/core/internal/artifacts/live"
 import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
@@ -32,6 +30,8 @@ import * as encoding from "lib0/encoding"
 import * as awarenessProtocol from "y-protocols/awareness"
 import * as syncProtocol from "y-protocols/sync"
 import * as Y from "yjs"
+import { patchText } from "../../core/src/artifacts/live/document"
+import { LIVE_SYNC_PART_BYTES } from "../../core/src/artifacts/live/protocol"
 import {
   ACCESS_RECHECK_MS,
   AWARENESS_SHARE_MS,

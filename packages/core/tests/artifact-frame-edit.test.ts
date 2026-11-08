@@ -7,7 +7,7 @@ import {
   applyBoardEdit,
   boardFramePatches,
   setBoardText,
-} from "../src/artifacts/live"
+} from "../src/artifacts/live/board"
 
 // The frame runtime's editing, run in a DOM: a board served for editing, and the app around it
 // as the frame's parent, which posts requests and hears events.
