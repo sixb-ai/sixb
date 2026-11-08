@@ -1,4 +1,7 @@
+import { getProjectInfoOptions } from "@sixb/client/hooks"
+import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { useCurrentUser } from "../session"
 import {
   type ArtifactTarget,
   artifactTargetFromSearch,
@@ -17,6 +20,8 @@ export function ArtifactPage() {
   const { artifactId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const queries = useQueryClient()
+  const user = useCurrentUser()
   if (!artifactId) return null
 
   // The artifact is the path; the version and part are parameters.
@@ -27,10 +32,16 @@ export function ArtifactPage() {
     artifactId,
   }
 
-  // Asked of the Agent from here, words wait for the conversation at home, in its input.
+  // Asked of the Agent from here, words wait for the conversation at home, in its input, for
+  // this person in this project.
   const draftForAgent = (text: string) => {
-    keepAgentDraft(text)
-    navigate("/")
+    void queries
+      .fetchQuery({ ...getProjectInfoOptions(), staleTime: Number.POSITIVE_INFINITY })
+      .then((project) => {
+        keepAgentDraft({ userId: user?.id ?? null, projectId: project.id, artifactId, text })
+        navigate("/")
+      })
+      .catch(() => navigate("/"))
   }
 
   return (
