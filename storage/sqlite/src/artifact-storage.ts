@@ -298,24 +298,24 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         if (!undone) continue
 
         restored.push(undone)
-        // Undone to it, the turn's restore point is what the artifact holds again.
+        // Undone, it holds the turn's restore point again, and leaves the threads only the turn
+        // shared it in; one kept stays where it was made.
         this.db
           .query(
             `DELETE FROM artifact_restore_points
              WHERE project_id = ? AND artifact_id = ? AND turn_run_id = ?`
           )
           .run(projectId, write.artifactId, turnRunId)
+        this.db
+          .query(
+            `DELETE FROM artifact_threads
+             WHERE project_id = ? AND artifact_id = ? AND linked_by_run_id = ? AND copied = 0`
+          )
+          .run(projectId, write.artifactId, turnRunId)
       }
 
-      // What else the turn left: its writes, and its links.
       this.db
         .query("DELETE FROM artifact_turn_writes WHERE project_id = ? AND turn_run_id = ?")
-        .run(projectId, turnRunId)
-      this.db
-        .query(
-          `DELETE FROM artifact_threads
-           WHERE project_id = ? AND linked_by_run_id = ? AND copied = 0`
-        )
         .run(projectId, turnRunId)
 
       return { restored, deleted }
