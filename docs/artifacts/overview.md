@@ -395,11 +395,11 @@ brainstorm or a retro, a diagram, a mood board.
   100 boards; sizes run from 40 to 8,000 pixels and positions within ±100,000.
 
 Readers drag or scroll to pan, pinch or ⌘-scroll to zoom, fit everything with the controls, and
-press the zoom to go to 100%. Boards run live once they're on screen, up to 12 at once, and keep
-running as the reader zooms out; on the canvas they're pictures, so dragging over one pans.
-Double-click a board, press Enter on it, or press the button by its name to open it: it fills the
-viewer and answers like a page, ← and → step through the boards in order, and Esc goes back to the
-canvas.
+press the zoom to go to 100%. Boards and embeds run live once the view shows them at half their
+size or 360 pixels wide, up to 8 at once, and keep running as the reader zooms out; on the canvas
+they're pictures, so dragging over one pans. Double-click a board, press Enter on it, or press the
+button by its name to open it: it fills the viewer and answers like a page, ← and → step through
+the boards in order, and Esc goes back to the canvas.
 
 Publishing warns of boards that overlap and of notes or text on a board. When the Agent publishes a
 canvas, its sandbox's browser opens each board at its own size, as it checks a page, and the Agent

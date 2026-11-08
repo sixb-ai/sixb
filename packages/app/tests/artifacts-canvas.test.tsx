@@ -10,25 +10,85 @@ import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/lay
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
 import { installDom } from "./helpers/dom"
 
-installDom([
-  "document",
-  "navigator",
-  "Node",
-  "Element",
-  "HTMLElement",
-  "SVGElement",
-  "Event",
-  "MouseEvent",
-  "PointerEvent",
-  "EventTarget",
-  "MutationObserver",
-  "ResizeObserver",
-  "getComputedStyle",
-  "requestAnimationFrame",
-  "cancelAnimationFrame",
-  "matchMedia",
-  "DOMMatrixReadOnly",
-])
+// React Flow measures its view and its items by their offset size, which happy-dom leaves at 0:
+// here the view is 1600 by 1000, and an item the size its style sets.
+const VIEW = { width: 1600, height: 1000 }
+
+function sizeOf(element: Element): { width: number; height: number } {
+  if (element.classList.contains("react-flow__renderer")) return VIEW
+  const style = (element as HTMLElement).style
+  return {
+    width: Number.parseFloat(style.width) || 0,
+    height: Number.parseFloat(style.height) || 0,
+  }
+}
+
+interface ResizeEntry {
+  readonly target: Element
+  readonly contentRect: { readonly width: number; readonly height: number }
+}
+
+/**
+ * Reports the elements it observes once, together, as a browser does after a layout: React Flow
+ * measures the items then, and fits the view to them.
+ */
+class ReportingResizeObserver {
+  readonly #report: (entries: ResizeEntry[]) => void
+  #pending: Element[] = []
+
+  constructor(report: (entries: ResizeEntry[]) => void) {
+    this.#report = report
+  }
+
+  observe(target: Element) {
+    this.#pending.push(target)
+    if (this.#pending.length > 1) return
+
+    queueMicrotask(() => {
+      const targets = this.#pending
+      this.#pending = []
+      this.#report(targets.map((element) => ({ target: element, contentRect: sizeOf(element) })))
+    })
+  }
+
+  unobserve() {}
+
+  disconnect() {}
+}
+
+const browser = installDom(
+  [
+    "document",
+    "navigator",
+    "Node",
+    "Element",
+    "HTMLElement",
+    "SVGElement",
+    "Event",
+    "MouseEvent",
+    "PointerEvent",
+    "EventTarget",
+    "MutationObserver",
+    "getComputedStyle",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "matchMedia",
+    "DOMMatrixReadOnly",
+  ],
+  { values: { ResizeObserver: ReportingResizeObserver } }
+)
+
+for (const [axis, side] of [
+  ["offsetWidth", "width"],
+  ["offsetHeight", "height"],
+] as const) {
+  Object.defineProperty(browser.HTMLElement.prototype, axis, {
+    configurable: true,
+    get(this: HTMLElement) {
+      return sizeOf(this)[side]
+    },
+  })
+}
 
 function canvasOf(value: unknown): Canvas {
   const parsed = parseCanvas(JSON.stringify(value))
@@ -224,6 +284,23 @@ describe("a canvas's board", () => {
     view.unmount()
   })
 
+  test("shows another artifact once the view shows it large enough, as a board runs", async () => {
+    // Fitted to a shape far away, the embed is under half its size: it is its tile. Reproduce by
+    // drawing every embed live, or by working out what runs before the view is fitted: either
+    // way the page runs at under a quarter of its size, the second because it ran at 100% first.
+    const canvas = canvasOf({
+      items: [
+        { id: "plan", type: "embed", src: "artifact:art_p4gep4n000", x: 0, y: 0, w: 480, h: 300 },
+        { id: "far", type: "shape", shape: "rect", x: 6000, y: 0, w: 240, h: 120 },
+      ],
+    })
+    const view = await mount("light", canvas)
+    const plan = view.container.querySelector(`.react-flow__node[data-id="plan"]`)
+    expect(plan?.querySelector(".lucide-link2")).not.toBeNull()
+    expect(plan?.textContent).not.toContain("Unavailable")
+    view.unmount()
+  })
+
   test("draws in the mode it is given, not React Flow's light default", async () => {
     // The app's light tokens answer to `.light`: a board left at React Flow's default draws
     // light in dark mode. Reproduce by dropping colorMode from the board.
@@ -249,6 +326,18 @@ describe("live boards", () => {
     height: 1000,
   })
 
+  test("start a board once it shows at half its size, or 360 pixels wide", () => {
+    // A phone screen, 390 wide, starts at 50%; a laptop's, 1280 wide, once it is 360 pixels
+    // wide, at 28%. Smaller, a page's text can't be read, and its tile shows as much. Reproduce
+    // by starting boards at a fixed width, as 48 pixels once did: both run at 20%.
+    const phone = { id: "phone", x: 0, y: 0, w: 390, h: 844 }
+    const laptop = { id: "laptop", x: 0, y: 0, w: 1280, h: 800 }
+    expect(liveBoards([phone], view(0, 0.5)).size).toBe(1)
+    expect(liveBoards([phone], view(0, 0.45)).size).toBe(0)
+    expect(liveBoards([laptop], view(0, 0.3)).size).toBe(1)
+    expect(liveBoards([laptop], view(0, 0.2)).size).toBe(0)
+  })
+
   test("run the boards on screen, and keep running those that are as the view zooms out", () => {
     // At 100% from the origin, boards 0 to 3 are on screen; board 4 starts past the right edge.
     const near = liveBoards(row, view(0, 1))
@@ -261,8 +350,8 @@ describe("live boards", () => {
     expect([...liveBoards(row, view(0, 0.1), near)].sort()).toEqual(["b0", "b1", "b2", "b3"])
   })
 
-  test("run at most twelve, those nearest the middle of the view", () => {
-    // Twenty boards in four rows of five, all on screen at 42%: twelve run, the corners don't.
+  test("run at most eight, those nearest the middle of the view", () => {
+    // Twenty boards in four rows of five, all on screen at 50%: eight run, the corners don't.
     const grid = Array.from({ length: 20 }, (_, index) => ({
       id: `g${index}`,
       x: (index % 5) * 420,
@@ -270,14 +359,14 @@ describe("live boards", () => {
       w: 390,
       h: 520,
     }))
-    const live = liveBoards(grid, { transform: [40, 20, 0.42], width: 1000, height: 1000 })
+    const view = { transform: [40, 20, 0.5] as const, width: 1000, height: 1000 }
+    const live = liveBoards(grid, view)
     expect(live.size).toBe(MAX_LIVE_BOARDS)
+    expect(MAX_LIVE_BOARDS).toBe(8)
     for (const corner of ["g0", "g4", "g15", "g19"]) expect(live.has(corner)).toBe(false)
     expect(live.has("g7")).toBe(true)
     // A corner already running keeps its place over a board nearer the middle.
-    expect(
-      liveBoards(grid, { transform: [40, 20, 0.42], width: 1000, height: 1000 }, new Set(["g0"]))
-    ).toContain("g0")
+    expect(liveBoards(grid, view, new Set(["g0"]))).toContain("g0")
   })
 })
 
