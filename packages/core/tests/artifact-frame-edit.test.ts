@@ -226,6 +226,22 @@ describe("a board's frame, editing", () => {
     expect(total.hasAttribute("contenteditable")).toBe(false)
   })
 
+  // Guard proof: drop `commentable` from the runtime's click handler; what a script wrote is not
+  // outlined as what the comment is about. Drop `label` from editTarget's scripted target; the
+  // comment cannot quote its words.
+  test("picking what to comment on, outlines and quotes what a script wrote, as it does an element", () => {
+    const { request, events, at, fire } = frame(BOARD)
+    request("edit", { on: true, typing: false })
+
+    const total = at("body>main:0>ul:0>li:0")
+    total.textContent = "Live total: 42"
+    fire(total, "click")
+    expect(events("edit.select").at(-1)?.params).toMatchObject({
+      target: { address: null, kind: "scripted", label: "Live total: 42" },
+    })
+    expect(total.hasAttribute("data-sixb-picked")).toBe(true)
+  })
+
   // Guard proof: apply every patch at once in `edit.patch`; the heading the reader types in is
   // rewritten under their caret.
   test("takes what others changed, keeping the element the reader types in until they leave it", () => {

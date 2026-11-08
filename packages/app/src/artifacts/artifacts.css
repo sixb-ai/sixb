@@ -342,7 +342,7 @@
 
 /* The board a click would comment on, outlined as the pin will be colored. */
 .sixb-artboard[data-commenting] .react-flow__node-board:hover {
-  outline: 2px solid var(--primary);
-  outline-offset: 4px;
+  outline: calc(2px / var(--sixb-zoom, 1)) solid var(--primary);
+  outline-offset: calc(4px / var(--sixb-zoom, 1));
   border-radius: 10px;
 }

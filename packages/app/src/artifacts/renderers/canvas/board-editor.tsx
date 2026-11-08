@@ -315,7 +315,7 @@ export function BoardStage({
           const element = target.address ?? target.within ?? undefined
           onPick({
             ...(element ? { element } : {}),
-            ...(target.address && target.label ? { label: target.label } : {}),
+            ...(target.label ? { label: target.label } : {}),
             point: point(at, target.rect),
             under: Math.min(1, (target.rect.y + target.rect.height) / board.h),
           })
@@ -471,12 +471,11 @@ function draftAbove(draft: DraftPlace): boolean {
  */
 function HoverTag({ target, scale }: { readonly target: FrameEditTarget; readonly scale: number }) {
   const messages = useArtifactMessages().canvas
-  const name =
-    target.address === null
+  const name = target.label
+    ? `“${target.label}”`
+    : target.address === null
       ? messages.comments.elsewhere
-      : target.label
-        ? `“${target.label}”`
-        : messages.edit.kinds[target.kind]
+      : messages.edit.kinds[target.kind]
   const top = target.rect.y * scale
   return (
     <div

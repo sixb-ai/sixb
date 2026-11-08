@@ -258,6 +258,14 @@ export function frameRuntime(): void {
     return copy.textContent ?? ""
   }
 
+  /**
+   * What is drawn as picked or pointed at: the element, or, picking what to comment on, what a
+   * script built too, which a comment can be about though it cannot be edited.
+   */
+  const commentable = (element: Element | null, node: EventTarget | null): Element | null =>
+    element ??
+    (!typable && node instanceof Element && node !== root && node !== document.body ? node : null)
+
   /** The element the reader means by `node`, as the app is told of it. */
   const editTarget = (node: EventTarget | null) => {
     const start = node instanceof Element ? node : null
@@ -270,10 +278,12 @@ export function frameRuntime(): void {
       height: box?.height ?? 0,
     }
     const kind = element?.getAttribute(KIND) ?? ""
+    const shown = start ? spokenWords(start).replace(/\s+/g, " ").trim() : ""
     const scripted = {
       address: null,
       kind: "scripted",
       within: element?.getAttribute(AT) ?? null,
+      ...(shown ? { label: shown.slice(0, MAX_EDIT_LABEL) } : {}),
       rect,
     }
     if (!element) return { element: null, target: scripted }
@@ -370,7 +380,7 @@ export function frameRuntime(): void {
       stopTyping()
 
       const { element, target } = editTarget(event.target)
-      picked = mark("data-sixb-picked", picked, element)
+      picked = mark("data-sixb-picked", picked, commentable(element, event.target))
       // Where the reader clicked, for a comment's pin.
       const at = { x: event.clientX, y: event.clientY }
       postEdit({ event: "edit.select", params: { target, at } })
@@ -386,8 +396,9 @@ export function frameRuntime(): void {
   document.addEventListener("mouseover", (event) => {
     if (!editing || !event.isTrusted) return
     const { element, target } = editTarget(event.target)
-    if (element === pointed && element !== null) return
-    pointed = mark("data-sixb-hover", pointed, element)
+    const shown = commentable(element, event.target)
+    if (shown === pointed && shown !== null) return
+    pointed = mark("data-sixb-hover", pointed, shown)
     postEdit({ event: "edit.hover", params: { target } })
   })
   // The pointer gone from the page, nothing is under it.
