@@ -15,7 +15,17 @@ describe.skipIf(!vault)("Azure Key Vault", () => {
   afterAll(async () => {
     const secret = name.replaceAll("_", "-")
     const child = Bun.spawn(
-      ["az", "keyvault", "secret", "delete", "--vault-name", vault ?? "", "--name", secret],
+      [
+        "az",
+        "keyvault",
+        "secret",
+        "delete",
+        "--only-show-errors",
+        "--vault-name",
+        vault ?? "",
+        "--name",
+        secret,
+      ],
       { stdout: "ignore", stderr: "inherit", timeout: 60_000 }
     )
     await child.exited

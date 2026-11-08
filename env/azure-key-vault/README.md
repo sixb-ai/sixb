@@ -42,6 +42,13 @@ past a revoked credential.
 Key Vault has no bulk read or write: `read` lists the vault and gets each secret, and `write` sets
 one secret per request, a few at a time. A failed write can leave some values written.
 
+A deleted secret keeps its name until the vault purges it, days later. `write` recovers it, which
+keeps its history, and sets the new value over it. For a second or two after a delete the name
+can't be used at all, and `write` waits that out.
+
+A vault's name is its host name, so a vault that doesn't exist fails DNS. While Entra ID's host still
+resolves, that's a refusal, so a deploy stops on a misspelled vault instead of riding it out.
+
 `createServerToken` runs `az` as the signed-in person. It creates a service principal and lets it
 read the one vault: the `Key Vault Secrets User` role on a vault using Azure RBAC, or a `get` and
 `list` access policy on one using access policies. If it can't grant that, it deletes the service

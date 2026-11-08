@@ -127,6 +127,7 @@ Install the package and the [Azure CLI](https://learn.microsoft.com/cli/azure/in
 | Access | Pulling needs the Key Vault Secrets User role on the dev vault; `sixb env set` needs Key Vault Secrets Officer. Add and remove teammates in the Azure portal |
 | Names | Key Vault allows hyphens, not underscores, so `DATABASE_URL` is stored as `DATABASE-URL`, and a secret you name `STRIPE-KEY` in the portal arrives as `STRIPE_KEY`. Names ignore case |
 | Disabled secrets | Skipped, as if they weren't there |
+| Deleted secrets | Setting a name you deleted recovers the secret with the new value |
 | Tests in CI | Sign in with [`azure/login`](https://github.com/Azure/login) before `bun sixb env pull` |
 
 `sixb deploy setup` creates a service principal that can read the prod vault and nothing else, and installs its credential on the server. Run it signed in to the vault's subscription (`az account set --subscription <id>`), as someone who can create app registrations and grant access to the vault: an Owner or Role Based Access Control Administrator on a vault using Azure RBAC, or someone who can change its access policies.

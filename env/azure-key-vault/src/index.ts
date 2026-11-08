@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises"
 import { type EnvName, type EnvSource, EnvSourceUnreachableError } from "@sixb/core/env"
 
 const API_VERSION = "7.5"
@@ -9,6 +10,8 @@ const CLI_TIMEOUT_MS = 60_000
 /** `az ad sp create-for-rbac` retries its role assignment until the new principal replicates. */
 const CREATE_TIMEOUT_MS = 300_000
 const PARALLEL_REQUESTS = 8
+const RECOVERY_CHECKS = 30
+const RECOVERY_CHECK_MS = 2_000
 const INSTALL_URL = "https://learn.microsoft.com/cli/azure/install-azure-cli"
 
 const VAULT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{1,22}[A-Za-z0-9]$/
@@ -98,7 +101,7 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
     env: EnvName,
     token: string,
     url: string,
-    init: { readonly method?: "GET" | "PUT"; readonly body?: unknown } = {}
+    init: { readonly method?: "GET" | "PUT" | "POST"; readonly body?: unknown } = {}
   ): Promise<unknown> {
     const vault = vaults[env]
     let response: Response
@@ -114,6 +117,9 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       })
     } catch (error) {
+      if (await isMissingVault(error)) {
+        throw new Error(`[AzureKeyVault] There is no vault named ${vault}.`, { cause: error })
+      }
       throw new EnvSourceUnreachableError(`[AzureKeyVault] Could not reach the vault ${vault}.`, {
         cause: error,
       })
@@ -131,14 +137,63 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
     }
 
     const body = (await response.json().catch(() => null)) as {
-      readonly error?: { readonly message?: unknown }
+      readonly error?: {
+        readonly message?: unknown
+        readonly innererror?: { readonly code?: unknown }
+      }
     } | null
-    const message = typeof body?.error?.message === "string" ? body.error.message : ""
+    // The first line says what happened. The rest lists the caller, action and resource.
+    const message =
+      typeof body?.error?.message === "string" ? (body.error.message.split(/\r?\n/)[0] ?? "") : ""
     const reason = `${message || response.statusText} (HTTP ${response.status})`
     if (response.status === 429 || response.status >= 500) {
       throw new EnvSourceUnreachableError(`[AzureKeyVault] ${vault}: ${reason}`)
     }
-    throw new Error(`[AzureKeyVault] ${vault}: ${reason}`)
+    const innerCode = body?.error?.innererror?.code
+    throw new KeyVaultRefusal(`[AzureKeyVault] ${vault}: ${reason}`, {
+      status: response.status,
+      ...(typeof innerCode === "string" ? { innerCode } : {}),
+    })
+  }
+
+  /**
+   * Sets one secret. A deleted secret keeps its name until the vault purges it, so writing that
+   * name again recovers it, which keeps its history, and sets the new value over it. For a second
+   * or two after a delete, the name can't be used at all, so this waits that out.
+   */
+  async function setSecret(env: EnvName, token: string, name: string, value: string) {
+    const url = (path: string) => `${vaultOrigin(vaults[env])}${path}?api-version=${API_VERSION}`
+    const secret = encodeURIComponent(secretName(name))
+
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await call(env, token, url(`/secrets/${secret}`), { method: "PUT", body: { value } })
+        return
+      } catch (error) {
+        const state = error instanceof KeyVaultRefusal ? error.innerCode : undefined
+        if (state === "ObjectIsDeletedButRecoverable") {
+          await call(env, token, url(`/deletedsecrets/${secret}/recover`), { method: "POST" })
+          await untilReadable(env, token, url(`/secrets/${secret}`))
+          continue
+        }
+        if (state !== "ObjectIsBeingDeleted" || attempt === RECOVERY_CHECKS) throw error
+      }
+      await sleep(RECOVERY_CHECK_MS)
+    }
+  }
+
+  /** Recovery finishes in the background. Until then the secret reads as not found. */
+  async function untilReadable(env: EnvName, token: string, url: string) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await call(env, token, url)
+        return
+      } catch (error) {
+        const recovering = error instanceof KeyVaultRefusal && error.status === 404
+        if (!recovering || attempt === RECOVERY_CHECKS) throw error
+      }
+      await sleep(RECOVERY_CHECK_MS)
+    }
   }
 
   /**
@@ -223,17 +278,9 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
       }
 
       const token = await accessToken(undefined)
-      const origin = vaultOrigin(vaults[env])
       // Key Vault sets one secret per request. A failure part way leaves the others written,
       // and writing them again is harmless.
-      await mapInParallel(names, (name) =>
-        call(
-          env,
-          token,
-          `${origin}/secrets/${encodeURIComponent(secretName(name))}?api-version=${API_VERSION}`,
-          { method: "PUT", body: { value: values[name] } }
-        )
-      )
+      await mapInParallel(names, (name) => setSecret(env, token, name, values[name] ?? ""))
     },
 
     async createServerToken(env, label) {
@@ -294,11 +341,39 @@ export function azureKeyVault(options: AzureKeyVaultOptions): EnvSource {
   }
 }
 
+/** Key Vault refused a request. `innerCode` names why, such as `ObjectIsDeletedButRecoverable`. */
+class KeyVaultRefusal extends Error {
+  readonly status: number
+  readonly innerCode: string | undefined
+
+  constructor(message: string, details: { readonly status: number; readonly innerCode?: string }) {
+    super(message)
+    this.name = "KeyVaultRefusal"
+    this.status = details.status
+    this.innerCode = details.innerCode
+  }
+}
+
 interface SecretItem {
   readonly id?: unknown
   readonly managed?: unknown
   readonly attributes?: { readonly enabled?: unknown }
 }
+
+/**
+ * A vault's name is its host name, so a misspelled or deleted vault fails DNS. That's a refusal: a
+ * deploy must stop on it rather than ride it out. When Entra ID's host doesn't resolve either, DNS
+ * itself is down, which is an outage.
+ */
+async function isMissingVault(error: unknown): Promise<boolean> {
+  if ((error as { readonly code?: unknown } | null)?.code !== "ENOTFOUND") return false
+  return lookup(new URL(LOGIN_ORIGIN).hostname).then(
+    () => true,
+    () => false
+  )
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 function vaultOrigin(vault: string): string {
   return `https://${vault.toLowerCase()}.vault.azure.net`
@@ -447,7 +522,7 @@ async function servicePrincipalObjectId(appId: string): Promise<string> {
         `[AzureKeyVault] Could not find the new service principal ${appId}: ${azReason(shown.stderr)}`
       )
     }
-    await Bun.sleep(5_000)
+    await sleep(5_000)
   }
 }
 

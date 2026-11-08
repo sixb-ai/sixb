@@ -1,9 +1,19 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, mock, spyOn, test } from "bun:test"
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { EnvSourceUnreachableError } from "@sixb/core/env"
 import { azureKeyVault } from "../src"
+
+/** Whether DNS answers for Entra ID's host, which tells a missing vault from DNS being down. */
+let dnsWorks = true
+mock.module("node:dns/promises", () => ({
+  lookup: async (host: string) => {
+    if (!dnsWorks)
+      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND" })
+    return { address: "20.190.0.1", family: 4 }
+  },
+}))
 
 interface Sent {
   readonly url: URL
@@ -17,7 +27,9 @@ const stdinIsTTY = process.stdin.isTTY
 const directories: string[] = []
 
 afterEach(async () => {
+  jest.useRealTimers()
   mock.restore()
+  dnsWorks = true
   process.stdin.isTTY = stdinIsTTY
   process.env.PATH = PATH
   await Promise.all(directories.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
@@ -240,6 +252,89 @@ describe("azureKeyVault", () => {
       ])
     })
 
+    // Reproduce: drop the recovery in setSecret. Setting a name deleted in the portal then fails
+    // until the vault purges it, days later.
+    test("writes over a deleted secret by recovering it first", async () => {
+      await fakeAz(signedIn)
+      let deleted = true
+      const sent = fakeAzure((request) => {
+        const path = request.url.pathname
+        if (request.method === "PUT" && deleted) {
+          return json(
+            {
+              error: {
+                code: "Conflict",
+                message: "Secret STRIPE-KEY is currently in a deleted but recoverable state.",
+                innererror: { code: "ObjectIsDeletedButRecoverable" },
+              },
+            },
+            409
+          )
+        }
+        if (request.method === "POST" && path === "/deletedsecrets/STRIPE-KEY/recover") {
+          deleted = false
+        }
+        return json({ id: secretId("shop-dev", "STRIPE-KEY"), value: "old" })
+      })
+
+      await source().write("dev", { STRIPE_KEY: "new" })
+
+      expect(sent.map((request) => `${request.method} ${request.url.pathname}`)).toEqual([
+        "PUT /secrets/STRIPE-KEY",
+        "POST /deletedsecrets/STRIPE-KEY/recover",
+        "GET /secrets/STRIPE-KEY",
+        "PUT /secrets/STRIPE-KEY",
+      ])
+      expect(JSON.parse(sent[3]?.body ?? "")).toEqual({ value: "new" })
+    })
+
+    test("waits out the moment after a delete when the name can't be used at all", async () => {
+      await fakeAz(signedIn)
+      const states = ["ObjectIsBeingDeleted", "ObjectIsDeletedButRecoverable"]
+      const sent = fakeAzure((request) => {
+        if (request.url.pathname === "/secrets") return json({ value: [] })
+        const state = request.method === "PUT" ? states.shift() : undefined
+        return state
+          ? json({ error: { code: "Conflict", message: state, innererror: { code: state } } }, 409)
+          : json({ id: secretId("shop-dev", "A"), value: "old" })
+      })
+      // Signs in through the fake az while real time still runs.
+      const client = source()
+      await client.names("dev")
+      sent.length = 0
+      jest.useFakeTimers()
+
+      let settled = false
+      const written = client.write("dev", { A: "new" }).finally(() => {
+        settled = true
+      })
+      for (let turn = 0; !settled && turn < 100; turn++) {
+        await new Promise((resolve) => setImmediate(resolve))
+        jest.advanceTimersByTime(2_000)
+      }
+      await written
+
+      expect(sent.map((request) => `${request.method} ${request.url.pathname}`)).toEqual([
+        "PUT /secrets/A",
+        "PUT /secrets/A",
+        "POST /deletedsecrets/A/recover",
+        "GET /secrets/A",
+        "PUT /secrets/A",
+      ])
+    })
+
+    test("any other conflict is a refusal, with Key Vault's reason", async () => {
+      await fakeAz(signedIn)
+      fakeAzure(() => json({ error: { code: "Conflict", message: "Being purged." } }, 409))
+
+      const error = await source()
+        .write("dev", { A: "1" })
+        .catch((e) => e)
+
+      expect(error).not.toBeInstanceOf(EnvSourceUnreachableError)
+      expect(String(error)).toContain("shop-dev: Being purged. (HTTP 409)")
+    })
+
     test("sends nothing for no values", async () => {
       const sent = fakeAzure(() => json({}))
 
@@ -371,6 +466,29 @@ describe("azureKeyVault", () => {
       expect(await read()).toBeInstanceOf(EnvSourceUnreachableError)
     })
 
+    const notFound = () => {
+      throw Object.assign(new TypeError("getaddrinfo ENOTFOUND shop-prod.vault.azure.net"), {
+        code: "ENOTFOUND",
+      })
+    }
+
+    // Reproduce: drop isMissingVault. A misspelled vault then rides out every deploy as an outage.
+    test("a vault name that doesn't resolve is a refusal: there's no such vault", async () => {
+      fakeAzure(afterLogin(notFound))
+
+      const error = await read()
+
+      expect(error).not.toBeInstanceOf(EnvSourceUnreachableError)
+      expect(String(error)).toContain("There is no vault named shop-prod")
+    })
+
+    test("when nothing resolves, DNS is down, which is an outage", async () => {
+      fakeAzure(afterLogin(notFound))
+      dnsWorks = false
+
+      expect(await read()).toBeInstanceOf(EnvSourceUnreachableError)
+    })
+
     test("Entra ID down means it's unreachable", async () => {
       fakeAzure(() => json({ error: "temporarily_unavailable" }, 503))
 
@@ -381,12 +499,13 @@ describe("azureKeyVault", () => {
     test.each([
       401, 403, 404,
     ])("a %i from the vault is a refusal, with its reason", async (status) => {
-      fakeAzure(afterLogin(() => json({ error: { code: "Forbidden", message: "Denied" } }, status)))
+      const message = "Denied.\nCaller: appid=app-1;oid=o-1\nAction: 'getSecret'"
+      fakeAzure(afterLogin(() => json({ error: { code: "Forbidden", message } }, status)))
 
       const error = await read()
 
       expect(error).not.toBeInstanceOf(EnvSourceUnreachableError)
-      expect(String(error)).toContain(`shop-prod: Denied (HTTP ${status})`)
+      expect(String(error)).toContain(`shop-prod: Denied. (HTTP ${status})`)
     })
 
     test("an expired secret is a refusal, naming Entra's error and not the secret", async () => {
