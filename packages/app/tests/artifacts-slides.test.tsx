@@ -429,6 +429,28 @@ describe("a deck", () => {
     }
   })
 
+  test("says it could not open soon after its frame loads something that never says it is ready", async () => {
+    // A browser that blocks the frame loads its own error page instead. Reproduce by dropping the
+    // frame's `onLoad` in ArtifactFrame: the stage waits out the full 20 seconds.
+    jest.useFakeTimers()
+    try {
+      const version = deckVersion()
+      const ui = render(<Deck cache={frameCache(version)} version={version} />)
+      const iframe = ui.container.querySelector("iframe")
+      if (!iframe) throw new Error("[test] No frame.")
+
+      await act(async () => {
+        fireEvent.load(iframe)
+      })
+      await act(async () => {
+        jest.advanceTimersByTime(2_000)
+      })
+      expect(ui.container.textContent).toContain("These slides could not be opened.")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   test("keeps its filmstrip's frames through the overview", async () => {
     // Reproduce by rendering the Filmstrip only in slide mode: every thumbnail loads again.
     const version = deckVersion({ slides: 2 })

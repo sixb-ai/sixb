@@ -40,6 +40,13 @@ const FRAME_REUSE_MS = 40 * 60 * 1000
 const READY_TIMEOUT_MS = 20_000
 
 /**
+ * How long a frame that finished loading has left to say it is ready: the runtime says so once the
+ * page is parsed, before it loads, so one that loaded without saying it is not the page, such as
+ * the browser's error page for a frame it blocked.
+ */
+const LOADED_READY_MS = 2_000
+
+/**
  * A version in a sandboxed frame, served from the API under a short-lived link. The frame has an
  * opaque origin, so its page cannot read the app's cookies or call the API as the reader: it
  * talks to the app only in messages, and the app listens only to its own frame and reads only
@@ -107,6 +114,7 @@ export function ArtifactFrame({
   const [ready, setReady] = useState<string | null>(null)
   const [shown, setShown] = useState<string | null>(null)
   const [timedOut, setTimedOut] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState<string | null>(null)
   const reportsFailure = failure !== undefined
   const queries = useQueryClient()
   // What the frame shows when it calls: a pinned version runs that version's queries.
@@ -300,9 +308,12 @@ export function ArtifactFrame({
 
   useEffect(() => {
     if (!reportsFailure || !source || ready === source) return
-    const timer = setTimeout(() => setTimedOut(source), READY_TIMEOUT_MS)
+    const timer = setTimeout(
+      () => setTimedOut(source),
+      loaded === source ? LOADED_READY_MS : READY_TIMEOUT_MS
+    )
     return () => clearTimeout(timer)
-  }, [reportsFailure, source, ready])
+  }, [reportsFailure, source, ready, loaded])
   // A link that fails for a later mount leaves a frame that has one as it is.
   const failed =
     reportsFailure && (source === undefined ? frame.isError : timedOut === source && !isReady)
@@ -317,6 +328,7 @@ export function ArtifactFrame({
           src={source}
           title={title}
           loading={reportsFailure ? "eager" : "lazy"}
+          onLoad={() => setLoaded(source)}
           className={cn(
             "absolute inset-0 size-full border-0 bg-transparent transition-opacity duration-200 ease-out motion-reduce:transition-none",
             shown === source ? "opacity-100" : "opacity-0"
