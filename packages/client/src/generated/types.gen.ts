@@ -19510,6 +19510,10 @@ export type GetArtifactBoardPreviewData = {
      * The reader's mode; a canvas whose theme.json pins one is pictured only in it
      */
     theme?: "light" | "dark"
+    /**
+     * full, the default: a PNG of the board at its own size. small: a WebP at most 480 pixels wide, for a canvas that shows many boards at once
+     */
+    size?: "full" | "small"
   }
   url: "/api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview"
 }

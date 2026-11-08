@@ -150,6 +150,12 @@ export const ArtifactBoardPreviewQuerySchema = z
     theme: ArtifactThemeModeSchema.optional().describe(
       "The reader's mode; a canvas whose theme.json pins one is pictured only in it"
     ),
+    size: z
+      .enum(["full", "small"])
+      .optional()
+      .describe(
+        "full, the default: a PNG of the board at its own size. small: a WebP at most 480 pixels wide, for a canvas that shows many boards at once"
+      ),
   })
   .strict()
 

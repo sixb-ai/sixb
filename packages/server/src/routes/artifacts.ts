@@ -17,7 +17,11 @@ import {
   createArtifactFrame,
   serializeArtifactQueryResult,
 } from "@sixb/core/internal/artifacts/frames"
-import { boardPreviewStatuses, boardPreviews } from "@sixb/core/internal/artifacts/publish"
+import {
+  boardPreview,
+  boardPreviewStatuses,
+  boardPreviews,
+} from "@sixb/core/internal/artifacts/publish"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -310,7 +314,13 @@ async function artifactBoardPreviewResponse(
 
     const storage = host.storage.artifacts
     const preview =
-      storage && theme ? (await boardPreviews(storage, version)).get(board)?.get(theme) : undefined
+      storage && theme
+        ? boardPreview(
+            (await boardPreviews(storage, version)).get(board),
+            theme,
+            query.size ?? "full"
+          )
+        : undefined
     const response =
       preview &&
       (await createFileContentResponse({
@@ -757,14 +767,17 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Get the preview of a canvas's board",
           description:
-            "A PNG of the board as its version shows it, in the reader's mode, which a viewer shows until the board is opened. It shows the data the version's author can see. A numbered version's preview never changes, and is cached as such; \"latest\" is revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.",
+            "A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A numbered version's preview never changes, and is cached as such; \"latest\" is revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactBoardPreview",
           security: accessTokenSecurityRequirement("getArtifactBoardPreview"),
           responses: {
             200: {
               description: "The board's preview",
-              content: { "image/png": { schema: { type: "string", format: "binary" } } },
+              content: {
+                "image/png": { schema: { type: "string", format: "binary" } },
+                "image/webp": { schema: { type: "string", format: "binary" } },
+              },
             },
             304: { description: "The preview is unchanged; reuse the privately cached one" },
             400: artifactErrorResponse(400),

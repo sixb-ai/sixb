@@ -407,8 +407,10 @@ canvas, its sandbox's browser opens each board at its own size, as it checks a p
 gets each board's warnings and screenshot, and `overview.png`, the canvas as it opens.
 
 Each board also gets a preview: a picture of it in light and dark, or in the mode `theme.json`
-pins, shown in place of the board until it runs, in the reader's mode. While it is rendered, the
-board shows its outline, and the viewer shows the preview as soon as it is ready.
+pins, shown in place of the board until it runs, in the reader's mode. Each comes in two sizes:
+`full`, a PNG of the board at its own size, and `small`, a WebP at most 480 pixels wide, shown
+while the board is drawn small. While it is rendered, the board shows its outline, and the viewer
+shows the preview as soon as it is ready.
 
 - The Agent's check takes them as it publishes. A version published otherwise, such as boards
   moved in the app, is pictured by the agent worker in a blank sandbox of the project; without
@@ -418,7 +420,7 @@ board shows its outline, and the viewer shows the preview as soon as it is ready
 - A board that reads a query is pictured with the data its publisher could read when they
   published it, which everyone who can open the canvas then sees in its preview; publishing warns
   of it.
-- `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark` serves one
+- `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark&size=small` serves one
   to whoever reads the version, and the version says which boards' previews are `ready`, `pending`,
   or `none`.
 
