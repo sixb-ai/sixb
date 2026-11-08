@@ -22,6 +22,7 @@ import {
   MAX_LIVE_BOARDS,
 } from "../src/artifacts/renderers/canvas/board"
 import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
+import { FAR_BELOW_ZOOM, zoomMarks, zoomOf } from "../src/artifacts/renderers/canvas/items"
 import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 import {
   boardPreviewSize,
@@ -1123,3 +1124,50 @@ describe("a board opened over its canvas", () => {
   })
 })
 
+describe("a canvas board's zoom", () => {
+  /** A React Flow store, as far as the zoom reads it. */
+  function flowStore(zoom: number) {
+    let state = { transform: [0, 0, zoom] as [number, number, number], fitViewQueued: false }
+    const listeners = new Set<() => void>()
+    return {
+      getState: () => state,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      set(next: Partial<typeof state>) {
+        state = { ...state, ...next }
+        for (const listener of listeners) listener()
+      },
+    }
+  }
+
+  test("tells the items only as it changes, not for each node moved", () => {
+    // Reproduce by reading the zoom with useStore in each item in items.tsx: a hundred boards'
+    // selectors run again for every node someone moves.
+    const store = flowStore(0.5)
+    const zoom = zoomOf(store)
+    let told = 0
+    const stop = zoom.subscribe(() => {
+      told += 1
+    })
+
+    store.set({ transform: [40, 0, 0.5] })
+    store.set({ transform: [80, 20, 0.5] })
+    expect(told).toBe(0)
+    store.set({ transform: [80, 20, 0.25] })
+    store.set({ fitViewQueued: true })
+    expect(told).toBe(2)
+    expect(zoom.get()).toEqual({ zoom: 0.25, fitViewQueued: true })
+    expect(zoomOf(store)).toBe(zoom)
+    stop()
+  })
+
+  test("marks the board far once its tiles are too small to breathe", () => {
+    // Reproduce by never marking the board far in zoomMarks: a hundred tiles waiting for their
+    // pictures repaint at every frame, and a remote drag at the fitted view drops frames.
+    expect(zoomMarks(1)).toEqual({ nameScale: "1.000", far: false })
+    expect(zoomMarks(FAR_BELOW_ZOOM).far).toBe(false)
+    expect(zoomMarks(0.06)).toEqual({ nameScale: "2.000", far: true })
+  })
+})

@@ -237,13 +237,18 @@ export function ItemTile({
   }
   return (
     <div
-      className={cn(
-        "flex size-full items-center justify-center bg-card",
-        pending && "motion-safe:animate-pulse"
-      )}
+      className="flex size-full items-center justify-center bg-card"
       {...(pending ? { "aria-busy": true } : {})}
     >
-      <Icon className="size-12 text-muted-foreground/30" strokeWidth={1} aria-hidden="true" />
+      {/*
+       * The icon breathes, not the tile, and only while the board is near enough to see it
+       * (artifacts.css): a hundred tiles breathing are a hundred repaints a frame.
+       */}
+      <Icon
+        className={cn("size-12 text-muted-foreground/30", pending && "motion-safe:animate-pulse")}
+        strokeWidth={1}
+        aria-hidden="true"
+      />
     </div>
   )
 }

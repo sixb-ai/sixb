@@ -286,6 +286,11 @@
   z-index: 2000;
 }
 
+/* Zoomed far out, a tile waiting for its picture is still (renderers/canvas/board.tsx). */
+.sixb-artboard[data-far] [aria-busy] > svg {
+  animation: none;
+}
+
 /* A board an Agent turn is changing: its outline shimmers, a light passing round it. */
 .sixb-agent-board {
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
