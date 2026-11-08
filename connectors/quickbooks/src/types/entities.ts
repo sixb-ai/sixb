@@ -239,3 +239,46 @@ export interface QuickBooksEmailMessage {
   readonly Subject?: string
   readonly Message?: string
 }
+
+export interface QuickBooksCustomerType extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+}
+
+/** Read-only planning data. Detail rows exist per account, period and optional dimension. */
+export interface QuickBooksBudget extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly StartDate?: string
+  readonly EndDate?: string
+  readonly BudgetType?: "ProfitAndLoss" | "BalanceSheet" | (string & {})
+  readonly BudgetEntryType?: "Monthly" | "Quarterly" | "Annually" | (string & {})
+  readonly BudgetDetail?: readonly {
+    readonly BudgetDate?: string
+    readonly Amount?: number
+    readonly AccountRef?: QuickBooksReference
+    readonly CustomerRef?: QuickBooksReference
+    readonly ClassRef?: QuickBooksReference
+    readonly DepartmentRef?: QuickBooksReference
+  }[]
+}
+
+/** Present only when multicurrency is enabled for the company. */
+export interface QuickBooksCompanyCurrency extends QuickBooksEntity {
+  readonly Code: string
+  readonly Name?: string
+  readonly Active?: boolean
+  readonly CustomField?: readonly QuickBooksCustomField[]
+}
+
+/** Keyed by source currency and date; exchange rates have no entity ID. */
+export interface QuickBooksExchangeRate {
+  readonly SourceCurrencyCode: string
+  readonly TargetCurrencyCode?: string
+  readonly Rate?: number
+  readonly AsOfDate?: string
+  readonly SyncToken?: string
+  readonly MetaData?: { readonly CreateTime?: string; readonly LastUpdatedTime?: string }
+  readonly domain?: string
+  readonly sparse?: boolean
+}

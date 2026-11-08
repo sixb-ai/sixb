@@ -5,15 +5,23 @@ import { createAccountsResource } from "./resources/accounts"
 import { createAttachmentsResource } from "./resources/attachments"
 import { createBillPaymentsResource } from "./resources/bill-payments"
 import { createBillsResource } from "./resources/bills"
+import { createBudgetsResource } from "./resources/budgets"
 import { createCdcResource } from "./resources/cdc"
+import { createCompanyCurrenciesResource } from "./resources/company-currencies"
 import { createCreditMemosResource } from "./resources/credit-memos"
+import { createCustomerTypesResource } from "./resources/customer-types"
 import { createCustomersResource } from "./resources/customers"
 import { createEstimatesResource } from "./resources/estimates"
+import { createExchangeRatesResource } from "./resources/exchange-rates"
 import { createInvoicesResource } from "./resources/invoices"
 import { createItemsResource } from "./resources/items"
 import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
 import { createReportsResource } from "./resources/reports"
+import { createTaxAgenciesResource } from "./resources/tax-agencies"
+import { createTaxClassificationsResource } from "./resources/tax-classifications"
+import { createTaxCodesResource } from "./resources/tax-codes"
+import { createTaxRatesResource } from "./resources/tax-rates"
 import { createTermsResource } from "./resources/terms"
 import { createVendorCreditsResource } from "./resources/vendor-credits"
 import { createVendorsResource } from "./resources/vendors"
@@ -87,6 +95,14 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
         bills: createBillsResource(http),
         billPayments: createBillPaymentsResource(http),
         vendorCredits: createVendorCreditsResource(http),
+        exchangeRates: createExchangeRatesResource(http),
+        companyCurrencies: createCompanyCurrenciesResource(http),
+        budgets: createBudgetsResource(http),
+        taxClassifications: createTaxClassificationsResource(http),
+        taxAgencies: createTaxAgenciesResource(http),
+        taxRates: createTaxRatesResource(http),
+        taxCodes: createTaxCodesResource(http),
+        customerTypes: createCustomerTypesResource(http),
       }
     },
   }

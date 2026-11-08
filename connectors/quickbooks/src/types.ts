@@ -3,15 +3,23 @@ import type { QuickBooksAccountsResource } from "./resources/accounts"
 import type { QuickBooksAttachmentsResource } from "./resources/attachments"
 import type { QuickBooksBillPaymentsResource } from "./resources/bill-payments"
 import type { QuickBooksBillsResource } from "./resources/bills"
+import type { QuickBooksBudgetsResource } from "./resources/budgets"
 import type { QuickBooksCdcResource } from "./resources/cdc"
+import type { QuickBooksCompanyCurrenciesResource } from "./resources/company-currencies"
 import type { QuickBooksCreditMemosResource } from "./resources/credit-memos"
+import type { QuickBooksCustomerTypesResource } from "./resources/customer-types"
 import type { QuickBooksCustomersResource } from "./resources/customers"
 import type { QuickBooksEstimatesResource } from "./resources/estimates"
+import type { QuickBooksExchangeRatesResource } from "./resources/exchange-rates"
 import type { QuickBooksInvoicesResource } from "./resources/invoices"
 import type { QuickBooksItemsResource } from "./resources/items"
 import type { QuickBooksPaymentsResource } from "./resources/payments"
 import type { QuickBooksPreferencesResource } from "./resources/preferences"
 import type { QuickBooksReportsResource } from "./resources/reports"
+import type { QuickBooksTaxAgenciesResource } from "./resources/tax-agencies"
+import type { QuickBooksTaxClassificationsResource } from "./resources/tax-classifications"
+import type { QuickBooksTaxCodesResource } from "./resources/tax-codes"
+import type { QuickBooksTaxRatesResource } from "./resources/tax-rates"
 import type { QuickBooksTermsResource } from "./resources/terms"
 import type { QuickBooksVendorCreditsResource } from "./resources/vendor-credits"
 import type { QuickBooksVendorsResource } from "./resources/vendors"
@@ -83,6 +91,14 @@ export interface QuickBooksClient {
   readonly items: QuickBooksItemsResource
   readonly terms: QuickBooksTermsResource
   readonly preferences: QuickBooksPreferencesResource
+  readonly exchangeRates: QuickBooksExchangeRatesResource
+  readonly companyCurrencies: QuickBooksCompanyCurrenciesResource
+  readonly budgets: QuickBooksBudgetsResource
+  readonly taxClassifications: QuickBooksTaxClassificationsResource
+  readonly taxAgencies: QuickBooksTaxAgenciesResource
+  readonly taxRates: QuickBooksTaxRatesResource
+  readonly taxCodes: QuickBooksTaxCodesResource
+  readonly customerTypes: QuickBooksCustomerTypesResource
   readonly companyInfo: {
     /** Sparse update using CompanyInfo.Id, which is distinct from the realm ID. */
     update(
