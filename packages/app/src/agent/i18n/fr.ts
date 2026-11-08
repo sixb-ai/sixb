@@ -117,6 +117,9 @@ export const fr: Translation<AgentMessages> = {
     searching: "Recherche…",
     empty: (query) => `Aucun objet trouvé pour ${quoted(query)}`,
     remove: (label) => `Retirer le contexte ${label}`,
+    showComments: (label) => `Afficher ${label}`,
+    someone: "Quelqu’un",
+    replies: (count) => (count === 1 ? "1 réponse" : `${count} réponses`),
     unnamed: "Contexte",
   },
   models: {

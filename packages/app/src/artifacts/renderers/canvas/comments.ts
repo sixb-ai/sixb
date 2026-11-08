@@ -7,7 +7,6 @@ import {
   resolveArtifactComment,
 } from "@sixb/client"
 import { listArtifactCommentsOptions, listArtifactCommentsQueryKey } from "@sixb/client/hooks"
-import { quoteArtifactComment } from "@sixb/core/artifacts"
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo } from "react"
 import { useCurrentUser } from "../../../session"
@@ -222,17 +221,4 @@ export function useCommentAuthors(): (
     if (own) return { name: user.displayName ?? user.email ?? authorName ?? "", you: true }
     return authorName ? { name: authorName, you: false } : null
   }
-}
-
-/**
- * The message that asks the Agent to act on these comments: a line that says so, then each
- * comment quoted with where it is, as the Agent's skill reads them.
- */
-export function agentDraftOf(intro: string, threads: readonly CommentThread[]): string {
-  const quoted = threads.map(({ comment, replies }) => {
-    const lines = [`- ${quoteArtifactComment(comment)}`]
-    for (const reply of replies) lines.push(`  - ${reply.body.replace(/\s+/g, " ").trim()}`)
-    return lines.join("\n")
-  })
-  return [intro, ...quoted].join("\n")
 }

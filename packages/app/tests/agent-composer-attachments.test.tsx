@@ -2,7 +2,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bu
 import { client } from "@sixb/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor } from "@testing-library/react"
+import { useLayoutEffect } from "react"
 import { Composer, type ComposerProps } from "../src/agent/components/composer"
+import { ContextChips } from "../src/agent/components/context-chips"
 import { useComposerInsertion } from "../src/agent/composer-insertion"
 import { installDom } from "./helpers/dom"
 
@@ -24,10 +26,24 @@ installDom([
   "PointerEvent",
   "MutationObserver",
   "ResizeObserver",
+  "DOMRect",
   "getComputedStyle",
   "requestAnimationFrame",
   "cancelAnimationFrame",
 ])
+
+// Radix picks its layout effect when it loads, a no-op without a `document`, and its popovers then
+// never mount: it is given React's own for this file, as agent-context-meter.test.tsx does.
+const radix = Bun.resolveSync("radix-ui", Bun.resolveSync("@sixb/ui/components", import.meta.dir))
+const layoutEffect = Bun.resolveSync(
+  "@radix-ui/react-use-layout-effect",
+  Bun.resolveSync("@radix-ui/react-portal", Bun.resolveSync("@radix-ui/react-dialog", radix))
+)
+const loaded: typeof useLayoutEffect = (await import(layoutEffect)).useLayoutEffect
+mock.module(layoutEffect, () => ({ useLayoutEffect }))
+afterAll(() => {
+  mock.module(layoutEffect, () => ({ useLayoutEffect: loaded }))
+})
 
 const originalConfig = client.getConfig()
 
@@ -169,29 +185,97 @@ describe("Composer attachments", () => {
   })
 })
 
-// Guard proof: set the inserted words in place of the input's (`setValue(insertion.text)`); what
-// the reader had written is lost.
-test("words handed to the input join what the reader is writing, and are not sent", async () => {
-  const view = renderComposer()
-  fireEvent.focusIn(view.input())
-  fireEvent.input(view.input(), { target: { value: "Also:" } })
-  fireEvent.keyUp(view.input(), { key: ":" })
+const comments = {
+  kind: "app-state" as const,
+  id: "artifact-comments:art_1",
+  label: "2 comments · Summer sale",
+  description: "Comments the person chose.",
+  value: {
+    artifactId: "art_1",
+    title: "Summer sale",
+    comments: [
+      {
+        id: "cmt_1",
+        quote: "[landing · body>main:0>h1:0 · revision 3 · comment cmt_1] Warmer title",
+        author: "Ava Martin",
+        body: "Warmer title",
+        replies: [],
+      },
+      {
+        id: "cmt_2",
+        quote: "[landing · revision 3 · comment cmt_2] Bigger button",
+        author: null,
+        body: "Bigger button",
+        replies: ["Agreed"],
+      },
+    ],
+  },
+}
 
-  view.rerender({ insertion: { text: "- [home · revision 3] Warmer colors", nonce: 1 } })
-  await waitFor(() =>
-    expect(view.input().value).toBe("Also:\n\n- [home · revision 3] Warmer colors")
-  )
+// Guard proof: set the handed words in place of the input's (`setValue(text)`); what the reader
+// wrote is lost. Drop the context branch of the insertion effect; no chip shows, and the comments
+// never reach the Agent.
+test("comments handed to the input join it as a chip, its words the reader's, and nothing is sent", async () => {
+  const view = renderComposer()
+  view.rerender({
+    insertion: { text: "Please address these comments.", context: comments, nonce: 1 },
+  })
+  await waitFor(() => expect(view.input().value).toBe("Please address these comments."))
+  expect(view.getByRole("button", { name: "Show 2 comments · Summer sale" })).toBeTruthy()
+  // The reader reads the comments' words, never where the Agent finds them.
+  expect(view.container.textContent).not.toContain("body>")
+
+  // What the reader wrote stays; the same comments handed again make one chip.
+  fireEvent.focusIn(view.input())
+  fireEvent.input(view.input(), { target: { value: "Keep it short" } })
+  fireEvent.keyUp(view.input(), { key: "t" })
+  view.rerender({
+    insertion: { text: "Please address these comments.", context: comments, nonce: 2 },
+  })
+  await waitFor(() => expect(view.input().value).toBe("Keep it short"))
+  expect(view.getAllByRole("button", { name: "Show 2 comments · Summer sale" })).toHaveLength(1)
   expect(view.onSend).not.toHaveBeenCalled()
 
-  // More words, handed later, join after them.
-  view.rerender({ insertion: { text: "Done.", nonce: 2 } })
-  await waitFor(() => expect(view.input().value).toEndWith("Warmer colors\n\nDone."))
+  // Sent, they go as the message's context.
+  await act(async () => {
+    fireEvent.keyDown(view.input(), { key: "Enter" })
+  })
+  expect(view.onSend).toHaveBeenCalledWith(
+    "Keep it short",
+    [],
+    [{ context: comments, origin: "explicit" }]
+  )
+})
+
+// Guard proof: render the chip's label without CommentsPreview; a tap shows nothing of what the
+// reader sends.
+test("a comments chip shows the comments' words on a tap", async () => {
+  const view = render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ContextChips entries={[{ context: comments, origin: "explicit" }]} />
+    </QueryClientProvider>
+  )
+  await act(async () => {
+    fireEvent.click(view.getByRole("button", { name: "Show 2 comments · Summer sale" }))
+  })
+  const preview = await waitFor(() => {
+    const found = document.querySelector("[data-comments-preview]")
+    if (!found) throw new Error("Expected the comments' preview.")
+    return found
+  })
+  expect(preview.textContent).toContain("Ava MartinWarmer title")
+  expect(preview.textContent).toContain("SomeoneBigger button1 reply")
+  expect(preview.textContent).not.toContain("cmt_")
+  view.unmount()
+  await act(async () => {
+    await new Promise((done) => setTimeout(done, 20))
+  })
 })
 
 // Guard proof: keep the insertion once the composer took it (`inserted` changing nothing); the
 // composer drawn again, as the first message replaces the welcome, adds the words a second time.
 test("words handed to the input join it once, however often the composer is drawn again", async () => {
-  let insert: (text: string) => void = () => {}
+  let insert: (draft: { readonly text: string }) => void = () => {}
   function Conversation({ drawing }: { readonly drawing: number }) {
     const insertion = useComposerInsertion()
     insert = insertion.insert
@@ -212,8 +296,8 @@ test("words handed to the input join it once, however often the composer is draw
   )
   const input = () => view.getByLabelText("Message") as HTMLTextAreaElement
 
-  await act(async () => insert("- [home · revision 3] Warmer colors"))
-  await waitFor(() => expect(input().value).toBe("- [home · revision 3] Warmer colors"))
+  await act(async () => insert({ text: "Please address these comments." }))
+  await waitFor(() => expect(input().value).toBe("Please address these comments."))
 
   view.rerender(
     <QueryClientProvider client={queryClient}>

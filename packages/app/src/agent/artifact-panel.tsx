@@ -32,7 +32,7 @@ import {
   type ViewerTarget,
   viewerTargetKey,
 } from "../artifacts/target"
-import { AgentDraftContext } from "../artifacts/view-context"
+import { type AgentDraft, AgentDraftContext } from "../artifacts/view-context"
 import { Viewer } from "../artifacts/viewer"
 import {
   type ArtifactPanelPresentation,
@@ -107,7 +107,7 @@ export interface ArtifactPanelRootProps {
    * Puts words in the conversation's input, as an artifact asks the Agent something: the panel
    * closes when it covers the conversation, so the reader sees them there. None for an observer.
    */
-  readonly onAgentDraft?: (text: string) => void
+  readonly onAgentDraft?: (draft: AgentDraft) => void
 }
 
 /**
@@ -229,8 +229,8 @@ export function ArtifactPanelRoot({
   const agentDraft = useMemo(
     () =>
       onAgentDraft
-        ? (text: string) => {
-            onAgentDraft(text)
+        ? (draft: AgentDraft) => {
+            onAgentDraft(draft)
             if (presentation !== "panel") close()
           }
         : null,
