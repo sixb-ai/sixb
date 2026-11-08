@@ -189,6 +189,90 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
+      describe("with replace", () => {
+        const id = "artifact:art_1:previews"
+        const asked = (runId: string, availableAt?: string) => ({
+          id,
+          type: "sync.run.requested" as const,
+          payload: { runId },
+          replace: true,
+          ...(availableAt ? { availableAt } : {}),
+        })
+        const claimOne = (queues: Queues) =>
+          queues.syncRuns.claim({ projectId: "project-a", workerId: "worker-1", limit: 2 })
+
+        test("replaces a waiting job: its payload and when it is due", async () => {
+          await withQueues(async (queues) => {
+            const later = new Date(Date.now() + 60_000).toISOString()
+            await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("first", later)] })
+
+            await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("second")] })
+            const claims = await claimOne(queues)
+
+            expect(claims.map((claim) => claim.job.payload.runId)).toEqual(["second"])
+            expect(claims[0]?.job.attempt).toBe(1)
+          })
+        })
+
+        test("delivers a job already completed again, as the one asked for", async () => {
+          await withQueues(async (queues) => {
+            await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("first")] })
+            const [claimed] = await claimOne(queues)
+            await queues.syncRuns.complete({
+              projectId: "project-a",
+              jobId: id,
+              leaseId: claimed!.leaseId,
+            })
+
+            await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("second")] })
+            const claims = await claimOne(queues)
+
+            expect(claims.map((claim) => claim.job.payload.runId)).toEqual(["second"])
+            expect(claims[0]?.job.attempt).toBe(1)
+          })
+        })
+
+        test("lets a claimed job finish its delivery, then waits as the one asked for", async () => {
+          await withQueues(async (queues) => {
+            await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("first")] })
+            const [claimed] = await claimOne(queues)
+
+            await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("second")] })
+            const meanwhile = await claimOne(queues)
+            await queues.syncRuns.complete({
+              projectId: "project-a",
+              jobId: id,
+              leaseId: claimed!.leaseId,
+            })
+            const claims = await claimOne(queues)
+
+            expect(meanwhile).toHaveLength(0)
+            expect(claims.map((claim) => claim.job.payload.runId)).toEqual(["second"])
+            expect(claims[0]?.job.attempt).toBe(1)
+          })
+        })
+
+        test("waits as the one asked for when a claimed job is retried or failed", async () => {
+          await withQueues(async (queues) => {
+            const later = new Date(Date.now() + 60_000).toISOString()
+
+            for (const settle of ["retry", "fail"] as const) {
+              await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("first")] })
+              const [claimed] = await claimOne(queues)
+              await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [asked("second")] })
+
+              const at = { projectId: "project-a", jobId: id, leaseId: claimed!.leaseId }
+              if (settle === "retry") await queues.syncRuns.retry({ ...at, availableAt: later })
+              else await queues.syncRuns.fail({ ...at, failure: TERMINAL_FAILURE })
+              const [next] = await claimOne(queues)
+
+              expect(next?.job.payload.runId).toBe("second")
+              await queues.syncRuns.complete({ ...at, leaseId: next!.leaseId })
+            }
+          })
+        })
+      })
+
       test("returns empty array when no jobs are passed", async () => {
         await withQueues(async (queues) => {
           const result = await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [] })
