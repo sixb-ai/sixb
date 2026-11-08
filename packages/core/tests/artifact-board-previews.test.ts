@@ -7,10 +7,10 @@ import type {
   SandboxFactory,
 } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
+import { BOARD_PREVIEW_WAIT_MS } from "../src/artifacts/canvas"
 import type { CanvasOutline } from "../src/artifacts/outline"
 import {
   BOARD_PREVIEW_GRACE_MS,
-  BOARD_PREVIEW_WAIT_MS,
   boardPreviewStatuses,
   boardRenderKey,
   missingBoardPreviews,

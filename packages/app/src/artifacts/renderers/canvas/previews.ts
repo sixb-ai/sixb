@@ -1,4 +1,5 @@
 import { client, getArtifactVersion } from "@sixb/client"
+import { BOARD_PREVIEW_WAIT_MS } from "@sixb/core/artifacts"
 import { type Query, useQuery } from "@tanstack/react-query"
 import type { ArtifactVersion } from "../../queries"
 
@@ -11,12 +12,6 @@ export type BoardPreviewStatus = "ready" | "pending" | "none"
 export type BoardPreviews = Readonly<Record<string, BoardPreviewStatus>>
 
 const NO_PREVIEWS: BoardPreviews = {}
-
-/**
- * How long after a version is published its pictures may still come, as the server waits for
- * them: past it, the server says `none` for what is missing, so the viewer stops asking.
- */
-export const PREVIEW_WAIT_MS = 15 * 60_000
 
 /** The first look again for pictures still rendered, and the longest between two. */
 const FIRST_CHECK_MS = 2_000
@@ -34,7 +29,7 @@ export function nextPreviewCheck(
 ): number | false {
   if (!Object.values(previews).includes("pending")) return false
 
-  if (now - Date.parse(version.createdAt) >= PREVIEW_WAIT_MS) return false
+  if (now - Date.parse(version.createdAt) >= BOARD_PREVIEW_WAIT_MS) return false
 
   return Math.min(LONGEST_CHECK_MS, FIRST_CHECK_MS * 1.5 ** checks)
 }
