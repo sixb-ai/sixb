@@ -80,8 +80,11 @@ edit in the app, such as a sheet's cells or columns or a canvas's notes and layo
 another conversation or the project's code. Start from it as it is, and keep its changes in yours
 unless the user asks you to undo them; say what you built on when you reply.
 
-If the artifact changes while you work, `update_artifact` refuses rather than write over what it
-never saw, says who changed it, and installs it in place of your copy. Start again from that copy,
+When others changed a canvas while you worked, `update_artifact` merges your changes with theirs
+and writes the merged result into the folder you updated from: keep editing it.
+
+If another kind of artifact changes while you work, `update_artifact` refuses rather than write
+over what it never saw, says who changed it, and installs it in place of your copy. Start again from that copy,
 keep its changes, make yours again, and update it.
 
 An entry without a `directory` is not installed: the conversation's artifacts were too large to
