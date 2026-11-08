@@ -18,7 +18,7 @@ the question, answer in the chat.
 | `sheet` | Tabular data the reader sorts, sums, charts, or downloads: metrics, lists, trackers, exports | `sheet.md` |
 | `slides` | A deck to present: a review, a pitch, a plan for a meeting | `slides.md` |
 | `page` | A small web app the reader works with: a calculator, a planner, a dashboard with filters | `page.md` |
-| `canvas` | Screens side by side with arrows, a brainstorm or retro of notes, a diagram | `canvas.md` |
+| `canvas` | Work seen more than read, laid out in two dimensions: screens or frames side by side (a flow, a storyboard, variants, a moodboard), a brainstorm or retro of notes, a diagram | `canvas.md` |
 | `file` | One file in a format the user asked for (PDF, DOCX, XLSX, PPTX, CSV), or a binary | `file.md` |
 
 To show or link to another artifact, such as a sheet's chart in a report, read `references.md`.
@@ -26,7 +26,9 @@ Data from the project's objects goes in a query, so the artifact stays live: rea
 
 Prefer a `document` to a DOCX or PDF, a `sheet` to an XLSX or CSV file, and `slides` to a PPTX,
 unless the user asked for that format: they render in the app, and their versions stay readable side by side. A report
-with a table of a dozen rows is a document; data the reader works with is a sheet.
+with a table of a dozen rows is a document; data the reader works with is a sheet. Work made of
+pictures, such as screens, shots, or posters, is a canvas even when notes come with it: the notes
+go beside each picture.
 
 ## Publish
 
