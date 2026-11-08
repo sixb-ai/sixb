@@ -383,7 +383,9 @@ describe("an artifact edited live", () => {
     await marie.settle()
     await save()
     expect(marie.statuses().at(-1)).toMatchObject({ state: "saved" })
-    expect(written().sv.get(marie.doc.clientID)).toBe(Y.getState(marie.doc.store, marie.doc.clientID))
+    expect(written().sv.get(marie.doc.clientID)).toBe(
+      Y.getState(marie.doc.store, marie.doc.clientID)
+    )
 
     // Deleting the note moves no clock: only the delete set says it was written.
     let removal: Uint8Array | undefined
