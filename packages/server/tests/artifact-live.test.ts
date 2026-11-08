@@ -348,9 +348,40 @@ describe("an artifact edited live", () => {
       artifactId: context.artifactId,
       state: "saved",
       revision: version.revision,
+      stateVector: expect.any(String),
     })
     // Written as the last editor.
     expect(version.author).toEqual({ type: "user", id: "bob" })
+  })
+
+  // Guard proof: send the document's state vector as it is now in LiveRoom.status, rather than
+  // the one written back; a change made since reads as written, and a client forgets it.
+  test("says what it wrote back as a state vector, which a change made since is past", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    await marie.join()
+    await marie.settle()
+
+    const written = () => {
+      const status = marie.statuses().at(-1)
+      if (status?.type !== "status") throw new Error("Expected a status.")
+      return Y.decodeStateVector(decodeLiveData(status.stateVector) as Uint8Array)
+    }
+    const own = () => Y.decodeStateVector(Y.encodeStateVector(marie.doc)).get(marie.doc.clientID)
+
+    marie.canvas.items.get("hi")?.set("x", 320)
+    await marie.settle()
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await marie.settle()
+    expect(marie.statuses().at(-1)).toMatchObject({ state: "saved" })
+    expect(written().get(marie.doc.clientID)).toBe(own())
+
+    marie.canvas.items.get("hi")?.set("x", 640)
+    await marie.settle()
+    expect(marie.statuses().at(-1)).toMatchObject({ state: "unsaved" })
+    expect(written().get(marie.doc.clientID)).toBeLessThan(own() as number)
   })
 
   test("writes back changes made without pause at most every few seconds, and when the last editor leaves", async () => {

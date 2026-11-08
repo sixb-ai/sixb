@@ -109,6 +109,8 @@ export class LiveRoom {
   readonly awareness: awarenessProtocol.Awareness
   private readonly members = new Map<string, Member>()
   private synced: Synced
+  /** What the document held when it was last written back: a client forgets what it covers. */
+  private savedVector: Uint8Array
   private dirty = false
   /** What another server heard is not known to be written yet. */
   private unwritten = false
@@ -150,6 +152,7 @@ export class LiveRoom {
     private readonly onClose: (room: LiveRoom) => void
   ) {
     this.synced = synced
+    this.savedVector = Y.encodeStateVector(doc)
     this.doc = doc
     this.shadow = copyOf(doc)
     this.awareness = new awarenessProtocol.Awareness(this.doc)
@@ -436,10 +439,11 @@ export class LiveRoom {
 
     try {
       const update = Y.encodeStateAsUpdate(this.doc)
+      const vector = Y.encodeStateVector(this.doc)
       const snapshot = documentFiles(this.doc)
       const files = await storeLiveFiles(this.host.blobStorage, snapshot, this.synced.files)
       if (sameArtifactFiles(files, this.synced.files)) {
-        this.saved(this.synced)
+        this.saved(this.synced, vector)
         return this.closeWhenDone()
       }
 
@@ -458,19 +462,23 @@ export class LiveRoom {
       if (published.merged && stored) {
         Y.applyUpdate(this.doc, await readDocumentState(this.host.blobStorage, stored.file), MERGED)
       }
-      this.saved({
-        revision: published.version.revision,
-        title: published.version.title,
-        files: published.version.files,
-      })
+      this.saved(
+        {
+          revision: published.version.revision,
+          title: published.version.title,
+          files: published.version.files,
+        },
+        vector
+      )
     } catch (error) {
       this.failed(author, error)
     }
     this.closeWhenDone()
   }
 
-  private saved(synced: Synced): void {
+  private saved(synced: Synced, vector: Uint8Array): void {
     this.synced = synced
+    this.savedVector = vector
     this.attempts = 0
     this.error = undefined
     this.setState(this.dirty ? "unsaved" : "saved", true)
@@ -565,6 +573,8 @@ export class LiveRoom {
       mergeIntoDocument(this.doc, base, next, MERGED)
     }
     this.synced = { revision: version.revision, title: version.title, files: version.files }
+    // Nothing here waits to be written: the document is all stored now.
+    if (!this.dirty) this.savedVector = Y.encodeStateVector(this.doc)
     this.setState(this.dirty ? this.state : "saved", true)
   }
 
@@ -830,6 +840,7 @@ export class LiveRoom {
       artifactId: this.artifactId,
       state: this.state,
       revision: this.synced.revision,
+      stateVector: encodeLiveData(this.savedVector),
       ...(this.state === "failed" && this.error ? { error: this.error } : {}),
     }
   }
