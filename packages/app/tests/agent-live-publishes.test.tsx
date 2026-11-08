@@ -98,3 +98,58 @@ describe("a run's first publish", () => {
     }
   })
 })
+
+describe("a run's writes to an artifact", () => {
+  /** An `update_artifact` call that wrote the current version, version 2, at `revision`. */
+  const wrote = (revision: number): NormalizedPart => ({
+    kind: "tool",
+    tool: {
+      toolName: "update_artifact",
+      state: "output-available",
+      input: { id: "art_review0001", title: "Q3 review" },
+      output: {
+        artifactId: "art_review0001",
+        version: 2,
+        revision,
+        open: true,
+        kind: "document",
+        title: "Q3 review",
+        warnings: [],
+      },
+    },
+  })
+
+  test("each read the artifact again, though its version stays the same", async () => {
+    // Reproduce by keeping a write by its version: the second write reads nothing again, and the
+    // open version shows what the first left.
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    const invalidated: unknown[] = []
+    const invalidate = cache.invalidateQueries.bind(cache)
+    cache.invalidateQueries = ((filters) => {
+      invalidated.push(filters?.queryKey)
+      return invalidate(filters)
+    }) as typeof cache.invalidateQueries
+    const ui = (parts: readonly NormalizedPart[]) => (
+      <QueryClientProvider client={cache}>
+        <MemoryRouter>
+          <ArtifactPanelRoot compact={false} scopeKey="thread">
+            <Conversation live={{ ...createLiveRunState("run_writes"), active: true, parts }} />
+          </ArtifactPanelRoot>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const view = render(ui([wrote(5)]))
+    const reads = () =>
+      invalidated.filter(
+        (key) =>
+          JSON.stringify(key) ===
+          JSON.stringify([{ _id: "getArtifactVersion", path: { artifactId: "art_review0001" } }])
+      ).length
+    expect(reads()).toBe(1)
+
+    await act(async () => {
+      view.rerender(ui([wrote(5), wrote(7)]))
+    })
+    expect(reads()).toBe(2)
+  })
+})

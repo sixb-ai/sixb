@@ -1,7 +1,7 @@
-import { getArtifactQueryKey } from "@sixb/client/hooks"
 import { isMobileViewport } from "@sixb/ui/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
+import { artifactChanged } from "../../artifacts/queries"
 import { useArtifactPanel } from "../artifact-panel"
 import type { NormalizedPart } from "../parts"
 import { turnArtifacts } from "./interpret"
@@ -10,9 +10,9 @@ import { turnArtifacts } from "./interpret"
 const openedRuns = new Set<string>()
 
 /**
- * Follows what a live turn publishes: each new version refreshes the artifact and every list of
- * artifacts, and the turn's first publish opens the panel on it, at its latest version so later
- * versions of the turn replace it in place. It opens only beside the conversation or over the app:
+ * Follows what a live turn publishes: each write, by its revision, refreshes the artifact and every
+ * list of artifacts, and the turn's first publish opens the panel on it, at its latest version so
+ * the turn's later writes show in place. It opens only beside the conversation or over the app:
  * a dialog would take the reader's focus, and the composer's, while the Agent is still working,
  * so there the card waits to be opened.
  */
@@ -26,17 +26,13 @@ export function useLivePublishes(live: {
 
   useEffect(() => {
     const published = turnArtifacts(live.parts)
-    let changed = false
     for (const artifact of published) {
-      const key = `${artifact.artifactId}@${artifact.version}`
+      // An open version keeps its number as the turn writes it: each write is its revision.
+      const key = `${artifact.artifactId}@${artifact.version}r${artifact.revision ?? ""}`
       if (seen.current.has(key)) continue
       seen.current.add(key)
-      changed = true
-      void queryClient.invalidateQueries({
-        queryKey: getArtifactQueryKey({ path: { artifactId: artifact.artifactId } }),
-      })
+      artifactChanged(queryClient, artifact.artifactId)
     }
-    if (changed) void queryClient.invalidateQueries({ queryKey: [{ _id: "listArtifacts" }] })
 
     const first = published[0]
     if (!first || !panel || !live.runId || openedRuns.has(live.runId)) return

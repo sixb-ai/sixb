@@ -820,6 +820,11 @@ export const fr: Translation<AgentMessages> = {
     published: (title) => (title ? `${title} publié` : "Artefact publié"),
     publishFailed: (title) =>
       title ? `Impossible de publier ${title}` : "Impossible de publier l’artefact",
+    updating: (title) => (title ? `Mise à jour de ${title}` : "Mise à jour d’un artefact"),
+    updated: (title) => (title ? `${title} mis à jour` : "Artefact mis à jour"),
+    updateFailed: (title) =>
+      title ? `Impossible de mettre à jour ${title}` : "Impossible de mettre à jour l’artefact",
+    changed: "Mis à jour",
     open: (title) => `Ouvrir ${title}`,
     cards: "Publié dans cette réponse",
     close: "Fermer",

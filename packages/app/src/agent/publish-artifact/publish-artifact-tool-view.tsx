@@ -3,11 +3,13 @@ import { useArtifactMessages } from "../../artifacts/messages"
 import { ActivityStatusText } from "../components/activity-status"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
-import { publishedArtifact, publishTitle } from "./interpret"
+import { isUpdateTool, publishedArtifact, publishTitle } from "./interpret"
 
 /**
- * A publish in the work trace: what it published and at which version, with any warnings, or why
- * it was refused. The answer's cards show the result; this row keeps each attempt.
+ * A publish in the work trace: what it published, with any warnings, or why it was refused. The
+ * answer's cards show the result; this row keeps each attempt. A write to an open version names
+ * no version: the version is the current one, which changes until someone creates it. A call from
+ * before open versions published a version for good, which it names.
  */
 export function PublishArtifactToolView({ tool }: { tool: NormalizedTool }) {
   const messages = useAgentMessages().artifacts
@@ -16,11 +18,12 @@ export function PublishArtifactToolView({ tool }: { tool: NormalizedTool }) {
   const published = publishedArtifact(tool)
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const failed = tool.state === "output-error"
+  const update = isUpdateTool(tool.toolName)
   const label = failed
-    ? messages.publishFailed(title)
+    ? (update ? messages.updateFailed : messages.publishFailed)(title)
     : running
-      ? messages.publishing(title)
-      : messages.published(title)
+      ? (update ? messages.updating : messages.publishing)(title)
+      : (update ? messages.updated : messages.published)(title)
 
   return (
     <div className="min-w-0 space-y-1">
@@ -31,7 +34,7 @@ export function PublishArtifactToolView({ tool }: { tool: NormalizedTool }) {
         ) : (
           <span className="min-w-0 truncate font-medium">{label}</span>
         )}
-        {published ? (
+        {published && published.open === undefined ? (
           <span className="shrink-0 text-muted-foreground/60 tabular-nums">
             · {versionLabel(published.version)}
           </span>
@@ -59,5 +62,8 @@ export function PublishArtifactToolView({ tool }: { tool: NormalizedTool }) {
 /** The refusal the Agent received, without the harness's prefix. */
 function refusal(errorText: string): string {
   // [SixbAgentWorker] on refusals recorded before the harness had a package of its own.
-  return errorText.replace(/^\[SixbAgent(?:Worker)?\] publish_artifact(_version)? refused: /, "")
+  return errorText.replace(
+    /^\[SixbAgent(?:Worker)?\] (?:publish_artifact(?:_version)?|update_artifact) refused: /,
+    ""
+  )
 }
