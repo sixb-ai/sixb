@@ -19,14 +19,12 @@ import {
   AlertDialogTitle,
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
@@ -49,8 +47,8 @@ type RestorePoint = ListArtifactRestorePointsResponse["restorePoints"][number]
 /**
  * The version shown, as a pill beside the title: "Current" while it is the open version, which
  * changes in place, else its number. It opens every version with who last wrote or created it, and
- * for whoever may change the artifact, *Create version*, which freezes the current one, and
- * *Restore*, the restore points kept before the Agent's turns and before restores. An earlier
+ * for whoever may change the artifact, *Create version*, which freezes the current one, and the
+ * restore points kept before the Agent's turns and before restores, each restored once confirmed. An earlier
  * version than the latest carries a dot, so the reader knows there is a newer one.
  */
 export function VersionMenu({
@@ -174,19 +172,19 @@ export function VersionMenu({
                 </span>
               </DropdownMenuItem>
 
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="gap-3 rounded-md px-2 py-1.5 text-[13px] font-medium">
-                  <History className="size-4 shrink-0 text-muted-foreground" />
-                  {messages.versions.restore}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-80 w-[min(17rem,calc(100vw-2rem))] p-1.5">
-                  <RestorePoints
-                    points={points.data?.restorePoints}
-                    loading={points.isLoading}
-                    onSelect={setRestoring}
-                  />
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
+              {/* In the menu itself, not a submenu: one opening beside it leaves a phone's screen. */}
+              <DropdownMenuSeparator className="my-1" />
+              <DropdownMenuLabel className="flex items-center gap-1.5 px-2 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                <History className="size-3.5" aria-hidden="true" />
+                {messages.versions.restore}
+              </DropdownMenuLabel>
+              <DropdownMenuGroup aria-label={messages.versions.restore}>
+                <RestorePoints
+                  points={points.data?.restorePoints}
+                  loading={points.isLoading}
+                  onSelect={setRestoring}
+                />
+              </DropdownMenuGroup>
             </>
           ) : null}
         </DropdownMenuContent>
