@@ -4,9 +4,9 @@ A canvas is an endless board the user pans and zooms: screens side by side with 
 them, sections of sticky notes, a diagram. Publish one when the work reads best laid out in two
 dimensions.
 
-| The deliverable | Publish |
+| The work | Publish |
 | --- | --- |
-| Several screens or variants of a design, a flow from one to the next | a `canvas` of boards |
+| Visuals side by side: screens, frames, posters, variants, a flow from one to the next | a `canvas` of boards |
 | A brainstorm, an affinity map, a retro | a `canvas` of sections and notes |
 | A process or a decision drawn as boxes and arrows | a `canvas` of shapes and arrows |
 | One web app or dashboard | a `page` |
@@ -34,6 +34,27 @@ work/onboarding-flow/
 }
 ```
 
+## Principles
+
+- **A board shows; the canvas annotates.** A board holds the visual alone: a screen, a frame, a
+  poster, a diagram. Captions, specs, voice-over, and rationale go in `text` and `note` items
+  beside or under it, a `section` groups each set, and arrows give the order. Never put small
+  explanatory text inside a board.
+- **It reads as it opens.** A canvas opens fitted to everything, so its headings, notes, and
+  labels must read at that zoom: an `xl` heading over each group, `l` within it. Lay boards out in
+  rows, four or five wide boards at most, so the fitted view isn't tiny. The reader opens a board
+  for its detail.
+- **Real visuals, or a clean placeholder.** Show real images: one made with
+  `sixb models image "…" --model <id> --output work/storyboard/boards/images/03.png`, or a file the
+  user attached or the workspace holds, copied into the folder (a copy costs nothing: files are
+  stored by their content). Reference it relatively, `<img src="images/03.png">`. Without one, fill
+  the frame's area in a neutral tone with one line saying what it shows. Never draw people,
+  products, or scenes as hand-made SVG shapes.
+- **One visual direction.** For creative work (a storyboard, a poster, a landing page, a
+  moodboard), choose one direction you can name: a type pairing (Google Fonts load in boards), a
+  ground, and no more than two accents, in `shared.css`. Screens of the project's own app keep the
+  kit's look. No filler: a fact you don't have is a visible placeholder, such as `[PRICE]`.
+
 ## Items
 
 Every item has an `id` (lowercase letters, digits, and hyphens; it is the item's address, so keep it
@@ -41,19 +62,19 @@ across versions) and sits at `x`, `y` in pixels from the canvas's origin, y grow
 
 | Type | Keys | For |
 | --- | --- | --- |
-| `board` | `file`, `w`, `h`, `title` | A screen, a mockup, a poster: an HTML file shown live at `w` by `h` |
+| `board` | `file`, `w`, `h`, `title` | A screen, a frame, a poster: an HTML file shown live at `w` by `h` |
 | `section` | `w`, `h`, `title` | A group's heading: the title draws at the region's top left, and the region is what `#id` frames |
 | `note` | `w`, `h`, `text`, `tone` | A sticky note; it grows to hold its text, `h` its least height |
-| `text` | `text`, `size`, `w` | A heading or a label: `size` `s`, `m`, `l`, or `xl`; `w` wraps it |
+| `text` | `text`, `size`, `w` | A heading, a caption, or a label: `size` `s`, `m`, `l`, or `xl`; `w` wraps it |
 | `shape` | `shape`, `w`, `h`, `text`, `tone` | A `rect`, `ellipse`, or `diamond`, for a diagram's steps and decisions |
 | `arrow` | `from`, `to`, `label`, `dashed` | From an item's id, or a point `{ "x": 0, "y": 0 }`, to another |
 | `embed` | `src`, `w`, `h`, `title` | Another artifact or a part of one: a chart, a range, a slide, a section |
 
 `tone` is `positive`, `warning`, `negative`, `neutral`, or `chart-1` to `chart-5`; a note without
 one is amber, as a note pad's, and a `neutral` one is plain paper. Items draw in the order listed.
-A canvas opens fitted to everything, so lay it out to read whole.
 
-A canvas holds at most 1,000 items and 100 boards; sizes run from 40 to 8,000 pixels.
+A canvas holds at most 1,000 items and 100 boards; sizes run from 40 to 8,000 pixels. A version
+holds at most 200 files, boards and images included.
 
 ## Lay it out
 
@@ -65,9 +86,9 @@ A canvas holds at most 1,000 items and 100 boards; sizes run from 40 to 8,000 pi
   under it (`m`) what it is for; `s` is small print, read close up.
 - Arrows for the order of a flow, labeled with what moves the user on: the button, the choice.
   Dashed arrows for asides: a note about a board.
-- Notes beside or below a board, never on it: a note over a board covers its page.
-- Sizes boards as their screens are: 390 by 844 for a phone, 1280 by 800 for a laptop, 1440 by 900
-  for a wide screen.
+- Notes and captions beside or below a board, never on it: a note over a board covers its page.
+- Size boards as their screens are: 390 by 844 for a phone, 1280 by 800 for a laptop, 1440 by 900
+  for a wide screen, 1280 by 720 for a video or presentation frame.
 
 ## Boards are pages
 
@@ -78,11 +99,13 @@ picture; the reader opens it to scroll and click.
 - Design the board for its size: a phone screen fills 390 by 844 and puts its main action at the
   bottom. What runs past the board's height is cut off on the canvas.
 - Link a stylesheet the boards share, `<link rel="stylesheet" href="shared.css">`, beside them, so
-  every screen of an app looks like one app.
+  every board looks like one piece of work.
 - Show what the screen would hold: real labels, names, and numbers, not lorem ipsum or gray boxes.
   A board reads the project's objects live with `sixb.query`, as a page does; for a chart a live
   sheet already draws, embed it.
-- Boards don't link to each other; arrows show the flow.
+- Arrows' labels make an opened board clickable: a button, or a `#` link, whose words are the
+  label of an arrow leaving the board opens the board it points to. Give the button and the arrow
+  the same words, and don't link boards to each other with `href`.
 
 ## Check
 
