@@ -69,15 +69,35 @@ export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPre
   return query.data
 }
 
-/** Where a board's picture is, in the reader's mode: the server picks the one a canvas pins. */
+/** The widest a board's small picture is, in device pixels: 480, a third of a laptop's screen. */
+export const SMALL_PREVIEW_WIDTH = 480
+
+/** A board's picture at its own size, or one at most {@link SMALL_PREVIEW_WIDTH} wide. */
+export type BoardPreviewSize = "small" | "full"
+
+/**
+ * The picture a board's tile shows, from how wide it is on screen: the small one while that
+ * covers it pixel for pixel, the full one past it, so a canvas fitted to a hundred boards holds a
+ * hundred small pictures, not a hundred screens.
+ */
+export function boardPreviewSize(screenWidth: number, pixelRatio: number): BoardPreviewSize {
+  return screenWidth * pixelRatio <= SMALL_PREVIEW_WIDTH ? "small" : "full"
+}
+
+/**
+ * Where a board's picture is, in the reader's mode, at a size: the server picks the mode a canvas
+ * pins, and the full size is its default.
+ */
 export function boardPreviewUrl(
   version: Pick<ArtifactVersion, "artifactId" | "version">,
   board: string,
-  mode: "light" | "dark"
+  mode: "light" | "dark",
+  size: BoardPreviewSize = "full"
 ): string {
   const artifact = `/api/artifacts/${encodeURIComponent(version.artifactId)}`
   const path = `${artifact}/versions/${version.version}/boards/${encodeURIComponent(board)}/preview`
   const url = new URL(path, client.getConfig().baseUrl || window.location.origin)
   url.searchParams.set("theme", mode)
+  if (size === "small") url.searchParams.set("size", "small")
   return url.toString()
 }

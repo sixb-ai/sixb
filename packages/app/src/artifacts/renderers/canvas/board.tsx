@@ -192,29 +192,33 @@ export function LiveBoardsProvider({
 /**
  * What a board or an embed shows while it doesn't run: a picture of it when there is one, else
  * its outline, the icon of what it is in the middle, breathing while its picture is on its way.
- * A picture that can't be loaded gives way to the outline. The name above says which it is.
+ * A picture that can't be loaded gives way to its fallback, then to the outline. The name above
+ * says which it is.
  */
 export function ItemTile({
   icon: Icon,
   preview,
+  fallback,
   pending = false,
 }: {
   readonly icon: LucideIcon
   /** A picture of the item, the size of its box. */
   readonly preview?: string
+  /** Another picture of it, for when that one can't be loaded. */
+  readonly fallback?: string
   readonly pending?: boolean
 }) {
-  const [failed, setFailed] = useState<string | null>(null)
+  const picture = usePicture(preview, fallback)
 
-  if (preview && failed !== preview) {
+  if (picture.src) {
     return (
       <img
-        src={preview}
+        src={picture.src}
         alt=""
         decoding="async"
         loading="lazy"
         draggable={false}
-        onError={() => setFailed(preview)}
+        onError={picture.fail}
         className="block size-full object-cover"
       />
     )
@@ -230,6 +234,57 @@ export function ItemTile({
       <Icon className="size-12 text-muted-foreground/30" strokeWidth={1} aria-hidden="true" />
     </div>
   )
+}
+
+const NOTHING_FAILED: ReadonlySet<string> = new Set()
+
+/**
+ * The picture to show of `preview`, else of `fallback` once it fails, without going blank as it
+ * changes: the one shown stays until the next has decoded, so a sharper picture, or one in the
+ * other mode, takes its place in one frame. Nothing is shown before the first one, which loads in
+ * place, as an image does.
+ */
+function usePicture(
+  preview: string | undefined,
+  fallback: string | undefined
+): { readonly src: string | null; readonly fail: () => void } {
+  const [failed, setFailed] = useState(NOTHING_FAILED)
+  const wanted = [preview, fallback].find((src) => src !== undefined && !failed.has(src)) ?? null
+  const [shown, setShown] = useState(wanted)
+  const showing = shown !== null && !failed.has(shown)
+
+  useEffect(() => {
+    if (wanted === shown) return
+
+    // Nothing worth keeping on screen: the next one loads in place.
+    if (!wanted || !showing) {
+      setShown(wanted)
+      return
+    }
+
+    let current = true
+    const next = new Image()
+    next.src = wanted
+    next.decode().then(
+      () => {
+        if (current) setShown(wanted)
+      },
+      () => {
+        if (current) setFailed((all) => new Set(all).add(wanted))
+      }
+    )
+    return () => {
+      current = false
+    }
+  }, [wanted, shown, showing])
+
+  return {
+    src: showing ? shown : wanted,
+    fail: () => {
+      const src = showing ? shown : wanted
+      if (src) setFailed((all) => new Set(all).add(src))
+    },
+  }
 }
 
 /**
