@@ -84,7 +84,8 @@ When others changed a canvas while you worked, `update_artifact` merges your cha
 and writes the merged result into the folder you updated from: keep editing it.
 
 If another kind of artifact changes while you work, `update_artifact` refuses rather than write
-over what it never saw, says who changed it, and installs it in place of your copy. Start again from that copy,
+over what it never saw, says who changed it, and installs it in place of your copy and in the
+folder you published it from. What your sub-agents wrote reaches both the same way. Start again from that copy,
 keep its changes, make yours again, and update it.
 
 An entry without a `directory` is not installed: the conversation's artifacts were too large to

@@ -189,6 +189,8 @@ export interface WaitForSubagentsOutput {
   readonly files: readonly InstalledChildFile[]
   /** Why what the children published is not all in `$SIXB_ARTIFACTS`. */
   readonly artifactsError?: string
+  /** The folders the Agent published from that took what the children wrote. */
+  readonly artifactsNote?: string
 }
 
 /** What a turn offers the children it spawns. */
@@ -997,6 +999,9 @@ export class SubagentCoordinator {
           ...(delivered.artifactsError === undefined
             ? {}
             : { artifactsError: delivered.artifactsError }),
+          ...(delivered.artifactsNote === undefined
+            ? {}
+            : { artifactsNote: delivered.artifactsNote }),
         }
       }
       // A child of an earlier turn ends into that turn's mailbox, which this one does not hear.
@@ -1104,6 +1109,7 @@ export class SubagentCoordinator {
     readonly byChild: ReadonlyMap<string, ChildFiles>
     readonly attached: readonly InstalledChildFile[]
     readonly artifactsError?: string
+    readonly artifactsNote?: string
   }> {
     const byChild = new Map<string, ChildFiles>()
     const attached: InstalledChildFile[] = []
@@ -1166,13 +1172,22 @@ export class SubagentCoordinator {
     }
 
     let artifactsError: string | undefined
+    let artifactsNote: string | undefined
     try {
-      await this.#runFiles?.installTurnArtifacts(signal)
+      const folders = (await this.#runFiles?.installTurnArtifacts(signal)) ?? []
+      if (folders.length > 0) {
+        artifactsNote = `What these children wrote is installed in $SIXB_ARTIFACTS and written into the folders you published those artifacts from: ${folders.join(", ")}. Update from them as they are now.`
+      }
     } catch (error) {
       if (signal.aborted) throw error
       artifactsError = `What these children wrote could not all be installed in $SIXB_ARTIFACTS (${errorMessage(error)}). The addresses in their answers still work.`
     }
-    return { byChild, attached, ...(artifactsError === undefined ? {} : { artifactsError }) }
+    return {
+      byChild,
+      attached,
+      ...(artifactsError === undefined ? {} : { artifactsError }),
+      ...(artifactsNote === undefined ? {} : { artifactsNote }),
+    }
   }
 
   private runFiles(): AgentRunFiles {

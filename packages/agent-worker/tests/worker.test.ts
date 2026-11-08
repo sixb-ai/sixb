@@ -10005,7 +10005,7 @@ describe("AgentWorker", () => {
       sandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
       blobStorage: sixb.blobStorage,
       budget: options.budget ?? new AgentFileBudget(),
-      installTurnArtifacts: options.installTurnArtifacts ?? (async () => {}),
+      installTurnArtifacts: options.installTurnArtifacts ?? (async () => []),
     }
     return { sandbox, runFiles }
   }

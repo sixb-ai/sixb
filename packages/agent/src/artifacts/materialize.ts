@@ -78,7 +78,12 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   readonly #installed: Map<string, number>
   /** The files of the revision each entry lists, by artifact id: what an update starts from. */
   readonly #bases = new Map<string, readonly ArtifactFile[]>()
-  #updates: Promise<void> = Promise.resolve()
+  /**
+   * The folder the Agent last published each artifact from, in the sandbox: it holds what the
+   * installed copy holds, so its next update, from there, starts from the base.
+   */
+  readonly #folders = new Map<string, { readonly path: string; readonly absolute: string }>()
+  #updates: Promise<unknown> = Promise.resolve()
 
   constructor(
     private readonly layout: {
@@ -123,9 +128,17 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     return revision === undefined || !files ? undefined : { revision, files }
   }
 
+  /** Records the folder the Agent published an artifact from: `path` as it named it. */
+  publishedFrom(artifactId: string, folder: { readonly path: string; readonly absolute: string }) {
+    this.#folders.set(artifactId, folder)
+  }
+
   /**
-   * Install the revision just written in place of the artifact's copy, and list it first. One
-   * update runs at a time, so parallel publishes never write an older manifest over a newer one.
+   * Install a revision in place of the artifact's copy, and list it first: the copy, the base of
+   * the next update, and the folder the Agent last published it from move together, so an update
+   * from that folder never takes out what someone else wrote. One update runs at a time, so
+   * parallel publishes never write an older manifest over a newer one. Resolves to the folder it
+   * wrote, as the Agent named it, if any.
    */
   replace(
     sandbox: Sandbox,
@@ -133,7 +146,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
     options: { readonly edited?: boolean } = {}
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const update = this.#updates.then(() =>
       this.#replace(sandbox, published, files, signal, options)
     )
@@ -150,7 +163,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
     options: { readonly edited?: boolean }
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
     const inSandbox = (path: string) => posix.resolve(sandbox.workingDirectory, path)
@@ -172,6 +185,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     }
     if (install) this.#installed.set(artifact.id, sizeBytes)
     else this.#installed.delete(artifact.id)
+    const previous = this.#bases.get(artifact.id) ?? []
     this.#bases.set(artifact.id, version.files)
     this.#entries = [
       manifestEntry(artifact, version, install ? directory : undefined, options),
@@ -186,6 +200,31 @@ export class InstalledArtifacts implements MaterializedArtifacts {
         : []),
       { path: inSandbox(manifestPath), contents: this.manifestJson },
     ])
+
+    // The folder takes the revision too: each file as it holds it, and none of the files the
+    // revision before held that it does not.
+    const folder = this.#folders.get(artifact.id)
+    if (!folder) return undefined
+    const kept = new Set(files.map((file) => file.path))
+    const gone = previous
+      .filter((file) => !kept.has(file.path))
+      .map((file) => posix.join(folder.absolute, file.path))
+    if (gone.length > 0) {
+      const removedFiles = await sandbox.runCommand(
+        "bash",
+        ["-c", 'rm -f -- "$@"', "rm", ...gone],
+        { timeout: REMOVE_TIMEOUT_MS, signal }
+      )
+      if (removedFiles.exitCode !== 0 || removedFiles.timedOut) {
+        throw new Error(
+          `[SixbAgent] Could not update ${folder.path}: ${removedFiles.stderr.trim() || `exit ${removedFiles.exitCode}`}`
+        )
+      }
+    }
+    await sandbox.writeFiles(
+      files.map((file) => ({ path: posix.join(folder.absolute, file.path), contents: file.bytes }))
+    )
+    return folder.path
   }
 }
 
@@ -279,7 +318,7 @@ export async function installTurnArtifacts(input: {
   readonly blobStorage: AgentRunFileStore
   readonly sandbox: Sandbox
   readonly signal: AbortSignal
-}): Promise<void> {
+}): Promise<string[]> {
   const [writes, artifacts] = await Promise.all([
     input.artifacts.turnWrites(),
     input.artifacts.list({ limit: MATERIALIZE_MAX_ARTIFACTS }),
@@ -287,6 +326,7 @@ export async function installTurnArtifacts(input: {
   const written = new Set(writes.map((write) => write.artifactId))
 
   const failed: string[] = []
+  const folders: string[] = []
   // Oldest first: each install lists its artifact first, so the newest ends up first.
   for (const artifact of [...artifacts].reverse()) {
     input.signal.throwIfAborted()
@@ -297,7 +337,13 @@ export async function installTurnArtifacts(input: {
       const version = await input.artifacts.getVersion(artifact.id, artifact.latestVersion)
       if (!version) continue
       const files = await readArtifactVersionFiles(input.blobStorage, version, input.signal)
-      await input.installed.replace(input.sandbox, { artifact, version }, files, input.signal)
+      const folder = await input.installed.replace(
+        input.sandbox,
+        { artifact, version },
+        files,
+        input.signal
+      )
+      if (folder) folders.push(folder)
     } catch (error) {
       input.signal.throwIfAborted()
       console.warn(`[SixbAgent] Could not install artifact '${artifact.id}':`, error)
@@ -307,6 +353,7 @@ export async function installTurnArtifacts(input: {
   if (failed.length > 0) {
     throw new Error(`[SixbAgent] Could not install artifacts ${failed.join(", ")}.`)
   }
+  return folders
 }
 
 function manifestEntry(

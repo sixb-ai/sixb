@@ -293,17 +293,10 @@ async function publish(
   // Merged with what others wrote since, the version holds more than the Agent's files: the copy
   // and the check take what it holds.
   const written = published.merged ? await mergedFiles(input, published, signal) : contents
-  // The folder the Agent published from takes the merged result too: its next update, from
-  // whichever folder it edits, then holds its own changes alone, and is merged from this revision.
-  if (published.merged && written) {
-    await syncPublishedFolder(handle, request.path, sources, written, signal).catch((error) => {
-      if (signal.aborted) throw error
-      console.warn(
-        `[SixbAgent] Could not write the merged result back to '${request.path}':`,
-        error
-      )
-    })
-  }
+  // The folder the Agent published from moves with the installed copy from now on: after a merge
+  // it takes the merged result, and its next update, from there, holds its own changes alone.
+  const folder = publishedFolder(handle, request.path, sources)
+  if (folder) installed.publishedFrom(artifact.id, folder)
   let copy: string | undefined
   try {
     // Revising from $SIXB_ARTIFACTS_DIR must start from this revision, not the one before.
@@ -622,9 +615,10 @@ async function artifactMoved(
     : ""
   const moved = `artifact '${artifactId}' changed since revision ${baseRevision}, which you started from: it is at revision ${latest.revision}, whose version ${latest.version} was last written ${where}${created}, so nothing was published`
 
+  let folder: string | undefined
   try {
     const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
-    await installed.replace(handle.sandbox, { artifact, version: latest }, files, signal, {
+    folder = await installed.replace(handle.sandbox, { artifact, version: latest }, files, signal, {
       edited: latest.origin?.threadId !== input.threadId,
     })
   } catch (error) {
@@ -641,7 +635,7 @@ async function artifactMoved(
 
   return publishError(
     UPDATE_TOOL,
-    `${moved}. $SIXB_ARTIFACTS lists revision ${latest.revision}, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and update it`
+    `${moved}. $SIXB_ARTIFACTS lists revision ${latest.revision}, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/${folder ? ` and written into ${folder}, the folder you published it from` : ""}: start again from it as it is, keep its changes, make yours again, and update it`
   )
 }
 
@@ -659,41 +653,17 @@ interface PublishSource {
  * a dot. A single file publishes alone: a document's Markdown as `document.md`, any other file
  * under its own name.
  */
-/**
- * Writes what a merged publish stored into the folder it was published from: each file as the
- * version holds it, and none it no longer holds. Only a folder: one file is never merged.
- */
-async function syncPublishedFolder(
+/** The folder the files were published from, when they were a folder's: one file has none. */
+function publishedFolder(
   handle: AgentSandboxHandle,
   path: string,
-  sources: readonly PublishSource[],
-  stored: readonly PublishedArtifactFile[],
-  signal: AbortSignal
-): Promise<void> {
-  const folder = resolveSandboxPath(handle, path)
-  const inFolder = (file: string) => posix.join(folder, file)
-  if (!sources.every((source) => source.absolutePath === inFolder(source.path))) return
-
-  const kept = new Set(stored.map((file) => file.path))
-  const gone = sources
-    .filter((source) => !kept.has(source.path))
-    .map((source) => source.absolutePath)
-  if (gone.length > 0) {
-    const removed = await handle.sandbox.runCommand(
-      "bash",
-      ["-c", 'rm -f -- "$@"', "rm", ...gone],
-      {
-        timeout: SANDBOX_TIMEOUT_MS,
-        signal,
-      }
-    )
-    if (removed.exitCode !== 0 || removed.timedOut) {
-      throw new Error(removed.stderr.trim() || `rm exited ${removed.exitCode}`)
-    }
-  }
-  await handle.sandbox.writeFiles(
-    stored.map((file) => ({ path: inFolder(file.path), contents: file.bytes }))
+  sources: readonly PublishSource[]
+): { readonly path: string; readonly absolute: string } | undefined {
+  const absolute = resolveSandboxPath(handle, path)
+  const inFolder = sources.every(
+    (source) => source.absolutePath === posix.join(absolute, source.path)
   )
+  return inFolder ? { path, absolute } : undefined
 }
 
 async function listSources(
