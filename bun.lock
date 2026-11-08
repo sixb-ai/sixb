@@ -834,8 +834,12 @@
     "packages/core": {
       "name": "@sixb/core",
       "version": "0.2.2",
+      "dependencies": {
+        "parse5": "8.0.1",
+      },
       "devDependencies": {
         "@types/bun": "latest",
+        "happy-dom": "^20.11.6",
         "typescript": "^5.7.0",
         "yjs": "13.6.33",
       },
