@@ -700,6 +700,60 @@ describe("an artifact edited live", () => {
     ])
   })
 
+  // Guard proof: drop the check of the room's own client and of other servers' in LiveRoom.mayUse;
+  // Bob's entry takes the Agent's place, and Bob's on the other server is Marie's cursor.
+  test("lets nobody speak for the room's own entry, or for a person on another server", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const [a, b] = [context.rooms("server-a"), context.rooms("server-b")]
+    const marie = new Client(a, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(a, context.bob, context.artifactId, "bob-1")
+    const elsewhere = new Client(b, context.bob, context.artifactId, "bob-2")
+    const settle = async () => {
+      await marie.settle()
+      await elsewhere.settle()
+      await marie.settle()
+    }
+    await marie.join()
+    await bob.join()
+    await elsewhere.join()
+    elsewhere.awareness.setLocalStateField("cursor", { x: 7, y: 7 })
+    await appendArtifactLive(context.broker, projectId, context.artifactId, {
+      name: "agent",
+      payload: { runId: "run_1", boards: ["welcome"], at: new Date().toISOString() },
+    })
+    await settle()
+    jest.advanceTimersByTime(AWARENESS_SHARE_MS)
+    await settle()
+
+    // Bob sends states for the room's entry, which carries the Agent's turn, and for himself
+    // on the other server, as newer than theirs.
+    const room = [...bob.awareness.getStates()].find(([, state]) => AGENT_AWARENESS_FIELD in state)
+    const forged = encoding.createEncoder()
+    encoding.writeVarUint(forged, 2)
+    for (const client of [room?.[0] ?? -1, elsewhere.doc.clientID]) {
+      encoding.writeVarUint(forged, client)
+      encoding.writeVarUint(forged, 99)
+      encoding.writeVarString(forged, JSON.stringify({ cursor: { x: 0, y: 0 } }))
+    }
+    await a.receive(bob.connection, {
+      type: "awareness",
+      artifactId: context.artifactId,
+      data: encodeLiveData(encoding.toUint8Array(forged)),
+    })
+    await settle()
+
+    expect(room).toBeDefined()
+    expect(others(marie)).toContainEqual({
+      [AGENT_AWARENESS_FIELD]: [{ runId: "run_1", boards: ["welcome"] }],
+    })
+    expect(others(marie)).toContainEqual({
+      cursor: { x: 7, y: 7 },
+      user: expect.objectContaining({ id: "user:bob" }),
+    })
+    expect(others(marie)).not.toContainEqual(expect.objectContaining({ cursor: { x: 0, y: 0 } }))
+  })
+
   test("shows the boards an Agent turn is changing until the turn ends", async () => {
     jest.useFakeTimers()
     const context = await setup()
@@ -855,6 +909,86 @@ describe("an artifact edited live", () => {
         failure: expect.objectContaining({ code: "internal.unexpected" }),
       }),
     ])
+  })
+
+  // Guard proof: leave the refused author an editor in LiveRoom.failed; the room tries the same
+  // refused write as Bob again at once, over and over, and Marie's room never writes as her.
+  test("writes as another editor when the one who changed it may no longer, and stops trying", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
+    await bob.join()
+    await bob.settle()
+
+    // Bob, the only editor, types, and is taken out of the conversation before it is written.
+    const removeBob = () =>
+      context.storage.agents.threads.removeParticipant({
+        projectId,
+        threadId: "thr_marie",
+        principal: { type: "user", id: "bob" },
+      })
+    ;(bob.canvas.items.get("hi")?.get("text") as Y.Text).insert(5, " from Bob")
+    await bob.settle()
+    await removeBob()
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await bob.settle()
+    for (let tick = 0; tick < 20; tick += 1) {
+      jest.advanceTimersByTime(1)
+      await bob.settle()
+    }
+
+    expect(
+      bob.statuses().filter((status) => status.type === "status" && status.state === "failed")
+    ).toHaveLength(1)
+    expect(bob.messages).toContainEqual({
+      type: "access",
+      artifactId: context.artifactId,
+      access: "watch",
+    })
+    expect((await context.latest()).revision).toBe(context.revision)
+
+    // Once he leaves, nobody may write what he typed: the project's onError hears of it.
+    await bob.leave()
+    await bob.settle()
+    expect(await context.errors()).toEqual([
+      expect.objectContaining({
+        type: "artifact.live_write.failed",
+        artifactId: context.artifactId,
+      }),
+    ])
+  })
+
+  // Guard proof: drop the retry as the next editor from LiveRoom.failed; what Bob typed waits
+  // for the next change.
+  test("writes as another editor at once when the one who changed it may no longer", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
+    await marie.join()
+    await bob.join()
+    await marie.settle()
+
+    ;(bob.canvas.items.get("hi")?.get("text") as Y.Text).insert(5, " from Bob")
+    await marie.settle()
+    await context.storage.agents.threads.removeParticipant({
+      projectId,
+      threadId: "thr_marie",
+      principal: { type: "user", id: "bob" },
+    })
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await marie.settle()
+    jest.advanceTimersByTime(0)
+    await marie.settle()
+
+    const version = await context.latest()
+    expect(version.revision).toBe(context.revision + 1)
+    expect(version.author).toEqual({ type: "user", id: "marie" })
+    expect((await context.items()).find((item) => item.id === "hi")).toMatchObject({
+      text: "Hello from Bob",
+    })
   })
 
   // Guard proof: answer `true` for any editor in LiveRoom.mayEdit; Bob's change after his removal
