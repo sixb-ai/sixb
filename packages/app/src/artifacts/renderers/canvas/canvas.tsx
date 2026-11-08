@@ -1,11 +1,7 @@
 // Loaded only when a canvas opens, so React Flow's code stays out of every other artifact's bundle.
 // Its stylesheet, canvas.css, is part of the framework's.
-import {
-  CANVAS_FIT_PADDING,
-  type Canvas,
-  type CanvasArrow,
-  type CanvasBoard as CanvasBoardItem,
-} from "@sixb/core/artifacts"
+import type { Canvas, CanvasArrow, CanvasBoard as CanvasBoardItem } from "@sixb/core/artifacts"
+import { CANVAS_FIT_PADDING } from "@sixb/core/internal/artifacts/canvas"
 import {
   Background,
   BackgroundVariant,

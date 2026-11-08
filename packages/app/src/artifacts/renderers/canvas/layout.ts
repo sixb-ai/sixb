@@ -1,10 +1,5 @@
-import {
-  CANVAS_TEXT_PIXELS,
-  type Canvas,
-  type CanvasArrow,
-  type CanvasEnd,
-  type CanvasItem,
-} from "@sixb/core/artifacts"
+import type { Canvas, CanvasArrow, CanvasEnd, CanvasItem } from "@sixb/core/artifacts"
+import { CANVAS_TEXT_PIXELS } from "@sixb/core/internal/artifacts/canvas"
 import type { Edge, Node } from "@xyflow/react"
 
 /** What a node on the board draws: one of the canvas's items, or an arrow's end at a point. */

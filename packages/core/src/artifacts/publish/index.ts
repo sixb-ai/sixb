@@ -3,7 +3,6 @@
  * the pictures of a canvas's boards are kept beside what it publishes.
  */
 
-export { SMALL_BOARD_PREVIEW_WIDTH } from "../canvas"
 export { artifactAccessRule, artifactQueryChecker } from "../execution"
 export { isArtifactId } from "../ids"
 export { ARTIFACT_LIMITS } from "../limits"
