@@ -404,7 +404,21 @@ whose words are the label of an arrow leaving it opens the board the arrow point
 
 Publishing warns of boards that overlap and of notes or text on a board. When the Agent publishes a
 canvas, its sandbox's browser opens each board at its own size, as it checks a page, and the Agent
-gets each board's warnings and screenshot.
+gets each board's warnings and screenshot, and `overview.png`, the canvas as it opens.
+
+Each board also gets a preview: a picture of it in light and dark, or in the mode `theme.json`
+pins, shown in place of the board until it runs.
+
+- The Agent's check takes them as it publishes. A version published otherwise, such as boards
+  moved in the app, is pictured by the agent worker in a blank sandbox of the project; without
+  sandboxes, boards have no preview.
+- A board kept as it was keeps its preview: each is named by what the board shows, its HTML, the
+  files it can load, and its size.
+- A board that reads a query is pictured with its author's data, which everyone who can open the
+  canvas then sees in its preview; publishing warns of it. The worker does not picture those.
+- `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark` serves one
+  to whoever reads the version, and the version says which boards' previews are `ready`, `pending`,
+  or `none`.
 
 ## Declare a query
 
