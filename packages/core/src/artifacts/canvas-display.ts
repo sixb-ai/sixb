@@ -84,8 +84,10 @@ export interface CanvasPoint {
 }
 
 /**
- * An item's box before anything is measured: a note without a height as tall as it is drawn at
- * least, and a text's width and height reckoned from its words. An arrow has none.
+ * An item's box before anything is measured, as the app draws it: a text's reckoned from its words
+ * at its size, wrapped at its width when it has one, each line at the app's line height; a note
+ * without a height as tall as its words take, and never shorter than the app draws it. An arrow
+ * has none.
  */
 export function canvasItemBox(item: CanvasItem): CanvasBox | null {
   switch (item.type) {
@@ -93,20 +95,36 @@ export function canvasItemBox(item: CanvasItem): CanvasBox | null {
       return null
     case "text": {
       const size = CANVAS_TEXT_PIXELS[item.size]
-      const lines = item.text.split("\n")
-      const longest = Math.max(...lines.map((line) => line.length))
+      const lineHeight = item.size === "s" || item.size === "m" ? 1.45 : 1.15
+      const longest = Math.max(...item.text.split("\n").map((line) => line.length))
+      const width = item.w ?? Math.min(longest * size * LETTER_WIDTH, 1600)
       return {
         x: item.x,
         y: item.y,
-        width: item.w ?? Math.min(longest * size * 0.55, 1600),
-        height: size * 1.3 * lines.length,
+        width,
+        height: size * lineHeight * wrappedLines(item.text, width, size),
       }
     }
-    case "note":
-      return { x: item.x, y: item.y, width: item.w, height: item.h ?? Math.min(item.w, 112) }
+    case "note": {
+      const size = canvasNoteFontSize(item.w)
+      const written = size * 1.4 * wrappedLines(item.text, item.w - size * 2, size) + size * 1.7
+      const height = item.h ?? Math.max(Math.min(item.w, 112), written)
+      return { x: item.x, y: item.y, width: item.w, height }
+    }
     default:
       return { x: item.x, y: item.y, width: item.w, height: item.h }
   }
+}
+
+/** An average letter's width, as a share of the text's size. */
+const LETTER_WIDTH = 0.55
+
+/** How many lines words take at a width, each of their own lines wrapped at it. */
+function wrappedLines(text: string, width: number, size: number): number {
+  const perLine = Math.max(1, Math.floor(width / (size * LETTER_WIDTH)))
+  return text
+    .split("\n")
+    .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / perLine)), 0)
 }
 
 /** An arrow's end as a box: an item's, or a point's, one pixel wide. */
