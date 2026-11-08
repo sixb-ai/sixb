@@ -86,7 +86,7 @@ deliverable.
 
 ## Rules
 
-- A version holds at most 200 files, 25 MB per file, and 100 MB in all.
+- A version holds at most 500 files, 25 MB per file, and 250 MB in all.
 - A title is plain text of at most 200 characters that names the deliverable ("Q3 operations
   review"), not the request.
 - Files and folders whose names start with a dot are not published.

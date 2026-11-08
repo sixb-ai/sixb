@@ -191,6 +191,43 @@ describe("publishing any version", () => {
     )
   })
 
+  test("holds up to 500 files and 250 MB, and refuses a version past either", async () => {
+    const { as, put } = setup()
+    const page = await put("index.html", "<!doctype html><title>Assets</title><p>Assets</p>")
+    const asset = await put("assets/0.svg", "<svg/>", "image/svg+xml")
+    const assets = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({ ...asset, path: `assets/${index}.svg` }))
+
+    const published = await as("alice").artifacts.create({
+      kind: "page",
+      title: "Assets",
+      files: [page, ...assets(499)],
+    })
+    expect(published.version.files).toHaveLength(500)
+
+    await expectRequestError(
+      as("alice").artifacts.create({
+        kind: "page",
+        title: "Assets",
+        files: [page, ...assets(500)],
+      }),
+      "invalid_artifact",
+      "A version holds at most 500 files; this one has 501."
+    )
+
+    // Counted from the references, before any byte is read: eleven files of 24 MB pass 250 MB.
+    const large = { ...asset.file, sizeBytes: 24 * 1024 * 1024 }
+    await expectRequestError(
+      as("alice").artifacts.create({
+        kind: "page",
+        title: "Assets",
+        files: [page, ...assets(11).map((file) => ({ ...file, file: large }))],
+      }),
+      "invalid_artifact",
+      `a version may hold at most ${250 * 1024 * 1024}`
+    )
+  })
+
   test("publishes a file as it is, and only one", async () => {
     const { as, put } = setup()
     const deck = await put("board-pack.pdf", "%PDF-1.7", "application/pdf")
