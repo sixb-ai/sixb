@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import * as Y from "yjs"
-import type { ArtifactFile, Principal } from "../src"
+import type { ArtifactFile, Principal, UpdateArtifactRuntimeInput } from "../src"
 import { SixbHost } from "../src"
 import { CANVAS_FILE, parseCanvas } from "../src/artifacts/canvas"
+import { writeLiveArtifact } from "../src/artifacts/execution"
 import { documentCanvas, documentFiles } from "../src/artifacts/live/document"
 import { storeLiveFiles } from "../src/artifacts/live/files"
 import { loadArtifactDocument } from "../src/artifacts/live/state"
@@ -75,12 +76,12 @@ function setup() {
   /** Writes a live editor's document back, as a server holding it does. */
   const writeBack = async (id: string, doc: Y.Doc, baseRevision: number) => {
     const { version } = await latest(id)
-    return sixb.artifacts.publish(id, {
-      kind: "canvas",
+    return writeLiveArtifact(sixb.artifacts, id, {
       title: "Flow",
+      baseTitle: "Flow",
       files: await storeLiveFiles(deps.blobStorage, documentFiles(doc), version.files),
       baseRevision,
-      document: Y.encodeStateAsUpdate(doc),
+      update: Y.encodeStateAsUpdate(doc),
     })
   }
   /** Applies what storage holds now to a live editor's document, as a server does on a write. */
@@ -332,6 +333,38 @@ describe("a canvas's document", () => {
     expect(noteText(first).toString()).toBe("Oh. Hello, team")
     expect(documentFiles(first)).toEqual(documentFiles(second))
     expect(documentFiles(await context.load(id))).toEqual(documentFiles(first))
+  })
+
+  test("is written back through the server's own entry, never the public update", async () => {
+    // Reproduce by giving UpdateArtifactRuntimeInput its `document` back: the line marked below
+    // type-checks, and an app's own Yjs state, from another history, is merged in place of the
+    // files it passes. Or drop the kind check in writeLive: the document's write is stored, its files as they were.
+    const context = setup()
+    const { published } = await canvas(context)
+    const plan = await context.sixb.artifacts.create({
+      kind: "document",
+      title: "Plan",
+      files: await context.put({ "document.md": "# Plan\n" }),
+    })
+    const doc = await context.load(published.artifact.id)
+
+    const input: UpdateArtifactRuntimeInput = {
+      kind: "canvas",
+      title: "Flow",
+      files: [],
+      // @ts-expect-error A live document is the server's to write back, with writeLiveArtifact.
+      document: Y.encodeStateAsUpdate(doc),
+    }
+    const refused = await writeLiveArtifact(context.sixb.artifacts, plan.artifact.id, {
+      title: "Plan",
+      baseTitle: "Plan",
+      files: plan.version.files,
+      baseRevision: plan.version.revision,
+      update: Y.encodeStateAsUpdate(doc),
+    }).catch((error: unknown) => error)
+
+    expect(input.files).toEqual([])
+    expect(refused).toMatchObject({ code: "invalid_artifact" })
   })
 
   test("takes a write of files between live edits as a change, keeping the editor's", async () => {
