@@ -6,12 +6,13 @@ import type {
   Principal,
   SandboxFactory,
 } from "../src"
-import { ArtifactRequestError, SixbHost } from "../src"
+import { SixbHost } from "../src"
 import { BOARD_PREVIEW_JOB, BOARD_PREVIEW_WAIT_MS } from "../src/artifacts/canvas-display"
 import type { CanvasOutline } from "../src/artifacts/outline"
 import {
   boardPreviewStatuses,
   boardRenderKey,
+  MAX_BOARD_PREVIEW_BYTES,
   missingBoardPreviews,
   requestBoardPreviews,
   storeBoardPreviews,
@@ -318,12 +319,6 @@ describe("a board's pictures", () => {
     return { ...context, version, store }
   }
 
-  const refusal = async (promise: Promise<unknown>) => {
-    const error = await promise.catch((caught: unknown) => caught)
-    expect(error).toBeInstanceOf(ArtifactRequestError)
-    return (error as Error).message
-  }
-
   test("are kept under each board's key, and are missing no more once both sizes are", async () => {
     const { deps, version, store, pictures, png } = await published()
     await store(await pictures("welcome", ["light"]))
@@ -337,32 +332,50 @@ describe("a board's pictures", () => {
     ).toEqual(["welcome: dark", "region: light, dark"])
   })
 
-  test("are refused for a board or a mode the version has none of, and in another format", async () => {
-    const { deps, store, png, webp } = await published()
+  test("are each kept or refused alone: for a board or a mode the version lacks, another format, or past the limit", async () => {
+    // Reproduce by refusing the whole hand-over for one picture: Welcome's light pictures, fine
+    // as they are, are lost with the rest, and a board of a hundred keeps none for one too large.
+    const { deps, version, store, pictures, png, webp } = await published()
     const picture = await png("welcome")
     const small = await webp("welcome")
-    const welcome = { board: "welcome", theme: "light" } as const
-
-    expect(
-      await refusal(store([{ ...welcome, board: "pricing", size: "full", file: picture }]))
-    ).toContain("has no board 'pricing' to picture in light mode")
+    const welcome = { board: "welcome", theme: "dark" } as const
     const svg = await deps.blobStorage.put({
       body: new TextEncoder().encode("<svg/>"),
       mediaType: "image/svg+xml",
     })
-    expect(await refusal(store([{ ...welcome, size: "full", file: svg }]))).toContain(
-      "The full picture of board 'welcome' must be image/png"
-    )
-    expect(await refusal(store([{ ...welcome, size: "full", file: small }]))).toContain(
-      "must be image/png"
-    )
-    expect(await refusal(store([{ ...welcome, size: "small", file: picture }]))).toContain(
-      "The small picture of board 'welcome' must be image/webp"
-    )
     const unstored: FileRef = { ...picture, sizeBytes: picture.sizeBytes + 1 }
-    expect(await refusal(store([{ ...welcome, size: "full", file: unstored }]))).toContain(
-      "is not stored"
-    )
+    const huge: FileRef = { ...picture, sizeBytes: MAX_BOARD_PREVIEW_BYTES + 1 }
+
+    const refused = await store([
+      ...(await pictures("welcome", ["light"])),
+      { ...welcome, board: "pricing", size: "full", file: picture },
+      { ...welcome, size: "full", file: svg },
+      { ...welcome, size: "small", file: picture },
+      { board: "region", theme: "light", size: "full", file: small },
+      { board: "region", theme: "dark", size: "full", file: unstored },
+      {
+        board: "region",
+        theme: "light",
+        size: "small",
+        file: { ...huge, mediaType: "image/webp" },
+      },
+    ])
+
+    expect(
+      refused.map(({ board, theme, size, reason }) => `${board} ${theme} ${size}: ${reason}`)
+    ).toEqual([
+      "pricing dark full: the version has no board 'pricing' to picture in dark mode",
+      "welcome dark full: a full picture must be image/png",
+      "welcome dark small: a small picture must be image/webp",
+      "region light full: a full picture must be image/png",
+      "region dark full: it is not stored",
+      `region light small: it is ${MAX_BOARD_PREVIEW_BYTES + 1} bytes, past the ${MAX_BOARD_PREVIEW_BYTES} kept`,
+    ])
+    expect(
+      (await missingBoardPreviews(deps.storage.artifacts, version)).map(
+        ({ board, themes }) => `${board.id}: ${themes.join(", ")}`
+      )
+    ).toEqual(["welcome: dark", "region: light, dark"])
   })
 
   test("read as ready, pending while one may still come, and none past the wait", async () => {

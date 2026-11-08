@@ -12,8 +12,7 @@ import type {
   ArtifactVersionRecord,
 } from "../../storage/artifacts/types"
 import { CANVAS_FILE } from "../canvas"
-import { BOARD_PREVIEW_JOB, BOARD_PREVIEW_WAIT_MS } from "../canvas-display"
-import { ArtifactRequestError } from "../errors"
+import { BOARD_PREVIEW_WAIT_MS } from "../canvas-display"
 import { FRAME_ASSETS } from "../frames/assets"
 import { FRAME_DEFAULT_THEMES } from "../frames/kit"
 import type { ArtifactOutline, CanvasOutline, CanvasOutlineItem } from "../outline"
@@ -282,11 +281,20 @@ export async function boardPreviewStatuses(
   )
 }
 
+/** A picture that was not kept, and why, in words for whoever handed it over. */
+export interface RefusedBoardPreview {
+  readonly board: string
+  readonly theme: ArtifactThemeMode
+  readonly size: ArtifactBoardPreviewSize
+  readonly reason: string
+}
+
 /**
  * Keeps pictures of a stored version's boards, each under its board's render key. Who may hand
- * them over is the caller's decision: only whoever rendered them with the author's data. Refuses
- * a board or a mode the version has no picture for, and anything but a stored PNG at full size or
- * WebP when small.
+ * them over is the caller's decision: only whoever rendered them with the author's data. Each
+ * picture stands alone: one for a board or a mode the version has no picture for, in another
+ * format than its size's, past the size limit, or not stored, is left out and returned, and the
+ * others are kept.
  */
 export async function storeBoardPreviews(
   context: {
@@ -295,43 +303,42 @@ export async function storeBoardPreviews(
   },
   version: ArtifactVersionRecord,
   previews: readonly BoardPreviewInput[]
-): Promise<void> {
-  if (previews.length === 0) return
+): Promise<readonly RefusedBoardPreview[]> {
+  if (previews.length === 0) return []
 
   const { boards, themes } = previewedBoards(version)
   const keys = new Map(boards.map((board) => [board.id, board.renderKey]))
   const createdAt = new Date()
 
-  const records = await Promise.all(
+  const checked = await Promise.all(
     previews.map(async (preview) => {
-      const renderKey = keys.get(preview.board)
-      if (!renderKey || !themes.includes(preview.theme)) {
-        throw invalidPreview(
-          `Version ${version.version} of '${version.artifactId}' has no board '${preview.board}' to picture in ${preview.theme} mode.`
-        )
+      const { board, theme, size, file } = preview
+      const refuse = (reason: string) => ({ refused: { board, theme, size, reason } })
+
+      const renderKey = keys.get(board)
+      if (!renderKey || !themes.includes(theme)) {
+        return refuse(`the version has no board '${board}' to picture in ${theme} mode`)
       }
 
-      const { file, size } = preview
       const mediaType = SIZES.includes(size) ? BOARD_PREVIEW_MEDIA_TYPES[size] : undefined
-      if (
-        !mediaType ||
-        !isValidFileRef(file) ||
-        file.mediaType !== mediaType ||
-        file.sizeBytes > MAX_BOARD_PREVIEW_BYTES
-      ) {
-        throw invalidPreview(
-          `The ${size} picture of board '${preview.board}' must be ${mediaType ?? "full or small"} of at most ${MAX_BOARD_PREVIEW_BYTES} bytes.`
-        )
+      if (!mediaType || !isValidFileRef(file) || file.mediaType !== mediaType) {
+        return refuse(`a ${size} picture must be ${mediaType ?? "full or small"}`)
       }
-      if (!(await statFileRef(context.blobStorage, file))) {
-        throw invalidPreview(`The picture of board '${preview.board}' is not stored.`)
+      if (file.sizeBytes > MAX_BOARD_PREVIEW_BYTES) {
+        return refuse(`it is ${file.sizeBytes} bytes, past the ${MAX_BOARD_PREVIEW_BYTES} kept`)
       }
+      if (!(await statFileRef(context.blobStorage, file))) return refuse("it is not stored")
 
-      return { renderKey, theme: preview.theme, size, file: { ...file }, createdAt }
+      return { record: { renderKey, theme, size, file: { ...file }, createdAt } }
     })
   )
 
-  await context.storage.putBoardPreviews({ projectId: version.projectId, previews: records })
+  const records = checked.flatMap((each) => ("record" in each ? [each.record] : []))
+  if (records.length > 0) {
+    await context.storage.putBoardPreviews({ projectId: version.projectId, previews: records })
+  }
+
+  return checked.flatMap((each) => ("refused" in each ? [each.refused] : []))
 }
 
 /** One job per version: asking again for the same version is the same job. */
@@ -423,8 +430,4 @@ function frameKitDigest(): string {
     .update(JSON.stringify([FRAME_ASSETS, FRAME_DEFAULT_THEMES]))
     .digest("hex")
   return kitDigest
-}
-
-function invalidPreview(message: string): ArtifactRequestError {
-  return new ArtifactRequestError("invalid_artifact", `[Sixb] ${message}`)
 }
