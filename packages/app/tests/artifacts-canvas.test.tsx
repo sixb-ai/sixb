@@ -547,6 +547,8 @@ describe("board previews", () => {
     ({
       artifactId: "art_0nb0ard1ng",
       version: 3,
+      revision: 8,
+      frozen: false,
       title: "Onboarding",
       entry: "canvas.json",
       files: [],
@@ -554,6 +556,7 @@ describe("board previews", () => {
       references: [],
       author: { type: "user", id: "user-1" },
       createdAt: "2026-10-18T12:00:00.000Z",
+      updatedAt: "2026-10-18T12:00:00.000Z",
       ...(boardPreviews ? { boardPreviews } : {}),
     }) as unknown as GetArtifactVersionResponse
 
@@ -582,7 +585,7 @@ describe("board previews", () => {
     // whatever the board's size: a canvas fitted to a hundred boards decodes a hundred screens.
     const picture = node("home")?.querySelector("img")
     expect(picture?.getAttribute("src")).toEndWith(
-      "/api/artifacts/art_0nb0ard1ng/versions/3/boards/home/preview?theme=dark&size=small"
+      "/api/artifacts/art_0nb0ard1ng/versions/3/boards/home/preview?theme=dark&size=small&revision=8"
     )
     // At its width from its top. Reproduce with object-cover: a board taller than its picture,
     // which stops 4000 pixels down, shows it zoomed in and cut at its sides.
@@ -697,14 +700,23 @@ describe("board previews", () => {
       await act(async () => decoding.at(-1)?.done())
       expect(shown()).toBe("full.png")
 
-      // A picture that can't be had gives way to its fallback, then to the outline.
-      view.rerender(<ItemTile icon={AppWindow} preview="missing.png" fallback="full.png" />)
+      // A picture that can't be had gives way to its fallback, then to the outline, and each one
+      // says so: a picture of a revision the version moved past is how the canvas learns it.
+      // Reproduce by dropping onFail from usePicture: the canvas never reads the version again.
+      let failures = 0
+      const onFail = () => {
+        failures += 1
+      }
+      view.rerender(
+        <ItemTile icon={AppWindow} preview="missing.png" fallback="full.png" onFail={onFail} />
+      )
       await act(async () => decoding.at(-1)?.fail())
       expect(shown()).toBe("full.png")
       const image = view.container.querySelector("img")
       if (!image) throw new Error("Expected the picture.")
       fireEvent.error(image)
       expect(view.container.querySelector("img")).toBeNull()
+      expect(failures).toBe(2)
       view.unmount()
     } finally {
       restore()

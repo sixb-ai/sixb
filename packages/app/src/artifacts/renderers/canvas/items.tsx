@@ -8,10 +8,12 @@ import type {
 } from "@sixb/core/artifacts"
 import { CANVAS_TEXT_PIXELS, canvasNoteFontSize, canvasShapeFontSize } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
+import { useQueryClient } from "@tanstack/react-query"
 import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
 import { AppWindow, ArrowUpRight, Link2, Maximize2 } from "lucide-react"
 import { memo, type ReactNode } from "react"
 import { useArtifactMessages } from "../../messages"
+import { artifactChanged } from "../../queries"
 import { ArtifactEmbed, ArtifactLink } from "../../references/references"
 import { TONE_COLORS } from "../../tones"
 import { ItemTile, LiveBoard, useLive, useLiveBoards } from "./board"
@@ -127,6 +129,7 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
   const board = itemOf<CanvasBoard>(props)
   const messages = useArtifactMessages().canvas
   const { version, previews, mode, open } = useLiveBoards()
+  const queries = useQueryClient()
   // Until the view is fitted it is at 100%, which is not where the reader sees the board: the
   // small picture first, then the full one if the board is drawn large.
   const previewSize = useStore((state) =>
@@ -180,6 +183,8 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
                   }
                 : {})}
               pending={previews[board.id] === "pending"}
+              // The version may have moved past the revision pictured: it is read again.
+              {...(version ? { onFail: () => artifactChanged(queries, version.artifactId) } : {})}
             />
           }
         />

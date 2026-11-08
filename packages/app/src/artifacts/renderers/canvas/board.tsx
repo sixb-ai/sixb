@@ -6,6 +6,7 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react"
@@ -201,6 +202,7 @@ export function ItemTile({
   preview,
   fallback,
   pending = false,
+  onFail,
 }: {
   readonly icon: LucideIcon
   /** A picture of the item, the size of its box. */
@@ -208,8 +210,10 @@ export function ItemTile({
   /** Another picture of it, for when that one can't be loaded. */
   readonly fallback?: string
   readonly pending?: boolean
+  /** A picture could not be had: what the tile knows of its pictures may be out of date. */
+  readonly onFail?: () => void
 }) {
-  const picture = usePicture(preview, fallback, pending)
+  const picture = usePicture(preview, fallback, pending, onFail)
 
   if (picture.src) {
     return (
@@ -255,9 +259,12 @@ const NOTHING_FAILED: ReadonlySet<string> = new Set()
 function usePicture(
   preview: string | undefined,
   fallback: string | undefined,
-  pending: boolean
+  pending: boolean,
+  onFail: (() => void) | undefined
 ): { readonly src: string | null; readonly fail: () => void } {
   const [failed, setFailed] = useState(NOTHING_FAILED)
+  const onFailRef = useRef(onFail)
+  onFailRef.current = onFail
   const wanted = [preview, fallback].find((src) => src !== undefined && !failed.has(src)) ?? null
   const [shown, setShown] = useState(wanted)
   const showing = shown !== null && !failed.has(shown)
@@ -282,7 +289,10 @@ function usePicture(
         if (current) setShown(wanted)
       },
       () => {
-        if (current) setFailed((all) => new Set(all).add(wanted))
+        if (!current) return
+
+        setFailed((all) => new Set(all).add(wanted))
+        onFailRef.current?.()
       }
     )
     return () => {
@@ -294,7 +304,10 @@ function usePicture(
     src: showing ? shown : wanted,
     fail: () => {
       const src = showing ? shown : wanted
-      if (src) setFailed((all) => new Set(all).add(src))
+      if (!src) return
+
+      setFailed((all) => new Set(all).add(src))
+      onFailRef.current?.()
     },
   }
 }

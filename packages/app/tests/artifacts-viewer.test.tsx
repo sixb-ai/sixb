@@ -275,7 +275,7 @@ describe("the viewer", () => {
     expect(html).toContain('aria-label="Copy link"')
     // The image resolves to the version's file, through the route that authorizes it.
     expect(html).toContain(
-      `/api/artifacts/${ARTIFACT_ID}/versions/2/content?path=figures%2Frevenue.png&amp;disposition=inline`
+      `/api/artifacts/${ARTIFACT_ID}/versions/2/content?path=figures%2Frevenue.png&amp;disposition=inline&amp;v=`
     )
     expect(html).toMatch(/data-sixb-artifact="" class="[^"]* dark"/)
     expect(html).toContain('style="--primary:#0f766e"')

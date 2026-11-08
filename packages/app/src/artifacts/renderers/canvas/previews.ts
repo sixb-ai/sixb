@@ -90,11 +90,12 @@ export function boardPreviewSize(screenWidth: number, pixelRatio: number): Board
 }
 
 /**
- * Where a board's picture is, in the reader's mode, at a size: the server picks the mode a canvas
- * pins, and the full size is its default.
+ * Where a board's picture is, in the reader's mode, at a size, of the revision shown: the server
+ * picks the mode a canvas pins, and the full size is its default. Named by its revision, a picture
+ * of an open version is kept for good, and one the version moved past is not found, never shown.
  */
 export function boardPreviewUrl(
-  version: Pick<ArtifactVersion, "artifactId" | "version">,
+  version: Pick<ArtifactVersion, "artifactId" | "version" | "revision">,
   board: string,
   mode: "light" | "dark",
   size: BoardPreviewSize = "full"
@@ -104,5 +105,6 @@ export function boardPreviewUrl(
   const url = new URL(path, client.getConfig().baseUrl || window.location.origin)
   url.searchParams.set("theme", mode)
   if (size === "small") url.searchParams.set("size", "small")
+  url.searchParams.set("revision", String(version.revision))
   return url.toString()
 }
