@@ -108,10 +108,17 @@ publishes it when it is what you asked for.
 
 ## Edit in the app
 
-Sheets and canvases are edited where they open. Press **Edit** on the latest version: the header
-becomes a draft bar with Undo, Redo, Discard, and **Save**. Saving replaces the current version
-with your draft; **Create version** keeps it as a numbered version in the version menu. ⌘S saves,
-and leaving with changes asks first.
+Sheets and canvases are edited where they open: press **Edit** on the latest version.
+
+A sheet is edited as a draft. The header becomes a draft bar with Undo, Redo, Discard, and
+**Save**. Saving replaces the current version with your draft; **Create version** keeps it as a
+numbered version in the version menu. ⌘S saves, and leaving with changes asks first. If someone
+changed the sheet while you were editing, the save stops and says so: open what they saved, or save
+yours over it.
+
+A canvas is edited live, with everyone who has it open: there is no draft to save. The header keeps
+Undo, Redo, and **Done**, your changes are saved as you make them, and everyone's are merged. See
+[Edit a canvas live](#edit-a-canvas-live).
 
 | In a sheet | |
 | --- | --- |
@@ -127,10 +134,8 @@ and leaving with changes asks first.
 | Arrows | Drag from the dot on an item's side to another item; the toolbar sets a line's style and label |
 | Style | A note's or a shape's color, a text's size, a shape's form, for everything selected |
 
-Boards' pages are the Agent's to change; on the canvas you arrange them. If someone changed the
-artifact while you were editing, the save stops and says so: open what they saved, or save yours
-over it. The next time the Agent works on the artifact, it starts from your save and keeps your
-changes.
+On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
+works on the artifact, it starts from the latest version and keeps your changes.
 
 ## Edit a canvas live
 
@@ -145,7 +150,9 @@ as they make them, and who else is there.
   their unsaved changes stay. While an Agent turn changes boards, everyone sees which ones.
 - Everyone sees the others' changes and presence at once, whichever server they are connected
   to. Someone who reconnects after editing offline gets their changes merged in.
-- A write that fails is reported and tried again; the changes stay meanwhile.
+- A write that fails is reported and tried again, for as long as the server runs; the changes stay
+  meanwhile. Changes the server could never save, because it stopped first, are reported to
+  [`onError`](../logging/overview.md#report-failures) as `artifact.live_write.failed`.
 
 `@sixb/core/artifacts/live` holds the document and the socket's messages for a client to build
 on, `@sixb/core/artifacts/live/protocol` the messages alone, without Yjs, and
