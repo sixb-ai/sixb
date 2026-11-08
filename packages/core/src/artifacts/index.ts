@@ -16,6 +16,8 @@ export {
 } from "./address"
 export {
   CANVAS_FILE,
+  CANVAS_FIT_PADDING,
+  CANVAS_TEXT_PIXELS,
   type Canvas,
   type CanvasArrow,
   type CanvasBoard,
@@ -28,6 +30,8 @@ export {
   type CanvasShapeItem,
   type CanvasText,
   type CanvasTextSize,
+  canvasNoteFontSize,
+  canvasShapeFontSize,
   parseCanvas,
 } from "./canvas"
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"

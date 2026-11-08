@@ -197,7 +197,7 @@ describe("publishing a canvas", () => {
 
     const job = {
       id: `art_previews_${first.artifact.id}_v1`,
-      type: "agent.artifact-previews.requested",
+      type: "agent.artifact-previews.requested" as const,
       payload: { artifactId: first.artifact.id, version: 1 },
     }
     expect(await claimable()).toEqual([job])

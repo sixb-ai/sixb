@@ -9,6 +9,7 @@ import type { ArtifactKind } from "../artifacts/kinds"
 import {
   BOARD_PREVIEW_GRACE_MS,
   type BoardPreviewInput,
+  missingBoardPreviews,
   storeBoardPreviews,
 } from "../artifacts/publish/previews"
 import {
@@ -17,11 +18,16 @@ import {
   prepareArtifactVersion,
   storeArtifactVersion,
 } from "../artifacts/publish/publish"
+import type { ArtifactThemeMode } from "../artifacts/theme"
 import { type Principal, principalsEqual } from "../auth/types"
 import type { Sixb } from "../runtime/sixb"
 import type { Storage } from "../storage"
 import type { AgentStorage, ConversationAgentRunRecord, SubagentRunRecord } from "../storage/agents"
-import type { ArtifactFile, ArtifactRecord } from "../storage/artifacts/types"
+import type {
+  ArtifactFile,
+  ArtifactRecord,
+  ArtifactVersionRecord,
+} from "../storage/artifacts/types"
 import { assertAgentRunOwned } from "./run-fence"
 import { conversationThreadId } from "./thread-access"
 
@@ -58,13 +64,28 @@ export interface AgentRunArtifacts {
    * other version.
    */
   storePreviews(input: AgentRunBoardPreviews): Promise<void>
+  /**
+   * The boards of a version the run published still without a picture, and the modes each
+   * misses: a board it kept as it was keeps the pictures it had. Refuses any other version.
+   */
+  missingPreviews(input: AgentRunVersion): Promise<readonly AgentRunMissingPreview[]>
+}
+
+/** A version of an artifact. */
+export interface AgentRunVersion {
+  readonly artifactId: string
+  readonly version: number
 }
 
 /** The pictures a run took of a version's boards. */
-export interface AgentRunBoardPreviews {
-  readonly artifactId: string
-  readonly version: number
+export interface AgentRunBoardPreviews extends AgentRunVersion {
   readonly previews: readonly BoardPreviewInput[]
+}
+
+/** A board of a version without a picture in these modes. */
+export interface AgentRunMissingPreview {
+  readonly board: string
+  readonly themes: readonly ArtifactThemeMode[]
 }
 
 /** A version a run publishes: of a new artifact of `kind`, or of the artifact `artifactId`. */
@@ -203,21 +224,34 @@ export function agentRunArtifacts(
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
     },
 
-    async storePreviews({ artifactId, version: number, previews }) {
-      const { blobs } = await sdk()
-      const artifacts = requireArtifacts(storage)
-
-      // Only the run that published a version took its pictures with its author's rights.
-      const version = await artifacts.getVersion({ projectId, artifactId, version: number })
-      if (!version || version.origin?.runId !== run.id) {
-        throw new ArtifactRequestError(
-          "not_allowed",
-          `[Sixb] Version ${number} of artifact '${artifactId}' was not published by this run.`
-        )
-      }
-
-      await storeBoardPreviews({ storage: artifacts, blobStorage: blobs }, version, previews)
+    async storePreviews({ previews, ...at }) {
+      const [{ blobs }, version] = await Promise.all([sdk(), publishedVersion(at)])
+      await storeBoardPreviews(
+        { storage: requireArtifacts(storage), blobStorage: blobs },
+        version,
+        previews
+      )
     },
+
+    async missingPreviews(at) {
+      const missing = await missingBoardPreviews(
+        requireArtifacts(storage),
+        await publishedVersion(at)
+      )
+      return missing.map(({ board, themes }) => ({ board: board.id, themes }))
+    },
+  }
+
+  /** Only the run that published a version pictures its boards with its author's rights. */
+  async function publishedVersion(at: AgentRunVersion): Promise<ArtifactVersionRecord> {
+    const version = await requireArtifacts(storage).getVersion({ projectId, ...at })
+    if (!version || version.origin?.runId !== run.id) {
+      throw new ArtifactRequestError(
+        "not_allowed",
+        `[Sixb] Version ${at.version} of artifact '${at.artifactId}' was not published by this run.`
+      )
+    }
+    return version
   }
 }
 
