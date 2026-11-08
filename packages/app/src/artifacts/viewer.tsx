@@ -615,8 +615,9 @@ function ArtifactHeader({
   const messages = useArtifactMessages()
   const { artifact } = detail
   const live = holdsQueries(version)
-  // Drawn from its live document, the canvas is edited live, not as a draft the header saves.
-  const drawnLive = !!liveView?.state.synced && !liveView.state.left
+  // A canvas held live is edited live, not as a draft the header saves: until its document holds
+  // it, Edit waits. Only one the server never holds live is edited as a draft.
+  const heldLive = !!liveView && !liveView.state.left
   if (liveView?.editing) {
     return <LiveEditBar chrome={chrome} detail={detail} version={version} liveView={liveView} />
   }
@@ -719,7 +720,7 @@ function ArtifactHeader({
       }
     >
       {live ? <RefreshButton version={version} /> : null}
-      {drawnLive ? (
+      {heldLive ? (
         liveView.editable ? (
           <Button
             size="sm"
@@ -729,6 +730,11 @@ function ArtifactHeader({
           >
             <PencilLine aria-hidden="true" />
             {messages.edit.edit}
+          </Button>
+        ) : !liveView.state.synced && edit.available ? (
+          <Button size="sm" variant="ghost" className="mr-0.5 text-muted-foreground" disabled>
+            <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            {messages.live.connecting}
           </Button>
         ) : null
       ) : edit.available ? (
