@@ -145,7 +145,7 @@ function runArtifactsFor(
   })
   options.reader?.(sdk.artifacts)
   return agentRunArtifacts(
-    { projectId, storage, domainEvents: host.events },
+    { projectId, storage, domainEvents: host.events, broker: host.broker },
     { id: publishing.id, projectId, kind: "conversation", threadId: publishing.threadId },
     options.executionToken ?? publishing.executionToken,
     async () => sdk

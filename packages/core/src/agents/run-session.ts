@@ -49,7 +49,7 @@ import {
 import { measuringAgentContextTokenRates, readAgentContextTokenRates } from "./context-token-rate"
 import { AgentToolPublicError } from "./errors"
 import { createAgentRunExecutionToken } from "./ids"
-import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
+import { type AgentRunArtifacts, agentRunArtifacts, announceAgentTurnEnded } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
 import {
   AgentExecutionLostError,
@@ -520,6 +520,10 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       await host.afterFinish?.(finished).catch((error: unknown) => {
         console.error(`[Sixb] What follows agent run '${run.id}' failed; repair retries it.`, error)
       })
+      // A turn's presence on the canvases it wrote ends with it; a child's with its turn.
+      if (run.kind === "conversation" && host.storage.artifacts) {
+        await announceAgentTurnEnded(host, run.id)
+      }
       return finished
     },
     assertOwned: () => assertAgentRunOwned(agents, fence),

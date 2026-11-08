@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
-import { defineObjectType, prop, type SandboxFactory, SixbHost } from "../src"
+import { defineObjectType, InMemoryBroker, prop, type SandboxFactory, SixbHost } from "../src"
 import { AgentExecutionLostError, agentRunArtifacts } from "../src/agents"
+import { announceAgentTurnEnded } from "../src/agents/run-artifacts"
 import { BOARD_PREVIEW_JOB } from "../src/artifacts/canvas-display"
+import { artifactLiveStream } from "../src/artifacts/live/presence"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { bindDurableAgentExecution } from "../src/execution/agent"
 import { bindRequestExecution } from "../src/execution/request"
@@ -110,7 +112,7 @@ async function setup() {
     },
   })
   const artifacts = agentRunArtifacts(
-    { projectId, storage, domainEvents: host.events },
+    { projectId, storage, domainEvents: host.events, broker: host.broker },
     started,
     "exec_bob",
     async () => runSdk
@@ -371,7 +373,7 @@ describe("a run's artifacts", () => {
       },
     }
     const artifacts = agentRunArtifacts(
-      { projectId, storage, domainEvents: { emit: async () => {} } },
+      { projectId, storage, domainEvents: { emit: async () => {} }, broker: new InMemoryBroker() },
       started,
       "exec_bob",
       async () => ({
@@ -435,7 +437,7 @@ describe("a run's artifacts", () => {
       execution: { token: "exec_child", queueLeaseExpiresAt: new Date("2099-01-01") },
     })
     const child = agentRunArtifacts(
-      { projectId, storage, domainEvents: { emit: async () => {} } },
+      { projectId, storage, domainEvents: { emit: async () => {} }, broker: new InMemoryBroker() },
       startedChild,
       "exec_child",
       async () => runSdk
@@ -493,6 +495,40 @@ describe("a run's artifacts", () => {
         revision: written.version.revision,
         frozen: false,
       },
+    ])
+  })
+  // Guard proof: drop announceAgentBoards from AgentRunArtifacts.publish; the canvas's viewers
+  // never learn which boards the turn is changing.
+  test("tells a canvas's viewers which boards the turn changes, and when the turn ends", async () => {
+    const { host, artifacts, canvas, deps } = await setup()
+    const records = async () =>
+      (
+        await deps.broker.read({
+          projectId,
+          streamId: artifactLiveStream(created.artifact.id).id,
+        })
+      ).records.map(({ name, payload }) => ({ name, payload }))
+
+    const created = await artifacts.publish({
+      kind: "canvas",
+      title: "Flow",
+      files: await canvas(),
+    })
+    // A new board is news, and so is one whose page the turn rewrites.
+    await artifacts.publish({
+      artifactId: created.artifact.id,
+      title: "Flow",
+      files: await canvas({ "welcome.html": "<main><h1>Hello</h1></main>" }),
+    })
+    await announceAgentTurnEnded(
+      { projectId, storage: deps.storage, domainEvents: host.events, broker: host.broker },
+      "run_bob"
+    )
+
+    expect(await records()).toEqual([
+      { name: "agent", payload: { runId: "run_bob", boards: ["welcome"], at: expect.any(String) } },
+      { name: "agent", payload: { runId: "run_bob", boards: ["welcome"], at: expect.any(String) } },
+      { name: "agent-ended", payload: { runId: "run_bob" } },
     ])
   })
 })
