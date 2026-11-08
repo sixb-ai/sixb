@@ -166,6 +166,10 @@ describe("events builder filter spec", () => {
     })
   })
 
+  test("the artifacts topic", () => {
+    expect(events.artifacts().ir).toEqual({ topic: "artifacts" })
+  })
+
   test("project-wide member builders", () => {
     expect(events.users().ir).toEqual({ topic: "users" })
     expect(events.users().joined().ir).toEqual({ topic: "users", types: ["user.joined"] })
