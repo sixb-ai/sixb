@@ -1,4 +1,4 @@
-import { describe, expect, jest, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { defineObjectType, prop, type SandboxFactory, SixbHost } from "../src"
 import { AgentExecutionLostError, agentRunArtifacts } from "../src/agents"
 import { BOARD_PREVIEW_JOB } from "../src/artifacts/canvas-display"
@@ -14,6 +14,10 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 const projectId = "agent-run-artifacts"
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
+
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 /** What a live canvas's boards read. */
 const Task = defineObjectType({
@@ -300,13 +304,9 @@ describe("a run's artifacts", () => {
     // The publish tool's job waits out the check's grace, and carries no answers.
     expect(await claim()).toBeUndefined()
     jest.useFakeTimers()
-    try {
-      jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
-      const waited = await claim()
-      expect(waited?.payload).toEqual({ artifactId: checked.artifact.id, version: 1 })
-    } finally {
-      jest.useRealTimers()
-    }
+    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
+    const waited = await claim()
+    expect(waited?.payload).toEqual({ artifactId: checked.artifact.id, version: 1 })
   })
 
   // Guard proof: drop assertAgentRunOwned from the publish transaction; the run that ended while
