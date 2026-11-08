@@ -1,5 +1,11 @@
 import { CANVAS_FILE, type Canvas, type CanvasItem } from "@sixb/core/artifacts"
-import { documentCanvas, LIVE_FILES, patchText } from "@sixb/core/artifacts/live"
+import {
+  canvasItemMap,
+  canvasItemObject,
+  documentCanvas,
+  LIVE_FILES,
+  mergeCanvasItem,
+} from "@sixb/core/artifacts/live"
 import * as Y from "yjs"
 import type { CanvasChange } from "../renderers/canvas/draft"
 import type { LiveArtifact } from "./session"
@@ -25,8 +31,6 @@ const ITEM_TYPES: ReadonlySet<string> = new Set<CanvasItem["type"]>([
   "embed",
   "arrow",
 ])
-/** The item keys held as `Y.Text`: words that people type. */
-const TEXT_KEYS: ReadonlySet<string> = new Set(["text", "title", "label"])
 
 /** How long changes made one after the other are one step for undo, as typing a word is. */
 const UNDO_CAPTURE_MS = 400
@@ -231,10 +235,7 @@ function joined(end: unknown, ids: ReadonlySet<string>): boolean {
 
 /** An item as the board reads it; null for one that is not an item of a known type. */
 function readItem(map: ItemMap): CanvasItem | null {
-  const item: Record<string, unknown> = {}
-  map.forEach((value, key) => {
-    item[key] = value instanceof Y.Text ? value.toString() : value
-  })
+  const item = canvasItemObject(map)
   if (typeof item.id !== "string" || typeof item.type !== "string" || !ITEM_TYPES.has(item.type)) {
     return null
   }
@@ -255,10 +256,11 @@ function write(items: Y.Map<ItemMap>, order: Y.Array<string>, before: Canvas, af
 
     const map = items.get(item.id)
     if (!was || !map) {
-      items.set(item.id, itemMap(item))
+      items.set(item.id, canvasItemMap(item))
       continue
     }
-    writeItem(map, was, item)
+    // The item as this reader last read it is what the document holds: its words go as edits.
+    mergeCanvasItem(map, was, item)
   }
   for (const id of previous.keys()) {
     if (!next.has(id)) items.delete(id)
@@ -273,37 +275,6 @@ function write(items: Y.Map<ItemMap>, order: Y.Array<string>, before: Canvas, af
   const ordered = new Set(order.toArray())
   const added = after.items.map((item) => item.id).filter((id) => !ordered.has(id))
   if (added.length > 0) order.push(added)
-}
-
-function writeItem(map: ItemMap, was: CanvasItem, item: CanvasItem): void {
-  const before = was as unknown as Record<string, unknown>
-  const after = item as unknown as Record<string, unknown>
-
-  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const value = after[key]
-    if (JSON.stringify(before[key]) === JSON.stringify(value)) continue
-
-    if (value === undefined) {
-      map.delete(key)
-      continue
-    }
-
-    const words = map.get(key)
-    if (TEXT_KEYS.has(key) && typeof value === "string" && words instanceof Y.Text) {
-      patchText(words, value)
-      continue
-    }
-    map.set(key, TEXT_KEYS.has(key) && typeof value === "string" ? new Y.Text(value) : value)
-  }
-}
-
-function itemMap(item: CanvasItem): ItemMap {
-  const map = new Y.Map<unknown>()
-  for (const [key, value] of Object.entries(item)) {
-    if (value === undefined) continue
-    map.set(key, TEXT_KEYS.has(key) && typeof value === "string" ? new Y.Text(value) : value)
-  }
-  return map
 }
 
 const canvases = new WeakMap<LiveArtifact, LiveCanvas>()
