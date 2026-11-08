@@ -3,6 +3,7 @@ import type { BlobStorage, Sandbox } from "@sixb/core"
 import { ARTIFACT_THEME_FILE, CANVAS_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
 import type { AgentRunMissingPreview } from "@sixb/core/internal/agents"
 import {
+  artifactQueryName,
   type BoardPreviewInput,
   MAX_BOARD_PREVIEW_BYTES,
   type MissingBoardPreview,
@@ -12,7 +13,7 @@ import { SANDBOX_CONTEXT_DIRECTORY } from "../run-sandbox"
 import { readSandboxFile } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import { type CheckedPreview, type CheckedQuery, checkLayout } from "./layout-check/layout-check"
-import { readArtifactVersionFiles } from "./materialize"
+import { type PublishedArtifactFile, readArtifactVersionFiles } from "./materialize"
 
 // The pictures of a canvas's boards, which the app shows until a reader opens a board. The layout
 // check takes them as it checks each board; these read them out of the sandbox and store them as
@@ -72,8 +73,9 @@ export async function storeCheckedPreviews(input: {
  * Renders the pictures a stored canvas version's boards miss, in `sandbox`, a blank one created
  * for it: the version's files are written there, each missing board is opened in every mode it
  * misses, and the pictures are stored in `blobStorage`. What the boards' queries return, `queries`
- * holds as the version's author reads it; without it, a board reads its queries rejecting.
- * A sandbox without the agent image's browser renders nothing.
+ * holds as the version's publisher read them. Without them a board that reads a query is not
+ * pictured: it would show its queries rejecting, which no reader sees. A sandbox without the
+ * agent image's browser renders nothing.
  */
 export async function renderBoardPreviews(input: {
   readonly sandbox: Sandbox
@@ -83,12 +85,16 @@ export async function renderBoardPreviews(input: {
   readonly queries?: Readonly<Record<string, CheckedQuery>>
   readonly signal: AbortSignal
 }): Promise<BoardPreviewInput[]> {
-  const { sandbox, version, missing, signal } = input
-  if (missing.length === 0) return []
+  const { sandbox, version, signal } = input
+  if (input.missing.length === 0) return []
 
   const handle: AgentSandboxHandle = { sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }
   const files = await readArtifactVersionFiles(input.blobStorage, version, signal)
   const bytesOf = (path: string) => files.find((file) => file.path === path)?.bytes
+
+  const reading = input.queries ? undefined : boardsReadingQueries(files)
+  const missing = input.missing.filter(({ board }) => !reading?.(board.file))
+  if (missing.length === 0) return []
 
   const directory = posix.resolve(sandbox.workingDirectory, WORK_DIRECTORY)
   await sandbox.writeFiles(
@@ -130,3 +136,26 @@ export async function renderBoardPreviews(input: {
     signal,
   })
 }
+
+/**
+ * Whether a board may read a query, for a version whose answers are not at hand: none when the
+ * version holds no query; otherwise a board whose HTML names `query`, and every board once a
+ * script beside them does, since which boards load it is not known. Erring on the side of reading
+ * one only leaves a board its outline.
+ */
+function boardsReadingQueries(
+  files: readonly PublishedArtifactFile[]
+): ((boardFile: string) => boolean) | undefined {
+  if (!files.some((file) => artifactQueryName(file.path) !== undefined)) return undefined
+
+  const names = (file: PublishedArtifactFile) =>
+    /\bquery\b/.test(new TextDecoder().decode(file.bytes))
+  if (files.some((file) => SCRIPT.test(file.path) && names(file))) return () => true
+
+  return (boardFile) => {
+    const html = files.find((file) => file.path === boardFile)
+    return html === undefined || names(html)
+  }
+}
+
+const SCRIPT = /\.m?js$/i

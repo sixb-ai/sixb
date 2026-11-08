@@ -265,6 +265,64 @@ describe("a canvas version's previews", () => {
     ])
   })
 
+  test("picture only the boards that read no query when the job carries no answers", async () => {
+    // Reproduce by picturing every board without answers: Regions is pictured with its query
+    // rejecting, a page no reader ever sees.
+    const sandboxes = new PicturingSandboxes()
+    const { host, blobStorage, canvas, pictures, job } = setup()
+    const { version } = await canvas()
+
+    // An Agent's version whose check missed its boards: Regions reads a query, Welcome none.
+    const [query, region, script] = await Promise.all(
+      [
+        ["queries/open.json", '{"kind":"start","objectTypeId":"Invoice"}'],
+        ["boards/region.html", '<main><script>sixb.query("open")</script></main>'],
+        ["boards/app.js", 'export const rows = () => sixb.query("open")'],
+      ].map(async ([path = "", body = ""]) => ({
+        path,
+        file: await blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
+      }))
+    )
+    const files = [
+      ...version.files.filter((file) => file.path !== "boards/region.html"),
+      query,
+      region,
+    ] as ArtifactFile[]
+    const publish = async (files: readonly ArtifactFile[]) => {
+      const published = await host.storage.artifacts?.publish({
+        projectId,
+        artifactId: version.artifactId,
+        kind: "canvas",
+        version: { ...version, files, createdAt: new Date() },
+      })
+      if (!published) throw new Error("Expected artifact storage.")
+      return published.version
+    }
+    const render = (live: ArtifactVersionRecord) =>
+      renderArtifactPreviews({
+        host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
+        job: job(live),
+        signal: new AbortController().signal,
+      })
+
+    const live = await publish(files)
+    await render(live)
+    expect(await pictures(live)).toEqual([
+      "welcome dark: welcome dark",
+      "welcome light: welcome light",
+    ])
+
+    // A script beside the boards may be what any of them reads its query with: Regions, whose
+    // own HTML names none, keeps its outline too.
+    const scripted = await publish([...version.files, query, script] as ArtifactFile[])
+    await render(scripted)
+    expect(await pictures(scripted)).toEqual([
+      "welcome dark: welcome dark",
+      "welcome light: welcome light",
+    ])
+    expect(sandboxes.served).toHaveLength(1)
+  })
+
   test("are rendered by the agent worker for a version a person saved in the app", async () => {
     const sandboxes = new PicturingSandboxes()
     const { host, canvas, pictures } = setup({ sandboxes })
