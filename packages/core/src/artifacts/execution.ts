@@ -24,6 +24,7 @@ import {
   assertUpdatable,
   createArtifactAccessRule,
 } from "./access"
+import { type ArtifactCommentsRuntime, createArtifactCommentsRuntime } from "./comments"
 import { ArtifactRequestError } from "./errors"
 import { announceArtifactUpdates } from "./events"
 import type { ArtifactKind } from "./kinds"
@@ -141,7 +142,7 @@ export interface ListArtifactsRuntimeInput {
  * {@link ArtifactAccess} says. System code reaches every artifact in the project, and an access
  * token only its own.
  */
-export interface ArtifactsRuntime {
+export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
   /** Creates an artifact owned by the caller, with its first version. */
   create(input: ArtifactContentInput): Promise<PublishedArtifact>
   /**
@@ -539,6 +540,14 @@ export function createArtifactsRuntime(
   }
 
   const artifacts: ArtifactsRuntime = {
+    ...createArtifactCommentsRuntime({
+      projectId: runtime.projectId,
+      storage: requireStorage,
+      events: runtime.events,
+      caller: requireCaller,
+      reach,
+    }),
+
     async create(input) {
       const author = requireCaller()
       const files = await contentFiles(input)

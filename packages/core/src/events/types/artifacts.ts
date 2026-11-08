@@ -20,4 +20,21 @@ export interface ArtifactUpdatedEvent extends EventEnvelope {
   }
 }
 
-export type ArtifactEvent = ArtifactUpdatedEvent
+/**
+ * A comment on an artifact was added, resolved, opened again, or deleted. Whoever reads the
+ * artifact receives it, and reads the comments again.
+ */
+export interface ArtifactCommentedEvent extends EventEnvelope {
+  type: "artifact.commented"
+  topic: "artifacts"
+  partitionKey: string
+  payload: {
+    artifactId: string
+    commentId: string
+    /** The comment it replies to, for a reply. */
+    parentId?: string
+    action: "created" | "resolved" | "reopened" | "deleted"
+  }
+}
+
+export type ArtifactEvent = ArtifactUpdatedEvent | ArtifactCommentedEvent

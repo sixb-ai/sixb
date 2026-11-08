@@ -29,7 +29,7 @@ export type {
   PropertyChangeMap,
   PropertyChangeOperation,
 } from "../property-changes"
-export type { ArtifactEvent, ArtifactUpdatedEvent } from "./artifacts"
+export type { ArtifactCommentedEvent, ArtifactEvent, ArtifactUpdatedEvent } from "./artifacts"
 export type { DatasetEvent, DatasetVersionCommittedEvent } from "./datasets"
 export type {
   LinkCreatedEvent,
