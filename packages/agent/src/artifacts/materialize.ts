@@ -103,7 +103,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   }
 
   get manifestJson(): string {
-    return JSON.stringify({ artifacts: this.#entries }, null, 2)
+    return manifestJson(this.#entries)
   }
 
   /** The revision the manifest lists for an artifact: the one its copy holds. */
@@ -136,7 +136,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   /**
    * Install a revision in place of the artifact's copy, and list it first: the copy, the base of
    * the next update, and the folder the Agent last published it from move together, so an update
-   * from that folder never takes out what someone else wrote. One update runs at a time, so
+   * from that folder never takes out what someone else wrote. One that fails to write them keeps
+   * the base as it was, and rejects. One update runs at a time, so
    * parallel publishes never write an older manifest over a newer one. Resolves to the folder it
    * wrote, as the Agent named it, if any.
    */
@@ -183,11 +184,10 @@ export class InstalledArtifacts implements MaterializedArtifacts {
         `[SixbAgent] Could not remove ${directory}: ${removed.stderr.trim() || `exit ${removed.exitCode}`}`
       )
     }
-    if (install) this.#installed.set(artifact.id, sizeBytes)
-    else this.#installed.delete(artifact.id)
+    // The copy, the folder and the base move together: until both are written, the next update
+    // starts from the revision before, which the folder still holds.
     const previous = this.#bases.get(artifact.id) ?? []
-    this.#bases.set(artifact.id, version.files)
-    this.#entries = [
+    const entries = [
       manifestEntry(artifact, version, install ? directory : undefined, options),
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
     ]
@@ -198,13 +198,33 @@ export class InstalledArtifacts implements MaterializedArtifacts {
             contents: file.bytes,
           }))
         : []),
-      { path: inSandbox(manifestPath), contents: this.manifestJson },
+      { path: inSandbox(manifestPath), contents: manifestJson(entries) },
     ])
 
-    // The folder takes the revision too: each file as it holds it, and none of the files the
-    // revision before held that it does not.
-    const folder = this.#folders.get(artifact.id)
+    const moved = await this.#writeFolder(sandbox, artifact.id, previous, files, signal)
+
+    if (install) this.#installed.set(artifact.id, sizeBytes)
+    else this.#installed.delete(artifact.id)
+    this.#bases.set(artifact.id, version.files)
+    this.#entries = entries
+    return moved
+  }
+
+  /**
+   * The folder the Agent last published an artifact from takes a revision too: each file as it
+   * holds it, and none of the files the revision before held that it does not. Resolves to the
+   * folder, as the Agent named it, if any.
+   */
+  async #writeFolder(
+    sandbox: Sandbox,
+    artifactId: string,
+    previous: readonly ArtifactFile[],
+    files: readonly PublishedArtifactFile[],
+    signal: AbortSignal
+  ): Promise<string | undefined> {
+    const folder = this.#folders.get(artifactId)
     if (!folder) return undefined
+
     const kept = new Set(files.map((file) => file.path))
     const gone = previous
       .filter((file) => !kept.has(file.path))
@@ -354,6 +374,11 @@ export async function installTurnArtifacts(input: {
     throw new Error(`[SixbAgent] Could not install artifacts ${failed.join(", ")}.`)
   }
   return folders
+}
+
+/** The manifest the sandbox reads, listing these entries. */
+function manifestJson(entries: readonly ManifestEntry[]): string {
+  return JSON.stringify({ artifacts: entries }, null, 2)
 }
 
 function manifestEntry(
