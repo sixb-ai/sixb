@@ -51,6 +51,9 @@ import { formatFileSize } from "./file-size"
 import { useFileName } from "./file-source"
 import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
 import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
+import { LiveAvatars, LiveNotice, LiveSaveStatus } from "./live/header"
+import { LiveArtifactProvider } from "./live/hooks"
+import { type LiveView, useLiveView } from "./live/view"
 import { useArtifactMessages } from "./messages"
 import { resetPageState, usePageStateCount } from "./page-state"
 import { useArtifactPeople } from "./people"
@@ -161,6 +164,13 @@ function ArtifactView({
     (shown ? null : versionQuery.error)
   const edit = useArtifactEdit(target, detail, shown, onTargetChange, editedVersion)
   const guarded = edit.guard(chrome)
+  // A canvas's latest version is held live: everyone's changes show as they make them, and
+  // editing it changes it for everyone at once.
+  const liveView = useLiveView(
+    detail?.artifact.kind === "canvas" && versionNumber === detail.artifact.latestVersion
+      ? target.artifactId
+      : null
+  )
 
   if (error || (artifactQuery.isSuccess && !detail)) {
     return (
@@ -189,6 +199,7 @@ function ArtifactView({
         version={version}
         chrome={guarded}
         edit={edit}
+        liveView={liveView}
         onVersionChange={(next) =>
           onTargetChange({
             type: "artifact",
@@ -201,14 +212,17 @@ function ArtifactView({
         <EditNotice edit={edit} />
       ) : null}
       {edit.savedShared ? <SavedSharedNotice /> : null}
-      <EditSessionProvider editing={edit.editing} report={edit.report}>
-        <ArtifactBody
-          key={bodyKey(version, kind, target.part)}
-          version={version}
-          kind={kind}
-          latestVersion={detail.artifact.latestVersion}
-          part={target.part}
-        />
+      {liveView?.notice ? <LiveNotice reason={liveView.notice} /> : null}
+      <EditSessionProvider editing={edit.editing || !!liveView?.editing} report={edit.report}>
+        <LiveArtifactProvider artifact={liveView?.live ?? null}>
+          <ArtifactBody
+            key={bodyKey(version, kind, target.part)}
+            version={version}
+            kind={kind}
+            latestVersion={detail.artifact.latestVersion}
+            part={target.part}
+          />
+        </LiveArtifactProvider>
       </EditSessionProvider>
       <DiscardDialog edit={edit} />
     </>
@@ -587,6 +601,7 @@ function ArtifactHeader({
   version,
   chrome,
   edit,
+  liveView,
   onVersionChange,
 }: {
   readonly target: ArtifactTarget
@@ -594,11 +609,17 @@ function ArtifactHeader({
   readonly version: ArtifactVersion
   readonly chrome: ViewerChrome
   readonly edit: ArtifactEdit
+  readonly liveView: LiveView | null
   readonly onVersionChange: (version: number) => void
 }) {
   const messages = useArtifactMessages()
   const { artifact } = detail
   const live = holdsQueries(version)
+  // Drawn from its live document, the canvas is edited live, not as a draft the header saves.
+  const drawnLive = !!liveView?.state.synced && !liveView.state.left
+  if (liveView?.editing) {
+    return <LiveEditBar chrome={chrome} detail={detail} version={version} liveView={liveView} />
+  }
   if (edit.editing) {
     // The draft bar: what is being edited, Discard, and Save. As the header narrows, down to a
     // phone's dialog, the state and Discard fold to icons, and the kind and full page give way, so
@@ -693,11 +714,24 @@ function ArtifactHeader({
             onRestored={() => onVersionChange(artifact.latestVersion)}
           />
           {live ? <LiveStatus version={version} /> : null}
+          {liveView ? <LiveAvatars live={liveView.live} /> : null}
         </>
       }
     >
       {live ? <RefreshButton version={version} /> : null}
-      {edit.available ? (
+      {drawnLive ? (
+        liveView.editable ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mr-0.5 text-muted-foreground hover:text-foreground"
+            onClick={liveView.start}
+          >
+            <PencilLine aria-hidden="true" />
+            {messages.edit.edit}
+          </Button>
+        ) : null
+      ) : edit.available ? (
         <Button
           size="sm"
           variant="ghost"
@@ -719,6 +753,66 @@ function ArtifactHeader({
           link={() => artifactLink(target, artifact.latestVersion, location.origin)}
         />
       )}
+    </ViewerBar>
+  )
+}
+
+/**
+ * The header while the reader edits a live canvas: who else is here and where their changes are,
+ * this reader's own undo and redo, and Done. Nothing waits to be saved: each change is everyone's
+ * as it is made. As the header narrows, the kind and the save state's words give way.
+ */
+function LiveEditBar({
+  chrome,
+  detail,
+  version,
+  liveView,
+}: {
+  readonly chrome: ViewerChrome
+  readonly detail: ArtifactDetail
+  readonly version: ArtifactVersion
+  readonly liveView: LiveView
+}) {
+  const messages = useArtifactMessages()
+  const { artifact } = detail
+  return (
+    <ViewerBar
+      chrome={chrome}
+      editing
+      leading={
+        <span className="hidden @md:contents">
+          <ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />
+        </span>
+      }
+      title={version.title}
+      accessory={
+        <>
+          <LiveSaveStatus state={liveView.state} />
+          <LiveAvatars live={liveView.live} />
+        </>
+      }
+    >
+      <div className="flex items-center gap-1.5 pr-1">
+        <div className="mr-1 flex items-center">
+          <HeaderButton
+            label={messages.edit.undo}
+            onClick={liveView.undo}
+            disabled={!liveView.history.undo}
+          >
+            <Undo2 />
+          </HeaderButton>
+          <HeaderButton
+            label={messages.edit.redo}
+            onClick={liveView.redo}
+            disabled={!liveView.history.redo}
+          >
+            <Redo2 />
+          </HeaderButton>
+        </div>
+        <Button size="sm" onClick={liveView.stop}>
+          {messages.live.done}
+        </Button>
+      </div>
     </ViewerBar>
   )
 }

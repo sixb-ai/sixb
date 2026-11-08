@@ -1,27 +1,18 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
-import type { ArtifactLiveSocket } from "@sixb/client"
-import { type Canvas, type CanvasItem, formatCanvas, parseCanvas } from "@sixb/core/artifacts"
-import {
-  type ArtifactLiveAccess,
-  type ArtifactLiveClientMessage,
-  type ArtifactLiveServerMessage,
-  decodeLiveData,
-  encodeLiveData,
-  LIVE_FILES,
-} from "@sixb/core/artifacts/live"
-import * as decoding from "lib0/decoding"
-import * as encoding from "lib0/encoding"
-import * as syncProtocol from "y-protocols/sync"
+import { type Canvas, type CanvasItem, formatCanvas } from "@sixb/core/artifacts"
+import { LIVE_FILES } from "@sixb/core/artifacts/live"
 import * as Y from "yjs"
 import { LiveCanvas, liveCanvasOf } from "../src/artifacts/live/canvas"
-import {
-  type LiveArtifact,
-  LiveHub,
-  type LiveKeeper,
-  type LiveSocketFactory,
-} from "../src/artifacts/live/session"
+import { type LiveArtifact, LiveHub, type LiveKeeper } from "../src/artifacts/live/session"
 import { moveItems, setItemText } from "../src/artifacts/renderers/canvas/draft"
 import { canvasGraph } from "../src/artifacts/renderers/canvas/layout"
+import {
+  canvasOf,
+  type FakeConnection,
+  FakeServer,
+  settle,
+  storedDocument,
+} from "./helpers/live-server"
 
 const ARTIFACT = "art_c4nv4s0000"
 
@@ -33,135 +24,6 @@ const CANVAS = canvasOf({
     { id: "ask", type: "note", x: 0, y: 560, w: 260, text: "Annual first?" },
   ],
 })
-
-function canvasOf(value: unknown): Canvas {
-  const parsed = parseCanvas(JSON.stringify(value))
-  if (!("canvas" in parsed)) throw new Error(parsed.error)
-  return parsed.canvas
-}
-
-/** A canvas's document as storage keeps it: the history every copy continues. */
-function storedDocument(canvas: Canvas): Y.Doc {
-  const doc = new Y.Doc()
-  doc.transact(() => {
-    doc.getMap("artifact").set("kind", "canvas")
-    const structure = new Y.Map<unknown>()
-    const items = new Y.Map<Y.Map<unknown>>()
-    for (const item of canvas.items) {
-      const map = new Y.Map<unknown>()
-      for (const [key, value] of Object.entries(item)) {
-        map.set(key, ["text", "title", "label"].includes(key) ? new Y.Text(String(value)) : value)
-      }
-      items.set(item.id, map)
-    }
-    const order = new Y.Array<string>()
-    order.push(canvas.items.map((item) => item.id))
-    structure.set("items", items)
-    structure.set("order", order)
-    doc.getMap(LIVE_FILES).set("canvas.json", structure)
-  })
-  return doc
-}
-
-/**
- * The server's side of `/ws/artifacts`, as the room speaks it: one document, a `joined` and its
- * own sync step 1 on join, each sync message read into the document, and each change it takes
- * sent on to every other connection. Messages arrive a turn later, as over a socket.
- */
-class FakeServer {
-  readonly doc = storedDocument(CANVAS)
-  readonly connections = new Set<FakeConnection>()
-  access: ArtifactLiveAccess = "edit"
-
-  constructor() {
-    this.doc.on("update", (update: Uint8Array, origin: unknown) => {
-      const message = encoding.createEncoder()
-      syncProtocol.writeUpdate(message, update)
-      for (const connection of this.connections) {
-        if (connection !== origin) connection.sync(encoding.toUint8Array(message))
-      }
-    })
-  }
-
-  /** A hub's socket factory: each socket a connection to this server. */
-  readonly open: LiveSocketFactory = (handlers) => {
-    const connection = new FakeConnection(this, handlers)
-    this.connections.add(connection)
-    connection.connect()
-    return connection
-  }
-}
-
-class FakeConnection implements ArtifactLiveSocket {
-  open = false
-  readonly sent: ArtifactLiveClientMessage[] = []
-
-  constructor(
-    private readonly server: FakeServer,
-    private readonly handlers: Parameters<LiveSocketFactory>[0]
-  ) {}
-
-  connect(): void {
-    this.open = true
-    queueMicrotask(() => this.handlers.onConnected())
-  }
-
-  /** The socket drops; the client hears of it at once. */
-  drop(): void {
-    this.open = false
-    this.handlers.onClosed()
-  }
-
-  send(message: ArtifactLiveClientMessage): boolean {
-    if (!this.open) return false
-    this.sent.push(message)
-    queueMicrotask(() => this.receive(message))
-    return true
-  }
-
-  close(): void {
-    this.open = false
-    this.server.connections.delete(this)
-  }
-
-  /** Sends a sync message to the client. */
-  sync(bytes: Uint8Array): void {
-    this.deliver({ type: "sync", artifactId: ARTIFACT, data: encodeLiveData(bytes) })
-  }
-
-  deliver(message: ArtifactLiveServerMessage): void {
-    if (!this.open) return
-    queueMicrotask(() => this.handlers.onMessage(message))
-  }
-
-  private receive(message: ArtifactLiveClientMessage): void {
-    if (message.type === "join") {
-      this.deliver({
-        type: "joined",
-        artifactId: ARTIFACT,
-        access: this.server.access,
-        revision: 1,
-        user: { id: "user:alice", name: "Alice", color: "#e5484d" },
-      })
-      const step1 = encoding.createEncoder()
-      syncProtocol.writeSyncStep1(step1, this.server.doc)
-      this.sync(encoding.toUint8Array(step1))
-      return
-    }
-    if (message.type !== "sync") return
-
-    const bytes = decodeLiveData(message.data)
-    if (!bytes) return
-    const reply = encoding.createEncoder()
-    syncProtocol.readSyncMessage(decoding.createDecoder(bytes), reply, this.server.doc, this)
-    if (encoding.length(reply) > 0) this.sync(encoding.toUint8Array(reply))
-  }
-}
-
-/** Lets every message in flight arrive, and what they set off. */
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 30; turn += 1) await Promise.resolve()
-}
 
 const held: { hub: LiveHub; artifact: LiveArtifact }[] = []
 
@@ -215,7 +77,7 @@ afterEach(() => {
 describe("a live artifact", () => {
   test("joins, takes the document from the server, and sends its changes to the others", async () => {
     // Reproduce by dropping sync step 1 from `joined` in session.ts: the document never fills.
-    const server = new FakeServer()
+    const server = new FakeServer(ARTIFACT, CANVAS)
     const alice = tab(server)
     const bob = tab(server)
     await settle()
@@ -237,7 +99,7 @@ describe("a live artifact", () => {
   test("keeps its document across a reconnect, and the server gets what changed meanwhile", async () => {
     // Reproduce by making a new document on reconnect, or by not sending sync step 1 on `joined`:
     // what Alice changed while offline never reaches Bob.
-    const server = new FakeServer()
+    const server = new FakeServer(ARTIFACT, CANVAS)
     const alice = tab(server)
     const bob = tab(server)
     await settle()
@@ -265,7 +127,7 @@ describe("a live artifact", () => {
     // that comes back after the outage gets a new document, and Alice's move is lost.
     jest.useFakeTimers()
     try {
-      const server = new FakeServer()
+      const server = new FakeServer(ARTIFACT, CANVAS)
       const alice = tab(server)
       const bob = tab(server)
       await settle()
@@ -299,7 +161,7 @@ describe("a live artifact", () => {
   test("keeps what changed offline across a reload, and forgets it once the server saved it", async () => {
     // Reproduce by dropping the keeper from LiveArtifact: the page reloaded during the outage
     // starts from the server's document, and Alice's move is lost.
-    const server = new FakeServer()
+    const server = new FakeServer(ARTIFACT, CANVAS)
     const keeper = memoryKeeper()
     const alice = tab(server, keeper)
     const bob = tab(server)
@@ -326,7 +188,7 @@ describe("a live artifact", () => {
   test("sends nothing once it may only watch, and leaves when the server says so", async () => {
     // Reproduce by sending every change in session.ts whatever the access: the server takes
     // Alice's move after she lost the right to make it.
-    const server = new FakeServer()
+    const server = new FakeServer(ARTIFACT, CANVAS)
     const alice = tab(server)
     await settle()
 
