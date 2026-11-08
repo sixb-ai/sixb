@@ -1,5 +1,6 @@
 import type { SixbHostView } from "@sixb/core"
 import { parseArtifactAddress } from "@sixb/core/artifacts"
+import { annotateBoard } from "@sixb/core/artifacts/live"
 import {
   ARTIFACT_FRAME_ROUTE_PREFIX,
   FRAME_ASSETS,
@@ -30,7 +31,8 @@ interface FrameContext {
 /**
  * Serves a version's files to its sandboxed frame, under the token a frame link carries: the token
  * is the credential, so the route is public. Each entry gets its layout's kit and the runtime,
- * which are served beside the files. Hidden from OpenAPI: clients receive frame links, they
+ * which are served beside the files. A canvas's board asked for with `?sixb-edit` is served for
+ * editing: its static elements marked with their addresses. Hidden from OpenAPI: clients receive frame links, they
  * never build them.
  */
 export function registerArtifactFrameRoutes(
@@ -116,8 +118,18 @@ async function frameResponse(
     headers.set("cache-control", "private, no-cache")
     if (options.head) return new Response(null, { headers })
     const text = await new Response(opened.body).text()
+
+    // A canvas's board served for editing has its static elements marked with their addresses,
+    // for the runtime to report and edit them by.
+    const editing =
+      version.outline.kind === "canvas" && new URL(request.url).searchParams.has("sixb-edit")
+    const source = editing ? annotateBoard(text) : text
     return new Response(
-      injectFrameAssets(rewriteFrameReferences(text, frame.targets, file.path), layout, file.path),
+      injectFrameAssets(
+        rewriteFrameReferences(source, frame.targets, file.path),
+        layout,
+        file.path
+      ),
       { headers }
     )
   }

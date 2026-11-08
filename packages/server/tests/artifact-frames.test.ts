@@ -278,6 +278,47 @@ describe("a deck's frame", () => {
     expect(await css.text()).toBe("body { margin: 0 }")
   })
 
+  // Guard proof: drop the `sixb-edit` branch from the frame route; the board comes back as it is,
+  // with no address for the runtime to edit by.
+  test("serves a canvas's board for editing with its static elements addressed, when asked", async () => {
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const canvas = await publish(fixture, alice, "canvas", [
+      await fixture.put(
+        "canvas.json",
+        JSON.stringify({
+          items: [
+            {
+              id: "welcome",
+              type: "board",
+              file: "boards/welcome.html",
+              x: 0,
+              y: 0,
+              w: 390,
+              h: 844,
+            },
+          ],
+        }),
+        "application/json"
+      ),
+      await fixture.put(
+        "boards/welcome.html",
+        "<html><head></head><body><h1>Welcome</h1></body></html>",
+        "text/html"
+      ),
+    ])
+    const { path } = (await (await mint(fixture, alice, canvas.artifact.id)).json()) as {
+      path: string
+    }
+    const board = async (query: string) =>
+      (await fixture.app.fetch(new Request(url(`${path}boards/welcome.html${query}`)))).text()
+
+    expect(await board("")).toContain("<body><h1>Welcome</h1></body>")
+    expect(await board("?sixb-edit")).toContain(
+      '<body data-sixb-at="body" data-sixb-edit="box"><h1 data-sixb-at="body>h1:0" data-sixb-edit="text" data-sixb-text="'
+    )
+  })
+
   test("keeps serving a canvas's boards while only its items move, and stops once a board changes", async () => {
     // Reproduce by keeping canvas.json in frameFilesDigest: each save of a canvas edited live
     // ends the link its boards run under, and they go blank.
