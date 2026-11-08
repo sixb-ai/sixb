@@ -78,7 +78,11 @@ export async function validateCanvas(
       }),
     },
     references,
-    warnings: [...layoutWarnings(canvas), ...crossingArrowWarnings(canvas)],
+    warnings: [
+      ...layoutWarnings(canvas),
+      ...overprintWarnings(canvas),
+      ...crossingArrowWarnings(canvas),
+    ],
   }
 }
 
@@ -122,6 +126,47 @@ function layoutWarnings(canvas: Canvas): ArtifactWarning[] {
     })
   }
   return warnings
+}
+
+/** The most pairs of words drawn over each other warned of one by one. */
+const MAX_OVERPRINTS = 12
+
+/**
+ * Texts and notes drawn over each other, as the app draws them: a title's box reckoned from its
+ * words and size, lines and all, so a subtitle placed under where a large title ends is caught.
+ */
+function overprintWarnings(canvas: Canvas): ArtifactWarning[] {
+  const worded = canvas.items.flatMap((item) => {
+    if (item.type !== "text" && item.type !== "note") return []
+    const box = canvasItemBox(item)
+    return box ? [{ item, box }] : []
+  })
+
+  const pairs = worded.flatMap((first, index) =>
+    worded
+      .slice(index + 1)
+      .filter((second) => intersects(first.box, second.box))
+      .map((second) => [first.item, second.item] as const)
+  )
+
+  const warnings: ArtifactWarning[] = pairs.slice(0, MAX_OVERPRINTS).map(([first, second]) => ({
+    code: "canvas_text_overlap",
+    part: first.id,
+    message: `${first.type === "note" ? "Note" : "Text"} '${first.id}' and ${second.type} '${second.id}' are drawn over each other, so neither reads: move one clear of the other.`,
+  }))
+  const more = pairs.length - warnings.length
+  if (more > 0) {
+    warnings.push({
+      code: "canvas_text_overlap",
+      message: `${more} more pair${more === 1 ? " is" : "s are"} drawn over each other.`,
+    })
+  }
+  return warnings
+}
+
+/** Whether two boxes share some area: touching edges do not. */
+function intersects(a: CanvasBox, b: CanvasBox): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 }
 
 /** The most arrows warned of one by one, and items named for one arrow. */

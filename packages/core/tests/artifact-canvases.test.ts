@@ -302,6 +302,60 @@ describe("publishing a canvas", () => {
     ])
   })
 
+  test("warns of texts and notes drawn over each other, sizing a title by its words and lines", async () => {
+    // Reproduce by testing texts by their top line at a fixed height, or not at all: the subtitle
+    // set under the top of a 120-pixel title, and the line under a two-line heading's first line,
+    // print over them unseen.
+    const { publish } = setup()
+    const text = (id: string, y: number, size: string, words: string, x = 0) => ({
+      id,
+      type: "text",
+      x,
+      y,
+      text: words,
+      size,
+    })
+    const published = await publish({
+      "canvas.json": JSON.stringify({
+        items: [
+          text("title", -1000, "xxl", "Launch film"),
+          // 120 pixels at a line height of 1.15 end 138 pixels down: this starts at 100.
+          text("subtitle", -900, "m", "Seven shots, one story"),
+          text("heading", -600, "xl", "Act one\nThe call"),
+          // Two lines of 44 pixels take 101: this starts under the first one.
+          text("under", -540, "m", "Where it starts"),
+          // And this one clear of both.
+          text("clear", -480, "m", "Where it goes"),
+          { id: "ask", type: "note", x: 2000, y: -1000, w: 280, text: "Shorter cut?" },
+          { id: "also", type: "note", x: 2100, y: -950, w: 280, text: "Music?" },
+          text("tag", -1000, "s", "Draft", 2200),
+          {
+            id: "pricing",
+            type: "board",
+            file: "boards/pricing.html",
+            x: 0,
+            y: 0,
+            w: 1280,
+            h: 800,
+          },
+          text("over-board", 100, "m", "On the board", 40),
+        ],
+      }),
+      "boards/pricing.html": "<main></main>",
+    })
+
+    expect(
+      published.warnings
+        .filter((warning) => warning.code === "canvas_text_overlap")
+        .map((warning) => warning.message)
+    ).toEqual([
+      "Text 'title' and text 'subtitle' are drawn over each other, so neither reads: move one clear of the other.",
+      "Text 'heading' and text 'under' are drawn over each other, so neither reads: move one clear of the other.",
+      "Note 'ask' and note 'also' are drawn over each other, so neither reads: move one clear of the other.",
+      "Note 'ask' and text 'tag' are drawn over each other, so neither reads: move one clear of the other.",
+    ])
+  })
+
   test("warns of an arrow drawn across other items, never of one across its section", async () => {
     // A row of two boards wrapping to a second row, a note under the first row, and a section
     // around them all. Reproduce by testing arrows against nothing: the wrap's arrow runs back
