@@ -3,6 +3,7 @@
 
 import type { Canvas, CanvasArrow, CanvasBoard as CanvasBoardItem } from "@sixb/core/artifacts"
 import { CANVAS_FIT_PADDING } from "@sixb/core/artifacts"
+import { cn } from "@sixb/ui/lib/utils"
 import {
   Background,
   BackgroundVariant,
@@ -12,6 +13,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
   useStoreApi,
 } from "@xyflow/react"
 import {
@@ -374,6 +376,7 @@ function Board({
                   <Panel position="top-right" className="!m-3">
                     <CommentTools commenting={commenting} />
                   </Panel>
+                  {commenting.commenting ? <ZoomVariable root={board.root} /> : null}
                 </>
               ) : null}
             </ReactFlow>
@@ -381,7 +384,12 @@ function Board({
         </LiveBoardsProvider>
         {commenting.enabled && commenting.commenting && !draft ? (
           // Over the canvas and an opened board alike, out of the way of what is commented on.
-          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 max-sm:bottom-20">
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4",
+              opened ? "top-15" : "bottom-4 max-sm:bottom-20"
+            )}
+          >
             <CommentModeHint onExit={() => setCommenting(false)} />
           </div>
         ) : null}
@@ -476,4 +484,16 @@ function useNameScaleVariable(root: RefObject<HTMLDivElement | null>): void {
     update()
     return store.subscribe(update)
   }, [store, root])
+}
+
+/**
+ * The canvas's zoom as `--sixb-zoom` on its root, while comments are placed: what outlines the
+ * board a click would comment on keeps its width on screen. Only this redraws as the view zooms.
+ */
+function ZoomVariable({ root }: { readonly root: RefObject<HTMLDivElement | null> }) {
+  const zoom = useStore((state) => state.transform[2])
+  useEffect(() => {
+    root.current?.style.setProperty("--sixb-zoom", String(zoom))
+  }, [root, zoom])
+  return null
 }

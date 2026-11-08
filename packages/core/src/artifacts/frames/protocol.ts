@@ -146,6 +146,8 @@ export type FrameEditTarget =
       readonly address: null
       readonly kind: "scripted"
       readonly within: string | null
+      /** The words the reader pointed at, as the page shows them now. */
+      readonly label?: string
       readonly rect: FrameRect
     }
 
@@ -414,7 +416,17 @@ function parseEditTarget(value: unknown): FrameEditTarget | null {
   if (value.kind === "scripted") {
     if (value.address !== null) return null
     if (value.within !== null && !isEditAddress(value.within)) return null
-    return { address: null, kind: "scripted", within: value.within as string | null, rect }
+    const label =
+      typeof value.label === "string" && value.label.length <= MAX_EDIT_LABEL_LENGTH
+        ? { label: value.label }
+        : {}
+    return {
+      address: null,
+      kind: "scripted",
+      within: value.within as string | null,
+      ...label,
+      rect,
+    }
   }
   if (!isEditAddress(value.address) || !EDIT_KINDS.includes(String(value.kind))) return null
   if (typeof value.label !== "string" || value.label.length > MAX_EDIT_LABEL_LENGTH) return null
