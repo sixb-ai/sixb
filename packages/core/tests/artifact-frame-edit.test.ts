@@ -242,6 +242,21 @@ describe("a board's frame, editing", () => {
     expect(total.hasAttribute("data-sixb-picked")).toBe(true)
   })
 
+  // Guard proof: drop the runtime's `mouseout` listener; the heading stays outlined, and named in
+  // the app, once the pointer has left the page.
+  test("picking what to comment on, leaves nothing outlined once the pointer leaves the page", () => {
+    const { request, events, at, fire } = frame(BOARD)
+    request("edit", { on: true, typing: false })
+
+    const heading = at("body>main:0>h1:0")
+    fire(heading, "mouseover")
+    expect(heading.hasAttribute("data-sixb-hover")).toBe(true)
+
+    fire(heading, "mouseout")
+    expect(heading.hasAttribute("data-sixb-hover")).toBe(false)
+    expect(events("edit.hover").at(-1)).toMatchObject({ params: { target: null } })
+  })
+
   // Guard proof: drop the `script, style, template` removal from spokenWords; the box's label
   // quotes the script's source. Drop the `start !== root` check from editTarget; the page itself
   // is quoted as what is pointed at.

@@ -408,9 +408,9 @@ export function frameRuntime(): void {
     pointed = mark("data-sixb-hover", pointed, shown)
     postEdit({ event: "edit.hover", params: { target } })
   })
-  // The pointer gone from the page, nothing is under it.
-  document.documentElement.addEventListener("mouseleave", () => {
-    if (!editing || pointed === null) return
+  // The pointer gone from the page, nothing is under it: it left for nothing of the page.
+  document.addEventListener("mouseout", (event) => {
+    if (!editing || !event.isTrusted || event.relatedTarget !== null || pointed === null) return
     pointed = mark("data-sixb-hover", pointed, null)
     postEdit({ event: "edit.hover", params: { target: null } })
   })
