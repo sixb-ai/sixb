@@ -3,10 +3,8 @@
 // update), `awareness` its awareness updates. A client joins, sends sync step 1, applies what it
 // is sent, and sends its document's updates and its awareness as they happen.
 //
-// Only documents of one copy sync: `joined` names the copy the server holds. A client whose
-// document came from another copy (the server reloaded the artifact, or another server holds it)
-// starts from an empty document and, once in step, applies what it changed meanwhile with
-// `mergeIntoDocument`.
+// Every copy of an artifact's document, a client's or a server's, continues the history storage
+// keeps, so a client that reconnects, to any server, syncs what it changed while away.
 
 /** Where an artifact is edited live. */
 export const ARTIFACT_LIVE_ROUTE = "/ws/artifacts"
@@ -45,8 +43,8 @@ export type ArtifactLiveServerMessage =
       readonly artifactId: string
       readonly access: ArtifactLiveAccess
       readonly revision: number
-      /** The copy of the document the server holds; only a document of this copy syncs with it. */
-      readonly document: string
+      /** Who the connection is in the awareness states the server shares. */
+      readonly user: ArtifactLiveUser
     }
   | { readonly type: "sync"; readonly artifactId: string; readonly data: string }
   | { readonly type: "awareness"; readonly artifactId: string; readonly data: string }
@@ -63,8 +61,22 @@ export type ArtifactLiveServerMessage =
   | { readonly type: "error"; readonly artifactId?: string; readonly message: string }
 
 /**
+ * Who a connection is, as the server says in each awareness state it shares as `user`: whatever
+ * a client sets there itself is replaced.
+ */
+export interface ArtifactLiveUser {
+  readonly id: string
+  readonly name: string
+  /** A color for the person's cursor and selection, the same wherever they connect. */
+  readonly color: string
+}
+
+/** The awareness field that names who an awareness state is. */
+export const USER_AWARENESS_FIELD = "user"
+
+/**
  * The awareness field the server sets for the Agent while a turn changes boards of the canvas:
- * each turn at work, with the boards it changed. Every other field is what clients set.
+ * each turn at work, with the boards it changed. A client's own state never holds it.
  */
 export const AGENT_AWARENESS_FIELD = "sixbAgent"
 

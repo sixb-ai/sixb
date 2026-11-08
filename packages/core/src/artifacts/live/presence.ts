@@ -2,12 +2,13 @@ import type { Broker, BrokerRetention, BrokerStreamDefinition } from "../../brok
 import type { JsonObject } from "../../json"
 import type { ArtifactVersionRecord } from "../../storage/artifacts/types"
 
-// What servers holding an artifact live tell each other, on one broker stream per artifact:
-// awareness updates, so editors on two servers see each other, and the Agent's presence, so a
-// board it is changing says so wherever it is open. Short-lived by nature: retention is short.
+// What servers holding an artifact live tell each other, on one broker stream per artifact: the
+// document's updates and awareness updates, so editors on two servers edit as one, and the
+// Agent's presence, so a board it is changing says so wherever it is open. Short-lived by nature:
+// what is written back is in storage, so retention only has to outlast a write-back.
 
-/** Minutes of records a server joining an artifact can still read; presence is renewed sooner. */
-const ARTIFACT_LIVE_RETENTION: BrokerRetention = { maxAgeMs: 10 * 60_000, maxRecords: 500 }
+/** Minutes of records a server opening an artifact can still read; presence is renewed sooner. */
+const ARTIFACT_LIVE_RETENTION: BrokerRetention = { maxAgeMs: 10 * 60_000, maxRecords: 5_000 }
 
 /** How long the Agent's presence lasts unless its turn ends sooner, as a crashed turn's would. */
 export const AGENT_PRESENCE_MS = 10 * 60_000
@@ -18,6 +19,11 @@ export function artifactLiveStream(artifactId: string): BrokerStreamDefinition {
 
 /** One record of an artifact's live stream. */
 export type ArtifactLiveRecord =
+  /** An update an editor made to the document on a server, as Yjs encodes it, in base64. */
+  | {
+      readonly name: "update"
+      readonly payload: { readonly instance: string; readonly update: string }
+    }
   /** A server's awareness update, as y-protocols encodes it, in base64. */
   | {
       readonly name: "awareness"
@@ -45,9 +51,10 @@ export function parseArtifactLiveRecord(record: {
   const value = payload as Record<string, unknown>
 
   switch (record.name) {
+    case "update":
     case "awareness":
       return typeof value.instance === "string" && typeof value.update === "string"
-        ? { name: "awareness", payload: { instance: value.instance, update: value.update } }
+        ? { name: record.name, payload: { instance: value.instance, update: value.update } }
         : null
     case "agent":
       return typeof value.runId === "string" &&

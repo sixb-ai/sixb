@@ -12,7 +12,6 @@ export {
   LIVE_FILES,
   type LiveFile,
   type LiveFiles,
-  mergeIntoDocument,
   patchText,
 } from "./document"
 export {
@@ -24,8 +23,10 @@ export {
   type ArtifactLiveLeftReason,
   type ArtifactLiveSaveState,
   type ArtifactLiveServerMessage,
+  type ArtifactLiveUser,
   decodeLiveData,
   encodeLiveData,
   LIVE_SYNC_PART_BYTES,
   liveSync,
+  USER_AWARENESS_FIELD,
 } from "./protocol"
