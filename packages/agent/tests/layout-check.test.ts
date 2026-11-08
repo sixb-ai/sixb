@@ -458,6 +458,7 @@ exports.chromium = {
           },
         ],
         stalls: [{ board: "region", message: "board 'region' in light mode did not respond" }],
+        unpictured: [{ board: "pricing", reason: "pricing.css did not load (404)" }],
         overview: join(output, "overview.png"),
       }),
     })
@@ -500,6 +501,12 @@ exports.chromium = {
       ],
       overview: ".sixb/agent/checks/art_0000000000-v2/overview.png",
       warnings: [
+        {
+          code: "preview_not_taken",
+          part: "pricing",
+          message:
+            "Board 'pricing' has no preview: pricing.css did not load (404), and a picture of it would show it broken to every reader. It shows its outline until a version loads whole.",
+        },
         {
           code: "layout_incomplete",
           part: "region",

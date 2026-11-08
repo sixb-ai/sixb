@@ -85,6 +85,8 @@ interface CheckReport {
   readonly errors?: readonly string[]
   readonly screenshots?: readonly string[]
   readonly previews?: readonly CheckedPreview[]
+  /** A canvas's boards not pictured: something on their page did not load. */
+  readonly unpictured?: readonly { readonly board: string; readonly reason: string }[]
   /** A canvas's boards that stopped answering, which the check went on without. */
   readonly stalls?: readonly { readonly board: string; readonly message: string }[]
   readonly overview?: string
@@ -263,6 +265,11 @@ export async function checkLayout(
     ...(report.overview ? { overview: named(report.overview) } : {}),
     warnings: [
       ...layoutWarnings(report.problems ?? []),
+      ...(report.unpictured ?? []).map(({ board, reason }) => ({
+        code: "preview_not_taken",
+        part: board,
+        message: `Board '${board}' has no preview: ${reason.slice(0, 200)}, and a picture of it would show it broken to every reader. It shows its outline until a version loads whole.`,
+      })),
       ...(report.stalls ?? []).map(({ board, message }) => ({
         code: "layout_incomplete",
         part: board,
