@@ -479,6 +479,59 @@ describe("publish_artifact", () => {
     })
   })
 
+  test("keeps every picture it could read, and warns of a board one of whose was lost", async () => {
+    // Reproduce by handing the pictures over all or nothing: the one picture the sandbox lost
+    // leaves both boards without any, and the Agent is never told.
+    const board = (id: string, x: number) => ({
+      id,
+      type: "board",
+      file: `${id}.html`,
+      x,
+      y: 0,
+      w: 390,
+      h: 844,
+    })
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({ items: [board("welcome", 0), board("region", 480)] })
+    )
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    write("work/flow/region.html", "<main><h1>Regions</h1></main>")
+    // The check says it took Welcome's small dark picture, but it is not there to read.
+    const lossy: Check = (output) => {
+      const report = canvasCheck(output)
+      rmSync(join(output, "boards", "welcome.dark.small.webp"))
+      return report
+    }
+
+    const published = (await publish(
+      { path: "work/flow", kind: "canvas", title: "Onboarding" },
+      { check: lossy }
+    )) as { artifactId: string; warnings: { code: string; part?: string; message: string }[] }
+
+    const stored = await storage.artifacts.getVersion({
+      projectId,
+      artifactId: published.artifactId,
+      version: 1,
+    })
+    const outline = stored?.outline
+    const keys =
+      outline?.kind === "canvas"
+        ? outline.items.flatMap((item) => (item.type === "board" ? [item.renderKey ?? ""] : []))
+        : []
+    expect(await storage.artifacts.listBoardPreviews({ projectId, renderKeys: keys })).toHaveLength(
+      7
+    )
+    expect(published.warnings.filter((warning) => warning.code === "preview_not_kept")).toEqual([
+      {
+        code: "preview_not_kept",
+        part: "welcome",
+        message:
+          "Board 'welcome' has no preview for the small one in dark mode (it could not be read): readers see its outline there until they open it.",
+      },
+    ])
+  })
+
   test("keeps the pictures of a canvas's boards, and pictures only the boards it changed", async () => {
     // Reproduce the second half by picturing every board: the welcome board, kept as it was, is
     // pictured again. Reproduce the first by dropping storePreviews: nothing is kept.

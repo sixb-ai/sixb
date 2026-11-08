@@ -55,7 +55,7 @@ export async function renderArtifactPreviews(input: {
     signal,
   })
   try {
-    const previews = await renderBoardPreviews({
+    const { previews, dropped } = await renderBoardPreviews({
       sandbox,
       version,
       missing,
@@ -63,11 +63,16 @@ export async function renderArtifactPreviews(input: {
       ...(queries ? { queries } : {}),
       signal,
     })
-    await storeBoardPreviews(
+    const refused = await storeBoardPreviews(
       { storage: artifacts, blobStorage: host.blobStorage },
       version,
       previews
     )
+    for (const { board, theme, size, reason } of [...dropped, ...refused]) {
+      console.warn(
+        `[SixbAgentWorker] The ${size} picture of board '${board}' of '${artifactId}' version ${number} in ${theme} mode was not kept: ${reason}.`
+      )
+    }
   } finally {
     await sandbox.destroy().catch((error: unknown) => {
       console.error(
