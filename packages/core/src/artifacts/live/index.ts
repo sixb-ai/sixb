@@ -5,6 +5,29 @@
  */
 
 export {
+  annotateBoard,
+  applyBoardEdit,
+  applyBoardEditToText,
+  BOARD_ADDRESS_ATTRIBUTE,
+  BOARD_KIND_ATTRIBUTE,
+  BOARD_STYLE_PROPERTIES,
+  BOARD_TEXT_ATTRIBUTE,
+  type BoardChange,
+  type BoardEdit,
+  type BoardElement,
+  type BoardElementKind,
+  type BoardFramePatch,
+  type BoardStyleProperty,
+  boardElement,
+  boardElements,
+  boardFilePath,
+  boardFramePatches,
+  boardTextHash,
+  setBoardImage,
+  setBoardStyle,
+  setBoardText,
+} from "./board"
+export {
   canvasItemMap,
   canvasItemObject,
   documentCanvas,
