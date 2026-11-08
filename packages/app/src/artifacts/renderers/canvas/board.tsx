@@ -1,16 +1,27 @@
-import { createContext, type ReactNode, useContext } from "react"
+import { useStoreApi } from "@xyflow/react"
+import type { LucideIcon } from "lucide-react"
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { ArtifactFrame } from "../../frame"
 import type { ArtifactVersion } from "../../queries"
 
-/** The most boards live at once: each is a page running in its own frame. */
-export const MAX_LIVE_BOARDS = 12
+/** The most boards and embeds live at once: each board is a page running in its own frame. */
+export const MAX_LIVE_BOARDS = 8
 /**
- * How wide on screen a board is before it starts running: narrower, it is its outline. One already
- * running keeps running however small, so zooming out never reloads it.
+ * A board starts running once the view shows it at half its size, where its page's text still
+ * reads. Smaller, a picture of it shows as much, so it is its tile.
  */
-export const MIN_LIVE_WIDTH = 48
+export const LIVE_FROM_SCALE = 0.5
+/** Or once it is this wide on screen, a phone's width, where a wide board's layout reads. */
+export const LIVE_FROM_WIDTH = 360
 
-/** A board's place on the canvas. */
+/** A board's or an embed's place on the canvas. */
 export interface BoardPlace {
   readonly id: string
   readonly x: number
@@ -19,52 +30,137 @@ export interface BoardPlace {
   readonly h: number
 }
 
+/** Where the board view is: React Flow's transform, the pan then the zoom, and its size. */
+export interface BoardView {
+  readonly transform: readonly [number, number, number]
+  readonly width: number
+  readonly height: number
+}
+
 /**
- * The boards to run, from where the board view is: those on screen and at least
- * {@link MIN_LIVE_WIDTH} wide there, or running already, at most {@link MAX_LIVE_BOARDS}. Those
- * running come first, so a pan doesn't swap one page for another, then the nearest the middle of
- * the view. The others show their outline until the view comes to them.
+ * The boards and embeds to run, from where the board view is: those on screen and large enough
+ * there, or running already, at most {@link MAX_LIVE_BOARDS}. One running keeps running however
+ * small while it is on screen, so zooming out never reloads it. Those running come first, so a
+ * pan doesn't swap one page for another, then the nearest the middle of the view. The others show
+ * their tile until the view comes to them.
  */
 export function liveBoards(
   boards: readonly BoardPlace[],
-  view: {
-    /** React Flow's transform: the pan, then the zoom. */
-    readonly transform: readonly [number, number, number]
-    readonly width: number
-    readonly height: number
-  },
+  view: BoardView,
   running: ReadonlySet<string> = new Set()
 ): ReadonlySet<string> {
   const [panX, panY, zoom] = view.transform
   const centerX = view.width / 2
   const centerY = view.height / 2
+
   const candidates = boards.flatMap((board) => {
     const left = board.x * zoom + panX
     const top = board.y * zoom + panY
     const width = board.w * zoom
     const height = board.h * zoom
     const onScreen = left < view.width && left + width > 0 && top < view.height && top + height > 0
+    const large = width >= Math.min(board.w * LIVE_FROM_SCALE, LIVE_FROM_WIDTH)
     const kept = running.has(board.id)
-    if (!onScreen || (width < MIN_LIVE_WIDTH && !kept)) return []
+    if (!onScreen || (!large && !kept)) return []
+
     const distance = Math.hypot(left + width / 2 - centerX, top + height / 2 - centerY)
     return [{ id: board.id, kept, distance }]
   })
+
   candidates.sort((a, b) => Number(b.kept) - Number(a.kept) || a.distance - b.distance)
   return new Set(candidates.slice(0, MAX_LIVE_BOARDS).map((candidate) => candidate.id))
 }
 
+/**
+ * The boards and embeds running, kept as the view moves. Each item reads whether it is one of
+ * them, so a change draws again only the items it starts or stops, and a pan draws nothing.
+ */
+export interface LiveSet {
+  readonly has: (id: string) => boolean
+  readonly subscribe: (listener: () => void) => () => void
+}
+
+/** The live set of these boards and embeds, worked out again as React Flow's view changes. */
+export function useLiveSet(places: readonly BoardPlace[]): LiveSet {
+  const store = useStoreApi()
+  const [live] = useState(createLiveSet)
+
+  useEffect(() => {
+    let last: BoardView | null = null
+    const update = () => {
+      const { transform, width, height, fitViewQueued } = store.getState()
+      // Until the view is fitted, it is not where the reader will see it: a board there would
+      // start only to be seen small.
+      if (fitViewQueued) return
+
+      // The store changes for more than the view: what doesn't move it changes nothing here.
+      if (
+        last &&
+        last.width === width &&
+        last.height === height &&
+        last.transform.every((value, index) => value === transform[index])
+      ) {
+        return
+      }
+
+      last = { transform, width, height }
+      live.set(liveBoards(places, last, live.current()))
+    }
+
+    update()
+    return store.subscribe(update)
+  }, [store, places, live])
+
+  return live
+}
+
+function createLiveSet(): LiveSet & {
+  readonly current: () => ReadonlySet<string>
+  readonly set: (next: ReadonlySet<string>) => void
+} {
+  let current: ReadonlySet<string> = new Set()
+  const listeners = new Set<() => void>()
+
+  return {
+    has: (id) => current.has(id),
+    current: () => current,
+    set: (next) => {
+      if (next.size === current.size && [...next].every((id) => current.has(id))) return
+
+      current = next
+      for (const listener of listeners) listener()
+    },
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+}
+
+const NOTHING_LIVE: LiveSet = { has: () => false, subscribe: () => () => {} }
+
 interface LiveBoards {
   readonly version: ArtifactVersion | null
-  readonly live: ReadonlySet<string>
+  readonly live: LiveSet
   /** Opens a board over the canvas. */
   readonly open?: (id: string) => void
 }
 
-const LiveBoardsContext = createContext<LiveBoards>({ version: null, live: new Set() })
+const LiveBoardsContext = createContext<LiveBoards>({ version: null, live: NOTHING_LIVE })
 
 /** The board view's version, the boards it runs, and how to open one. */
 export function useLiveBoards(): LiveBoards {
   return useContext(LiveBoardsContext)
+}
+
+/** Whether a board or an embed runs now: it draws again only as that changes. */
+export function useLive(id: string): boolean {
+  const { live } = useContext(LiveBoardsContext)
+  return useSyncExternalStore(
+    live.subscribe,
+    () => live.has(id),
+    () => false
+  )
 }
 
 export function LiveBoardsProvider({
@@ -75,6 +171,37 @@ export function LiveBoardsProvider({
   readonly children: ReactNode
 }) {
   return <LiveBoardsContext.Provider value={value}>{children}</LiveBoardsContext.Provider>
+}
+
+/**
+ * What a board or an embed shows while it doesn't run: a picture of it when there is one, else
+ * its outline, the icon of what it is in the middle. The name above says which it is.
+ */
+export function ItemTile({
+  icon: Icon,
+  preview,
+}: {
+  readonly icon: LucideIcon
+  /** A picture of the item, the size of its box. */
+  readonly preview?: string
+}) {
+  if (preview) {
+    return (
+      <img
+        src={preview}
+        alt=""
+        decoding="async"
+        loading="lazy"
+        draggable={false}
+        className="block size-full object-cover"
+      />
+    )
+  }
+  return (
+    <div className="flex size-full items-center justify-center bg-card">
+      <Icon className="size-12 text-muted-foreground/30" strokeWidth={1} aria-hidden="true" />
+    </div>
+  )
 }
 
 /**
@@ -93,8 +220,9 @@ export function LiveBoard({
   readonly title: string
   readonly tile: ReactNode
 }) {
-  const { version, live } = useContext(LiveBoardsContext)
-  if (!version || !live.has(id)) return <>{tile}</>
+  const { version } = useContext(LiveBoardsContext)
+  const live = useLive(id)
+  if (!version || !live) return <>{tile}</>
   return (
     <ArtifactFrame
       version={version}

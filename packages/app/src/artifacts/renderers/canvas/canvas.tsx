@@ -1,35 +1,36 @@
 // Loaded only when a canvas opens, so React Flow's code stays out of every other artifact's bundle.
 // Its stylesheet, canvas.css, is part of the framework's.
-import type { Canvas, CanvasBoard as CanvasBoardItem } from "@sixb/core/artifacts"
+import type { Canvas, CanvasBoard as CanvasBoardItem, CanvasEmbed } from "@sixb/core/artifacts"
 import {
   Background,
   BackgroundVariant,
   type FitViewOptions,
+  type Node,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
-  useStore,
+  useStoreApi,
 } from "@xyflow/react"
-import { memo, useCallback, useMemo, useRef, useState } from "react"
+import { memo, type RefObject, useCallback, useEffect, useMemo, useState } from "react"
 import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
 import { CANVAS_EDGE_TYPES } from "./arrows"
-import { LiveBoardsProvider, liveBoards } from "./board"
+import { LiveBoardsProvider, useLiveSet } from "./board"
 import { CanvasControls } from "./controls"
 import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider } from "./editing"
 import { BoardFocus } from "./focus"
-import { CANVAS_NODE_TYPES } from "./items"
+import { CANVAS_NODE_TYPES, NAME_SCALE, nameScale } from "./items"
 
 /** Room around what the board fits to, as a share of the view. */
 const PADDING = 0.12
 
 /**
  * A canvas on an endless board: drag or scroll to pan, pinch or ⌘-scroll to zoom, the zoom
- * controls in a corner. Boards run live as the view comes to them; double-click one, press Enter
- * on it, or press its Open to open it over the canvas. It opens on the item an address named,
- * else fitted to everything. Given an editor, its items are selected, moved, resized, connected,
- * and typed into, with a toolbar to add more.
+ * controls in a corner. Boards and embeds run live once the view shows them large enough;
+ * double-click a board, press Enter on it, or press its Open to open it over the canvas. It opens
+ * on the item an address named, else fitted to everything. Given an editor, its items are
+ * selected, moved, resized, connected, and typed into, with a toolbar to add more.
  */
 export default memo(function CanvasBoard({
   canvas,
@@ -87,17 +88,19 @@ function Board({
     () => canvas.items.filter((item): item is CanvasBoardItem => item.type === "board"),
     [canvas]
   )
-  // The boards to run, as a key, so the board view draws again only when they change, not on
-  // every frame of a pan. Those running keep running while they are on screen.
-  const running = useRef<ReadonlySet<string>>(new Set())
-  const liveKey = useStore((state) => {
-    running.current = liveBoards(
-      boards,
-      { transform: state.transform, width: state.width, height: state.height },
-      running.current
-    )
-    return [...running.current].sort().join(" ")
-  })
+
+  // The boards and embeds to run, as the view comes to them: each knows whether it is one, so a
+  // pan draws nothing again. Those running keep running while they are on screen.
+  const places = useMemo(
+    () =>
+      canvas.items.filter(
+        (item): item is CanvasBoardItem | CanvasEmbed =>
+          item.type === "board" || item.type === "embed"
+      ),
+    [canvas]
+  )
+  const running = useLiveSet(places)
+
   // A board an address names opens over the canvas, which sits behind it fitted to it.
   const [opened, setOpened] = useState<string | null>(() =>
     focus && boards.some((board) => board.id === focus) ? focus : null
@@ -109,14 +112,27 @@ function Board({
     if (id) void fitView({ nodes: [{ id }], padding: PADDING, maxZoom: 1, duration: 220 })
   }, [opened, fitView])
   const live = useMemo(
-    () => ({
-      version: version ?? null,
-      live: new Set(liveKey ? liveKey.split(" ") : []),
-      ...(version ? { open: setOpened } : {}),
-    }),
-    [version, liveKey]
+    () => ({ version: version ?? null, live: running, ...(version ? { open: setOpened } : {}) }),
+    [version, running]
   )
   const board = useBoardEditing(canvas, edit, version ? setOpened : undefined)
+  useNameScaleVariable(board.root)
+
+  // Read, the board's handlers stay the same from one draw to the next, so React Flow doesn't
+  // draw every item again when the board does.
+  const open = live.open
+  const reading = useMemo(
+    () => ({
+      nodesDraggable: false,
+      nodesConnectable: false,
+      elementsSelectable: false,
+      onNodeDoubleClick: (_: unknown, node: Node) => {
+        if (node.type === "board") open?.(node.id)
+      },
+    }),
+    [open]
+  )
+
   const fitOptions = useMemo<FitViewOptions>(() => {
     const item = focus ? canvas.items.find((candidate) => candidate.id === focus) : undefined
     // An item with a box opens filling the view; an arrow or a text opens the whole canvas.
@@ -155,6 +171,10 @@ function Board({
             colorMode={mode}
             fitView
             fitViewOptions={fitOptions}
+            // Only what the view shows is drawn: a canvas holds up to a thousand items. Each is
+            // drawn once at first, so notes and texts are measured, and an arrow draws while any
+            // of the box between its ends is in view.
+            onlyRenderVisibleElements
             minZoom={0.04}
             maxZoom={2.5}
             // Scroll pans, as a design tool's board does; a pinch, or ⌘ or Ctrl with scroll, zooms.
@@ -163,16 +183,7 @@ function Board({
             zoomOnPinch
             zoomActivationKeyCode={["Meta", "Control"]}
             panOnDrag
-            {...(board.editing
-              ? board.flow
-              : {
-                  nodesDraggable: false,
-                  nodesConnectable: false,
-                  elementsSelectable: false,
-                  onNodeDoubleClick: (_: unknown, node: { type?: string; id: string }) => {
-                    if (node.type === "board") live.open?.(node.id)
-                  },
-                })}
+            {...(board.editing ? board.flow : reading)}
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.3} />
@@ -192,4 +203,28 @@ function Board({
       ) : null}
     </div>
   )
+}
+
+/**
+ * Sets how much names grow, {@link NAME_SCALE}, on the board as it zooms, so names, headings, and
+ * labels keep their size on screen without an item drawing again for each frame of a zoom.
+ */
+function useNameScaleVariable(root: RefObject<HTMLDivElement | null>): void {
+  const store = useStoreApi()
+
+  useEffect(() => {
+    let last = ""
+    const update = () => {
+      const element = root.current
+      // Rounded, so a zoom between the steps it can show changes nothing.
+      const value = nameScale(store.getState().transform[2]).toFixed(3)
+      if (!element || value === last) return
+
+      last = value
+      element.style.setProperty(NAME_SCALE, value)
+    }
+
+    update()
+    return store.subscribe(update)
+  }, [store, root])
 }

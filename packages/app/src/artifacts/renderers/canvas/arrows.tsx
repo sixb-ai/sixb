@@ -6,10 +6,11 @@ import {
   type InternalNode,
   useInternalNode,
 } from "@xyflow/react"
-import { useNameScale } from "./items"
+import { memo } from "react"
+import { NAME_SCALE_VALUE, useNamesShown } from "./items"
 import type { CanvasFlowEdge } from "./layout"
 
-export const CANVAS_EDGE_TYPES: EdgeTypes = { floating: FloatingArrow }
+export const CANVAS_EDGE_TYPES: EdgeTypes = { floating: memo(FloatingArrow) }
 
 /** Room between an item's edge and the arrow that leaves or meets it. */
 const GAP = 10
@@ -66,7 +67,7 @@ export function exitPoint(rect: Rect, toward: { x: number; y: number }): { x: nu
 function FloatingArrow({ id, source, target, data, selected }: EdgeProps<CanvasFlowEdge>) {
   const from = useInternalNode(source)
   const to = useInternalNode(target)
-  const scale = useNameScale()
+  const shown = useNamesShown()
   if (!from || !to) return null
   const a = rectOf(from)
   const b = rectOf(to)
@@ -89,7 +90,7 @@ function FloatingArrow({ id, source, target, data, selected }: EdgeProps<CanvasF
   const room =
     (LABEL_SHARE * Math.hypot(end.x - start.x, end.y - start.y)) /
     ((data?.label?.length ?? 0) * 6.6 + 24)
-  const labelScale = scale === null ? null : Math.min(scale, Math.max(1, room))
+  const labelScale = `min(${NAME_SCALE_VALUE}, ${Math.max(1, room)})`
   const color = selected
     ? "var(--primary)"
     : "color-mix(in oklab, var(--foreground) 62%, transparent)"
@@ -117,7 +118,7 @@ function FloatingArrow({ id, source, target, data, selected }: EdgeProps<CanvasF
         style={{ fill: color }}
         strokeLinejoin="round"
       />
-      {data?.label && labelScale ? (
+      {data?.label && shown ? (
         <EdgeLabelRenderer>
           <span
             className="pointer-events-none absolute rounded-full border border-border bg-background px-2.5 py-0.5 text-[12px] font-medium whitespace-nowrap text-foreground shadow-sm"

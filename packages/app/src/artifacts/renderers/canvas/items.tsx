@@ -9,27 +9,28 @@ import type {
 import { cn } from "@sixb/ui/lib/utils"
 import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
 import { AppWindow, ArrowUpRight, Link2, Maximize2 } from "lucide-react"
-import type { ReactNode } from "react"
+import { memo, type ReactNode } from "react"
 import { useArtifactMessages } from "../../messages"
 import { ArtifactEmbed, ArtifactLink } from "../../references/references"
 import { TONE_COLORS } from "../../tones"
-import { LiveBoard, useLiveBoards } from "./board"
+import { ItemTile, LiveBoard, useLive, useLiveBoards } from "./board"
 import { EditChrome, InPlaceText, useCanvasEditing } from "./editing"
 import { type CanvasFlowNode, TEXT_SIZES } from "./layout"
 
 /**
  * Every item's look on the board. Boards and embeds are pages and artifacts under their names,
- * live where the board shows them; sections are headings; the rest draw as they are, in the
- * theme's colors.
+ * live where the board shows them large enough; sections are headings; the rest draw as they are,
+ * in the theme's colors. Each draws again only when its own node changes: a canvas holds up to a
+ * thousand.
  */
 export const CANVAS_NODE_TYPES: NodeTypes = {
-  board: BoardNode,
-  section: SectionNode,
-  note: NoteNode,
-  text: TextNode,
-  shape: ShapeNode,
-  embed: EmbedNode,
-  point: PointNode,
+  board: memo(BoardNode),
+  section: memo(SectionNode),
+  note: memo(NoteNode),
+  text: memo(TextNode),
+  shape: memo(ShapeNode),
+  embed: memo(EmbedNode),
+  point: memo(PointNode),
 }
 
 /** The ends an arrow attaches to. Arrows find their own sides, so these are never seen. */
@@ -53,15 +54,25 @@ const MAX_NAME_SCALE = 2
 const NAMED_FROM_WIDTH = 120
 
 /**
- * How much names grow against the zoom, as a design tool names its frames: their size on screen
- * from 100% down to half, then shrinking with the canvas, then gone. Null when they are hidden.
+ * The CSS variable names scale by, which the board sets on itself as it zooms, so no item draws
+ * again for a frame of a zoom.
  */
-export function useNameScale(): number | null {
-  return useStore((state) => {
-    const zoom = state.transform[2]
-    if (zoom < NAMES_FROM_ZOOM) return null
-    return Math.min(MAX_NAME_SCALE, Math.max(1, 1 / zoom))
-  })
+export const NAME_SCALE = "--sixb-name-scale"
+
+/** `scale` as the CSS variable gives it, 1 where nothing sets it. */
+export const NAME_SCALE_VALUE = `var(${NAME_SCALE}, 1)`
+
+/**
+ * How much names grow against the zoom, as a design tool names its frames: their size on screen
+ * from 100% down to half, then shrinking with the canvas.
+ */
+export function nameScale(zoom: number): number {
+  return Math.min(MAX_NAME_SCALE, Math.max(1, 1 / zoom))
+}
+
+/** Whether names show at all: zoomed out further, they give way to the canvas. */
+export function useNamesShown(): boolean {
+  return useStore((state) => state.transform[2] >= NAMES_FROM_ZOOM)
 }
 
 /** Whether an item is wide enough on screen to show its name above it. */
@@ -75,14 +86,12 @@ function useNamed(width: number): boolean {
  */
 function NameRow({
   width,
-  scale,
   icon,
   name,
   action,
 }: {
   /** The named item's width, in canvas pixels. */
   readonly width: number
-  readonly scale: number
   readonly icon: ReactNode
   readonly name: string
   readonly action?: ReactNode
@@ -90,7 +99,10 @@ function NameRow({
   return (
     <div
       className="pointer-events-none absolute bottom-full left-0 flex h-7 origin-bottom-left items-center gap-1.5 pb-1.5 text-[13px] font-medium text-muted-foreground"
-      style={{ width: width / scale, transform: `scale(${scale})` }}
+      style={{
+        width: `calc(${width}px / ${NAME_SCALE_VALUE})`,
+        transform: `scale(${NAME_SCALE_VALUE})`,
+      }}
     >
       <span className="shrink-0 [&>svg]:size-3.5" aria-hidden="true">
         {icon}
@@ -113,23 +125,16 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
   const board = itemOf<CanvasBoard>(props)
   const messages = useArtifactMessages().canvas
   const { open } = useLiveBoards()
-  const scale = useNameScale()
+  const shown = useNamesShown()
   const named = useNamed(board.w)
   const title = board.title ?? board.id
-  // Until the page runs, its outline: the name above says which it is.
-  const tile = (
-    <div className="flex size-full items-center justify-center bg-card">
-      <AppWindow className="size-12 text-muted-foreground/30" strokeWidth={1} aria-hidden="true" />
-    </div>
-  )
   return (
     <div className="relative size-full">
       <Ends />
       <EditChrome id={board.id} selected={props.selected} />
-      {scale && named ? (
+      {shown && named ? (
         <NameRow
           width={board.w}
-          scale={scale}
           icon={<AppWindow />}
           name={title}
           action={
@@ -149,7 +154,12 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
         />
       ) : null}
       <div className="sixb-canvas-surface size-full overflow-hidden">
-        <LiveBoard id={board.id} file={board.file} title={title} tile={tile} />
+        <LiveBoard
+          id={board.id}
+          file={board.file}
+          title={title}
+          tile={<ItemTile icon={AppWindow} />}
+        />
       </div>
     </div>
   )
@@ -161,7 +171,7 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
  */
 function SectionNode(props: NodeProps<CanvasFlowNode>) {
   const section = itemOf<CanvasSection>(props)
-  const scale = useNameScale()
+  const shown = useNamesShown()
   const editing = useCanvasEditing()
   const heading =
     "absolute top-0 left-0 m-0 origin-top-left text-base leading-6 font-semibold tracking-[-0.01em] text-foreground"
@@ -173,7 +183,7 @@ function SectionNode(props: NodeProps<CanvasFlowNode>) {
         <div className={cn(heading, "pointer-events-auto")} style={{ width: section.w }}>
           <InPlaceText id={section.id} value={section.title ?? ""} />
         </div>
-      ) : section.title && scale ? (
+      ) : section.title && shown ? (
         // While the canvas is edited, the heading is what takes the section: a press anywhere
         // else in its region falls through to what the region holds, or pans.
         <h3
@@ -182,7 +192,10 @@ function SectionNode(props: NodeProps<CanvasFlowNode>) {
             "truncate",
             editing ? "pointer-events-auto cursor-grab" : "pointer-events-none"
           )}
-          style={{ maxWidth: section.w / scale, transform: `scale(${scale})` }}
+          style={{
+            maxWidth: `calc(${section.w}px / ${NAME_SCALE_VALUE})`,
+            transform: `scale(${NAME_SCALE_VALUE})`,
+          }}
         >
           {section.title}
         </h3>
@@ -330,22 +343,23 @@ function ShapeNode(props: NodeProps<CanvasFlowNode>) {
 
 /**
  * Another artifact on the canvas at the item's size, as a deck's box shows one: a chart, a range,
- * a slide, a section, a page's card, or another canvas's board. One the reader can't open, or
- * whose part is gone, says so in place.
+ * a slide, a section, a page's card, or another canvas's board. It shows once the view shows it
+ * large enough, as a board runs, and its tile until then. One the reader can't open, or whose part
+ * is gone, says so in place.
  */
 function EmbedNode(props: NodeProps<CanvasFlowNode>) {
   const embed = itemOf<CanvasEmbed>(props)
   const messages = useArtifactMessages().canvas
-  const scale = useNameScale()
-  const named = Boolean(useNamed(embed.w) && scale && embed.title)
+  const live = useLive(embed.id)
+  const shown = useNamesShown()
+  const named = useNamed(embed.w) && shown && Boolean(embed.title)
   return (
     <div className="relative size-full">
       <Ends />
       <EditChrome id={embed.id} selected={props.selected} />
-      {named && scale && embed.title ? (
+      {named && embed.title ? (
         <NameRow
           width={embed.w}
-          scale={scale}
           icon={<Link2 />}
           name={embed.title}
           action={
@@ -364,7 +378,11 @@ function EmbedNode(props: NodeProps<CanvasFlowNode>) {
         className="sixb-canvas-surface sixb-canvas-embed size-full overflow-hidden"
         {...(named ? { "data-named": "" } : {})}
       >
-        <ArtifactEmbed address={embed.src} caption={embed.title ?? ""} fill />
+        {live ? (
+          <ArtifactEmbed address={embed.src} caption={embed.title ?? ""} fill />
+        ) : (
+          <ItemTile icon={Link2} />
+        )}
       </div>
     </div>
   )
