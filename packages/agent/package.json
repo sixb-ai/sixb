@@ -44,7 +44,8 @@
     "@types/bun": "latest",
     "@types/hast": "^3.0.5",
     "@types/mdast": "^4.0.4",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "yjs": "13.6.33"
   },
   "license": "MIT",
   "engines": {

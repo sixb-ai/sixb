@@ -26,11 +26,14 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { documentFiles } from "@sixb/core/artifacts/live"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import { AgentExecutionLostError, agentRunArtifacts } from "@sixb/core/internal/agents"
+import { loadArtifactDocument, storeLiveFiles } from "@sixb/core/internal/artifacts/live"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
+import * as Y from "yjs"
 import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
@@ -1035,6 +1038,181 @@ describe("publish_artifact", () => {
       JSON.parse(read(`${copy}/canvas.json`)).items.map((item: { id: string }) => item.id)
     ).toEqual(["welcome", "todo"])
     expect(read(`${copy}/welcome.html`)).toBe("<main><h1>Hello</h1></main>")
+  })
+
+  // Reproduce by installing the merged version as the base of the copy, as publish() did, or by
+  // diffing an update at the latest revision from that version in mergeArtifactWrite, not from
+  // its baseFiles: the Agent's next update, written from its working copy, takes out the words
+  // typed meanwhile.
+  test("keeps every word a person types in a board live while the Agent's turn updates it", async () => {
+    const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({
+        items: [{ id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 }],
+      })
+    )
+    write("work/flow/welcome.html", board("Welcome"))
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person's live document, as a room holds it, typing in the paragraph and writing back.
+    const latest = async () => {
+      const artifact = await storage.artifacts.get({ projectId, id: artifactId })
+      const version =
+        artifact &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: artifact.latestVersion,
+        }))
+      if (!artifact || !version) throw new Error("Expected the canvas.")
+      return { artifact, version }
+    }
+    const stored = async () => {
+      const { artifact, version } = await latest()
+      return loadArtifactDocument(blobStorage, artifact, version.files)
+    }
+    const doc = await stored()
+    const text = () => doc.getMap("files").get("welcome.html") as Y.Text
+    const type = (word: string) => text().insert(text().toString().indexOf("</p>"), ` ${word}`)
+    const follow = async () => Y.applyUpdate(doc, Y.encodeStateAsUpdate(await stored()))
+    const writeBack = async () => {
+      const { artifact, version } = await latest()
+      await readerFor(owner).publish(artifactId, {
+        kind: "canvas",
+        title: artifact.title,
+        baseTitle: artifact.title,
+        files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
+        baseRevision: artifact.revision,
+        document: Y.encodeStateAsUpdate(doc),
+      })
+      await follow()
+    }
+
+    type("w1")
+    await writeBack()
+
+    // The Agent, from its copy, retitles the board: merged, its copy is installed again.
+    write("work/flow/welcome.html", board("Hello"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+
+    // Again from its working copy, which never held the words, while the person types: nobody
+    // wrote since its last update, which merged their first word in.
+    type("w2")
+    write("work/flow/welcome.html", board("Hello again"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+    type("w3")
+    type("w4")
+    await writeBack()
+    type("w5")
+
+    // And once more, now that the person wrote since.
+    write("work/flow/welcome.html", board("Hello, team"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+    type("w6")
+    await writeBack()
+
+    const { version } = await latest()
+    const welcome = version.files.find((entry) => entry.path === "welcome.html")
+    const html = welcome
+      ? await new Response(await blobStorage.open(welcome.file.blobId)).text()
+      : ""
+    expect(html).toBe(
+      "<main>\n  <p>Notes: w1 w2 w3 w4 w5 w6</p>\n  <h1>Hello, team</h1>\n</main>\n"
+    )
+    expect(text().toString()).toBe(html)
+  })
+
+  // Reproduce by keeping both insertions in the text merge's `interleave`, as it did: the word the
+  // Agent's copy holds, and the person typed, is in the board twice.
+  test("keeps each of their words once when the Agent updates from its installed copy", async () => {
+    const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({
+        items: [{ id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 }],
+      })
+    )
+    write("work/flow/welcome.html", board("Welcome"))
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person's live document, as a room holds it, typing in the paragraph and writing back.
+    const latest = async () => {
+      const artifact = await storage.artifacts.get({ projectId, id: artifactId })
+      const version =
+        artifact &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: artifact.latestVersion,
+        }))
+      if (!artifact || !version) throw new Error("Expected the canvas.")
+      return { artifact, version }
+    }
+    const stored = async () => {
+      const { artifact, version } = await latest()
+      return loadArtifactDocument(blobStorage, artifact, version.files)
+    }
+    const doc = await stored()
+    const text = () => doc.getMap("files").get("welcome.html") as Y.Text
+    const type = (word: string) => text().insert(text().toString().indexOf("</p>"), ` ${word}`)
+    const follow = async () => Y.applyUpdate(doc, Y.encodeStateAsUpdate(await stored()))
+    const writeBack = async () => {
+      const { artifact, version } = await latest()
+      await readerFor(owner).publish(artifactId, {
+        kind: "canvas",
+        title: artifact.title,
+        baseTitle: artifact.title,
+        files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
+        baseRevision: artifact.revision,
+        document: Y.encodeStateAsUpdate(doc),
+      })
+      await follow()
+    }
+
+    type("w1")
+    await writeBack()
+
+    // The Agent, from its copy, retitles the board: merged, its copy is installed again.
+    write("work/flow/welcome.html", board("Hello"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+
+    // It starts from its copy, as it is told to, which holds the person's first word; they type on.
+    const copy = `.sixb/agent/artifacts/${artifactId}/welcome.html`
+    write("work/flow/welcome.html", read(copy).replace("Hello", "Hello, team"))
+    type("w2")
+    type("w3")
+    await writeBack()
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+
+    const { version } = await latest()
+    const welcome = version.files.find((entry) => entry.path === "welcome.html")
+    const html = welcome
+      ? await new Response(await blobStorage.open(welcome.file.blobId)).text()
+      : ""
+    expect(html).toBe("<main>\n  <p>Notes: w1 w2 w3</p>\n  <h1>Hello, team</h1>\n</main>\n")
+    expect(text().toString()).toBe(html)
   })
 
   test("refuses to update over a save made during the run, and installs it", async () => {
