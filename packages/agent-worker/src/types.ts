@@ -1,5 +1,6 @@
 import type { AgentExecutionContext, AgentRunSettings } from "@sixb/agent"
 import type {
+  BlobStorage,
   Broker,
   DomainEventLog,
   Queues,
@@ -44,6 +45,8 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly broker: Broker
   readonly events: DomainEventLog
   readonly storage: Storage
+  /** Where the pictures of a canvas's boards are kept, as previews of them. */
+  readonly blobStorage: BlobStorage
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
