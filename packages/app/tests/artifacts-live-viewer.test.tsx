@@ -204,4 +204,22 @@ describe("a canvas held live in the viewer", () => {
     expect(ui.queryByRole("button", { name: "Save" })).toBeNull()
     ui.unmount()
   })
+
+  test("says it is offline to whoever only looks at it, as to who edits it", async () => {
+    // Reproduce by showing the save state only in LiveEditBar: once Done, the canvas freezes
+    // while the socket is down, and nothing says why.
+    const server = new FakeServer(ARTIFACT_ID, CANVAS)
+    const ui = viewer(new LiveHub(server.open))
+    await act(settle)
+    await ui.findByRole("button", { name: "Edit" })
+    expect(ui.container.querySelector("[data-save]")).toBeNull()
+
+    await act(async () => {
+      for (const connection of server.connections) connection.drop()
+    })
+    const offline = ui.container.querySelector("[data-save]")
+    expect(offline?.getAttribute("data-save")).toBe("offline")
+    expect(offline?.getAttribute("title")).toBe("Offline — reconnecting")
+    ui.unmount()
+  })
 })

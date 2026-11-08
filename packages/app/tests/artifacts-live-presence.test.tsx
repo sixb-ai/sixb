@@ -224,5 +224,11 @@ describe("who is on a live canvas", () => {
     const status = view.getByRole("status")
     expect(status.getAttribute("data-save")).toBe("failed")
     expect(status.textContent).toBe("Couldn't save — retrying")
+
+    // Saving and saved come and go with every change: they are shown, never announced.
+    // Reproduce by giving LiveSaveStatus role="status" whatever its state.
+    view.rerender(<LiveSaveStatus state={{ ...state, save: { state: "saving", revision: 4 } }} />)
+    expect(view.queryByRole("status")).toBeNull()
+    expect(view.container.querySelector("[data-save]")?.getAttribute("data-save")).toBe("saving")
   })
 })

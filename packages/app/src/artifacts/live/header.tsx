@@ -70,11 +70,14 @@ export function liveSaveLabel(state: LiveArtifactState): LiveSaveLabel {
   return "saved"
 }
 
-/** The save state, discreet beside the title: its words fold into the icon on a narrow header. */
+/**
+ * The save state, discreet beside the title: its words fold into the icon on a narrow header.
+ * Only a failure is announced; offline with nothing kept, it says it is reconnecting.
+ */
 export function LiveSaveStatus({ state }: { readonly state: LiveArtifactState }) {
   const messages = useArtifactMessages().live
   const label = liveSaveLabel(state)
-  const text = messages[label]
+  const text = label === "offline" && !state.pending ? messages.reconnecting : messages[label]
   const Icon =
     label === "saved"
       ? Check
@@ -85,7 +88,7 @@ export function LiveSaveStatus({ state }: { readonly state: LiveArtifactState })
           : CloudOff
   return (
     <span
-      role="status"
+      role={label === "failed" ? "status" : undefined}
       title={text}
       data-save={label}
       className={cn(

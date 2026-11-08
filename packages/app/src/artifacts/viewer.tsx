@@ -715,6 +715,9 @@ function ArtifactHeader({
             onRestored={() => onVersionChange(artifact.latestVersion)}
           />
           {live ? <LiveStatus version={version} /> : null}
+          {heldLive && liveView.state.connection === "offline" ? (
+            <LiveSaveStatus state={liveView.state} />
+          ) : null}
           {liveView ? <LiveAvatars live={liveView.live} /> : null}
         </>
       }
