@@ -1,4 +1,10 @@
-import type { Canvas, CanvasArrow, CanvasEnd, CanvasItem } from "@sixb/core/artifacts"
+import {
+  CANVAS_TEXT_PIXELS,
+  type Canvas,
+  type CanvasArrow,
+  type CanvasEnd,
+  type CanvasItem,
+} from "@sixb/core/artifacts"
 import type { Edge, Node } from "@xyflow/react"
 
 /** What a node on the board draws: one of the canvas's items, or an arrow's end at a point. */
@@ -110,16 +116,13 @@ export function canvasExtent(canvas: Canvas): Box {
     : { x: 0, y: 0, width: 1, height: 1 }
 }
 
-/** The size a text of each size draws at, in pixels. */
-export const TEXT_SIZES = { s: 14, m: 18, l: 28, xl: 44 } as const
-
 /** An item's box as a thumbnail draws it, before anything is measured. */
 export function approximateBox(item: CanvasItem): Box | null {
   switch (item.type) {
     case "arrow":
       return null
     case "text": {
-      const size = TEXT_SIZES[item.size]
+      const size = CANVAS_TEXT_PIXELS[item.size]
       return {
         x: item.x,
         y: item.y,
