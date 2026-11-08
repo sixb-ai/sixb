@@ -64,6 +64,27 @@ function saved(canvas: Canvas): Canvas {
 
 const ids = (canvas: Canvas) => canvas.items.map((item) => item.id)
 
+describe("saving a canvas", () => {
+  test("keeps every text size as it reads it, xxl among them", () => {
+    // Reproduce by leaving xxl out of the sizes parseCanvas takes: the saved canvas is refused.
+    const sized = canvasOf({
+      items: (["s", "m", "l", "xl", "xxl"] as const).map((size, index) => ({
+        id: `t-${size}`,
+        type: "text",
+        x: 0,
+        y: index * 200,
+        text: size,
+        size,
+      })),
+    })
+
+    expect(
+      JSON.parse(formatCanvas(sized)).items.map((item: { size?: string }) => item.size)
+    ).toEqual(["s", undefined, "l", "xl", "xxl"])
+    expect(saved(sized)).toEqual(sized)
+  })
+})
+
 describe("arranging a canvas", () => {
   test("moves and resizes items in whole pixels, a text by its width alone", () => {
     const moved = moveItems(new Map([["ask", { x: 400.4, y: 600 }]]))(CANVAS)

@@ -10,6 +10,8 @@ export const CANVAS_TEXT_PIXELS: Readonly<Record<CanvasTextSize, number>> = {
   m: 18,
   l: 28,
   xl: 44,
+  // A title over a group of full-size screens or frames, which a canvas opens far out on.
+  xxl: 120,
 }
 
 /** The margin a canvas opens with around everything on it, as a share of what it shows. */

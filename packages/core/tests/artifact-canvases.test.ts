@@ -90,7 +90,10 @@ describe("parseCanvas", () => {
       withItems({ id: "n", type: "note", x: 0, y: 0, w: 200, text: "Hi", tone: "red" }),
       'has the tone "red"',
     ],
-    [withItems({ id: "t", type: "text", x: 0, y: 0, text: "Hi", size: "xxl" }), '"size" is "xxl"'],
+    [
+      withItems({ id: "t", type: "text", x: 0, y: 0, text: "Hi", size: "huge" }),
+      '"size" is "huge"; use one of s, m, l, xl, xxl',
+    ],
     [
       withItems({ id: "s", type: "shape", shape: "star", x: 0, y: 0, w: 80, h: 80 }),
       '"shape" is "star"',

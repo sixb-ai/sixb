@@ -278,6 +278,25 @@ describe("a canvas's board", () => {
     view.unmount()
   })
 
+  test("draws an xxl title at 120 pixels, bold, over full-size boards", async () => {
+    // Reproduce by drawing xxl at xl's 44 pixels: a canvas of seven 1280-wide boards opens near
+    // 15%, where its title is 6 pixels tall.
+    const titled = canvasOf({
+      items: [
+        { id: "storyboard", type: "text", x: 0, y: -240, text: "Launch film", size: "xxl" },
+        { id: "shot", type: "board", file: "boards/shot.html", x: 0, y: 0, w: 1280, h: 720 },
+      ],
+    })
+    const view = await mount("light", titled)
+    const title = view.container.querySelector<HTMLElement>(
+      '.react-flow__node[data-id="storyboard"] > div'
+    )
+
+    expect(title?.style.fontSize).toBe("120px")
+    expect(title?.className).toContain("font-bold")
+    view.unmount()
+  })
+
   test("shows another artifact at the item's size, and says so where the reader can't open it", async () => {
     const plan = "art_p4gep4n000"
     const canvas = canvasOf({

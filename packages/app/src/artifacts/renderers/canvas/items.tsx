@@ -278,13 +278,13 @@ function TextNode(props: NodeProps<CanvasFlowNode>) {
     <div
       className={cn(
         "relative whitespace-pre-wrap text-foreground",
-        text.size === "xl" && "font-bold tracking-[-0.025em]",
+        (text.size === "xl" || text.size === "xxl") && "font-bold tracking-[-0.025em]",
         text.size === "l" && "font-semibold tracking-[-0.015em]",
         text.size === "s" && "text-muted-foreground"
       )}
       style={{
         fontSize: size,
-        lineHeight: text.size === "xl" || text.size === "l" ? 1.15 : 1.45,
+        lineHeight: text.size === "s" || text.size === "m" ? 1.45 : 1.15,
         ...(text.w === undefined ? { width: "max-content", minWidth: "100%" } : { width: "100%" }),
       }}
     >
