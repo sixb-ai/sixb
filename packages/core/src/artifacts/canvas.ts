@@ -367,3 +367,27 @@ function record(
   }
   return input
 }
+
+// How the app draws a canvas, in canvas pixels: whatever pictures a canvas as a reader opens it,
+// such as the Agent's overview of one, draws it at these sizes.
+
+/** The size a text of each size is drawn at. */
+export const CANVAS_TEXT_PIXELS: Readonly<Record<CanvasTextSize, number>> = {
+  s: 14,
+  m: 18,
+  l: 28,
+  xl: 44,
+}
+
+/** The margin a canvas opens with around everything on it, as a share of what it shows. */
+export const CANVAS_FIT_PADDING = 0.12
+
+/** A note's words: a wide note is read from further out, so its text is a little larger. */
+export function canvasNoteFontSize(width: number): number {
+  return Math.round(Math.min(22, Math.max(15, width / 13)))
+}
+
+/** A shape's words, larger in a larger shape, as a note's are. */
+export function canvasShapeFontSize(width: number, height: number): number {
+  return Math.round(Math.min(22, Math.max(15, Math.min(width, height * 2) / 12)))
+}

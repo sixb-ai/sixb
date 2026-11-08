@@ -90,6 +90,13 @@ export interface PublishedArtifact {
 
 const CREATE_ATTEMPTS = 3
 
+/** A reader sees a board's picture until they open it, and the picture was taken as its author. */
+const LIVE_BOARD_PREVIEWS: ArtifactWarning = {
+  code: "canvas_previews_show_author_data",
+  message:
+    "Its boards read live data, so each board's preview shows the data its author can see, to everyone who can open the canvas, until they open the board.",
+}
+
 /** A version checked against its kind and with its addresses resolved, ready to store. */
 export interface PreparedArtifactVersion {
   readonly artifactId?: string
@@ -153,7 +160,10 @@ export async function prepareArtifactVersion(
     kind: input.kind,
     owner: input.owner ?? input.author,
     readable,
-    warnings: validated.warnings ?? [],
+    warnings: [
+      ...(validated.warnings ?? []),
+      ...(input.kind === "canvas" && queries.size > 0 ? [LIVE_BOARD_PREVIEWS] : []),
+    ],
     version: {
       title,
       entry: validated.entry,

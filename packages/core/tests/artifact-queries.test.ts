@@ -130,6 +130,39 @@ const open = {
 }
 
 describe("publishing a version that holds queries", () => {
+  test("tells a canvas's author that its boards' previews show what they can see", async () => {
+    // Reproduce by dropping the warning from prepareArtifactVersion: the author learns only when
+    // a reader sees their rows on a board they never opened.
+    const { as, put } = setup()
+    const canvas = async (files: readonly ArtifactFile[]) =>
+      as("alice", { cleared: true }).artifacts.create({
+        kind: "canvas",
+        title: "Collections",
+        files: [
+          await put(
+            "canvas.json",
+            JSON.stringify({
+              items: [
+                { id: "overdue", type: "board", file: "overdue.html", x: 0, y: 0, w: 640, h: 480 },
+              ],
+            })
+          ),
+          await put("overdue.html", "<main><h1>Overdue</h1></main>"),
+          ...files,
+        ],
+      })
+
+    const live = await canvas([await put("queries/open.json", JSON.stringify(open))])
+    expect(live.warnings).toEqual([
+      {
+        code: "canvas_previews_show_author_data",
+        message:
+          "Its boards read live data, so each board's preview shows the data its author can see, to everyone who can open the canvas, until they open the board.",
+      },
+    ])
+    expect((await canvas([])).warnings).toEqual([])
+  })
+
   test("keeps each query among its files, as a node, a request, or a facets request", async () => {
     const { as, page } = setup()
 
