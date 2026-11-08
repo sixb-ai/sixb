@@ -13,6 +13,7 @@ import { useEffect, useMemo } from "react"
 import { useCurrentUser } from "../../../session"
 import { useLivePresence } from "../../live/presence"
 import type { LiveArtifact } from "../../live/session"
+import { useArtifactMessages } from "../../messages"
 import { useArtifactPeople } from "../../people"
 
 // The comments on a canvas: read once, kept in step as anyone adds, resolves or deletes one, over
@@ -206,6 +207,7 @@ export function useCommentAuthors(
   const user = useCurrentUser()
   const nameOf = useArtifactPeople()
   const { peers } = useLivePresence(live)
+  const project = useArtifactMessages().canvas.comments.project
 
   return (author) => {
     if (author.type === "user" && author.id === user?.id) {
@@ -215,7 +217,10 @@ export function useCommentAuthors(
     if (known) return { name: known, you: false }
 
     const peer = peers.find((each) => each.user.id === `${author.type}:${author.id}`)
-    return peer ? { name: peer.user.name, you: false } : null
+    if (peer) return { name: peer.user.name, you: false }
+
+    // The project's own code, or everyone where nobody signs in, as the live canvas names it.
+    return author.type === "system" ? { name: project, you: false } : null
   }
 }
 

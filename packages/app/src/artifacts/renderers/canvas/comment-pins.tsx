@@ -40,6 +40,20 @@ export function pinPoint(pin: Pick<PinPlace, "point">, index: number): { x: numb
   return pin.point ?? { x: 1, y: 0.02 + index * 0.06 }
 }
 
+/** The widest a new comment's card is. */
+const CARD_WIDTH = 288
+
+/**
+ * Where a new comment's card sits from its pin, `x` along a view `width` wide: beside the pin,
+ * else as far left as it must to stay in view, and narrower in a view narrower than it.
+ */
+export function cardPlace(x: number, width: number): { left: number; width: number } {
+  const card = Math.min(CARD_WIDTH, width - 16)
+  const beside = 36
+  const left = Math.max(8 - x, Math.min(beside, width - 8 - card - x))
+  return { left, width: card }
+}
+
 /** A pin: a bubble with its number, pointing at its place from its bottom left. */
 export function CommentPin({
   number,
@@ -237,10 +251,12 @@ export const CanvasCommentPins = memo(function CanvasCommentPins({
 }) {
   const messages = useArtifactMessages().canvas.comments
   const zoom = useStore((state) => state.transform[2])
+  const view = useStore(viewOf, sameView)
   const boards = [...new Set([...pins.map((pin) => pin.board), ...(draft ? [draft.board] : [])])]
   const boxes = useBoardBoxes(boards)
   const unplaced = new Map<string, number>()
   const scale = `scale(${1 / zoom})`
+  const draftBox = draft ? boxes.get(draft.board) : undefined
 
   if (boxes.size === 0) return null
   return (
@@ -271,10 +287,13 @@ export const CanvasCommentPins = memo(function CanvasCommentPins({
           </div>
         )
       })}
-      {draft && boxes.get(draft.board) ? (
-        <DraftAt box={boxes.get(draft.board) as Box} draft={draft} scale={scale}>
+      {draft && draftBox ? (
+        <DraftAt box={draftBox} draft={draft} scale={scale}>
           <CommentPin label={messages.newPin} active resolved={false} draft />
-          <div className="absolute top-0 left-9 w-72">
+          <div
+            className="absolute top-0"
+            style={cardPlace(view.x + (draftBox.x + draft.point.x * draftBox.w) * zoom, view.width)}
+          >
             <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
           </div>
         </DraftAt>
@@ -305,6 +324,15 @@ function DraftAt({
       {children}
     </div>
   )
+}
+
+/** Where the view is panned to, and how wide it is: a new comment's card stays in it. */
+function viewOf(state: { readonly transform: readonly number[]; readonly width: number }) {
+  return { x: state.transform[0] ?? 0, width: state.width }
+}
+
+function sameView(left: { x: number; width: number }, right: { x: number; width: number }) {
+  return left.x === right.x && left.width === right.width
 }
 
 /** The boxes of these boards, read again only as one of them moves or changes size. */

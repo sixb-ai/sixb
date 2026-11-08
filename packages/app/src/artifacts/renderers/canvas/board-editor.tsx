@@ -39,7 +39,14 @@ import {
   boardReferencePath,
   showablePatches,
 } from "./board-source"
-import { CommentPin, DraftCard, type DraftPlace, type PinPlace, pinPoint } from "./comment-pins"
+import {
+  CommentPin,
+  cardPlace,
+  DraftCard,
+  type DraftPlace,
+  type PinPlace,
+  pinPoint,
+} from "./comment-pins"
 
 // A board opened over the canvas, as its page runs in its frame, and what the reader does on it:
 // read it, edit what it shows, or pick what to comment on.
@@ -370,20 +377,6 @@ export function BoardStage({
       ) : null}
     </div>
   )
-}
-
-/** The widest a new comment's card is, as `DraftCard` draws it. */
-const CARD_WIDTH = 288
-
-/**
- * Where a new comment's card sits from its pin, `x` along a stage `width` wide: beside the pin,
- * else as far left as it must to stay on the stage, and narrower on a stage narrower than it.
- */
-function cardPlace(x: number, width: number): { left: number; width: number } {
-  const card = Math.min(CARD_WIDTH, width - 16)
-  const beside = 36
-  const left = Math.max(8 - x, Math.min(beside, width - 8 - card - x))
-  return { left, width: card }
 }
 
 /**
