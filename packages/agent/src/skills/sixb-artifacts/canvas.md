@@ -38,7 +38,7 @@ work/onboarding-flow/
 
 - **A board shows; the canvas annotates.** A board holds the visual alone: a screen, a frame, a
   poster, a diagram, with the words the viewer would see on it, such as an end card's title.
-  Captions, specs, voice-over, and rationale go in `text` and `note` items beside or under it, a
+  A label and a one-sentence caption go in `text` items beside or under it, a
   `section` groups each set, and arrows give the order. Never put small explanatory text inside a
   board.
 - **Titles and pictures read as it opens.** A canvas opens fitted to everything, so what must
@@ -60,6 +60,40 @@ work/onboarding-flow/
   moodboard), choose one direction you can name: a type pairing (Google Fonts load in boards), a
   ground, and no more than two accents, in `shared.css`. Screens of the project's own app keep the
   kit's look. No filler: a fact you don't have is a visible placeholder, such as `[PRICE]`.
+
+## Craft
+
+A canvas is judged as a keynote slide is: in the first second, from far out. Make what a senior
+product designer would present.
+
+- **One grid.** Choose a column and a gutter and set everything on them: the boards of a row share
+  a size and a top edge, captions start on their board's left edge, groups align left. The same
+  gap means the same relation everywhere.
+- **A whole shaped for the screen.** The canvas opens fitted to everything in a wide window: lay it
+  out as one wide block, about 16 by 10, not a tall column, and leave nothing alone in a corner.
+- **Three levels of words.** The title (`xxl`), and under it, clear of it by half its height, one
+  line a size down (`xl`) saying what the canvas is for; a short label per board (`l`), such as
+  `01  Dawn at the depot`; a caption (`m`) of one sentence. The first row starts one title height
+  below that line, not further. Anything longer, such as specs, a shot list, or guidelines, is a board of its
+  own designed as a page, never a long note or paragraph on the canvas.
+- **Notes are working material.** Sticky notes are for a brainstorm, open questions, review. A
+  finished piece is annotated with `text`: coloured notes make a deliverable look like a draft.
+  When notes are there, a tone means one thing across the canvas, or they all keep one.
+
+Boards:
+
+- Typography carries the design: one family or a deliberate pairing, a scale with clear steps,
+  display sizes set tight (-0.02em to -0.04em), body at 1.5. Size words for the board: a 1280-wide
+  frame's title is 72 to 120 px and its smallest words 20 px; a phone screen's body 15 to 17 px.
+- Margins of at least a twentieth of the board's width, and room around every group.
+- Restraint: a quiet ground and one accent with one job. No colour bands, decorative gradients,
+  boxes around everything, drop shadows, or emoji.
+- Images fill their frame (`object-fit: cover`), never letterboxed or stretched; words over an
+  image sit on its quiet part, with a scrim only when they must.
+
+Images, as one set: write one look line (camera and lens, light, grade, palette, mood) and end
+every prompt with it; describe a recurring person, place, or product in the same words each time;
+ask for the frame's aspect and no text or logos, since words are set in HTML.
 
 ## Items
 
@@ -108,6 +142,13 @@ picture; the reader opens it to scroll and click.
 
 - Design the board for its size: a phone screen fills 390 by 844 and puts its main action at the
   bottom. What runs past the board's height is cut off on the canvas.
+- The kit's `<main>` is a column with room around it. A board that is a picture edge to edge, such
+  as a film frame or a poster's photograph, puts it straight in `<body>`, not in `<main>`:
+
+  ```html
+  <body style="margin:0"><img src="images/03.png" alt="Maya opens the rooftop unit"
+    style="display:block;width:100vw;height:100vh;object-fit:cover"></body>
+  ```
 - Link a stylesheet the boards share, `<link rel="stylesheet" href="shared.css">`, beside them, so
   every board looks like one piece of work.
 - Show what the screen would hold: real labels, names, and numbers, not lorem ipsum or gray boxes.
@@ -130,7 +171,9 @@ opens, under `$SIXB_CONTEXT_DIR/checks/`. The check also takes each board's prev
 readers see until they open it, so a board that looks wrong there looks wrong on the canvas too.
 
 1. Open the screenshots with `view_file` and look at each board as the reader will. Open
-   `overview.png` to see whether the canvas reads at the zoom it opens at.
+   `overview.png` to see whether the canvas reads at the zoom it opens at, and judge it as a
+   designer would: one composition on one grid, words at three levels, nothing that looks like a
+   default or a draft.
 2. Fix what the warnings name and what you see, in the boards' files or `canvas.json`.
 3. Publish the next version with `publish_artifact_version`, and check again.
 
