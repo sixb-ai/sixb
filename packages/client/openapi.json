@@ -52966,7 +52966,7 @@
                             "type": "string",
                             "enum": ["ready", "pending", "none"]
                           },
-                          "description": "A canvas's boards by id, as GET returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
+                          "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                         }
                       },
                       "required": [
@@ -55325,7 +55325,7 @@
                             "type": "string",
                             "enum": ["ready", "pending", "none"]
                           },
-                          "description": "A canvas's boards by id, as GET returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
+                          "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                         }
                       },
                       "required": [
@@ -56220,7 +56220,7 @@
                         "type": "string",
                         "enum": ["ready", "pending", "none"]
                       },
-                      "description": "A canvas's boards by id, as GET returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
+                      "description": "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
                     }
                   },
                   "required": [

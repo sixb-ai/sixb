@@ -90,10 +90,30 @@ function versionBody(version: ArtifactVersionRecord) {
   }
 }
 
-function serializePublished(published: PublishedArtifact) {
+/**
+ * A version as one is answered alone, or just published: a canvas's boards say whether their
+ * previews are worth waiting for, so a viewer seeded from either asks for them alike.
+ */
+async function versionResponse(host: SixbHostView, version: ArtifactVersionRecord) {
+  const storage = host.storage.artifacts
+  const statuses =
+    storage && version.outline.kind === "canvas"
+      ? await boardPreviewStatuses(storage, version, {
+          renders: host.sandboxes !== undefined,
+          now: new Date(),
+        })
+      : undefined
+
+  return {
+    ...versionBody(version),
+    ...(statuses ? { boardPreviews: Object.fromEntries(statuses) } : {}),
+  }
+}
+
+async function serializePublished(host: SixbHostView, published: PublishedArtifact) {
   return PublishedArtifactResponseSchema.parse({
     artifact: artifactBody(published.artifact),
-    version: versionBody(published.version),
+    version: await versionResponse(host, published.version),
     warnings: published.warnings,
   })
 }
@@ -396,7 +416,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             ? await run.publish(contentInput(body))
             : await requireRequestSixb(context).artifacts.create(contentInput(body))
           context.set.status = 201
-          return serializePublished(published)
+          return await serializePublished(host, published)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -646,7 +666,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             ? await run.publish({ ...content, artifactId })
             : await requireRequestSixb(context).artifacts.publish(artifactId, content)
           context.set.status = 201
-          return serializePublished(published)
+          return await serializePublished(host, published)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -723,20 +743,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           )
           if (!version) return await refusal(context, context.params.artifactId, context.set)
 
-          // A canvas's boards say whether their previews are worth waiting for.
-          const storage = host.storage.artifacts
-          const statuses =
-            storage && version.outline.kind === "canvas"
-              ? await boardPreviewStatuses(storage, version, {
-                  renders: host.sandboxes !== undefined,
-                  now: new Date(),
-                })
-              : undefined
-
-          return ArtifactVersionSchema.parse({
-            ...versionBody(version),
-            ...(statuses ? { boardPreviews: Object.fromEntries(statuses) } : {}),
-          })
+          return ArtifactVersionSchema.parse(await versionResponse(host, version))
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }

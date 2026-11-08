@@ -120,7 +120,7 @@ export const ArtifactVersionSchema = z.object({
     .record(z.string(), z.enum(["ready", "pending", "none"]))
     .optional()
     .describe(
-      "A canvas's boards by id, as GET returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
+      "A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
     ),
 })
 
