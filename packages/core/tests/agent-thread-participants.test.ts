@@ -814,7 +814,8 @@ describe("artifacts a shared conversation shares", () => {
 
   // Guard proof: show artifact events to every principal in `createEventsRuntime`; Cleo then
   // learns that Alice's artifact changed. Drop `undoTurnWrites` from retryAgentRun, and the
-  // turn's draft outlives its retry.
+  // turn's draft outlives its retry. Leave out the `requester` it passes, and Alice's own comment
+  // keeps the chart.
   test("a retry puts back what the turn wrote, and tells only whoever reads it", async () => {
     const { host } = setup()
     const { owner, participant, other, run, artifact, content } = await sharedArtifact(host)
@@ -837,6 +838,28 @@ describe("artifacts a shared conversation shares", () => {
       version: { ...before, title: "Chart", updatedAt: new Date() },
       turnRunId: run.id,
     })
+    const table = await host.storage.artifacts?.create({
+      projectId,
+      id: "art_turntable",
+      kind: "document",
+      owner: alice,
+      version: { ...before, title: "Table", updatedAt: new Date() },
+      turnRunId: run.id,
+    })
+
+    // Alice commented on the chart, and Bob on the table: his words keep the table.
+    const comment = (artifactId: string, author: typeof alice | typeof bob) =>
+      host.storage.artifacts?.createComment({
+        projectId,
+        artifactId,
+        id: `cmt_${author.id}`,
+        anchor: { revision: 1 },
+        body: "Bigger labels",
+        author,
+        createdAt: new Date(),
+      })
+    await comment("art_turnchart", alice)
+    await comment("art_turntable", bob)
     const cursor = await host.events.latestCursor()
 
     await owner.agent.runs.retry(run.id)
@@ -846,6 +869,7 @@ describe("artifacts a shared conversation shares", () => {
       revision: 4,
     })
     expect(await owner.artifacts.get(chart?.artifact.id ?? "")).toBeNull()
+    expect(await owner.artifacts.get(table?.artifact.id ?? "")).toMatchObject({ title: "Table" })
 
     const read = async (reader: typeof owner) =>
       (

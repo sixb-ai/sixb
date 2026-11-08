@@ -6,6 +6,7 @@ import {
   artifactStateBytes,
   artifactStorageErrors,
   checkArtifactStateWrite,
+  othersCommented,
   turnUndoable,
 } from "./record"
 import type {
@@ -266,7 +267,11 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       if (!write) continue
 
       const revision = stored.record.revision
-      if (write.created && turnUndoable({ write, revision })) {
+      if (
+        write.created &&
+        turnUndoable({ write, revision }) &&
+        !othersCommented(stored.comments, input)
+      ) {
         this.deleteArtifact(key)
         deleted.push(stored.record.id)
         continue

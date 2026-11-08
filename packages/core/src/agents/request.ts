@@ -364,12 +364,19 @@ export async function retryAgentRun(
       runId: failedRun.id,
     })
     // What the failed turn wrote goes with what it said, so the retry starts clean: each artifact
-    // nobody changed since is put back as it was, or deleted when the turn created it. Its
-    // children wrote as the turn.
+    // nobody changed since is put back as it was, or deleted when the turn created it and nobody
+    // but its requester commented on it. Its children wrote as the turn.
+    const trigger = await agents.messages.getById({
+      projectId: runtime.projectId,
+      id: failedRun.triggerMessageId,
+    })
+    const requester = trigger?.authorPrincipal
+
     const undone = await tx.artifacts?.undoTurnWrites({
       projectId: runtime.projectId,
       turnRunId: failedRun.id,
       documents,
+      ...(requester ? { requester } : {}),
     })
     await tx.executions.create(durableExecution)
     const run = await agents.runs.create({
