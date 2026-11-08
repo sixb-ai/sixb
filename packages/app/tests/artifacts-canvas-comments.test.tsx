@@ -107,6 +107,7 @@ const comment = (
   },
   body,
   author,
+  authorName: author.id === bob.id ? "Bob" : "Alice Martin",
   createdAt: at,
   ...extra,
 })
@@ -294,7 +295,10 @@ describe("comments on a canvas", () => {
     await waitFor(() => expect(thread(panel, "cmt_2")).toBeTruthy())
 
     expect(within(thread(panel, "cmt_2")).queryByRole("button", { name: "Resolve" })).toBeNull()
+    // Each is named as the API names its author, the reader's own as theirs.
+    // Guard proof: drop `authorName` from useCommentAuthors; Alice is then "Someone".
     expect(within(thread(panel, "cmt_1")).getByText("You")).toBeTruthy()
+    expect(within(thread(panel, "cmt_2")).getByText("Alice Martin")).toBeTruthy()
 
     await act(async () => {
       fireEvent.click(within(thread(panel, "cmt_1")).getByRole("button", { name: "Resolve" }))

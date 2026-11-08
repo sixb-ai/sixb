@@ -29,7 +29,12 @@ import { type ComponentPropsWithoutRef, forwardRef, useEffect, useRef, useState 
 import { useArtifactMessages } from "../../messages"
 import { PersonAvatar } from "../../person-avatar"
 import { CommentComposer } from "./comment-pins"
-import { type ArtifactComment, CommentActionError, type CommentThread } from "./comments"
+import {
+  type ArtifactComment,
+  CommentActionError,
+  type CommentAuthor,
+  type CommentThread,
+} from "./comments"
 
 // The canvas's comments, as threads: the open ones, or those resolved, each saying where it is,
 // who wrote it and its replies, resolved, reopened, replied to or deleted in place. The reader
@@ -68,10 +73,7 @@ export function CommentsPanel({
   readonly filter: CommentFilter
   readonly active: string | null
   readonly placeOf: (thread: CommentThread) => ThreadPlace
-  readonly nameOf: (author: ArtifactComment["author"]) => {
-    readonly name: string
-    readonly you: boolean
-  } | null
+  readonly nameOf: (comment: ArtifactComment) => CommentAuthor | null
   readonly canManage: (comment: ArtifactComment) => boolean
   readonly onFilter: (filter: CommentFilter) => void
   readonly onActivate: (id: string) => void
@@ -301,10 +303,7 @@ function ThreadCard({
   readonly active: boolean
   readonly choosing: boolean
   readonly chosen: boolean
-  readonly nameOf: (author: ArtifactComment["author"]) => {
-    readonly name: string
-    readonly you: boolean
-  } | null
+  readonly nameOf: (comment: ArtifactComment) => CommentAuthor | null
   readonly manages: boolean
   readonly onChoose: (chosen: boolean) => void
   readonly onActivate: () => void
@@ -328,7 +327,7 @@ function ThreadCard({
     <li>
       <article
         ref={card}
-        aria-label={messages.pin(number, nameOf(comment.author)?.name ?? messages.someone)}
+        aria-label={messages.pin(number, nameOf(comment)?.name ?? messages.someone)}
         data-comment-thread={comment.id}
         data-active={active ? "" : undefined}
         className={cn(
@@ -476,14 +475,11 @@ function Message({
   nameOf,
 }: {
   readonly comment: ArtifactComment
-  readonly nameOf: (author: ArtifactComment["author"]) => {
-    readonly name: string
-    readonly you: boolean
-  } | null
+  readonly nameOf: (comment: ArtifactComment) => CommentAuthor | null
 }) {
   const messages = useArtifactMessages().canvas.comments
   const when = useWhen()
-  const author = nameOf(comment.author)
+  const author = nameOf(comment)
   const name = author ? (author.you ? messages.you : author.name) : messages.someone
   return (
     <div className="mt-1.5">
