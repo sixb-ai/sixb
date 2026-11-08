@@ -19138,7 +19138,7 @@ export type SetArtifactStateResponses = {
 
 export type SetArtifactStateResponse = SetArtifactStateResponses[keyof SetArtifactStateResponses]
 
-export type PublishArtifactVersionData = {
+export type UpdateArtifactData = {
   body: {
     kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
     title: string
@@ -19168,10 +19168,10 @@ export type PublishArtifactVersionData = {
     artifactId: string
   }
   query?: never
-  url: "/api/artifacts/{artifactId}/versions"
+  url: "/api/artifacts/{artifactId}/content"
 }
 
-export type PublishArtifactVersionErrors = {
+export type UpdateArtifactErrors = {
   /**
    * Response for status 400
    */
@@ -19299,14 +19299,13 @@ export type PublishArtifactVersionErrors = {
   }
 }
 
-export type PublishArtifactVersionError =
-  PublishArtifactVersionErrors[keyof PublishArtifactVersionErrors]
+export type UpdateArtifactError = UpdateArtifactErrors[keyof UpdateArtifactErrors]
 
-export type PublishArtifactVersionResponses = {
+export type UpdateArtifactResponses = {
   /**
-   * Response for status 201
+   * Response for status 200
    */
-  201: {
+  200: {
     artifact: {
       id: string
       projectId: string
@@ -19473,8 +19472,7 @@ export type PublishArtifactVersionResponses = {
   }
 }
 
-export type PublishArtifactVersionResponse =
-  PublishArtifactVersionResponses[keyof PublishArtifactVersionResponses]
+export type UpdateArtifactResponse = UpdateArtifactResponses[keyof UpdateArtifactResponses]
 
 export type FreezeArtifactVersionData = {
   body: {

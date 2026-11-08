@@ -850,7 +850,7 @@ describe("saving an edited sheet", () => {
 
   test("uploads only the sheet that changed, and saves from the revision edited", async () => {
     requests.length = 0
-    answer = () => Response.json(saved(2), { status: 201 })
+    answer = () => Response.json(saved(2))
     const ui = await editNorth(cache())
     const save = ui.getByRole("button", { name: "Save" })
     await act(async () => {
@@ -860,7 +860,7 @@ describe("saving an edited sheet", () => {
     expect(requests).toEqual([
       { url: "/api/files", body: "Region,Visits\r\nNorth,1300\r\nSouth,1107\r\n" },
       {
-        url: `/api/artifacts/${artifactId}/versions`,
+        url: `/api/artifacts/${artifactId}/content`,
         body: expect.objectContaining({
           kind: "sheet",
           baseRevision: 1,
@@ -925,7 +925,7 @@ describe("saving an edited sheet", () => {
     expect(
       ui.container.querySelector('[role="grid"] [data-row="1"][data-column="1"]')?.textContent
     ).toBe("1,300")
-    answer = () => Response.json(saved(4), { status: 201 })
+    answer = () => Response.json(saved(4))
     await act(async () => {
       fireEvent.click(ui.getByRole("button", { name: "Save anyway" }))
     })

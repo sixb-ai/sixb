@@ -248,7 +248,7 @@ const BaseRevisionSchema = z
     "The revision this was made from. When the artifact changed since, it is refused with 409 artifact_moved, naming the revision and who last wrote the latest version."
   )
 
-export const PublishArtifactVersionBodySchema = PublishArtifactBodySchema.extend({
+export const UpdateArtifactBodySchema = PublishArtifactBodySchema.extend({
   baseRevision: BaseRevisionSchema,
 })
 

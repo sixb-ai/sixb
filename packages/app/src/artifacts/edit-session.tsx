@@ -1,4 +1,4 @@
-import type { PublishArtifactVersionResponse } from "@sixb/client"
+import type { UpdateArtifactResponse } from "@sixb/client"
 import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import type { QueryClient } from "@tanstack/react-query"
 import { createContext, type ReactNode, useContext, useEffect } from "react"
@@ -66,7 +66,7 @@ export async function saveDraft(
   version: ArtifactVersion,
   draft: ArtifactDraft,
   options: { readonly baseRevision?: number } = {}
-): Promise<PublishArtifactVersionResponse> {
+): Promise<UpdateArtifactResponse> {
   const texts = draft.files()
   const changed = new Map(
     [...texts].map(([path, text]) => [

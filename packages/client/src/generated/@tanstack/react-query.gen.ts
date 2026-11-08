@@ -172,7 +172,6 @@ import {
   moveAgentThreadToComputer,
   type Options,
   postAgentThreadMessage,
-  publishArtifactVersion,
   queryObjectLinks,
   queryObjects,
   reactivateAuthMember,
@@ -209,6 +208,7 @@ import {
   transcribeAudio,
   updateAgentPreferences,
   updateAiLimitPolicy,
+  updateArtifact,
   updateAuthMemberGroups,
   updateAuthProfile,
   uploadFileContent,
@@ -685,9 +685,6 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
-  PublishArtifactVersionData,
-  PublishArtifactVersionError,
-  PublishArtifactVersionResponse,
   QueryObjectLinksData,
   QueryObjectLinksError,
   QueryObjectLinksResponse,
@@ -794,6 +791,9 @@ import type {
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyError,
   UpdateAiLimitPolicyResponse,
+  UpdateArtifactData,
+  UpdateArtifactError,
+  UpdateArtifactResponse,
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsError,
   UpdateAuthMemberGroupsResponse,
@@ -6318,20 +6318,16 @@ export const setArtifactStateMutation = (
  *
  * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
  */
-export const publishArtifactVersionMutation = (
-  options?: Partial<Options<PublishArtifactVersionData>>
-): UseMutationOptions<
-  PublishArtifactVersionResponse,
-  PublishArtifactVersionError,
-  Options<PublishArtifactVersionData>
-> => {
+export const updateArtifactMutation = (
+  options?: Partial<Options<UpdateArtifactData>>
+): UseMutationOptions<UpdateArtifactResponse, UpdateArtifactError, Options<UpdateArtifactData>> => {
   const mutationOptions: UseMutationOptions<
-    PublishArtifactVersionResponse,
-    PublishArtifactVersionError,
-    Options<PublishArtifactVersionData>
+    UpdateArtifactResponse,
+    UpdateArtifactError,
+    Options<UpdateArtifactData>
   > = {
     mutationFn: async (fnOptions) => {
-      const { data } = await publishArtifactVersion({
+      const { data } = await updateArtifact({
         ...options,
         ...fnOptions,
         throwOnError: true,

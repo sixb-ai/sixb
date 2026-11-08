@@ -502,9 +502,6 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
-  PublishArtifactVersionData,
-  PublishArtifactVersionErrors,
-  PublishArtifactVersionResponses,
   QueryObjectLinksData,
   QueryObjectLinksErrors,
   QueryObjectLinksResponses,
@@ -613,6 +610,9 @@ import type {
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyErrors,
   UpdateAiLimitPolicyResponses,
+  UpdateArtifactData,
+  UpdateArtifactErrors,
+  UpdateArtifactResponses,
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsErrors,
   UpdateAuthMemberGroupsResponses,
@@ -3912,20 +3912,16 @@ export const setArtifactState = <ThrowOnError extends boolean = false>(
  *
  * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
  */
-export const publishArtifactVersion = <ThrowOnError extends boolean = false>(
-  options: Options<PublishArtifactVersionData, ThrowOnError>
+export const updateArtifact = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateArtifactData, ThrowOnError>
 ) =>
-  (options.client ?? client).post<
-    PublishArtifactVersionResponses,
-    PublishArtifactVersionErrors,
-    ThrowOnError
-  >({
+  (options.client ?? client).put<UpdateArtifactResponses, UpdateArtifactErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
-    url: "/api/artifacts/{artifactId}/versions",
+    url: "/api/artifacts/{artifactId}/content",
     ...options,
     headers: {
       "Content-Type": "application/json",

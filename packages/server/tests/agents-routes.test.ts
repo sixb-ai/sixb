@@ -2107,15 +2107,15 @@ describe("a shared conversation's artifacts over HTTP", () => {
     expect(read.status).toBe(200)
     expect(await read.json()).toMatchObject({ artifact: { owner: alice }, access: "update" })
 
-    const saved = await call("/api/artifacts/art_0000000001/versions", bob, {
-      method: "POST",
+    const saved = await call("/api/artifacts/art_0000000001/content", bob, {
+      method: "PUT",
       body: JSON.stringify({
         kind: "document",
         title: "Bob's edit",
         files: [{ path: "document.md", file }],
       }),
     })
-    expect(saved.status).toBe(201)
+    expect(saved.status).toBe(200)
     expect(await saved.json()).toMatchObject({
       artifact: { owner: alice, latestVersion: 1, revision: 2 },
       version: { version: 1, revision: 2, author: { type: "user", id: "usr_bob" } },

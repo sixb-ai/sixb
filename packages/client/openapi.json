@@ -55339,12 +55339,12 @@
         }
       }
     },
-    "/api/artifacts/{artifactId}/versions": {
-      "post": {
+    "/api/artifacts/{artifactId}/content": {
+      "put": {
         "summary": "Update an artifact",
         "description": "Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.",
         "tags": ["Artifacts"],
-        "operationId": "publishArtifactVersion",
+        "operationId": "updateArtifact",
         "security": [
           {
             "sixbCsrf": []
@@ -55571,8 +55571,8 @@
           }
         },
         "responses": {
-          "201": {
-            "description": "Response for status 201",
+          "200": {
+            "description": "Response for status 200",
             "content": {
               "application/json": {
                 "schema": {

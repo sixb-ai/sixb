@@ -114,13 +114,13 @@ async function rewrite(
   files: Awaited<ReturnType<Fixture["put"]>>[]
 ) {
   const response = await app.fetch(
-    new Request(url(`/api/artifacts/${artifactId}/versions`), {
-      method: "POST",
+    new Request(url(`/api/artifacts/${artifactId}/content`), {
+      method: "PUT",
       headers: as.mutationHeaders,
       body: JSON.stringify({ kind, title: "Untitled", files }),
     })
   )
-  expect(response.status).toBe(201)
+  expect(response.status).toBe(200)
 }
 
 /** Creates an artifact's open version: the next write opens a new one. */

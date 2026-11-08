@@ -41,7 +41,7 @@ function api(published: () => Response) {
         requests.push({ url, body: file.name })
         return Response.json(fileRef(`new-${file.name}`), { status: 201 })
       }
-      requests.push({ url, body: await input.json() })
+      requests.push({ url: `${input.method} ${url}`, body: await input.json() })
       return published()
     },
     { preconnect: globalThis.fetch.preconnect }
@@ -52,7 +52,7 @@ function api(published: () => Response) {
 describe("publishing an edit", () => {
   test("uploads only what changed and saves from the revision edited", async () => {
     const { client, requests } = api(() =>
-      Response.json({ artifact: {}, version: { version: 4 }, warnings: [] }, { status: 201 })
+      Response.json({ artifact: {}, version: { version: 4 }, warnings: [] })
     )
     const changed = new Map<string, Blob | null>([
       ["sheets/Regions.csv", new Blob(["Region,Visits\nNorth,1300\n"])],
@@ -67,7 +67,7 @@ describe("publishing an edit", () => {
       "Targets.csv",
     ])
     expect(requests.at(-1)).toEqual({
-      url: "/api/artifacts/art_s3ll5ab0ok/versions",
+      url: "PUT /api/artifacts/art_s3ll5ab0ok/content",
       body: {
         kind: "sheet",
         title: "Q3 operations",
