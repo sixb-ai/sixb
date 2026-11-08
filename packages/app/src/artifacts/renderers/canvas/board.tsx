@@ -1,3 +1,4 @@
+import { CANVAS_FILE } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { useStoreApi } from "@xyflow/react"
 import type { LucideIcon } from "lucide-react"
@@ -313,6 +314,24 @@ function usePicture(
 }
 
 /**
+ * The version a board's frame runs, kept as long as the pages it holds are the same: a canvas
+ * edited live is written again every few seconds, moving its revision, while only `canvas.json`
+ * changes. Its boards then keep running as they were rather than load again, and load the next
+ * revision only once a page, or a file one loads, changed.
+ */
+function usePagesVersion(version: ArtifactVersion | null): ArtifactVersion | null {
+  const kept = useRef<{ readonly version: ArtifactVersion; readonly pages: string } | null>(null)
+  if (!version) return null
+
+  const pages = `${version.artifactId}@${version.version}\n${version.files
+    .filter((file) => file.path !== CANVAS_FILE)
+    .map((file) => `${file.path}:${file.file.digest}`)
+    .join("\n")}`
+  if (kept.current?.pages !== pages) kept.current = { version, pages }
+  return kept.current.version
+}
+
+/**
  * A board's page, running, when the view shows it large enough, over its tile: the tile stays
  * under the frame, which fades in once its page is ready, so a board never flashes blank as it
  * starts or stops. On the board a frame takes no clicks, so dragging across it pans; it is a
@@ -331,12 +350,13 @@ export function LiveBoard({
 }) {
   const { version } = useContext(LiveBoardsContext)
   const live = useLive(id)
+  const pages = usePagesVersion(version)
   return (
     <div className="relative size-full">
       {tile}
-      {version && live ? (
+      {pages && live ? (
         <ArtifactFrame
-          version={version}
+          version={pages}
           entry={file}
           title={title}
           decorative
