@@ -11,8 +11,8 @@
  * frame. A deck it also lays out: every `section.slide` is a 1280×720 slide, shown one at a time
  * scaled to fit, or all at once in a grid. The URL's fragment can open it at a slide, and with
  * `sixb-fill` show that slide alone filling the frame, as a thumbnail or an embed does; it tells
- * the app about keys and picks in the overview. A page scrolls as it is: it reports the embeds near its view as it scrolls, and its
- * height as it changes.
+ * the app about keys and picks in the overview. A page scrolls as it is: it reports the embeds
+ * near its view as it scrolls, and its height as it changes.
  *
  * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
  * call is a message the app answers, and the app keeps the values. Opened on its own, with no app
