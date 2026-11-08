@@ -70,7 +70,7 @@ export function AgentChatPage({
   }, [navigate, normalizedRouteBase])
 
   return (
-    <section className="fixed inset-0 z-50 flex h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+    <section className="fixed inset-0 z-50 flex h-(--viewport-height) min-h-0 overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
       <AgentChat
         {...props}
         ambientContext={ambientContext ?? registeredContext}
@@ -117,7 +117,7 @@ export function AgentThreadsPage() {
   const navigate = useNavigate()
 
   return (
-    <section className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
+    <section className="fixed inset-0 z-50 flex h-(--viewport-height) min-h-0 flex-col overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
       <AgentThreads
         className="min-h-0 flex-1"
         onSelectThread={(threadId) => navigate(threadPath(threadId))}

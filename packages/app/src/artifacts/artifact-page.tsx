@@ -27,7 +27,7 @@ export function ArtifactPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background text-foreground">
+    <div className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
       <Viewer
         target={target}
         chrome={{

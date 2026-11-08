@@ -1,1 +1,9 @@
-["overview.md", "querying-data.md", "actions.md", "customization.md", "activity.md", "desktop.md"]
+[
+  "overview.md",
+  "querying-data.md",
+  "actions.md",
+  "customization.md",
+  "activity.md",
+  "mobile.md",
+  "desktop.md"
+]

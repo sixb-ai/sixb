@@ -804,7 +804,8 @@ function AppFallback({
         alignItems: "center",
         justifyContent: "center",
         gap: "1rem",
-        padding: "2rem",
+        padding:
+          "calc(2rem + env(safe-area-inset-top, 0px)) 2rem calc(2rem + env(safe-area-inset-bottom, 0px))",
         textAlign: "center",
         fontFamily:
           "var(--font-sans, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif)",
@@ -1642,6 +1643,10 @@ function renderMetadataHead(metadata: Awaited<ReturnType<typeof resolveAppMetada
       ? [`    <meta name="description" content="${escapeHtmlAttribute(metadata.description)}" />`]
       : []),
     `    <meta name="theme-color" content="${escapeHtmlAttribute(metadata.themeColor)}" />`,
+    // iOS reads this when the app is added to the Home Screen.
+    ...(metadata.statusBar === "under"
+      ? ['    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />']
+      : []),
     '    <link rel="manifest" href="/app.webmanifest" />',
     ...(metadata.favicon
       ? [`    <link rel="icon" href="${escapeHtmlAttribute(metadata.favicon)}" />`]

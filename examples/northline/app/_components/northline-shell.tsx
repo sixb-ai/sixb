@@ -11,9 +11,7 @@ import { openServiceCases } from "../_lib/service-cases"
 import { GlobalSearch } from "./global-search"
 import { NorthlineMark } from "./northline-mark"
 import { OperationsAssistant } from "./operations-assistant"
-import { SidebarOrMoreSheet } from "./phone/phone-shell"
-import { PhoneTabBar } from "./phone/phone-tab-bar"
-import { PhoneTopBar } from "./phone/phone-top-bar"
+import { NorthlineTabBar, NorthlineTopBar, SidebarOrMoreSheet } from "./phone/northline-phone"
 
 const quotesWithCustomer = objects(Quote)
   .query()
@@ -65,8 +63,8 @@ export function NorthlineShell({ children }: PropsWithChildren) {
         className="phone-shell relative flex min-h-0 min-w-0 flex-1"
         data-tab-bar={conversationActive ? "hidden" : undefined}
       >
-        <SidebarInset className="relative h-svh min-h-0 overflow-hidden bg-background">
-          <PhoneTopBar />
+        <SidebarInset className="relative h-(--viewport-height) min-h-0 overflow-hidden bg-background">
+          <NorthlineTopBar />
           <div className="min-h-0 flex-1 overflow-y-auto" data-app-scroll>
             <div
               className={
@@ -78,7 +76,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
               {children}
             </div>
           </div>
-          {conversationActive ? null : <PhoneTabBar />}
+          {conversationActive ? null : <NorthlineTabBar />}
         </SidebarInset>
         <OperationsAssistant />
       </div>

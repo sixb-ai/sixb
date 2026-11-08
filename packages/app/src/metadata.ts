@@ -11,6 +11,13 @@ export interface AppMetadata {
   favicon?: string
   themeColor?: string
   backgroundColor?: string
+  /**
+   * Where the installed app starts on an iPhone or iPad: under the status bar (the default), as a
+   * native app does, so a sheet's backdrop dims the status bar in step with the page, or below it.
+   * Under it, a layout of your own clears the status bar with `--safe-top`; Sixb's shells and
+   * screens do.
+   */
+  statusBar?: "under" | "below"
 }
 
 export interface ResolvedManifestIcon {
@@ -28,6 +35,7 @@ export interface ResolvedAppMetadata {
   readonly backgroundColor: string
   readonly appleTouchIcon?: string
   readonly icons: readonly ResolvedManifestIcon[]
+  readonly statusBar: "under" | "below"
 }
 
 export interface ResolveAppMetadataOptions {
@@ -107,6 +115,7 @@ export async function resolveAppMetadata(
       ? { appleTouchIcon: "/apple-touch-icon.png" }
       : {}),
     icons,
+    statusBar: configured.statusBar ?? "under",
   }
 }
 
@@ -173,6 +182,9 @@ function validateMetadata(metadata: AppMetadata, layoutPath: string): void {
     if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) {
       throw metadataError(layoutPath, `metadata.${field} must be a non-empty string when provided`)
     }
+  }
+  if (metadata.statusBar !== undefined && !["under", "below"].includes(metadata.statusBar)) {
+    throw metadataError(layoutPath, 'metadata.statusBar must be "under" or "below" when provided')
   }
 }
 

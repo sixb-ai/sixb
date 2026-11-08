@@ -126,6 +126,14 @@ export {
   type NavItemsProps,
 } from "./shell/nav-items"
 export { useBack } from "./shell/phone/back"
+export {
+  PhoneMoreGroup,
+  PhoneMoreRow,
+  PhoneMoreSheet,
+  type PhoneMoreSheetProps,
+} from "./shell/phone/more-sheet"
+export { PhoneTabBar, type PhoneTabBarProps } from "./shell/phone/tab-bar"
+export { PhoneBarActions, PhoneTopBar, type PhoneTopBarProps } from "./shell/phone/top-bar"
 export { SearchCommand, type SearchCommandProps } from "./shell/search-command"
 export { SectionNav, type SectionNavProps } from "./shell/section-nav"
 export { UserMenu, type UserMenuItemProps, type UserMenuProps } from "./shell/user-menu"

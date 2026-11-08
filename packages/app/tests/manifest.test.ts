@@ -170,6 +170,27 @@ describe("custom app metadata and manifest generation", () => {
 
   // Regression proof: remove the agentToolViews call in metadata.ts and the three rejections fail;
   // the app would then generate and fail only in the browser.
+  test("draws the installed app under the status bar unless asked not to", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const statusBarTag =
+      '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />'
+
+    await writeLayout(fixture, "{}")
+    const under = await generateAppEntry(fixture.root, fixture.generatedDir)
+    expect(await readFile(under.htmlPath, "utf-8")).toContain(statusBarTag)
+
+    await writeLayout(fixture, '{ statusBar: "below" }')
+    const below = await generateAppEntry(fixture.root, fixture.generatedDir)
+    expect(await readFile(below.htmlPath, "utf-8")).not.toContain("apple-mobile-web-app-status-bar")
+
+    await writeLayout(fixture, '{ statusBar: "over" }')
+    const error = await generateAppEntry(fixture.root, fixture.generatedDir).catch(
+      (thrown: unknown) => thrown
+    )
+    expect(String(error)).toContain('metadata.statusBar must be "under" or "below"')
+  })
+
   test("rejects a toolViews export that is not a list of views, one per tool", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)

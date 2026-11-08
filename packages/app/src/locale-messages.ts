@@ -41,6 +41,13 @@ export const en = {
   },
   agent: { title: "Agent", open: "Ask the agent" },
   artifacts: "Artifacts",
+  phone: {
+    back: "Back",
+    more: "More",
+    moreDescription: "Every place in the app, and your account.",
+    tabs: "Primary",
+    workspace: "Workspace",
+  },
   sections: {
     back: "Back",
     console: {
@@ -126,6 +133,13 @@ export const fr: Translation<AppMessages> = {
   },
   agent: { title: "Agent", open: "Demander à l’agent" },
   artifacts: "Artefacts",
+  phone: {
+    back: "Retour",
+    more: "Plus",
+    moreDescription: "Toutes les pages de l’application, et votre compte.",
+    tabs: "Principal",
+    workspace: "Espace de travail",
+  },
   sections: {
     back: "Retour",
     console: {

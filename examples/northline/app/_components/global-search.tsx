@@ -39,7 +39,7 @@ export function GlobalSearch({ placement = "sidebar" }: GlobalSearchProps) {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
-  // On phones it fills the screen instead of floating (see phone/phone-navigation.css). The server
+  // On phones it fills the screen instead of floating (`fullscreen`). The server
   // matches more fields than a result's label, so the dialog shows its results as they come.
   const dialog = (
     <CommandDialog

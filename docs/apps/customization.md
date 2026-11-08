@@ -52,7 +52,8 @@ export default function RootLayout({ children }: PropsWithChildren) {
 ```
 
 Place `logo.svg` in `app/public/`. The title also names the installed app; `themeColor` sets the
-browser theme and `backgroundColor` sets the launch background.
+browser theme and `backgroundColor` sets the launch background. The installed app draws under an
+iPhone's status bar; `statusBar: "below"` starts it below ([On a Phone](./mobile.md#the-status-bar)).
 
 Only the root layout supplies metadata. It is loaded during app generation, so do not access
 `window` or `document` at module scope.
