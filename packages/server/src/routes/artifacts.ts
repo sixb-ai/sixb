@@ -198,7 +198,7 @@ async function runTokenArtifacts(
   if (!run || !sixb) throw new AgentExecutionLostError(runId)
 
   return agentRunArtifacts(
-    { projectId: host.id, storage: host.storage, domainEvents: host.events },
+    { projectId: host.id, storage: host.storage, domainEvents: host.events, broker: host.broker },
     run,
     executionToken,
     () => Promise.resolve(sixb)

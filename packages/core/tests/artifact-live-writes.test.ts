@@ -13,7 +13,7 @@ const alice: Principal = { type: "user", id: "alice" }
 
 const board = (id: string, x = 0) => ({
   id,
-  type: "board",
+  type: "board" as const,
   file: `boards/${id}.html`,
   x,
   y: 0,

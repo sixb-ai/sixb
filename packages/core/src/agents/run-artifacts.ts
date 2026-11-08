@@ -8,6 +8,7 @@ import {
   artifactQueryChecker,
 } from "../artifacts/execution"
 import type { ArtifactKind } from "../artifacts/kinds"
+import { appendArtifactLive, changedBoards } from "../artifacts/live/presence"
 import { withMergedWrite } from "../artifacts/publish/merge"
 import {
   type BoardPreviewInput,
@@ -23,6 +24,7 @@ import {
 } from "../artifacts/publish/publish"
 import type { ArtifactThemeMode } from "../artifacts/theme"
 import { type Principal, principalsEqual } from "../auth/types"
+import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events/service"
 import type { Sixb } from "../runtime/sixb"
 import type { Storage } from "../storage"
@@ -30,6 +32,7 @@ import type { AgentStorage, ConversationAgentRunRecord, SubagentRunRecord } from
 import type {
   ArtifactFile,
   ArtifactRecord,
+  ArtifactStorage,
   ArtifactTurnWriteRecord,
   ArtifactVersionRecord,
 } from "../storage/artifacts/types"
@@ -136,6 +139,8 @@ export interface AgentRunArtifactsHost {
   readonly storage: Storage
   /** Where `artifact.updated` goes once a write to an artifact is stored. */
   readonly domainEvents: Pick<DomainEventLog, "emit">
+  /** Where the turn's presence on a canvas it writes goes, for whoever has it open. */
+  readonly broker: Pick<Broker, "ensureStream" | "append">
 }
 
 /** The SDK a run acts through, bound to its execution: as its requester. */
@@ -248,6 +253,12 @@ export function agentRunArtifacts(
         return { prepared, stored }
       }
 
+      // What the canvas showed before, so that its viewers learn which boards the turn changes.
+      const before =
+        kind === "canvas" && "artifactId" in input
+          ? await latestVersionOf(requireArtifacts(storage), projectId, input.artifactId)
+          : null
+
       // A canvas written since the copy the run started from is merged into, not refused.
       const { prepared, stored, merged } =
         "artifactId" in input
@@ -267,6 +278,7 @@ export function agentRunArtifacts(
             )
           : { ...(await write(input.files)), merged: false }
       if ("artifactId" in input) await announceArtifactUpdates(host.domainEvents, [stored.version])
+      if (kind === "canvas") await announceAgentBoards(host, turnRunId, before, stored.version)
 
       // A publisher that renders its own previews reads the query answers in its layout check, and
       // normally pictures every board: answering them here too would run each query twice. So its
@@ -325,6 +337,67 @@ export function agentRunArtifacts(
       )
     }
     return version
+  }
+}
+
+/** The latest version of an artifact, or null without one. */
+async function latestVersionOf(
+  storage: ArtifactStorage,
+  projectId: string,
+  artifactId: string
+): Promise<ArtifactVersionRecord | null> {
+  const artifact = await storage.get({ projectId, id: artifactId })
+  if (!artifact) return null
+  return storage.getVersion({ projectId, artifactId, version: artifact.latestVersion })
+}
+
+/**
+ * Tells whoever has the canvas open which boards the turn is changing. The write is stored by
+ * now: a broker that refuses only leaves its viewers without the notice.
+ */
+async function announceAgentBoards(
+  host: AgentRunArtifactsHost,
+  turnRunId: string,
+  before: ArtifactVersionRecord | null,
+  after: ArtifactVersionRecord
+): Promise<void> {
+  const boards = changedBoards(before, after)
+  if (boards.length === 0) return
+
+  try {
+    await appendArtifactLive(host.broker, host.projectId, after.artifactId, {
+      name: "agent",
+      payload: { runId: turnRunId, boards, at: new Date().toISOString() },
+    })
+  } catch (error) {
+    console.warn(
+      `[Sixb] Could not tell the viewers of '${after.artifactId}' what the Agent changes:`,
+      error
+    )
+  }
+}
+
+/**
+ * Tells whoever has open an artifact a turn wrote that the turn ended, so its presence goes. A
+ * turn that ends without saying so is forgotten after `AGENT_PRESENCE_MS`.
+ */
+export async function announceAgentTurnEnded(
+  host: AgentRunArtifactsHost,
+  turnRunId: string
+): Promise<void> {
+  try {
+    const writes = await requireArtifacts(host.storage).listTurnWrites({
+      projectId: host.projectId,
+      turnRunId,
+    })
+    for (const { artifactId } of writes) {
+      await appendArtifactLive(host.broker, host.projectId, artifactId, {
+        name: "agent-ended",
+        payload: { runId: turnRunId },
+      })
+    }
+  } catch (error) {
+    console.warn(`[Sixb] Could not tell the viewers of turn '${turnRunId}' that it ended:`, error)
   }
 }
 
