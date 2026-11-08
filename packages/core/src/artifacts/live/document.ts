@@ -60,10 +60,16 @@ function structuredPath(kind: ArtifactKind): string | undefined {
 
 /**
  * A document holding `files` for an artifact of `kind`. A structured file that does not parse is
- * held as text, so nothing is lost; publishing then refuses it as it would the file.
+ * held as text, so nothing is lost; publishing then refuses it as it would the file. Built as
+ * `clientID`, two builds of the same files are the same document.
  */
-export function createArtifactDocument(kind: ArtifactKind, files: LiveFiles): Y.Doc {
+export function createArtifactDocument(
+  kind: ArtifactKind,
+  files: LiveFiles,
+  options: { readonly clientID?: number } = {}
+): Y.Doc {
   const doc = new Y.Doc()
+  if (options.clientID !== undefined) doc.clientID = options.clientID
   doc.transact(() => {
     doc.getMap(LIVE_ARTIFACT).set("kind", kind)
     const map = doc.getMap<unknown>(LIVE_FILES)

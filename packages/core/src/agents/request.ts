@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { announceArtifactUpdates } from "../artifacts/events"
+import { undoneTurnDocuments } from "../artifacts/publish/merge"
 import type { Principal } from "../auth"
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
+import type { BlobStorage } from "../blob-storage/types"
 import { isValidFileRef } from "../blob-storage/validation"
 import {
   canInheritAgentRequestAuthorization,
@@ -305,7 +307,9 @@ export async function retryAgentRun(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   models: LanguageModelCatalog | undefined,
-  failedRun: ConversationAgentRunRecord
+  failedRun: ConversationAgentRunRecord,
+  /** Where a canvas the retry puts back stores its document; without it, the document is cleared. */
+  blobStorage?: Pick<BlobStorage, "open" | "put">
 ): Promise<RequestAgentRunResult> {
   resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
@@ -335,6 +339,17 @@ export async function retryAgentRun(
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
+
+  // A canvas put back takes its restore point as a change to its document, made before the undo.
+  const artifacts = runtime.storage.artifacts
+  const documents =
+    artifacts && blobStorage
+      ? await undoneTurnDocuments(
+          { projectId: runtime.projectId, storage: artifacts, blobStorage },
+          failedRun.id
+        )
+      : {}
+
   const { run, undone } = await runtime.storage.transaction(async (tx) => {
     const agents = tx.agents
     if (!agents) {
@@ -351,6 +366,7 @@ export async function retryAgentRun(
     const undone = await tx.artifacts?.undoTurnWrites({
       projectId: runtime.projectId,
       turnRunId: failedRun.id,
+      documents,
     })
     await tx.executions.create(durableExecution)
     const run = await agents.runs.create({

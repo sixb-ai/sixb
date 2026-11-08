@@ -150,7 +150,8 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       "agent.run"
     ),
     dependencies.sandbox,
-    dependencies.definitions.security
+    dependencies.definitions.security,
+    dependencies.blobStorage
   )
   return {
     objects: createObjectsRuntime(runtime, execution, dependencies.blobStorage, {
