@@ -403,6 +403,32 @@ describe("an artifact edited live", () => {
     expect(deletes(removal, written())).toBe(true)
   })
 
+  // Yjs keeps both of two insertions made at once, alike or not, and so does the write-back: a
+  // merge that took alike insertions once would leave "Hello!".
+  test("keeps the same words two people type at once in the same place, both times", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
+    await marie.join()
+    await bob.join()
+    await marie.settle()
+
+    // Each types before hearing of the other's.
+    const note = (client: Client) => client.canvas.items.get("hi")?.get("text") as Y.Text
+    for (const client of [marie, bob]) note(client).insert(5, "!")
+    await marie.settle()
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await marie.settle()
+
+    expect(note(marie).toString()).toBe("Hello!!")
+    expect(note(bob).toString()).toBe("Hello!!")
+    expect((await context.items()).find((item) => item.id === "hi")).toMatchObject({
+      text: "Hello!!",
+    })
+  })
+
   test("writes back changes made without pause at most every few seconds, and when the last editor leaves", async () => {
     jest.useFakeTimers()
     const context = await setup()
