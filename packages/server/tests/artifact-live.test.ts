@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import {
   type ArtifactFile,
   InMemoryBlobStorage,
@@ -28,8 +28,15 @@ import * as encoding from "lib0/encoding"
 import * as awarenessProtocol from "y-protocols/awareness"
 import * as syncProtocol from "y-protocols/sync"
 import * as Y from "yjs"
-import { ACCESS_RECHECK_MS, type LiveConnection, SAVE_IDLE_MS, SAVE_MAX_MS } from "../src/live/room"
-import { LiveRooms } from "../src/live/rooms"
+import {
+  ACCESS_RECHECK_MS,
+  AWARENESS_SHARE_MS,
+  HEARD_SAVE_MS,
+  type LiveConnection,
+  SAVE_IDLE_MS,
+  SAVE_MAX_MS,
+} from "../src/live/room"
+import { LiveRooms, MAX_LIVE_ARTIFACTS_PER_CONNECTION } from "../src/live/rooms"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -471,6 +478,8 @@ describe("an artifact edited live", () => {
 
     marie.awareness.setLocalStateField("cursor", { x: 10, y: 20 })
     await settle()
+    jest.advanceTimersByTime(AWARENESS_SHARE_MS)
+    await settle()
     expect(others(bob)).toContainEqual({
       cursor: { x: 10, y: 20 },
       user: expect.objectContaining({ id: "user:marie" }),
@@ -683,7 +692,12 @@ describe("an artifact edited live", () => {
     await marie.leave()
     await marie.settle()
 
-    // Written back as she left: the room closes with her.
+    // Told she left, and written back as she did: the room closes with her.
+    expect(marie.messages.at(-1)).toEqual({
+      type: "left",
+      artifactId: context.artifactId,
+      reason: "left",
+    })
     expect((await context.latest()).revision).toBe(context.revision + 1)
 
     // Offline, she moves the board; reconnected, her document syncs it as it is.
@@ -699,6 +713,282 @@ describe("an artifact edited live", () => {
     expect(items.find((item) => item.id === "welcome")).toMatchObject({ x: 80 })
     expect(items.find((item) => item.id === "hi")).toMatchObject({ x: 40 })
     expect(items).toHaveLength(2)
+  })
+})
+
+describe("an artifact edited live, under strain", () => {
+  // Guard proof: in LiveRooms.join, take the slot after the awaits, as it was; the joins at
+  // once all pass the cap.
+  test("counts joins at once against a connection's cap", async () => {
+    const context = await setup()
+    const rooms = context.rooms()
+    const ids: string[] = []
+    for (let index = 0; index < MAX_LIVE_ARTIFACTS_PER_CONNECTION + 2; index += 1) {
+      const created = await context.marie.artifacts.create({
+        kind: "canvas",
+        title: `Canvas ${index}`,
+        files: await context.put({
+          [CANVAS_FILE]: JSON.stringify({
+            items: [{ id: "n", type: "note", x: 0, y: 0, w: 100, text: "a" }],
+          }),
+        }),
+      })
+      ids.push(created.artifact.id)
+    }
+    const sent: ArtifactLiveServerMessage[] = []
+    const connection = {
+      id: "c-1",
+      sixb: context.marie,
+      send: (m: ArtifactLiveServerMessage) => sent.push(m),
+    }
+    await Promise.all(
+      ids.map((artifactId) => rooms.receive(connection, { type: "join", artifactId }))
+    )
+
+    expect(sent.filter((message) => message.type === "joined")).toHaveLength(
+      MAX_LIVE_ARTIFACTS_PER_CONNECTION
+    )
+    expect(sent.filter((message) => message.type === "error")).toHaveLength(2)
+  })
+
+  // Guard proof: drop the ticket check after the awaits in LiveRooms.join; Marie, gone, is
+  // joined anyway.
+  test("leaves out a connection that closed while its join was on the way", async () => {
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const joining = rooms.receive(marie.connection, {
+      type: "join",
+      artifactId: context.artifactId,
+    })
+    await rooms.disconnect(marie.connection)
+    await joining
+    await marie.settle()
+
+    expect(marie.messages.some((message) => message.type === "joined")).toBe(false)
+  })
+
+  // Guard proof: return from LiveRoom.updated for a REMOTE update without `heard()`; Marie's move,
+  // heard by server B from server A, which died, is never written.
+  test("writes back what it heard from a server that died before writing it", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const [a, b] = [context.rooms("server-a"), context.rooms("server-b")]
+    const marie = new Client(a, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(b, context.bob, context.artifactId, "bob-1")
+    const settle = async () => {
+      await marie.settle()
+      await bob.settle()
+      await marie.settle()
+    }
+    await marie.join()
+    await bob.join()
+    await settle()
+
+    marie.canvas.items.get("hi")?.set("x", 777)
+    await settle()
+    expect(bob.canvas.items.get("hi")?.get("x")).toBe(777)
+
+    // Server A dies before it writes back: its room stops, nothing saved. Everyone on B leaves.
+    const held = (a as unknown as { rooms: Map<string, Promise<unknown>> }).rooms
+    ;((await held.get(context.artifactId)) as { close(): void }).close()
+    await bob.leave()
+    await settle()
+    jest.advanceTimersByTime(HEARD_SAVE_MS)
+    await settle()
+
+    expect((await context.items()).find((item) => item.id === "hi")).toMatchObject({ x: 777 })
+  })
+
+  // Guard proof: drop the recheck from LiveRoom.written; Bob, idle, keeps watching the canvas
+  // after he lost the right to read it.
+  test("reads every member's right again when the artifact is written, and drops who lost it", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
+    await marie.join()
+    await bob.join()
+    await marie.settle()
+
+    await context.storage.agents.threads.removeParticipant({
+      projectId,
+      threadId: "thr_marie",
+      principal: { type: "user", id: "bob" },
+    })
+    const latest = await context.latest()
+    await context.marie.artifacts.update(context.artifactId, {
+      kind: "canvas",
+      title: "Flow",
+      files: latest.files,
+      baseRevision: latest.revision,
+    })
+    await marie.settle()
+
+    expect(bob.messages).toContainEqual({
+      type: "left",
+      artifactId: context.artifactId,
+      reason: "not_shared",
+    })
+  })
+
+  // Guard proof: drop the shadow check in LiveRoom.sync; the poisoned board reaches Bob, the
+  // write-back throws, and the room never closes.
+  test("refuses a change that leaves the document unreadable, before anyone gets it", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
+    await marie.join()
+    await bob.join()
+    await marie.settle()
+
+    marie.doc.getMap("files").set("boards/x.html", new Y.Map())
+    await marie.settle()
+    expect(marie.messages.at(-1)).toMatchObject({ type: "error" })
+    expect(bob.doc.getMap("files").has("boards/x.html")).toBe(false)
+
+    // A sound change after it is kept, and written back.
+    ;(bob.canvas.items.get("hi")?.get("text") as Y.Text).insert(5, "!")
+    await marie.settle()
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await marie.settle()
+    expect((await context.items()).find((item) => item.id === "hi")).toMatchObject({
+      text: "Hello!",
+    })
+  })
+
+  // Guard proof: drop `baseTitle` from LiveRoom.flush's publish; the write-back puts the old
+  // title back.
+  test("keeps a title given while the canvas was edited", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    await marie.join()
+    await marie.settle()
+    marie.canvas.items.get("hi")?.set("x", 40)
+    await marie.settle()
+
+    // Renamed elsewhere before the write-back.
+    const latest = await context.latest()
+    await context.storage.artifacts.publish({
+      projectId,
+      artifactId: context.artifactId,
+      kind: "canvas",
+      version: { ...latest, title: "Onboarding" },
+    })
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await marie.settle()
+
+    const written = await context.latest()
+    expect(written.title).toBe("Onboarding")
+    expect(written.revision).toBe(latest.revision + 2)
+  })
+
+  // Guard proof: reset nothing when the events feed fails in LiveRooms.followEvents; no room
+  // ever hears of a write again.
+  test("follows the artifacts' writes again after the feed failed to start", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    let calls = 0
+    const events = {
+      subscribe: ((...args: Parameters<typeof context.host.events.subscribe>) => {
+        calls += 1
+        return calls === 1
+          ? Promise.reject(new Error("down"))
+          : context.host.events.subscribe(...args)
+      }) as typeof context.host.events.subscribe,
+    }
+    const rooms = new LiveRooms({
+      projectId,
+      storage: context.storage,
+      blobStorage: context.blobStorage,
+      broker: context.broker,
+      events: events as typeof context.host.events,
+      instance: "server-a",
+    })
+    const error = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const first = new Client(rooms, context.marie, context.artifactId, "marie-1")
+      await first.join()
+      await first.settle()
+      await first.leave()
+      await first.settle()
+
+      const marie = new Client(rooms, context.marie, context.artifactId, "marie-2")
+      await marie.join()
+      await marie.settle()
+      const latest = await context.latest()
+      await context.marie.artifacts.update(context.artifactId, {
+        kind: "canvas",
+        title: "Flow",
+        files: await context.put({
+          [CANVAS_FILE]: JSON.stringify({ items: [board("welcome", 120)] }),
+          "boards/welcome.html": WELCOME,
+        }),
+        baseRevision: latest.revision,
+      })
+      await marie.settle()
+      expect(marie.canvas.items.get("welcome")?.get("x")).toBe(120)
+    } finally {
+      error.mockRestore()
+    }
+  })
+
+  // Guard proof: drop the `room.close()` from LiveRoom.open's failed follow; the room's awareness
+  // check keeps running for good.
+  test("leaves nothing running when a room cannot follow its stream", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const broker = {
+      ensureStream: context.broker.ensureStream.bind(context.broker),
+      append: context.broker.append.bind(context.broker),
+      read: context.broker.read.bind(context.broker),
+      tail: context.broker.tail.bind(context.broker),
+      subscribe: () => Promise.reject(new Error("broker down")),
+    } as unknown as typeof context.broker
+    const rooms = new LiveRooms({
+      projectId,
+      storage: context.storage,
+      blobStorage: context.blobStorage,
+      broker,
+      events: context.host.events,
+      instance: "server-a",
+    })
+    // The client's own awareness keeps a timer: counted before the join.
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const before = jest.getTimerCount()
+    const refused = await rooms
+      .receive(marie.connection, { type: "join", artifactId: context.artifactId })
+      .catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(Error)
+    expect(jest.getTimerCount()).toBe(before)
+  })
+
+  // Guard proof: share each awareness change at once, on the live stream; Marie's cursor moves
+  // fill the document's stream.
+  test("shares presence a few times a second at most, apart from the document's updates", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    await marie.join()
+    await marie.settle()
+
+    for (let x = 0; x < 20; x += 1) {
+      marie.awareness.setLocalStateField("cursor", { x, y: 0 })
+      await marie.settle()
+    }
+    jest.advanceTimersByTime(AWARENESS_SHARE_MS)
+    await marie.settle()
+
+    const read = async (streamId: string) =>
+      (await context.broker.read({ projectId, streamId })).records.map((record) => record.name)
+    expect(await read(`artifacts.presence.${context.artifactId}`)).toEqual(["awareness"])
+    expect(await read(`artifacts.live.${context.artifactId}`)).not.toContain("awareness")
   })
 })
 

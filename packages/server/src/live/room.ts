@@ -14,6 +14,7 @@ import type { Broker, BrokerRecord } from "@sixb/core/broker"
 import {
   AGENT_PRESENCE_MS,
   artifactLiveStream,
+  artifactPresenceStream,
   loadArtifactDocument,
   mergeIntoDocument,
   parseArtifactLiveRecord,
@@ -48,6 +49,15 @@ const RETRY_MAX_MS = 30_000
 const RETRIES_UNHELD = 5
 /** How old another server's awareness update may be for a server joining late to apply it. */
 const AWARENESS_REPLAY_MS = awarenessProtocol.outdatedTimeout
+/**
+ * How long an edit heard from another server waits before this one writes it back too, in case
+ * the server that heard it never does: long enough that it normally has.
+ */
+export const HEARD_SAVE_MS = 3 * SAVE_MAX_MS
+/** How often every member's right to read and change the artifact is read again. */
+export const MEMBERS_RECHECK_MS = 60_000
+/** How often, at most, this server shares its people's awareness with the others. */
+export const AWARENESS_SHARE_MS = 100
 
 /** A connection, as a room sees it: who it is, through its SDK, and how to reach it. */
 export interface LiveConnection {
@@ -88,7 +98,7 @@ interface Synced {
 const MERGED = Symbol("merged")
 /**
  * The origin of what another server holding the artifact heard from its editors: shown here,
- * never shared again, and written back by that server.
+ * never shared again, and written back by that server, or by this one should that one never do.
  */
 const REMOTE = Symbol("remote")
 /** The origin of a connection's awareness taken back as it leaves: shared, so others see it go. */
@@ -100,13 +110,27 @@ export class LiveRoom {
   private readonly members = new Map<string, Member>()
   private synced: Synced
   private dirty = false
+  /** What another server heard is not known to be written yet. */
+  private unwritten = false
   private author: LiveConnection | undefined
+  /** The last connection that joined to edit: who writes back what another server heard. */
+  private lastEditor: LiveConnection | undefined
+  /**
+   * The document as it is, again: a client's update is tried on it first, so one that would leave
+   * the document unreadable is refused before anyone gets it.
+   */
+  private shadow: Y.Doc
   private state: ArtifactLiveSaveState = "saved"
   private error: string | undefined
   private attempts = 0
   private idle: ReturnType<typeof setTimeout> | undefined
   private deadline: ReturnType<typeof setTimeout> | undefined
   private retry: ReturnType<typeof setTimeout> | undefined
+  private heardSave: ReturnType<typeof setTimeout> | undefined
+  private recheck: ReturnType<typeof setInterval> | undefined
+  /** The awareness clients whose state waits to be shared with the other servers. */
+  private readonly unshared = new Set<number>()
+  private sharing: ReturnType<typeof setTimeout> | undefined
   private queue: Promise<void> = Promise.resolve()
   private readonly agents = new Map<
     string,
@@ -127,6 +151,7 @@ export class LiveRoom {
   ) {
     this.synced = synced
     this.doc = doc
+    this.shadow = copyOf(doc)
     this.awareness = new awarenessProtocol.Awareness(this.doc)
     // The server is no one: it is here only for the Agent, while a turn changes boards.
     this.awareness.setLocalState(null)
@@ -168,8 +193,14 @@ export class LiveRoom {
       { revision: version.revision, title: version.title, files: version.files },
       onClose
     )
-    // What editors on other servers changed since the last write-back is on the live stream.
-    await room.follow()
+    // What editors on other servers changed since the last write-back is on the live stream. A
+    // room that cannot follow it is no room: it stops, timers and all.
+    try {
+      await room.follow()
+    } catch (error) {
+      room.close()
+      throw error
+    }
     return room
   }
 
@@ -183,6 +214,8 @@ export class LiveRoom {
 
   /** Adds a connection, which gets the document and who is here; sync is the client's to start. */
   join(connection: LiveConnection, access: ArtifactLiveAccess, user: ArtifactLiveUser): void {
+    if (access === "edit") this.lastEditor = connection
+    this.recheck ??= setInterval(() => this.enqueue(() => this.recheckAccess()), MEMBERS_RECHECK_MS)
     this.members.set(connection.id, {
       connection,
       user,
@@ -246,6 +279,17 @@ export class LiveRoom {
       return
     }
 
+    // A change is tried on the shadow first: one that leaves the document unreadable is refused.
+    if (type !== syncProtocol.messageYjsSyncStep1 && !this.readable(bytes)) {
+      member.connection.send({
+        type: "error",
+        artifactId: this.artifactId,
+        message:
+          "[SixbServer] That change leaves the artifact unreadable: it is not kept. Load the artifact again.",
+      })
+      return
+    }
+
     const encoder = encoding.createEncoder()
     syncProtocol.readSyncMessage(decoding.createDecoder(bytes), encoder, this.doc, member)
     if (encoding.length(encoder) > 0)
@@ -281,8 +325,15 @@ export class LiveRoom {
    * the stored document, which the room takes in: what its editors changed meanwhile stays.
    */
   written(revision: number): void {
+    // Whatever changed, who may read or change the artifact may have too.
+    this.enqueue(() => this.recheckAccess())
     if (revision <= this.synced.revision) return
     this.enqueue(() => this.reconcile(revision))
+  }
+
+  /** Closes the room if nobody holds it and nothing waits to be written: a join gave up. */
+  closeIfUnheld(): void {
+    this.closeWhenDone()
   }
 
   /** Writes the document back now, if it changed. */
@@ -301,16 +352,22 @@ export class LiveRoom {
     if (this.closed) return
     this.closed = true
     this.clearTimers()
+    if (this.recheck) clearInterval(this.recheck)
+    if (this.sharing) clearTimeout(this.sharing)
     for (const agent of this.agents.values()) clearTimeout(agent.expiry)
     this.unsubscribe?.()
     this.awareness.destroy()
     this.doc.destroy()
+    this.shadow.destroy()
     this.onClose(this)
   }
 
   // ── The document ────────────────────────────────────────────────────
 
   private updated(update: Uint8Array, origin: unknown): void {
+    // The shadow takes every change; one it was tried on already changes nothing.
+    Y.applyUpdate(this.shadow, update)
+
     const message = encoding.createEncoder()
     syncProtocol.writeUpdate(message, update)
     const data = encoding.toUint8Array(message)
@@ -319,10 +376,23 @@ export class LiveRoom {
     }
 
     // What an editor here changed reaches the other servers at once, and waits to be written back
-    // from here; what came from storage or another server is written already, or will be there.
+    // from here. What another server heard is written back there, and here too, later, should that
+    // server never do it; what came from storage is written already.
+    if (origin === REMOTE) {
+      this.heard()
+      return
+    }
     if (!(origin instanceof Object && this.isMember(origin))) return
     this.changed(origin)
     this.share("update", update)
+  }
+
+  private heard(): void {
+    this.unwritten = true
+    this.heardSave ??= setTimeout(() => {
+      this.heardSave = undefined
+      this.save()
+    }, HEARD_SAVE_MS)
   }
 
   private changed(member: Member): void {
@@ -342,25 +412,42 @@ export class LiveRoom {
    * failure leaves the changes waiting, says so, and tries again.
    */
   private async flush(): Promise<void> {
-    if (this.closed || !this.dirty) return this.closeWhenDone()
-    const author = this.author
-    if (!author) return
+    if (this.closed || !(this.dirty || this.unwritten)) return this.closeWhenDone()
 
-    const update = Y.encodeStateAsUpdate(this.doc)
-    const snapshot = documentFiles(this.doc)
+    // What another server heard is written as whoever edits here, or last edited.
+    const author =
+      this.author ??
+      [...this.members.values()].find((each) => each.access === "edit")?.connection ??
+      this.lastEditor
+    if (!author) {
+      if (this.unwritten && !this.dirty) {
+        console.warn(
+          `[SixbServer] Nobody here may write back what another server heard of '${this.artifactId}'; that server writes it.`
+        )
+        this.unwritten = false
+      }
+      return this.closeWhenDone()
+    }
+
+    const wasDirty = this.dirty
     this.dirty = false
-    this.setState("saving")
+    this.unwritten = false
+    if (wasDirty) this.setState("saving")
 
     try {
+      const update = Y.encodeStateAsUpdate(this.doc)
+      const snapshot = documentFiles(this.doc)
       const files = await storeLiveFiles(this.host.blobStorage, snapshot, this.synced.files)
       if (sameArtifactFiles(files, this.synced.files)) {
         this.saved(this.synced)
         return this.closeWhenDone()
       }
 
+      // The document holds no title: one given since stays.
       const published = await author.sixb.artifacts.publish(this.artifactId, {
         kind: this.kind,
         title: this.synced.title,
+        baseTitle: this.synced.title,
         files,
         baseRevision: this.synced.revision,
         document: update,
@@ -489,14 +576,38 @@ export class LiveRoom {
 
   /** Closes the room once nobody holds it and nothing waits to be written. */
   private closeWhenDone(): void {
-    if (this.members.size === 0 && !this.dirty && !this.retry) this.close()
+    if (this.members.size === 0 && !this.dirty && !this.unwritten && !this.retry) this.close()
   }
 
   private clearTimers(): void {
-    for (const timer of [this.idle, this.deadline, this.retry]) if (timer) clearTimeout(timer)
+    for (const timer of [this.idle, this.deadline, this.retry, this.heardSave]) {
+      if (timer) clearTimeout(timer)
+    }
     this.idle = undefined
     this.deadline = undefined
     this.retry = undefined
+    this.heardSave = undefined
+  }
+
+  /**
+   * Whether the document stays readable with a client's sync message: tried on the shadow, which
+   * is made again from the document when it does not.
+   */
+  private readable(bytes: Uint8Array): boolean {
+    try {
+      syncProtocol.readSyncMessage(
+        decoding.createDecoder(bytes),
+        encoding.createEncoder(),
+        this.shadow,
+        null
+      )
+      documentFiles(this.shadow)
+      return true
+    } catch {
+      this.shadow.destroy()
+      this.shadow = copyOf(this.doc)
+      return false
+    }
   }
 
   // ── Who may edit ────────────────────────────────────────────────────
@@ -522,6 +633,32 @@ export class LiveRoom {
     if (member.access === "watch") return
     member.access = "watch"
     member.connection.send({ type: "access", artifactId: this.artifactId, access: "watch" })
+  }
+
+  /**
+   * Reads every member's right to the artifact again, editors and watchers alike: who may no
+   * longer read it leaves, who may no longer change it watches, and who may now change it edits.
+   */
+  private async recheckAccess(): Promise<void> {
+    for (const member of [...this.members.values()]) {
+      if (this.closed) return
+      const access = await member.connection.sixb.artifacts.access(this.artifactId)
+      if (this.members.get(member.connection.id) !== member) continue
+      member.checkedAt = Date.now()
+
+      if (access === null || access === "none") {
+        this.members.delete(member.connection.id)
+        awarenessProtocol.removeAwarenessStates(this.awareness, [...member.clients], LEFT)
+        member.connection.send({ type: "left", artifactId: this.artifactId, reason: "not_shared" })
+      } else if (access === "read") {
+        this.demote(member)
+      } else if (member.access === "watch") {
+        member.access = "edit"
+        this.lastEditor = member.connection
+        member.connection.send({ type: "access", artifactId: this.artifactId, access: "edit" })
+      }
+    }
+    this.closeWhenDone()
   }
 
   private isMember(value: object): value is Member {
@@ -561,20 +698,29 @@ export class LiveRoom {
     }
 
     // People reach the other servers holding the artifact; the Agent's entry each server sets.
-    const people = changed.filter((client) => client !== this.doc.clientID)
-    if (origin === REMOTE || people.length === 0) return
-    this.share("awareness", awarenessProtocol.encodeAwarenessUpdate(this.awareness, people))
+    // People reach the other servers holding the artifact, a few times a second at most, each
+    // as they are by then; the Agent's entry each server sets.
+    if (origin === REMOTE) return
+    for (const client of changed) if (client !== this.doc.clientID) this.unshared.add(client)
+    if (this.unshared.size === 0 || this.sharing) return
+    this.sharing = setTimeout(() => {
+      this.sharing = undefined
+      const clients = [...this.unshared]
+      this.unshared.clear()
+      this.share("awareness", awarenessProtocol.encodeAwarenessUpdate(this.awareness, clients))
+    }, AWARENESS_SHARE_MS)
   }
 
   /** Tells the other servers holding the artifact what an editor here changed or pointed at. */
   private share(name: "update" | "awareness", update: Uint8Array): void {
     if (this.closed) return
-    // The room made sure of the stream when it started to follow it.
+    // The room made sure of the streams when it started to follow them.
     const payload = { instance: this.host.instance, update: encodeLiveData(update) }
+    const stream = name === "update" ? artifactLiveStream : artifactPresenceStream
     this.host.broker
       .append({
         projectId: this.host.projectId,
-        streamId: artifactLiveStream(this.artifactId).id,
+        streamId: stream(this.artifactId).id,
         records: [{ name, payload }],
       })
       .catch((error: unknown) => {
@@ -589,17 +735,25 @@ export class LiveRoom {
    * last write-back; an update it already holds changes nothing.
    */
   private async follow(): Promise<void> {
-    const stream = artifactLiveStream(this.artifactId)
-    await this.host.broker.ensureStream({ projectId: this.host.projectId, stream })
-    this.unsubscribe = await this.host.broker.subscribe(
-      { projectId: this.host.projectId, streamId: stream.id, from: "earliest" },
-      (records) => {
-        for (const record of records) this.heard(record)
-      }
-    )
+    const { broker, projectId } = this.host
+    const unsubscribes: (() => void)[] = []
+    this.unsubscribe = () => {
+      for (const unsubscribe of unsubscribes) unsubscribe()
+    }
+    for (const stream of [
+      artifactLiveStream(this.artifactId),
+      artifactPresenceStream(this.artifactId),
+    ]) {
+      await broker.ensureStream({ projectId, stream })
+      unsubscribes.push(
+        await broker.subscribe({ projectId, streamId: stream.id, from: "earliest" }, (records) => {
+          for (const record of records) this.heardRecord(record)
+        })
+      )
+    }
   }
 
-  private heard(record: BrokerRecord): void {
+  private heardRecord(record: BrokerRecord): void {
     if (this.closed) return
     const live = parseArtifactLiveRecord(record)
     if (!live) return
@@ -692,6 +846,13 @@ interface AwarenessChanges {
   readonly added: readonly number[]
   readonly updated: readonly number[]
   readonly removed: readonly number[]
+}
+
+/** Another document holding the same history. */
+function copyOf(doc: Y.Doc): Y.Doc {
+  const copy = new Y.Doc()
+  Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc))
+  return copy
 }
 
 function requireArtifacts(host: LiveRoomHost) {

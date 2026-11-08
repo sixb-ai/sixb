@@ -43,7 +43,8 @@ whose content it holds, replaced with every content write (see
   `liveSync`), each its own base64, and assembled per connection and artifact up to
   `MAX_LIVE_SYNC_BYTES`.
 - A watcher may send sync step 1 (to receive the document) and awareness, never an update. An
-  editor's access is read again at most every `ACCESS_RECHECK_MS` while it writes. Losing `update`
+  editor's access is read again at most every `ACCESS_RECHECK_MS` while it writes, and every
+  member's on each write to the artifact and every `MEMBERS_RECHECK_MS`. Losing `update`
   demotes it to a watcher (`access`), and losing `read` removes it (`left`).
 
 ## Presence
@@ -65,7 +66,11 @@ The server vouches for every awareness state it shares:
 - `flush` publishes through the SDK of the last editor, with the room's state as `document`. The
   write is authored by that person, bumps the revision, and emits `artifact.updated`. If someone
   wrote meanwhile, storage merges both. The room then takes the stored state back under the
-  `MERGED` origin, which is never written back again.
+  `MERGED` origin, which is never written back again. The document holds no title: the write
+  passes the title it last read as `baseTitle`, so a title given since stays.
+- A client's change is tried first on a shadow copy of the document. One that leaves it unreadable
+  (`documentFiles` throws) is refused with an `error` before anyone gets it, so a poisoned history
+  never spreads or wedges the write-back.
 - A failure leaves the room dirty, reports `status: failed` with the error, and retries:
   - `artifact_not_found`: the room closes and every member gets `left`.
   - An access error: the author is demoted, and another editor is tried at once.
@@ -83,21 +88,29 @@ time.
 
 ## Several servers
 
-The broker stream `artifacts.live.<artifactId>` (10 minutes, 5,000 records) carries what reaches
-every server at once. Each record is tagged with the server that heard it, so it is not taken back:
+Two broker streams carry what reaches every server at once. Each record is tagged with the server
+that heard it, so it is not taken back.
 
-- `update`: a Yjs update an editor made. Other servers apply it under the `REMOTE` origin: they show
-  it to their members, and leave its write-back to the server that heard it. Applying an update
-  twice changes nothing, so a room that opens replays the stream from its start, to get what was
-  changed since the last write-back.
-- `awareness`: what people point at, as their server vouched for it.
+`artifacts.live.<artifactId>` (10 minutes, 5,000 records):
+
+- `update`: a Yjs update an editor made. Other servers apply it under the `REMOTE` origin and show
+  it to their members. The server that heard it writes it back. Each other server marks it
+  unwritten, and writes it back too `HEARD_SAVE_MS` later, or when its last editor leaves. By then
+  that write is normally in storage, and a write that changes nothing is skipped; if the server
+  that heard it died, the edit is not lost.
+- Applying an update twice changes nothing, so a room that opens replays the stream from its start,
+  to get what was changed since the last write-back.
 - `agent` / `agent-ended`: the boards an Agent turn changed, appended by `run-artifacts` after each
   canvas write and at the turn's end. Each server drops one after `AGENT_PRESENCE_MS` if the turn
   never ends.
 
-An update the stream no longer holds reaches storage with the write-back of the server that heard
-it, so a server that missed it gets it then. A server that dies before writing back loses nothing
-its editors still hold: when they reconnect, wherever, their documents sync it again.
+`artifacts.presence.<artifactId>` (1 minute, 1,000 records) carries `awareness`: what people point
+at, as their server vouched for it. A server shares its people's states at most every
+`AWARENESS_SHARE_MS`, each as it is by then, so moving cursors never push an update out of the
+document's stream.
+
+An update the stream no longer holds reaches storage with a write-back, so a server that missed it
+gets it then.
 
 ## Lifetime
 

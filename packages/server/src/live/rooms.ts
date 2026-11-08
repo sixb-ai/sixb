@@ -20,8 +20,12 @@ export const MAX_LIVE_SYNC_BYTES = 8 * 1024 * 1024
  */
 export class LiveRooms {
   private readonly rooms = new Map<string, Promise<LiveRoom | "not_found" | "not_live">>()
-  /** The artifacts each connection joined. */
-  private readonly joined = new Map<string, Set<string>>()
+  /**
+   * The artifacts each connection joined, or is joining: the slot is taken before the join reads
+   * anything, so joins at once count against the cap, and each is its own ticket, so a join that
+   * resumes once the connection left, or joined again, knows it is stale.
+   */
+  private readonly joined = new Map<string, Map<string, symbol>>()
   /** Who each connection is, read once. */
   private readonly users = new Map<string, Promise<ArtifactLiveUser>>()
   /** The parts of a sync message a connection is sending, by connection and artifact. */
@@ -54,7 +58,7 @@ export class LiveRooms {
 
   /** Leaves every artifact a connection holds: it closed. */
   async disconnect(connection: LiveConnection): Promise<void> {
-    for (const artifactId of [...(this.joined.get(connection.id) ?? [])]) {
+    for (const artifactId of [...(this.joined.get(connection.id)?.keys() ?? [])]) {
       await this.leave(connection, artifactId)
     }
     this.joined.delete(connection.id)
@@ -75,7 +79,7 @@ export class LiveRooms {
       room.close()
     }
     this.rooms.clear()
-    const unsubscribe = await this.events
+    const unsubscribe = await this.events?.catch(() => undefined)
     unsubscribe?.()
   }
 
@@ -93,7 +97,7 @@ export class LiveRooms {
    */
   private async join(connection: LiveConnection, artifactId: string): Promise<void> {
     const send = (message: ArtifactLiveServerMessage) => connection.send(message)
-    const held = this.joined.get(connection.id) ?? new Set<string>()
+    const held = this.joined.get(connection.id) ?? new Map<string, symbol>()
     if (held.has(artifactId)) return
     if (held.size >= MAX_LIVE_ARTIFACTS_PER_CONNECTION) {
       send({
@@ -104,21 +108,42 @@ export class LiveRooms {
       return
     }
 
-    const access = await connection.sixb.artifacts.access(artifactId)
-    if (access === null || access === "none") {
-      send({ type: "left", artifactId, reason: access === null ? "not_found" : "not_shared" })
-      return
-    }
-
-    const room = await this.open(artifactId)
-    if (!(room instanceof LiveRoom)) {
-      send({ type: "left", artifactId, reason: room })
-      return
-    }
-
-    held.add(artifactId)
+    // Taken now, before anything is read: what follows waits, and other joins run meanwhile.
+    const ticket = Symbol(artifactId)
+    held.set(artifactId, ticket)
     this.joined.set(connection.id, held)
-    room.join(connection, access === "read" ? "watch" : "edit", await this.userOf(connection))
+    const current = () => this.joined.get(connection.id)?.get(artifactId) === ticket
+    const release = () => {
+      if (current()) this.joined.get(connection.id)?.delete(artifactId)
+    }
+
+    try {
+      const access = await connection.sixb.artifacts.access(artifactId)
+      if (access === null || access === "none") {
+        release()
+        send({ type: "left", artifactId, reason: access === null ? "not_found" : "not_shared" })
+        return
+      }
+
+      const user = await this.userOf(connection)
+      const room = await this.open(artifactId)
+      if (!(room instanceof LiveRoom)) {
+        release()
+        send({ type: "left", artifactId, reason: room })
+        return
+      }
+
+      // The connection left, or closed, while this read: it is not here, and a room this join
+      // opened for it closes again. Otherwise it joins now, before the room can close.
+      if (!current()) {
+        room.closeIfUnheld()
+        return
+      }
+      room.join(connection, access === "read" ? "watch" : "edit", user)
+    } catch (error) {
+      release()
+      throw error
+    }
   }
 
   private userOf(connection: LiveConnection): Promise<ArtifactLiveUser> {
@@ -134,6 +159,7 @@ export class LiveRooms {
     return user
   }
 
+  /** Leaves an artifact, as asked: the connection is told it left, once it did. */
   private async leave(connection: LiveConnection, artifactId: string): Promise<void> {
     this.parts.delete(partsKey(connection, artifactId))
     const held = this.joined.get(connection.id)
@@ -141,6 +167,7 @@ export class LiveRooms {
 
     const room = await this.rooms.get(artifactId)
     if (room instanceof LiveRoom) room.leave(connection.id)
+    connection.send({ type: "left", artifactId, reason: "left" })
   }
 
   /**
@@ -220,7 +247,7 @@ export class LiveRooms {
   /** Every write to an artifact a room holds reaches it, whichever server or worker made it. */
   private followEvents(): void {
     if (this.events || this.closed) return
-    this.events = this.host.events.subscribe(
+    const following = this.host.events.subscribe(
       { from: "latest", types: ["artifact.updated"] },
       async (events) => {
         for (const event of events) {
@@ -230,6 +257,12 @@ export class LiveRooms {
         }
       }
     )
+    // A feed that could not start is asked for again by the next room that opens.
+    this.events = following
+    following.catch((error: unknown) => {
+      if (this.events === following) this.events = undefined
+      console.error("[SixbServer] Could not follow the artifacts' writes:", error)
+    })
   }
 }
 
