@@ -6,6 +6,7 @@ import type { QuickBooksBillsResource } from "./resources/bills"
 import type { QuickBooksCdcResource } from "./resources/cdc"
 import type { QuickBooksCreditMemosResource } from "./resources/credit-memos"
 import type { QuickBooksCustomersResource } from "./resources/customers"
+import type { QuickBooksEstimatesResource } from "./resources/estimates"
 import type { QuickBooksInvoicesResource } from "./resources/invoices"
 import type { QuickBooksItemsResource } from "./resources/items"
 import type { QuickBooksPaymentsResource } from "./resources/payments"
@@ -69,6 +70,7 @@ export interface QuickBooksClient {
   readonly attachments: QuickBooksAttachmentsResource
   readonly reports: QuickBooksReportsResource
   readonly cdc: QuickBooksCdcResource
+  readonly estimates: QuickBooksEstimatesResource
   readonly invoices: QuickBooksInvoicesResource
   readonly payments: QuickBooksPaymentsResource
   readonly creditMemos: QuickBooksCreditMemosResource

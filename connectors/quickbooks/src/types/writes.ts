@@ -14,6 +14,8 @@ import type {
   QuickBooksBillPayment,
   QuickBooksCreditMemo,
   QuickBooksDescriptionLine,
+  QuickBooksEstimate,
+  QuickBooksEstimateStatus,
   QuickBooksInvoice,
   QuickBooksItemExpenseLine,
   QuickBooksLinkedTransaction,
@@ -136,6 +138,48 @@ export interface QuickBooksInvoiceSendOptions extends QuickBooksWriteOptions {
   /** Omit to use the invoice's BillEmail.Address. Intuit may update BillEmail when supplied. */
   readonly sendTo?: string
 }
+
+type EstimateFields = Pick<
+  QuickBooksEstimate,
+  | "TxnDate"
+  | "DocNumber"
+  | "PrivateNote"
+  | "CurrencyRef"
+  | "ExchangeRate"
+  | "DepartmentRef"
+  | "ClassRef"
+  | "ProjectRef"
+  | "CustomField"
+  | "TxnTaxDetail"
+  | "GlobalTaxCalculation"
+  | "BillAddr"
+  | "ShipAddr"
+  | "ShipFromAddr"
+  | "BillEmail"
+  | "BillEmailCc"
+  | "BillEmailBcc"
+  | "CustomerMemo"
+  | "SalesTermRef"
+  | "ShipMethodRef"
+  | "ShipDate"
+  | "PrintStatus"
+  | "EmailStatus"
+  | "ApplyTaxAfterDiscount"
+  | "DueDate"
+  | "ExpirationDate"
+  | "AcceptedBy"
+  | "AcceptedDate"
+> & { readonly TxnStatus?: QuickBooksEstimateStatus }
+
+export type QuickBooksEstimateCreate = EstimateFields & {
+  readonly CustomerRef: QuickBooksReference
+  readonly Line: readonly QuickBooksInvoiceLine[]
+}
+
+/** Sparse update; supplying Line follows Intuit's line-ID replacement semantics. */
+export type QuickBooksEstimateUpdate = QuickBooksRevision & Partial<QuickBooksEstimateCreate>
+
+export type QuickBooksEstimateSendOptions = QuickBooksInvoiceSendOptions
 
 export interface QuickBooksInvoiceDeleteResult {
   readonly Id: string

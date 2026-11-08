@@ -8,6 +8,7 @@ import { createBillsResource } from "./resources/bills"
 import { createCdcResource } from "./resources/cdc"
 import { createCreditMemosResource } from "./resources/credit-memos"
 import { createCustomersResource } from "./resources/customers"
+import { createEstimatesResource } from "./resources/estimates"
 import { createInvoicesResource } from "./resources/invoices"
 import { createItemsResource } from "./resources/items"
 import { createPaymentsResource } from "./resources/payments"
@@ -79,6 +80,7 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
         accounts: createAccountsResource(http),
         items: createItemsResource(http),
         terms: createTermsResource(http),
+        estimates: createEstimatesResource(http),
         invoices: createInvoicesResource(http),
         payments: createPaymentsResource(http),
         creditMemos: createCreditMemosResource(http),

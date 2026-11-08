@@ -153,6 +153,8 @@ interface QuickBooksSalesTransaction extends QuickBooksTransaction {
   readonly GlobalTaxCalculation?: string
   readonly BillAddr?: QuickBooksAddress
   readonly ShipAddr?: QuickBooksAddress
+  readonly ShipFromAddr?: QuickBooksAddress
+  readonly FreeFormAddress?: boolean
   readonly BillEmail?: { readonly Address?: string }
   readonly BillEmailCc?: { readonly Address?: string }
   readonly BillEmailBcc?: { readonly Address?: string }
@@ -179,6 +181,21 @@ export interface QuickBooksInvoice extends QuickBooksSalesTransaction {
   readonly AllowIPNPayment?: boolean
   readonly InvoiceLink?: string
   readonly RecurDataRef?: QuickBooksReference
+}
+
+/** Writable estimate statuses. */
+export type QuickBooksEstimateStatus = "Pending" | "Accepted" | "Closed" | "Rejected"
+
+export interface QuickBooksEstimate extends QuickBooksSalesTransaction {
+  /** QuickBooks sets `Converted` (observed live) when an invoice links the estimate. */
+  readonly TxnStatus?: QuickBooksEstimateStatus | "Converted" | (string & {})
+  readonly ExpirationDate?: string
+  readonly AcceptedBy?: string
+  readonly AcceptedDate?: string
+  readonly DueDate?: string
+  readonly RecurDataRef?: QuickBooksReference
+  readonly TaxExemptionRef?: QuickBooksReference
+  readonly TransactionLocationType?: string
 }
 
 export interface QuickBooksCreditMemo extends QuickBooksSalesTransaction {

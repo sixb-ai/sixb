@@ -9,6 +9,7 @@ import type {
   QuickBooksBill,
   QuickBooksBillPayment,
   QuickBooksCreditMemo,
+  QuickBooksEstimate,
   QuickBooksInvoice,
   QuickBooksPayment,
   QuickBooksVendorCredit,
@@ -20,6 +21,7 @@ export interface QuickBooksCdcEntityMap {
   readonly Item: QuickBooksItem
   readonly Term: QuickBooksTerm
   readonly Vendor: QuickBooksVendor
+  readonly Estimate: QuickBooksEstimate
   readonly Invoice: QuickBooksInvoice
   readonly Payment: QuickBooksPayment
   readonly CreditMemo: QuickBooksCreditMemo

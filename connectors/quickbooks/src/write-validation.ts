@@ -18,6 +18,13 @@ export function salesLines(lines: readonly QuickBooksInvoiceLine[]) {
   }
 }
 
+const ESTIMATE_STATUSES = new Set(["Pending", "Accepted", "Closed", "Rejected"])
+
+export function estimateStatus(value: unknown) {
+  if (value !== undefined && (typeof value !== "string" || !ESTIMATE_STATUSES.has(value)))
+    throw new Error("[SixbQuickBooks] TxnStatus must be Pending, Accepted, Closed, or Rejected.")
+}
+
 export function expenseLines(lines: readonly QuickBooksExpenseWriteLine[]) {
   nonEmptyLines(lines)
   for (const line of lines) {

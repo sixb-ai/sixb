@@ -8,6 +8,7 @@ const ENTITIES = new Set([
   "Item",
   "Term",
   "Vendor",
+  "Estimate",
   "Invoice",
   "Payment",
   "CreditMemo",
