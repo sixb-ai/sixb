@@ -93,8 +93,10 @@ export type AgentRunArtifactPublish = {
   readonly title: string
   readonly files: readonly ArtifactFile[]
   /**
-   * The run renders the version's boards itself and hands their pictures over with
-   * `storePreviews`: the worker renders only what is still missing after a grace period.
+   * The publisher renders the version's boards itself, as the publish tool's layout check does,
+   * and hands their pictures over with `storePreviews`. The worker then renders only what is still
+   * missing, after a grace period, and without the version's query answers, which the check read.
+   * Any other publish, such as a command in the sandbox, has its queries answered at once.
    */
   readonly rendersPreviews?: boolean
 } & (
@@ -216,13 +218,14 @@ export function agentRunArtifacts(
           (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
         )
       })
-      // A run's layout check reads the version's query answers itself, and normally pictures every
-      // board: answering them here too would run each query twice. So the job carries none, and a
-      // board that reads one and that the check missed keeps its outline.
-      await artifactPreviewRequester(reader)(stored.version, {
-        withoutAnswers: true,
-        ...(input.rendersPreviews ? { delayMs: BOARD_PREVIEW_GRACE_MS } : {}),
-      })
+      // A publisher that renders its own previews reads the query answers in its layout check, and
+      // normally pictures every board: answering them here too would run each query twice. So its
+      // job waits, carries none, and a board that reads one and that the check missed keeps its
+      // outline. Every other publish has its answers read now, as its requester.
+      await artifactPreviewRequester(reader)(
+        stored.version,
+        input.rendersPreviews ? { delayMs: BOARD_PREVIEW_GRACE_MS, withoutAnswers: true } : {}
+      )
 
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
     },
