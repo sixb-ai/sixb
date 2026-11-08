@@ -42,6 +42,8 @@ export class LiveCanvas {
   private undoManager: Y.UndoManager | null = null
   private readonly listeners = new Set<() => void>()
   private history = { undo: false, redo: false }
+  /** A drag is under way: everything it changes is one step, however long it pauses. */
+  private dragging = false
   /** The origin of this reader's own changes: the only ones its undo takes back. */
   readonly origin = Symbol("sixb-live-canvas")
 
@@ -85,6 +87,20 @@ export class LiveCanvas {
     this.undoManager?.stopCapturing()
   }
 
+  /** A drag starts: what it changes, until it ends, is one step for undo. */
+  startDrag(): void {
+    this.stopCapturing()
+    this.dragging = true
+    if (this.undoManager) this.undoManager.captureTimeout = Number.POSITIVE_INFINITY
+  }
+
+  /** The drag ended: the next change is a step of its own. */
+  endDrag(): void {
+    this.dragging = false
+    if (this.undoManager) this.undoManager.captureTimeout = UNDO_CAPTURE_MS
+    this.stopCapturing()
+  }
+
   destroy(): void {
     this.doc.getMap<unknown>(LIVE_FILES).unobserve(this.onFiles)
     this.unbind()
@@ -107,7 +123,7 @@ export class LiveCanvas {
       this.structure.order.observe(this.onOrder)
       this.undoManager = new Y.UndoManager([this.structure.items, this.structure.order], {
         trackedOrigins: new Set([this.origin]),
-        captureTimeout: UNDO_CAPTURE_MS,
+        captureTimeout: this.dragging ? Number.POSITIVE_INFINITY : UNDO_CAPTURE_MS,
       })
       this.undoManager.on("stack-item-added", this.onHistory)
       this.undoManager.on("stack-item-popped", this.onHistory)

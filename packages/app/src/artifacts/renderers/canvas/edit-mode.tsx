@@ -44,10 +44,11 @@ export interface CanvasEditor {
   readonly redo: () => void
   /**
    * Edits everyone sees as they are made: a drag moves its items for the others while it goes,
-   * and ends one undo step as it starts and as it ends.
+   * and is one undo step from its start to its end, however long it pauses.
    */
   readonly live?: {
-    readonly stopCapturing: () => void
+    readonly startDrag: () => void
+    readonly endDrag: () => void
     /** Tells the others what is selected. */
     readonly select: (ids: readonly string[]) => void
   }
@@ -331,7 +332,7 @@ export function useBoardEditing(
         setEdges((current) => applyEdgeChanges(changes, current))
         if (changes.some((change) => change.type === "select")) chose(changes)
       },
-      onNodeDragStart: () => edit.live?.stopCapturing(),
+      onNodeDragStart: () => edit.live?.startDrag(),
       onNodeDrag: (_: unknown, __: Node, dragged: Node[]) => {
         if (!edit.live) return
         const now = performance.now()
@@ -341,7 +342,7 @@ export function useBoardEditing(
       },
       onNodeDragStop: (_: unknown, __: Node, dragged: Node[]) => {
         edit.apply(moveItems(new Map(dragged.map((node) => [node.id, node.position] as const))))
-        edit.live?.stopCapturing()
+        edit.live?.endDrag()
       },
       onConnect: (connection: Connection) =>
         edit.apply(connectItems(connection.source, connection.target)),
