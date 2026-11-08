@@ -1,6 +1,7 @@
 export type {
   MicrosoftAuthOptions,
   MicrosoftClientCertificate,
+  MicrosoftOAuthOptions,
   MicrosoftTokenContext,
 } from "./auth/types"
 export type { MicrosoftClient } from "./client"
@@ -12,7 +13,7 @@ export {
   MicrosoftConfigurationError,
   MicrosoftProtocolError,
 } from "./errors"
-export { type MicrosoftConnector, microsoft } from "./microsoft"
+export { type MicrosoftConnector, type MicrosoftOAuthConnector, microsoft } from "./microsoft"
 export type { CalendarSurface } from "./surfaces/calendar"
 export type { CalendarAttachmentsResource } from "./surfaces/calendar/attachments"
 export { MicrosoftCalendarUploadError } from "./surfaces/calendar/attachments"

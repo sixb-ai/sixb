@@ -5,6 +5,7 @@ import { isRecord } from "../guards"
 import { withSignal } from "../lifetime"
 import { nonEmpty, segment } from "../validation"
 import { authNetwork } from "./network"
+import { assertSpecificTenant } from "./tenant"
 import type { MicrosoftAuthOptions } from "./types"
 
 export interface TokenSource {
@@ -28,15 +29,7 @@ export function validateAuth(auth: MicrosoftAuthOptions): void {
     return
   }
   nonEmpty(auth.clientId, "clientId")
-  nonEmpty(auth.tenantId, "tenantId")
-  if (
-    !/^[a-zA-Z0-9.-]+$/.test(auth.tenantId) ||
-    ["common", "organizations", "consumers", ".", ".."].includes(auth.tenantId.toLowerCase())
-  ) {
-    throw new MicrosoftConfigurationError(
-      "tenantId must identify a specific tenant (GUID or verified domain)."
-    )
-  }
+  assertSpecificTenant(nonEmpty(auth.tenantId, "tenantId"))
   if (auth.clientSecret !== undefined) nonEmpty(auth.clientSecret, "clientSecret")
   if (auth.clientCertificate) {
     if (!/^[a-fA-F0-9]{64}$/.test(auth.clientCertificate.thumbprintSha256)) {

@@ -3,7 +3,8 @@
 Typed Microsoft Graph v1.0 connector for Sixb. Covers SharePoint Online sites, document libraries,
 files, folders, Outlook mail, calendars, personal and organizational contacts, directory users and
 incremental synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
-`@azure/msal-node` for application authentication. Targets the global Microsoft 365 cloud.
+`@azure/msal-node` for application authentication. People can also connect their own accounts
+through Sixb-managed OAuth. Targets the global Microsoft 365 cloud.
 
 ## Quick start
 
@@ -81,6 +82,67 @@ See [Selected permissions](https://learn.microsoft.com/en-us/graph/permissions-s
 [admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent).
 The configured identity operates as the application, without user impersonation or daily sign-in.
 
+## Connect people's own accounts
+
+With `oauth`, each person connects their own Microsoft 365 account and the connector acts as them,
+with Graph delegated permissions: a request reaches only what that person can open. Sixb stores
+and refreshes each grant. Let members connect without `can.manage` with `owners: ["user"]`:
+
+```ts
+// connectors/outlook.ts
+import { defineConnector } from "@sixb/core"
+import { microsoft } from "@sixb/connector-microsoft"
+
+export const outlook = defineConnector(
+  "outlook",
+  microsoft({
+    auth: {
+      oauth: {
+        tenantId: process.env.MICROSOFT_TENANT_ID!,
+        clientId: process.env.MICROSOFT_CLIENT_ID!,
+        clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
+        scopes: ["Mail.Read", "Calendars.Read", "Files.Read.All", "Sites.Read.All"],
+      },
+    },
+  }),
+  { owners: ["user"] }
+)
+```
+
+`scopes` lists delegated Graph permissions by name. Sign-in, `offline_access` (for the refresh
+token) and `User.Read` (to identify the account) are always requested. A sync reads each person's
+data through their own connection; pass the account's id where a method takes a mailbox or user:
+
+```ts
+export const syncInbox = defineSync("inbox", { mode: "merge" })
+  .from(outlook)
+  .read(async function* (graph, { connection }) {
+    for await (const message of graph.mail.messages.listAll(connection.account.id)) {
+      yield change.upsert({ ...toRow(message), owner_email: connection.account.label })
+    }
+  })
+  .intoDataset(inbox)
+```
+
+Administrator setup:
+
+1. In Entra **App registrations**, create a single-tenant application with a **Web** redirect URI:
+   `https://<sixb-api-origin>/auth/connectors/callback`. Create a client secret.
+2. Under **API permissions**, add **Microsoft Graph → Delegated permissions** for each scope.
+3. **Grant admin consent** for the tenant. Microsoft's default consent policy for new tenants does
+   not let people consent to `Mail.Read`, `Calendars.Read`, `Files.Read.All` or `Sites.Read.All`
+   themselves. Once an administrator has consented, nobody sees a consent prompt.
+
+What to expect:
+
+| | |
+| --- | --- |
+| Account | `id` is the person's Entra object id; `label` is the name they sign in with (`userPrincipalName`), which is what Entra sign-in matches Sixb members by |
+| Refresh | Entra issues a new refresh token on every refresh; the connector stores it |
+| Reconnect | Needed when the grant is revoked, expires after 90 days unused, or a sign-in policy requires the person (`invalid_grant`, `interaction_required`). A configuration error such as a wrong secret never disconnects anyone |
+| Disconnect | Deletes the stored grant. Entra has no endpoint for an app to revoke one person's refresh token |
+| Change notifications | `webhookSecret` and `onEvent` stay with the application modes |
+
 ## Authentication
 
 Choose exactly one mode. Credential discovery is never implicit.
@@ -89,6 +151,8 @@ Choose exactly one mode. Credential discovery is never implicit.
 - **Client certificate**: `{ tenantId, clientId, clientCertificate: { thumbprintSha256, privateKey } }`.
   Upload the public certificate in Entra. Supply its 64-character hexadecimal SHA-256 fingerprint
   and matching PEM RSA private key to the connector. Keep the private key in a secret store.
+- **People's own accounts**: `{ oauth: { tenantId, clientId, clientSecret, scopes } }`. See
+  [Connect people's own accounts](#connect-peoples-own-accounts).
 - **Token resolver**: `{ token: ({ signal, forceRefresh }) => Promise<string> }`.
   The caller supplies a Graph token and owns its lifetime. Suitable for delegated access, managed
   identity or federation through the appropriate Microsoft identity library. On `forceRefresh`,
