@@ -43,9 +43,17 @@ export function nextPreviewCheck(
  * was read. Without a version, a canvas drawn on its own, no board has a picture.
  */
 export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPreviews {
-  const query = useQuery({
+  return useQuery(boardPreviewsQuery(version)).data ?? NO_PREVIEWS
+}
+
+/**
+ * The query {@link useBoardPreviews} runs. The version's own answer starts it when it holds one:
+ * one without it, such as a version seeded from elsewhere, is asked rather than read as none.
+ */
+export function boardPreviewsQuery(version: ArtifactVersion | undefined) {
+  return {
     queryKey: ["artifact-board-previews", version?.artifactId, version?.version],
-    queryFn: async () => {
+    queryFn: async (): Promise<BoardPreviews> => {
       if (!version) return NO_PREVIEWS
 
       const { data } = await getArtifactVersion({
@@ -54,7 +62,7 @@ export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPre
       })
       return data.boardPreviews ?? NO_PREVIEWS
     },
-    initialData: version?.boardPreviews ?? NO_PREVIEWS,
+    ...(version?.boardPreviews ? { initialData: version.boardPreviews } : {}),
     enabled: version !== undefined,
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
@@ -67,9 +75,7 @@ export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPre
             Date.now()
           )
         : false,
-  })
-
-  return query.data
+  }
 }
 
 /** A board's picture at its own size, or one at most {@link SMALL_BOARD_PREVIEW_WIDTH} wide. */

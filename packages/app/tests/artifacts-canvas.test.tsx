@@ -21,7 +21,11 @@ import {
 } from "../src/artifacts/renderers/canvas/board"
 import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
 import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
-import { boardPreviewSize, nextPreviewCheck } from "../src/artifacts/renderers/canvas/previews"
+import {
+  boardPreviewSize,
+  boardPreviewsQuery,
+  nextPreviewCheck,
+} from "../src/artifacts/renderers/canvas/previews"
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
 import { installDom } from "./helpers/dom"
 
@@ -544,6 +548,31 @@ describe("board previews", () => {
       if (previous) Object.defineProperty(globalThis, "Image", previous)
       else Reflect.deleteProperty(globalThis, "Image")
     }
+  })
+
+  test("are asked for when the version does not say, and read from it when it does", async () => {
+    // Reproduce by starting from no pictures whatever the version holds: a version seeded from a
+    // save's answer, which held none, never asks, and every board stays an outline.
+    const answered = version({ home: "ready" })
+    const asked = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let fetched = 0
+    const query = (previewed: GetArtifactVersionResponse) => ({
+      ...boardPreviewsQuery(previewed),
+      queryFn: async () => {
+        fetched += 1
+        return { home: "pending" as const }
+      },
+    })
+
+    expect(await asked.ensureQueryData(query(answered))).toEqual({ home: "ready" })
+    expect(fetched).toBe(0)
+    expect(await asked.ensureQueryData(query({ ...answered, version: 4 }))).toEqual({
+      home: "ready",
+    })
+    const seeded = { ...answered, version: 5 }
+    delete (seeded as { boardPreviews?: unknown }).boardPreviews
+    expect(await asked.ensureQueryData(query(seeded))).toEqual({ home: "pending" })
+    expect(fetched).toBe(1)
   })
 
   test("ask the version again while pictures are rendered, less often each time, and no longer than the server waits", () => {
