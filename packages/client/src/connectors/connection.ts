@@ -32,8 +32,13 @@ interface ConnectorConnectionCallback {
 
 export interface UseConnectorConnectionOptions {
   readonly connectorId: string
-  /** Stable application-defined role filled by this connection, for example `organic` or `ads`. */
-  readonly slot: string
+  /**
+   * `"project"` (the default) for an account the project shares, `"me"` for the signed-in user's
+   * own account on a connector whose owners include `"user"`.
+   */
+  readonly owner?: "project" | "me"
+  /** Stable application-defined role filled by this connection. Defaults to `"default"`. */
+  readonly slot?: string
   /** Defaults to the current page while preserving unrelated query parameters and the hash. */
   readonly returnTo?: string
 }
@@ -90,7 +95,8 @@ export interface UseConnectorConnectionResult {
  */
 export function useConnectorConnection({
   connectorId,
-  slot,
+  owner = "project",
+  slot = "default",
   returnTo,
 }: UseConnectorConnectionOptions): UseConnectorConnectionResult {
   const [callback, setCallback] = useState(readConnectorConnectionCallback)
@@ -106,13 +112,23 @@ export function useConnectorConnection({
   })
   const recoveryPending = callbackRunId === null && pendingRunsQuery.isPending
   const recoveryError = callbackRunId === null ? pendingRunsQuery.error : null
-  const connectionsQuery = useConnectorConnections({ connectorId })
+  const ownerType = owner === "me" ? "user" : "project"
+  const fillsSlot = useCallback(
+    (candidate: { readonly owner: { readonly type: string }; readonly slot: string }) =>
+      candidate.owner.type === ownerType && candidate.slot === slot,
+    [ownerType, slot]
+  )
+  // A manager also sees other people's connections, so "me" asks the server for the caller's own.
+  const connectionsQuery = useConnectorConnections({
+    connectorId,
+    ...(owner === "me" ? { owner } : {}),
+  })
   const connection = useMemo(
-    () => connectionsQuery.data?.find((candidate) => candidate.slot === slot),
-    [connectionsQuery.data, slot]
+    () => connectionsQuery.data?.find(fillsSlot),
+    [connectionsQuery.data, fillsSlot]
   )
   const pendingRun = pendingRunsQuery.data?.find(
-    (run) => run.slot === slot && !dismissedRunIds.includes(run.id)
+    (run) => fillsSlot(run) && !dismissedRunIds.includes(run.id)
   )
   useEffect(() => {
     if (
@@ -128,10 +144,15 @@ export function useConnectorConnection({
     runId: callbackRunId,
     refetchInterval: (query) => (isRunInProgress(query.state.data) ? RUN_POLL_INTERVAL_MS : false),
   })
-  const resumedRun = runQuery.data?.slot === slot ? runQuery.data : undefined
+  const resumedRun = runQuery.data && fillsSlot(runQuery.data) ? runQuery.data : undefined
   const resolvedReturnTo = returnTo ?? connectorConnectionReturnTo()
 
-  const connectMutation = useConnectConnector({ connectorId, slot, returnTo: resolvedReturnTo })
+  const connectMutation = useConnectConnector({
+    connectorId,
+    ...(owner === "me" ? { owner } : {}),
+    slot,
+    returnTo: resolvedReturnTo,
+  })
   const reauthorizeMutation = useReauthorizeConnector({
     connectorId,
     connectionId: connection?.id ?? "",
@@ -157,7 +178,7 @@ export function useConnectorConnection({
     ): Promise<void> => {
       const result = await connectionsQuery.refetch()
       if (result.error || !expectedCallback || !canConsume()) return
-      if (!result.data?.some((candidate) => candidate.slot === slot)) return
+      if (!result.data?.some(fillsSlot)) return
 
       await queryClient.invalidateQueries({
         queryKey: listPendingConnectorConnectionRunsQueryKey({
@@ -172,7 +193,7 @@ export function useConnectorConnection({
         sameConnectorConnectionCallback(current, expectedCallback) ? null : current
       )
     },
-    [connectionsQuery.refetch, slot, queryClient, connectorId, providerClient]
+    [connectionsQuery.refetch, fillsSlot, queryClient, connectorId, providerClient]
   )
 
   const completedRunId = resumedRun?.status === "succeeded" ? resumedRun.id : null
@@ -239,7 +260,8 @@ export function useConnectorConnection({
       const runResult = await runQuery.refetch()
       if (
         !runResult.error &&
-        runResult.data?.slot === slot &&
+        runResult.data !== undefined &&
+        fillsSlot(runResult.data) &&
         runResult.data.status === "succeeded" &&
         sameConnectorConnectionCallback(callback, {
           connectorId,

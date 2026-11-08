@@ -142,12 +142,21 @@ export const ConnectorConnectionRunSchema = z.union([
   }),
 ])
 
+/** `"me"` fills the caller's own connection, on a connector whose owners include `"user"`. */
+const ConnectorConnectionOwnerChoiceSchema = z.enum(["project", "me"])
+
+export const ListConnectorConnectionsQuerySchema = z.object({
+  owner: ConnectorConnectionOwnerChoiceSchema.optional(),
+})
+
 export const StartConnectorConnectionRunBodySchema = z.object({
+  owner: ConnectorConnectionOwnerChoiceSchema.default("project"),
   slot: z.string().trim().min(1),
   returnTo: z.string().url(),
 })
 
 export const AddConnectorConnectionBodySchema = z.object({
+  owner: ConnectorConnectionOwnerChoiceSchema.default("project"),
   slot: z.string().trim().min(1),
 })
 

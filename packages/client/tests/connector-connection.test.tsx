@@ -270,6 +270,41 @@ describe("useConnectorConnection", () => {
     expect(browserWindow.location.href).toBe("https://app.sixb.test/settings?tab=connectors#oauth")
   })
 
+  test("connects and finds the signed-in user's own account with owner me", async () => {
+    // Removal proof: drop the owner from the hook's query and body; both assertions below fail.
+    const personal = { ...connection, id: "ccn_2", owner: { type: "user", id: "usr_ada" } } as const
+    let owned = false
+    const { client, requests } = createHookClient(async (request) => {
+      const url = new URL(request.url)
+      if (request.method === "GET" && url.pathname.endsWith("/connections")) {
+        return Response.json(owned ? [connection, personal] : [connection])
+      }
+      return Response.json({ error: "Temporary outage" }, { status: 503 })
+    })
+    const rendered = renderHook(
+      () => useConnectorConnection({ connectorId: "github", owner: "me" }),
+      { wrapper: connectorWrapper(client, connectorQueryClient()) }
+    )
+
+    // The project's connection in the same slot is not the user's own.
+    await waitFor(() => expect(rendered.result.current.status).toBe("disconnected"))
+    await act(async () => {
+      await rendered.result.current.connect().catch(() => undefined)
+    })
+    const started = requests.find((request) => request.method === "POST")
+    expect(await started?.clone().json()).toMatchObject({ owner: "me", slot: "default" })
+    const reads = requests.filter(
+      (request) =>
+        request.method === "GET" && new URL(request.url).pathname.endsWith("/connections")
+    )
+    expect(reads.map((request) => new URL(request.url).searchParams.get("owner"))).toContain("me")
+
+    owned = true
+    await act(async () => rendered.result.current.refresh())
+    await waitFor(() => expect(rendered.result.current.connection?.id).toBe("ccn_2"))
+    expect(rendered.result.current.status).toBe("connected")
+  })
+
   test("coalesces concurrent connect calls into one authorization request", async () => {
     let releaseRequest: (response: Response) => void = () => undefined
     const providerResponse = new Promise<Response>((resolve) => {

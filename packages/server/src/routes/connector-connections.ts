@@ -4,6 +4,7 @@ import { requireRequestSixb } from "../auth/scope"
 import {
   connectorRouteRuntime,
   handleConnectorRouteError,
+  matchesConnectorConnectionOwner,
   serializeConnectorConnection,
 } from "../connectors/http"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -19,6 +20,7 @@ import {
   ConnectorNotFoundResponseSchema,
   ConnectorParamsSchema,
   ConnectorUnavailableResponseSchema,
+  ListConnectorConnectionsQuerySchema,
   StartConnectorConnectionRunResponseSchema,
 } from "../schemas/connectors"
 
@@ -27,21 +29,22 @@ export function registerConnectorConnectionRoutes(app: Elysia, host: SixbHostVie
     .get(
       "/api/connectors/:connectorId/connections",
       async (context) => {
-        const { params, set } = context
+        const { params, query, set } = context
         try {
-          const runtime = connectorRouteRuntime(
-            host,
-            requireRequestSixb(context),
-            params.connectorId
-          )
+          const sixb = requireRequestSixb(context)
+          const runtime = connectorRouteRuntime(host, sixb, params.connectorId)
+          const { owner } = ListConnectorConnectionsQuerySchema.parse(query)
           const connections = await runtime.listConnections(params.connectorId)
-          return connections.map(serializeConnectorConnection)
+          return connections
+            .filter((connection) => matchesConnectorConnectionOwner(sixb, connection, owner))
+            .map(serializeConnectorConnection)
         } catch (error) {
           return handleConnectorRouteError(error, set)
         }
       },
       {
         params: ConnectorParamsSchema,
+        query: ListConnectorConnectionsQuerySchema,
         response: {
           200: ConnectorConnectionSchema.array(),
           400: ConnectorBadRequestResponseSchema,

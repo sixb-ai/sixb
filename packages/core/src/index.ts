@@ -687,6 +687,7 @@ export type {
   ConnectorConnectionSelector,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorDefinitionOptions,
   ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
   ConnectorOAuthErrorKind,

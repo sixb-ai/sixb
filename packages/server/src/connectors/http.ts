@@ -1,4 +1,4 @@
-import type { SixbHostView } from "@sixb/core"
+import { AuthorizationError, type ConnectorConnectionOwner, type SixbHostView } from "@sixb/core"
 import type {
   ConnectorConnectionRunView,
   ConnectorConnectionsRuntime,
@@ -9,6 +9,7 @@ import {
   isOAuthConnectorDefinition,
 } from "@sixb/core/internal/connector-connections"
 import { createSixbError } from "@sixb/core/internal/errors"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { z } from "zod"
 import {
   CONNECTOR_HTTP_ERROR_CODES,
@@ -34,6 +35,39 @@ export function connectorRouteRuntime(
     )
   }
   return getConnectorConnectionsRuntime(owner)
+}
+
+/** The owner a route's `owner` choice names: the project, or the signed-in caller. */
+export function connectorConnectionOwner(
+  sixb: Pick<Sixb, "execution">,
+  connectorId: string,
+  choice: "project" | "me"
+): ConnectorConnectionOwner {
+  if (choice === "project") return { type: "project" }
+  const requester = sixb.execution.requestedBy
+  if (requester?.type !== "user") {
+    throw new AuthorizationError(
+      `connection:connector:${connectorId}`,
+      "[Sixb] Only a signed-in user can connect their own account."
+    )
+  }
+  return { type: "user", id: requester.id }
+}
+
+/** Whether a connection matches a list route's `owner` filter. */
+export function matchesConnectorConnectionOwner(
+  sixb: Pick<Sixb, "execution">,
+  connection: ConnectorConnectionView,
+  choice: "project" | "me" | undefined
+): boolean {
+  if (choice === undefined) return true
+  if (choice === "project") return connection.owner.type === "project"
+  const requester = sixb.execution.requestedBy
+  return (
+    connection.owner.type === "user" &&
+    requester?.type === "user" &&
+    connection.owner.id === requester.id
+  )
 }
 
 export function serializeConnectorConnection(

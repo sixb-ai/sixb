@@ -9,9 +9,14 @@ import type {
   ConnectorConnectionSelector,
 } from "../types"
 
-/** Durable, already-authorized request provenance carried into the process-owned OAuth service. */
+/** Durable, already-authenticated request provenance carried into the process-owned OAuth service. */
 export interface ConnectorConnectionCommandContext {
   readonly execution: CreateExecutionInput
+  /**
+   * Whether the caller holds `can.manage(connector)`. The service decides from it which
+   * connections the caller may see and change: see `access.ts`.
+   */
+  readonly canManage: boolean
 }
 
 export interface StartConnectorAuthorizationInput extends ConnectorConnectionSelector {

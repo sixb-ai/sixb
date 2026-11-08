@@ -198,9 +198,25 @@ export interface ConnectorDefinition<
   readonly kind: "connector"
   readonly id: TId
   readonly adapter: TAdapter
+  /** Who may own an OAuth connector's connections. Omitted, only the project. */
+  readonly owners?: readonly ConnectorConnectionOwner["type"][]
+}
+
+export interface ConnectorDefinitionOptions {
+  /**
+   * Who may own this OAuth connector's connections: `"project"` (the default) for accounts the
+   * project shares, `"user"` for each person's own account. Syncs read both.
+   */
+  readonly owners?: readonly ConnectorConnectionOwner["type"][]
 }
 
 export type StaticConnectorDefinition = ConnectorDefinition<string, ConnectorAdapter>
+
+export function connectorConnectionOwners(
+  definition: ConnectorDefinition
+): readonly ConnectorConnectionOwner["type"][] {
+  return definition.owners ?? ["project"]
+}
 
 /** Infer the connected client type returned by a connector adapter. */
 export type ConnectorClient<TAdapter extends AnyConnectorAdapter> = Awaited<

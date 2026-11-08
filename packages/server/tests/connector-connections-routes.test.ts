@@ -10,6 +10,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type OAuthConnectorAdapter,
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
@@ -29,7 +30,7 @@ const twoAccounts = [
 ]
 let discoveredAccounts = twoAccounts
 
-const connector = defineConnector("crm", {
+const oauthAdapter = {
   type: "test-oauth",
   authentication: {
     type: "oauth2",
@@ -69,7 +70,11 @@ const connector = defineConnector("crm", {
   connect() {
     return {}
   },
-})
+} satisfies OAuthConnectorAdapter
+
+const connector = defineConnector("crm", oauthAdapter)
+/** Each person connects their own account; nobody needs can.manage. */
+const personalConnector = defineConnector("mail", oauthAdapter, { owners: ["user"] })
 
 const staticConnector = defineConnector("static-crm", {
   type: "static-test",
@@ -81,7 +86,7 @@ const staticConnector = defineConnector("static-crm", {
 const connectorManagers = defineGroup("connector-managers")
 const connectorManager = defineRole("connector.manager", {
   grantedTo: [connectorManagers],
-  grants: [can.manage(connector)],
+  grants: [can.manage(connector), can.manage(personalConnector)],
 })
 
 async function createHarness() {
@@ -96,7 +101,7 @@ async function createHarness() {
   const host = new SixbHost({
     id: "test-project",
     ontology: [],
-    connectors: [connector],
+    connectors: [connector, personalConnector],
     groups: [connectorManagers],
     roles: [connectorManager],
     auth: { id: "test", kind: "dev" },
@@ -263,6 +268,69 @@ async function connectAccount(
 const STATE = "<run state>"
 
 describe("connector connection Headless API", () => {
+  test("a member connects their own account, and only they see it", async () => {
+    const harness = await createHarness()
+    discoveredAccounts = [{ id: "account-ada", label: "ada@acme.com" }]
+    const ada = await seedSession(harness.storage, "usr_ada", false)
+    const ben = await seedSession(harness.storage, "usr_ben", false)
+    const request = (path: string, headers: Record<string, string>, body?: unknown) =>
+      harness.app.handle(
+        new Request(`http://api.localhost/api/connectors/${path}`, {
+          method: body === undefined ? "GET" : "POST",
+          headers,
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        })
+      )
+    const returnTo = "http://app.localhost/connections"
+
+    const started = await request("mail/connection-runs", ada.mutationHeaders, {
+      owner: "me",
+      slot: "default",
+      returnTo,
+    })
+    expect(started.status, await started.clone().text()).toBe(201)
+    const { authorizationUrl } = (await started.json()) as { readonly authorizationUrl: string }
+    const callbackCookie = started.headers.get("set-cookie")!.split(";", 1)[0]!
+    const state = new URL(authorizationUrl).searchParams.get("state")!
+    expect((await completeRunAtProvider(harness, state, callbackCookie)).status).toBe(302)
+
+    const owned = await request("mail/connections?owner=me", ada.readHeaders)
+    const [connection] = (await owned.json()) as readonly { readonly id: string }[]
+    expect(connection).toMatchObject({
+      owner: { type: "user", id: "usr_ada" },
+      account: { id: "account-ada" },
+      status: "connected",
+    })
+
+    expect(await (await request("mail/connections", ben.readHeaders)).json()).toEqual([])
+    const managed = await request("mail/connections", harness.session.readHeaders)
+    expect(await managed.json()).toMatchObject([{ id: connection!.id }])
+    expect(
+      await (await request("mail/connections?owner=me", harness.session.readHeaders)).json()
+    ).toEqual([])
+
+    const disconnectedByBen = await harness.app.handle(
+      new Request(`http://api.localhost/api/connectors/mail/connections/${connection!.id}`, {
+        method: "DELETE",
+        headers: ben.mutationHeaders,
+      })
+    )
+    expect(disconnectedByBen.status).toBe(404)
+
+    // A project-only connector still answers members with 403, and refuses "me".
+    const projectRun = await request("crm/connection-runs", ada.mutationHeaders, {
+      slot: "default",
+      returnTo,
+    })
+    expect(projectRun.status).toBe(403)
+    const managerOwnRun = await request("crm/connection-runs", harness.session.mutationHeaders, {
+      owner: "me",
+      slot: "default",
+      returnTo,
+    })
+    expect(managerOwnRun.status).toBe(400)
+  })
+
   test("lists pending selection only for its initiating user without a callback URL", async () => {
     // Remove the pending-run route or actor filter to see the corresponding assertion fail.
     const harness = await createHarness()

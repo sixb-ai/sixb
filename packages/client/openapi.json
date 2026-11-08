@@ -14905,6 +14905,15 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["project", "me"]
+            }
           }
         ],
         "responses": {
@@ -16301,6 +16310,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -16318,6 +16332,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -16335,6 +16354,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -17391,6 +17415,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -17404,6 +17433,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -17417,6 +17451,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1

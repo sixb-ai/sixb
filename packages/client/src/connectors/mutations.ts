@@ -36,6 +36,8 @@ export interface AddConnectorConnectionOptions<TContext = unknown>
   > {
   readonly connectorId: string
   readonly fromConnectionId: string
+  /** `"me"` adds the account as the signed-in user's own connection. Defaults to `"project"`. */
+  readonly owner?: "project" | "me"
   readonly slot: string
   /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
   readonly client?: Client
@@ -49,6 +51,7 @@ export function addConnectorConnectionMutationOptions<TContext = unknown>(
   const {
     connectorId,
     fromConnectionId,
+    owner,
     slot,
     client,
     queryClient,
@@ -67,7 +70,7 @@ export function addConnectorConnectionMutationOptions<TContext = unknown>(
       const { data } = await addConnectorConnection<true>({
         client,
         path,
-        body: { slot: nonblank(slot, "slot") },
+        body: { ...(owner === undefined ? {} : { owner }), slot: nonblank(slot, "slot") },
         throwOnError: true,
       })
       return data
@@ -104,6 +107,8 @@ export interface ConnectConnectorOptions<TContext = unknown>
     "mutationFn"
   > {
   readonly connectorId: string
+  /** `"me"` connects the signed-in user's own account. Defaults to `"project"`. */
+  readonly owner?: "project" | "me"
   readonly slot: string
   readonly returnTo: string
   /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
@@ -113,7 +118,7 @@ export interface ConnectConnectorOptions<TContext = unknown>
 export function connectConnectorMutationOptions<TContext = unknown>(
   options: ConnectConnectorOptions<TContext>
 ): UseMutationOptions<StartConnectorConnectionRunResponse, Error, void, TContext> {
-  const { connectorId, slot, returnTo, client, ...mutationOptions } = options
+  const { connectorId, owner, slot, returnTo, client, ...mutationOptions } = options
   const normalizedConnectorId = nonblank(connectorId, "connectorId")
   const normalizedSlot = nonblank(slot, "slot")
 
@@ -124,6 +129,7 @@ export function connectConnectorMutationOptions<TContext = unknown>(
         client,
         path: { connectorId: normalizedConnectorId },
         body: {
+          ...(owner === undefined ? {} : { owner }),
           slot: normalizedSlot,
           returnTo: resolveReturnTo(returnTo),
         },

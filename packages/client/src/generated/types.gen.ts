@@ -4920,7 +4920,9 @@ export type ListConnectorConnectionsData = {
   path: {
     connectorId: string
   }
-  query?: never
+  query?: {
+    owner?: "project" | "me"
+  }
   url: "/api/connectors/{connectorId}/connections"
 }
 
@@ -5421,6 +5423,7 @@ export type ListPendingConnectorConnectionRunsResponse =
 
 export type StartConnectorConnectionRunData = {
   body: {
+    owner?: "project" | "me"
     slot: string
     returnTo: string
   }
@@ -5770,6 +5773,7 @@ export type GetConnectorConnectionRunResponse =
 
 export type AddConnectorConnectionData = {
   body: {
+    owner?: "project" | "me"
     slot: string
   }
   path: {
