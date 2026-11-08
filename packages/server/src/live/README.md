@@ -15,8 +15,9 @@ artifact keeps one copy, and writes it back into storage as an ordinary artifact
 
 Yjs merges only documents that share a history. Two documents built separately from the same
 files each own their `canvas.json`, and syncing them keeps one by client id. So storage keeps the
-document itself: `ArtifactRecord.document`, the whole encoded state in a blob, replaced with every
-content write (see `packages/core/src/artifacts/live/state.ts`).
+document itself: `ArtifactRecord.document`, the whole encoded state in a blob and the revision
+whose content it holds, replaced with every content write (see
+`packages/core/src/artifacts/live/state.ts`).
 
 - Every server loads a room from that state, and every client's document comes from a room. Any
   copy, on any server and after any reload, continues the same history.
@@ -25,9 +26,12 @@ content write (see `packages/core/src/artifacts/live/state.ts`).
   - A live write-back carries the room's state, which is applied to the stored one.
   - A write of files (the Agent, HTTP) is applied as the change from the files it was made from.
   - A restore, or a retried turn's undo, is applied as the change back to the restored files.
-- An artifact that keeps no document yet (written before documents were kept) is built from its
-  files under a client id derived from them. Every server that builds it builds the same document,
-  and the first write stores it.
+- A document whose revision is not the artifact's was left behind by a write that stored none: a
+  server from before documents were kept, during a rolling deploy, or a repair by hand. Whoever
+  loads it, a room or a write, brings it up to the content as the change from the files it holds.
+  An artifact that keeps none yet is built from its files.
+- Both are made under a client id derived from what they are made from, so every server makes the
+  same document, and the next write stores it again.
 
 ## Joining
 
@@ -72,9 +76,9 @@ The server vouches for every awareness state it shares:
 ## Writes made elsewhere
 
 Every `artifact.updated` for a held artifact queues a `reconcile`, whoever made the write. The
-room applies the stored document, which shares its history, so unsaved edits stay. A version
-written without one, by a server from before documents were kept, is merged as the change from the
-files the room last took in. The room's work (flush, reconcile) runs on one queue, one task at a
+room applies the stored document, brought up to the content if it was left behind, so unsaved
+edits stay. An artifact that keeps none at all takes the change from the files the room last took
+in. The room's work (flush, reconcile) runs on one queue, one task at a
 time.
 
 ## Several servers

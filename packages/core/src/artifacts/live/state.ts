@@ -1,8 +1,8 @@
 import * as Y from "yjs"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
-import type { ArtifactFile, ArtifactRecord } from "../../storage/artifacts/types"
+import type { ArtifactDocument, ArtifactFile, ArtifactRecord } from "../../storage/artifacts/types"
 import type { ArtifactKind } from "../kinds"
-import { createArtifactDocument } from "./document"
+import { createArtifactDocument, documentFiles, mergeIntoDocument } from "./document"
 import { readLiveFiles } from "./files"
 
 // An artifact's document as storage keeps it: its whole Yjs state in one blob, replaced by every
@@ -15,27 +15,43 @@ export function keepsDocument(kind: ArtifactKind): boolean {
 }
 
 /**
- * The artifact's document: the one storage keeps, or, for an artifact that keeps none yet, one
- * built from `files`, its latest version's. That one is built under a client id named by the
- * files, so whoever builds it first, wherever, builds the same history. Its own changes are made
- * under a fresh id.
+ * The artifact's document, holding `files`, its latest version's.
+ *
+ * - The one storage keeps, when it holds the artifact's revision.
+ * - One storage left behind, written without a document since: that one, then the change from what
+ *   it holds to `files`.
+ * - None yet: one built from `files`.
+ *
+ * The last two are made under a client id named by what they start from and the files, so that
+ * whoever makes one, wherever, makes the same history; the next write stores it. The document's
+ * own changes are made under a fresh id.
  */
 export async function loadArtifactDocument(
   blobStorage: Pick<BlobStorage, "open">,
-  artifact: Pick<ArtifactRecord, "id" | "kind" | "document">,
+  artifact: Pick<ArtifactRecord, "id" | "kind" | "revision" | "document">,
   files: readonly ArtifactFile[]
 ): Promise<Y.Doc> {
   const doc = new Y.Doc()
-  if (artifact.document) {
-    Y.applyUpdate(doc, await readDocumentState(blobStorage, artifact.document))
+  const stored = artifact.document
+  if (stored?.revision === artifact.revision) {
+    Y.applyUpdate(doc, await readDocumentState(blobStorage, stored.file))
     return doc
   }
 
-  const built = createArtifactDocument(artifact.kind, await readLiveFiles(blobStorage, files), {
-    clientID: filesClientId(artifact.id, files),
-  })
-  Y.applyUpdate(doc, Y.encodeStateAsUpdate(built))
-  built.destroy()
+  const clientID = madeClientId(artifact.id, stored, files)
+  const live = await readLiveFiles(blobStorage, files)
+  let made: Y.Doc
+  if (stored) {
+    made = new Y.Doc()
+    made.clientID = clientID
+    Y.applyUpdate(made, await readDocumentState(blobStorage, stored.file))
+    mergeIntoDocument(made, documentFiles(made), live)
+  } else {
+    made = createArtifactDocument(artifact.kind, live, { clientID })
+  }
+
+  Y.applyUpdate(doc, Y.encodeStateAsUpdate(made))
+  made.destroy()
   return doc
 }
 
@@ -76,14 +92,22 @@ export async function firstArtifactDocument(
   }
 }
 
-/** A Yjs client id named by the files: FNV-1a over the artifact and each file's path and digest. */
-function filesClientId(artifactId: string, files: readonly ArtifactFile[]): number {
+/**
+ * A Yjs client id named by what a document is made from: FNV-1a over the artifact, the document
+ * left behind, if any, and each file's path and digest.
+ */
+function madeClientId(
+  artifactId: string,
+  stored: ArtifactDocument | undefined,
+  files: readonly ArtifactFile[]
+): number {
   const named = [...files]
     .map(({ path, file }) => `${path}\u0000${file.digest}`)
     .sort()
     .join("\u0001")
+  const from = stored ? `${stored.file.digest}@${stored.revision}` : ""
   let hash = 0x811c9dc5
-  for (const char of `${artifactId}\u0002${named}`) {
+  for (const char of `${artifactId}\u0002${from}\u0002${named}`) {
     hash ^= char.codePointAt(0) ?? 0
     hash = Math.imul(hash, 0x01000193) >>> 0
   }

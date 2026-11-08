@@ -30,11 +30,18 @@ export interface ArtifactRecord {
   /** When it last changed. */
   readonly updatedAt: Date
   /**
-   * The latest version's content as a Yjs document, encoded whole in a blob: what everyone
-   * editing a canvas live shares, and what every write to it merges into. A write that changes
-   * the content stores the document with it, or clears it; a freeze keeps it.
+   * The content as a Yjs document: what everyone editing a canvas live shares, and what every
+   * write to it merges into. A write that changes the content stores one with it; one that stores
+   * none leaves this one behind, at the revision whose content it holds.
    */
-  readonly document?: FileRef
+  readonly document?: ArtifactDocument
+}
+
+/** An artifact's Yjs document, encoded whole in a blob, and the revision whose content it holds. */
+export interface ArtifactDocument {
+  readonly file: FileRef
+  /** The artifact's revision when it was stored, or when a freeze kept its content since. */
+  readonly revision: number
 }
 
 /** One file of a version, at its path inside the artifact. */
@@ -121,7 +128,7 @@ export interface PublishArtifactVersionInput {
    * write keeps a restore point of what it replaces, and a retry of the turn undoes its writes.
    */
   readonly turnRunId?: string
-  /** The content as a Yjs document; without it, the artifact's is cleared. */
+  /** The content as a Yjs document; without it, the artifact's stays behind. */
   readonly document?: FileRef
 }
 
@@ -182,7 +189,7 @@ export interface RestoreArtifactInput {
   /** Who restores: the restored content's author from now on. */
   readonly author: Principal
   readonly restoredAt: Date
-  /** The restored content as a Yjs document; without it, the artifact's is cleared. */
+  /** The restored content as a Yjs document; without it, the artifact's stays behind. */
   readonly document?: FileRef
 }
 

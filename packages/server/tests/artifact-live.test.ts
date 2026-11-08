@@ -121,7 +121,7 @@ async function setup() {
     artifactId,
     kind: "canvas",
     version: { ...created.version, origin: { threadId: "thr_marie", runId: "run_marie" } },
-    ...(created.artifact.document ? { document: created.artifact.document } : {}),
+    ...(created.artifact.document ? { document: created.artifact.document.file } : {}),
   })
 
   const rooms = (instance = "server-a") =>

@@ -57,7 +57,7 @@ const ARTIFACT_COLUMNS = `
   project_id AS projectId, id, kind, title,
   owner_principal_type AS ownerPrincipalType, owner_principal_id AS ownerPrincipalId,
   latest_version AS latestVersion, revision, created_at AS createdAt, updated_at AS updatedAt,
-  document
+  document, document_revision AS documentRevision
 `
 
 /** What a version and a restore point both hold, and who last wrote it from where. */
@@ -115,8 +115,9 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifacts (
             project_id, id, kind, title, owner_principal_type, owner_principal_id,
-            latest_version, next_version, revision, created_at, updated_at, document
-          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, 1, ?, ?, ?)
+            latest_version, next_version, revision, created_at, updated_at, document,
+            document_revision
+          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, 1, ?, ?, ?, ?)
           ON CONFLICT (project_id, id) DO NOTHING
           RETURNING ${ARTIFACT_COLUMNS}`
         )
@@ -129,7 +130,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.owner.id,
           createdAt,
           createdAt,
-          documentJson(input.document)
+          documentJson(input.document),
+          input.document ? 1 : null
         ) as Row | null
       if (!artifact) throw artifactStorageErrors.exists(input.id)
 
@@ -224,10 +226,21 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         ) as Row
       const updated = this.db
         .query(
-          `UPDATE artifacts SET revision = ?, updated_at = ? WHERE project_id = ? AND id = ?
+          // A freeze keeps the content, so a document that held it still does.
+          `UPDATE artifacts
+           SET revision = ?, updated_at = ?,
+               document_revision = CASE WHEN document_revision = ? THEN ? ELSE document_revision END
+           WHERE project_id = ? AND id = ?
            RETURNING ${ARTIFACT_COLUMNS}`
         )
-        .get(revision, frozenAt, input.projectId, input.artifactId) as Row
+        .get(
+          revision,
+          frozenAt,
+          artifact.revision,
+          revision,
+          input.projectId,
+          input.artifactId
+        ) as Row
       return { artifact: parseArtifactRow(updated), version: parseArtifactVersionRow(version) }
     })
   }
@@ -473,10 +486,11 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifacts (
             project_id, id, kind, title, owner_principal_type, owner_principal_id,
-            latest_version, next_version, revision, created_at, updated_at, document
+            latest_version, next_version, revision, created_at, updated_at, document,
+            document_revision
           )
           SELECT project_id, ?, kind, title, ?, ?, latest_version, next_version, revision,
-                 created_at, updated_at, document
+                 created_at, updated_at, document, document_revision
           FROM artifacts WHERE project_id = ? AND id = ?
           ON CONFLICT (project_id, id) DO NOTHING
           RETURNING ${ARTIFACT_COLUMNS}`
@@ -753,7 +767,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `UPDATE artifacts
            SET title = ?, latest_version = ?, next_version = ?, revision = ?, updated_at = ?,
-               document = ?
+               ${DOCUMENT_WRITTEN}
            WHERE project_id = ? AND id = ?
            RETURNING ${ARTIFACT_COLUMNS}`
         )
@@ -763,7 +777,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           version.version + 1,
           revision,
           updatedAt,
-          state,
+          ...documentWritten(state, revision),
           projectId,
           artifactId
         ) as Row
@@ -779,11 +793,18 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     })
     const row = this.db
       .query(
-        `UPDATE artifacts SET title = ?, revision = ?, updated_at = ?, document = ?
+        `UPDATE artifacts SET title = ?, revision = ?, updated_at = ?, ${DOCUMENT_WRITTEN}
          WHERE project_id = ? AND id = ?
          RETURNING ${ARTIFACT_COLUMNS}`
       )
-      .get(content.title, revision, updatedAt, state, projectId, artifactId) as Row
+      .get(
+        content.title,
+        revision,
+        updatedAt,
+        ...documentWritten(state, revision),
+        projectId,
+        artifactId
+      ) as Row
     return { artifact: parseArtifactRow(row), version }
   }
 
@@ -1023,7 +1044,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     const artifact = this.db
       .query(
         `UPDATE artifacts
-         SET title = ?, latest_version = ?, revision = ?, updated_at = ?, document = ?
+         SET title = ?, latest_version = ?, revision = ?, updated_at = ?, ${DOCUMENT_WRITTEN}
          WHERE project_id = ? AND id = ?
          RETURNING ${ARTIFACT_COLUMNS}`
       )
@@ -1032,7 +1053,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         undone.version,
         revision,
         updatedAt.toISOString(),
-        documentJson(document),
+        ...documentWritten(documentJson(document), revision),
         projectId,
         artifactId
       ) as Row
@@ -1080,7 +1101,21 @@ function assertBase(
   })
 }
 
-/** A Yjs document's reference as its column holds it: null clears it. */
+/**
+ * The document a content write stores, at the revision it writes; without one, the stored one
+ * stays, at the revision it holds, for the next reader to bring up to the content.
+ */
+const DOCUMENT_WRITTEN = `document = COALESCE(?, document),
+  document_revision = CASE WHEN ? IS NULL THEN document_revision ELSE ? END`
+
+function documentWritten(
+  state: string | null,
+  revision: number
+): [string | null, string | null, number] {
+  return [state, state, revision]
+}
+
+/** A Yjs document's reference as its column holds it: null leaves the stored one. */
 function documentJson(document: FileRef | undefined): string | null {
   return document ? JSON.stringify(document) : null
 }

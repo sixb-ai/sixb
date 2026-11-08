@@ -369,7 +369,7 @@ export class LiveRoom {
       // Merged with a write made meanwhile: the stored document holds it too.
       const stored = published.artifact.document
       if (published.merged && stored) {
-        Y.applyUpdate(this.doc, await readDocumentState(this.host.blobStorage, stored), MERGED)
+        Y.applyUpdate(this.doc, await readDocumentState(this.host.blobStorage, stored.file), MERGED)
       }
       this.saved({
         revision: published.version.revision,
@@ -439,9 +439,9 @@ export class LiveRoom {
   }
 
   /**
-   * Takes in what someone else wrote: the stored document, which shares this one's history. A
-   * version written without one, by a server from before documents were kept, is merged as the
-   * change from the files the room last took in.
+   * Takes in what someone else wrote: the stored document, which shares this one's history. One
+   * a write left behind is brought up to the content first, as every server that loads it does. An
+   * artifact that keeps none takes the change from the files the room last took in.
    */
   private async reconcile(revision: number): Promise<void> {
     if (this.closed || revision <= this.synced.revision) return
@@ -467,7 +467,9 @@ export class LiveRoom {
 
     const { blobStorage } = this.host
     if (artifact.document) {
-      Y.applyUpdate(this.doc, await readDocumentState(blobStorage, artifact.document), MERGED)
+      const stored = await loadArtifactDocument(blobStorage, artifact, version.files)
+      Y.applyUpdate(this.doc, Y.encodeStateAsUpdate(stored), MERGED)
+      stored.destroy()
     } else {
       const [base, next] = await Promise.all([
         readLiveFiles(blobStorage, this.synced.files),
