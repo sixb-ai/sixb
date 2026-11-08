@@ -25,6 +25,7 @@ import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/lay
 import {
   boardPreviewSize,
   boardPreviewsQuery,
+  boardPreviewUrl,
   nextPreviewCheck,
 } from "../src/artifacts/renderers/canvas/previews"
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
@@ -676,6 +677,83 @@ describe("board previews", () => {
     })
     expect(view.container.querySelector("iframe")).not.toBeNull()
     expect(view.container.querySelector("img")).toBe(before)
+    view.unmount()
+  })
+
+  test("ask for a board's picture by its render key, so a canvas changing around it keeps it", () => {
+    // Reproduce by naming the picture by revision alone: each write of a canvas edited live
+    // loads every board's picture again.
+    const keyed = {
+      ...version(),
+      outline: {
+        kind: "canvas",
+        items: [
+          {
+            id: "home",
+            type: "board",
+            file: "boards/home.html",
+            w: 390,
+            h: 400,
+            renderKey: "rk_home",
+          },
+        ],
+      },
+    } as unknown as GetArtifactVersionResponse
+    expect(boardPreviewUrl(keyed, "home", "light")).toEndWith(
+      "/boards/home/preview?theme=light&key=rk_home"
+    )
+    expect(boardPreviewUrl({ ...keyed, revision: 9 }, "home", "light")).toBe(
+      boardPreviewUrl(keyed, "home", "light")
+    )
+    expect(boardPreviewUrl(keyed, "pay", "light")).toEndWith("&revision=8")
+  })
+
+  test("keep a running board's page while only the canvas around it changes", async () => {
+    // A canvas edited live is written every few seconds. Reproduce by giving the frame the
+    // version as it is: each write loads every running board's page again.
+    const file = (seed: string) => ({
+      blobId: `blob_${seed}`,
+      digest: `sha256:${seed.repeat(64).slice(0, 64)}`,
+      sizeBytes: 10,
+      mediaType: "text/html",
+    })
+    const at = (revision: number, canvas: string, page: string) =>
+      ({
+        ...version({ home: "ready" }),
+        revision,
+        files: [
+          { path: "canvas.json", file: file(canvas) },
+          { path: "boards/home.html", file: file(page) },
+        ],
+      }) as unknown as GetArtifactVersionResponse
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    for (const [revision, token] of [
+      [8, "first"],
+      [9, "moved"],
+      [10, "changed"],
+    ] as const) {
+      cache.setQueryData(frameLinkKey(at(revision, "a", "a")), {
+        path: `/api/artifact-frames/${token}/`,
+        expiresAt: "2026-10-18T13:00:00.000Z",
+      })
+    }
+    const live = { has: () => true, subscribe: () => () => {} }
+    const board = (shown: GetArtifactVersionResponse) => (
+      <QueryClientProvider client={cache}>
+        <LiveBoardsProvider value={{ version: shown, live, previews: {}, mode: "light" }}>
+          <LiveBoard id="home" file="boards/home.html" title="Home" tile={null} />
+        </LiveBoardsProvider>
+      </QueryClientProvider>
+    )
+    const view = render(board(at(8, "a", "a")))
+    const source = () => view.container.querySelector("iframe")?.getAttribute("src")
+    expect(source()).toContain("/first/")
+
+    view.rerender(board(at(9, "b", "a")))
+    expect(source()).toContain("/first/")
+
+    view.rerender(board(at(10, "b", "c")))
+    expect(source()).toContain("/changed/")
     view.unmount()
   })
 
