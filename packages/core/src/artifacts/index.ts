@@ -15,6 +15,7 @@ export {
   type SheetPart,
 } from "./address"
 export {
+  BOARD_PREVIEW_WAIT_MS,
   CANVAS_FILE,
   CANVAS_FIT_PADDING,
   CANVAS_TEXT_PIXELS,

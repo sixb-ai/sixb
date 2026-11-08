@@ -10,7 +10,7 @@ import type {
   ArtifactStorage,
   ArtifactVersionRecord,
 } from "../../storage/artifacts/types"
-import { CANVAS_FILE } from "../canvas"
+import { BOARD_PREVIEW_WAIT_MS, CANVAS_FILE } from "../canvas"
 import { ArtifactRequestError } from "../errors"
 import { FRAME_ASSETS } from "../frames/assets"
 import { FRAME_DEFAULT_THEMES } from "../frames/kit"
@@ -60,12 +60,6 @@ export const MAX_BOARD_PREVIEW_BYTES = 8 * 1024 * 1024
  * 120 seconds, has before the worker renders what is still missing.
  */
 export const BOARD_PREVIEW_GRACE_MS = 180_000
-
-/**
- * How long after a version is published a missing picture is still worth waiting for: the grace
- * above, then the worker's attempts. Past it, nothing more will come.
- */
-export const BOARD_PREVIEW_WAIT_MS = 15 * 60_000
 
 const RENDER_KEY_FORMAT = "sixb-board-preview/1"
 

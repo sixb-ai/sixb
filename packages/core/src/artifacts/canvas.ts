@@ -387,6 +387,13 @@ export function canvasNoteFontSize(width: number): number {
   return Math.round(Math.min(22, Math.max(15, width / 13)))
 }
 
+/**
+ * How long after a canvas version is published a missing board preview is still worth waiting
+ * for: the Agent's own pictures, then the agent worker's attempts. Past it, nothing more will
+ * come, so the server says so and a viewer stops asking.
+ */
+export const BOARD_PREVIEW_WAIT_MS = 15 * 60_000
+
 /** A shape's words, larger in a larger shape, as a note's are. */
 export function canvasShapeFontSize(width: number, height: number): number {
   return Math.round(Math.min(22, Math.max(15, Math.min(width, height * 2) / 12)))
