@@ -1,112 +1,86 @@
 import { SectionNav, UserMenu, useCurrentSection } from "@sixb/app"
-import { events, objectQueryKeys, useInvalidateOnEvent } from "@sixb/client/hooks"
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarTrigger,
-} from "@sixb/ui/components"
-import {
-  CalendarClock,
-  ClipboardList,
-  FileText,
-  Gauge,
-  Handshake,
-  House,
-  Network,
-  UsersRound,
-} from "lucide-react"
+import { events, objectQueryKeys, useInvalidateOnEvent, useObjectsCount } from "@sixb/client/hooks"
+import { objects } from "@sixb/client/query"
+import { SidebarContent, SidebarFooter, SidebarHeader, SidebarInset } from "@sixb/ui/components"
 import type { PropsWithChildren } from "react"
 import { Link, useLocation } from "react-router-dom"
+import { Quote } from "../../ontology/quote"
+import { threadPath, threadTitle, useRecentThreads } from "../_lib/agent-threads"
+import { places } from "../_lib/navigation"
+import { openServiceCases } from "../_lib/service-cases"
 import { GlobalSearch } from "./global-search"
+import { NorthlineMark } from "./northline-mark"
 import { OperationsAssistant } from "./operations-assistant"
+import { SidebarOrMoreSheet } from "./phone/phone-shell"
+import { PhoneTabBar } from "./phone/phone-tab-bar"
+import { PhoneTopBar } from "./phone/phone-top-bar"
+import { PullToRefresh } from "./phone/pull-to-refresh"
+
+const quotesWithCustomer = objects(Quote)
+  .query()
+  .where((quote) => quote.p.status.eq("sent"))
 
 const groups = [
-  {
-    label: "Workspace",
-    items: [
-      { href: "/", label: "Home", icon: House },
-      { href: "/service-cases", label: "Service cases", icon: ClipboardList },
-      { href: "/dispatch", label: "Dispatch", icon: CalendarClock },
-    ],
-  },
-  {
-    label: "Business",
-    items: [
-      { href: "/quotes", label: "Quotes", icon: FileText },
-      { href: "/contracts", label: "Contracts", icon: Handshake },
-      { href: "/customers", label: "Customers", icon: Network },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { href: "/equipment", label: "Equipment", icon: Gauge },
-      { href: "/technicians", label: "Technicians", icon: UsersRound },
-    ],
-  },
-] as const
+  { items: places.filter((place) => place.section === "operations") },
+  { label: "Business", items: places.filter((place) => place.section === "business") },
+]
 
-// Sits in `AppShellProvider` from the root layout, which also covers the full-screen threads page.
+// Sits in `AppShellProvider` from the root layout.
 export function NorthlineShell({ children }: PropsWithChildren) {
   const location = useLocation()
-  const threadsPageActive = location.pathname === "/threads"
-  const homeActive = location.pathname === "/"
-  const conversationActive = homeActive || location.pathname.startsWith("/threads/")
-  // Data and Settings pages bring their own margins, and some fill the height.
+  const conversationActive = location.pathname.startsWith("/threads/")
   const sectionActive = useCurrentSection() !== null
-  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], {
-    debounceMs: 75,
-    enabled: !threadsPageActive,
-  })
-  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], {
-    debounceMs: 75,
-    enabled: !threadsPageActive,
-  })
-
-  if (threadsPageActive) return children
+  // The threads list, Console and Settings pages bring their own margins, and some fill the height.
+  const ownLayout = conversationActive || location.pathname === "/threads" || sectionActive
+  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], { debounceMs: 75 })
+  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], { debounceMs: 75 })
 
   return (
     <>
-      <Sidebar collapsible="offcanvas" className="border-sidebar-border">
-        <NorthlineSidebarHeader />
-        <SidebarContent className="py-2">
-          {/* Inside Data or Settings the sidebar lists that section's pages instead. */}
-          <SectionNav fallback={<NorthlineNav />} />
+      <SidebarOrMoreSheet collapsible="offcanvas" className="nl-sidebar">
+        <SidebarHeader className="nl-sidebar-header">
+          <Link to="/" aria-label="Northline Operations home" className="nl-sidebar-brand">
+            <NorthlineMark className="mx-0 size-[26px]" />
+            <span className="nl-sidebar-brand-name">Northline</span>
+          </Link>
+          <GlobalSearch />
+        </SidebarHeader>
+        <SidebarContent className="nl-sidebar-content">
+          {/* Inside the Console or Settings the sidebar lists that section's pages instead. */}
+          <SectionNav
+            fallback={
+              <>
+                <NorthlineNav />
+                <RecentThreads />
+              </>
+            }
+          />
         </SidebarContent>
-        <SidebarFooter className="border-t border-sidebar-border">
+        <SidebarFooter className="nl-sidebar-footer">
           <UserMenu />
         </SidebarFooter>
-      </Sidebar>
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        <SidebarInset className="relative h-svh min-h-0 overflow-hidden">
-          {conversationActive ? (
-            <SidebarTrigger className="absolute top-3 left-3 z-50 md:hidden" />
-          ) : (
-            <header className="flex h-12 shrink-0 items-center gap-3 bg-background px-3 sm:px-4">
-              <SidebarTrigger className="md:hidden" />
-              <GlobalSearch />
-            </header>
-          )}
-          <div className="min-h-0 flex-1 overflow-y-auto">
+      </SidebarOrMoreSheet>
+      {/* Below 768 px: a top bar and a tab bar over the page; a conversation's composer takes
+          the tab bar's place. */}
+      <div
+        className="phone-shell relative flex min-h-0 min-w-0 flex-1"
+        data-tab-bar={conversationActive ? "hidden" : undefined}
+      >
+        <SidebarInset className="relative h-svh min-h-0 overflow-hidden bg-background">
+          <PhoneTopBar />
+          <PullToRefresh />
+          <div className="min-h-0 flex-1 overflow-y-auto" data-app-scroll>
             <div
               className={
-                conversationActive || sectionActive
+                ownLayout
                   ? "h-full w-full"
-                  : "mx-auto w-full max-w-[1320px] px-6 py-8 max-sm:px-4 max-sm:py-5"
+                  : "mx-auto w-full max-w-[1180px] px-5 pt-2 pb-6 sm:px-10 md:pt-10 md:pb-16 lg:px-14"
               }
             >
               {children}
             </div>
           </div>
+          {conversationActive ? null : <PhoneTabBar />}
         </SidebarInset>
         <OperationsAssistant />
       </div>
@@ -116,43 +90,77 @@ export function NorthlineShell({ children }: PropsWithChildren) {
 
 function NorthlineNav() {
   const { pathname } = useLocation()
+  const openCaseCount = useObjectsCount(openServiceCases)
+  const quoteCount = useObjectsCount(quotesWithCustomer)
+  const counts = { openCases: openCaseCount.data, quotesWithCustomer: quoteCount.data }
 
-  return groups.map((group) => (
-    <SidebarGroup key={group.label} className="px-2 py-1.5">
-      <SidebarGroupLabel className="h-7 px-2 text-[10px] font-semibold tracking-[0.13em] uppercase opacity-65">
-        {group.label}
-      </SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {group.items.map((item) => {
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
-            return (
-              <SidebarMenuItem key={item.href}>
-                <SidebarMenuButton asChild isActive={active} className="h-9 px-2.5 text-[13px]">
-                  <Link to={item.href}>
+  return (
+    <nav aria-label="Northline">
+      {groups.map((group) => (
+        <section
+          key={group.label ?? "workspace"}
+          className={group.label ? "nl-sidebar-section" : undefined}
+        >
+          {group.label ? <h2 className="nl-sidebar-label">{group.label}</h2> : null}
+          <ul className="nl-sidebar-list">
+            {group.items.map((item) => {
+              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
+              const count = item.count ? counts[item.count] : undefined
+              return (
+                <li key={item.href}>
+                  <Link
+                    to={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className="nl-sidebar-row"
+                  >
                     <item.icon />
-                    <span>{item.label}</span>
+                    <span className="truncate">{item.label}</span>
+                    {count ? <span className="nl-sidebar-count">{count}</span> : null}
                   </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )
-          })}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
-  ))
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ))}
+    </nav>
+  )
 }
 
-function NorthlineSidebarHeader() {
+function RecentThreads() {
+  const { pathname } = useLocation()
+  const { threads } = useRecentThreads()
+  if (threads.length === 0) return null
+
   return (
-    <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-2">
-      <Link to="/" aria-label="Northline Operations">
-        <img
-          src="/brand/northline-wordmark-light.svg"
-          alt="Northline Mechanical"
-          className="h-10 w-auto"
-        />
-      </Link>
-    </SidebarHeader>
+    <section className="nl-sidebar-section">
+      <div className="nl-sidebar-label">
+        <h2>Recents</h2>
+        <Link to="/threads" className="nl-sidebar-label-action">
+          View all
+        </Link>
+      </div>
+      <ul className="nl-sidebar-list">
+        {threads.slice(0, 12).map((thread) => {
+          const to = threadPath(thread.id)
+          const title = threadTitle(thread)
+          return (
+            <li key={thread.id}>
+              <Link
+                to={to}
+                title={title}
+                aria-current={pathname === to ? "page" : undefined}
+                className="nl-sidebar-row nl-sidebar-chat"
+              >
+                <span className="truncate">{title}</span>
+                {thread.activeRunId ? (
+                  <span role="status" aria-label="Working" className="nl-working-dot" />
+                ) : null}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }

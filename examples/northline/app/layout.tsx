@@ -2,20 +2,22 @@ import { type AppMetadata, AppShellProvider } from "@sixb/app"
 import type { CSSProperties, PropsWithChildren } from "react"
 import { responsePolicyView } from "./_agent/response-policy-view"
 import { NorthlineShell } from "./_components/northline-shell"
+import { PhoneBehaviors } from "./_components/phone/phone-shell"
 
 export const metadata = {
   title: "Northline Operations",
   description: "Connected service operations for Northline Mechanical.",
   favicon: "/favicon.svg",
-  themeColor: "#132a33",
-  backgroundColor: "#f5f7f7",
+  themeColor: "#fbfbfd",
+  backgroundColor: "#fbfbfd",
 } satisfies AppMetadata
 
 export const toolViews = [responsePolicyView]
 
 export default function RootLayout({ children }: PropsWithChildren) {
   return (
-    <AppShellProvider style={{ "--sidebar-width": "12.5rem" } as CSSProperties}>
+    <AppShellProvider style={{ "--sidebar-width": "220px" } as CSSProperties}>
+      <PhoneBehaviors />
       <NorthlineShell>{children}</NorthlineShell>
     </AppShellProvider>
   )

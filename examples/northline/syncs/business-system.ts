@@ -6,24 +6,25 @@ import {
   businessFacilities,
   businessQuotes,
 } from "../datasets/business-system"
+import { allRows } from "../lib/sources/client-utils"
 import { hourlyBusinessSync } from "../schedules/source-syncs"
 
 export const syncBusinessCustomers = defineSync("sync-business-customers")
   .when(hourlyBusinessSync)
   .from(businessSystemConnector)
-  .read(async (client) => (await client.listCustomers()).rows)
+  .read((client) => allRows((input) => client.listCustomers(input)))
   .intoDataset(businessCustomers)
 
 export const syncBusinessFacilities = defineSync("sync-business-facilities")
   .when(hourlyBusinessSync)
   .from(businessSystemConnector)
-  .read(async (client) => (await client.listFacilities()).rows)
+  .read((client) => allRows((input) => client.listFacilities(input)))
   .intoDataset(businessFacilities)
 
 export const syncBusinessContracts = defineSync("sync-business-contracts")
   .when(hourlyBusinessSync)
   .from(businessSystemConnector)
-  .read(async (client) => (await client.listContracts()).rows)
+  .read((client) => allRows((input) => client.listContracts(input)))
   .intoDataset(businessContracts)
 
 export const syncBusinessQuotes = defineSync("sync-business-quotes", { mode: "merge" })

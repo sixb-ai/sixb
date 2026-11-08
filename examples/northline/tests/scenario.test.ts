@@ -23,7 +23,7 @@ describe("Northline scenario", () => {
     )
     expect(scenario.controls.equipment).toHaveLength(10)
     expect(scenario.fieldService.technicians).toHaveLength(7)
-    expect(scenario.controls.readings).toHaveLength(40)
+    expect(scenario.controls.readings).toHaveLength(480)
   })
 
   test("keeps external references connected", () => {

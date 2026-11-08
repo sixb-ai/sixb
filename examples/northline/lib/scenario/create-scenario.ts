@@ -240,7 +240,7 @@ export function createNorthlineScenario(
         currency: "USD",
         status: "sent",
         valid_until: clock.dateDaysFromNow(21),
-        updated_at: clock.hoursAgo(5),
+        updated_at: clock.hoursAgo(2),
       },
       {
         quote_id: "quote-q-881",
@@ -819,32 +819,53 @@ function equipment(
   }
 }
 
+// A day of readings, every half hour, ending two minutes ago. Healthy units drift with the day; the
+// two faulty rooftop units read normally until their fault sets in, then climb to the values that
+// raised their alarms. The newest reading decides each unit's health.
+const readingsPerDay = 48
+const faultOnsetSamples: Readonly<Record<string, number>> = {
+  "equipment-harbor-newark-rtu-7": 5,
+  "equipment-camden-rtu-2": 15,
+}
+
 function createReadings(
   equipmentRows: readonly EquipmentRow[],
   clock: ScenarioClock
 ): ReadingRow[] {
-  return equipmentRows.flatMap((row, equipmentIndex) =>
-    [45, 30, 15, 2].map((minutesAgo, sampleIndex) => {
-      const golden = row.equipment_id === "equipment-harbor-newark-rtu-7"
-      const unhealthy = golden || row.equipment_id === "equipment-camden-rtu-2"
-      const supply = unhealthy
-        ? 69 + sampleIndex * 1.7
-        : 54 + (equipmentIndex % 3) + sampleIndex * 0.2
-      const current = unhealthy
-        ? 25 + sampleIndex * 2.2
-        : 10 + (equipmentIndex % 4) + sampleIndex * 0.3
+  const last = readingsPerDay - 1
+  return equipmentRows.flatMap((row, equipmentIndex) => {
+    const normalSupply = 54.6 + (equipmentIndex % 3)
+    const normalCurrent = 10.9 + (equipmentIndex % 4)
+    const normalReturn = 72 + (equipmentIndex % 2)
+    const onset = faultOnsetSamples[row.equipment_id]
+    return Array.from({ length: readingsPerDay }, (_, sample) => {
+      const day = Math.sin((2 * Math.PI * (sample - last)) / readingsPerDay)
+      const wobble = sample === last ? 0 : jitter(equipmentIndex, sample)
+      const fault = onset ? Math.min(1, Math.max(0, (sample - (last - onset)) / onset)) : 0
+      const supply = normalSupply + 1.4 * day + 0.4 * wobble
+      const current = normalCurrent + 0.8 * day + 0.3 * wobble
       return {
-        reading_id: `${row.equipment_id}-reading-${sampleIndex + 1}`,
+        reading_id: `${row.equipment_id}-reading-${sample + 1}`,
         equipment_id: row.equipment_id,
-        recorded_at: clock.minutesAgo(minutesAgo),
-        supply_temp: supply,
-        return_temp: unhealthy ? 78 : 72 + (equipmentIndex % 2),
+        recorded_at: clock.minutesAgo(2 + (last - sample) * 30),
+        supply_temp: round(supply + (74.1 - supply) * fault),
+        return_temp: round(normalReturn + (78 - normalReturn) * fault),
         temperature_unit: "degreeFahrenheit" as const,
-        compressor_current: current,
+        compressor_current: round(current + (31.6 - current) * fault),
         current_unit: "ampere" as const,
       }
     })
-  )
+  })
+}
+
+/** A repeatable value between -1 and 1, so the demo reads the same on every reset. */
+function jitter(seed: number, sample: number): number {
+  const value = Math.sin(seed * 78.233 + sample * 12.9898) * 43758.5453
+  return (value - Math.floor(value)) * 2 - 1
+}
+
+function round(value: number): number {
+  return Math.round(value * 10) / 10
 }
 
 function createAlarms(clock: ScenarioClock): AlarmRow[] {
@@ -877,9 +898,11 @@ function createAlarms(clock: ScenarioClock): AlarmRow[] {
       "medium",
       "comfort",
       "acknowledged",
-      clock.hoursAgo(6),
+      // Broad Street's contract allows four hours to respond; the technician arrives with half an
+      // hour to spare, so the case opens on track.
+      clock.hoursAgo(3.5),
       clock.minutesAgo(20),
-      clock.hoursAgo(5.8)
+      clock.hoursAgo(3.3)
     ),
     alarm(
       "alarm-camden-condenser-fan",

@@ -5,18 +5,8 @@ import { CustomerAccount } from "../../ontology/customer-account"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
-import { NorthlineWordmark } from "./northline-wordmark"
-
-const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
-  ["/service-cases", "Service cases"],
-  ["/dispatch", "Dispatch"],
-  ["/quotes", "Quotes"],
-  ["/contracts", "Contracts"],
-  ["/customers", "Customers"],
-  ["/equipment", "Equipment"],
-  ["/technicians", "Technicians"],
-  ["/review", "Operational review"],
-]
+import { placeFor } from "../_lib/navigation"
+import { NorthlineMark } from "./northline-mark"
 
 export function OperationsAssistant() {
   const location = useLocation()
@@ -31,8 +21,7 @@ export function OperationsAssistant() {
     }
   }, [currentLocation, fullPage, location.pathname])
   const objectContext = currentObjectContext(location.pathname)
-  const pageLabel =
-    pageLabels.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ?? "Home"
+  const pageLabel = placeFor(location.pathname)?.label ?? "Home"
   const pageContext = agentContext.appState("northline-current-page", {
     label: pageLabel,
     description: "The current Northline Operations route and query state.",
@@ -46,10 +35,12 @@ export function OperationsAssistant() {
 
   return (
     <AgentSurface
-      title="Northline Operations Assistant"
-      launcherLabel="Ask Northline"
+      // Conversations start on Home; the dock opens on request so it never covers a page.
+      defaultMode="collapsed"
+      title="Chat"
+      launcherLabel="Chat"
       context={context}
-      welcomeContent={<NorthlineWordmark className="h-10" />}
+      welcomeContent={<NorthlineMark className="size-12" />}
       fullPage={fullPage}
       panelClassName={fullPage ? "max-md:[&_[data-agent-conversation-header]]:pl-12" : undefined}
       threadId={threadRoute?.params.id}

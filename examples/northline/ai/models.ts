@@ -1,12 +1,18 @@
-import type { ImageModel, LanguageModel } from "@sixb/core/models"
+import type { DecisionModel, ImageModel, LanguageModelTiers } from "@sixb/core/models"
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
-/** The first language model is the default used by the project Agent. */
-export const languageModels: readonly [LanguageModel, ...LanguageModel[]] = [
-  vercelGateway("deepseek/deepseek-v4-flash-vision-exp"),
-  vercelGateway("openai/gpt-5.6-luna"),
-  vercelGateway("anthropic/claude-haiku-4.5"),
-] as const
+/**
+ * Open-weight models by tier. `standard` is the default; with the decision model below, chat picks
+ * the tier of each message: lookups go light, investigations and plans go heavy.
+ */
+export const languageModels: LanguageModelTiers = {
+  light: vercelGateway("zai/glm-5.3-flash", { reasoning: "low" }),
+  standard: vercelGateway("deepseek/deepseek-v4.1-flash", { reasoning: "high" }),
+  heavy: vercelGateway("moonshotai/kimi-k3", { reasoning: "high" }),
+}
+
+/** Scores each chat message's tier in about 150 ms, before the answer starts. */
+export const decisionModels: readonly DecisionModel[] = [vercelGateway.decision("typesafe-ai/jev")]
 
 /** Images the agent makes through `sixb models image`. The first is the default. */
 export const imageModels: readonly [ImageModel, ...ImageModel[]] = [

@@ -6,14 +6,20 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  Kbd,
 } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Search } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { quotePath } from "../_lib/quotes"
+import { casePath } from "../_lib/service-cases"
 
-export function GlobalSearch() {
+interface GlobalSearchProps {
+  /** The sidebar's search row by default; `toolbar` is the phone top bar's icon button. */
+  readonly placement?: "sidebar" | "toolbar"
+}
+
+export function GlobalSearch({ placement = "sidebar" }: GlobalSearchProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const navigate = useNavigate()
@@ -33,61 +39,84 @@ export function GlobalSearch() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
+  // On phones it fills the screen instead of floating (see phone/phone-navigation.css). The server
+  // matches more fields than a result's label, so the dialog shows its results as they come.
+  const dialog = (
+    <CommandDialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setQuery("")
+      }}
+      shouldFilter={false}
+      className="northline-search"
+    >
+      <CommandInput
+        placeholder="Search Northline Operations"
+        value={query}
+        onValueChange={setQuery}
+      />
+      <CommandList>
+        <CommandEmpty>{query.length < 2 ? "Type to search." : "No matching records."}</CommandEmpty>
+        <CommandGroup heading="Results">
+          {(results.data?.items ?? []).map((item) => (
+            <CommandItem
+              key={`${item.ref.objectTypeId}:${item.ref.primaryId}`}
+              value={`${item.label} ${item.ref.primaryId}`}
+              onSelect={() => {
+                navigate(resultPath(item.ref.objectTypeId, item.ref.primaryId))
+                setOpen(false)
+              }}
+            >
+              <Search className="size-4 text-muted-foreground" />
+              <span>{item.label}</span>
+              <span className="ml-auto text-[11px] text-muted-foreground">
+                {item.ref.objectTypeId}
+              </span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </CommandDialog>
+  )
+
+  if (placement === "toolbar") {
+    return (
+      <>
+        <button
+          type="button"
+          aria-label="Search"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className="phone-bar-action"
+          onClick={() => setOpen(true)}
+        >
+          <Search className="size-[21px]" strokeWidth={1.8} aria-hidden="true" />
+        </button>
+        {dialog}
+      </>
+    )
+  }
+
   return (
     <>
-      <button
-        type="button"
-        className="group flex h-9 w-full max-w-80 items-center gap-3 rounded-full px-3 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={() => setOpen(true)}
-      >
-        <Search className="size-4" />
-        <span className="flex-1 max-sm:hidden">Search Northline</span>
-        <span className="sm:hidden">Search</span>
-        <Kbd className="h-6 bg-transparent px-1.5 text-sm group-hover:bg-background/70 max-sm:hidden">
-          ⌘K
-        </Kbd>
+      <button type="button" className="nl-sidebar-row" onClick={() => setOpen(true)}>
+        <Search />
+        <span>Search</span>
+        <kbd>⌘K</kbd>
       </button>
-      <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput
-          placeholder="Search Northline Operations"
-          value={query}
-          onValueChange={setQuery}
-        />
-        <CommandList>
-          <CommandEmpty>
-            {query.length < 2 ? "Type to search." : "No matching records."}
-          </CommandEmpty>
-          <CommandGroup heading="Results">
-            {(results.data?.items ?? []).map((item) => (
-              <CommandItem
-                key={`${item.ref.objectTypeId}:${item.ref.primaryId}`}
-                value={`${item.label} ${item.ref.primaryId}`}
-                onSelect={() => {
-                  navigate(resultPath(item.ref.objectTypeId, item.ref.primaryId))
-                  setOpen(false)
-                }}
-              >
-                <Search className="size-4 text-muted-foreground" />
-                <span>{item.label}</span>
-                <span className="ml-auto text-[11px] text-muted-foreground">
-                  {item.ref.objectTypeId}
-                </span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        </CommandList>
-      </CommandDialog>
+      {dialog}
     </>
   )
 }
 
 function resultPath(objectTypeId: string, primaryId: string): string {
   const encoded = encodeURIComponent(primaryId)
-  if (objectTypeId === "ServiceCase") return `/service-cases/${encoded}`
+  if (objectTypeId === "ServiceCase") return casePath(primaryId)
   if (objectTypeId === "Equipment") return `/equipment/${encoded}`
   if (objectTypeId === "CustomerAccount") return `/customers/${encoded}`
   if (objectTypeId === "Technician") return `/technicians/${encoded}`
-  if (objectTypeId === "Quote") return "/quotes"
+  if (objectTypeId === "Quote") return quotePath(primaryId)
   if (objectTypeId === "ServiceContract") return "/contracts"
   if (objectTypeId === "WorkOrder" || objectTypeId === "ServiceVisit") return "/dispatch"
   return "/"

@@ -1,0 +1,63 @@
+/* On a phone, home is one screen, as Internal's is: the brand and tiles centered, and a one-line
+   composer at the foot, resting on the tab bar. The shell pads its content column by 2rem in all;
+   the column fills what is left. When the keyboard opens the tab bar steps aside (--phone-tab-bar
+   becomes 0) and the composer rides just above the keyboard. */
+@media (max-width: 767px) {
+  .nl-home {
+    min-height: calc(var(--app-height) - var(--phone-top-bar) - var(--phone-tab-bar) - 2rem);
+  }
+
+  /* The brand and tiles center together in the open space, apart from the composer below. */
+  .nl-home-brand {
+    margin-top: auto;
+  }
+
+  .nl-home-tiles {
+    order: 1;
+    margin-bottom: auto;
+  }
+
+  /* The scroller's padding already clears the tab bar, so the offset is only a small gap. */
+  .nl-home-composer {
+    order: 2;
+    position: sticky;
+    bottom: 0.5rem;
+    z-index: 20;
+    margin-top: 0.75rem;
+  }
+
+  /* On a short screen the tiles scroll under it, so it has to be opaque. */
+  .nl-home-composer .sixb-composer-surface {
+    background: var(--card);
+  }
+}
+
+/* Entrance: the mark, then the composer, then the tiles rise out of a soft blur. */
+@keyframes nl-home-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+    filter: blur(4px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nl-home-rise,
+  .nl-home-tiles > * {
+    animation: nl-home-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: var(--rise-delay, 0ms);
+  }
+
+  .nl-home-tiles > :nth-child(1) {
+    --rise-delay: 120ms;
+  }
+  .nl-home-tiles > :nth-child(2) {
+    --rise-delay: 160ms;
+  }
+  .nl-home-tiles > :nth-child(3) {
+    --rise-delay: 200ms;
+  }
+  .nl-home-tiles > :nth-child(4) {
+    --rise-delay: 240ms;
+  }
+}

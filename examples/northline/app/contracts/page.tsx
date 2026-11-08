@@ -1,11 +1,24 @@
 import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Input } from "@sixb/ui/components"
-import { ArrowUpDown, ChevronRight, Search, ShieldCheck } from "lucide-react"
-import { useMemo, useState } from "react"
+import { cn } from "@sixb/ui/lib/utils"
+import { ChevronRight } from "lucide-react"
+import { type ReactNode, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ServiceContract } from "../../ontology/service-contract"
-import { formatDate, formatMoney, humanize, QueryState } from "../_components/ui"
+import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
+import {
+  calendarDate,
+  daysUntil,
+  formatCoverageHours,
+  formatMinutes,
+  humanize,
+  PageHeader,
+  QueryState,
+  Section,
+  StatusBadge,
+} from "../_components/ui"
+import { contractTypeLabel, isContractCurrent } from "../_lib/contracts"
+import type { QueryRow } from "../_lib/query-types"
 
 const contractsQuery = objects(ServiceContract)
   .query()
@@ -30,9 +43,13 @@ const sortOptions = [
   ["number", "Contract number"],
 ] as const
 
+// One template for the header and every row, so the columns line up like a table.
+const columns =
+  "grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.85fr)_minmax(0,1.1fr)_6rem_1rem]"
+
 type View = (typeof views)[number][0]
 type Sort = (typeof sortOptions)[number][0]
-type ContractRow = NonNullable<Awaited<ReturnType<typeof contractsQuery.first>>>
+type ContractRow = QueryRow<typeof contractsQuery>
 
 export default function ContractsPage() {
   const contracts = useObjectsQuery(contractsQuery)
@@ -41,6 +58,13 @@ export default function ContractsPage() {
   const [search, setSearch] = useState("")
   const allRows = contracts.data?.objects ?? []
   const renewalRisks = allRows.filter(needsRenewalAttention).length
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        views.map(([id]) => [id, allRows.filter((contract) => matchesView(contract, id)).length])
+      ),
+    [allRows]
+  )
   const rows = useMemo(() => {
     const normalized = search.trim().toLowerCase()
     return allRows
@@ -51,6 +75,7 @@ export default function ContractsPage() {
           contract.properties.number,
           contract.properties.name,
           humanize(contract.properties.contractType),
+          contractTypeLabel(contract.properties.contractType),
           contract.links.customer?.properties.name,
           ...contract.links.coveredFacilities.map((facility) => facility.properties.name),
         ].some((value) => value?.toLowerCase().includes(normalized))
@@ -59,236 +84,172 @@ export default function ContractsPage() {
   }, [allRows, search, sort, view])
 
   return (
-    <div className="pb-8">
-      <header className="mb-6 flex items-start justify-between gap-6 max-sm:flex-col">
-        <div className="min-w-0">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-primary uppercase">
-            Coverage commitments
-          </p>
-          <h1 className="text-[32px] leading-9 font-semibold tracking-[-0.035em] text-foreground max-sm:text-[28px]">
-            Contracts
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Response obligations, commercial coverage, and renewal exposure for every serviced
-            facility.
-          </p>
-        </div>
-        <div className="shrink-0 text-right max-sm:text-left">
-          <strong className="block font-mono text-xl font-semibold">{renewalRisks}</strong>
-          <span className="text-xs text-muted-foreground">renewal risks</span>
-        </div>
-      </header>
+    <div>
+      <PageHeader
+        title="Contracts"
+        description={
+          <>
+            Response commitments and coverage for every serviced facility.
+            {renewalRisks > 0 ? (
+              <>
+                {" "}
+                <span className="font-medium text-foreground tabular-nums">{renewalRisks}</span>{" "}
+                {renewalRisks === 1 ? "needs" : "need"} renewal attention.
+              </>
+            ) : null}
+          </>
+        }
+        action={
+          <>
+            <SearchField
+              label="Search contracts"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search contracts, customers, sites"
+            />
+            <SortSelect
+              label="Sort contracts"
+              value={sort}
+              options={sortOptions}
+              onChange={setSort}
+            />
+          </>
+        }
+      >
+        <ViewPills
+          label="Contract views"
+          views={views}
+          value={view}
+          counts={counts}
+          onChange={setView}
+        />
+      </PageHeader>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <label className="relative block">
-          <span className="sr-only">Search contracts</span>
-          <Search
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search contracts, customers, or facilities"
-            className="h-12 rounded-lg border-border/90 bg-card pl-11 text-sm shadow-none focus-visible:ring-2"
-          />
-        </label>
-
-        <label className="relative block">
-          <span className="sr-only">Sort contracts</span>
-          <ArrowUpDown
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <select
-            value={sort}
-            onChange={(event) => setSort(event.target.value as Sort)}
-            className="h-12 w-full appearance-none rounded-lg border border-border/90 bg-card pr-10 pl-11 text-sm font-medium text-foreground outline-none transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {sortOptions.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <span
-            className="pointer-events-none absolute top-1/2 right-4 size-2.5 -translate-y-2/3 rotate-45 border-r border-b border-muted-foreground"
-            aria-hidden="true"
-          />
-        </label>
-      </div>
-
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-2" aria-label="Contract views">
-        {views.map(([value, label]) => {
-          const count = allRows.filter((contract) => matchesView(contract, value)).length
-          const active = view === value
-          return (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={active}
-              className={
-                active
-                  ? "h-9 shrink-0 rounded-md border border-primary bg-primary px-3.5 text-xs font-semibold text-primary-foreground shadow-sm"
-                  : "h-9 shrink-0 rounded-md border border-border/90 bg-card px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground"
-              }
-              onClick={() => setView(value)}
-            >
-              {label} <span className="ml-1.5 font-mono text-[10px] opacity-75">{count}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <section className="mt-3">
+      <Section className="overflow-hidden">
         <QueryState
           loading={contracts.isLoading}
           error={contracts.isError}
           empty={rows.length === 0}
-          emptyMessage="No service contracts match this view."
+          emptyMessage={
+            search ? "No contracts match that search." : "No service contracts in this view."
+          }
         >
-          <div className="grid gap-2.5">
-            {rows.map((contract) => (
-              <ContractWorklistRow key={contract.primaryId} contract={contract} />
-            ))}
+          {/* On narrow screens the list scrolls sideways inside the card instead of squeezing. */}
+          <div className="overflow-x-auto">
+            <div className="min-w-[56rem]">
+              <div
+                className={cn(
+                  "grid items-center gap-4 px-6 pt-4 pb-2.5 text-[12.5px] font-medium text-muted-foreground",
+                  columns
+                )}
+              >
+                <span>Customer and contract</span>
+                <span>Type</span>
+                <span>Coverage hours</span>
+                <span>Response</span>
+                <span>Term</span>
+                <span>Status</span>
+                <span />
+              </div>
+              <ul>
+                {rows.map((contract) => (
+                  <ContractListRow key={contract.primaryId} contract={contract} />
+                ))}
+              </ul>
+            </div>
           </div>
         </QueryState>
-      </section>
+      </Section>
     </div>
   )
 }
 
-function ContractWorklistRow({ contract }: { contract: ContractRow }) {
-  const facilities = contract.links.coveredFacilities
+function ContractListRow({ contract }: { contract: ContractRow }) {
+  const { properties } = contract
   const customer = contract.links.customer
   const href = customer ? `/customers/${encodeURIComponent(customer.primaryId)}` : undefined
-
-  return (
-    <Link
-      to={href ?? "/contracts"}
-      aria-disabled={!href}
-      tabIndex={href ? undefined : -1}
-      className={`group relative overflow-hidden rounded-xl border border-border/85 bg-card transition-[border-color,background-color,box-shadow] hover:border-primary/55 hover:bg-primary/[0.025] hover:shadow-[0_1px_2px_rgba(13,32,39,0.04)] focus-visible:border-primary/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-        href ? "cursor-pointer" : ""
-      }`}
-      onClick={(event) => {
-        if (!href) event.preventDefault()
-      }}
-    >
-      <div className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-4 gap-y-4 px-3.5 py-3.5 2xl:grid-cols-[82px_minmax(250px,1.2fr)_minmax(185px,0.7fr)_minmax(210px,0.82fr)_130px_150px_18px] 2xl:pr-5">
-        <ContractDocument number={contract.properties.number} />
-
-        <div className="min-w-0 self-center">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <strong className="font-mono text-xs font-semibold tracking-[-0.01em]">
-              {contract.properties.number}
-            </strong>
-            <ContractStatusIndicator status={contract.properties.status} />
-          </div>
-          <p className="mt-1.5 truncate text-sm font-semibold tracking-[-0.012em] text-foreground">
-            {contract.properties.name}
-          </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {humanize(contract.properties.contractType)} · {coverageHoursLabel(contract)}
-          </p>
-        </div>
-
-        <div className="col-start-2 min-w-0 border-t border-border/65 pt-3 2xl:col-start-auto 2xl:border-0 2xl:pt-0">
-          {customer ? (
-            <span className="block truncate text-xs font-semibold text-foreground group-hover:text-primary">
-              {customer.properties.name}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">Customer unavailable</span>
+  const rowClass = cn("grid items-center gap-4 px-6 py-3.5", columns)
+  const content = (
+    <>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span
+          className={cn(
+            "truncate text-[15px] font-semibold tracking-[-0.01em]",
+            customer ? "group-hover:text-primary" : "text-muted-foreground"
           )}
-          <span className="mt-1.5 block truncate text-[11px] text-muted-foreground">
-            {facilities[0]?.properties.name ?? "No covered facility"}
-            {facilities.length > 1 ? ` +${facilities.length - 1} more` : ""}
-          </span>
-        </div>
-
-        <div className="col-start-2 min-w-0 2xl:col-start-auto">
-          <strong className="block text-xs font-medium text-foreground">
-            {contract.properties.includedLabor ? "Labor included" : "Labor excluded"}
-          </strong>
-          <span className="mt-1.5 block text-[11px] text-muted-foreground">
-            {contract.properties.majorComponentsExcluded
-              ? "Major components excluded"
-              : "Major components included"}
-          </span>
-          <span className="mt-1 block text-[11px] text-muted-foreground">
-            Approval threshold {formatMoney(contract.properties.approvalThreshold)}
-          </span>
-        </div>
-
-        <div className="col-start-2 2xl:col-start-auto">
-          <strong className="block font-mono text-sm font-semibold tracking-[-0.02em]">
-            {duration(contract.properties.responseTargetMinutes)}
-          </strong>
-          <span className="mt-1 block text-[10px] text-muted-foreground">response target</span>
-          <span className="mt-1.5 block text-[11px] text-foreground/80">
-            {duration(contract.properties.resolutionTargetMinutes)} resolution
-          </span>
-        </div>
-
-        <div className="col-start-2 min-w-0 2xl:col-start-auto 2xl:text-right">
-          <strong className={`block text-xs font-medium ${renewalTone(contract)}`}>
-            {formatDate(contract.properties.endsOn)}
-          </strong>
-          <span className={`mt-1.5 block text-[11px] font-medium ${renewalTone(contract)}`}>
-            {renewalLabel(contract.properties.endsOn)}
-          </span>
-          <span className="mt-1 block text-[10px] text-muted-foreground">
-            Started {formatDate(contract.properties.startsOn)}
-          </span>
-        </div>
-
-        {href ? (
-          <ChevronRight
-            className="absolute right-4 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary 2xl:static"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        ) : (
-          <ChevronRight
-            className="absolute right-4 size-4 text-muted-foreground/40 2xl:static"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        )}
-      </div>
-    </Link>
-  )
-}
-
-function ContractDocument({ number }: { number: string }) {
-  return (
-    <span className="grid h-[82px] w-[76px] place-items-center rounded-lg border border-primary/10 bg-secondary/75">
-      <span className="relative grid h-[66px] w-[50px] place-items-center overflow-hidden rounded-[3px] border border-border bg-card shadow-[0_2px_4px_rgba(13,32,39,0.08)]">
-        <span className="absolute top-0 right-0 size-3 border-b border-l border-border bg-secondary" />
-        <ShieldCheck className="size-5 text-primary" strokeWidth={1.6} aria-hidden="true" />
-        <strong className="absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap font-mono text-[7px] font-semibold text-foreground">
-          {number}
-        </strong>
+        >
+          {customer?.properties.name ?? "Customer unavailable"}
+        </span>
+        <span className="truncate text-[13px] text-muted-foreground">
+          {properties.name} · <span className="tabular-nums">{properties.number}</span>
+        </span>
       </span>
-    </span>
+      <Cell
+        primary={contractTypeLabel(properties.contractType)}
+        secondary={
+          properties.majorComponentsExcluded ? "Major parts excluded" : "Major parts included"
+        }
+      />
+      <Cell
+        primary={formatCoverageHours(properties.coverageHours)}
+        secondary={properties.includedLabor ? "Labor included" : "Labor excluded"}
+      />
+      <Cell
+        primary={formatMinutes(properties.responseTargetMinutes)}
+        secondary={`${formatMinutes(properties.resolutionTargetMinutes)} to resolve`}
+      />
+      <Cell
+        primary={`${monthYear(properties.startsOn)} – ${monthYear(properties.endsOn)}`}
+        secondary={renewalLabel(properties.endsOn)}
+        secondaryClassName={renewalTone(contract)}
+      />
+      <span>
+        <StatusBadge value={properties.status} />
+      </span>
+      <ChevronRight
+        className={cn(
+          "size-4",
+          href ? "text-muted-foreground/50 group-hover:text-muted-foreground" : "opacity-0"
+        )}
+        aria-hidden="true"
+      />
+    </>
+  )
+
+  return (
+    <li className="border-t border-border/70">
+      {href ? (
+        <Link
+          to={href}
+          className={cn(
+            rowClass,
+            "group transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none dark:hover:bg-white/[0.03]"
+          )}
+        >
+          {content}
+        </Link>
+      ) : (
+        <div className={rowClass}>{content}</div>
+      )}
+    </li>
   )
 }
 
-function ContractStatusIndicator({ status }: { status: string }) {
-  const tone =
-    status === "active"
-      ? "text-[color:var(--success)] before:bg-[color:var(--success)]"
-      : status === "expiring"
-        ? "text-[color:var(--warning)] before:bg-[color:var(--warning)]"
-        : status === "expired"
-          ? "text-destructive before:bg-destructive"
-          : "text-muted-foreground before:bg-muted-foreground/65"
+function Cell({
+  primary,
+  secondary,
+  secondaryClassName = "text-muted-foreground",
+}: {
+  primary: ReactNode
+  secondary: ReactNode
+  secondaryClassName?: string
+}) {
   return (
-    <span
-      className={`inline-flex items-center gap-2 text-xs font-medium before:size-1.5 before:rounded-full ${tone}`}
-    >
-      {humanize(status)}
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="truncate text-[14.5px] font-medium tabular-nums">{primary}</span>
+      <span className={cn("truncate text-[13px] tabular-nums", secondaryClassName)}>
+        {secondary}
+      </span>
     </span>
   )
 }
@@ -296,10 +257,9 @@ function ContractStatusIndicator({ status }: { status: string }) {
 function matchesView(contract: ContractRow, view: View): boolean {
   if (view === "all") return true
   if (view === "renewing") return needsRenewalAttention(contract)
-  if (["full_service", "priority_care", "preventive"].includes(view)) {
-    return contract.properties.contractType === view
-  }
-  return contract.properties.status === view
+  // Active includes contracts nearing their end: they are in force until they expire.
+  if (view === "active") return isContractCurrent(contract.properties.status)
+  return contract.properties.contractType === view
 }
 
 function compareContracts(left: ContractRow, right: ContractRow, sort: Sort): number {
@@ -336,38 +296,26 @@ function needsRenewalAttention(contract: ContractRow): boolean {
   )
 }
 
-function coverageHoursLabel(contract: ContractRow): string {
-  return contract.properties.coverageHours === "24_7" ? "24/7 coverage" : "Business-hours coverage"
-}
-
-function duration(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`
-  const hours = minutes / 60
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`
-}
-
 function renewalLabel(value: string | Date): string {
   const days = daysUntil(value)
-  if (days < 0) return `${Math.abs(days)} days expired`
-  if (days === 0) return "Renews today"
-  if (days === 1) return "1 day remaining"
-  return `${days} days remaining`
+  if (days < 0) return `Ended ${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} ago`
+  if (days === 0) return "Ends today"
+  if (days === 1) return "1 day left"
+  return `${days} days left`
 }
 
 function renewalTone(contract: ContractRow): string {
   if (contract.properties.status === "expired" || daysUntil(contract.properties.endsOn) < 0) {
-    return "text-destructive"
+    return "font-medium text-destructive"
   }
-  if (needsRenewalAttention(contract)) return "text-[color:var(--warning)]"
-  return "text-foreground"
+  if (needsRenewalAttention(contract)) return "font-medium text-[color:var(--warning)]"
+  return "text-muted-foreground"
 }
 
-function daysUntil(value: string | Date): number {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(value)
-  target.setHours(0, 0, 0, 0)
-  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
+function monthYear(value: string | Date): string {
+  return new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" }).format(
+    calendarDate(value)
+  )
 }
 
 function dateValue(value: string | Date): number {

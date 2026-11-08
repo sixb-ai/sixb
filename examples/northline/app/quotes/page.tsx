@@ -1,24 +1,44 @@
-import type {
-  ListWorkflowInterventionsResponse,
-  SubmitWorkflowInterventionData,
-} from "@sixb/client"
-import {
-  listWorkflowInterventionsOptions,
-  listWorkflowInterventionsQueryKey,
-  submitWorkflowInterventionMutation,
-  useActionRunMutation,
-  useObjectsQuery,
-} from "@sixb/client/hooks"
+import { useActionRunMutation, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Button, Input } from "@sixb/ui/components"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowRight, ArrowUpDown, Check, ChevronRight, LoaderCircle, Search, X } from "lucide-react"
-import { useMemo, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { cn } from "@sixb/ui/lib/utils"
+import { ChevronRight, FileText } from "lucide-react"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { Link, useSearchParams } from "react-router-dom"
 import { Quote } from "../../ontology/quote"
 import { ServiceCase } from "../../ontology/service-case"
-import { formatDate, formatMoney, formatRelativeTime, QueryState } from "../_components/ui"
+import { CustomerCard } from "../_components/customer-card"
+import { SearchField, SortSelect, ViewPills } from "../_components/list-controls"
+import {
+  decisionRingClass,
+  ErrorLine,
+  NextStepCard,
+  PillButton,
+  PillLink,
+} from "../_components/next-step"
+import {
+  Breadcrumb,
+  daysUntil,
+  Fact,
+  formatDate,
+  formatMoney,
+  formatRelativeTime,
+  humanize,
+  PageHeader,
+  QueryState,
+  Section,
+  StatusBadge,
+} from "../_components/ui"
+import {
+  type Intervention,
+  type InterventionResponse,
+  numberValue,
+  refValue,
+  textValue,
+  useInterventionReviews,
+} from "../_lib/interventions"
 import type { QueryRow } from "../_lib/query-types"
+import { isQuoteOpen, quotePath } from "../_lib/quotes"
+import { casePath } from "../_lib/service-cases"
 
 const allQuotes = objects(Quote)
   .query()
@@ -28,19 +48,17 @@ const allQuotes = objects(Quote)
   .orderBy(Quote.p.validUntil, "asc")
   .limit(100)
 
-const linkedServiceCases = objects(ServiceCase).query().expand(ServiceCase.l.equipment).limit(100)
-
-const reviewQuery = {
-  interventionId: "review-repair-quote",
-  status: "pending" as const,
-  limit: "100",
-  order: "desc" as const,
-}
+const linkedServiceCases = objects(ServiceCase)
+  .query()
+  .expand(ServiceCase.l.customer)
+  .expand(ServiceCase.l.facility)
+  .expand(ServiceCase.l.equipment)
+  .limit(100)
 
 const views = [
   ["all", "All"],
   ["internal_review", "Internal review"],
-  ["sent", "Awaiting customer"],
+  ["sent", "With customer"],
   ["approved", "Approved"],
   ["declined", "Declined"],
   ["expiring", "Expiring soon"],
@@ -55,39 +73,38 @@ const sortOptions = [
 
 type QuoteRow = QueryRow<typeof allQuotes>
 type ServiceCaseRow = QueryRow<typeof linkedServiceCases>
-type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
-type InterventionResponse = SubmitWorkflowInterventionData["body"]["response"]
 type View = (typeof views)[number][0]
 type Sort = (typeof sortOptions)[number][0]
 type QuoteDecision = "approved" | "declined"
 
 export default function QuotesPage() {
-  const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
+  const selectedId = searchParams.get("quote")
   const [view, setView] = useState<View>("all")
   const [sort, setSort] = useState<Sort>("urgency")
   const [search, setSearch] = useState("")
-  const [expandedQuoteId, setExpandedQuoteId] = useState<string>()
-  const [submittingId, setSubmittingId] = useState<string>()
   const quotes = useObjectsQuery(allQuotes)
   const serviceCases = useObjectsQuery(linkedServiceCases)
-  const reviews = useQuery(listWorkflowInterventionsOptions({ query: reviewQuery }))
-  const submit = useMutation({
-    ...submitWorkflowInterventionMutation(),
-    onSuccess: async () => {
-      setExpandedQuoteId(undefined)
-      await queryClient.invalidateQueries({
-        queryKey: listWorkflowInterventionsQueryKey({ query: reviewQuery }),
-      })
-    },
-    onSettled: () => setSubmittingId(undefined),
-  })
+  const {
+    reviews,
+    pending: pendingReviews,
+    approve,
+    submitting,
+    failed,
+  } = useInterventionReviews("review-repair-quote")
 
   const allRows = quotes.data?.objects ?? []
   const caseRows = serviceCases.data?.objects ?? []
-  const pendingReviews = reviews.data?.interventions ?? []
   const blockedValue = allRows
-    .filter((quote) => ["internal_review", "sent"].includes(quote.properties.status))
+    .filter((quote) => isQuoteOpen(quote.properties.status))
     .reduce((total, quote) => total + quote.properties.amount, 0)
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        views.map(([id]) => [id, allRows.filter((quote) => matchesView(quote, id)).length])
+      ),
+    [allRows]
+  )
   const visibleRows = useMemo(() => {
     const normalized = search.trim().toLowerCase()
     return allRows
@@ -106,185 +123,298 @@ export default function QuotesPage() {
       .sort((left, right) => compareQuotes(left, right, sort))
   }, [allRows, search, sort, view])
   const unmatchedReviews = pendingReviews.filter((intervention) => {
-    const caseNumber = text(intervention.input.caseNumber)
+    const caseNumber = textValue(intervention.input.caseNumber)
     return !allRows.some((quote) => quote.links.serviceCase?.properties.number === caseNumber)
   })
 
+  function reviewFor(quote: QuoteRow): Intervention | undefined {
+    return pendingReviews.find(
+      (intervention) =>
+        textValue(intervention.input.caseNumber) === quote.links.serviceCase?.properties.number
+    )
+  }
+
+  function reviewState(intervention: Intervention | undefined) {
+    return { pending: submitting(intervention), failed: failed(intervention) }
+  }
+
+  if (selectedId !== null) {
+    const quote = allRows.find((row) => row.primaryId === selectedId)
+    const review = quote ? reviewFor(quote) : undefined
+    return (
+      <QuoteDocumentPage number={quote?.properties.number}>
+        <QueryState
+          loading={quotes.isLoading || reviews.isLoading}
+          error={quotes.isError || reviews.isError}
+          empty={!quote}
+          emptyMessage="Quote not found."
+        >
+          {quote ? (
+            <QuoteDocument
+              quote={quote}
+              serviceCase={caseRows.find(
+                (serviceCase) => serviceCase.primaryId === quote.links.serviceCase?.primaryId
+              )}
+              review={review}
+              {...reviewState(review)}
+              onApproveReview={(response) => {
+                if (review) approve(review, response)
+              }}
+            />
+          ) : null}
+        </QueryState>
+      </QuoteDocumentPage>
+    )
+  }
+
   return (
-    <div className="pb-8">
-      <header className="mb-6 flex items-start justify-between gap-6 max-sm:flex-col">
-        <div className="min-w-0">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-primary uppercase">
-            Commercial authorization
-          </p>
-          <h1 className="text-[32px] leading-9 font-semibold tracking-[-0.035em] text-foreground max-sm:text-[28px]">
-            Quotes
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Repair proposals and customer decisions connected to the service work they unblock.
-          </p>
-        </div>
-        <div className="shrink-0 text-right max-sm:text-left">
-          <strong className="block font-mono text-xl font-semibold">
-            {formatBlockedValue(blockedValue)}
-          </strong>
-          <span className="text-xs text-muted-foreground">awaiting decision</span>
-        </div>
-      </header>
-
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <label className="relative block">
-          <span className="sr-only">Search quotes</span>
-          <Search
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search quotes, customers, or service cases"
-            className="h-12 rounded-lg border-border/90 bg-card pl-11 text-sm shadow-none focus-visible:ring-2"
-          />
-        </label>
-
-        <label className="relative block">
-          <span className="sr-only">Sort quotes</span>
-          <ArrowUpDown
-            className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.8}
-          />
-          <select
-            value={sort}
-            onChange={(event) => setSort(event.target.value as Sort)}
-            className="h-12 w-full appearance-none rounded-lg border border-border/90 bg-card pr-10 pl-11 text-sm font-medium text-foreground outline-none transition-colors hover:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {sortOptions.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <span
-            className="pointer-events-none absolute top-1/2 right-4 size-2.5 -translate-y-2/3 rotate-45 border-r border-b border-muted-foreground"
-            aria-hidden="true"
-          />
-        </label>
-      </div>
-
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-2" aria-label="Quote views">
-        {views.map(([value, label]) => {
-          const count = allRows.filter((quote) => matchesView(quote, value)).length
-          const active = view === value
-          return (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={active}
-              className={
-                active
-                  ? "h-9 shrink-0 rounded-md border border-primary bg-primary px-3.5 text-xs font-semibold text-primary-foreground shadow-sm"
-                  : "h-9 shrink-0 rounded-md border border-border/90 bg-card px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/35 hover:text-foreground"
-              }
-              onClick={() => setView(value)}
-            >
-              {label} <span className="ml-1.5 font-mono text-[10px] opacity-75">{count}</span>
-            </button>
-          )
-        })}
-      </div>
+    <div>
+      <PageHeader
+        title="Quotes"
+        description={
+          <>
+            Repair proposals and the customer decisions they unblock.
+            {blockedValue > 0 ? (
+              <>
+                {" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {formatMoney(blockedValue)}
+                </span>{" "}
+                is waiting on a decision.
+              </>
+            ) : null}
+          </>
+        }
+        action={
+          <>
+            <SearchField
+              label="Search quotes"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search quotes, customers, cases"
+            />
+            <SortSelect label="Sort quotes" value={sort} options={sortOptions} onChange={setSort} />
+          </>
+        }
+      >
+        <ViewPills
+          label="Quote views"
+          views={views}
+          value={view}
+          counts={counts}
+          onChange={setView}
+        />
+      </PageHeader>
 
       {unmatchedReviews.length > 0 ? (
-        <section className="mt-3 overflow-hidden rounded-xl border border-[color:var(--warning)]/35 bg-card">
-          <header className="border-b border-border/75 px-5 py-3">
-            <h2 className="text-sm font-semibold">Northline review required</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Commercial scopes that have not created a quote record yet.
-            </p>
-          </header>
-          <div className="divide-y divide-border/75">
-            {unmatchedReviews.map((intervention) => (
-              <UnmatchedReview
-                key={intervention.id}
-                intervention={intervention}
-                pending={submit.isPending && submittingId === intervention.id}
-                onApprove={(response) => {
-                  setSubmittingId(intervention.id)
-                  submit.mutate({
-                    path: { interventionId: intervention.id },
-                    body: { response },
-                  })
-                }}
-              />
-            ))}
-          </div>
-        </section>
+        <div className="mb-5 flex flex-col gap-4">
+          {unmatchedReviews.map((intervention) => (
+            <ReviewCard
+              key={intervention.id}
+              intervention={intervention}
+              serviceCase={caseForReview(intervention, caseRows)}
+              {...reviewState(intervention)}
+              onApprove={(response) => approve(intervention, response)}
+            />
+          ))}
+        </div>
       ) : null}
 
-      <section className="mt-3">
+      <Section className="overflow-hidden">
         <QueryState
           loading={quotes.isLoading || reviews.isLoading}
           error={quotes.isError || reviews.isError}
           empty={visibleRows.length === 0}
-          emptyMessage="No quotes match this view."
+          emptyMessage={search ? "No quotes match that search." : "No quotes in this view."}
         >
-          <div className="grid gap-2.5">
-            {visibleRows.map((quote) => {
-              const relatedCase = caseRows.find(
-                (serviceCase) => serviceCase.primaryId === quote.links.serviceCase?.primaryId
-              )
-              const review = pendingReviews.find(
-                (intervention) =>
-                  text(intervention.input.caseNumber) === quote.links.serviceCase?.properties.number
-              )
-              return (
-                <QuoteWorklistRow
-                  key={quote.primaryId}
-                  quote={quote}
-                  serviceCase={relatedCase}
-                  review={review}
-                  expanded={expandedQuoteId === quote.primaryId}
-                  reviewPending={submit.isPending && submittingId === review?.id}
-                  onToggle={() =>
-                    setExpandedQuoteId((current) =>
-                      current === quote.primaryId ? undefined : quote.primaryId
-                    )
-                  }
-                  onApproveReview={(response) => {
-                    if (!review) return
-                    setSubmittingId(review.id)
-                    submit.mutate({
-                      path: { interventionId: review.id },
-                      body: { response },
-                    })
-                  }}
-                />
-              )
-            })}
-          </div>
+          <ul>
+            {visibleRows.map((quote) => (
+              <QuoteListRow
+                key={quote.primaryId}
+                quote={quote}
+                awaitingApproval={Boolean(reviewFor(quote))}
+              />
+            ))}
+          </ul>
         </QueryState>
-      </section>
+      </Section>
     </div>
   )
 }
 
-function QuoteWorklistRow({
+function QuoteListRow({ quote, awaitingApproval }: { quote: QuoteRow; awaitingApproval: boolean }) {
+  const status = quote.properties.status
+  const open = isQuoteOpen(status)
+  const caseNumber = quote.links.serviceCase?.properties.number
+
+  return (
+    <li className="border-t border-border/70 first:border-t-0">
+      <Link
+        to={quotePath(quote.primaryId)}
+        className="group grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-4 px-5 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none max-sm:grid-cols-1 max-sm:gap-2.5 sm:grid-cols-[2.75rem_minmax(0,1fr)_auto_1rem] sm:px-6 dark:hover:bg-white/[0.03]"
+      >
+        {/* On a phone the amount, state and validity become one line under the scope. */}
+        <span className="hidden size-11 items-center justify-center rounded-[12px] bg-muted sm:flex">
+          <FileText className="size-5 text-foreground/55" strokeWidth={1.6} />
+        </span>
+        <span className="flex min-w-0 flex-col gap-1">
+          <span className="text-[13px] font-semibold text-muted-foreground tabular-nums">
+            {quote.properties.number}
+            {caseNumber ? ` · ${caseNumber}` : ""}
+          </span>
+          <span
+            className={cn(
+              "line-clamp-2 text-[16px] leading-[1.3] font-semibold tracking-[-0.01em] text-pretty group-hover:text-primary",
+              !open && "text-foreground/60"
+            )}
+          >
+            {headline(quote.properties.scope)}
+          </span>
+          <span className="truncate text-[13.5px] text-muted-foreground">
+            {quote.links.customer?.properties.name ?? "Customer"} ·{" "}
+            {quote.links.facility?.properties.name ?? "Facility"}
+          </span>
+        </span>
+        <span className="flex flex-col items-end gap-1.5 max-sm:flex-row max-sm:flex-wrap max-sm:items-center max-sm:gap-2.5">
+          <span className="text-[16px] font-semibold tracking-[-0.01em] tabular-nums">
+            {formatMoney(quote.properties.amount)}
+          </span>
+          <StatusBadge
+            value={status}
+            label={awaitingApproval ? "Needs approval" : statusLabel(status)}
+          />
+          <span
+            className={cn(
+              "text-[13px] whitespace-nowrap tabular-nums max-sm:ml-auto",
+              expiresSoon(quote)
+                ? "font-medium text-[color:var(--warning)]"
+                : "text-muted-foreground"
+            )}
+          >
+            {validityLabel(quote)}
+          </span>
+        </span>
+        <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground max-sm:hidden" />
+      </Link>
+    </li>
+  )
+}
+
+/** A repair scope that has no quote record yet: Northline approves it before it is sent. */
+function ReviewCard({
+  intervention,
+  serviceCase,
+  pending,
+  failed,
+  onApprove,
+}: {
+  intervention: Intervention
+  serviceCase: ServiceCaseRow | undefined
+  pending: boolean
+  failed: boolean
+  onApprove(response: InterventionResponse): void
+}) {
+  const scope = textValue(intervention.defaultResponse.scope ?? intervention.input.scope)
+  const amount = numberValue(intervention.defaultResponse.amount ?? intervention.input.amount)
+  const caseNumber = textValue(intervention.input.caseNumber) || serviceCase?.properties.number
+  const caseId = refValue(intervention.input.serviceCase)?.primaryId ?? serviceCase?.primaryId
+  const validUntil = textValue(intervention.input.validUntil)
+  const customer = serviceCase?.links.customer?.properties.name
+
+  return (
+    <section className={cn("flex flex-col gap-4 p-6 max-sm:p-5", decisionRingClass)}>
+      <div className="flex items-start justify-between gap-6 max-sm:flex-col max-sm:gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-[12px] font-semibold text-primary">Needs your approval</span>
+          <h2 className="text-[22px] leading-7 font-semibold tracking-[-0.015em] text-balance">
+            {scope ? headline(scope) : "Repair quote review"}
+          </h2>
+          <p className="max-w-2xl text-[15px] leading-6 text-pretty text-foreground/75">
+            Approve the scope and price before the quote goes to {customer ?? "the customer"} for
+            authorization.
+          </p>
+        </div>
+        <span className="shrink-0 text-[28px] leading-8 font-semibold tracking-[-0.02em] tabular-nums">
+          {formatMoney(amount)}
+        </span>
+      </div>
+      <dl className="flex flex-wrap gap-x-9 gap-y-3">
+        {caseNumber ? (
+          <Fact label="Service case">
+            {caseId ? (
+              <Link to={casePath(caseId)} className="text-primary hover:underline">
+                {caseNumber}
+              </Link>
+            ) : (
+              caseNumber
+            )}
+          </Fact>
+        ) : null}
+        {customer ? <Fact label="Customer">{customer}</Fact> : null}
+        {serviceCase?.links.equipment ? (
+          <Fact label="Equipment">{serviceCase.links.equipment.properties.name}</Fact>
+        ) : null}
+        {validUntil ? <Fact label="Valid until">{formatDate(validUntil)}</Fact> : null}
+      </dl>
+      {textValue(intervention.input.reason) ? (
+        <p className="rounded-[12px] bg-muted px-4 py-3 text-[14px] leading-5 text-foreground/80">
+          {textValue(intervention.input.reason)}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <PillButton
+          disabled={pending || !scope || amount <= 0}
+          onClick={() => onApprove({ scope, amount })}
+        >
+          {pending ? "Sending…" : "Approve and send"}
+        </PillButton>
+        {caseId && caseNumber ? (
+          <PillLink tone="secondary" to={casePath(caseId)}>
+            Open {caseNumber}
+          </PillLink>
+        ) : null}
+      </div>
+      {failed ? <ErrorLine>The approval could not be sent. Try again.</ErrorLine> : null}
+    </section>
+  )
+}
+
+function QuoteDocumentPage({
+  number: quoteNumber,
+  children,
+}: {
+  number: string | undefined
+  children: ReactNode
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  // The document replaces the list in place, so bring its top into view when it opens.
+  useEffect(() => {
+    root.current?.scrollIntoView({ block: "start" })
+  }, [])
+
+  return (
+    <div ref={root} className="flex scroll-mt-14 flex-col gap-4 md:scroll-mt-10">
+      <Breadcrumb to="/quotes" label="Quotes" current={quoteNumber ?? "Quote"} />
+      {children}
+    </div>
+  )
+}
+
+function QuoteDocument({
   quote,
   serviceCase,
   review,
-  expanded,
-  reviewPending,
-  onToggle,
+  pending: reviewPending,
+  failed: reviewFailed,
   onApproveReview,
 }: {
   quote: QuoteRow
   serviceCase: ServiceCaseRow | undefined
   review: Intervention | undefined
-  expanded: boolean
-  reviewPending: boolean
-  onToggle(): void
+  pending: boolean
+  failed: boolean
   onApproveReview(response: InterventionResponse): void
 }) {
-  const navigate = useNavigate()
   const decide = useActionRunMutation<{
     serviceCase: { objectTypeId: "ServiceCase"; primaryId: string }
     decision: QuoteDecision
@@ -293,321 +423,235 @@ function QuoteWorklistRow({
     subject: { objectType: Quote, primaryId: quote.primaryId },
     invalidateOnCommit: true,
   })
+  const { properties } = quote
+  const customer = quote.links.customer
+  const facility = quote.links.facility
   const linkedCase = quote.links.serviceCase
-  const href = linkedCase
-    ? `/service-cases/${encodeURIComponent(linkedCase.primaryId)}`
-    : quote.links.customer
-      ? `/customers/${encodeURIComponent(quote.links.customer.primaryId)}`
-      : undefined
-  const canRecordDecision =
-    Boolean(linkedCase) && ["internal_review", "sent"].includes(quote.properties.status)
-  const hasAction = Boolean(review) || canRecordDecision
+  const decided = properties.status === "approved" || properties.status === "declined"
 
-  return (
-    <article
-      role={href ? "link" : undefined}
-      tabIndex={href ? 0 : undefined}
-      aria-label={href ? `Open related record for ${quote.properties.number}` : undefined}
-      className={`group relative overflow-hidden rounded-xl border border-border/85 bg-card transition-[border-color,background-color,box-shadow] hover:border-primary/55 hover:bg-primary/[0.025] hover:shadow-[0_1px_2px_rgba(13,32,39,0.04)] focus-within:border-primary/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-        href ? "cursor-pointer" : ""
-      }`}
-      onClick={() => {
-        if (href) navigate(href)
-      }}
-      onKeyDown={(event) => {
-        if (href && event.currentTarget === event.target && event.key === "Enter") {
-          navigate(href)
-        }
-      }}
-    >
-      <div className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-4 gap-y-4 px-3.5 py-3.5 xl:grid-cols-[82px_minmax(250px,1.35fr)_minmax(185px,0.78fr)_110px_minmax(150px,0.52fr)_auto_18px] xl:pr-5">
-        <QuoteDocument number={quote.properties.number} />
-
-        <div className="min-w-0 self-center">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <strong className="font-mono text-xs font-semibold tracking-[-0.01em]">
-              {quote.properties.number}
-            </strong>
-            <QuoteStatusIndicator status={quote.properties.status} />
-          </div>
-          <p className="mt-1.5 line-clamp-2 text-sm leading-5 font-semibold tracking-[-0.012em] text-foreground">
-            {quote.properties.scope}
-          </p>
-          <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-            {quote.properties.reason}
-          </p>
-        </div>
-
-        <div className="col-start-2 min-w-0 border-t border-border/65 pt-3 xl:col-start-auto xl:border-0 xl:pt-0">
-          <p className="truncate text-xs font-medium text-primary">
-            {linkedCase?.properties.number
-              ? `${linkedCase.properties.number} · ${equipmentLabel(serviceCase, quote)}`
-              : equipmentLabel(serviceCase, quote)}
-          </p>
-          <strong className="mt-2 block truncate text-xs font-semibold text-foreground">
-            {quote.links.customer?.properties.name ?? "Customer"}
-          </strong>
-          <span className="mt-1 block truncate text-[11px] text-muted-foreground">
-            {quote.links.facility?.properties.name ?? "Facility"}
-          </span>
-        </div>
-
-        <div className="col-start-2 xl:col-start-auto">
-          <strong className="block font-mono text-sm font-semibold tracking-[-0.02em]">
-            {formatMoney(quote.properties.amount)}
-          </strong>
-          <span className="mt-1 block text-[10px] text-muted-foreground">
-            {quote.properties.currency}
-          </span>
-        </div>
-
-        <div className="col-start-2 min-w-0 xl:col-start-auto">
-          <strong className={`block text-xs font-medium ${stageTone(quote.properties.status)}`}>
-            {stageLabel(quote.properties.status)}
-          </strong>
-          <span className="mt-1.5 block text-[11px] text-muted-foreground">
-            {decisionDateLabel(quote)}
-          </span>
-          <span className={`mt-1.5 block text-[11px] font-medium ${outcomeTone(quote)}`}>
-            {outcomeLabel(quote)}
-          </span>
-        </div>
-
-        <div className="col-start-2 flex items-center xl:col-start-auto xl:justify-end">
-          {hasAction ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-primary/65 text-primary hover:bg-primary hover:text-primary-foreground"
-              onClick={(event) => {
-                event.stopPropagation()
-                onToggle()
-              }}
-              onKeyDown={(event) => event.stopPropagation()}
-            >
-              {review ? "Review & send" : "Record decision"}
-            </Button>
-          ) : null}
-        </div>
-
-        {href ? (
-          <ChevronRight
-            className="absolute right-4 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary xl:static"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        ) : (
-          <ArrowRight
-            className="absolute right-4 size-4 text-muted-foreground/55 xl:static"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        )}
-      </div>
-
-      {expanded && hasAction ? (
-        <div
-          className="flex items-center justify-between gap-5 border-t border-border/75 bg-background/55 px-5 py-4 max-md:flex-col max-md:items-stretch"
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          {review ? (
-            <ReviewDecision
-              intervention={review}
-              pending={reviewPending}
-              onCancel={onToggle}
-              onApprove={onApproveReview}
-            />
-          ) : linkedCase ? (
-            <CustomerDecision
-              quote={quote}
-              pending={decide.isPending}
-              onCancel={onToggle}
-              onDecision={(decision) =>
-                decide.mutate({
-                  serviceCase: {
-                    objectTypeId: "ServiceCase",
-                    primaryId: linkedCase.primaryId,
-                  },
-                  decision,
-                })
-              }
-            />
-          ) : null}
-        </div>
-      ) : null}
-    </article>
-  )
-}
-
-function QuoteDocument({ number: quoteNumber }: { number: string }) {
-  return (
-    <span className="grid h-[82px] w-[76px] place-items-center rounded-lg border border-primary/10 bg-secondary/75">
-      <span className="relative h-[66px] w-[50px] overflow-hidden rounded-[3px] border border-border bg-card shadow-[0_2px_4px_rgba(13,32,39,0.08)]">
-        <span className="absolute top-0 right-0 size-3 border-b border-l border-border bg-secondary" />
-        <span className="absolute top-4 left-3 h-0.5 w-5 bg-primary" />
-        <span className="absolute top-7 left-3 h-px w-7 bg-border" />
-        <span className="absolute top-9 left-3 h-px w-6 bg-border" />
-        <span className="absolute top-11 left-3 h-px w-7 bg-border" />
-        <strong className="absolute bottom-2 left-2.5 font-mono text-[8px] font-semibold text-foreground">
-          {quoteNumber}
-        </strong>
-      </span>
-    </span>
-  )
-}
-
-function QuoteStatusIndicator({ status }: { status: string }) {
-  const tone =
-    status === "approved"
-      ? "text-[color:var(--success)] before:bg-[color:var(--success)]"
-      : status === "sent"
-        ? "text-[color:var(--info)] before:bg-[color:var(--info)]"
-        : status === "internal_review"
-          ? "text-[color:var(--warning)] before:bg-[color:var(--warning)]"
-          : status === "declined" || status === "expired"
-            ? "text-destructive before:bg-destructive"
-            : "text-muted-foreground before:bg-muted-foreground/65"
-  return (
-    <span
-      className={`inline-flex items-center gap-2 text-xs font-medium before:size-1.5 before:rounded-full ${tone}`}
-    >
-      {quoteStatusLabel(status)}
-    </span>
-  )
-}
-
-function ReviewDecision({
-  intervention,
-  pending,
-  onCancel,
-  onApprove,
-}: {
-  intervention: Intervention
-  pending: boolean
-  onCancel(): void
-  onApprove(response: InterventionResponse): void
-}) {
-  const scope = text(intervention.defaultResponse.scope ?? intervention.input.scope)
-  const amount = numeric(intervention.defaultResponse.amount ?? intervention.input.amount)
-  return (
-    <>
-      <div className="min-w-0">
-        <strong className="text-xs font-semibold">Confirm Northline approval</strong>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Approve the repair scope and {formatMoney(amount)} quote before it is sent to the
-          customer.
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <Button variant="outline" size="sm" disabled={pending} onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button
-          size="sm"
-          disabled={pending || !scope || amount <= 0}
-          onClick={() => onApprove({ scope, amount })}
-        >
-          {pending ? (
-            <LoaderCircle className="size-4 animate-spin" />
-          ) : (
-            <Check className="size-4" />
-          )}
-          {pending ? "Sending…" : "Approve & send"}
-        </Button>
-      </div>
-    </>
-  )
-}
-
-function CustomerDecision({
-  quote,
-  pending,
-  onCancel,
-  onDecision,
-}: {
-  quote: QuoteRow
-  pending: boolean
-  onCancel(): void
-  onDecision(decision: QuoteDecision): void
-}) {
-  return (
-    <>
-      <div className="min-w-0">
-        <strong className="text-xs font-semibold">Record customer decision</strong>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Record whether the customer approved or declined the{" "}
-          {formatMoney(quote.properties.amount)}
-          repair proposal.
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <Button variant="outline" size="sm" disabled={pending} onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="border-destructive/35 text-destructive hover:bg-destructive hover:text-white"
-          disabled={pending}
-          onClick={() => onDecision("declined")}
-        >
-          <X className="size-4" /> Declined
-        </Button>
-        <Button size="sm" disabled={pending} onClick={() => onDecision("approved")}>
-          {pending ? (
-            <LoaderCircle className="size-4 animate-spin" />
-          ) : (
-            <Check className="size-4" />
-          )}
-          {pending ? "Saving…" : "Approved"}
-        </Button>
-      </div>
-    </>
-  )
-}
-
-function UnmatchedReview({
-  intervention,
-  pending,
-  onApprove,
-}: {
-  intervention: Intervention
-  pending: boolean
-  onApprove(response: InterventionResponse): void
-}) {
-  const scope = text(intervention.defaultResponse.scope ?? intervention.input.scope)
-  const amount = numeric(intervention.defaultResponse.amount ?? intervention.input.amount)
-  return (
-    <article className="flex items-center justify-between gap-5 px-5 py-4 max-sm:flex-col max-sm:items-stretch">
-      <div className="min-w-0">
-        <p className="font-mono text-xs font-semibold text-primary">
-          {text(intervention.input.caseNumber) || "Service case"}
-        </p>
-        <p className="mt-1 truncate text-sm font-semibold">{scope || "Repair quote review"}</p>
-        <p className="mt-1 truncate text-xs text-muted-foreground">
-          {text(intervention.input.reason)} · {formatMoney(amount)}
-        </p>
-      </div>
-      <Button
-        size="sm"
-        disabled={pending || !scope || amount <= 0}
-        onClick={() => onApprove({ scope, amount })}
+  let next: ReactNode = null
+  if (review) {
+    const scope = textValue(review.defaultResponse.scope ?? review.input.scope)
+    const amount = numberValue(review.defaultResponse.amount ?? review.input.amount)
+    next = (
+      <NextStepCard
+        title="Approve the quote for customer authorization"
+        detail={`Confirm the repair scope and ${formatMoney(amount)} price before the quote is sent to ${customer?.properties.name ?? "the customer"}.`}
       >
-        {pending ? "Sending…" : "Approve & send"}
-      </Button>
-    </article>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <PillButton
+            disabled={reviewPending || !scope || amount <= 0}
+            onClick={() => onApproveReview({ scope, amount })}
+          >
+            {reviewPending ? "Sending…" : "Approve and send"}
+          </PillButton>
+        </div>
+        {reviewFailed ? <ErrorLine>The approval could not be sent. Try again.</ErrorLine> : null}
+      </NextStepCard>
+    )
+  } else if (linkedCase && isQuoteOpen(properties.status)) {
+    const recording = decide.isPending ? decide.variables?.decision : undefined
+    const record = (decision: QuoteDecision) =>
+      decide.mutate({
+        serviceCase: { objectTypeId: "ServiceCase", primaryId: linkedCase.primaryId },
+        decision,
+      })
+    next = (
+      <NextStepCard
+        title="Record the customer’s decision"
+        detail={`Did ${customer?.properties.name ?? "the customer"} approve the ${formatMoney(properties.amount)} repair? Approved work goes back to dispatch; a declined repair resolves ${linkedCase.properties.number}.`}
+      >
+        <div className="flex flex-wrap items-center gap-2.5">
+          <PillButton disabled={decide.isPending} onClick={() => record("approved")}>
+            {recording === "approved" ? "Saving…" : "Customer approved"}
+          </PillButton>
+          <PillButton
+            tone="secondary"
+            disabled={decide.isPending}
+            onClick={() => record("declined")}
+          >
+            {recording === "declined" ? "Saving…" : "Customer declined"}
+          </PillButton>
+        </div>
+        {decide.isError ? (
+          <ErrorLine>The decision could not be recorded. Try again.</ErrorLine>
+        ) : null}
+      </NextStepCard>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <header className="flex flex-col gap-4">
+        <div className="flex items-start justify-between gap-6 max-md:flex-col max-md:gap-3">
+          <div className="flex min-w-0 flex-col gap-2">
+            <h1 className="text-[34px] leading-[1.06] font-semibold tracking-[-0.03em] tabular-nums sm:text-[40px]">
+              {properties.number}
+            </h1>
+            <p className="text-[16px] text-muted-foreground">
+              Repair quote for {customer?.properties.name ?? "the customer"}
+              {facility ? ` · ${facility.properties.name}` : ""}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 pt-2">
+            <StatusBadge
+              value={properties.status}
+              label={review ? "Needs approval" : statusLabel(properties.status)}
+            />
+          </div>
+        </div>
+        <dl className="flex flex-wrap gap-x-9 gap-y-3 pt-1">
+          <Fact label="Amount">{formatMoney(properties.amount)}</Fact>
+          <Fact label="Valid until">
+            <span className={cn(expiresSoon(quote) && "text-[color:var(--warning)]")}>
+              {formatDate(properties.validUntil)}
+              {isQuoteOpen(properties.status) ? ` · ${remainingLabel(properties.validUntil)}` : ""}
+            </span>
+          </Fact>
+          <Fact label="Service case">
+            {linkedCase ? (
+              <Link to={casePath(linkedCase.primaryId)} className="text-primary hover:underline">
+                {linkedCase.properties.number}
+              </Link>
+            ) : (
+              "None"
+            )}
+          </Fact>
+          {decided ? (
+            <Fact label="Decided">{formatDate(properties.decisionAt)}</Fact>
+          ) : properties.sourceUpdatedAt ? (
+            <Fact label={properties.status === "sent" ? "Sent" : "Updated"}>
+              {formatRelativeTime(properties.sourceUpdatedAt)}
+            </Fact>
+          ) : null}
+        </dl>
+      </header>
+
+      <div className="flex flex-wrap items-start gap-5">
+        <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-5">
+          {next}
+
+          <section
+            aria-label={`Quote ${properties.number}`}
+            className="rounded-[20px] bg-card shadow-[var(--shadow-card)]"
+          >
+            <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-5 sm:px-8">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[17px] font-semibold tracking-[-0.015em]">
+                  Northline Mechanical
+                </span>
+                <span className="text-[13.5px] text-muted-foreground">Repair quote</span>
+              </div>
+              <div className="flex flex-col items-end gap-0.5 text-right">
+                <span className="text-[15px] font-semibold tabular-nums">{properties.number}</span>
+                {properties.sourceUpdatedAt ? (
+                  <span className="text-[13.5px] text-muted-foreground tabular-nums">
+                    {formatDate(properties.sourceUpdatedAt)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <DocumentPart label="Prepared for">
+              <p className="text-[16px] font-semibold">{customer?.properties.name ?? "Customer"}</p>
+              {facility ? (
+                <p className="text-[14px] leading-5 text-foreground/80">
+                  {facility.properties.name} · {facility.properties.addressLine},{" "}
+                  {facility.properties.city}, {facility.properties.state}{" "}
+                  {facility.properties.postalCode}
+                </p>
+              ) : null}
+              {customer?.properties.primaryContactName ? (
+                <p className="text-[14px] leading-5 text-muted-foreground">
+                  Attention {customer.properties.primaryContactName}
+                </p>
+              ) : null}
+            </DocumentPart>
+
+            <DocumentPart label="Scope of work">
+              <p className="text-[16px] leading-[1.55] text-pretty">{properties.scope}</p>
+            </DocumentPart>
+
+            <DocumentPart label="Why it needs authorization">
+              <p className="text-[15px] leading-[1.55] text-pretty text-foreground/80">
+                {properties.reason}
+              </p>
+            </DocumentPart>
+
+            <div className="mx-6 flex items-end justify-between gap-4 border-t border-border/70 pt-5 pb-6 sm:mx-8">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">Total</span>
+                <span className="text-[13.5px] text-muted-foreground">
+                  {properties.currency} · valid until {formatDate(properties.validUntil)}
+                </span>
+              </div>
+              <span className="text-[30px] leading-9 font-semibold tracking-[-0.02em] tabular-nums">
+                {formatMoney(properties.amount)}
+              </span>
+            </div>
+          </section>
+        </div>
+
+        <aside className="flex min-w-0 flex-[1_1_320px] flex-col gap-5">
+          {linkedCase ? (
+            <Section
+              title="Service case"
+              action={
+                <Link
+                  to={casePath(linkedCase.primaryId)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  Open
+                </Link>
+              }
+            >
+              <div className="flex flex-col gap-2 px-6 pb-5">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="min-w-0 text-[15px] leading-5 font-semibold">
+                    {linkedCase.properties.number} · {linkedCase.properties.title}
+                  </span>
+                  <StatusBadge value={linkedCase.properties.status} />
+                </div>
+                <span className="text-[13.5px] leading-5 text-muted-foreground">
+                  {[serviceCase?.links.equipment?.properties.name, linkedCase.properties.nextAction]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </div>
+            </Section>
+          ) : null}
+
+          <CustomerCard customer={customer} facility={facility} />
+        </aside>
+      </div>
+    </div>
+  )
+}
+
+function DocumentPart({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="mx-6 flex flex-col gap-1.5 border-t border-border/70 py-5 sm:mx-8">
+      <h3 className="text-[12.5px] font-semibold text-muted-foreground">{label}</h3>
+      {children}
+    </div>
+  )
+}
+
+function caseForReview(
+  intervention: Intervention,
+  cases: readonly ServiceCaseRow[]
+): ServiceCaseRow | undefined {
+  const caseId = refValue(intervention.input.serviceCase)?.primaryId
+  const caseNumber = textValue(intervention.input.caseNumber)
+  return (
+    cases.find((serviceCase) => serviceCase.primaryId === caseId) ??
+    cases.find((serviceCase) => serviceCase.properties.number === caseNumber)
   )
 }
 
 function matchesView(quote: QuoteRow, view: View): boolean {
   if (view === "all") return true
-  if (view === "expiring") {
-    return (
-      ["internal_review", "sent"].includes(quote.properties.status) &&
-      daysUntil(quote.properties.validUntil) <= 7
-    )
-  }
+  if (view === "expiring") return expiresSoon(quote)
   return quote.properties.status === view
 }
 
@@ -636,100 +680,38 @@ function quotePriority(quote: QuoteRow): number {
   return status + Math.max(0, 30 - daysUntil(quote.properties.validUntil))
 }
 
-function equipmentLabel(serviceCase: ServiceCaseRow | undefined, quote: QuoteRow): string {
-  const linkedEquipment = serviceCase?.links.equipment?.properties.name
-  if (linkedEquipment) return linkedEquipment
-  const scope = quote.properties.scope.toLowerCase()
-  if (scope.includes("controller")) return "Building Controller"
-  const equipmentCode = quote.properties.scope.match(/\b(?:RTU|AHU)-\d+\b/i)?.[0]
-  return equipmentCode?.toUpperCase() ?? "Service work"
+/** Open and valid for at most another week; a quote past its date has already expired. */
+function expiresSoon(quote: QuoteRow): boolean {
+  const days = daysUntil(quote.properties.validUntil)
+  return isQuoteOpen(quote.properties.status) && days >= 0 && days <= 7
 }
 
-function stageLabel(status: string): string {
-  if (status === "internal_review") return "Northline approval"
-  if (status === "sent") return "Awaiting customer"
-  if (status === "approved" || status === "declined") return "Decision recorded"
-  if (status === "expired") return "Quote expired"
-  return "Draft preparation"
+function statusLabel(status: string): string {
+  return status === "sent" ? "With customer" : humanize(status)
 }
 
-function stageTone(status: string): string {
-  if (status === "approved") return "text-[color:var(--success)]"
-  if (status === "sent") return "text-[color:var(--info)]"
-  if (status === "internal_review") return "text-[color:var(--warning)]"
-  if (status === "declined" || status === "expired") return "text-destructive"
-  return "text-muted-foreground"
-}
-
-function decisionDateLabel(quote: QuoteRow): string {
-  if (["approved", "declined"].includes(quote.properties.status)) {
-    return quote.properties.decisionAt
-      ? `${quoteStatusLabel(quote.properties.status)} ${formatDate(quote.properties.decisionAt)}`
-      : quoteStatusLabel(quote.properties.status)
+function validityLabel(quote: QuoteRow): string {
+  const { status, decisionAt, validUntil } = quote.properties
+  if (status === "approved" || status === "declined") {
+    return decisionAt ? `${humanize(status)} ${formatDate(decisionAt)}` : humanize(status)
   }
-  return `Valid until ${formatDate(quote.properties.validUntil)}`
-}
-
-function outcomeLabel(quote: QuoteRow): string {
-  if (quote.properties.status === "internal_review") {
-    return remainingLabel(quote.properties.validUntil)
-  }
-  if (quote.properties.status === "sent") {
-    return quote.properties.sourceUpdatedAt
-      ? `Sent ${formatRelativeTime(quote.properties.sourceUpdatedAt)}`
-      : "Awaiting response"
-  }
-  if (quote.properties.status === "approved") return "Work returned to dispatch"
-  if (quote.properties.status === "declined") return "Customer declined repair"
-  if (quote.properties.status === "expired") return "No longer valid"
-  return "Not yet sent"
-}
-
-function outcomeTone(quote: QuoteRow): string {
-  if (quote.properties.status === "approved") return "text-[color:var(--success)]"
-  if (quote.properties.status === "sent") return "text-[color:var(--info)]"
-  if (quote.properties.status === "internal_review") return "text-[color:var(--warning)]"
-  if (["declined", "expired"].includes(quote.properties.status)) return "text-destructive"
-  return "text-muted-foreground"
-}
-
-function quoteStatusLabel(status: string): string {
-  return status.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase())
+  if (status === "expired" || daysUntil(validUntil) < 0) return `Expired ${formatDate(validUntil)}`
+  if (expiresSoon(quote)) return remainingLabel(validUntil)
+  return `Valid until ${formatDate(validUntil)}`
 }
 
 function remainingLabel(value: string | Date | undefined): string {
   const days = daysUntil(value)
   if (days < 0) return "Expired"
   if (days === 0) return "Expires today"
-  if (days === 1) return "1 day remaining"
-  return `${days} days remaining`
+  if (days === 1) return "1 day left"
+  return `${days} days left`
 }
 
-function daysUntil(value: string | Date | undefined): number {
-  if (!value) return Number.POSITIVE_INFINITY
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(value)
-  target.setHours(0, 0, 0, 0)
-  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
+function headline(scope: string): string {
+  return scope.replace(/\.$/, "")
 }
 
 function dateValue(value: string | Date | undefined): number {
   return value ? new Date(value).getTime() : Number.POSITIVE_INFINITY
-}
-
-function formatBlockedValue(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: value % 1 === 0 ? 0 : 2,
-  }).format(value)
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : ""
-}
-
-function numeric(value: unknown): number {
-  return typeof value === "number" ? value : 0
 }

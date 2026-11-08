@@ -5,22 +5,23 @@ import {
   controlsEquipment,
   controlsRawReadings,
 } from "../datasets/building-controls"
+import { allRows } from "../lib/sources/client-utils"
 import { frequentControlsSync } from "../schedules/source-syncs"
 
 export const syncControlsEquipment = defineSync("sync-controls-equipment")
   .when(frequentControlsSync)
   .from(buildingControlsConnector)
-  .read(async (client) => (await client.listEquipment()).rows)
+  .read((client) => allRows((input) => client.listEquipment(input)))
   .intoDataset(controlsEquipment)
 
 export const syncControlsReadings = defineSync("sync-controls-readings")
   .when(frequentControlsSync)
   .from(buildingControlsConnector)
-  .read(async (client) => (await client.listReadings()).rows)
+  .read((client) => allRows((input) => client.listReadings(input)))
   .intoDataset(controlsRawReadings)
 
 export const syncControlsAlarms = defineSync("sync-controls-alarms")
   .when(frequentControlsSync)
   .from(buildingControlsConnector)
-  .read(async (client) => (await client.listAlarms()).rows)
+  .read((client) => allRows((input) => client.listAlarms(input)))
   .intoDataset(controlsAlarms)

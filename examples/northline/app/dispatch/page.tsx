@@ -1,57 +1,59 @@
-import type {
-  ListWorkflowInterventionsResponse,
-  SubmitWorkflowInterventionData,
-} from "@sixb/client"
-import {
-  listWorkflowInterventionsOptions,
-  listWorkflowInterventionsQueryKey,
-  submitWorkflowInterventionMutation,
-  useObjectsQuery,
-} from "@sixb/client/hooks"
+import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Button } from "@sixb/ui/components"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Filter, LoaderCircle } from "lucide-react"
-import type { CSSProperties } from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { cn } from "@sixb/ui/lib/utils"
+import { ArrowRight, Check, ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react"
+import type { CSSProperties, ReactNode } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
 import { WorkOrder } from "../../ontology/work-order"
-import { deadlineLabel, humanize, QueryState, StatusIndicator } from "../_components/ui"
-
-type Intervention = ListWorkflowInterventionsResponse["interventions"][number]
-type InterventionResponse = SubmitWorkflowInterventionData["body"]["response"]
+import { EquipmentThumb } from "../_components/equipment-picture"
+import { decisionRingClass, ErrorLine, pillClass } from "../_components/next-step"
+import {
+  CaseClockText,
+  Fact,
+  formatTime,
+  humanize,
+  initials,
+  PageHeader,
+  QueryState,
+  Section,
+  StatusBadge,
+  StatusIndicator,
+} from "../_components/ui"
+import {
+  type Intervention,
+  type InterventionResponse,
+  refValue,
+  textValue,
+  useInterventionReviews,
+} from "../_lib/interventions"
+import type { QueryRow } from "../_lib/query-types"
+import { casePath, openServiceCases, openWorkOrders } from "../_lib/service-cases"
 
 const techniciansQuery = objects(Technician).query().orderBy(Technician.p.name, "asc").limit(50)
 
-const workOrdersQuery = objects(WorkOrder)
-  .query()
+const workOrdersQuery = openWorkOrders
   .expand(WorkOrder.l.serviceCase)
   .expand(WorkOrder.l.equipment)
   .expand(WorkOrder.l.assignee)
   .orderBy(WorkOrder.p.scheduledStart, "asc")
   .limit(100)
 
-const serviceCasesQuery = objects(ServiceCase)
-  .query()
+const serviceCasesQuery = openServiceCases
   .expand(ServiceCase.l.customer)
   .expand(ServiceCase.l.facility)
   .expand(ServiceCase.l.equipment)
+  .orderBy(ServiceCase.p.responseDeadline, "asc")
   .limit(100)
-
-const interventionQuery = {
-  interventionId: "review-dispatch",
-  status: "pending" as const,
-  limit: "100",
-  order: "desc" as const,
-}
 
 const timelineStartHour = 8
 const timelineEndHour = 18
-const timelineGuideStepMinutes = 2 * 60
-const timelineHourWidth = 120
-const timelineTechnicianColumnWidth = 250
+/** The visible range widens in two-hour steps to fit work scheduled outside the working day. */
+const timelineSnapMinutes = 2 * 60
+const timelineHourWidth = 80
+const timelineTechnicianColumnWidth = 224
 const timelineDefaultWorkDurationMinutes = 90
 
 interface TimelineRange {
@@ -60,55 +62,33 @@ interface TimelineRange {
   hours: number[]
 }
 
-type TechnicianRow = NonNullable<Awaited<ReturnType<typeof techniciansQuery.first>>>
-type WorkOrderRow = NonNullable<Awaited<ReturnType<typeof workOrdersQuery.first>>>
-type ServiceCaseRow = NonNullable<Awaited<ReturnType<typeof serviceCasesQuery.first>>>
+type TechnicianRow = QueryRow<typeof techniciansQuery>
+type WorkOrderRow = QueryRow<typeof workOrdersQuery>
+type ServiceCaseRow = QueryRow<typeof serviceCasesQuery>
 
 export default function DispatchPage() {
-  const queryClient = useQueryClient()
-  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()))
+  // Until someone picks a day, the board opens on today, or on the first day with work.
+  const [pickedDate, setPickedDate] = useState<Date>()
   const [scheduleView, setScheduleView] = useState<"timeline" | "list">("timeline")
   const [showAvailableOnly, setShowAvailableOnly] = useState(false)
   const [reviewingId, setReviewingId] = useState<string>()
-  const [submittingId, setSubmittingId] = useState<string>()
-  const didChooseInitialDate = useRef(false)
   const technicians = useObjectsQuery(techniciansQuery)
   const workOrders = useObjectsQuery(workOrdersQuery)
   const serviceCases = useObjectsQuery(serviceCasesQuery)
-  const reviews = useQuery(listWorkflowInterventionsOptions({ query: interventionQuery }))
-  const submit = useMutation({
-    ...submitWorkflowInterventionMutation(),
-    onSuccess: async () => {
-      setReviewingId(undefined)
-      await queryClient.invalidateQueries({
-        queryKey: listWorkflowInterventionsQueryKey({ query: interventionQuery }),
-      })
-    },
-    onSettled: () => setSubmittingId(undefined),
-  })
-
-  const pending = reviews.data?.interventions ?? []
-  const caseRows = serviceCases.data?.objects ?? []
-  const activeWork = (workOrders.data?.objects ?? []).filter(
-    (item) => !["completed", "cancelled"].includes(item.properties.status)
+  const { reviews, pending, approve, submitting, failed } = useInterventionReviews(
+    "review-dispatch",
+    () => setReviewingId(undefined)
   )
-  useEffect(() => {
-    if (didChooseInitialDate.current || workOrders.isLoading || activeWork.length === 0) return
-    didChooseInitialDate.current = true
-    const hasWorkToday = activeWork.some((item) =>
-      item.properties.scheduledStart
-        ? isSameDay(new Date(item.properties.scheduledStart), selectedDate)
-        : false
-    )
-    const firstScheduledStart = activeWork.find((item) => item.properties.scheduledStart)
-      ?.properties.scheduledStart
-    if (!hasWorkToday && firstScheduledStart) {
-      setSelectedDate(startOfDay(new Date(firstScheduledStart)))
-    }
-  }, [activeWork, selectedDate, workOrders.isLoading])
+
+  const caseRows = serviceCases.data?.objects ?? []
+  const activeWork = workOrders.data?.objects
+  const selectedDate = useMemo(
+    () => pickedDate ?? openingDate(activeWork ?? []),
+    [activeWork, pickedDate]
+  )
   const workOnSelectedDate = useMemo(
     () =>
-      activeWork.filter((item) =>
+      (activeWork ?? []).filter((item) =>
         item.properties.scheduledStart
           ? isSameDay(new Date(item.properties.scheduledStart), selectedDate)
           : false
@@ -116,194 +96,191 @@ export default function DispatchPage() {
     [activeWork, selectedDate]
   )
   const technicianRows = useMemo(() => {
-    const rows = (technicians.data?.objects ?? []).filter(
-      (technician) => technician.properties.availability !== "off_duty"
-    )
-    return [...rows].sort((left, right) => {
-      const leftHasWork = workOnSelectedDate.some(
-        (workOrder) => workOrder.links.assignee?.primaryId === left.primaryId
+    const busy = new Set(workOnSelectedDate.map((workOrder) => workOrder.links.assignee?.primaryId))
+    return (technicians.data?.objects ?? [])
+      .filter((technician) => technician.properties.availability !== "off_duty")
+      .sort(
+        (left, right) =>
+          Number(busy.has(right.primaryId)) - Number(busy.has(left.primaryId)) ||
+          left.properties.name.localeCompare(right.properties.name)
       )
-      const rightHasWork = workOnSelectedDate.some(
-        (workOrder) => workOrder.links.assignee?.primaryId === right.primaryId
-      )
-      if (leftHasWork !== rightHasWork) return leftHasWork ? -1 : 1
-      return left.properties.name.localeCompare(right.properties.name)
-    })
   }, [technicians.data?.objects, workOnSelectedDate])
+  // The day's board: jobs for technicians on duty, and jobs still waiting for one. The count, the
+  // timeline and the list all show these.
+  const boardWork = useMemo(() => {
+    const onDuty = new Set(technicianRows.map((technician) => technician.primaryId))
+    return workOnSelectedDate.filter((workOrder) => {
+      const assigneeId = workOrder.links.assignee?.primaryId
+      return !assigneeId || onDuty.has(assigneeId)
+    })
+  }, [technicianRows, workOnSelectedDate])
+  const visibleTechnicians = technicianRows.filter(
+    (technician) => !showAvailableOnly || technician.properties.availability === "available"
+  )
+  const availableCount = technicianRows.filter(
+    (technician) => technician.properties.availability === "available"
+  ).length
+
+  const reviewsLoading = reviews.isLoading || serviceCases.isLoading
+  const reviewsError = reviews.isError || serviceCases.isError
 
   return (
     <div className="pb-8">
-      <header className="mb-6 flex items-start justify-between gap-6 max-md:flex-col">
-        <div className="min-w-0">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-primary uppercase">
-            Field coordination
-          </p>
-          <h1 className="text-[32px] leading-9 font-semibold tracking-[-0.035em] text-foreground max-sm:text-[28px]">
-            Dispatch
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Assign urgent work and coordinate today&apos;s field capacity.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-            <StatusIndicator
-              value="active"
-              label={`${technicianRows.length} technicians on duty`}
-            />
-            <span className="h-4 w-px bg-border" aria-hidden="true" />
-            <StatusIndicator
-              value={pending.length > 0 ? "urgent" : "available"}
-              label={
-                pending.length === 0
-                  ? "No work needs assignment"
-                  : pending.length === 1
-                    ? "1 needs assignment"
-                    : `${pending.length} need assignment`
-              }
-            />
-          </div>
-        </div>
+      <PageHeader
+        title="Dispatch"
+        description="Approve the recommended assignments and coordinate the day’s field capacity."
+        action={
+          <DateControl
+            date={selectedDate}
+            onPrevious={() => setPickedDate(shiftDate(selectedDate, -1))}
+            onNext={() => setPickedDate(shiftDate(selectedDate, 1))}
+            onToday={() => setPickedDate(startOfDay(new Date()))}
+          />
+        }
+      >
+        <dl className="flex flex-wrap gap-x-9 gap-y-3">
+          <Fact label="Needs assignment">
+            {reviews.isLoading ? (
+              "—"
+            ) : pending.length === 0 ? (
+              "Nothing waiting"
+            ) : (
+              <span className="text-[color:var(--warning)]">{count(pending.length, "case")}</span>
+            )}
+          </Fact>
+          <Fact label="On duty">
+            {technicians.isLoading ? "—" : count(technicianRows.length, "technician")}
+          </Fact>
+          <Fact label="Available">
+            {technicians.isLoading ? "—" : `${availableCount} of ${technicianRows.length}`}
+          </Fact>
+          <Fact label="Scheduled">
+            {workOrders.isLoading ? "—" : count(boardWork.length, "job")}
+          </Fact>
+        </dl>
+      </PageHeader>
 
-        <DateControl
-          date={selectedDate}
-          onPrevious={() => setSelectedDate((current) => shiftDate(current, -1))}
-          onNext={() => setSelectedDate((current) => shiftDate(current, 1))}
-          onToday={() => setSelectedDate(startOfDay(new Date()))}
-        />
-      </header>
-
-      <section className="overflow-hidden rounded-xl border border-border/90 bg-card">
-        <header className="px-5 pt-5 pb-3">
-          <h2 className="text-base font-semibold tracking-[-0.015em]">Needs assignment</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Unscheduled work ordered by customer impact.
-          </p>
-        </header>
-
-        <QueryState
-          loading={reviews.isLoading || serviceCases.isLoading}
-          error={reviews.isError || serviceCases.isError}
-          empty={pending.length === 0}
-          emptyMessage="All urgent work is assigned."
-        >
-          <div className="divide-y divide-border/75">
-            {pending.map((intervention) => {
-              const serviceCaseRef = objectRef(intervention.input.serviceCase)
-              const serviceCase = caseRows.find(
-                (item) => item.primaryId === serviceCaseRef?.primaryId
-              )
-              const technicianRef =
-                objectRef(intervention.defaultResponse.technician) ??
-                objectRef(intervention.input.recommendedTechnician)
-              const recommended = technicianRows.find(
-                (technician) => technician.primaryId === technicianRef?.primaryId
-              )
-              return (
-                <AssignmentRow
-                  key={intervention.id}
-                  intervention={intervention}
-                  serviceCase={serviceCase}
-                  recommended={recommended}
-                  reviewing={reviewingId === intervention.id}
-                  submitting={submit.isPending && submittingId === intervention.id}
-                  onReview={() => setReviewingId(intervention.id)}
-                  onCancel={() => setReviewingId(undefined)}
-                  onApprove={(response) => {
-                    setSubmittingId(intervention.id)
-                    submit.mutate({
-                      path: { interventionId: intervention.id },
-                      body: { response },
-                    })
-                  }}
-                />
-              )
-            })}
-          </div>
-        </QueryState>
-      </section>
-
-      <section className="mt-4 overflow-hidden rounded-xl border border-border/90 bg-card">
-        <header className="flex items-center justify-between gap-5 px-5 py-5 max-sm:items-start">
-          <div>
-            <h2 className="text-base font-semibold tracking-[-0.015em]">
-              {isToday(selectedDate)
-                ? "Today’s field schedule"
-                : formatScheduleHeading(selectedDate)}
+      <div className="flex flex-col gap-10">
+        <section aria-labelledby="dispatch-reviews" className="flex flex-col gap-4">
+          <header>
+            <h2
+              id="dispatch-reviews"
+              className="text-[19px] leading-6 font-semibold tracking-[-0.015em]"
+            >
+              Needs assignment
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Live assignments and open capacity by technician.
+            <p className="mt-1 text-[13.5px] leading-5 text-muted-foreground">
+              Northline recommends a technician and window for each case. Review it, then approve to
+              dispatch.
             </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <div className="flex overflow-hidden rounded-md border border-border bg-background">
+          </header>
+
+          {!reviewsLoading && !reviewsError && pending.length > 0 ? (
+            <ul className="flex flex-col gap-4">
+              {pending.map((intervention) => {
+                const caseId = refValue(intervention.input.serviceCase)?.primaryId
+                const serviceCase = caseRows.find((item) => item.primaryId === caseId)
+                const technicianId = recommendation(intervention).technician?.primaryId
+                const recommended = technicianRows.find(
+                  (technician) => technician.primaryId === technicianId
+                )
+                return (
+                  <li key={intervention.id}>
+                    <DispatchDecision
+                      intervention={intervention}
+                      serviceCase={serviceCase}
+                      recommended={recommended}
+                      reviewing={reviewingId === intervention.id}
+                      submitting={submitting(intervention)}
+                      failed={failed(intervention)}
+                      onReview={() => setReviewingId(intervention.id)}
+                      onCancel={() => setReviewingId(undefined)}
+                      onApprove={(response) => approve(intervention, response)}
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <Section>
+              <QueryState
+                loading={reviewsLoading}
+                error={reviewsError}
+                empty={pending.length === 0}
+                emptyMessage="All urgent work is assigned."
+              />
+            </Section>
+          )}
+        </section>
+
+        <Section className="overflow-hidden">
+          <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4 px-6 pt-5 pb-4">
+            <div className="min-w-0">
+              <h2 className="text-[19px] leading-6 font-semibold tracking-[-0.015em]">
+                {isToday(selectedDate)
+                  ? "Today’s field schedule"
+                  : formatScheduleHeading(selectedDate)}
+              </h2>
+              <p className="mt-1 text-[13.5px] leading-5 text-muted-foreground">
+                Live assignments and open capacity by technician.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                role="group"
+                aria-label="Schedule view"
+                className="inline-flex h-9 items-center rounded-full bg-black/[0.05] p-0.5 dark:bg-white/[0.08]"
+              >
+                <ViewButton
+                  active={scheduleView === "timeline"}
+                  onClick={() => setScheduleView("timeline")}
+                >
+                  Timeline
+                </ViewButton>
+                <ViewButton
+                  active={scheduleView === "list"}
+                  onClick={() => setScheduleView("list")}
+                >
+                  List
+                </ViewButton>
+              </div>
               <button
                 type="button"
-                aria-pressed={scheduleView === "timeline"}
-                className={
-                  scheduleView === "timeline"
-                    ? "h-9 bg-primary px-4 text-xs font-semibold text-primary-foreground"
-                    : "h-9 px-4 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                }
-                onClick={() => setScheduleView("timeline")}
+                aria-pressed={showAvailableOnly}
+                title="Show available technicians only"
+                className={cn(
+                  "inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-[13.5px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                  showAvailableOnly
+                    ? "bg-foreground text-background"
+                    : "bg-black/[0.05] text-foreground/80 hover:bg-black/[0.08] dark:bg-white/[0.08]"
+                )}
+                onClick={() => setShowAvailableOnly((current) => !current)}
               >
-                Timeline
-              </button>
-              <button
-                type="button"
-                aria-pressed={scheduleView === "list"}
-                className={
-                  scheduleView === "list"
-                    ? "h-9 border-l border-border bg-primary px-4 text-xs font-semibold text-primary-foreground"
-                    : "h-9 border-l border-border px-4 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                }
-                onClick={() => setScheduleView("list")}
-              >
-                List
+                {showAvailableOnly ? <Check className="size-3.5" strokeWidth={2.4} /> : null}
+                Available only
               </button>
             </div>
-            <button
-              type="button"
-              aria-label="Show available technicians only"
-              aria-pressed={showAvailableOnly}
-              title="Show available technicians only"
-              className={
-                showAvailableOnly
-                  ? "grid size-9 place-items-center rounded-md border border-primary bg-primary text-primary-foreground"
-                  : "grid size-9 place-items-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:border-primary/45 hover:text-primary"
-              }
-              onClick={() => setShowAvailableOnly((current) => !current)}
-            >
-              <Filter className="size-4" strokeWidth={1.8} />
-            </button>
-          </div>
-        </header>
+          </header>
 
-        <QueryState
-          loading={technicians.isLoading || workOrders.isLoading}
-          error={technicians.isError || workOrders.isError}
-          empty={technicianRows.length === 0}
-          emptyMessage="No technicians are on duty."
-        >
-          {scheduleView === "timeline" ? (
-            <ScheduleTimeline
-              date={selectedDate}
-              technicians={technicianRows.filter(
-                (technician) =>
-                  !showAvailableOnly || technician.properties.availability === "available"
-              )}
-              workOrders={workOnSelectedDate}
-              pending={pending}
-            />
-          ) : (
-            <ScheduleList
-              technicians={technicianRows.filter(
-                (technician) =>
-                  !showAvailableOnly || technician.properties.availability === "available"
-              )}
-              workOrders={workOnSelectedDate}
-            />
-          )}
-        </QueryState>
-      </section>
+          <QueryState
+            loading={technicians.isLoading || workOrders.isLoading}
+            error={technicians.isError || workOrders.isError}
+            empty={technicianRows.length === 0}
+            emptyMessage="No technicians are on duty."
+          >
+            {scheduleView === "timeline" ? (
+              <ScheduleTimeline
+                date={selectedDate}
+                technicians={visibleTechnicians}
+                workOrders={boardWork}
+                pending={pending}
+              />
+            ) : (
+              <ScheduleList technicians={visibleTechnicians} workOrders={boardWork} />
+            )}
+          </QueryState>
+        </Section>
+      </div>
     </div>
   )
 }
@@ -319,50 +296,70 @@ function DateControl({
   onNext(): void
   onToday(): void
 }) {
+  const stepButton =
+    "grid size-8 place-items-center rounded-full text-foreground/70 transition-colors hover:bg-card hover:text-foreground hover:shadow-[var(--shadow-card)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+
   return (
-    <div className="flex shrink-0 items-center gap-3">
-      <div className="flex h-10 items-center overflow-hidden rounded-md border border-border bg-card">
-        <button
-          type="button"
-          className="grid h-full w-10 place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="Previous day"
-          onClick={onPrevious}
-        >
-          <ChevronLeft className="size-4" strokeWidth={1.8} />
+    <div className="flex items-center gap-2">
+      <div className="flex h-10 items-center rounded-full bg-black/[0.05] p-1 dark:bg-white/[0.08]">
+        <button type="button" className={stepButton} aria-label="Previous day" onClick={onPrevious}>
+          <ChevronLeft className="size-4" strokeWidth={2} />
         </button>
-        <span className="min-w-36 border-x border-border px-4 text-center text-xs font-medium tracking-[0.02em] text-foreground uppercase">
+        <span
+          aria-live="polite"
+          className="min-w-[7.5rem] px-2 text-center text-[14px] font-semibold tabular-nums"
+        >
           {new Intl.DateTimeFormat(undefined, {
             weekday: "short",
             month: "short",
             day: "numeric",
           }).format(date)}
         </span>
-        <button
-          type="button"
-          className="grid h-full w-10 place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="Next day"
-          onClick={onNext}
-        >
-          <ChevronRight className="size-4" strokeWidth={1.8} />
+        <button type="button" className={stepButton} aria-label="Next day" onClick={onNext}>
+          <ChevronRight className="size-4" strokeWidth={2} />
         </button>
       </div>
-      <button
-        type="button"
-        className="h-10 rounded-md border border-border bg-card px-4 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/45 hover:text-foreground"
-        onClick={onToday}
-      >
+      <button type="button" className={pillClass("secondary")} onClick={onToday}>
         Today
       </button>
     </div>
   )
 }
 
-function AssignmentRow({
+function ViewButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick(): void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      className={cn(
+        "h-8 rounded-full px-4 text-[13.5px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        active
+          ? "bg-card text-foreground shadow-[var(--shadow-card)]"
+          : "text-foreground/70 hover:text-foreground"
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** One pending dispatch review, framed like the service case's next step. */
+function DispatchDecision({
   intervention,
   serviceCase,
   recommended,
   reviewing,
   submitting,
+  failed,
   onReview,
   onCancel,
   onApprove,
@@ -372,143 +369,147 @@ function AssignmentRow({
   recommended: TechnicianRow | undefined
   reviewing: boolean
   submitting: boolean
+  failed: boolean
   onReview(): void
   onCancel(): void
   onApprove(response: InterventionResponse): void
 }) {
-  const technician =
-    objectRef(intervention.defaultResponse.technician) ??
-    objectRef(intervention.input.recommendedTechnician)
-  const scheduledStart =
-    intervention.defaultResponse.scheduledStart ?? intervention.input.scheduledStart
-  const scheduledEnd = intervention.defaultResponse.scheduledEnd ?? intervention.input.scheduledEnd
+  const { technician, scheduledStart, scheduledEnd } = recommendation(intervention)
   const equipment = serviceCase?.links.equipment?.properties
+  const duration = durationLabel(scheduledStart, scheduledEnd)
 
   return (
-    <article className="group mx-3 mb-3 overflow-hidden rounded-xl border border-primary/65 bg-primary/[0.035] transition-[background-color,box-shadow] hover:bg-primary/[0.055] hover:shadow-[0_1px_2px_rgba(13,32,39,0.04)]">
-      <div className="grid items-center gap-5 px-5 py-4 lg:grid-cols-[96px_minmax(280px,1.4fr)_145px_minmax(230px,0.72fr)_auto]">
-        <EquipmentThumbnail
-          equipmentName={equipment?.name ?? text(intervention.input.title, "Equipment")}
-          equipmentType={equipment?.equipmentType}
+    <article className={cn("flex flex-col gap-5 p-6 max-sm:p-5", decisionRingClass)}>
+      <div className="flex items-start gap-5 max-sm:gap-4">
+        <EquipmentThumb
+          name={equipment?.name}
+          type={equipment?.equipmentType}
+          className="size-[88px] rounded-[16px] max-sm:size-16"
         />
 
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <strong className="font-mono text-xs font-semibold">
-              {serviceCase?.properties.number ??
-                text(intervention.input.caseNumber, "Service case")}
-            </strong>
-            <StatusIndicator value={serviceCase?.properties.severity ?? "urgent"} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+            <span className="text-[12px] font-semibold text-primary">Dispatch recommendation</span>
+            <span className="flex items-center gap-2.5">
+              {serviceCase ? (
+                <CaseClockText
+                  serviceCase={serviceCase.properties}
+                  className="text-[13px] font-medium text-foreground/70"
+                />
+              ) : (
+                <span className="text-[13px] font-medium text-foreground/70">Needs review</span>
+              )}
+              <StatusBadge value={serviceCase?.properties.severity ?? "urgent"} />
+            </span>
           </div>
-          <Link
-            to={
-              serviceCase
-                ? `/service-cases/${encodeURIComponent(serviceCase.primaryId)}`
-                : "/service-cases"
-            }
-            className="mt-1.5 block truncate text-sm font-semibold tracking-[-0.012em] text-foreground hover:text-primary"
-          >
-            {serviceCase?.properties.title ?? text(intervention.input.title, "Dispatch review")}
-          </Link>
-          <p className="mt-1 text-xs font-medium text-foreground/85">
-            {serviceCase?.links.customer?.properties.name ?? "Customer"}
-          </p>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          <h3 className="text-[22px] leading-7 font-semibold tracking-[-0.015em] text-balance max-sm:text-[19px] max-sm:leading-6">
+            <Link
+              to={serviceCase ? casePath(serviceCase.primaryId) : "/service-cases"}
+              className="rounded-[4px] transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              {serviceCase?.properties.title ??
+                textValue(intervention.input.title, "Dispatch review")}
+            </Link>
+          </h3>
+          <p className="text-[14px] leading-5 text-pretty text-muted-foreground">
+            <span className="font-semibold text-foreground/70 tabular-nums">
+              {serviceCase?.properties.number ??
+                textValue(intervention.input.caseNumber, "Service case")}
+            </span>
+            {" · "}
+            {serviceCase?.links.customer?.properties.name ?? "Customer"} ·{" "}
             {serviceCase?.links.facility?.properties.name ?? "Facility"} ·{" "}
             {equipment?.name ?? "Equipment"}
           </p>
         </div>
+      </div>
 
-        <strong className="font-mono text-xs text-destructive lg:text-center">
-          {serviceCase ? deadlineLabel(serviceCase.properties.responseDeadline) : "Needs review"}
-        </strong>
-
-        <div className="border-border/80 lg:border-l lg:pl-6">
-          <span className="text-[11px] text-muted-foreground">Best fit</span>
-          <div className="mt-2 flex items-center gap-3">
-            <span className="grid size-8 shrink-0 place-items-center rounded-full border border-primary/35 bg-card font-mono text-[11px] font-medium text-primary">
+      <dl className="grid gap-x-8 gap-y-5 rounded-[16px] bg-muted/70 px-5 py-4 sm:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-2">
+          <dt className="text-[12px] text-muted-foreground">Recommended technician</dt>
+          <dd className="flex min-w-0 items-start gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-card text-[13px] font-semibold text-primary shadow-[var(--shadow-card)]">
               {initials(recommended?.properties.name ?? "Technician")}
             </span>
-            <span className="min-w-0">
-              <strong className="block truncate text-xs font-semibold">
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate text-[15px] leading-5 font-semibold">
                 {recommended?.properties.name ?? "Recommended technician"}
-              </strong>
-              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+              </span>
+              <span className="truncate text-[13px] leading-5 text-muted-foreground">
                 {recommended
                   ? `${humanize(recommended.properties.territory)} · ${humanize(recommended.properties.certification)}`
                   : "Qualification pending"}
               </span>
+              <StatusIndicator
+                value="available"
+                label={`Available ${formatUnknownTime(scheduledStart)}`}
+                className="pt-0.5"
+              />
             </span>
-          </div>
-          <StatusIndicator
-            value="available"
-            label={`Available ${formatUnknownTime(scheduledStart)}`}
-            className="mt-2 ml-11"
-          />
+          </dd>
         </div>
-
-        <Button
-          className="h-10 justify-between gap-5 px-4 text-xs"
-          disabled={!technician}
-          onClick={onReview}
-        >
-          Review assignment <ArrowRight className="size-4" />
-        </Button>
-      </div>
+        <div className="flex min-w-0 flex-col gap-2">
+          <dt className="text-[12px] text-muted-foreground">Window</dt>
+          <dd className="flex flex-col gap-0.5">
+            <span className="text-[15px] leading-5 font-semibold tabular-nums">
+              {formatUnknownDate(scheduledStart)} – {formatUnknownTime(scheduledEnd)}
+            </span>
+            {duration ? (
+              <span className="text-[13px] leading-5 text-muted-foreground">{duration}</span>
+            ) : null}
+          </dd>
+        </div>
+      </dl>
 
       {reviewing ? (
-        <div className="flex items-center justify-between gap-5 border-t border-primary/20 bg-card/75 px-5 py-4 max-md:flex-col max-md:items-stretch">
-          <div className="min-w-0">
-            <p className="text-xs leading-5 text-muted-foreground">
-              {text(intervention.input.recommendation, "Review the recommended assignment.")}
-            </p>
-            <p className="mt-1 font-mono text-[11px] text-foreground">
-              {formatUnknownDate(scheduledStart)} – {formatUnknownTime(scheduledEnd)}
+        <div className="flex flex-col gap-4 border-t border-border/70 pt-5">
+          <div className="flex flex-col gap-1">
+            <span className="text-[12px] font-semibold text-muted-foreground">
+              Why this technician
+            </span>
+            <p className="max-w-2xl text-[15px] leading-6 text-pretty text-foreground/80">
+              {textValue(intervention.input.recommendation, "Review the recommended assignment.")}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="outline" size="sm" disabled={submitting} onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              className={pillClass("primary")}
               disabled={submitting || !technician}
-              onClick={() => onApprove({ technician, scheduledStart, scheduledEnd })}
+              onClick={() => technician && onApprove({ technician, scheduledStart, scheduledEnd })}
             >
               {submitting ? (
                 <LoaderCircle className="size-4 animate-spin" />
               ) : (
-                <Check className="size-4" />
+                <Check className="size-4" strokeWidth={2.2} />
               )}
               {submitting ? "Approving…" : "Approve dispatch"}
-            </Button>
+            </button>
+            <button
+              type="button"
+              className={pillClass("secondary")}
+              disabled={submitting}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
           </div>
+          {failed ? <ErrorLine>The approval could not be sent. Try again.</ErrorLine> : null}
         </div>
-      ) : null}
-    </article>
-  )
-}
-
-function EquipmentThumbnail({
-  equipmentName,
-  equipmentType,
-}: {
-  equipmentName: string
-  equipmentType: string | undefined
-}) {
-  const illustration = equipmentIllustration(equipmentName, equipmentType)
-
-  return (
-    <span className="grid size-20 place-items-center overflow-hidden rounded-lg border border-primary/15 bg-secondary/75">
-      {illustration ? (
-        <img src={illustration} alt="" className="size-full object-cover" />
       ) : (
-        <span className="grid size-12 place-items-center rounded-lg border border-primary/25 bg-primary/10 font-mono text-[10px] font-semibold text-primary uppercase">
-          HVAC
-        </span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            className={pillClass("primary")}
+            disabled={!technician}
+            onClick={onReview}
+          >
+            Review assignment
+            <ArrowRight className="size-4" strokeWidth={2} />
+          </button>
+        </div>
       )}
-      <span className="sr-only">{equipmentName}</span>
-    </span>
+    </article>
   )
 }
 
@@ -527,50 +528,49 @@ function ScheduleList({
 
   if (visibleWork.length === 0) {
     return (
-      <p className="border-t border-border/80 px-5 py-12 text-center text-sm text-muted-foreground">
+      <p className="border-t border-border/70 px-6 py-12 text-center text-[14px] text-muted-foreground">
         No work is scheduled for this view.
       </p>
     )
   }
 
   return (
-    <div className="divide-y divide-border/75 border-t border-border/80">
+    <ul className="border-t border-border/70">
       {visibleWork.map((workOrder) => (
-        <Link
-          key={workOrder.primaryId}
-          to={`/service-cases/${encodeURIComponent(workOrder.links.serviceCase?.primaryId ?? "")}`}
-          className="group grid items-center gap-4 px-5 py-4 transition-colors hover:bg-accent/45 md:grid-cols-[120px_minmax(0,1fr)_200px_120px_auto]"
-        >
-          <span className="font-mono text-xs font-semibold">
-            {formatUnknownTime(workOrder.properties.scheduledStart)}
-            <span className="mt-1 block text-[10px] font-normal text-muted-foreground">
-              to {formatUnknownTime(workOrder.properties.scheduledEnd)}
+        <li key={workOrder.primaryId} className="border-t border-border/70 first:border-t-0">
+          <Link
+            to={casePath(workOrder.links.serviceCase?.primaryId)}
+            className="group grid grid-cols-[4.75rem_minmax(0,1fr)] items-center gap-4 px-6 py-4 transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none sm:grid-cols-[5.25rem_minmax(0,1fr)_auto_1rem] dark:hover:bg-white/[0.03]"
+          >
+            <span className="flex flex-col gap-0.5 tabular-nums">
+              <span className="text-[15px] leading-5 font-semibold">
+                {formatUnknownTime(workOrder.properties.scheduledStart)}
+              </span>
+              <span className="text-[13px] leading-5 text-muted-foreground">
+                to {formatUnknownTime(workOrder.properties.scheduledEnd)}
+              </span>
             </span>
-          </span>
-          <span className="min-w-0">
-            <strong className="block truncate font-mono text-[10px]">
-              {workOrder.properties.number}
-            </strong>
-            <span className="mt-1 block truncate text-xs font-semibold group-hover:text-primary">
-              {workOrder.properties.title}
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className="truncate text-[15.5px] leading-5 font-semibold tracking-[-0.01em] group-hover:text-primary">
+                {workOrder.properties.title}
+              </span>
+              <span className="truncate text-[13.5px] leading-5 text-muted-foreground">
+                <span className="tabular-nums">{workOrder.properties.number}</span> ·{" "}
+                {workOrder.links.equipment?.properties.name ?? "Equipment"} ·{" "}
+                {workOrder.links.assignee?.properties.name ?? "Unassigned"}
+              </span>
+              <span className="pt-1 sm:hidden">
+                <StatusBadge value={workOrder.properties.status} />
+              </span>
             </span>
-          </span>
-          <span className="min-w-0 text-xs">
-            <strong className="block truncate font-medium">
-              {workOrder.links.equipment?.properties.name ?? "Equipment"}
-            </strong>
-            <span className="mt-1 block truncate text-[10px] text-muted-foreground">
-              {workOrder.links.assignee?.properties.name ?? "Unassigned"}
+            <span className="max-sm:hidden">
+              <StatusBadge value={workOrder.properties.status} />
             </span>
-          </span>
-          <StatusIndicator value={workOrder.properties.status} />
-          <ArrowRight
-            className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
-            strokeWidth={1.8}
-          />
-        </Link>
+            <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground max-sm:hidden" />
+          </Link>
+        </li>
       ))}
-    </div>
+    </ul>
   )
 }
 
@@ -587,89 +587,58 @@ function ScheduleTimeline({
 }) {
   const now = new Date()
   const range = createTimelineRange(date, workOrders)
+  const unassigned = workOrders.filter((workOrder) => !workOrder.links.assignee)
   const nowPosition = isSameDay(date, now) ? timePosition(now, date, range) : undefined
   const timelineWidth = ((range.endMinutes - range.startMinutes) / 60) * timelineHourWidth
   const timelineCanvasStyle = {
-    width: timelineTechnicianColumnWidth + timelineWidth,
+    minWidth: timelineTechnicianColumnWidth + timelineWidth,
   } satisfies CSSProperties
   const timelineGridStyle = {
-    gridTemplateColumns: `${timelineTechnicianColumnWidth}px ${timelineWidth}px`,
+    gridTemplateColumns: `${timelineTechnicianColumnWidth}px minmax(${timelineWidth}px, 1fr)`,
   } satisfies CSSProperties
 
   return (
-    <div
-      className="overflow-x-auto overscroll-x-contain border-t border-border/80 [scrollbar-gutter:stable]"
-      role="region"
-      aria-label="Technician schedule timeline"
-      tabIndex={0}
-    >
-      <div style={timelineCanvasStyle}>
-        <div className="grid border-b border-border/80" style={timelineGridStyle}>
-          <div className="border-r border-border/70 bg-card md:sticky md:left-0 md:z-30" />
-          <div className="relative h-11">
-            <TimelineGuides range={range} />
-            {range.hours.map((hour) => (
-              <span
-                key={hour}
-                className="absolute top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground"
-                style={timeLabelStyle(hour, range)}
-              >
-                {formatHour(hour)}
-              </span>
-            ))}
-            {nowPosition !== undefined ? (
-              <span
-                className="absolute top-0 z-20 -translate-x-1/2 bg-card px-1.5 font-mono text-[10px] font-semibold tracking-[0.04em] text-primary"
-                style={{ left: `${nowPosition}%` }}
-              >
-                NOW {formatTimelineTime(now)}
-              </span>
-            ) : null}
+    <>
+      <div
+        className="overflow-x-auto overscroll-x-contain border-t border-border/70 [scrollbar-gutter:stable] focus-visible:outline-none"
+        role="region"
+        aria-label="Technician schedule timeline"
+        tabIndex={0}
+      >
+        <div className="w-full" style={timelineCanvasStyle}>
+          <div className="grid border-b border-border/70" style={timelineGridStyle}>
+            <div className="flex items-center border-r border-border/70 bg-card px-5 text-[12px] font-medium text-muted-foreground md:sticky md:left-0 md:z-30">
+              Technician
+            </div>
+            <div className="relative h-10">
+              {range.hours.map((hour) => (
+                <span
+                  key={hour}
+                  className="absolute top-1/2 text-[12px] whitespace-nowrap text-muted-foreground tabular-nums"
+                  style={timeLabelStyle(hour, range)}
+                >
+                  {formatHour(hour)}
+                </span>
+              ))}
+              {nowPosition !== undefined ? (
+                <span
+                  className="absolute top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary px-2 py-0.5 text-[11.5px] font-semibold whitespace-nowrap text-primary-foreground tabular-nums"
+                  style={{ left: `${nowPosition}%` }}
+                >
+                  {formatTime(now)}
+                </span>
+              ) : null}
+            </div>
           </div>
-        </div>
 
-        {technicians.map((technician) => {
-          const assignedWork = workOrders.filter(
-            (workOrder) => workOrder.links.assignee?.primaryId === technician.primaryId
-          )
-          const availabilityStart = recommendedAvailabilityStart(technician, pending, date, now)
-          return (
-            <div
-              key={technician.primaryId}
-              className="grid min-h-[66px] border-b border-border/70 last:border-b-0"
-              style={timelineGridStyle}
-            >
-              <Link
-                to={`/technicians/${encodeURIComponent(technician.primaryId)}`}
-                className="group flex items-center gap-3 border-r border-border/70 bg-card px-5 py-3 transition-colors hover:bg-accent/55 md:sticky md:left-0 md:z-20"
-              >
-                <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-medium text-foreground">
-                  {initials(technician.properties.name)}
-                </span>
-                <span className="min-w-0">
-                  <strong className="block truncate text-xs font-semibold group-hover:text-primary">
-                    {technician.properties.name}
-                  </strong>
-                  <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
-                    {humanize(technician.properties.territory)} ·{" "}
-                    {humanize(technician.properties.certification)}
-                  </span>
-                </span>
-              </Link>
-
-              <div className="relative min-h-[66px] overflow-hidden">
+          {unassigned.length > 0 ? (
+            <div className="grid border-b border-border/70" style={timelineGridStyle}>
+              <div className="flex items-center border-r border-border/70 bg-card px-5 py-3 text-[14.5px] font-semibold md:sticky md:left-0 md:z-20">
+                Waiting for a technician
+              </div>
+              <div className="relative min-h-[80px] overflow-hidden">
                 <TimelineGuides range={range} />
-                {availabilityStart && assignedWork.length === 0 ? (
-                  <div
-                    className="absolute top-3 h-10 rounded-lg border border-dashed border-[color:var(--success)]/55 bg-[color:var(--success)]/[0.025]"
-                    style={availabilityStyle(availabilityStart, date, range)}
-                  >
-                    <span className="absolute top-1/2 right-3 -translate-y-1/2 text-[10px] font-medium text-[color:var(--success)]">
-                      Available
-                    </span>
-                  </div>
-                ) : null}
-                {assignedWork.map((workOrder) => (
+                {unassigned.map((workOrder) => (
                   <ScheduleBlock
                     key={workOrder.primaryId}
                     workOrder={workOrder}
@@ -677,29 +646,93 @@ function ScheduleTimeline({
                     range={range}
                   />
                 ))}
-                {nowPosition !== undefined ? (
-                  <span
-                    className="pointer-events-none absolute inset-y-0 z-10 w-px bg-primary/85"
-                    style={{ left: `${nowPosition}%` }}
-                    aria-hidden="true"
-                  />
-                ) : null}
               </div>
             </div>
-          )
-        })}
+          ) : null}
 
-        <div className="flex h-12 items-center gap-7 border-t border-border/20 px-5 text-[10px] text-muted-foreground">
-          <LegendDot className="bg-primary" label="On site" />
-          <LegendDot className="bg-[color:var(--info)]" label="Dispatched" />
-          <LegendDot className="bg-destructive" label="Paused" />
-          <span className="inline-flex items-center gap-2">
-            <span className="size-3 rounded-[3px] border border-dashed border-[color:var(--success)]/60" />
-            Available
-          </span>
+          {technicians.length === 0 ? (
+            <p className="px-6 py-10 text-[14px] text-muted-foreground">
+              No technicians match this view.
+            </p>
+          ) : null}
+
+          {technicians.map((technician) => {
+            const assignedWork = workOrders.filter(
+              (workOrder) => workOrder.links.assignee?.primaryId === technician.primaryId
+            )
+            const availabilityStart = recommendedAvailabilityStart(technician, pending, date, now)
+            return (
+              <div
+                key={technician.primaryId}
+                className="grid border-b border-border/70 last:border-b-0"
+                style={timelineGridStyle}
+              >
+                <Link
+                  to={`/technicians/${encodeURIComponent(technician.primaryId)}`}
+                  className="group flex items-center gap-3 border-r border-border/70 bg-card px-5 py-3 transition-colors hover:bg-[color-mix(in_srgb,var(--foreground)_3%,var(--card))] focus-visible:bg-[color-mix(in_srgb,var(--foreground)_4%,var(--card))] focus-visible:outline-none md:sticky md:left-0 md:z-20"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-[12px] font-semibold text-foreground/75">
+                    {initials(technician.properties.name)}
+                  </span>
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate text-[14.5px] leading-5 font-semibold group-hover:text-primary">
+                      {technician.properties.name}
+                    </span>
+                    <span className="truncate text-[12.5px] leading-4 text-muted-foreground">
+                      {humanize(technician.properties.territory)} ·{" "}
+                      {humanize(technician.properties.certification)}
+                    </span>
+                    <StatusIndicator
+                      value={technician.properties.availability}
+                      className="text-[12.5px] leading-4"
+                    />
+                  </span>
+                </Link>
+
+                <div className="relative min-h-[80px] overflow-hidden">
+                  <TimelineGuides range={range} />
+                  {availabilityStart && assignedWork.length === 0 ? (
+                    <div
+                      className="absolute inset-y-3 flex items-center overflow-hidden rounded-[12px] border border-dashed border-[color:var(--success)]/45 bg-[color-mix(in_srgb,var(--success)_5%,var(--card))] px-3"
+                      style={availabilityStyle(availabilityStart, date, range)}
+                    >
+                      <span className="truncate text-[12.5px] font-medium text-[color:var(--success)]">
+                        Available from {formatTime(availabilityStart)}
+                      </span>
+                    </div>
+                  ) : null}
+                  {assignedWork.map((workOrder) => (
+                    <ScheduleBlock
+                      key={workOrder.primaryId}
+                      workOrder={workOrder}
+                      date={date}
+                      range={range}
+                    />
+                  ))}
+                  {nowPosition !== undefined ? (
+                    <span
+                      className="pointer-events-none absolute inset-y-0 z-10 w-px bg-primary"
+                      style={{ left: `${nowPosition}%` }}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
-    </div>
+
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border/70 px-6 py-4 text-[12.5px] text-muted-foreground">
+        <LegendSwatch tone="primary" label="On site or scheduled" />
+        <LegendSwatch tone="info" label="Dispatched" />
+        <LegendSwatch tone="warning" label="Paused" />
+        <span className="inline-flex items-center gap-2">
+          <span className="size-3 rounded-[4px] border border-dashed border-[color:var(--success)]/60" />
+          Available
+        </span>
+      </div>
+    </>
   )
 }
 
@@ -712,28 +745,30 @@ function ScheduleBlock({
   date: Date
   range: TimelineRange
 }) {
-  const href = `/service-cases/${encodeURIComponent(workOrder.links.serviceCase?.primaryId ?? "")}`
+  const href = casePath(workOrder.links.serviceCase?.primaryId)
   const style = scheduleBlockStyle(
     workOrder.properties.scheduledStart,
     workOrder.properties.scheduledEnd,
     date,
     range
   )
+  const tone = blockTones[scheduleTone(workOrder.properties.status)]
 
   return (
     <Link
       to={href}
-      className={`absolute top-2.5 z-[5] h-11 min-w-[118px] overflow-hidden rounded-lg border px-3 py-1.5 transition-[filter,box-shadow] hover:brightness-[0.985] hover:shadow-sm ${scheduleTone(workOrder.properties.status)}`}
+      title={`${workOrder.properties.number} · ${workOrder.properties.title}`}
+      className={cn(
+        "absolute inset-y-3 z-[5] flex min-w-[120px] flex-col justify-center gap-0.5 overflow-hidden rounded-[12px] px-3 transition-shadow hover:shadow-[var(--shadow-raised)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        tone.block
+      )}
       style={style}
     >
-      <span className="flex items-center justify-between gap-2">
-        <strong className="truncate font-mono text-[10px] font-semibold">
-          {workOrder.properties.number}
-        </strong>
-        <StatusIndicator value={workOrder.properties.status} />
-      </span>
-      <span className="mt-0.5 block truncate text-[10px] font-medium">
+      <span className="truncate text-[13px] leading-4 font-semibold text-foreground">
         {workOrder.links.equipment?.properties.name ?? "Equipment"}
+      </span>
+      <span className={cn("truncate text-[12px] leading-4 font-medium tabular-nums", tone.text)}>
+        {workOrder.properties.number} · {humanize(workOrder.properties.status)}
       </span>
     </Link>
   )
@@ -745,7 +780,7 @@ function TimelineGuides({ range }: { range: TimelineRange }) {
       {range.hours.map((hour) => (
         <span
           key={hour}
-          className="pointer-events-none absolute inset-y-0 w-px bg-border/55"
+          className="pointer-events-none absolute inset-y-0 w-px bg-border/60"
           style={{ left: `${hourPosition(hour, range)}%` }}
           aria-hidden="true"
         />
@@ -754,23 +789,39 @@ function TimelineGuides({ range }: { range: TimelineRange }) {
   )
 }
 
-function LegendDot({ className, label }: { className: string; label: string }) {
+function LegendSwatch({ tone, label }: { tone: BlockTone; label: string }) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span className={`size-1.5 rounded-full ${className}`} />
+      <span className={cn("size-3 rounded-[4px]", blockTones[tone].block)} />
       {label}
     </span>
   )
 }
 
-function scheduleTone(status: string): string {
-  if (status === "paused") {
-    return "border-destructive/45 bg-destructive/[0.07] text-destructive"
-  }
-  if (status === "dispatched" || status === "en_route") {
-    return "border-[color:var(--info)]/45 bg-[color:var(--info)]/[0.07] text-[color:var(--info)]"
-  }
-  return "border-primary/50 bg-primary/[0.075] text-primary"
+type BlockTone = "primary" | "info" | "warning"
+
+const blockTones: Record<BlockTone, { block: string; text: string }> = {
+  primary: {
+    block:
+      "bg-[color-mix(in_srgb,var(--primary)_12%,var(--card))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--primary)_24%,transparent)]",
+    text: "text-primary",
+  },
+  info: {
+    block:
+      "bg-[color-mix(in_srgb,var(--info)_11%,var(--card))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--info)_24%,transparent)]",
+    text: "text-[color:var(--info)]",
+  },
+  warning: {
+    block:
+      "bg-[color-mix(in_srgb,var(--warning)_12%,var(--card))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--warning)_26%,transparent)]",
+    text: "text-[color:var(--warning)]",
+  },
+}
+
+function scheduleTone(status: string): BlockTone {
+  if (status === "paused") return "warning"
+  if (status === "dispatched" || status === "en_route") return "info"
+  return "primary"
 }
 
 function scheduleBlockStyle(
@@ -808,15 +859,11 @@ function recommendedAvailabilityStart(
 ): Date | undefined {
   if (technician.properties.availability !== "available") return undefined
 
-  const matchingReview = pending.find((intervention) => {
-    const technicianRef =
-      objectRef(intervention.defaultResponse.technician) ??
-      objectRef(intervention.input.recommendedTechnician)
-    return technicianRef?.primaryId === technician.primaryId
-  })
-  const recommendedStart = matchingReview
-    ? (matchingReview.defaultResponse.scheduledStart ?? matchingReview.input.scheduledStart)
-    : undefined
+  const recommendedStart = pending
+    .map(recommendation)
+    .find(
+      (recommended) => recommended.technician?.primaryId === technician.primaryId
+    )?.scheduledStart
   if (
     (typeof recommendedStart === "string" || recommendedStart instanceof Date) &&
     isSameDay(new Date(recommendedStart), date)
@@ -830,16 +877,6 @@ function recommendedAvailabilityStart(
   return start
 }
 
-function equipmentIllustration(equipmentName: string, equipmentType: string | undefined) {
-  const normalized = equipmentName.toLowerCase()
-  if (normalized.includes("rtu-2")) return "/illustrations/rtu-2.webp"
-  if (normalized.includes("rtu-7")) return "/illustrations/rtu-7.webp"
-  if (normalized.includes("ahu-3")) return "/illustrations/ahu-3.webp"
-  if (normalized.includes("controller")) return "/illustrations/building-controller.webp"
-  if (equipmentType === "boiler") return "/illustrations/boiler-2.webp"
-  return undefined
-}
-
 function createTimelineRange(date: Date, workOrders: WorkOrderRow[]): TimelineRange {
   let startMinutes = timelineStartHour * 60
   let endMinutes = timelineEndHour * 60
@@ -850,19 +887,18 @@ function createTimelineRange(date: Date, workOrders: WorkOrderRow[]): TimelineRa
     if (scheduledStart !== undefined) {
       startMinutes = Math.min(
         startMinutes,
-        Math.floor(scheduledStart / timelineGuideStepMinutes) * timelineGuideStepMinutes
+        Math.floor(scheduledStart / timelineSnapMinutes) * timelineSnapMinutes
       )
       endMinutes = Math.max(
         endMinutes,
-        Math.ceil(
-          (scheduledStart + timelineDefaultWorkDurationMinutes) / timelineGuideStepMinutes
-        ) * timelineGuideStepMinutes
+        Math.ceil((scheduledStart + timelineDefaultWorkDurationMinutes) / timelineSnapMinutes) *
+          timelineSnapMinutes
       )
     }
     if (scheduledEnd !== undefined) {
       endMinutes = Math.max(
         endMinutes,
-        Math.ceil(scheduledEnd / timelineGuideStepMinutes) * timelineGuideStepMinutes
+        Math.ceil(scheduledEnd / timelineSnapMinutes) * timelineSnapMinutes
       )
     }
   }
@@ -870,7 +906,7 @@ function createTimelineRange(date: Date, workOrders: WorkOrderRow[]): TimelineRa
   startMinutes = Math.max(0, startMinutes)
   endMinutes = Math.min(24 * 60, endMinutes)
   const hours: number[] = []
-  for (let minutes = startMinutes; minutes <= endMinutes; minutes += timelineGuideStepMinutes) {
+  for (let minutes = startMinutes; minutes <= endMinutes; minutes += 60) {
     hours.push(minutes / 60)
   }
 
@@ -898,19 +934,13 @@ function hourPosition(hour: number, range: TimelineRange): number {
 
 function timeLabelStyle(hour: number, range: TimelineRange): CSSProperties {
   const position = hourPosition(hour, range)
-  if (position === 0) return { left: 12 }
-  if (position === 100) return { right: 12 }
+  if (position === 0) return { left: 12, transform: "translateY(-50%)" }
+  if (position === 100) return { right: 12, transform: "translateY(-50%)" }
   return { left: `${position}%`, transform: "translate(-50%, -50%)" }
 }
 
 function formatHour(hour: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(new Date(2026, 0, 1, hour))
-}
-
-function formatTimelineTime(value: Date): string {
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" })
-    .format(value)
-    .replace(" ", "")
 }
 
 function formatUnknownDate(value: unknown): string {
@@ -931,12 +961,40 @@ function formatUnknownTime(value: unknown): string {
   )
 }
 
+function durationLabel(start: unknown, end: unknown): string | undefined {
+  if (typeof start !== "string" && !(start instanceof Date)) return undefined
+  if (typeof end !== "string" && !(end instanceof Date)) return undefined
+  const minutes = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60_000)
+  if (!Number.isFinite(minutes) || minutes <= 0) return undefined
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (hours === 0) return `${minutes} min on site`
+  return rest === 0 ? `${hours} h on site` : `${hours} h ${rest} min on site`
+}
+
 function formatScheduleHeading(date: Date): string {
   return new Intl.DateTimeFormat(undefined, {
     weekday: "long",
     month: "long",
     day: "numeric",
   }).format(date)
+}
+
+function count(value: number, noun: string): string {
+  return `${value} ${value === 1 ? noun : `${noun}s`}`
+}
+
+/**
+ * Today when it has work; otherwise the next day that does, or failing that the latest day with
+ * work still open, so the board never opens on an empty day.
+ */
+function openingDate(work: readonly WorkOrderRow[]): Date {
+  const today = startOfDay(new Date())
+  const days = work.flatMap((item) =>
+    item.properties.scheduledStart ? [startOfDay(new Date(item.properties.scheduledStart))] : []
+  )
+  if (days.length === 0 || days.some((day) => isSameDay(day, today))) return today
+  return days.find((day) => day > today) ?? days.at(-1) ?? today
 }
 
 function shiftDate(date: Date, amount: number): Date {
@@ -963,24 +1021,12 @@ function isToday(date: Date): boolean {
   return isSameDay(date, new Date())
 }
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
-}
-
-function objectRef(value: unknown): { objectTypeId: string; primaryId: string } | null {
-  if (!value || typeof value !== "object") return null
-  const ref = value as { objectTypeId?: unknown; primaryId?: unknown }
-  return typeof ref.objectTypeId === "string" && typeof ref.primaryId === "string"
-    ? { objectTypeId: ref.objectTypeId, primaryId: ref.primaryId }
-    : null
-}
-
-function text(value: unknown, fallback: string): string {
-  return typeof value === "string" ? value : fallback
+/** The technician and window to approve: the reviewer's edit, else Northline's recommendation. */
+function recommendation(intervention: Intervention) {
+  const { defaultResponse: chosen, input } = intervention
+  return {
+    technician: refValue(chosen.technician) ?? refValue(input.recommendedTechnician),
+    scheduledStart: chosen.scheduledStart ?? input.scheduledStart,
+    scheduledEnd: chosen.scheduledEnd ?? input.scheduledEnd,
+  }
 }

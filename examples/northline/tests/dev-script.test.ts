@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createRuntimeCommand, probeNorthlineApi } from "../scripts/dev"
+import { createRuntimeCommand, probeNorthlineApi, resolveDevPorts } from "../scripts/dev"
 
 describe("Northline development script", () => {
   test("forwards its arguments to the Sixb dev command", () => {
@@ -19,6 +19,16 @@ describe("Northline development script", () => {
       "--host",
       "127.0.0.1",
     ])
+  })
+
+  test("waits for the API on the ports Sixb dev was given", () => {
+    expect(resolveDevPorts([])).toEqual({ appPort: 3000, apiPort: 3001 })
+    expect(resolveDevPorts(["--port", "4100"])).toEqual({ appPort: 4100, apiPort: 4101 })
+    expect(resolveDevPorts(["--port=4100", "--api-port", "4200"])).toEqual({
+      appPort: 4100,
+      apiPort: 4200,
+    })
+    expect(() => resolveDevPorts(["--port", "web"])).toThrow("--port must be a port number")
   })
 
   test("accepts readiness only from the Northline project", async () => {

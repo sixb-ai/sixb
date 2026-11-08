@@ -8,7 +8,16 @@ import {
   northlineServiceCases,
 } from "../datasets/building-controls"
 import { businessContracts, businessFacilities } from "../datasets/business-system"
-import { alarmsUpdated, rawReadingsUpdated } from "../schedules/data-plane"
+import { operatingLimits } from "../lib/operating-limits"
+import {
+  alarmsUpdated,
+  contractsUpdated,
+  equipmentUpdated,
+  facilitiesUpdated,
+  rawReadingsUpdated,
+} from "../schedules/data-plane"
+
+const { supplyAirWatch, supplyAirUnhealthy, compressorUnhealthy } = operatingLimits
 
 export const normalizeControlsReadings = definePipelineStep("normalize-controls-readings")
   .inputs({ readings: controlsRawReadings })
@@ -60,9 +69,10 @@ export const deriveEquipmentHealth = definePipelineStep("derive-equipment-health
           equipment.installed_on,
           equipment.criticality,
           CASE
-            WHEN readings.supply_air_temperature >= 22 OR readings.compressor_current >= 28
+            WHEN readings.supply_air_temperature >= ${supplyAirUnhealthy}
+              OR readings.compressor_current >= ${compressorUnhealthy}
               THEN 'unhealthy'
-            WHEN readings.supply_air_temperature >= 19 THEN 'watch'
+            WHEN readings.supply_air_temperature >= ${supplyAirWatch} THEN 'watch'
             ELSE 'healthy'
           END AS health,
           readings.supply_air_temperature,
@@ -87,10 +97,10 @@ export const deriveEquipmentHealth = definePipelineStep("derive-equipment-health
         health,
         CASE
           WHEN health = 'unhealthy'
-            AND supply_air_temperature >= 22
-            AND compressor_current >= 28
+            AND supply_air_temperature >= ${supplyAirUnhealthy}
+            AND compressor_current >= ${compressorUnhealthy}
             THEN 'elevated_supply_temperature_and_current'
-          WHEN health = 'unhealthy' AND supply_air_temperature >= 22
+          WHEN health = 'unhealthy' AND supply_air_temperature >= ${supplyAirUnhealthy}
             THEN 'elevated_supply_temperature'
           WHEN health = 'unhealthy' THEN 'elevated_compressor_current'
           WHEN health = 'watch' THEN 'supply_temperature_trending_high'
@@ -220,4 +230,7 @@ export const deriveServiceCases = definePipelineStep("derive-service-cases")
 
 export const serviceCaseIntakePipeline = definePipeline("service-case-intake")
   .when(alarmsUpdated)
+  .when(equipmentUpdated)
+  .when(facilitiesUpdated)
+  .when(contractsUpdated)
   .then(deriveServiceCases)
