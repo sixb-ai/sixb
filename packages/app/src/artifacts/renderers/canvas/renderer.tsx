@@ -130,6 +130,7 @@ function useLiveEditor(live: LiveArtifact | null, canvas: LiveCanvas | null): Ca
               startDrag: () => canvas.startDrag(),
               endDrag: () => canvas.endDrag(),
               select: (ids) => shareSelection(live, ids),
+              editBoard: (path, make, files) => canvas.editBoard(path, make, files),
             },
           }
         : null,

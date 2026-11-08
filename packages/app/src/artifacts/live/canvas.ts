@@ -1,11 +1,14 @@
 import { CANVAS_FILE, type Canvas, type CanvasItem } from "@sixb/core/artifacts"
 import {
+  applyBoardEditToText,
+  type BoardEdit,
   canvasItemMap,
   canvasItemObject,
   documentCanvas,
   LIVE_FILES,
   mergeCanvasItem,
 } from "@sixb/core/artifacts/live"
+import type { FileRef } from "@sixb/core/blob-storage"
 import * as Y from "yjs"
 import type { CanvasChange } from "../renderers/canvas/draft"
 import type { LiveArtifact } from "./session"
@@ -21,7 +24,9 @@ import type { LiveArtifact } from "./session"
 //
 // Writing: an edit stays a `CanvasChange`, one function from a canvas to the next, as the draft
 // had it. What it changed is written into the document, key by key and word by word, in one
-// transaction under this canvas's own origin: only those are this reader's to undo.
+// transaction under this canvas's own origin: only those are this reader's to undo. An edit to
+// what a board shows is a change to the board's page, its `Y.Text`, under the same origin, so the
+// same undo takes it back.
 
 /** The item types the board draws: anything else in a document is left out. */
 const ITEM_TYPES: ReadonlySet<string> = new Set<CanvasItem["type"]>([
@@ -102,6 +107,30 @@ export class LiveCanvas {
     this.doc.transact(() => write(items, order, before, after), this.origin)
   }
 
+  /**
+   * Makes an edit to a board's page, worked out from what it holds now, as one step of this
+   * reader's undo, with the files it needs added in the same step: an image's picture. False when
+   * the document holds no such page; `make` throws when the edit no longer applies.
+   */
+  editBoard(
+    path: string,
+    make: (source: string) => BoardEdit,
+    files: Readonly<Record<string, FileRef>> = {}
+  ): boolean {
+    const map = this.doc.getMap<unknown>(LIVE_FILES)
+    const text = map.get(path)
+    if (!(text instanceof Y.Text)) return false
+
+    const edit = make(text.toString())
+    if (edit.length === 0 && Object.keys(files).length === 0) return true
+
+    this.doc.transact(() => {
+      for (const [file, ref] of Object.entries(files)) map.set(file, ref)
+      applyBoardEditToText(text, edit)
+    }, this.origin)
+    return true
+  }
+
   undo(): void {
     this.undoManager?.undo()
   }
@@ -155,7 +184,9 @@ export class LiveCanvas {
     if (this.structure) {
       this.structure.items.observeDeep(this.onItems)
       this.structure.order.observe(this.onOrder)
-      this.undoManager = new Y.UndoManager([this.structure.items, this.structure.order], {
+      // The files hold the canvas's structure and its boards' pages: this reader's changes to any
+      // of them are theirs to undo.
+      this.undoManager = new Y.UndoManager(this.doc.getMap<unknown>(LIVE_FILES), {
         trackedOrigins: new Set([this.origin]),
         captureTimeout: this.dragging ? Number.POSITIVE_INFINITY : UNDO_CAPTURE_MS,
       })

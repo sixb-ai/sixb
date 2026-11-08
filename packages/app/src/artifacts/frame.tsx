@@ -74,6 +74,7 @@ export function ArtifactFrame({
   handle,
   start,
   decorative = false,
+  editable = false,
   fallback,
   failure,
   overlay,
@@ -86,6 +87,11 @@ export function ArtifactFrame({
   readonly start?: FrameStart
   /** A picture of the deck, as a thumbnail is: it takes no focus, clicks, or reading. */
   readonly decorative?: boolean
+  /**
+   * A canvas's board served for editing, its elements marked by address: the frame then picks
+   * and types into them once asked to with `edit`.
+   */
+  readonly editable?: boolean
   readonly onEvent?: (event: FrameEvent) => void
   readonly className?: string
   /** What shows where the frame will be while it loads, and under it as it fades in. */
@@ -139,7 +145,9 @@ export function ArtifactFrame({
   )
   if (frame.data && kept?.identity !== identity) setKept({ identity, path: frame.data.path })
   const path = kept?.identity === identity ? kept.path : undefined
-  const source = path ? `${frameUrl(path, entry)}${frameStartHash(start ?? {})}` : undefined
+  const source = path
+    ? `${frameUrl(path, entry)}${editable ? "?sixb-edit" : ""}${frameStartHash(start ?? {})}`
+    : undefined
   const sourceRef = useRef(source)
   sourceRef.current = source
   const pathRef = useRef(path)
