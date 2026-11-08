@@ -157,7 +157,7 @@ export function useBoardEditing(
     }
     const text = kind === "text" ? messages.newText : kind === "section" ? messages.newSection : ""
     const added = addItem(kind, at, text)
-    const id = added.id(canvas)
+    const id = added.id
     edit.apply((current) => {
       const next = added.change(current)
       return shape && shape !== "rect" ? styleItems(new Set([id]), { shape })(next) : next
