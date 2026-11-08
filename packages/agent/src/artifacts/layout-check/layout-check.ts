@@ -246,7 +246,13 @@ export async function checkLayout(
   return {
     status: "checked",
     screenshots,
-    previews: report.previews ?? [],
+    // Only pictures of the boards asked for, where the check writes them.
+    previews: (report.previews ?? []).filter(
+      ({ board, path }) =>
+        input.layout === "canvas" &&
+        input.boards.some((each) => each.id === board && each.pictured) &&
+        path.startsWith(`${output}/`)
+    ),
     ...(report.overview ? { overview: named(report.overview) } : {}),
     warnings: [
       ...layoutWarnings(report.problems ?? []),
