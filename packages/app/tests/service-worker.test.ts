@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { startupChunks } from "../src/build"
 import { renderServiceWorker } from "../src/service-worker"
 
 const ORIGIN = "https://app.example.com"
@@ -66,6 +70,7 @@ function startWorker(options: { network: Network; version?: string; instantTimer
   const listeners = new Map<string, (event: unknown) => void>()
   const caches = cacheStorage()
   let skippedWaiting = false
+  let preloading = false
   const self = {
     location: new URL(`${ORIGIN}/sixb-service-worker.js`),
     addEventListener: (type: string, listener: (event: unknown) => void) => {
@@ -75,6 +80,13 @@ function startWorker(options: { network: Network; version?: string; instantTimer
       skippedWaiting = true
     },
     clients: { claim: async () => undefined },
+    registration: {
+      navigationPreload: {
+        enable: async () => {
+          preloading = true
+        },
+      },
+    },
   }
   const source = renderServiceWorker({
     version: options.version ?? "v1",
@@ -112,10 +124,15 @@ function startWorker(options: { network: Network; version?: string; instantTimer
   return {
     caches,
     skippedWaiting: () => skippedWaiting,
+    preloading: () => preloading,
     install: () => dispatch("install"),
     activate: () => dispatch("activate"),
-    fetch: (url: string, mode: RequestMode = "no-cors", settle = true) =>
-      dispatch("fetch", { request: new WorkerRequest(url, { mode }) }, settle),
+    fetch: (
+      url: string,
+      mode: RequestMode = "no-cors",
+      settle = true,
+      preloadResponse?: Promise<Response | undefined>
+    ) => dispatch("fetch", { request: new WorkerRequest(url, { mode }), preloadResponse }, settle),
   }
 }
 
@@ -175,6 +192,29 @@ describe("the app's service worker", () => {
     await last.put("/chunk-quotes-aa11.js", basic("old chunk", "text/javascript"))
     await worker.activate()
     expect(await (await worker.fetch("/chunk-quotes-aa11.js"))?.text()).toBe("old chunk")
+  })
+
+  test("a page uses the response the browser asked for while the worker started", async () => {
+    let calls = 0
+    const worker = startWorker({
+      network: async (request) => {
+        calls++
+        return online(request)
+      },
+    })
+    await worker.install()
+    await worker.activate()
+    expect(worker.preloading()).toBe(true)
+
+    calls = 0
+    const page = await worker.fetch(
+      "/equipment",
+      "navigate",
+      true,
+      Promise.resolve(basic("preloaded /equipment"))
+    )
+    expect(await page?.text()).toBe("preloaded /equipment")
+    expect(calls).toBe(0)
   })
 
   test("a page comes from the network, and from the device when the network fails", async () => {
@@ -244,6 +284,34 @@ describe("the app's service worker", () => {
       "https://api.example.com/v1",
     ]) {
       expect(await worker.fetch(url, "navigate")).toBeUndefined()
+    }
+  })
+})
+
+// Regression proof: without startupChunks the worker saves only the entry, and the app opened offline
+// after its first launch is blank once the browser's own cache lets the chunks go.
+describe("the files a build has the worker save on install", () => {
+  test("every chunk the entry imports as it loads, and theirs, but none loaded on demand", async () => {
+    const outdir = await mkdtemp(join(tmpdir(), "sixb-startup-chunks-"))
+    try {
+      const files: Record<string, string> = {
+        "app-abc123.js":
+          'import{a}from"/chunk-main-aa11.js";import"/chunk-main-bb22.js";import("/chunk-chart-cc33.js")',
+        "chunk-main-aa11.js": 'import{b}from "/chunk-main-dd44.js";export const a=1',
+        "chunk-main-bb22.js": 'import{a}from"/chunk-main-aa11.js"',
+        "chunk-main-dd44.js": "export const b=2",
+        "chunk-chart-cc33.js": 'import{c}from"/chunk-lazy-ee55.js"',
+      }
+      for (const [name, source] of Object.entries(files)) {
+        await writeFile(join(outdir, name), source)
+      }
+      expect((await startupChunks(outdir, "/app-abc123.js")).sort()).toEqual([
+        "/chunk-main-aa11.js",
+        "/chunk-main-bb22.js",
+        "/chunk-main-dd44.js",
+      ])
+    } finally {
+      await rm(outdir, { recursive: true, force: true })
     }
   })
 })

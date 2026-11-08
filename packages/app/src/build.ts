@@ -405,15 +405,38 @@ function withLoadingShell(html: string): string {
 async function writeServiceWorker(outdir: string, html: string, entry: string): Promise<string> {
   const version = createHash("sha256").update(html).digest("hex").slice(0, 16)
   const precache = [
-    ...new Set(
-      [...html.matchAll(/<(?:script|link)\b[^>]*\s(?:src|href)=["'](\/[^"'/][^"']*)["']/g)]
+    ...new Set([
+      ...[...html.matchAll(/<(?:script|link)\b[^>]*\s(?:src|href)=["'](\/[^"'/][^"']*)["']/g)]
         .map((match) => match[1])
-        .filter((path): path is string => path !== undefined && path !== "/app.webmanifest")
-    ),
+        .filter((path): path is string => path !== undefined && path !== "/app.webmanifest"),
+      // The page registers the worker after it has loaded these, so it never saves them itself.
+      ...(await startupChunks(outdir, entry)),
+    ]),
   ]
   const path = join(outdir, SERVICE_WORKER_PATH.slice(1))
   await writeFile(path, renderServiceWorker({ version, entry, precache }), "utf-8")
   return path
+}
+
+/** A static `import … from "/chunk-…"` or `import "/chunk-…"` in a bundle; `import(` is left out. */
+const STATIC_CHUNK_IMPORT = /\b(?:from|import)\s*["'](\/chunk-[^"']+\.js)["']/g
+
+/**
+ * The chunks the entry imports as it loads, and the chunks those import: everything the app runs
+ * before its first screen. Chunks loaded on demand, such as a chart, are saved when first used.
+ */
+export async function startupChunks(outdir: string, entry: string): Promise<string[]> {
+  const found = new Set<string>()
+  const pending = [entry]
+  for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+    const source = await readFile(join(outdir, path.slice(1)), "utf-8").catch(() => "")
+    for (const [, chunk] of source.matchAll(STATIC_CHUNK_IMPORT)) {
+      if (chunk === undefined || found.has(chunk)) continue
+      found.add(chunk)
+      pending.push(chunk)
+    }
+  }
+  return [...found]
 }
 
 const extensionlessSourceImportPlugin: Bun.BunPlugin = {
