@@ -148,7 +148,9 @@ as they make them, and who else is there.
 - A write that fails is reported and tried again; the changes stay meanwhile.
 
 `@sixb/core/artifacts/live` holds the document and the socket's messages for a client to build
-on. The [WebSockets](../websockets/overview.md#live-artifacts) page lists the messages.
+on, `@sixb/core/artifacts/live/protocol` the messages alone, without Yjs, and
+`@sixb/client/artifact-live` the socket. The [WebSockets](../websockets/overview.md#live-artifacts)
+page lists the messages.
 
 ## Write a document
 

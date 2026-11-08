@@ -53,6 +53,12 @@
       "import": "./dist/artifacts/live/index.js",
       "default": "./dist/artifacts/live/index.js"
     },
+    "./artifacts/live/protocol": {
+      "types": "./dist/artifacts/live/protocol.d.ts",
+      "bun": "./src/artifacts/live/protocol.ts",
+      "import": "./dist/artifacts/live/protocol.js",
+      "default": "./dist/artifacts/live/protocol.js"
+    },
     "./auth/strategy": {
       "types": "./dist/auth/strategy.d.ts",
       "bun": "./src/auth/strategy.ts",

@@ -1,4 +1,4 @@
-import { type ArtifactLiveSocket, createArtifactLiveSocket } from "@sixb/client"
+import { type ArtifactLiveSocket, createArtifactLiveSocket } from "@sixb/client/artifact-live"
 import {
   type ArtifactLiveAccess,
   type ArtifactLiveClientMessage,

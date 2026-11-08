@@ -29,6 +29,12 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./artifact-live": {
+      "types": "./dist/artifact-live.d.ts",
+      "bun": "./src/artifact-live.ts",
+      "import": "./dist/artifact-live.js",
+      "default": "./dist/artifact-live.js"
+    },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "bun": "./src/browser.ts",

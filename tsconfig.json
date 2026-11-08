@@ -60,6 +60,7 @@
       "@sixb/core/agents/streams": ["./packages/core/src/agents/streams/index.ts"],
       "@sixb/core/artifacts": ["./packages/core/src/artifacts/index.ts"],
       "@sixb/core/artifacts/live": ["./packages/core/src/artifacts/live/index.ts"],
+      "@sixb/core/artifacts/live/protocol": ["./packages/core/src/artifacts/live/protocol.ts"],
       "@sixb/core/auth/strategy": ["./packages/core/src/auth/strategy.ts"],
       "@sixb/core/blob-storage": ["./packages/core/src/blob-storage/browser.ts"],
       "@sixb/core/blob-storage/server": ["./packages/core/src/blob-storage/index.ts"],

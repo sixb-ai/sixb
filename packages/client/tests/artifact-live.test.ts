@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
-import type { ArtifactLiveServerMessage } from "@sixb/core/artifacts/live"
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import type { ArtifactLiveServerMessage } from "@sixb/core/artifacts/live/protocol"
 import { type ArtifactLiveSocket, createArtifactLiveSocket } from "../src/artifact-live"
 
 class FakeWebSocket {
@@ -111,5 +113,50 @@ describe("the live artifacts socket", () => {
     latest().close()
     jest.advanceTimersByTime(500)
     expect(FakeWebSocket.instances).toHaveLength(4)
+  })
+})
+
+/** The packages a module's runtime imports reach, following the repo's own files. */
+function packagesReached(entry: string): Set<string> {
+  const transpilers = {
+    ts: new Bun.Transpiler({ loader: "ts", trimUnusedImports: true }),
+    tsx: new Bun.Transpiler({ loader: "tsx", trimUnusedImports: true }),
+  }
+  const seen = new Set<string>()
+  const packages = new Set<string>()
+  const queue = [entry]
+  while (queue.length > 0) {
+    const file = queue.pop() as string
+    if (seen.has(file)) continue
+    seen.add(file)
+
+    const transpiler = file.endsWith(".tsx") ? transpilers.tsx : transpilers.ts
+    for (const { path } of transpiler.scanImports(readFileSync(file, "utf8"))) {
+      const resolved = Bun.resolveSync(path, dirname(file))
+      if (resolved.includes("/node_modules/")) {
+        packages.add(
+          path
+            .split("/")
+            .slice(0, path.startsWith("@") ? 2 : 1)
+            .join("/")
+        )
+      } else if (/\.(ts|tsx)$/.test(resolved)) {
+        queue.push(resolved)
+      }
+    }
+  }
+  return packages
+}
+
+describe("the live socket's package", () => {
+  // Reproduce by exporting createArtifactLiveSocket from the client's root, or by importing the
+  // messages from @sixb/core/artifacts/live in artifact-live.ts: every app that imports the client
+  // loads Yjs.
+  test("is loaded apart, and loads no Yjs, nor does the client's root", () => {
+    const yjs = ["yjs", "lib0", "y-protocols"]
+    for (const entry of ["index.ts", "artifact-live.ts"]) {
+      const reached = packagesReached(join(import.meta.dir, "../src", entry))
+      expect(yjs.filter((name) => reached.has(name))).toEqual([])
+    }
   })
 })
