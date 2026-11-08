@@ -256,7 +256,7 @@ describe("a board's frame, editing", () => {
   test("reports editing only through the port the app hands over, which the page never sees", () => {
     const { window, request, posted, throughPort, at, fire } = frame(BOARD)
     const heard: unknown[] = []
-    window.addEventListener("message", (event: { data: unknown }) => heard.push(event.data))
+    window.addEventListener("message", (event) => heard.push("data" in event ? event.data : event))
 
     // Without a port, nothing of editing is reported.
     request("edit", { on: true }, { withPort: false })

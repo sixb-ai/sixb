@@ -461,7 +461,7 @@ describe("comments on a canvas", () => {
   test("start being placed with C only while the canvas has the focus or the pointer", async () => {
     serveComments([])
     const { ui } = await open()
-    const tool = await waitFor(() => ui.getByRole("button", { name: "Comment", exact: true }))
+    const tool = await waitFor(() => ui.getByRole("button", { name: /^Comment$/ }))
 
     await act(async () => {
       fireEvent.keyDown(document.body, { key: "c" })
