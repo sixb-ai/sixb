@@ -1281,7 +1281,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         })
         // At the same time: as they were made. A reply takes its own anchor.
         await comment("cmt_a", { anchor: { revision: 2 } })
-        await comment("cmt_reply", { parentId: "cmt_b", author: owner, createdAt: at(2) })
+        await comment("cmt_reply", {
+          parentId: "cmt_b",
+          author: owner,
+          origin: { threadId: "thr_1", runId: "run_1" },
+          createdAt: at(2),
+        })
         expect(
           (await artifacts.listComments({ projectId, id: "art_report" })).map((each) => [
             each.id,
@@ -1293,6 +1298,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           ["cmt_a", undefined, { revision: 2 }],
           ["cmt_reply", "cmt_b", first.anchor],
         ])
+        // The Agent's run that wrote a comment for its author is kept with it.
+        expect(
+          (await artifacts.getComment({ projectId, artifactId: "art_report", id: "cmt_reply" }))
+            ?.origin
+        ).toEqual({ threadId: "thr_1", runId: "run_1" })
+        expect(first).not.toHaveProperty("origin")
 
         // Resolved, then opened again.
         const resolved = await artifacts.resolveComment({

@@ -505,6 +505,9 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       },
       body: input.body,
       author: input.author,
+      ...(input.origin
+        ? { origin: { threadId: input.origin.threadId, runId: input.origin.runId } }
+        : {}),
       createdAt: input.createdAt,
     })
     this.artifacts.set(key, { ...stored, comments: [...stored.comments, comment] })

@@ -5,6 +5,7 @@ import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
   ArtifactCommentAnchor,
   ArtifactCommentRecord,
+  ArtifactOrigin,
   ArtifactRecord,
   ArtifactStorage,
 } from "../storage/artifacts/types"
@@ -29,6 +30,8 @@ export interface ArtifactCommentInput {
   readonly anchor?: Partial<ArtifactCommentAnchor>
   /** The comment this one replies to. */
   readonly parentId?: string
+  /** The Agent's run that writes it for the caller, and that run's conversation. */
+  readonly origin?: ArtifactOrigin
 }
 
 /** The comment methods of the artifacts runtime. */
@@ -136,6 +139,7 @@ export function createArtifactCommentsRuntime(input: {
           anchor,
           body,
           author,
+          ...(comment.origin ? { origin: comment.origin } : {}),
           createdAt: new Date(),
         })
         await announceArtifactComment(events, created, "created")
@@ -209,7 +213,10 @@ async function checkAnchor(
   if (point !== undefined && anchor.board === undefined) {
     throw invalid("A comment's point is on the board it names.")
   }
-  if (point !== undefined && ![point.x, point.y].every((value) => value >= 0 && value <= 1)) {
+  if (
+    point !== undefined &&
+    ![point.x, point.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)
+  ) {
     throw invalid("A comment's point is on its board: x and y from 0 to 1.")
   }
 
