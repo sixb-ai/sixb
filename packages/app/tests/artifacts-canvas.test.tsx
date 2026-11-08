@@ -237,6 +237,81 @@ describe("a canvas's card", () => {
   })
 })
 
+describe("a canvas's card, with its boards' pictures", () => {
+  // Guard proof: draw every board as its shape in thumbnail.tsx; the card shows Home as an empty
+  // box though its picture is ready.
+  test("draws each board whose picture is ready as its small picture, the others as their shapes", async () => {
+    const { ArtifactPreview } = await import("../src/artifacts/card-preview")
+    const { artifactFileSource } = await import("../src/artifacts/file-source")
+    const file = {
+      blobId: "blob_canvas",
+      digest: `sha256:${"0".repeat(64)}` as const,
+      sizeBytes: 10,
+      mediaType: "application/json",
+    }
+    const version = {
+      artifactId: "art_c4nv4s0000",
+      version: 2,
+      title: "Checkout",
+      entry: "canvas.json",
+      files: [{ path: "canvas.json", file }],
+      outline: { kind: "canvas", items: [] },
+      references: [],
+      author: { type: "user", id: "user-1" },
+      createdAt: "2026-10-18T12:00:00.000Z",
+      boardPreviews: { home: "ready", pay: "pending" },
+    } as never
+
+    const queries = new QueryClient({
+      defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
+    })
+    const source = artifactFileSource({
+      artifactId: "art_c4nv4s0000",
+      version: 2,
+      path: "canvas.json",
+      fileRef: file,
+    })
+    queries.setQueryData([...source.queryKey, "text"], JSON.stringify(CANVAS))
+
+    const view = render(
+      <QueryClientProvider client={queries}>
+        <ArtifactPreview version={version} kind="canvas" loading={false} />
+      </QueryClientProvider>
+    )
+
+    const images = [...view.container.querySelectorAll("svg image")]
+    expect(images.map((image) => image.getAttribute("href"))).toEqual([
+      expect.stringContaining(
+        "/api/artifacts/art_c4nv4s0000/versions/2/boards/home/preview?theme=light&size=small"
+      ),
+    ])
+    view.unmount()
+  })
+
+  // Guard proof: picture every board whatever their number; a card of a hundred boards fetches a
+  // hundred pictures for a box 124 pixels tall.
+  test("draws a canvas of many boards as their shapes: each is a few pixels on a card", () => {
+    const many: Canvas = {
+      items: Array.from({ length: 25 }, (_, index) => ({
+        id: `b${index}`,
+        type: "board" as const,
+        file: `boards/b${index}.html`,
+        x: index * 400,
+        y: 0,
+        w: 390,
+        h: 844,
+      })),
+    }
+    const pictures = new Map(many.items.map((item) => [item.id, `${item.id}.webp`]))
+
+    const view = render(<CanvasThumbnail canvas={many} pictures={pictures} />)
+    expect(view.container.querySelectorAll("svg image")).toHaveLength(0)
+    view.rerender(<CanvasThumbnail canvas={{ items: many.items.slice(1) }} pictures={pictures} />)
+    expect(view.container.querySelectorAll("svg image")).toHaveLength(24)
+    view.unmount()
+  })
+})
+
 describe("a canvas's board", () => {
   async function mount(
     mode: "light" | "dark",
