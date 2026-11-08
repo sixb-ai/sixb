@@ -24,7 +24,7 @@ export type QuickBooksUpdatedField = "MetaData.LastUpdatedTime"
 export interface QuickBooksReferenceListOptions<TSort extends string = "Id">
   extends QuickBooksPaginationOptions {
   readonly ids?: readonly string[]
-  /** Inclusive `MetaData.LastUpdatedTime` lower bound. */
+  /** `MetaData.LastUpdatedTime >=` bound; rows at exactly the bound second can be omitted. */
   readonly updatedSince?: Date
   readonly orderBy?: {
     readonly field: "Id" | QuickBooksUpdatedField | TSort
@@ -63,7 +63,7 @@ export interface QuickBooksTransactionListOptions extends QuickBooksPaginationOp
   readonly ids?: readonly string[]
   readonly txnDateFrom?: string
   readonly txnDateTo?: string
-  /** Inclusive `MetaData.LastUpdatedTime` lower bound. */
+  /** `MetaData.LastUpdatedTime >=` bound; rows at exactly the bound second can be omitted. */
   readonly updatedSince?: Date
   /** Exact `DocNumber` match. */
   readonly docNumber?: string
@@ -131,7 +131,7 @@ export interface QuickBooksRecurringTransactionListOptions
 export type QuickBooksTaxPaymentListOptions = QuickBooksReferenceListOptions<never>
 
 export interface QuickBooksExchangeRateListOptions extends QuickBooksPaginationOptions {
-  /** Inclusive `MetaData.LastUpdatedTime` lower bound. */
+  /** `MetaData.LastUpdatedTime >=` bound; rows at exactly the bound second can be omitted. */
   readonly updatedSince?: Date
 }
 

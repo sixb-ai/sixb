@@ -1,12 +1,16 @@
 # @sixb/connector-quickbooks
 
 QuickBooks Online Accounting API connector for Sixb. Managed OAuth, verified company discovery,
-CompanyInfo, Preferences, customers, vendors, ledger accounts, items, terms, invoices, payments,
-credit memos, bills, bill payments, and vendor credits are implemented as reads.
-Typed writes cover these reference and transaction resources, including invoice, credit-memo,
-and payment-receipt sending. CompanyInfo and writable Preferences settings support updates.
-Typed CDC reads and verified CloudEvents webhook handlers support incremental syncs.
-Invoice/payment PDFs, file attachments, and receivable/payable aging reports are also supported.
+CompanyInfo and Preferences, plus typed reads of every queryable US Accounting entity: name lists
+(customers, vendors, employees, accounts, items, terms, classes, departments, customer types,
+payment methods, budgets, currencies), tax data (codes, rates, agencies, classifications, exchange
+rates) and transactions (estimates, invoices, sales and refund receipts, payments, credit memos,
+bills, bill payments, vendor credits, purchases, purchase orders, time activities, deposits,
+transfers, journal entries, card payments, inventory adjustments, reimburse charges and
+recurring templates). Typed writes cover the resources applications commonly change, including
+the estimate-to-invoice flow, form sending and PDFs. Queries support modification, document
+number and customer/vendor filters where QuickBooks accepts them. CDC, verified CloudEvents
+webhooks, file attachments and the standard accounting reports complete the connector.
 
 ## Register
 
@@ -46,10 +50,8 @@ uses the realm ID; accounting requests are scoped by that realm in their URL.
 ```ts
 const preferences = await qb.preferences.get()
 const customer = await qb.customers.get("42")
-const vendor = await qb.vendors.get("17")
-const account = await qb.accounts.get("8")
-const item = await qb.items.get("3")
-const term = await qb.terms.get("2")
+const employee = await qb.employees.get("55")
+const taxCode = await qb.taxCodes.get("2")
 
 // Every name-list resource has get, list, and listAll.
 const page = await qb.customers.list({
@@ -59,21 +61,30 @@ const page = await qb.customers.list({
   orderBy: { field: "DisplayName", direction: "ASC" },
 })
 
-for await (const customer of qb.customers.listAll({ active: "all" })) {
+for await (const customer of qb.customers.listAll({
+  active: "all",
+  updatedSince: new Date("2026-09-01T00:00:00Z"),
+  orderBy: { field: "MetaData.LastUpdatedTime" },
+})) {
   console.log(customer.Id, customer.DisplayName, customer.ParentRef, customer.Balance)
 }
 ```
+
+Name lists: `customers`, `vendors`, `employees`, `accounts`, `items`, `terms`, `classes`,
+`departments`, `customerTypes`, `paymentMethods`, `taxCodes`, `taxRates`, `taxAgencies`, `budgets`
+and `companyCurrencies`.
 
 | List option | Contract |
 | --- | --- |
 | `startPosition` | One-based position; default 1 |
 | `maxResults` | 1–1,000 records per page; default 100 |
-| `active` | `true` (default), `false`, or `"all"` |
+| `active` | `true` (default), `false`, or `"all"`; not available on `taxAgencies` (no Active flag) |
 | `ids` | Nonempty string ID array, serialized as `Id IN (...)` |
-| `name` | Exact `DisplayName` equality for customers/vendors; `Name` equality for accounts/items/terms |
-| `orderBy` | `Id` or the resource's name field, with `ASC`/`DESC`; defaults to `Id ASC` |
+| `name` | Exact `DisplayName` equality for customers/vendors/employees; `Name` elsewhere (tax agencies match their display name); not available on `companyCurrencies` |
+| `updatedSince` | `Date`; `MetaData.LastUpdatedTime >=` bound (see the boundary caveat under transactions) |
+| `orderBy` | `Id`, `MetaData.LastUpdatedTime` or the name field, with `ASC`/`DESC`; defaults to `Id ASC` |
 
-These options are the supported query subset. Strings are escaped for the QBO query language,
+These options are the supported query subset; unknown options reject before any request. Strings are escaped for the QBO query language,
 then URL-encoded. Entity records retain their provider shape, including addresses, customer
 hierarchies, reference objects, inventory/group details, currencies, and returned custom fields.
 Optional data varies by locale, product, and company settings; missing fields are not filled in.
@@ -87,6 +98,8 @@ provider edits can move records between pages, so syncs still need reconciliatio
 
 Sorting is executed by QuickBooks. In live sandbox checks, Account queries accepted `ORDERBY Id`
 but returned nonmonotonic entity IDs; descending results were not the reverse of ascending results.
+`ORDERBY MetaData.LastUpdatedTime` on accounts was also nonmonotonic (13 inversions across 97
+accounts at page sizes 7 and 1,000); customers, items and invoices sorted correctly.
 The connector preserves that provider order. Use Account `Name` sorting when name order is needed,
 and do not use the last Account ID as a high-water mark. Equal sort values can also have unstable
 relative order; offset pagination does not establish a snapshot or a completeness guarantee.
@@ -100,18 +113,35 @@ classification without including provider response bodies or credentials in thei
 Accounting failures throw `QuickBooksApiError` with `status`, `requestId` (`intuit_tid`),
 `faultType`, and provider `errors` (`code`, `Message`, `Detail`, `element`).
 
-## Download invoice and payment PDFs
+Tax data and rates have provider quirks the resources model directly:
+
+- `taxCodes` and `taxRates` are read-only. US pseudo-codes `TAX`, `NON` and `CustomSalesTax` have
+  no Active flag or numeric ID: `get` rejects them (error 2030) and they are never returned by
+  `list`, which always sends an Active predicate. Without one, QuickBooks prepends them to the
+  first page beyond `MAXRESULTS` and later offsets skip codes. Reference them by value in
+  `TaxCodeRef`. QuickBooks creates tax codes and rates through TaxService, which makes permanent
+  records and is not exposed.
+- `taxClassifications.list({ ids?, name?, level?, parentId? })` returns every match in one
+  response. QuickBooks ignores `STARTPOSITION`/`MAXRESULTS` here (2,106 rows unfiltered in the
+  sandbox), so the resource is not paged.
+- `exchangeRates.get({ sourceCurrencyCode, asOfDate? })` reads a rate to the home currency.
+  Rates have no entity ID. `list` supports pagination and `updatedSince` only, in provider order:
+  QuickBooks accepts but ignores `SourceCurrencyCode`/`AsOfDate` predicates and cannot sort by date.
+- `companyCurrencies` exist only when multicurrency is enabled; `budgets` are read-only.
+
+## Download PDFs
 
 ```ts
 const pdf = await qb.invoices.downloadPdf("42") // Invoice.Id
 await Bun.write("invoice.pdf", pdf)
-const receipt = await qb.payments.downloadPdf("17") // Payment.Id
-await Bun.write("receipt.pdf", receipt)
+const quote = await qb.estimates.downloadPdf("77") // Estimate.Id
+await Bun.write("estimate.pdf", quote)
 ```
 
-`downloadPdf(id)` returns `Uint8Array` bytes from `GET /invoice/{id}/pdf` or
-`GET /payment/{id}/pdf`, formatted using
-the company's custom form styles. It uses the selected company, managed authentication,
+`downloadPdf(id)` returns `Uint8Array` bytes from `GET /{entity}/{id}/pdf` on `invoices`,
+`estimates`, `salesReceipts`, `refundReceipts`, `creditMemos`, `payments` and `purchaseOrders`,
+formatted using the company's custom form styles. Other transactions have no PDF route
+(QuickBooks returns 400). It uses the selected company, managed authentication,
 and the same retry settings as other reads. The caller chooses where to save or serve the file.
 Provider faults throw `QuickBooksApiError`; unexpected non-PDF responses reject.
 
@@ -160,51 +190,146 @@ before deciding how to retry an upload whose outcome is unknown.
 Protocol references: [attachment API](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/attachable),
 [Intuit's multipart upload example](https://www.postman.com/intuit-developer/intuit-developer-quickbooks-online-accounting-api/documentation/4884662-e6c576f1-f6d3-440f-b090-da9ff1ac519d).
 
-## Aging reports
+## Reports
 
 ```ts
+const pnl = await qb.reports.profitAndLoss({
+  startDate: "2026-01-01",
+  endDate: "2026-06-30",
+  accountingMethod: "Cash",
+  summarizeColumnBy: "Month",
+})
+const sheet = await qb.reports.balanceSheet({ dateMacro: "Last Fiscal Year" })
+const jobs = await qb.reports.customerIncome({ startDate: "2026-01-01", customerIds: ["9"] })
 const receivables = await qb.reports.agedReceivables({
   reportDate: "2026-09-23",
   agingMethod: "Report_Date",
   agingPeriod: 30,
   numPeriods: 4,
-  customerIds: ["9"],
 })
-const receivableDetail = await qb.reports.agedReceivableDetail({ reportDate: "2026-09-23" })
-const payables = await qb.reports.agedPayables({ reportDate: "2026-09-23" })
-const payableDetail = await qb.reports.agedPayableDetail({ vendorIds: ["17"] })
+const invoices = await qb.reports.transactionList({
+  dateMacro: "This Fiscal Year",
+  transactionType: "Invoice",
+  columns: ["tx_date", "txn_type", "doc_num"],
+})
 ```
 
-The four methods call `/reports/AgedReceivables`, `/reports/AgedReceivableDetail`,
-`/reports/AgedPayables`, and `/reports/AgedPayableDetail`. Common options are `reportDate`
-(`YYYY-MM-DD`), `agingMethod` (`Current` or `Report_Date`), `agingPeriod` (days per bucket), and
-`numPeriods` (bucket count). Receivable methods accept `customerIds`; payable methods accept
-`vendorIds`. Omitted options use QuickBooks defaults; use an explicit date and aging method when
-reproducibility matters. Unsupported options reject locally; QuickBooks validates company-specific
-availability and parameter limits.
+| Method | Route |
+| --- | --- |
+| `profitAndLoss`, `profitAndLossDetail` | `ProfitAndLoss`, `ProfitAndLossDetail` |
+| `balanceSheet`, `cashFlow`, `trialBalance`, `generalLedger` | Same names |
+| `transactionList`, `transactionListByCustomer`, `transactionListByVendor`, `transactionListWithSplits`, `journalReport` | Same names |
+| `customerBalance`, `customerBalanceDetail`, `customerIncome`, `customerSales` | Same names |
+| `vendorBalance`, `vendorBalanceDetail`, `vendorExpenses` | Same names |
+| `itemSales`, `classSales`, `departmentSales`, `inventoryValuationSummary`, `accountList` | Same names |
+| `agedReceivables`, `agedReceivableDetail`, `agedPayables`, `agedPayableDetail` | Same names |
+
+Options are camelCase and map to Intuit's parameters: `startDate`/`endDate` (`start_date`/
+`end_date`), `dateMacro`, `reportDate`, `accountingMethod`, `summarizeColumnBy`, `sortBy`,
+`sortOrder`, `columns`, ID filters (`customerIds`, `vendorIds`, `employeeIds`, `itemIds`,
+`classIds`, `departmentIds`, `accountIds`, `sourceAccountIds`, `termIds`, sent as comma lists),
+`accountType`, `adjustedGainLoss`, `quickZoomUrl` (`qzurl`), aging options, and the transaction
+list filters (due/modified/created date ranges and macros, `transactionType`, `docNumber`
+(`docnum`), `paymentMethod`, `name`, `groupBy`, `arPaid`/`apPaid`, `cleared`, `printed`,
+`bothAmount`). Each method's option type is the subset Intuit documents for that report.
+
+QuickBooks silently ignores parameters it does not recognize, so the connector rejects any option
+a report does not document, validates dates and enumerations, rejects `startDate` after
+`endDate`, and rejects a date macro combined with its explicit range. Omitted options use
+QuickBooks defaults; pass explicit dates and accounting method when reproducibility matters.
+`columns` and `sortBy` take Intuit's column keys (for example `tx_date`, `doc_num`), which vary by
+report. Invalid values that reach QuickBooks can fail with HTTP 200 and a `SystemFault`; these
+are raised as `QuickBooksApiError`.
 
 Reports preserve the provider's `Header`, `Columns`, nested `Rows`, and summaries. Amounts remain
-strings and missing values remain empty strings. Empty reports can omit rows. Interpret columns
-using their metadata instead of hardcoding positions or titles, and do not assume a stable row
-order. These are report snapshots, not paginated entity lists.
+strings and missing values remain empty strings. Empty reports can omit rows (TransactionList
+returned `Rows: {}` with `NoReportData: true`). Interpret columns using their metadata (`ColKey`)
+instead of hardcoding positions or titles, and do not assume a stable row order. These are report
+snapshots, not paginated entity lists. TaxSummary, AccountListDetail and region-specific reports
+(BAS, the FR variants) are not exposed: the US sandbox denied them (5020) or they apply to other
+locales.
 
 See [Intuit's report modernization guidance](https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce)
-for response conventions and the supported aging reports.
+for response conventions.
+
+## Estimates, invoices and pay links
+
+```ts
+const estimate = await qb.estimates.create({
+  CustomerRef: { value: customer.Id },
+  BillEmail: { Address: "customer@example.com" },
+  ExpirationDate: "2026-10-31",
+  Line: [{
+    Amount: 2400,
+    DetailType: "SalesItemLineDetail",
+    SalesItemLineDetail: { ItemRef: { value: "3" }, Qty: 8, UnitPrice: 300 },
+  }],
+})
+await qb.estimates.send(estimate.Id) // uses BillEmail
+if (!estimate.SyncToken) throw new Error("Missing estimate revision")
+const accepted = await qb.estimates.update({
+  Id: estimate.Id,
+  SyncToken: estimate.SyncToken,
+  TxnStatus: "Accepted",
+  AcceptedBy: "Customer name",
+  AcceptedDate: "2026-09-20",
+})
+
+// Converting: link the estimate from a new invoice; QuickBooks marks it Converted.
+const invoice = await qb.invoices.create({
+  CustomerRef: { value: customer.Id },
+  BillEmail: { Address: "customer@example.com" },
+  LinkedTxn: [{ TxnId: accepted.Id, TxnType: "Estimate" }],
+  Line: [{
+    Amount: 2400,
+    DetailType: "SalesItemLineDetail",
+    SalesItemLineDetail: { ItemRef: { value: "3" }, Qty: 8, UnitPrice: 300 },
+  }],
+})
+const payable = await qb.invoices.get(invoice.Id, { includeInvoiceLink: true })
+console.log(payable.InvoiceLink)
+```
+
+- `estimates` support `get`, `list`, `listAll` (customer, document number, date and modification
+  filters), `create`, sparse `update`, `delete`, `send` and `downloadPdf`. Estimates cannot be
+  voided. Writable statuses are `Pending`, `Accepted`, `Closed` and `Rejected`; QuickBooks sets
+  `Converted` (not documented by Intuit, observed live) when an invoice links the estimate.
+- There is no status filter: QuickBooks rejects `TxnStatus` predicates (4001 "not queryable" at
+  minor versions 75, 76 and 80). Filter `TxnStatus` in application code after listing.
+- Line edits follow Intuit's line-ID semantics: keep `Id` on lines you change, omit it on new
+  lines, and leave out lines to remove them. The invoice copies lines explicitly; QuickBooks does
+  not copy them from the estimate. Deleting the invoice unlinks it so the estimate can be deleted.
+- Invoice inputs accept `LinkedTxn` and `ProjectRef`. Projects themselves come from the separate
+  Projects API; `ProjectRef` is deterministic-only here because the sandbox has no projects.
+- `includeInvoiceLink` sends `include=invoiceLink` on `get` and `list`. Queries return
+  `InvoiceLink` only with it. Reads by ID returned it for eligible invoices either way. In the
+  sandbox, an invoice was eligible when it had `BillEmail`, even with online card/ACH payment
+  disabled; Intuit documents online payments as a further production requirement. The sandbox
+  link points at an Intuit placeholder page. Ineligible invoices omit the field.
 
 ## Write operations
 
 | Resource | Write methods |
 | --- | --- |
-| `customers`, `vendors` | `create(input, options?)`, `update(input, options?)`, `deactivate(revision, options?)`, `reactivate(revision, options?)` |
+| `customers`, `vendors`, `employees`, `paymentMethods` | `create(input, options?)`, `update(input, options?)`, `deactivate(revision, options?)`, `reactivate(revision, options?)` |
+| `classes`, `departments` | `create`, `update`, `deactivate`, `reactivate` (each requires `Name`, see below) |
 | `invoices` | `create(input, options?)`, `update(input, options?)`, `delete(revision, options?)`, `void(revision, options?)`, `send(id, options?)` |
+| `estimates` | `create`, `update`, `delete`, `send` |
+| `salesReceipts`, `refundReceipts` | `create`, `update`, `delete`, `void`, `send` |
 | `payments` | `create`, `update`, `delete`, `void`, `send(id, { sendTo, requestId? })` |
 | `creditMemos` | `create`, `update`, `delete`, `send` |
-| `bills`, `vendorCredits` | `create`, `update`, `delete` |
+| `bills`, `vendorCredits`, `purchases`, `timeActivities`, `deposits`, `transfers`, `journalEntries` | `create`, `update`, `delete` |
+| `purchaseOrders` | `create`, `update`, `delete`, `send` |
 | `billPayments` | `create`, `update`, `delete`, `void` |
 | `accounts`, `terms` | `create`, `update`, `deactivate`, `reactivate` |
 | `items` | `create`, `update`, `deactivate`, `reactivate` (type-specific restrictions below) |
 | `companyInfo` | `update` (sparse, using the entity ID from `get()`) |
 | `preferences` | `update` (sparse; supported groups only) |
+
+Read-only: `customerTypes`, `taxCodes`, `taxRates`, `taxAgencies`, `taxClassifications`,
+`budgets`, `companyCurrencies`, `exchangeRates`, `reimburseCharges`, `creditCardPayments`,
+`inventoryAdjustments`, `recurringTransactions` and `taxPayments`. Intuit offers writes for some
+of these (for example inventory adjustments and recurring templates); they are follow-ups.
 
 ```ts
 const customer = await qb.customers.create({
@@ -291,9 +416,60 @@ Linked/deposited transactions can prevent deletion or voiding; Intuit's error is
 Credit memo sending accepts an optional `sendTo`, like invoices. Payment receipt sending requires
 an explicit `sendTo`. Both use the provider's octet-stream send endpoint and the same no-retry policy.
 
+Sales receipts record a sale paid at the time of sale (`CustomerRef` optional,
+`DepositToAccountRef` for where the money went). Refund receipts require `DepositToAccountRef`
+(the account the refund is paid from). Voiding differs: sales receipts void with
+`operation=update&include=void`, refund receipts with `operation=void`. QuickBooks accepts
+`include=void` on a refund receipt as a no-op update (HTTP 200, amounts unchanged), so the
+connector does not use it there. A refund-receipt send returns `DeliveryInfo` rather than
+`EmailStatus`; voiding prefixes `PrivateNote` with "Voided".
+
+### Purchases, banking and time
+
+- `purchases` record cash, check or card expenses (`PaymentType` with the paying `AccountRef`).
+  `Credit: true` records a card credit. The payee is `EntityRef` (vendor, customer or employee).
+- `purchaseOrders` take `VendorRef` and expense lines; `POStatus` is `Open` or `Closed`.
+  `send` uses `POEmail` when `sendTo` is omitted.
+- `deposits` take `DepositToAccountRef` and lines that either name a source account
+  (`DepositLineDetail.AccountRef`, amounts may be negative) or deposit a payment held in
+  Undeposited Funds (`LinkedTxn: [{ TxnId, TxnType: "Payment", TxnLineId: "0" }]`).
+- `transfers` move amounts between balance-sheet accounts; `journalEntries` take Debit/Credit
+  lines with `AccountRef`. QuickBooks rejects unbalanced entries (2300) and reports `TotalAmt: 0`
+  for journal entries; the lines carry the amounts.
+- `timeActivities` need `NameOf` with the matching `EmployeeRef` or `VendorRef`, and either
+  `Hours`/`Minutes` or `StartTime`/`EndTime`. A name created moments earlier can briefly fail as a
+  reference (error 2500 "Names element id not found"); the live suite waits until it is queryable.
+
+These record bookkeeping only; none moves money.
+
+### Fields QuickBooks requires on sparse updates
+
+Sparse updates preserve omitted fields, but QuickBooks still requires some fields on every update
+(error 2020). The input types require them and the connector checks them before sending:
+
+| Resource | Required on update (besides `Id`/`SyncToken`) |
+| --- | --- |
+| `bills`, `vendorCredits` | `VendorRef`, `Line` |
+| `creditMemos` | `CustomerRef`, `Line` |
+| `billPayments` | `VendorRef`, `TotalAmt`, `PayType` and its payment detail, `Line` |
+| `purchases` | `PaymentType` |
+| `deposits` | `DepositToAccountRef` |
+| `transfers` | `FromAccountRef`, `ToAccountRef`, `Amount` |
+| `classes`, `departments` | `Name` (activation methods take `{ Id, SyncToken, Name }`) |
+| `terms` | `DueDays` or `DayOfMonthDue` |
+| `items` (activation) | `Type` |
+
+Estimates, invoices, sales and refund receipts, payments, purchase orders, time activities,
+journal entries, customers, vendors, employees, payment methods and accounts accepted sparse
+updates without additional fields in the sandbox.
+
 ### Reference data and company settings
 
 - Accounts require a name and account type or subtype. Provider account rules govern edits and activation.
+- Employees require `DisplayName`, `GivenName` or `FamilyName`; QuickBooks enforces unique display
+  names across people. Payment method `Type` is `CREDIT_CARD` or `NON_CREDIT_CARD`. Classes and
+  departments (Locations in the UI) accept `SubClass`/`SubDepartment` with `ParentRef`.
+  Deactivated employees, classes, departments and payment methods remain in QuickBooks.
 - Item creation supports `Service`, `NonInventory`, `Inventory`, and `Category`. Inventory inputs
   require income/expense/asset accounts, quantity tracking, quantity, and an inventory start date.
   Quantity adjustments require `InvStartDate` (the adjustment date) even on sparse updates.
@@ -342,17 +518,15 @@ Intuit retired minor versions 1–74 and treats them as 75. Version 75 is the in
 baseline, not a claim that it is the latest available minor version.
 See [Intuit's migration announcement](https://medium.com/intuitdev/changes-to-our-accounting-api-that-may-impact-your-application-c330bd1a06f5).
 
-## Read receivables and payables
+## Read transactions
 
 ```ts
 const invoice = await qb.invoices.get("42")
-const payment = await qb.payments.get("51")
-const credit = await qb.creditMemos.get("8")
-const bill = await qb.bills.get("12")
-const billPayment = await qb.billPayments.get("60")
-const vendorCredit = await qb.vendorCredits.get("9")
+const estimate = await qb.estimates.get("77")
+const receipt = await qb.salesReceipts.get("51")
 
 for await (const invoice of qb.invoices.listAll({
+  customerIds: ["9"],
   txnDateFrom: "2026-09-01",
   txnDateTo: "2026-09-30",
   maxResults: 100,
@@ -365,25 +539,63 @@ for await (const invoice of qb.invoices.listAll({
     }
   }
 }
+
+// Incremental sync by modification time.
+for await (const bill of qb.bills.listAll({
+  updatedSince: checkpoint,
+  orderBy: { field: "MetaData.LastUpdatedTime" },
+})) {
+  console.log(bill.Id, bill.MetaData?.LastUpdatedTime)
+}
 ```
 
-All six transaction resources expose `get`, `list`, and `listAll`. They share this query subset:
+Every transaction resource exposes `get`, `list`, and `listAll` with this query subset:
 
 | Option | Contract |
 | --- | --- |
 | `ids` | Nonempty string ID array, serialized as `Id IN (...)` |
 | `txnDateFrom`, `txnDateTo` | Inclusive `TxnDate` bounds; valid `YYYY-MM-DD` dates |
-| `orderBy` | `Id` or `TxnDate`, with `ASC`/`DESC`; default `Id ASC` |
+| `docNumber` | Exact `DocNumber` |
+| `customerIds` / `vendorIds` | `CustomerRef IN (...)` / `VendorRef IN (...)` where supported (below) |
+| `updatedSince` | `Date`; `MetaData.LastUpdatedTime >=` bound (boundary caveat below) |
+| `orderBy` | `Id`, `TxnDate` or `MetaData.LastUpdatedTime`, with `ASC`/`DESC`; default `Id ASC` |
 | `startPosition`, `maxResults` | Same one-based pagination and bounds as reference resources |
 
-Transaction queries have no `Active` predicate. Date bounds refer to the transaction's accounting
-date, not its due date or last modification time. Additional query fields can be added as their
-resource-specific contracts are verified.
+Support differs by entity because QuickBooks rejects predicates on properties it does not index
+(4001 "not found"/"not queryable"); unsupported options reject locally instead:
 
-- Invoices and credit memos retain sales-item, discount, subtotal, description and group lines.
-- Bills and vendor credits retain account-based and item-based expense lines.
+| Resources | Party filter | Not supported |
+| --- | --- | --- |
+| `estimates`, `invoices`, `salesReceipts`, `refundReceipts`, `payments`, `creditMemos` | `customerIds` | |
+| `bills`, `billPayments`, `vendorCredits`, `purchaseOrders` | `vendorIds` | |
+| `timeActivities` | `customerIds` | `docNumber` |
+| `reimburseCharges` | `customerIds` | `txnDateFrom`/`txnDateTo`, `docNumber`, `TxnDate` sort |
+| `purchases` | none (`EntityRef` is not queryable) | |
+| `deposits`, `transfers`, `journalEntries`, `creditCardPayments`, `inventoryAdjustments` | none | |
+| `recurringTransactions` | none; `type` filters the template entity | dates, `docNumber`, `TxnDate` sort |
+| `taxPayments` | none | dates, `docNumber`; US companies reject the entity (5030) |
+
+`invoices` also accept `includeInvoiceLink`. Transaction queries have no `Active` predicate. Date
+bounds refer to the transaction's accounting date, not its due date or last modification time.
+No sandbox payment carried a `DocNumber`, so that positive case is unexercised for payments.
+
+`updatedSince` (on name lists and transactions) sends `MetaData.LastUpdatedTime >=`. QuickBooks
+never returned older records and always returned newer ones, but it can drop records displayed
+at exactly the bound second: in the sandbox two system accounts at the bound were excluded while
+the oldest invoice was included. Displayed timestamps have one-second precision. Start each
+incremental read a few seconds before the last checkpoint and deduplicate by ID. QuickBooks'
+other timestamp comparisons were unreliable (`<=` returned nothing, `=` matched everything), so
+no upper bound is exposed. CDC remains the source for deletions.
+
+- Invoices, estimates, receipts and credit memos retain sales-item, discount, subtotal,
+  description and group lines.
+- Bills, vendor credits, purchases and purchase orders retain account-based and item-based
+  expense lines; deposits and journal entries retain their own line details.
 - Payments retain every `Line.LinkedTxn` allocation and `UnappliedAmt`, including empty allocations.
 - Bill payments retain linked bills/credits and `CheckPayment`/`CreditCardPayment` account details.
+- `recurringTransactions` return QuickBooks' wrapper, e.g. `{ Bill: { Id, RecurringInfo, ... } }`.
+  The template's `Id` is the recurring transaction ID; it differs from `RecurDataRef` values on
+  generated transactions.
 - References, returned custom fields, tax details, balances, currency and exchange-rate values
   pass through without recalculation. An absent balance remains absent; zero remains zero.
 
@@ -432,10 +644,18 @@ for (const batch of changes.CDCResponse) {
 }
 ```
 
-`cdc.get` supports the eleven reference/transaction entity names in the table below, excluding
-CompanyInfo and Preferences (read those directly). It preserves Intuit's `CDCResponse` /
-`QueryResponse` groups, metadata, timestamps, full records and `status: "Deleted"` tombstones.
-Selection must be nonempty and unique; `changedSince` must be a valid `Date` within the last 30 days.
+`cdc.get` supports the 34 entity names QuickBooks accepted in the sandbox: Account, Attachable,
+Budget, Class, CompanyCurrency, Customer, CustomerType, Department, Employee, Item,
+PaymentMethod, TaxCode, TaxRate, Term, Vendor, Bill, BillPayment, CreditCardPayment, CreditMemo,
+Deposit, Estimate, InventoryAdjustment, Invoice, JournalEntry, Payment, Purchase, PurchaseOrder,
+RecurringTransaction, RefundReceipt, ReimburseCharge, SalesReceipt, TimeActivity, Transfer and
+VendorCredit. Excluded: TaxAgency and TaxClassification (QuickBooks fails the request with 4001),
+TaxPayment (5030 in US companies), Exchangerate (returns up to 1,000 Id-less rate rows), and
+CompanyInfo/Preferences (read directly). It preserves Intuit's `CDCResponse` / `QueryResponse`
+groups, metadata, timestamps, full records and `status: "Deleted"` tombstones.
+RecurringTransaction changes keep their template wrapper, including deletions
+(`{ Bill: { Id, status: "Deleted" } }`). Selection must be nonempty and unique; `changedSince`
+must be a valid `Date` within the last 30 days.
 
 Intuit caps CDC at 1,000 objects across the request. At that threshold—or when count metadata
 indicates it—the connector throws `QuickBooksCdcLimitError`. Its `response` contains the potentially
@@ -505,7 +725,9 @@ An unknown or disconnected realm yields no targets. Storage/handler failures pro
 
 The helper verifies HMAC-SHA256 over the original bytes using `intuit-signature`, then parses the
 CloudEvents array. It preserves event types, data, extensions, and order; it does not split events
-or resolve clients automatically. `quickbooksEventsWebhook(options)` is also exported for direct
+or resolve clients automatically. Event types follow `qbo.<entity>.<operation>.v1` for every
+entity, so new entities such as estimates (`qbo.estimate.created.v1`) need no parser changes;
+estimate events are covered by deterministic tests, not a live delivery. `quickbooksEventsWebhook(options)` is also exported for direct
 use as an ordinary `WebhookDefinition`.
 
 Intuit requires **HTTP 200 within three seconds**. A handler returning nothing gets 200 only after
@@ -543,6 +765,32 @@ Query positions are one-based; the maximum page size is 1,000.
 | `bills` | `/bill/{id}` | `Bill` | [Bill](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/bill) |
 | `billPayments` | `/billpayment/{id}` | `BillPayment` | [BillPayment](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/billpayment) |
 | `vendorCredits` | `/vendorcredit/{id}` | `VendorCredit` | [VendorCredit](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/vendorcredit) |
+| `estimates` | `/estimate/{id}` | `Estimate` | [Estimate](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/estimate) |
+| `salesReceipts` | `/salesreceipt/{id}` | `SalesReceipt` | [SalesReceipt](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/salesreceipt) |
+| `refundReceipts` | `/refundreceipt/{id}` | `RefundReceipt` | [RefundReceipt](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/refundreceipt) |
+| `purchases` | `/purchase/{id}` | `Purchase` | [Purchase](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/purchase) |
+| `purchaseOrders` | `/purchaseorder/{id}` | `PurchaseOrder` | [PurchaseOrder](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/purchaseorder) |
+| `timeActivities` | `/timeactivity/{id}` | `TimeActivity` | [TimeActivity](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/timeactivity) |
+| `deposits` | `/deposit/{id}` | `Deposit` | [Deposit](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/deposit) |
+| `transfers` | `/transfer/{id}` | `Transfer` | [Transfer](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/transfer) |
+| `journalEntries` | `/journalentry/{id}` | `JournalEntry` | [JournalEntry](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/journalentry) |
+| `creditCardPayments` | `/creditcardpayment/{id}` | `CreditCardPayment` | [CreditCardPayment](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/creditcardpayment) |
+| `inventoryAdjustments` | `/inventoryadjustment/{id}` | `InventoryAdjustment` | [InventoryAdjustment](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/inventoryadjustment) |
+| `reimburseCharges` | `/reimbursecharge/{id}` | `ReimburseCharge` | [ReimburseCharge](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/reimbursecharge) |
+| `recurringTransactions` | `/recurringtransaction/{id}` | `RecurringTransaction` | [RecurringTransaction](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/recurringtransaction) |
+| `taxPayments` | `/taxpayment/{id}` | `TaxPayment` | [TaxPayment](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/taxpayment) |
+| `employees` | `/employee/{id}` | `Employee` | [Employee](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/employee) |
+| `classes` | `/class/{id}` | `Class` | [Class](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/class) |
+| `departments` | `/department/{id}` | `Department` | [Department](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/department) |
+| `customerTypes` | `/customertype/{id}` | `CustomerType` | [CustomerType](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/customertype) |
+| `paymentMethods` | `/paymentmethod/{id}` | `PaymentMethod` | [PaymentMethod](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/paymentmethod) |
+| `taxCodes` | `/taxcode/{id}` | `TaxCode` | [TaxCode](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/taxcode) |
+| `taxRates` | `/taxrate/{id}` | `TaxRate` | [TaxRate](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/taxrate) |
+| `taxAgencies` | `/taxagency/{id}` | `TaxAgency` | [TaxAgency](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/taxagency) |
+| `taxClassifications` | `/taxclassification/{id}` | `TaxClassification` (unpaged) | [TaxClassification](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/taxclassification) |
+| `budgets` | `/budget/{id}` | `Budget` | [Budget](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/budget) |
+| `companyCurrencies` | `/companycurrency/{id}` | `CompanyCurrency` | [CompanyCurrency](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/companycurrency) |
+| `exchangeRates` | `/exchangerate?sourcecurrencycode=..&asofdate=..` | `Exchangerate` (array `ExchangeRate`) | [Exchangerate](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/exchangerate) |
 
 Single reads return an entity-named envelope; query responses contain a `QueryResponse` envelope
 with an entity-named array and pagination metadata. Empty query responses can omit that array.
@@ -569,15 +817,21 @@ and [Term field definitions](https://static.developer.intuit.com/sdkdocs/qbv3doc
 See [tests/README.md](tests/README.md) in the repository for deterministic integration coverage and
 opt-in sandbox commands. `bun run test:e2e` skips live tests unless `QUICKBOOKS_LIVE` selects a mode.
 
-Writes cover the operations listed above on the current resources. Reports other than aging,
-other resource PDFs, attachment metadata writes/deletion, bundle writes, and additional transaction
-resources are follow-ups.
+Writes cover the operations listed above. Follow-ups: writes for the read-only entities Intuit
+can also write (inventory adjustments, recurring templates, tax agencies, TaxService, company
+currencies, exchange-rate overrides, budgets), attachment metadata writes/deletion, bundle
+writes, the Entitlements endpoint (outside the company path), exact decimal-string amounts,
+batch operations, and the separate Payments, Payroll and Projects APIs. JournalCode and the
+FR/AU reports are region-specific and not exposed.
 Tax, inventory, multicurrency, and custom-field
 availability depend on the company's locale, subscription, and preferences; returned values are
 preserved without inventing defaults or deriving accounting totals.
 
 Tests use synthetic, partial wire examples and mocked provider traffic. They cover OAuth, token
 invalidation, paths, queries, pagination, transaction variants, CDC limits, and webhook signatures.
+The `accounting-writes` live mode and the extended `read` mode cover the resources, filters,
+writes, CDC entities and reports added with estimates; see [tests/README.md](tests/README.md)
+for what ran and what the provider rejected.
 Live sandbox checks passed for OAuth code exchange, authenticated company discovery, CompanyInfo,
 Preferences, the 24-hour CDC request, token refresh, and a read with the refreshed token.
 A subsequent full enumeration covered 241 records across all eleven list resources, compared
@@ -612,3 +866,13 @@ persisted each payload before HTTP 200, with measured local processing times of 
 unsigned and wrong-signature probes returned 401. These checks used a standalone listener;
 the full managed Sixb OAuth/webhook dispatch and connection lookup flow, provider retries,
 and CDC cap/recovery under load still need separate live verification.
+
+The coverage added with estimates was verified in the sandbox on 2026-11-08: exhaustive reads
+of all 33 paged resources (420 records) with every new filter, irregular reads, all 27 report
+methods with parameter-effect checks, every PDF route, and the `accounting-writes` lifecycles
+for every new write method, each confirmed through CDC. Empty sandbox datasets (customer types,
+budgets, company currencies, vendor credits, transfers, card payments) and US-unavailable tax
+payments remain deterministic-only, as do `ProjectRef`, estimate webhooks and the CDC entities
+no test changed (Attachable, Budget, CompanyCurrency, CustomerType, TaxCode, TaxRate,
+ReimburseCharge, CreditCardPayment, InventoryAdjustment), which QuickBooks accepted with empty
+results.

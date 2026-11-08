@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
-import { QuickBooksApiError, type QuickBooksRevision, quickbooksEventsWebhook } from "../src"
+import {
+  QuickBooksApiError,
+  type QuickBooksClient,
+  type QuickBooksRevision,
+  quickbooksEventsWebhook,
+} from "../src"
 import { connect, required } from "./live"
 
 // Deliberately separate from normal unit tests and from each other: reads never imply writes.
@@ -10,29 +15,74 @@ function sameIds(actual: readonly { Id: string }[], expected: readonly { Id: str
   expect(new Set(actual.map((r) => r.Id)).size).toBe(actual.length)
   expect(actual.map((r) => r.Id).sort()).toEqual(expected.map((r) => r.Id).sort())
 }
+type Row = { Id: string } & Record<string, unknown>
+type LooseResource = {
+  get(id: string): Promise<Row>
+  list(options: Record<string, unknown>): Promise<{ items: readonly Row[] }>
+  listAll(options: Record<string, unknown>): AsyncIterable<Row>
+}
+type ReadCase =
+  | { kind: "name"; name?: string; active: boolean }
+  | {
+      kind: "transaction"
+      party?: "CustomerRef" | "VendorRef"
+      txnDate: boolean
+      docNumber: boolean
+    }
+
+// Every paged list resource with the predicates QuickBooks accepted for it.
+const readCases: Record<string, ReadCase> = {
+  customers: { kind: "name", name: "DisplayName", active: true },
+  vendors: { kind: "name", name: "DisplayName", active: true },
+  employees: { kind: "name", name: "DisplayName", active: true },
+  accounts: { kind: "name", name: "Name", active: true },
+  items: { kind: "name", name: "Name", active: true },
+  terms: { kind: "name", name: "Name", active: true },
+  classes: { kind: "name", name: "Name", active: true },
+  departments: { kind: "name", name: "Name", active: true },
+  customerTypes: { kind: "name", name: "Name", active: true },
+  paymentMethods: { kind: "name", name: "Name", active: true },
+  taxCodes: { kind: "name", name: "Name", active: true },
+  taxRates: { kind: "name", name: "Name", active: true },
+  budgets: { kind: "name", name: "Name", active: true },
+  taxAgencies: { kind: "name", name: "DisplayName", active: false },
+  companyCurrencies: { kind: "name", active: true },
+  invoices: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
+  payments: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
+  creditMemos: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
+  estimates: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
+  salesReceipts: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
+  refundReceipts: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
+  timeActivities: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: false },
+  reimburseCharges: { kind: "transaction", party: "CustomerRef", txnDate: false, docNumber: false },
+  bills: { kind: "transaction", party: "VendorRef", txnDate: true, docNumber: true },
+  billPayments: { kind: "transaction", party: "VendorRef", txnDate: true, docNumber: true },
+  vendorCredits: { kind: "transaction", party: "VendorRef", txnDate: true, docNumber: true },
+  purchaseOrders: { kind: "transaction", party: "VendorRef", txnDate: true, docNumber: true },
+  purchases: { kind: "transaction", txnDate: true, docNumber: true },
+  deposits: { kind: "transaction", txnDate: true, docNumber: true },
+  transfers: { kind: "transaction", txnDate: true, docNumber: true },
+  journalEntries: { kind: "transaction", txnDate: true, docNumber: true },
+  creditCardPayments: { kind: "transaction", txnDate: true, docNumber: true },
+  inventoryAdjustments: { kind: "transaction", txnDate: true, docNumber: true },
+}
+
+function updated(row: Row) {
+  const value = (row.MetaData as { LastUpdatedTime?: string } | undefined)?.LastUpdatedTime
+  return value ? Date.parse(value) : Number.NaN
+}
+
 test.skipIf(mode !== "read")(
   "sandbox read contracts and optional full enumeration",
   async () => {
     const { qb } = await connect()
     await qb.preferences.get()
     const full = process.env.QUICKBOOKS_EXHAUSTIVE === "1"
-    for (const name of [
-      "customers",
-      "vendors",
-      "accounts",
-      "items",
-      "terms",
-      "invoices",
-      "payments",
-      "creditMemos",
-      "bills",
-      "billPayments",
-      "vendorCredits",
-    ] as const) {
-      const resource = qb[name]
-      const isName = ["customers", "vendors", "accounts", "items", "terms"].includes(name)
-      const options = isName ? { active: "all" as const } : {}
-      const rows = []
+    for (const [name, config] of Object.entries(readCases)) {
+      const resource = qb[name as keyof typeof qb] as unknown as LooseResource
+      const isName = config.kind === "name"
+      const options = isName && config.active ? { active: "all" as const } : {}
+      const rows: Row[] = []
       for await (const row of resource.listAll({ ...options, maxResults: full ? 7 : 2 })) {
         rows.push(row)
         if (!full && rows.length === 5) break
@@ -66,65 +116,137 @@ test.skipIf(mode !== "read")(
           if (page.items.length < 100) break
         }
         sameIds(manual, rows)
-        if (isName) {
-          for (const active of [true, false]) {
-            const filtered = []
-            for await (const row of resource.listAll({ active, maxResults: 7 })) filtered.push(row)
-            sameIds(
-              filtered,
-              rows.filter((r) => "Active" in r && r.Active === active)
+        // updatedSince never returns older rows and always returns strictly newer ones. Rows
+        // displayed at exactly the bound second may be excluded: QuickBooks dropped two system
+        // accounts there while including the oldest invoice. Timestamp ordering is ascending.
+        const stamps = [...new Set(rows.map(updated).filter(Number.isFinite))].sort((a, b) => a - b)
+        for (const stamp of new Set([
+          stamps[0],
+          stamps[Math.floor(stamps.length / 2)],
+          stamps.at(-1),
+        ])) {
+          if (stamp === undefined) continue
+          const filtered: Row[] = []
+          for await (const row of resource.listAll({
+            ...options,
+            updatedSince: new Date(stamp),
+            orderBy: { field: "MetaData.LastUpdatedTime" },
+            maxResults: 7,
+          }))
+            filtered.push(row)
+          const returned = new Set(filtered.map((r) => r.Id))
+          expect(returned.size).toBe(filtered.length)
+          expect(filtered.filter((r) => updated(r) < stamp)).toEqual([])
+          expect(rows.filter((r) => updated(r) > stamp && !returned.has(r.Id))).toEqual([])
+          const boundary = rows.filter((r) => updated(r) === stamp && !returned.has(r.Id))
+          if (boundary.length)
+            console.log(
+              `[QuickBooksLive] ${name}: updatedSince excluded ${boundary.length} row(s) at the bound second`
             )
-          }
-          const names = new Set(
-            rows.map((r) => ("DisplayName" in r ? r.DisplayName : "Name" in r ? r.Name : undefined))
-          )
-          for (const value of names) {
-            if (typeof value !== "string") throw new Error("[QuickBooksLive] Missing name field")
-            const filtered = []
-            for await (const row of resource.listAll({ ...options, name: value, maxResults: 7 }))
-              filtered.push(row)
-            sameIds(
-              filtered,
-              rows.filter((r) => {
-                const name = "DisplayName" in r ? r.DisplayName : "Name" in r ? r.Name : undefined
-                return typeof name === "string" && name.toLowerCase() === value.toLowerCase()
-              })
+          // Account ordering is provider-nonmonotonic for both Id and timestamp sorts.
+          const order = filtered.map(updated)
+          if (name === "accounts")
+            console.log(
+              `[QuickBooksLive] accounts: timestamp order ${order.every((t, i) => !i || t >= (order[i - 1] ?? t)) ? "monotonic" : "nonmonotonic"}`
             )
-          }
-        } else {
-          const dates = [
-            ...new Set(
-              rows.flatMap((r) =>
-                "TxnDate" in r && typeof r.TxnDate === "string" ? [r.TxnDate] : []
-              )
-            ),
-          ].sort()
-          for (const date of new Set([
-            dates[0],
-            dates[Math.floor(dates.length / 2)],
-            dates.at(-1),
-          ])) {
-            if (!date) continue
-            for (const mode of ["from", "to", "exact"]) {
+          else expect(order).toEqual([...order].sort((a, b) => a - b))
+        }
+        if (config.kind === "name") {
+          if (config.active)
+            for (const active of [true, false]) {
               const filtered = []
-              for await (const row of resource.listAll({
-                txnDateFrom: mode !== "to" ? date : undefined,
-                txnDateTo: mode !== "from" ? date : undefined,
-                maxResults: 7,
-              }))
+              for await (const row of resource.listAll({ active, maxResults: 7 }))
+                filtered.push(row)
+              sameIds(
+                filtered,
+                rows.filter((r) => r.Active === active)
+              )
+            }
+          const field = config.name
+          if (field) {
+            const names = new Set(rows.map((r) => r[field]))
+            for (const value of names) {
+              if (typeof value !== "string") throw new Error("[QuickBooksLive] Missing name field")
+              const filtered = []
+              for await (const row of resource.listAll({ ...options, name: value, maxResults: 7 }))
                 filtered.push(row)
               sameIds(
                 filtered,
                 rows.filter(
                   (r) =>
-                    "TxnDate" in r &&
-                    typeof r.TxnDate === "string" &&
-                    (mode === "from"
-                      ? r.TxnDate >= date
-                      : mode === "to"
-                        ? r.TxnDate <= date
-                        : r.TxnDate === date)
+                    typeof r[field] === "string" &&
+                    (r[field] as string).toLowerCase() === value.toLowerCase()
                 )
+              )
+            }
+          }
+        } else {
+          if (config.txnDate) {
+            const dates = [
+              ...new Set(rows.flatMap((r) => (typeof r.TxnDate === "string" ? [r.TxnDate] : []))),
+            ].sort()
+            for (const date of new Set([
+              dates[0],
+              dates[Math.floor(dates.length / 2)],
+              dates.at(-1),
+            ])) {
+              if (!date) continue
+              for (const mode of ["from", "to", "exact"]) {
+                const filtered = []
+                for await (const row of resource.listAll({
+                  txnDateFrom: mode !== "to" ? date : undefined,
+                  txnDateTo: mode !== "from" ? date : undefined,
+                  maxResults: 7,
+                }))
+                  filtered.push(row)
+                sameIds(
+                  filtered,
+                  rows.filter(
+                    (r) =>
+                      typeof r.TxnDate === "string" &&
+                      (mode === "from"
+                        ? r.TxnDate >= date
+                        : mode === "to"
+                          ? r.TxnDate <= date
+                          : r.TxnDate === date)
+                  )
+                )
+              }
+            }
+          }
+          if (config.docNumber) {
+            const numbers = [
+              ...new Set(
+                rows.flatMap((r) => (typeof r.DocNumber === "string" ? [r.DocNumber] : []))
+              ),
+            ].slice(0, 10)
+            if (!numbers.length) console.log(`[QuickBooksLive] ${name}: docNumber unexercised`)
+            for (const docNumber of numbers) {
+              const filtered = []
+              for await (const row of resource.listAll({ docNumber, maxResults: 7 }))
+                filtered.push(row)
+              sameIds(
+                filtered,
+                rows.filter((r) => r.DocNumber === docNumber)
+              )
+            }
+          }
+          const partyField = config.party
+          if (partyField) {
+            const option = partyField === "CustomerRef" ? "customerIds" : "vendorIds"
+            const party = (r: Row) => (r[partyField] as { value?: string } | undefined)?.value
+            const parties = [...new Set(rows.map(party).filter((id) => id !== undefined))].slice(
+              0,
+              10
+            )
+            for (const ids of [...parties.map((id) => [id]), parties.slice(0, 3)]) {
+              if (!ids.length) continue
+              const filtered = []
+              for await (const row of resource.listAll({ [option]: ids, maxResults: 7 }))
+                filtered.push(row)
+              sameIds(
+                filtered,
+                rows.filter((r) => ids.includes(party(r) as string))
               )
             }
           }
@@ -135,11 +257,200 @@ test.skipIf(mode !== "read")(
       )
     }
     await qb.cdc.get({
-      entities: ["Customer", "Invoice", "Bill", "VendorCredit"],
+      entities: ["Customer", "Invoice", "Bill", "VendorCredit", "Estimate", "SalesReceipt"],
       changedSince: new Date(Date.now() - 86400_000),
     })
   },
   15 * 60_000
+)
+
+test.skipIf(mode !== "read")(
+  "sandbox irregular reads: invoice links, tax classifications, exchange rates, recurring templates",
+  async () => {
+    const { qb } = await connect()
+    const invoices = (await qb.invoices.list({ maxResults: 50, includeInvoiceLink: true })).items
+    const eligible = invoices.filter((row) => row.BillEmail?.Address)
+    for (const row of eligible.slice(0, 5)) expect(row.InvoiceLink).toMatch(/^https:\/\//)
+    for (const row of invoices.filter((row) => !row.BillEmail?.Address))
+      expect(row.InvoiceLink).toBeUndefined()
+
+    const all = await qb.taxClassifications.list()
+    expect(all.items.length).toBeGreaterThan(1000)
+    const top = await qb.taxClassifications.list({ level: "1" })
+    expect(top.items.every((row) => row.Level === "1")).toBe(true)
+    const child = all.items.find((row) => row.ParentRef?.value)
+    if (child?.ParentRef) {
+      const siblings = await qb.taxClassifications.list({ parentId: child.ParentRef.value })
+      expect(siblings.items.map((row) => row.Id)).toContain(child.Id)
+      expect((await qb.taxClassifications.get(child.Id)).Id).toBe(child.Id)
+      expect((await qb.taxClassifications.list({ ids: [child.Id] })).items).toHaveLength(1)
+    }
+
+    const rates = []
+    for await (const rate of qb.exchangeRates.listAll({ maxResults: 50 })) {
+      rates.push(rate)
+      if (rates.length >= 150) break
+    }
+    expect(rates.every((rate) => typeof rate.SourceCurrencyCode === "string")).toBe(true)
+    const today = new Date().toISOString().slice(0, 10)
+    const eur = await qb.exchangeRates.get({ sourceCurrencyCode: "EUR" })
+    expect(eur.SourceCurrencyCode).toBe("EUR")
+    expect(
+      (await qb.exchangeRates.get({ sourceCurrencyCode: "EUR", asOfDate: today })).AsOfDate
+    ).toBe(today)
+
+    const recurring = []
+    for await (const row of qb.recurringTransactions.listAll({ maxResults: 1 })) recurring.push(row)
+    for (const row of recurring) {
+      const [type, template] = Object.entries(row)[0] as [string, { Id: string }]
+      expect(Object.keys(await qb.recurringTransactions.get(template.Id))).toEqual([type])
+      const typed = await qb.recurringTransactions.list({ type, ids: [template.Id] })
+      expect(typed.items).toHaveLength(1)
+    }
+    if (!recurring.length) console.log("[QuickBooksLive] recurringTransactions: empty")
+    // Every PDF route, on the first existing record of each type (read-only).
+    let pdfs = 0
+    for (const name of [
+      "invoices",
+      "estimates",
+      "salesReceipts",
+      "refundReceipts",
+      "creditMemos",
+      "payments",
+      "purchaseOrders",
+    ] as const) {
+      const resource = qb[name] as unknown as LooseResource & {
+        downloadPdf(id: string): Promise<Uint8Array>
+      }
+      const [first] = (await resource.list({ maxResults: 1 })).items
+      if (!first) {
+        console.log(`[QuickBooksLive] ${name}: no record for PDF check`)
+        continue
+      }
+      const pdf = await resource.downloadPdf(first.Id)
+      expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-")
+      pdfs++
+    }
+    const other = await qb.recurringTransactions.list({ type: "JournalEntry" })
+    expect(other.items.every((row) => "JournalEntry" in row)).toBe(true)
+    console.log(
+      `[QuickBooksLive] irregular reads: ${eligible.length} linked invoices, ${all.items.length} tax classifications, ${rates.length} exchange rates, ${recurring.length} recurring templates, ${pdfs} PDF routes`
+    )
+  },
+  5 * 60_000
+)
+
+type Report = Awaited<ReturnType<QuickBooksClient["reports"]["profitAndLoss"]>>
+type ReportRow = NonNullable<NonNullable<Report["Rows"]>["Row"]>[number]
+function dataRows(rows: Report["Rows"]): ReportRow[] {
+  return (rows?.Row ?? []).flatMap((row) => [...(row.ColData ? [row] : []), ...dataRows(row.Rows)])
+}
+function columnIndex(report: Report, key: string) {
+  return report.Columns.Column.findIndex((column) =>
+    column.MetaData?.some((entry) => entry.Name === "ColKey" && entry.Value === key)
+  )
+}
+function option(report: Report, name: string) {
+  return report.Header.Option?.find((entry) => entry.Name === name)?.Value
+}
+
+test.skipIf(mode !== "read")(
+  "sandbox report contracts and parameter effects",
+  async () => {
+    const { qb } = await connect()
+    const today = new Date().toISOString().slice(0, 10)
+    const year = Number(today.slice(0, 4))
+    const reports = qb.reports as unknown as Record<string, () => Promise<Report>>
+    for (const method of Object.keys(qb.reports)) {
+      const result = await reports[method]?.()
+      expect(result?.Header).toBeDefined()
+      expect(Array.isArray(result?.Columns.Column)).toBe(true)
+      console.log(
+        `[QuickBooksLive] report ${method}: ${result?.Header.ReportName} ${dataRows(result?.Rows).length} rows`
+      )
+    }
+
+    const pnl = await qb.reports.profitAndLoss({
+      startDate: `${year}-01-01`,
+      endDate: `${year}-06-30`,
+      accountingMethod: "Cash",
+      summarizeColumnBy: "Month",
+    })
+    expect(pnl.Header.StartPeriod).toBe(`${year}-01-01`)
+    expect(pnl.Header.EndPeriod).toBe(`${year}-06-30`)
+    expect(pnl.Header.ReportBasis).toBe("Cash")
+    expect(pnl.Header.SummarizeColumnsBy).toBe("Month")
+    expect(pnl.Columns.Column.length).toBeGreaterThan(6)
+    const balance = await qb.reports.balanceSheet({
+      dateMacro: "Last Fiscal Year",
+      accountingMethod: "Accrual",
+    })
+    expect(balance.Header.ReportBasis).toBe("Accrual")
+    expect(balance.Header.EndPeriod?.startsWith(String(year - 1))).toBe(true)
+    expect((await qb.reports.trialBalance({ endDate: today })).Header.EndPeriod).toBe(today)
+
+    const customers = await qb.reports.customerBalance({ reportDate: today })
+    expect(option(customers, "report_date")).toBe(today)
+    const customerId = dataRows(customers.Rows).find((row) => row.ColData?.[0]?.id)?.ColData?.[0]
+      ?.id
+    if (customerId) {
+      const one = await qb.reports.customerBalance({ reportDate: today, customerIds: [customerId] })
+      const ids = dataRows(one.Rows).flatMap((row) =>
+        row.ColData?.[0]?.id ? [row.ColData[0].id] : []
+      )
+      expect(new Set(ids)).toEqual(new Set([customerId]))
+    }
+    const vendors = await qb.reports.vendorBalance({ reportDate: today })
+    const vendorId = dataRows(vendors.Rows).find((row) => row.ColData?.[0]?.id)?.ColData?.[0]?.id
+    if (vendorId) {
+      const one = await qb.reports.vendorBalance({ vendorIds: [vendorId] })
+      const ids = dataRows(one.Rows).flatMap((row) =>
+        row.ColData?.[0]?.id ? [row.ColData[0].id] : []
+      )
+      expect(new Set(ids)).toEqual(new Set([vendorId]))
+    }
+
+    const range = { startDate: `${year - 1}-01-01`, endDate: today }
+    const narrow = await qb.reports.transactionList({
+      ...range,
+      columns: ["tx_date", "txn_type", "doc_num"],
+    })
+    expect(narrow.Columns.Column).toHaveLength(3)
+    const invoices = await qb.reports.transactionList({ ...range, transactionType: "Invoice" })
+    const typeColumn = columnIndex(invoices, "txn_type")
+    const types = new Set(dataRows(invoices.Rows).map((row) => row.ColData?.[typeColumn]?.value))
+    expect(types.size ? [...types] : ["Invoice"]).toEqual(["Invoice"])
+
+    const banks = await qb.reports.accountList({ accountType: "Bank" })
+    const accountTypeColumn = columnIndex(banks, "account_type")
+    const bankRows = dataRows(banks.Rows)
+    expect(bankRows.length).toBeGreaterThan(0)
+    expect(new Set(bankRows.map((row) => row.ColData?.[accountTypeColumn]?.value))).toEqual(
+      new Set(["Bank"])
+    )
+    const bankId = bankRows.find((row) => row.ColData?.[0]?.id)?.ColData?.[0]?.id
+    if (bankId) {
+      const ledger = await qb.reports.generalLedger({ ...range, accountIds: [bankId] })
+      const sections = (ledger.Rows?.Row ?? []).filter((row) => row.Header?.ColData?.[0]?.id)
+      expect(new Set(sections.map((row) => row.Header?.ColData?.[0]?.id))).toEqual(
+        new Set([bankId])
+      )
+    }
+
+    const aging = await qb.reports.agedReceivables({
+      reportDate: today,
+      agingMethod: "Report_Date",
+    })
+    const shorter = await qb.reports.agedReceivables({
+      reportDate: today,
+      agingMethod: "Report_Date",
+      agingPeriod: 15,
+      numPeriods: 2,
+    })
+    expect(shorter.Columns.Column.length).toBeLessThan(aging.Columns.Column.length)
+    expect(option(shorter, "report_date")).toBe(today)
+  },
+  10 * 60_000
 )
 
 test.skipIf(mode !== "mutate")(

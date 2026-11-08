@@ -8,8 +8,20 @@ and a different realm ID, matching the provider contract discovered in the sandb
 `invoice-pdf.test.ts` and `attachments-reports.test.ts` cover binary PDF preservation, attachment
 queries and pagination, multipart uploads and nested faults, upload non-replay, credential-free
 temporary URL downloads, and the four aging report routes with nested/empty report responses.
-These use synthetic provider responses; PDFs, attachments, and aging reports have not yet been
-verified against a live sandbox. Regression-removal instructions are beside the relevant tests.
+Attachments remain unverified against a live sandbox; PDFs and reports are covered by the live
+modes below. Regression-removal instructions are beside the relevant tests.
+
+The coverage added with estimates has one deterministic file per area: `query-filters`
+(modification, document number and party predicates), `estimates`, `invoice-links`,
+`reference-reads` (tax data, exchange rates, budgets, currencies), `reference-writes` (employees,
+classes, departments, payment methods), `receipts`, `purchases`, `banking` (time activities,
+deposits, transfers, journal entries), `transaction-reads` (read-only transactions and recurring
+wrappers), `reports` (every report's documented parameters) and the extended `cdc` and
+`webhooks` files. Each file covers wire paths, query serialization, pagination, envelope
+parsing, HTTP and HTTP-200 faults, write request IDs without replay, and local input
+validation. Constraints discovered live are guarded locally; the guards for refund-receipt voids,
+recurring CDC wrappers, Purchase `PaymentType`, Transfer accounts and report allowlists were each
+removed and their tests observed failing before restoration.
 
 `packages/server/tests/quickbooks-webhooks.test.ts` exercises the real QuickBooks adapter through
 Sixb HTTP dispatch, signature verification, selected-account lookup, lazy clients and encrypted
@@ -31,10 +43,17 @@ The keys alone cannot authorize company access. The suite fixes the API host to 
 refresh or persist credentials, and fails explicitly if an enabled mode lacks configuration.
 Without `QUICKBOOKS_LIVE`, all live tests skip, including in repository-wide E2E jobs.
 
-Read mode samples up to five records per resource. Exhaustive mode enumerates all records, reads
-every ID, verifies ID-filter batches, exact names, active selection, date bounds and compares two page sizes (bounded to 10,000 records and
-15 minutes). Keep the sandbox unchanged while comparing results. Empty datasets report unexercised
-positive cases. Provider ordering is preserved: Account Id ordering is not reliably monotonic.
+Read mode samples up to five records per resource across every paged list resource. Exhaustive
+mode enumerates all records, reads every ID, verifies ID-filter batches, exact names, active
+selection, date bounds, document numbers, customer/vendor filters (up to ten parties each, plus a
+multi-party filter), `updatedSince` bounds with timestamp ordering, and compares two page sizes
+(bounded to 10,000 records and 15 minutes). Keep the sandbox unchanged while comparing results.
+Empty datasets report unexercised positive cases. Provider ordering is preserved: Account Id and
+timestamp ordering are not reliably monotonic. Read mode also runs two shorter tests: irregular
+reads (invoice pay links, unpaged tax classifications, exchange rates by key and page, recurring
+templates by type, and every PDF route on an existing record) and report contracts (every report
+method, plus checks that dates, accounting basis, column summaries, customer/vendor/account
+filters, transaction types, column selection and aging periods change the provider's output).
 
 Mutation mode is an independent opt-in:
 
@@ -100,6 +119,33 @@ cleanup even if another fails. Transactions are deleted; reference records remai
 Run against an otherwise idle sandbox. `QUICKBOOKS_SEND_TO` has the same meaning as in `writes` mode;
 successful API receipt sending does not establish inbox delivery.
 
+Coverage added with estimates has its own journaled suite:
+
+```sh
+QUICKBOOKS_LIVE=accounting-writes QUICKBOOKS_JOURNAL=.local/qb-accounting-unique bun --env-file=.env.test test ./connectors/quickbooks/tests/accounting-writes.e2e.ts
+```
+
+It runs six bounded tests with separate journals (`.estimates.json`, `.references.json`,
+`.receipts.json`, `.purchases.json`, `.time.json`, `.banking.json`; none may already exist):
+- Estimates: create; customer, document number and modification filters; sparse acceptance;
+  a line edit that keeps one line ID and adds a line; explicit and stored-BillEmail sends; PDF;
+  conversion to an invoice through `LinkedTxn`; `includeInvoiceLink` on get and list; Closed and
+  Rejected statuses; CDC update and deletion markers.
+- References: employee, class, department and payment method create, update, name filter,
+  deactivate and reactivate.
+- Receipts: sales and refund receipt create, customer filter, sparse update, send, PDF, void and
+  delete.
+- Purchases: cash, check and card purchases with a DocNumber filter; purchase order create,
+  vendor filter, sparse close, explicit and stored-POEmail sends, PDF and delete.
+- Time: time activities by duration and by start/end time for a new employee and customer.
+- Banking: a direct deposit, a deposit of an undeposited payment through `LinkedTxn`, a
+  transfer, a journal entry with a line edit, and an unbalanced entry QuickBooks must reject.
+
+Every test checks multi-entity CDC for each entity it writes. Cleanup runs LIFO and attempts every
+step; transactions are deleted, and the customers, vendors, employees, classes, departments and
+payment methods it creates remain inactive. Sends use `QUICKBOOKS_SEND_TO` or the reserved
+`sixb-invoice-test@example.com`.
+
 The recorded local verification in the package README describes additional live CDC, transaction,
 and webhook experiments. It is evidence of that run, not a guarantee about every company or locale.
 
@@ -119,3 +165,35 @@ All final-suite cleanup markers were complete. Earlier diagnostic runs exposed a
 account subtype requirement, a required due-date rule on term edits, HTTP 200 preference faults,
 and the sales-form preference limitation documented in the package README. The Term and Preferences
 guards were each removed temporarily and the regression test failed before they were restored.
+
+On 2026-11-08 the coverage added with estimates ran against the sandbox company at minor
+version 75. Exhaustive read mode passed (420 records across the 33 paged resources, 1,919
+assertions, ~400 seconds); customer types, budgets, company currencies, vendor credits, transfers
+and card payments were empty, and DocNumber was unexercised for payments, bills, deposits and
+journal entries. The irregular-read and report tests passed (99 assertions: 31 linked invoices,
+2,106 tax classifications, 150 exchange rates, 2 recurring templates, 7 PDF routes, 27 report
+methods). The final `accounting-writes` run passed all six tests (131 assertions, ~74 seconds)
+with every cleanup step complete. The existing `writes` (23 assertions) and `remaining-writes`
+(72 assertions) modes were rerun as regression checks and passed.
+
+Provider behaviour found during those runs, and how the connector handles it:
+- Estimate `TxnStatus` is not queryable (4001 at minor versions 75, 76 and 80): no status filter.
+- Linking an invoice sets the estimate's `TxnStatus` to `Converted`, a value Intuit does not
+  document: added to the read type, rejected as a write value.
+- `GET /invoice/{id}` returned `InvoiceLink` for eligible invoices without `include`; queries
+  needed `include=invoiceLink`. Eligibility in the sandbox required `BillEmail` only.
+- Sparse updates still required `Name` on Class and Department, `PaymentType` on Purchase,
+  `DepositToAccountRef` on Deposit, and both accounts plus `Amount` on Transfer (2020): the
+  input types require them and they are checked before sending. An early run's class cleanup
+  failed on this before the fix; the leftover test class was deactivated by hand.
+- `refundreceipt?operation=update&include=void` returned HTTP 200 without voiding; refund
+  receipts use `operation=void`. Refund receipt sends return `DeliveryInfo`, not `EmailStatus`.
+- Journal entries report `TotalAmt: 0`; an unbalanced entry fails with 2300.
+- A time activity referencing a customer created moments earlier failed once with 2500 ("Names
+  element id not found") and passed when the test waited until the name was queryable.
+- `updatedSince` dropped system accounts displayed at exactly the bound second while including
+  records at the bound elsewhere; `<=` and `=` timestamp predicates were unreliable. Account
+  `ORDERBY MetaData.LastUpdatedTime` was nonmonotonic.
+- Probes outside the suites, each on one labelled record deleted immediately afterwards: a
+  recurring bill template (to capture CDC wrapper shapes), and a purchase, deposit, transfer,
+  journal entry and refund receipt (to find required update fields and the void route).

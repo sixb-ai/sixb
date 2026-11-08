@@ -155,6 +155,12 @@ live(
         qb.estimates.send(estimateId, { ...o, sendTo })
       )
       expect(estimate.EmailStatus).toBe("EmailSent")
+      // Without sendTo, QuickBooks sends to the stored BillEmail.
+      estimate = await write("Estimate.send BillEmail", { id: estimateId }, (o) =>
+        qb.estimates.send(estimateId, o)
+      )
+      expect(estimate.EmailStatus).toBe("EmailSent")
+      expect(estimate.BillEmail?.Address).toBe(sendTo)
       const pdf = await qb.estimates.downloadPdf(estimateId)
       expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-")
       await cdcRecord(
@@ -578,6 +584,11 @@ live(
       expect(order.TotalAmt).toBe(6)
       order = await write("PurchaseOrder.send", { id: orderId, sendTo }, (o) =>
         qb.purchaseOrders.send(orderId, { ...o, sendTo })
+      )
+      expect(order.EmailStatus).toBe("EmailSent")
+      // Without sendTo, QuickBooks sends to the stored POEmail.
+      order = await write("PurchaseOrder.send POEmail", { id: orderId }, (o) =>
+        qb.purchaseOrders.send(orderId, o)
       )
       expect(order.EmailStatus).toBe("EmailSent")
       const pdf = await qb.purchaseOrders.downloadPdf(orderId)

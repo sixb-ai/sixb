@@ -130,7 +130,7 @@ export const connectorCatalog: readonly ConnectorEntry[] = [
   {
     id: "quickbooks",
     name: "QuickBooks",
-    description: "Accounting reads and writes, receipts, and change data capture",
+    description: "Accounting reads and writes, estimates, reports, and change data capture",
     category: "Business",
     package: "quickbooks",
     icon: "quickbooks.svg",
