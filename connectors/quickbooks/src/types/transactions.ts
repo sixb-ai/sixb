@@ -272,6 +272,43 @@ export interface QuickBooksBill extends QuickBooksPurchaseTransaction {
 
 export type QuickBooksVendorCredit = QuickBooksPurchaseTransaction
 
+/** Expense, check or credit-card charge (or card credit when `Credit` is true). */
+export interface QuickBooksPurchase extends QuickBooksTransaction {
+  readonly PaymentType?: "Cash" | "Check" | "CreditCard" | (string & {})
+  /** Bank or credit-card account the purchase was paid from. */
+  readonly AccountRef?: QuickBooksReference
+  /** Payee; `type` is Vendor, Customer or Employee. */
+  readonly EntityRef?: QuickBooksReference
+  readonly Credit?: boolean
+  readonly RemitToAddr?: QuickBooksAddress
+  readonly PrintStatus?: string
+  readonly PaymentMethodRef?: QuickBooksReference
+  readonly Line?: readonly QuickBooksExpenseLine[]
+  readonly TxnTaxDetail?: QuickBooksTaxDetail
+  readonly GlobalTaxCalculation?: string
+  readonly TxnSource?: string
+  readonly IncludeInAnnualTPAR?: boolean
+  readonly RecurDataRef?: QuickBooksReference
+  /** Opaque provider extension data, retained without interpretation. */
+  readonly PurchaseEx?: Readonly<Record<string, unknown>>
+}
+
+export interface QuickBooksPurchaseOrder extends QuickBooksPurchaseTransaction {
+  readonly POStatus?: "Open" | "Closed" | (string & {})
+  readonly POEmail?: { readonly Address?: string }
+  readonly VendorAddr?: QuickBooksAddress
+  readonly ShipAddr?: QuickBooksAddress
+  readonly ShipTo?: QuickBooksReference
+  readonly ShipMethodRef?: QuickBooksReference
+  readonly DueDate?: string
+  readonly SalesTermRef?: QuickBooksReference
+  readonly ClassRef?: QuickBooksReference
+  readonly EmailStatus?: string
+  readonly PrintStatus?: string
+  readonly Memo?: string
+  readonly RecurDataRef?: QuickBooksReference
+}
+
 export interface QuickBooksBillPayment extends QuickBooksTransaction {
   readonly VendorRef?: QuickBooksReference
   readonly VendorAddr?: QuickBooksAddress

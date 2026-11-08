@@ -21,6 +21,8 @@ import { createItemsResource } from "./resources/items"
 import { createPaymentMethodsResource } from "./resources/payment-methods"
 import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
+import { createPurchaseOrdersResource } from "./resources/purchase-orders"
+import { createPurchasesResource } from "./resources/purchases"
 import { createRefundReceiptsResource } from "./resources/refund-receipts"
 import { createReportsResource } from "./resources/reports"
 import { createSalesReceiptsResource } from "./resources/sales-receipts"
@@ -101,6 +103,8 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
         bills: createBillsResource(http),
         billPayments: createBillPaymentsResource(http),
         vendorCredits: createVendorCreditsResource(http),
+        purchaseOrders: createPurchaseOrdersResource(http),
+        purchases: createPurchasesResource(http),
         refundReceipts: createRefundReceiptsResource(http),
         salesReceipts: createSalesReceiptsResource(http),
         paymentMethods: createPaymentMethodsResource(http),

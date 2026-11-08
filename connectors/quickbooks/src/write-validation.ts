@@ -47,6 +47,17 @@ export function linkedTransactions(links: readonly QuickBooksLinkedTransaction[]
   }
 }
 
+export function purchasePayment(input: { PaymentType?: unknown; AccountRef?: { value?: string } }) {
+  if (
+    input.PaymentType !== undefined &&
+    input.PaymentType !== "Cash" &&
+    input.PaymentType !== "Check" &&
+    input.PaymentType !== "CreditCard"
+  )
+    throw new Error("[SixbQuickBooks] PaymentType must be Cash, Check, or CreditCard.")
+  if (input.AccountRef !== undefined) nonEmpty(input.AccountRef.value, "AccountRef.value")
+}
+
 export function allocations(lines: readonly QuickBooksAllocationLine[]) {
   if (!Array.isArray(lines)) throw new Error("[SixbQuickBooks] Line must be an array.")
   for (const line of lines) {

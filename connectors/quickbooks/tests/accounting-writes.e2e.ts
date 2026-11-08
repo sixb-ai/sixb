@@ -444,3 +444,106 @@ live(
   },
   5 * 60_000
 )
+
+live(
+  "purchase (cash, check, card) and purchase order lifecycles",
+  async () => {
+    await withJournal("purchases", async ({ qb, tag, write, defer }) => {
+      const vendorInput = { DisplayName: `${tag}-vendor` }
+      const vendor = await write("Vendor.create", vendorInput, (o) =>
+        qb.vendors.create(vendorInput, o)
+      )
+      defer("Vendor.deactivate", async () => {
+        const input = revision(await qb.vendors.get(vendor.Id))
+        await write("Vendor.deactivate", input, (o) => qb.vendors.deactivate(input, o))
+      })
+      const { bank, card, expense } = await accountsByType(qb)
+      const expenseLine = (Amount: number) =>
+        ({
+          Amount,
+          DetailType: "AccountBasedExpenseLineDetail",
+          Description: tag,
+          AccountBasedExpenseLineDetail: { AccountRef: { value: expense.Id } },
+        }) as const
+
+      for (const [PaymentType, account] of [
+        ["Cash", bank],
+        ["Check", bank],
+        ["CreditCard", card],
+      ] as const) {
+        const DocNumber = `${PaymentType.slice(0, 2)}${tag.slice(-12)}`
+        const input = {
+          PaymentType,
+          AccountRef: { value: account.Id },
+          EntityRef: { value: vendor.Id, type: "Vendor" },
+          DocNumber,
+          PrivateNote: tag,
+          Line: [expenseLine(3.5)],
+        }
+        let purchase = await write(`Purchase.${PaymentType}.create`, input, (o) =>
+          qb.purchases.create(input, o)
+        )
+        const id = purchase.Id
+        defer(`Purchase.${PaymentType}.delete`, async () => {
+          const current = revision(await qb.purchases.get(id))
+          expect(
+            (await write("Purchase.delete", current, (o) => qb.purchases.delete(current, o))).status
+          ).toBe("Deleted")
+          expect((await qb.purchases.list({ ids: [id] })).items).toHaveLength(0)
+        })
+        expect(purchase.PaymentType).toBe(PaymentType)
+        expect(purchase.TotalAmt).toBe(3.5)
+        expect((await qb.purchases.list({ docNumber: DocNumber })).items.map((r) => r.Id)).toEqual([
+          id,
+        ])
+        // Sparse Purchase updates require PaymentType (live error 2020 without it).
+        const update = { ...revision(purchase), PaymentType, PrivateNote: `${tag}-updated` }
+        purchase = await write(`Purchase.${PaymentType}.update`, update, (o) =>
+          qb.purchases.update(update, o)
+        )
+        expect(purchase.PrivateNote).toBe(update.PrivateNote)
+        expect(purchase.TotalAmt).toBe(3.5)
+        expect(purchase.EntityRef?.value).toBe(vendor.Id)
+      }
+
+      const orderInput = {
+        VendorRef: { value: vendor.Id },
+        POEmail: { Address: sendTo },
+        PrivateNote: tag,
+        Line: [expenseLine(6)],
+      }
+      let order = await write("PurchaseOrder.create", orderInput, (o) =>
+        qb.purchaseOrders.create(orderInput, o)
+      )
+      const orderId = order.Id
+      defer("PurchaseOrder.delete", async () => {
+        const current = revision(await qb.purchaseOrders.get(orderId))
+        expect(
+          (
+            await write("PurchaseOrder.delete", current, (o) =>
+              qb.purchaseOrders.delete(current, o)
+            )
+          ).status
+        ).toBe("Deleted")
+        expect((await qb.purchaseOrders.list({ ids: [orderId] })).items).toHaveLength(0)
+      })
+      expect(order.POStatus).toBe("Open")
+      expect(
+        (await qb.purchaseOrders.list({ vendorIds: [vendor.Id] })).items.map((r) => r.Id)
+      ).toEqual([orderId])
+      const orderUpdate = { ...revision(order), Memo: tag, POStatus: "Closed" as const }
+      order = await write("PurchaseOrder.update", orderUpdate, (o) =>
+        qb.purchaseOrders.update(orderUpdate, o)
+      )
+      expect(order.POStatus).toBe("Closed")
+      expect(order.TotalAmt).toBe(6)
+      order = await write("PurchaseOrder.send", { id: orderId, sendTo }, (o) =>
+        qb.purchaseOrders.send(orderId, { ...o, sendTo })
+      )
+      expect(order.EmailStatus).toBe("EmailSent")
+      const pdf = await qb.purchaseOrders.downloadPdf(orderId)
+      expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-")
+    })
+  },
+  5 * 60_000
+)

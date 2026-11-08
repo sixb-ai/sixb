@@ -24,6 +24,8 @@ import type {
   QuickBooksItemExpenseLine,
   QuickBooksLinkedTransaction,
   QuickBooksPayment,
+  QuickBooksPurchase,
+  QuickBooksPurchaseOrder,
   QuickBooksRefundReceipt,
   QuickBooksSalesItemLine,
   QuickBooksSalesLine,
@@ -346,6 +348,57 @@ export type QuickBooksVendorCreditCreate = Pick<
   readonly Line: readonly QuickBooksExpenseWriteLine[]
 }
 export type QuickBooksVendorCreditUpdate = QuickBooksRevision & QuickBooksVendorCreditCreate
+
+export type QuickBooksPurchaseCreate = Pick<
+  QuickBooksPurchase,
+  | TransactionFields
+  | "DocNumber"
+  | "DepartmentRef"
+  | "EntityRef"
+  | "Credit"
+  | "RemitToAddr"
+  | "PrintStatus"
+  | "PaymentMethodRef"
+  | "TxnTaxDetail"
+  | "GlobalTaxCalculation"
+> & {
+  readonly PaymentType: "Cash" | "Check" | "CreditCard"
+  readonly AccountRef: QuickBooksReference
+  readonly Line: readonly QuickBooksExpenseWriteLine[]
+}
+/** QuickBooks requires PaymentType on every Purchase update, including sparse ones (error 2020). */
+export type QuickBooksPurchaseUpdate = QuickBooksRevision &
+  Partial<QuickBooksPurchaseCreate> &
+  Pick<QuickBooksPurchaseCreate, "PaymentType">
+
+export type QuickBooksPurchaseOrderCreate = Pick<
+  QuickBooksPurchaseOrder,
+  | TransactionFields
+  | "DocNumber"
+  | "DepartmentRef"
+  | "ClassRef"
+  | "APAccountRef"
+  | "POEmail"
+  | "VendorAddr"
+  | "ShipAddr"
+  | "ShipTo"
+  | "ShipMethodRef"
+  | "DueDate"
+  | "SalesTermRef"
+  | "Memo"
+  | "EmailStatus"
+  | "PrintStatus"
+  | "TxnTaxDetail"
+  | "GlobalTaxCalculation"
+  | "CustomField"
+> & {
+  readonly VendorRef: QuickBooksReference
+  readonly Line: readonly QuickBooksExpenseWriteLine[]
+  readonly POStatus?: "Open" | "Closed"
+}
+export type QuickBooksPurchaseOrderUpdate = QuickBooksRevision &
+  Partial<QuickBooksPurchaseOrderCreate>
+export type QuickBooksPurchaseOrderSendOptions = QuickBooksInvoiceSendOptions
 
 export type QuickBooksBillPaymentCreate = Pick<
   QuickBooksBillPayment,
