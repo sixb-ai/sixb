@@ -3,6 +3,7 @@
  * follows what others write into it, and writes it back.
  */
 
+export { type LiveArtifactWrite, writeLiveArtifact } from "../execution"
 export { mergeIntoDocument } from "./document"
 export { readLiveFiles, sameArtifactFiles, storeLiveFiles } from "./files"
 export {

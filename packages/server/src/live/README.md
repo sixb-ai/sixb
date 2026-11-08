@@ -63,8 +63,10 @@ The server vouches for every awareness state it shares:
 
 - An editor's change marks the room dirty. It is written `SAVE_IDLE_MS` after the last change, at
   most `SAVE_MAX_MS` after the first, and at once when the last editor leaves.
-- `flush` publishes through the SDK of the last editor, with the room's state as `document`. The
-  write is authored by that person, bumps the revision, and emits `artifact.updated`. If someone
+- `flush` writes the room's state through `writeLiveArtifact`, with the SDK of the last editor:
+  the public `update` takes files only, and this server-only entry makes the same write from the
+  document. The write is authored by that person, bumps the revision, and emits
+  `artifact.updated`. If someone
   wrote meanwhile, storage merges both. The room then takes the stored state back under the
   `MERGED` origin, which is never written back again. The document holds no title: the write
   passes the title it last read as `baseTitle`, so a title given since stays.

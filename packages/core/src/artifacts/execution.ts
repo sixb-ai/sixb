@@ -28,9 +28,9 @@ import { ArtifactRequestError } from "./errors"
 import { announceArtifactUpdates } from "./events"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
-import { firstArtifactDocument } from "./live/state"
+import { firstArtifactDocument, keepsDocument } from "./live/state"
 import { invalidArtifact, readArtifactText } from "./publish/files"
-import { withDocumentHolding, withMergedWrite } from "./publish/merge"
+import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
 import {
   type BoardPreviewRequester,
   boardsReadLiveData,
@@ -98,11 +98,25 @@ export interface UpdateArtifactRuntimeInput extends ArtifactContentInput {
    * unless this write changes the title itself.
    */
   readonly baseTitle?: string
+}
+
+/**
+ * A live room's write-back, for this repo's server: the canvas's Yjs document as its editors hold
+ * it, merged into the stored one. The version holds what the merged document holds.
+ */
+export interface LiveArtifactWrite {
+  readonly title: string
+  /** The title the room last read: a title given since stays. */
+  readonly baseTitle: string
+  /** The revision the room last took in. */
+  readonly baseRevision: number
   /**
-   * A canvas's Yjs document as a live editor holds it, encoded with `Y.encodeStateAsUpdate`:
-   * merged into the artifact's own, and the version then holds what the merged document holds.
+   * The document's files as the room stored them: what the merged version holds alike keeps
+   * these references.
    */
-  readonly document?: Uint8Array
+  readonly files: readonly ArtifactFile[]
+  /** The document, encoded with `Y.encodeStateAsUpdate`. */
+  readonly update: Uint8Array
 }
 
 /** A change made from what the caller saw: past `baseRevision`, it fails with `artifact_moved`. */
@@ -232,6 +246,7 @@ const publishers = new WeakMap<
     readonly rule: (storage?: ArtifactAccessStorage) => ArtifactAccessRule
     readonly checkQuery: ArtifactQueryChecker
     readonly requestPreviews: BoardPreviewRequester
+    readonly writeLive: (artifactId: string, write: LiveArtifactWrite) => Promise<PublishedArtifact>
   }
 >()
 
@@ -265,6 +280,19 @@ export function artifactPreviewRequester(
   artifacts: Partial<ArtifactsRuntime>
 ): BoardPreviewRequester {
   return publisherOf(artifacts).requestPreviews
+}
+
+/**
+ * Writes a live room's document back into the canvas, as the caller `artifacts` acts for: the
+ * write `update` makes, checked, authored and announced as it is, from the document instead of
+ * from files.
+ */
+export function writeLiveArtifact(
+  artifacts: Partial<ArtifactsRuntime>,
+  artifactId: string,
+  write: LiveArtifactWrite
+): Promise<PublishedArtifact> {
+  return publisherOf(artifacts).writeLive(artifactId, write)
 }
 
 /** The access rule for the runtime's caller, reading from `storage`. */
@@ -461,6 +489,55 @@ export function createArtifactsRuntime(
     return files
   }
 
+  /**
+   * Stores the latest version, authored by the caller, who may update the artifact. A canvas
+   * written since the base is merged into, not refused: the merge is what is checked.
+   */
+  const write = async (
+    input: ArtifactWrite & { readonly title: string }
+  ): Promise<PublishedArtifact> => {
+    const author = requireCaller()
+    const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
+
+    return withMergedWrite(context, input, async (merged) => {
+      const prepared = await prepareArtifactVersion(context, {
+        artifactId: input.artifactId,
+        kind: input.kind,
+        title: merged.title ?? input.title,
+        files: merged.files,
+        ...(merged.baseRevision === undefined ? {} : { baseRevision: merged.baseRevision }),
+        ...(merged.document ? { document: merged.document } : {}),
+        author,
+        readable: readableBy(rule()),
+        checkQuery,
+      })
+      const stored = await store(prepared)
+      await announceArtifactUpdates(runtime.events, [stored.version])
+      await requestPreviews(stored.version)
+
+      return {
+        ...stored,
+        warnings: await artifactVersionWarnings(context, prepared, stored),
+        ...(merged.merged ? { merged: true as const } : {}),
+      }
+    })
+  }
+
+  /** A live room's write-back: only a canvas keeps a document to merge it into. */
+  const writeLive = async (
+    artifactId: string,
+    input: LiveArtifactWrite
+  ): Promise<PublishedArtifact> => {
+    const artifact = await requireUpdatable(artifactId)
+    if (!keepsDocument(artifact.kind)) {
+      throw invalidArtifact(
+        `Artifact '${artifactId}' is a ${artifact.kind}, which is not edited live: publish its files.`
+      )
+    }
+
+    return write({ artifactId, kind: artifact.kind, ...input })
+  }
+
   const artifacts: ArtifactsRuntime = {
     async create(input) {
       const author = requireCaller()
@@ -486,44 +563,16 @@ export function createArtifactsRuntime(
     },
 
     async update(artifactId, input) {
-      const author = requireCaller()
       await requireUpdatable(artifactId)
 
-      const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
-      const files = await contentFiles(input)
-      const write = {
+      return write({
         artifactId,
         kind: input.kind,
-        files,
+        files: await contentFiles(input),
         ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
         ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
-        ...(input.document === undefined ? {} : { update: input.document }),
         title: input.title,
         ...(input.baseTitle === undefined ? {} : { baseTitle: input.baseTitle }),
-      }
-
-      // A canvas written since the base is merged into, not refused: the merge is what is checked.
-      return withMergedWrite(context, write, async (merged) => {
-        const prepared = await prepareArtifactVersion(context, {
-          artifactId,
-          kind: input.kind,
-          title: merged.title ?? input.title,
-          files: merged.files,
-          ...(merged.baseRevision === undefined ? {} : { baseRevision: merged.baseRevision }),
-          ...(merged.document ? { document: merged.document } : {}),
-          author,
-          readable: readableBy(rule()),
-          checkQuery,
-        })
-        const stored = await store(prepared)
-        await announceArtifactUpdates(runtime.events, [stored.version])
-        await requestPreviews(stored.version)
-
-        return {
-          ...stored,
-          warnings: await artifactVersionWarnings(context, prepared, stored),
-          ...(merged.merged ? { merged: true as const } : {}),
-        }
       })
     },
 
@@ -705,7 +754,7 @@ export function createArtifactsRuntime(
     },
   }
 
-  publishers.set(artifacts, { rule, checkQuery, requestPreviews })
+  publishers.set(artifacts, { rule, checkQuery, requestPreviews, writeLive })
   return artifacts
 }
 

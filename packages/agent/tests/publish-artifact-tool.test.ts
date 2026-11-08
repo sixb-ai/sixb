@@ -29,7 +29,11 @@ import {
 import { documentFiles } from "@sixb/core/artifacts/live"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import { AgentExecutionLostError, agentRunArtifacts } from "@sixb/core/internal/agents"
-import { loadArtifactDocument, storeLiveFiles } from "@sixb/core/internal/artifacts/live"
+import {
+  loadArtifactDocument,
+  storeLiveFiles,
+  writeLiveArtifact,
+} from "@sixb/core/internal/artifacts/live"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
@@ -1091,13 +1095,12 @@ describe("publish_artifact", () => {
     const follow = async () => Y.applyUpdate(doc, Y.encodeStateAsUpdate(await stored()))
     const writeBack = async () => {
       const { artifact, version } = await latest()
-      await readerFor(owner).publish(artifactId, {
-        kind: "canvas",
+      await writeLiveArtifact(readerFor(owner), artifactId, {
         title: artifact.title,
         baseTitle: artifact.title,
         files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
         baseRevision: artifact.revision,
-        document: Y.encodeStateAsUpdate(doc),
+        update: Y.encodeStateAsUpdate(doc),
       })
       await follow()
     }
@@ -1189,13 +1192,12 @@ describe("publish_artifact", () => {
     const follow = async () => Y.applyUpdate(doc, Y.encodeStateAsUpdate(await stored()))
     const writeBack = async () => {
       const { artifact, version } = await latest()
-      await readerFor(owner).publish(artifactId, {
-        kind: "canvas",
+      await writeLiveArtifact(readerFor(owner), artifactId, {
         title: artifact.title,
         baseTitle: artifact.title,
         files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
         baseRevision: artifact.revision,
-        document: Y.encodeStateAsUpdate(doc),
+        update: Y.encodeStateAsUpdate(doc),
       })
       await follow()
     }

@@ -22,9 +22,10 @@ import {
   readLiveFiles,
   sameArtifactFiles,
   storeLiveFiles,
+  writeLiveArtifact,
 } from "@sixb/core/internal/artifacts/live"
 import type { Sixb } from "@sixb/core/internal/request-execution"
-import type { ArtifactFile, ArtifactKind } from "@sixb/core/storage"
+import type { ArtifactFile } from "@sixb/core/storage"
 import * as decoding from "lib0/decoding"
 import * as encoding from "lib0/encoding"
 import * as awarenessProtocol from "y-protocols/awareness"
@@ -149,7 +150,6 @@ export class LiveRoom {
   private constructor(
     private readonly host: LiveRoomHost,
     readonly artifactId: string,
-    private readonly kind: ArtifactKind,
     doc: Y.Doc,
     synced: Synced,
     private readonly onClose: (room: LiveRoom) => void
@@ -194,7 +194,6 @@ export class LiveRoom {
     const room = new LiveRoom(
       host,
       artifactId,
-      artifact.kind,
       doc,
       { revision: version.revision, title: version.title, files: version.files },
       onClose
@@ -451,13 +450,12 @@ export class LiveRoom {
       }
 
       // The document holds no title: one given since stays.
-      const published = await author.sixb.artifacts.publish(this.artifactId, {
-        kind: this.kind,
+      const published = await writeLiveArtifact(author.sixb.artifacts, this.artifactId, {
         title: this.synced.title,
         baseTitle: this.synced.title,
         files,
         baseRevision: this.synced.revision,
-        document: update,
+        update,
       })
 
       // Merged with a write made meanwhile: the stored document holds it too.
