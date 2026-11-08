@@ -1,8 +1,8 @@
 # Artifacts
 
 An artifact is a piece of finished work your project keeps: a report, a chart, a file someone
-needs. Each one has versions that never change once published, and a page in your app where its
-owner reads it.
+needs. Changes go to its current version until someone creates a version, which then never changes.
+Each artifact has a page in your app where its owner reads it.
 
 ## Kinds
 
@@ -39,20 +39,41 @@ const { artifact } = await sixb.artifacts.create({
 })
 ```
 
-`sixb.artifacts.publish(artifact.id, input)` adds the next version. Publishing checks the whole
-version first: a document's images must be files in that version or another artifact's address, so
-it reads the same wherever it opens.
+`sixb.artifacts.publish(artifact.id, input)` replaces the current version's content. Publishing
+checks the whole version first: a document's images must be files in that version or another
+artifact's address, so it reads the same wherever it opens.
 
-Pass `baseVersion`, the version your change was made from, when someone else may publish in
-between. If another version was published since, the publish fails with `artifact_moved` (409 over
-HTTP) and names the latest version and its author, rather than replace changes you never saw:
+Pass `baseRevision`, the revision your change was made from, when someone else may change it in
+between. If it changed since, the publish fails with `artifact_moved` (409 over HTTP), naming the
+revision and who last wrote it, rather than replace changes you never saw:
 
 ```ts
-await sixb.artifacts.publish(artifact.id, { ...input, baseVersion: 3 })
+await sixb.artifacts.publish(artifact.id, { ...input, baseRevision: artifact.revision })
 ```
 
 From outside the server, use `POST /api/artifacts` and
 `POST /api/artifacts/{artifactId}/versions` with files uploaded through `POST /api/files`.
+
+## Versions and restore points
+
+- The latest version is **open**: each publish, Agent update, or save in the app replaces it.
+- **Creating a version** freezes it: it never changes again, and the next change opens the next
+  one. Creating it twice changes nothing.
+- Every change counts in the artifact's `revision`, which only grows. Content read at one revision
+  stays that revision's.
+- Before an Agent turn's first change to an artifact, and before each restore, the artifact keeps a
+  **restore point** of what it held: its last 20. Restoring one writes it back as a change, which
+  can itself be restored.
+
+| To | SDK | HTTP |
+| --- | --- | --- |
+| Create a version | `sixb.artifacts.freeze(id)` | `POST /api/artifacts/{id}/freeze` |
+| List restore points | `sixb.artifacts.listRestorePoints(id)` | `GET /api/artifacts/{id}/restore-points` |
+| Restore one | `sixb.artifacts.restore(id, revision)` | `POST /api/artifacts/{id}/restore-points/{revision}/restore` |
+
+Whoever may change an artifact may create its versions and restore it; the Agent does neither.
+Each change sends `artifact.updated` to whoever reads the artifact, over the
+[events websocket](../websockets/overview.md).
 
 ## The Agent publishes
 
@@ -62,13 +83,14 @@ reply. The first one a reply publishes opens beside the conversation as soon as 
 while the Agent is still working; on a phone, where it would open over the conversation, it waits
 on its card instead.
 
-Ask for a change and the Agent publishes the next version of the same artifact. The reply shows it
-as a line with the version number and what changed, such as a sheet or section added, and the
-version menu keeps the earlier versions. The conversation's header lists every artifact it
+Ask for a change and the Agent updates the same artifact: its current version, until you create
+one. The reply shows it as a line with what changed, such as a sheet or section added, and the
+version menu keeps the versions you created. The conversation's header lists every artifact it
 published.
 
-A cancelled reply keeps what it already published. Retrying a reply that failed removes what it
-published along with what it said.
+A cancelled reply keeps what it already published. Retrying a reply that failed takes back what it
+changed, along with what it said: an artifact nobody changed since goes back to its restore point,
+and one it created is removed.
 
 The Agent learns the formats from a built-in skill, `sixb-artifacts`.
 
@@ -78,9 +100,9 @@ publishes it when it is what you asked for.
 ## Edit in the app
 
 Sheets and canvases are edited where they open. Press **Edit** on the latest version: the header
-becomes a draft bar with Undo, Redo, Discard, and **Save as version N**. Saving publishes your
-draft as the next version; the earlier ones stay in the version menu. ⌘S saves, and leaving with
-changes asks first.
+becomes a draft bar with Undo, Redo, Discard, and **Save**. Saving replaces the current version
+with your draft; **Create version** keeps it as a numbered version in the version menu. ⌘S saves,
+and leaving with changes asks first.
 
 | In a sheet | |
 | --- | --- |
@@ -96,9 +118,9 @@ changes asks first.
 | Arrows | Drag from the dot on an item's side to another item; the toolbar sets a line's style and label |
 | Style | A note's or a shape's color, a text's size, a shape's form, for everything selected |
 
-Boards' pages are the Agent's to change; on the canvas you arrange them. If someone published a
-version while you were editing, the save stops and says so: open the new version, or save yours
-over it. The next time the Agent works on the artifact, it starts from your version and keeps your
+Boards' pages are the Agent's to change; on the canvas you arrange them. If someone changed the
+artifact while you were editing, the save stops and says so: open what they saved, or save yours
+over it. The next time the Agent works on the artifact, it starts from your save and keeps your
 changes.
 
 ## Write a document
@@ -491,9 +513,9 @@ await sixb.artifacts.create({
 ## Reference another artifact
 
 A document, a sheet, a deck, a page, or an agent's reply can show another artifact, or a part of
-it, by its address. A report that shows a sheet's chart stays current when the sheet changes. The Agent is
-told to pin the version a reply describes (`@2`), so that what the reply shows matches its words;
-an address it writes without a version follows the latest one.
+it, by its address. A report that shows a sheet's chart stays current when the sheet changes. A
+reply pins a created version it describes (`@2`), so that what it shows matches its words; an
+address without a version follows the latest one.
 
 ```text
 artifact:<id>[@<version>][/<file>][#<part>]
@@ -502,7 +524,7 @@ artifact:<id>[@<version>][/<file>][#<part>]
 | Address                                       | Points at                                   |
 | --------------------------------------------- | ------------------------------------------- |
 | `artifact:art_k3m9q2x7tp`                     | The artifact, at its latest version         |
-| `artifact:art_k3m9q2x7tp@2`                   | Version 2, which never changes              |
+| `artifact:art_k3m9q2x7tp@2`                   | Version 2, created, which never changes     |
 | `artifact:art_k3m9q2x7tp/figures/revenue.svg` | A file inside it                            |
 | `artifact:art_k3m9q2x7tp#Regions`             | A sheet                                     |
 | `artifact:art_k3m9q2x7tp#Regions!A1:D5`       | A range of a sheet; row 1 is its header row |
@@ -525,9 +547,9 @@ source and whether it follows the latest version or a fixed one. Something shown
 artifact appears as a link. In a sheet, a `link` or `image` column cell can hold an address.
 
 Publishing resolves every address in a version against what its author can read, and refuses one
-that names nothing, saying what the target has instead. When a new version renames or removes
-something another artifact shows, it publishes with a warning naming that artifact. A reader who
-can't open a target sees it as unavailable.
+that names nothing, saying what the target has instead, and one pinned to a version still open.
+When a change renames or removes something another artifact shows, it publishes with a warning
+naming that artifact. A reader who can't open a target sees it as unavailable.
 
 ## Open an artifact
 
@@ -542,8 +564,8 @@ an image. Filter it by kind with `?kind=document`, `sheet`, `slides`, or `file`;
 takes the same `kind`. The user menu, search (⌘K), and a conversation's artifact menu link to it.
 
 The link button in an artifact's header copies a link to its page, and the one beside a heading a
-link to that section. A link to the latest version keeps following the artifact as new versions
-are published; a link copied from an earlier version stays on it.
+link to that section. A link to the latest version keeps following the artifact as it changes; a
+link copied from an earlier version stays on it.
 
 An artifact belongs to its owner. Server code that runs as the system, outside any user's request,
 reaches every artifact in the project.
@@ -556,15 +578,15 @@ reads the conversation reads the artifact, at its latest version, whatever publi
 | | Owner | [Participant](../models/overview.md#share-a-conversation) | [Observer](../apps/activity.md#read-a-conversation) |
 | --- | --- | --- | --- |
 | Read every version, list the conversation's artifacts | ✓ | ✓ | ✓ |
-| Publish a version, keep page data with `sixb.state` | ✓ | ✓ | – |
+| Change it, create versions, restore it, keep page data with `sixb.state` | ✓ | ✓ | – |
 | Delete it | ✓ | – | – |
 
-- A version saved by anyone who can update it is seen by every reader of every conversation that
+- A change saved by anyone who can update it is seen by every reader of every conversation that
   shares the artifact. Its author is whoever saved it; the artifact stays its owner's.
 - The agent revises someone else's artifact only in a conversation that already shares it. When
   it revises one of yours in a conversation, that conversation shares it from then on, with its
   history.
-- Retrying a turn takes back what it published: an artifact only that turn shared in the
+- Retrying a turn takes back what it changed: an artifact only that turn shared in the
   conversation is no longer shared there.
 - The owner's other artifacts stay private. An embed or link to one is refused with 403
   `not_shared` for whoever cannot read it, so a page can say it is not shared in this
