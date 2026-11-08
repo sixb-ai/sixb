@@ -8,6 +8,7 @@ import {
   artifactQueryChecker,
 } from "../artifacts/execution"
 import type { ArtifactKind } from "../artifacts/kinds"
+import { withMergedWrite } from "../artifacts/publish/merge"
 import {
   type BoardPreviewInput,
   missingBoardPreviews,
@@ -120,8 +121,13 @@ export type AgentRunArtifactPublish = {
       readonly artifactId: string
       /** The artifact's kind, when the caller names one: another is refused. */
       readonly kind?: ArtifactKind
-      /** The revision this content was made from: publishing fails with `artifact_moved` past it. */
+      /**
+       * The revision this content was made from: publishing fails with `artifact_moved` past it,
+       * unless it is a canvas's, which takes what changed from `baseFiles` into what it holds now.
+       */
       readonly baseRevision?: number
+      /** The files of `baseRevision`: the copy the run started from. */
+      readonly baseFiles?: readonly ArtifactFile[]
     }
 )
 
@@ -203,41 +209,63 @@ export function agentRunArtifacts(
       // checks again that the run holds its conversation and the requester may still publish.
       const context = { projectId, storage: requireArtifacts(storage), blobStorage: blobs }
       const reading = artifactAccessRule(reader, storage)
-      const prepared = await prepareArtifactVersion(context, {
-        ...("artifactId" in input
-          ? {
-              artifactId: input.artifactId,
-              ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
-            }
-          : {}),
-        kind,
-        title: input.title,
-        files: input.files,
-        author,
-        owner,
-        readable: async (artifact) => (await reading.accessTo(artifact)) !== "none",
-        // As the requester, so a query never reads what they cannot.
-        checkQuery: artifactQueryChecker(reader),
-        origin: { threadId, runId: run.id },
-        turnRunId,
-      })
-      const stored = await storage.transaction(async (tx) => {
-        await assertAgentRunOwned(requireAgents(tx), fence)
-        if (run.kind === "subagent") await assertParentActive(requireAgents(tx), run)
-        if (execution.requestedBy) {
-          await assertTakesPart(
-            requireAgents(tx),
-            { projectId, threadId, owner },
-            execution.requestedBy
+      const write = async (files: readonly ArtifactFile[], baseRevision?: number) => {
+        const prepared = await prepareArtifactVersion(context, {
+          ...("artifactId" in input
+            ? {
+                artifactId: input.artifactId,
+                ...(baseRevision === undefined ? {} : { baseRevision }),
+              }
+            : {}),
+          kind,
+          title: input.title,
+          files,
+          author,
+          owner,
+          readable: async (artifact) => (await reading.accessTo(artifact)) !== "none",
+          // As the requester, so a query never reads what they cannot.
+          checkQuery: artifactQueryChecker(reader),
+          origin: { threadId, runId: run.id },
+          turnRunId,
+        })
+        const stored = await storage.transaction(async (tx) => {
+          await assertAgentRunOwned(requireAgents(tx), fence)
+          if (run.kind === "subagent") await assertParentActive(requireAgents(tx), run)
+          if (execution.requestedBy) {
+            await assertTakesPart(
+              requireAgents(tx),
+              { projectId, threadId, owner },
+              execution.requestedBy
+            )
+          }
+          // The owner may have deleted it since, or removed the requester from the conversation.
+          return storeArtifactVersion(
+            { ...context, storage: requireArtifacts(tx) },
+            prepared,
+            (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
           )
-        }
-        // The owner may have deleted it since, or removed the requester from the conversation.
-        return storeArtifactVersion(
-          { ...context, storage: requireArtifacts(tx) },
-          prepared,
-          (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
-        )
-      })
+        })
+        return { prepared, stored }
+      }
+
+      // A canvas written since the copy the run started from is merged into, not refused.
+      const { prepared, stored, merged } =
+        "artifactId" in input
+          ? await withMergedWrite(
+              context,
+              {
+                artifactId: input.artifactId,
+                kind,
+                files: input.files,
+                ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+                ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
+              },
+              async (each) => ({
+                ...(await write(each.files, each.baseRevision)),
+                merged: each.merged,
+              })
+            )
+          : { ...(await write(input.files)), merged: false }
       if ("artifactId" in input) await announceArtifactUpdates(host.domainEvents, [stored.version])
 
       // A publisher that renders its own previews reads the query answers in its layout check, and
@@ -249,7 +277,11 @@ export function agentRunArtifacts(
         input.rendersPreviews ? { delayMs: BOARD_PREVIEW_JOB.graceMs, withoutAnswers: true } : {}
       )
 
-      return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+      return {
+        ...stored,
+        warnings: await artifactVersionWarnings(context, prepared, stored),
+        ...(merged ? { merged: true as const } : {}),
+      }
     },
 
     async turnWrites() {

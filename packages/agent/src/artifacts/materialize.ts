@@ -2,7 +2,12 @@ import { posix } from "node:path"
 import type { Sandbox, SandboxFileRecord } from "@sixb/core"
 import { formatArtifactAddress } from "@sixb/core/artifacts"
 import type { AgentRunArtifacts, AgentRunFileStore } from "@sixb/core/internal/agents"
-import type { ArtifactOutline, ArtifactRecord, ArtifactVersionRecord } from "@sixb/core/storage"
+import type {
+  ArtifactFile,
+  ArtifactOutline,
+  ArtifactRecord,
+  ArtifactVersionRecord,
+} from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "../abort"
 
 /** How many of the thread's artifacts are installed, newest first, and how many bytes in all. */
@@ -71,6 +76,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   #entries: readonly ManifestEntry[]
   /** The installed copies' sizes, by artifact id. */
   readonly #installed: Map<string, number>
+  /** The files of the revision each entry lists, by artifact id: what an update starts from. */
+  readonly #bases = new Map<string, readonly ArtifactFile[]>()
   #updates: Promise<void> = Promise.resolve()
 
   constructor(
@@ -82,10 +89,12 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     },
     entries: readonly ManifestEntry[],
     installed: Map<string, number>,
-    readonly files: readonly SandboxFileRecord[]
+    readonly files: readonly SandboxFileRecord[],
+    bases: ReadonlyMap<string, readonly ArtifactFile[]> = new Map()
   ) {
     this.#entries = entries
     this.#installed = installed
+    for (const [id, base] of bases) this.#bases.set(id, base)
   }
 
   get manifestJson(): string {
@@ -95,6 +104,23 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   /** The revision the manifest lists for an artifact: the one its copy holds. */
   revisionOf(artifactId: string): number | undefined {
     return this.#entries.find((entry) => entry.id === artifactId)?.revision
+  }
+
+  /** Where an artifact's copy is installed, as the agent names it; none when it is not. */
+  directoryOf(artifactId: string): string | undefined {
+    return this.#entries.find((entry) => entry.id === artifactId)?.directory
+  }
+
+  /**
+   * The revision an update of an artifact starts from, and its files: those of the copy, which a
+   * canvas's update is merged from when others wrote it since.
+   */
+  baseOf(
+    artifactId: string
+  ): { readonly revision: number; readonly files: readonly ArtifactFile[] } | undefined {
+    const revision = this.revisionOf(artifactId)
+    const files = this.#bases.get(artifactId)
+    return revision === undefined || !files ? undefined : { revision, files }
   }
 
   /**
@@ -146,6 +172,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     }
     if (install) this.#installed.set(artifact.id, sizeBytes)
     else this.#installed.delete(artifact.id)
+    this.#bases.set(artifact.id, version.files)
     this.#entries = [
       manifestEntry(artifact, version, install ? directory : undefined, options),
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
@@ -191,6 +218,7 @@ export async function materializeThreadArtifacts(input: {
   const entries: ManifestEntry[] = []
   const files: SandboxFileRecord[] = []
   const installed = new Map<string, number>()
+  const bases = new Map<string, readonly ArtifactFile[]>()
   const artifacts = await input.artifacts.list({ limit: MATERIALIZE_MAX_ARTIFACTS })
   let installedBytes = 0
   for (const artifact of artifacts) {
@@ -222,6 +250,7 @@ export async function materializeThreadArtifacts(input: {
         install = false
       }
     }
+    bases.set(artifact.id, version.files)
     // Edited when its last write came from anywhere but this conversation.
     entries.push(
       manifestEntry(artifact, version, install ? directory : undefined, {
@@ -233,7 +262,8 @@ export async function materializeThreadArtifacts(input: {
     { directory: input.directory, manifestPath: input.manifestPath, maxBytes },
     entries,
     installed,
-    files
+    files,
+    bases
   )
 }
 
