@@ -467,7 +467,7 @@ function draftAbove(draft: DraftPlace): boolean {
 
 /**
  * What the reader would comment on, named over it as the pointer moves: its words, or what kind
- * of thing it is. The frame draws its outline.
+ * of thing it is, in the blue the frame outlines it in.
  */
 function HoverTag({ target, scale }: { readonly target: FrameEditTarget; readonly scale: number }) {
   const messages = useArtifactMessages().canvas
@@ -481,7 +481,7 @@ function HoverTag({ target, scale }: { readonly target: FrameEditTarget; readonl
     <div
       aria-hidden="true"
       className={cn(
-        "absolute max-w-64 truncate rounded-md bg-primary px-1.5 py-0.5 text-[11px] leading-4 font-medium text-primary-foreground shadow-sm",
+        "absolute max-w-64 truncate rounded-md bg-[#0a84ff] px-1.5 py-0.5 text-[11px] leading-4 font-medium text-white shadow-sm",
         // Above the element, or inside its top when it starts at the board's top.
         top < 24 ? "translate-y-1" : "-translate-y-[calc(100%+5px)]"
       )}
