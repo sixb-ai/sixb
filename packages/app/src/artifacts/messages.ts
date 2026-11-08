@@ -90,6 +90,21 @@ export const en = {
     saveAnyway: "Save anyway",
     savedShared: "Saved — everyone in this conversation sees it.",
   },
+  live: {
+    done: "Done",
+    saved: "Saved",
+    saving: "Saving…",
+    failed: "Couldn't save — retrying",
+    offline: "Offline — your changes are kept here",
+    connecting: "Connecting…",
+    /** Who is here, for the avatars' label: `names` lists them. */
+    here: (names: string) => `Here now: ${names}`,
+    more: (count: number) => `+${number(count)}`,
+    agent: "Agent",
+    accessLost: "You can now only view this canvas.",
+    notShared: "This canvas is no longer shared with you.",
+    deleted: "This canvas was deleted.",
+  },
   versions: {
     current: "Current",
     /** The latest version, frozen: nothing changed since someone created it. */
@@ -207,6 +222,9 @@ export const en = {
     previousBoard: "Previous board",
     nextBoard: "Next board",
     boardFailed: "This board's page could not be opened.",
+    live: {
+      agentChanging: "Agent is changing this board",
+    },
     toolbar: {
       label: "Canvas tools",
       note: "Add a note",
@@ -567,6 +585,20 @@ export const fr: Translation<ArtifactMessages> = {
     saveAnyway: "Enregistrer quand même",
     savedShared: "Enregistré — toutes les personnes de cette conversation le voient.",
   },
+  live: {
+    done: "Terminé",
+    saved: "Enregistré",
+    saving: "Enregistrement…",
+    failed: "Échec de l’enregistrement — nouvel essai",
+    offline: "Hors ligne — vos modifications sont gardées ici",
+    connecting: "Connexion…",
+    here: (names) => `Présents : ${names}`,
+    more: (count) => `+${numberFr(count)}`,
+    agent: "Agent",
+    accessLost: "Vous pouvez désormais seulement consulter ce canevas.",
+    notShared: "Ce canevas n’est plus partagé avec vous.",
+    deleted: "Ce canevas a été supprimé.",
+  },
   versions: {
     current: "Actuelle",
     latest: "Dernière",
@@ -682,6 +714,9 @@ export const fr: Translation<ArtifactMessages> = {
     previousBoard: "Planche précédente",
     nextBoard: "Planche suivante",
     boardFailed: "La page de cette planche n’a pas pu s’ouvrir.",
+    live: {
+      agentChanging: "L’agent modifie cette planche",
+    },
     toolbar: {
       label: "Outils du canevas",
       note: "Ajouter une note",
