@@ -491,6 +491,18 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "env/azure-key-vault": {
+      "name": "@sixb/env-azure-key-vault",
+      "version": "0.2.0",
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "env/doppler": {
       "name": "@sixb/env-doppler",
       "version": "0.2.0",
@@ -1812,6 +1824,8 @@
     "@sixb/docs": ["@sixb/docs@workspace:apps/docs"],
 
     "@sixb/ducklake": ["@sixb/ducklake@workspace:storage/ducklake"],
+
+    "@sixb/env-azure-key-vault": ["@sixb/env-azure-key-vault@workspace:env/azure-key-vault"],
 
     "@sixb/env-doppler": ["@sixb/env-doppler@workspace:env/doppler"],
 

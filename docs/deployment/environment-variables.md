@@ -1,6 +1,6 @@
 # Environment variables
 
-Keep your project's values in [Doppler](https://www.doppler.com) instead of sending `.env` files around. The repository lists the names, `sixb env pull` writes your `.env`, and your app reads `process.env` as it always has.
+Keep your project's values in [Doppler](https://www.doppler.com) or [Azure Key Vault](#azure-key-vault) instead of sending `.env` files around. The repository lists the names, `sixb env pull` writes your `.env`, and your app reads `process.env` as it always has.
 
 ## List what the project needs
 
@@ -104,3 +104,31 @@ Give a test job that needs values a read-only token for `dev`, created in Dopple
     DOPPLER_TOKEN: ${{ secrets.DOPPLER_DEV_TOKEN }}
   run: bun sixb env pull
 ```
+
+## Azure Key Vault
+
+To keep the values in Azure instead, use a vault for each environment:
+
+```ts
+import { defineEnv } from "@sixb/core/env"
+import { azureKeyVault } from "@sixb/env-azure-key-vault"
+
+export default defineEnv({
+  source: azureKeyVault({ vaults: { dev: "client-a-dev", prod: "client-a-prod" } }),
+  vars: { DATABASE_URL: "required" },
+})
+```
+
+Install the package and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), and sign in with `az login`. If the vaults are in a tenant other than your default, add `tenant: "<tenant ID or domain>"`. Everything above works the same way, with these differences:
+
+| | With Key Vault |
+| --- | --- |
+| Moving a project over | `sixb env init` sets up Doppler only. Write `sixb.env.ts` yourself, then add values with `sixb env set` or the Azure portal |
+| Access | Pulling needs the Key Vault Secrets User role on the dev vault; `sixb env set` needs Key Vault Secrets Officer. Add and remove teammates in the Azure portal |
+| Names | Key Vault allows hyphens, not underscores, so `DATABASE_URL` is stored as `DATABASE-URL`, and a secret you name `STRIPE-KEY` in the portal arrives as `STRIPE_KEY`. Names ignore case |
+| Disabled secrets | Skipped, as if they weren't there |
+| Tests in CI | Sign in with [`azure/login`](https://github.com/Azure/login) before `bun sixb env pull` |
+
+`sixb deploy setup` creates a service principal that can read the prod vault and nothing else, and installs its credential on the server. Run it signed in to the vault's subscription (`az account set --subscription <id>`), as someone who can create app registrations and grant access to the vault: an Owner or Role Based Access Control Administrator on a vault using Azure RBAC, or someone who can change its access policies.
+
+The credential expires after a year. When a deploy stops with `AADSTS7000222`, delete `~/<name>/env-token` on the server and run setup again, then delete the old app registration, named `sixb-<name>-<date>`, in the Azure portal.
