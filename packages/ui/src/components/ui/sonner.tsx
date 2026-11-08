@@ -16,6 +16,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme?.resolvedTheme ?? "system"}
       className="toaster group"
+      // On a phone a toast drops in below the status bar, where banners appear natively.
+      mobileOffset={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)", left: 12, right: 12 }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

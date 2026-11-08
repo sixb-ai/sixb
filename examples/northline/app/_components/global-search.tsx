@@ -49,6 +49,7 @@ export function GlobalSearch({ placement = "sidebar" }: GlobalSearchProps) {
         if (!next) setQuery("")
       }}
       shouldFilter={false}
+      fullscreen
       className="northline-search"
     >
       <CommandInput

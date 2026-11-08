@@ -438,55 +438,6 @@
     background: var(--touch-destructive-pressed);
   }
 
-  /* Search fills the screen, its field at the top and its results above the keyboard. */
-
-  .northline-search[data-slot="dialog-content"] {
-    --tw-translate-x: 0px;
-    --tw-translate-y: 0px;
-    inset: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    max-width: none;
-    height: var(--app-height);
-    padding-top: var(--safe-top);
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    animation: phone-search-in 280ms var(--ease-sheet);
-  }
-
-  .northline-search[data-slot="dialog-content"][data-state="closed"] {
-    animation: phone-search-out 180ms ease-in forwards;
-  }
-
-  .northline-search [data-slot="command"] {
-    min-height: 0;
-    flex: 1;
-    border-radius: 0;
-  }
-
-  /* Room for the close button at the end of the field. */
-  .northline-search [data-slot="command-input-wrapper"] {
-    padding-right: 52px;
-  }
-
-  .northline-search [data-slot="command-list"] {
-    min-height: 0;
-    max-height: none;
-    flex: 1;
-    padding-bottom: calc(16px + var(--safe-bottom));
-  }
-
-  html[data-keyboard] .northline-search [data-slot="command-list"] {
-    padding-bottom: 16px;
-  }
-
-  .northline-search [data-slot="dialog-close"] {
-    top: calc(var(--safe-top) + 9px);
-    right: 12px;
-  }
-
   /* The assistant. Its round launcher would sit on the tab bar, so phones open it from the top
      bar's Chat button instead; open, it keeps clear of the notch and the home indicator. */
 
@@ -518,19 +469,6 @@
   }
 }
 
-@keyframes phone-search-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -12px, 0);
-  }
-}
-
-@keyframes phone-search-out {
-  to {
-    opacity: 0;
-  }
-}
-
 /* Landscape phones: a compact top bar and tab bar, as iOS does. */
 @media (max-width: 767px) and (max-height: 500px) {
   .phone-shell {
@@ -557,8 +495,7 @@
   .phone-top-bar-title,
   .phone-tab-bar,
   .phone-tab-lens,
-  .phone-tab svg,
-  .northline-search[data-slot="dialog-content"] {
+  .phone-tab svg {
     transition: none;
     animation: none;
   }
