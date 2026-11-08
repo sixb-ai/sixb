@@ -22,7 +22,7 @@ export type CanvasItemType = (typeof CANVAS_ITEM_TYPES)[number]
 export const CANVAS_SHAPES = ["rect", "ellipse", "diamond"] as const
 export type CanvasShape = (typeof CANVAS_SHAPES)[number]
 
-export const CANVAS_TEXT_SIZES = ["s", "m", "l", "xl"] as const
+export const CANVAS_TEXT_SIZES = ["s", "m", "l", "xl", "xxl"] as const
 export type CanvasTextSize = (typeof CANVAS_TEXT_SIZES)[number]
 
 /** Where an item sits, from the canvas's origin, in pixels; and how large it is. */

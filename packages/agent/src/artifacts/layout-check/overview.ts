@@ -128,7 +128,7 @@ function itemBox(item: CanvasItem): Box | null {
     case "text": {
       const size = CANVAS_TEXT_PIXELS[item.size]
       const width = item.w ?? Math.min(longestLine(item.text) * size * 0.55, 1600)
-      const lineHeight = size * (item.size === "xl" || item.size === "l" ? 1.15 : 1.45)
+      const lineHeight = size * (item.size === "s" || item.size === "m" ? 1.45 : 1.15)
       return { x: item.x, y: item.y, width, height: lineHeight * lines(item.text, width, size) }
     }
     case "note": {
@@ -197,9 +197,9 @@ function drawItem(
       return `<div class="item note" style="${place} font-size: ${canvasNoteFontSize(item.w)}px; background: ${background}">${escapeHtml(item.text)}</div>`
     }
     case "text": {
-      const weight = item.size === "xl" ? 700 : item.size === "l" ? 600 : 400
+      const weight = item.size === "xl" || item.size === "xxl" ? 700 : item.size === "l" ? 600 : 400
       const color = item.size === "s" ? "var(--muted-foreground)" : "var(--foreground)"
-      const lineHeight = item.size === "xl" || item.size === "l" ? 1.15 : 1.45
+      const lineHeight = item.size === "s" || item.size === "m" ? 1.45 : 1.15
       return `<div class="item text" style="${place} font-size: ${CANVAS_TEXT_PIXELS[item.size]}px; font-weight: ${weight}; line-height: ${lineHeight}; color: ${color}">${escapeHtml(item.text)}</div>`
     }
     case "shape": {

@@ -45,7 +45,7 @@ const SHAPE_TONES: readonly (ArtifactTone | null)[] = [
   "chart-1",
   "chart-3",
 ]
-const SIZES: readonly CanvasTextSize[] = ["s", "m", "l", "xl"]
+const SIZES: readonly CanvasTextSize[] = ["s", "m", "l", "xl", "xxl"]
 const SHAPES: readonly { readonly shape: CanvasShape; readonly icon: LucideIcon }[] = [
   { shape: "rect", icon: RectangleHorizontal },
   { shape: "ellipse", icon: Circle },
