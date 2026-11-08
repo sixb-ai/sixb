@@ -408,10 +408,6 @@ export interface PutArtifactBoardPreviewsInput {
 }
 
 /**
- * Persistence only: who may read or publish, and what a version may contain, are decided in Core
- * before a call reaches storage.
- */
-/**
  * What a comment is about: a canvas's board, an element of it by its address, as
  * `boardElements` writes one, or the artifact itself, at the revision the author saw.
  */
@@ -453,6 +449,10 @@ export interface ResolveArtifactCommentInput extends ArtifactCommentKey {
   readonly resolved: { readonly at: Date; readonly by: Principal } | null
 }
 
+/**
+ * Persistence only: who may read or publish, and what a version may contain, are decided in Core
+ * before a call reaches storage.
+ */
 export interface ArtifactStorage {
   /**
    * Creates the artifact with its first version, open, shared in its origin's thread. Throws
