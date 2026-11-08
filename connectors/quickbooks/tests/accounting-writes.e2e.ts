@@ -204,6 +204,12 @@ live(
       let rejected = await write("Estimate.create rejected", rejectedInput, (o) =>
         qb.estimates.create(rejectedInput, o)
       )
+      let rejectedDeleted = false
+      defer("Estimate.delete rejected", async () => {
+        if (rejectedDeleted) return
+        const input = revision(await qb.estimates.get(rejected.Id))
+        await write("Estimate.delete rejected", input, (o) => qb.estimates.delete(input, o))
+      })
       const close = { ...revision(rejected), TxnStatus: "Closed" as const }
       rejected = await write("Estimate.close", close, (o) => qb.estimates.update(close, o))
       expect(rejected.TxnStatus).toBe("Closed")
@@ -215,6 +221,7 @@ live(
         (await write("Estimate.delete rejected", remove, (o) => qb.estimates.delete(remove, o)))
           .status
       ).toBe("Deleted")
+      rejectedDeleted = true
       await cdcRecord(
         qb,
         "Estimate",

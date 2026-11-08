@@ -207,7 +207,7 @@ test("invalid estimate inputs reject before network access", async () => {
     "CustomerRef"
   )
   await expect(
-    // @ts-expect-error Closed is set by QuickBooks; unknown statuses are rejected locally.
+    // @ts-expect-error QuickBooks sets Converted itself; it is not a writable status.
     qb.estimates.create({ ...create, TxnStatus: "Converted" })
   ).rejects.toThrow("TxnStatus")
   await expect(qb.estimates.create({ ...create, ...identity })).rejects.toThrow("Create input")

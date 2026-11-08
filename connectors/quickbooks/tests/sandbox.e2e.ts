@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
 import {
   QuickBooksApiError,
+  type QuickBooksCdcEntity,
   type QuickBooksClient,
   type QuickBooksRecurringTemplateType,
   type QuickBooksRevision,
@@ -23,7 +24,13 @@ type LooseResource = {
   listAll(options: Record<string, unknown>): AsyncIterable<Row>
 }
 type ReadCase =
-  | { kind: "name"; name?: string; active: boolean }
+  | {
+      kind: "name"
+      /** Row field holding the name; `queryName` is the query field when it differs. */
+      name?: string
+      queryName?: string
+      active: boolean
+    }
   | {
       kind: "transaction"
       party?: "CustomerRef" | "VendorRef"
@@ -48,7 +55,7 @@ const readCases: Record<string, ReadCase> = {
   taxCodes: { kind: "name", name: "Name", active: true },
   taxRates: { kind: "name", name: "Name", active: true },
   budgets: { kind: "name", name: "Name", active: true },
-  taxAgencies: { kind: "name", name: "DisplayName", active: false },
+  taxAgencies: { kind: "name", name: "DisplayName", queryName: "Name", active: false },
   companyCurrencies: { kind: "name", active: true },
   invoices: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
   payments: {
@@ -115,6 +122,54 @@ test.skipIf(mode !== "read")(
           filtered.push(row)
         sameIds(filtered, selected)
       }
+      // Send every supported predicate and sort once, even for empty datasets, so each one meets
+      // a real provider envelope. Values match nothing, or only rows that satisfy them.
+      const probes: Record<string, unknown>[] = [
+        { ...options, ids: ["999999999"], maxResults: 2 },
+        { ...options, updatedSince: new Date(), maxResults: 2 },
+        { ...options, orderBy: { field: "Id", direction: "DESC" }, maxResults: 2 },
+      ]
+      if (config.kind === "name") {
+        if (config.active) probes.push({ active: false, maxResults: 2 })
+        if (config.name)
+          probes.push(
+            { ...options, name: "__sixb_none__", maxResults: 2 },
+            {
+              ...options,
+              orderBy: { field: config.queryName ?? config.name, direction: "DESC" },
+              maxResults: 2,
+            }
+          )
+      } else {
+        if (config.txnDate)
+          probes.push({
+            txnDateFrom: "2000-01-01",
+            txnDateTo: "2000-01-02",
+            orderBy: { field: "TxnDate", direction: "DESC" },
+            maxResults: 2,
+          })
+        if (config.docNumber) probes.push({ docNumber: "__sixb_none__", maxResults: 2 })
+        if (config.reference) probes.push({ [config.reference[0]]: "__sixb_none__", maxResults: 2 })
+        if (config.party)
+          probes.push({
+            [config.party === "CustomerRef" ? "customerIds" : "vendorIds"]: ["999999999"],
+            maxResults: 2,
+          })
+      }
+      for (const probe of probes) {
+        const page = await resource.list(probe)
+        expect(page.items.length).toBeLessThanOrEqual(2)
+        if (
+          "ids" in probe ||
+          "name" in probe ||
+          "docNumber" in probe ||
+          "customerIds" in probe ||
+          "vendorIds" in probe
+        )
+          expect(page.items).toEqual([])
+        if ("txnDateFrom" in probe) expect(page.items).toEqual([])
+      }
+
       if (full) {
         const manual = []
         for (let startPosition = 1; ; startPosition += 100) {
@@ -273,10 +328,49 @@ test.skipIf(mode !== "read")(
         `[QuickBooksLive] ${name}: ${rows.length} records checked (${full ? "complete" : "sample"})`
       )
     }
-    await qb.cdc.get({
-      entities: ["Customer", "Invoice", "Bill", "VendorCredit", "Estimate", "SalesReceipt"],
-      changedSince: new Date(Date.now() - 86400_000),
-    })
+    // Every entity the connector accepts for CDC, checked against the public union so a new one
+    // must be added here. Chunks keep each request well under the 1,000-object cap.
+    const cdcEntities = Object.keys({
+      Account: true,
+      Attachable: true,
+      Bill: true,
+      BillPayment: true,
+      Budget: true,
+      Class: true,
+      CompanyCurrency: true,
+      CreditCardPaymentTxn: true,
+      CreditMemo: true,
+      Customer: true,
+      CustomerType: true,
+      Department: true,
+      Deposit: true,
+      Employee: true,
+      Estimate: true,
+      InventoryAdjustment: true,
+      Invoice: true,
+      Item: true,
+      JournalEntry: true,
+      Payment: true,
+      PaymentMethod: true,
+      Purchase: true,
+      PurchaseOrder: true,
+      RecurringTransaction: true,
+      RefundReceipt: true,
+      ReimburseCharge: true,
+      SalesReceipt: true,
+      TaxCode: true,
+      TaxRate: true,
+      Term: true,
+      TimeActivity: true,
+      Transfer: true,
+      Vendor: true,
+      VendorCredit: true,
+    } satisfies Record<QuickBooksCdcEntity, true>) as QuickBooksCdcEntity[]
+    for (let i = 0; i < cdcEntities.length; i += 9)
+      await qb.cdc.get({
+        entities: cdcEntities.slice(i, i + 9),
+        changedSince: new Date(Date.now() - 86400_000),
+      })
   },
   15 * 60_000
 )
@@ -301,7 +395,12 @@ test.skipIf(mode !== "read")(
       expect(siblings.items.map((row) => row.Id)).toContain(child.Id)
       expect((await qb.taxClassifications.get(child.Id)).Id).toBe(child.Id)
       expect((await qb.taxClassifications.list({ ids: [child.Id] })).items).toHaveLength(1)
+      if (child.Name)
+        expect(
+          (await qb.taxClassifications.list({ name: child.Name })).items.map((row) => row.Id)
+        ).toContain(child.Id)
     }
+    expect((await qb.taxClassifications.list({ name: "__sixb_none__" })).items).toEqual([])
 
     const rates = []
     for await (const rate of qb.exchangeRates.listAll({ maxResults: 50 })) {
@@ -309,6 +408,9 @@ test.skipIf(mode !== "read")(
       if (rates.length >= 150) break
     }
     expect(rates.every((rate) => typeof rate.SourceCurrencyCode === "string")).toBe(true)
+    expect(
+      (await qb.exchangeRates.list({ updatedSince: new Date(), maxResults: 5 })).items
+    ).toEqual([])
     const today = new Date().toISOString().slice(0, 10)
     const eur = await qb.exchangeRates.get({ sourceCurrencyCode: "EUR" })
     expect(eur.SourceCurrencyCode).toBe("EUR")
@@ -351,6 +453,11 @@ test.skipIf(mode !== "read")(
       expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-")
       pdfs++
     }
+    expect((await qb.recurringTransactions.list({ updatedSince: new Date() })).items).toEqual([])
+    const descending = await qb.recurringTransactions.list({
+      orderBy: { field: "Id", direction: "DESC" },
+    })
+    expect(descending.items).toHaveLength(recurring.length)
     const other = await qb.recurringTransactions.list({ type: "JournalEntry" })
     expect(other.items.every((row) => "JournalEntry" in row)).toBe(true)
     console.log(
@@ -456,6 +563,183 @@ test.skipIf(mode !== "read")(
         new Set([bankId])
       )
     }
+
+    // Options added after Intuit's per-report reference was rechecked: each changes the output.
+    const calendar = await qb.reports.profitAndLoss({
+      dateMacro: "This Calendar Year",
+      summarizeColumnBy: "FiscalQuarter",
+    })
+    expect([calendar.Header.StartPeriod, calendar.Header.EndPeriod]).toEqual([
+      `${year}-01-01`,
+      `${year}-12-31`,
+    ])
+    expect(calendar.Header.SummarizeColumnsBy).toBe("Quarter")
+    const memos = await qb.reports.transactionList({ ...range, columns: ["tx_date", "memo"] })
+    const memoColumn = columnIndex(memos, "memo")
+    const memo = dataRows(memos.Rows).find((row) => row.ColData?.[memoColumn]?.value)?.ColData?.[
+      memoColumn
+    ]?.value
+    if (memo) {
+      const byMemo = await qb.reports.transactionList({
+        ...range,
+        memo,
+        columns: ["tx_date", "memo"],
+      })
+      const values = dataRows(byMemo.Rows).map((row) => row.ColData?.[memoColumn]?.value)
+      expect(values.length).toBeGreaterThan(0)
+      expect(new Set(values)).toEqual(new Set([memo]))
+    }
+    const estimates = await qb.reports.transactionList({ ...range, transactionType: "Estimate" })
+    const estimateColumn = columnIndex(estimates, "txn_type")
+    const estimateTypes = dataRows(estimates.Rows).map(
+      (row) => row.ColData?.[estimateColumn]?.value
+    )
+    expect(new Set(estimateTypes.length ? estimateTypes : ["Estimate"])).toEqual(
+      new Set(["Estimate"])
+    )
+    const unfiltered = dataRows((await qb.reports.transactionList(range)).Rows).length
+    const nonPosting = await qb.reports.transactionList({
+      ...range,
+      sourceAccountType: "NonPosting",
+    })
+    expect(dataRows(nonPosting.Rows).length).toBeLessThan(unfiltered)
+    const createdToday = await qb.reports.transactionList({ ...range, createDateMacro: "Today" })
+    expect(dataRows(createdToday.Rows).length).toBeLessThan(unfiltered)
+    const bankLedger = await qb.reports.generalLedger({ ...range, accountType: "Bank" })
+    const ledgerSections = (bankLedger.Rows?.Row ?? []).flatMap((row) =>
+      row.Header?.ColData?.[0]?.value ? [row.Header.ColData[0].value] : []
+    )
+    const bankNames = bankRows.map((row) => row.ColData?.[0]?.value)
+    expect(ledgerSections.length).toBeGreaterThan(0)
+    for (const section of ledgerSections) expect(bankNames).toContain(section)
+
+    for (const method of ["agedReceivables", "agedPayables"] as const) {
+      const base = await qb.reports[method]({ reportDate: today })
+      const lastYear = await qb.reports[method]({ dateMacro: "Last Calendar Year" })
+      expect(lastYear.Header.EndPeriod).toBe(`${year - 1}-12-31`)
+      const department = await qb.reports[method]({
+        reportDate: today,
+        departmentIds: ["999999999"],
+      })
+      expect(dataRows(department.Rows).length).toBeLessThan(dataRows(base.Rows).length)
+      const periods = await qb.reports[method]({
+        reportDate: today,
+        agingPeriod: 15,
+        numPeriods: 2,
+      })
+      expect(periods.Columns.Column.length).toBeLessThan(base.Columns.Column.length)
+    }
+    for (const zoom of [
+      await qb.reports.agedReceivables({ reportDate: today, quickZoomUrl: true }),
+      await qb.reports.profitAndLoss({ ...range, quickZoomUrl: true }),
+      await qb.reports.balanceSheet({ quickZoomUrl: true }),
+    ])
+      expect(dataRows(zoom.Rows).some((row) => row.ColData?.some((cell) => cell.href))).toBe(true)
+    const payablesUp = dataRows((await qb.reports.agedPayables({ sortOrder: "ascend" })).Rows)
+    const payablesDown = dataRows((await qb.reports.agedPayables({ sortOrder: "descend" })).Rows)
+    expect(payablesDown.length).toBe(payablesUp.length)
+    if (payablesUp.length > 1)
+      expect(payablesDown[0]?.ColData?.[0]?.value).not.toBe(payablesUp[0]?.ColData?.[0]?.value)
+    for (const method of ["agedReceivableDetail", "agedPayableDetail"] as const) {
+      const base = await qb.reports[method]({ reportDate: today })
+      const narrowed = await qb.reports[method]({
+        reportDate: today,
+        columns: ["tx_date", "due_date", "past_due"],
+        pastDue: 30,
+      })
+      expect(narrowed.Columns.Column).toHaveLength(3)
+      const pastDue = columnIndex(narrowed, "past_due")
+      for (const row of dataRows(narrowed.Rows))
+        expect(Number(row.ColData?.[pastDue]?.value)).toBeGreaterThanOrEqual(30)
+      const due = await qb.reports[method]({
+        reportDate: today,
+        startDueDate: `${year}-10-01`,
+        endDueDate: `${year}-10-31`,
+        columns: ["tx_date", "due_date"],
+      })
+      const dueColumn = columnIndex(due, "due_date")
+      for (const row of dataRows(due.Rows)) {
+        const value = row.ColData?.[dueColumn]?.value ?? ""
+        expect(value >= `${year}-10-01` && value <= `${year}-10-31`).toBe(true)
+      }
+      const terms = await qb.reports[method]({ reportDate: today, termIds: ["999999999"] })
+      expect(dataRows(terms.Rows).length).toBeLessThan(dataRows(base.Rows).length)
+    }
+    // Accepted but not positively verifiable here: QuickBooks validates these values (an invalid
+    // accounting_method fails with 2170) yet the sandbox output does not change, so only
+    // acceptance is asserted. agingMethod on AgedPayableDetail is kept for compatibility only.
+    const payableDetail = dataRows((await qb.reports.agedPayableDetail({ reportDate: today })).Rows)
+    for (const options of [
+      { accountingMethod: "Cash" },
+      { agingMethod: "Current" },
+      { shipVia: "__sixb_none__" },
+      { custom1: "__sixb_none__", custom2: "__sixb_none__", custom3: "__sixb_none__" },
+    ] as const)
+      expect(
+        dataRows((await qb.reports.agedPayableDetail({ reportDate: today, ...options })).Rows)
+      ).toHaveLength(payableDetail.length)
+
+    // shipvia filters receivable detail reports: an unknown ship method leaves no rows.
+    for (const method of ["agedReceivableDetail", "customerBalanceDetail"] as const) {
+      const base = dataRows((await qb.reports[method]({ reportDate: today })).Rows)
+      const none = dataRows(
+        (await qb.reports[method]({ reportDate: today, shipVia: "__sixb_none__" })).Rows
+      )
+      expect(base.length).toBeGreaterThan(0)
+      expect(none).toHaveLength(0)
+      await qb.reports[method]({ reportDate: today, custom1: "__sixb_none__" })
+    }
+    await qb.reports.agedReceivableDetail({ custom2: "__sixb_none__", custom3: "__sixb_none__" })
+
+    // QuickBooks resolves journal codes (unknown codes fail with 610); US companies have none.
+    const journal = await qb.reports
+      .journal({ ...range, journalCodes: ["__sixb_none__"] })
+      .catch((error: unknown) => error)
+    expect(journal).toBeInstanceOf(QuickBooksApiError)
+    expect(journal).toHaveProperty("errors.0.code", "610")
+
+    for (const groupBy of ["Name", "Account", "Transaction Type"] as const) {
+      const splits = await qb.reports.transactionListWithSplits({ ...range, groupBy })
+      expect((splits.Rows?.Row ?? []).some((row) => row.Header)).toBe(true)
+    }
+
+    const sectionsOf = (report: Report) =>
+      (report.Rows?.Row ?? []).flatMap((row) => row.Header?.ColData?.[0]?.value ?? [])
+    const inventory = { startDate: `${year}-01-01`, endDate: today }
+    const byItem = await qb.reports.inventoryValuationDetail(inventory)
+    const byType = await qb.reports.inventoryValuationDetail({
+      ...inventory,
+      groupBy: "Transaction Type",
+    })
+    expect(sectionsOf(byType)).not.toEqual(sectionsOf(byItem))
+    const oldService = await qb.reports.inventoryValuationDetail({
+      ...inventory,
+      startServiceDate: "2000-01-01",
+      endServiceDate: "2000-01-02",
+    })
+    expect(dataRows(byItem.Rows).length).toBeGreaterThan(0)
+    expect(dataRows(oldService.Rows)).toHaveLength(0)
+    const serviceMacro = await qb.reports.inventoryValuationDetail({
+      ...inventory,
+      serviceDateMacro: "This Calendar Year",
+    })
+    expect(dataRows(serviceMacro.Rows).length).toBeLessThanOrEqual(dataRows(byItem.Rows).length)
+
+    const valuation = await qb.reports.inventoryValuationDetail({
+      startDate: `${year}-01-01`,
+      endDate: today,
+      columns: ["tx_date", "txn_type", "quantity"],
+    })
+    expect([valuation.Header.StartPeriod, valuation.Header.EndPeriod]).toEqual([
+      `${year}-01-01`,
+      today,
+    ])
+    // The report always leads with a Product/Service grouping column that has no ColKey.
+    expect(
+      valuation.Columns.Column.filter((column) =>
+        column.MetaData?.some((entry) => entry.Name === "ColKey")
+      ).map((column) => column.MetaData?.find((entry) => entry.Name === "ColKey")?.Value)
+    ).toEqual(["tx_date", "txn_type", "quantity"])
 
     const aging = await qb.reports.agedReceivables({
       reportDate: today,

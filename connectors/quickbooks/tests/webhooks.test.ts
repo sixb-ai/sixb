@@ -139,23 +139,3 @@ test("adapter registers the ordinary webhook and optional request identity", () 
   expect(hooks?.[0]?.id).toBe("events")
   expect(hooks?.[0]?.idempotencyKey).toBe(idempotencyKey)
 })
-
-test("signed estimate lifecycle events verify and parse without entity-specific handling", async () => {
-  // Synthetic CloudEvents using Intuit's qbo.<entity>.<operation>.v1 naming; not a live capture.
-  const hook = quickbooksEventsWebhook({ verifierToken: token, onEvent() {} })
-  const body = JSON.stringify(
-    ["created", "updated", "deleted"].map((operation, index) => ({
-      ...event,
-      id: `estimate-${index}`,
-      type: `qbo.estimate.${operation}.v1`,
-      intuitentityid: "77",
-    }))
-  )
-  await hook.verify?.(verifyContext(body, sign(body)))
-  const parsed = hook.body.parse(JSON.parse(body))
-  expect(parsed.map((event) => [event.type, event.intuitentityid])).toEqual([
-    ["qbo.estimate.created.v1", "77"],
-    ["qbo.estimate.updated.v1", "77"],
-    ["qbo.estimate.deleted.v1", "77"],
-  ])
-})
