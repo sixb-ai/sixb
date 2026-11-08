@@ -229,6 +229,7 @@ export type {
 
 export type {
   ActionEventOrigin,
+  ArtifactCommentedEvent,
   ArtifactEvent,
   ArtifactUpdatedEvent,
   DatasetEvent,

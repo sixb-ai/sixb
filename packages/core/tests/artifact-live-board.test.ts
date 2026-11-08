@@ -10,11 +10,11 @@ import {
   boardFramePatches,
   boardTextHash,
   mergeBoardText,
-  patchText,
   setBoardImage,
   setBoardStyle,
   setBoardText,
-} from "../src/artifacts/live"
+} from "../src/artifacts/live/board"
+import { patchText } from "../src/artifacts/live/document"
 
 const BOARD = `<!doctype html>
 <html>

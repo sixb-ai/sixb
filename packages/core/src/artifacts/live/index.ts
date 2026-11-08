@@ -6,12 +6,7 @@
 
 export {
   annotateBoard,
-  applyBoardEdit,
   applyBoardEditToText,
-  BOARD_ADDRESS_ATTRIBUTE,
-  BOARD_KIND_ATTRIBUTE,
-  BOARD_STYLE_PROPERTIES,
-  BOARD_TEXT_ATTRIBUTE,
   type BoardChange,
   type BoardEdit,
   type BoardElement,
@@ -33,13 +28,10 @@ export {
   canvasItemObject,
   documentCanvas,
   documentFiles,
-  documentKind,
-  isLiveTextPath,
   LIVE_FILES,
   type LiveFile,
   type LiveFiles,
   mergeCanvasItem,
-  patchText,
 } from "./document"
 export {
   AGENT_AWARENESS_FIELD,
@@ -53,7 +45,6 @@ export {
   type ArtifactLiveUser,
   decodeLiveData,
   encodeLiveData,
-  LIVE_SYNC_PART_BYTES,
   liveSync,
   USER_AWARENESS_FIELD,
 } from "./protocol"
