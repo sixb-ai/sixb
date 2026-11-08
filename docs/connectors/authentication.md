@@ -103,3 +103,36 @@ const client = await sixb.connector(linkedinAds, {
 
 [Syncs](../syncs/overview.md#sync-connected-accounts) read all connected accounts automatically,
 so you don't need to select a slot in a sync definition.
+
+## Let people connect their own accounts
+
+By default an OAuth connector's accounts belong to the project. To let each person connect their
+own account, such as their own mailbox, add `owners` to the definition:
+
+```ts
+export const gmail = defineConnector("gmail", google({ auth: { oauth } }), {
+  owners: ["user"],
+})
+```
+
+Use `["project", "user"]` to allow both. Then any signed-in member can connect their own account,
+without `can.manage`:
+
+```tsx
+const gmail = useConnectorConnection({ connectorId: "gmail", owner: "me" })
+```
+
+`owner: "me"` fills the member's own `default` slot. Pass `slot` to give one person several
+accounts.
+
+| Who | Can |
+|---|---|
+| The member who connected it | See it, reconnect it, revoke it and disconnect it |
+| Other members | Nothing: to them it doesn't exist |
+| Members with `can.manage(gmail)` | See every connection with its owner, and disconnect any of them. Only the owner can reconnect or revoke it |
+
+A personal connection is read only by [syncs](../syncs/overview.md#sync-connected-accounts) and
+[webhooks](webhooks.md). `sixb.connector()` opens project connections only, so no action or tool
+can act with someone else's account. A sync writes everyone's rows into the same dataset: use
+`connection.owner` or `connection.account` to record whose they are, and
+[roles](../auth/authorization.md#grant-only-some-objects) to decide who sees them.

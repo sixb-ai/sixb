@@ -79,6 +79,17 @@ export const importVideos = defineSync("import-videos")
 If record IDs can repeat across accounts, include the account ID in the dataset's primary key.
 Incremental checkpoints are saved separately for each connection and account.
 
+[Personal connections](../connectors/authentication.md#let-people-connect-their-own-accounts) are
+read too. `connection.owner` is `{ type: "user", id }` for one and `{ type: "project" }`
+otherwise. To show each person only their own rows, write the account's email on each row, map it
+to a [`ref.user()`](../projections/overview.md#point-to-members) property, and grant
+`can.view(Type).where((row) => row.p.owner.eq(currentUser()))`. Grant a workflow's group
+`can.view(Type)` without the condition when it needs to see everyone's.
+
+When an account needs reconnecting, a `merge` or `append` sync skips it: the run succeeds, the
+account keeps its checkpoint and rows, and the next run after it reconnects resumes from there. A
+`snapshot` sync fails instead, because leaving the account out would drop its rows.
+
 ## Import files
 
 Use `blobs.put()` to store a file and include its returned reference in a `fileRef` column.
