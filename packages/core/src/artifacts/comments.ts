@@ -205,6 +205,14 @@ async function checkAnchor(
     if (!shows) throw invalid(`The artifact shows no board '${anchor.board}'.`)
   }
 
+  const { point } = anchor
+  if (point !== undefined && anchor.board === undefined) {
+    throw invalid("A comment's point is on the board it names.")
+  }
+  if (point !== undefined && ![point.x, point.y].every((value) => value >= 0 && value <= 1)) {
+    throw invalid("A comment's point is on its board: x and y from 0 to 1.")
+  }
+
   const label = anchor.label
     ?.replace(/\s+/g, " ")
     .trim()
@@ -213,6 +221,7 @@ async function checkAnchor(
     ...(anchor.board === undefined ? {} : { board: anchor.board }),
     ...(anchor.element === undefined ? {} : { element: anchor.element }),
     ...(label ? { label } : {}),
+    ...(point === undefined ? {} : { point: { x: point.x, y: point.y } }),
     revision,
   }
 }

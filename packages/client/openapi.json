@@ -57303,6 +57303,24 @@
                                 "maxLength": 1000,
                                 "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                               },
+                              "point": {
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  }
+                                },
+                                "required": ["x", "y"],
+                                "additionalProperties": false,
+                                "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                              },
                               "revision": {
                                 "type": "integer",
                                 "exclusiveMinimum": true,
@@ -57623,6 +57641,24 @@
                         "maxLength": 1000,
                         "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": ["x", "y"],
+                        "additionalProperties": false,
+                        "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                      },
                       "revision": {
                         "type": "integer",
                         "exclusiveMinimum": true,
@@ -57672,6 +57708,24 @@
                         "maxLength": 1000,
                         "description": "The element's first words, which name it once it is gone; kept to 120 characters"
                       },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": ["x", "y"],
+                        "additionalProperties": false,
+                        "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
+                      },
                       "revision": {
                         "type": "integer",
                         "exclusiveMinimum": true,
@@ -57720,6 +57774,24 @@
                         "type": "string",
                         "maxLength": 1000,
                         "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": ["x", "y"],
+                        "additionalProperties": false,
+                        "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
                       },
                       "revision": {
                         "type": "integer",
@@ -57779,6 +57851,24 @@
                           "type": "string",
                           "maxLength": 1000,
                           "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                        },
+                        "point": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "y": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": ["x", "y"],
+                          "additionalProperties": false,
+                          "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
                         },
                         "revision": {
                           "type": "integer",
@@ -58284,6 +58374,24 @@
                           "type": "string",
                           "maxLength": 1000,
                           "description": "The element's first words, which name it once it is gone; kept to 120 characters"
+                        },
+                        "point": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "y": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": ["x", "y"],
+                          "additionalProperties": false,
+                          "description": "Where on the board its pin is, as fractions of the board's width and height from its top left"
                         },
                         "revision": {
                           "type": "integer",

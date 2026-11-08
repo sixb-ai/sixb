@@ -797,6 +797,7 @@ function commentAnchor(anchor: ArtifactCommentAnchor): ArtifactCommentAnchor {
     ...(anchor.board === undefined ? {} : { board: anchor.board }),
     ...(anchor.element === undefined ? {} : { element: anchor.element }),
     ...(anchor.label === undefined ? {} : { label: anchor.label }),
+    ...(anchor.point === undefined ? {} : { point: { x: anchor.point.x, y: anchor.point.y } }),
     revision: anchor.revision,
   }
 }

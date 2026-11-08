@@ -183,7 +183,8 @@ pictures, and inline styles.
 
 A board's frame link serves it for editing with `?sixb-edit`. The frame's `edit` request then
 turns editing on: the frame reports `edit.hover`, `edit.select` and `edit.text`, and takes
-`edit.patch`. It acts only on the reader's own clicks and keys. A board's scripts can still post
+`edit.patch`. With `typing: false`, picking an element types nothing into it, as when the reader
+picks what to comment on; `edit.select` says where they clicked. It acts only on the reader's own clicks and keys. A board's scripts can still post
 messages, so take `edit.text` only for the element the reader picked.
 
 ## Comment on an artifact
@@ -210,7 +211,8 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 | Delete, with its replies | `DELETE /api/artifacts/{id}/comments/{commentId}` |
 
 - An anchor records the revision its author saw, and the element's first words. These still name
-  the element once it is gone.
+  the element once it is gone. Its `point` places the comment's pin on the board, as fractions of
+  the board's width and height.
 - Each change sends `artifact.commented` to whoever reads the artifact, and to everyone editing it
   live.
 - An artifact holds at most 1,000 comments, each up to 4,000 characters.

@@ -53,9 +53,10 @@ export type FrameRequest =
   | FrameRequestOf<"query.changed", { readonly name: string }>
   /**
    * Starts or stops editing a canvas's board, served for editing (`?sixb-edit`): the frame then
-   * reports what the reader points at and picks, by address, and lets them type into text.
+   * reports what the reader points at and picks, by address, and lets them type into text. With
+   * `typing: false`, a text the reader picks takes no typing, as when they pick what to comment on.
    */
-  | FrameRequestOf<"edit", { readonly on: boolean }>
+  | FrameRequestOf<"edit", { readonly on: boolean; readonly typing?: boolean }>
   /**
    * What someone else changed in the board, element by element, as `boardFramePatches` says. The
    * element the reader is typing in takes its patch once they leave it.
@@ -107,8 +108,11 @@ export type FrameEvent =
   | FrameEventOf<"press", { readonly text: string }>
   /** Editing, the reader points at an element, or at none. */
   | FrameEventOf<"edit.hover", { readonly target: FrameEditTarget | null }>
-  /** Editing, the reader picked an element, or none. */
-  | FrameEventOf<"edit.select", { readonly target: FrameEditTarget | null }>
+  /** Editing, the reader picked an element, or none, clicking `at` that point of the frame. */
+  | FrameEventOf<
+      "edit.select",
+      { readonly target: FrameEditTarget | null; readonly at?: FramePoint }
+    >
   /**
    * Editing, the reader typed in a text element: all its words now, as plain text, and `base`,
    * its words as the frame last posted them, or as they were when the reader started typing. The
@@ -140,6 +144,11 @@ export type FrameEditTarget =
       readonly within: string | null
       readonly rect: FrameRect
     }
+
+export interface FramePoint {
+  readonly x: number
+  readonly y: number
+}
 
 export interface FrameRect {
   readonly x: number
@@ -344,9 +353,12 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
         : null
     case "edit.hover":
     case "edit.select": {
-      if (params.target === null) return event(data.event, { target: null })
+      const at = data.event === "edit.select" ? parsePoint(params.at) : undefined
+      if (at === null) return null
+      const point = at ? { at } : {}
+      if (params.target === null) return event(data.event, { target: null, ...point })
       const target = parseEditTarget(params.target)
-      return target ? event(data.event, { target }) : null
+      return target ? event(data.event, { target, ...point }) : null
     }
     case "edit.text":
       return isEditAddress(params.address) &&
@@ -380,6 +392,13 @@ function isEditAddress(value: unknown): value is string {
   return (
     typeof value === "string" && value.length <= 2048 && /^body(>[a-z][a-z0-9-]*:\d+)*$/.test(value)
   )
+}
+
+/** A point the frame reports: undefined for none, null for one that does not read. */
+function parsePoint(value: unknown): FramePoint | null | undefined {
+  if (value === undefined) return undefined
+  if (!isRecord(value) || !Number.isFinite(value.x) || !Number.isFinite(value.y)) return null
+  return { x: Number(value.x), y: Number(value.y) }
 }
 
 function parseEditTarget(value: unknown): FrameEditTarget | null {
