@@ -9,8 +9,8 @@
 // `smallWidth` wide, as boards/<id>.<theme>.small.webp; a board whose page did not load whole is
 // not pictured, but listed in `unpictured`, as a broken picture would stay. With overview.html, the
 // whole canvas as it opens is screenshot as overview.png. It writes one line of JSON:
-// { layout, slides, problems, errors, screenshots, previews, unpictured, stalls, overview?,
-// stopped? } or
+// { layout, slides, problems, errors, screenshots, previews, unpictured, oversized, stalls,
+// overview?, stopped? } or
 // { skipped }.
 //
 //   node check.cjs <directory> <output directory> <library directory> <deadline in ms> <layout>
@@ -71,6 +71,26 @@ const TYPES = {
   ".otf": "font/otf",
 }
 
+/**
+ * How large a board's page draws, in CSS pixels: its document's scroll size, or its largest
+ * element's, which a page that clips its overflow still lays out, such as a fixed 1280×720 frame.
+ * Run in the page.
+ */
+function contentSize() {
+  const root = document.documentElement
+  let w = Math.max(root.scrollWidth, document.body?.scrollWidth ?? 0)
+  let h = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0)
+  for (const element of document.body?.querySelectorAll("*") ?? []) {
+    const rect = element.getBoundingClientRect()
+    w = Math.max(w, rect.width)
+    h = Math.max(h, rect.height)
+  }
+  return { w: Math.round(w), h: Math.round(h) }
+}
+
+/** How far a page may pass its board before it is too large for it: a scrollbar, a rounding. */
+const slack = (size) => Math.max(4, Math.round(size * 0.02))
+
 /** How many of a canvas's boards the check opens at once, each in a browser context of its own. */
 const LANES = 4
 /** A laptop's width, and reduced motion: what animates in is measured and shown where it lands. */
@@ -92,6 +112,8 @@ const found = {
   // answering, and the whole canvas as it opens.
   previews: [],
   unpictured: [],
+  // A canvas's boards whose page draws larger than the board shows.
+  oversized: [],
   stalls: [],
   overview: undefined,
 }
@@ -246,6 +268,12 @@ async function checkCanvas(browser, port, probe, themes) {
       await tab.settle()
       for (const problem of await within(step, tab.page.evaluate(`(${probe})("page")`))) {
         found.problems.push({ ...problem, board: board.id, theme: name })
+      }
+      if (index === 0) {
+        const page = await within(step, tab.page.evaluate(contentSize))
+        if (page.w > board.w + slack(board.w) || page.h > board.h + slack(board.h)) {
+          found.oversized.push({ board: board.id, w: board.w, h: board.h, page })
+        }
       }
 
       if (index > 0 && !board.pictured) continue
