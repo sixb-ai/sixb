@@ -1,3 +1,4 @@
+import type { FileRef } from "../blob-storage/types"
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { JsonValue } from "../json"
 import type {
@@ -214,6 +215,11 @@ export interface AgentArtifactPreviewsRequestedQueueJob
     {
       readonly artifactId: string
       readonly version: number
+      /**
+       * The version's query answers as its publisher read them when publishing, by name: a JSON
+       * blob the boards read their queries from. Absent for a version without queries.
+       */
+      readonly queries?: FileRef
     }
   > {}
 
