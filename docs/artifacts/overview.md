@@ -311,7 +311,8 @@ fleet-planner/
   buttons are drawn like the app's. A page picks a few components by class: `.eyebrow`, `.lede`,
   `.card`, `.grid`, `.row`, `.stat` (with `.label`, `.value`, `.delta`), `.tag`, `.callout`,
   `.note`, and `.table-scroll`.
-  The page's own CSS overrides the kit and the theme.
+  The page's own CSS overrides the kit and the theme, and text takes the colour the page gives
+  its body: a page with its own light background reads the same in dark mode.
 - The page's `<title>`, else its first `<h1>`, names it in cards and lists.
 - A page runs its own scripts, with the same limits as a deck: it can't read the app's cookies or
   call the API itself, and it loads only its own files and a few public CDNs (jsDelivr, cdnjs,
