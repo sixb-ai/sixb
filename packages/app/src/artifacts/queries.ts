@@ -4,7 +4,7 @@ import {
   getArtifactQuery,
   isSixbApiError,
 } from "@sixb/client"
-import { events, useEvents } from "@sixb/client/hooks"
+import { events, getArtifactVersionOptions, useEvents } from "@sixb/client/hooks"
 import {
   ARTIFACT_THEME_FILE,
   type ArtifactTheme,
@@ -18,11 +18,84 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useCallback, useMemo, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
 import { artifactFileSource, type FileSource } from "./file-source"
 import { type FileLoadError, fileLoadError, MAX_TEXT_PREVIEW_BYTES } from "./file-view"
 
 export type ArtifactVersion = GetArtifactVersionResponse
+
+/** How long the open version read stays fresh: a view that opens after it reads it again. */
+const OPEN_VERSION_STALE_MS = 30_000
+
+/**
+ * A version as a view reads it. A frozen version never changes, so it is read once; the open one
+ * changes at each write, which `artifact.updated` announces to the views that follow the artifact
+ * ({@link useArtifactUpdates}), and is read again when a view opens after half a minute.
+ */
+export function artifactVersionOptions(artifactId: string, version: number | "latest") {
+  return queryOptions({
+    ...getArtifactVersionOptions({ path: { artifactId, version: String(version) } }),
+    staleTime: (query) =>
+      query.state.data?.frozen ? Number.POSITIVE_INFINITY : OPEN_VERSION_STALE_MS,
+    retry: false,
+  })
+}
+
+/**
+ * A version, read again as soon as it is older than `revision`, a revision the view knows the
+ * artifact has reached, such as its gallery entry's.
+ */
+export function useArtifactVersion(
+  artifactId: string,
+  version: number | "latest",
+  options: { readonly enabled?: boolean; readonly revision?: number } = {}
+) {
+  const query = useQuery({
+    ...artifactVersionOptions(artifactId, version),
+    enabled: options.enabled ?? true,
+  })
+
+  const behind =
+    options.revision !== undefined &&
+    query.data !== undefined &&
+    !query.data.frozen &&
+    query.data.revision < options.revision
+  const { refetch } = query
+  useEffect(() => {
+    if (behind) void refetch()
+  }, [behind, refetch])
+
+  return query
+}
+
+/**
+ * Follows changes to an artifact while a view shows it: each `artifact.updated` reads again what
+ * the change made stale, so a reader anywhere sees what someone else saved, the Agent wrote, or a
+ * version created.
+ */
+export function useArtifactUpdates(artifactId: string | undefined): void {
+  const queries = useQueryClient()
+  useEvents(
+    events.artifacts(),
+    (event) => {
+      if (event.payload.artifactId === artifactId) artifactChanged(queries, artifactId)
+    },
+    { enabled: artifactId !== undefined }
+  )
+}
+
+/**
+ * Reads again what a change to an artifact makes stale: the artifact and its versions, its restore
+ * points, its boards' previews, and the lists that show it. Only what a view shows is read now; the
+ * rest when one opens.
+ */
+export function artifactChanged(queries: QueryClient, artifactId: string): void {
+  for (const id of ["getArtifact", "getArtifactVersion", "listArtifactRestorePoints"]) {
+    void queries.invalidateQueries({ queryKey: [{ _id: id, path: { artifactId } }] })
+  }
+  void queries.invalidateQueries({ queryKey: ["artifact-board-previews", artifactId] })
+  void queries.invalidateQueries({ queryKey: [{ _id: "listArtifacts" }] })
+}
 
 /** Where a file's text is cached; a test seeds it there to render without a network. */
 export function fileTextQueryKey(source: FileSource | null): readonly unknown[] {
@@ -89,20 +162,25 @@ export function versionFileSource(version: ArtifactVersion, path: string): FileS
     : null
 }
 
-/** Where a version's query result is cached: every view of the version that shows it reads it once. */
-export function artifactQueryKey(artifactId: string, version: number, name: string) {
-  return [...versionQueriesKey({ artifactId, version }), name] as const
+/**
+ * Where a version's query result is cached: every view of the version that shows it reads it once.
+ * An open version's query file can change, so the result is the file's: a change elsewhere in the
+ * artifact keeps it.
+ */
+export function artifactQueryKey(version: QueriedVersion, name: string) {
+  const file = version.files.find((candidate) => artifactQueryName(candidate.path) === name)
+  return [...versionQueriesKey(version), name, file?.file.digest ?? null] as const
 }
 
 /** Where every query result of a version is cached, one key under it each. */
-export function versionQueriesKey(version: QueriedVersion) {
+export function versionQueriesKey(version: Pick<ArtifactVersion, "artifactId" | "version">) {
   return [ARTIFACT_QUERIES, version.artifactId, version.version] as const
 }
 
 const ARTIFACT_QUERIES = "artifact-query"
 
-/** The version a query runs at: the one the view or the frame shows. */
-export type QueriedVersion = Pick<ArtifactVersion, "artifactId" | "version">
+/** The version a query runs at: the one the view or the frame shows, with its query files. */
+export type QueriedVersion = Pick<ArtifactVersion, "artifactId" | "version" | "files">
 
 /** Read once a view shows it, and again when one opens after half a minute, as page state is. */
 const QUERY_STALE_MS = 30_000
@@ -113,7 +191,7 @@ const QUERY_STALE_MS = 30_000
  */
 export function artifactQueryOptions(version: QueriedVersion, name: string) {
   return queryOptions({
-    queryKey: artifactQueryKey(version.artifactId, version.version, name),
+    queryKey: artifactQueryKey(version, name),
     staleTime: QUERY_STALE_MS,
     retry: false,
     queryFn: ({ signal }) => readQuery(version, name, signal),
@@ -187,7 +265,7 @@ export function holdsQueries(version: Pick<ArtifactVersion, "files">): boolean {
  * views that show one refetch it, and a frame's page hears its rows changed; one no view shows is
  * read when one opens.
  */
-export function useVersionQueries(version: QueriedVersion): {
+export function useVersionQueries(version: Pick<ArtifactVersion, "artifactId" | "version">): {
   readonly readAt: number | null
   readonly refreshing: boolean
   readonly refresh: () => void

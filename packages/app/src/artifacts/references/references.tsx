@@ -1,5 +1,5 @@
 import { isSixbApiError } from "@sixb/client"
-import { getArtifactOptions, getArtifactVersionOptions } from "@sixb/client/hooks"
+import { getArtifactOptions } from "@sixb/client/hooks"
 import {
   type ArtifactAddress,
   type CellRange,
@@ -32,8 +32,10 @@ import { ArtifactKindIcon } from "../kind-icon"
 import { useArtifactMessages } from "../messages"
 import {
   type ArtifactVersion,
+  artifactVersionOptions,
   holdsQueries,
   useArtifactTheme,
+  useArtifactUpdates,
   useFileText,
   versionFileSource,
 } from "../queries"
@@ -261,14 +263,9 @@ function LoadedEmbed({
   readonly fill: boolean
 }) {
   const messages = useArtifactMessages().references
-  const query = useQuery({
-    ...getArtifactVersionOptions({
-      path: { artifactId: address.artifactId, version: String(address.version ?? "latest") },
-    }),
-    // A pinned version never changes; the latest is read again when the embed mounts.
-    staleTime: address.version === undefined ? 30_000 : Number.POSITIVE_INFINITY,
-    retry: false,
-  })
+  // A pinned version is a created one, which never changes; the latest follows the artifact.
+  const query = useQuery(artifactVersionOptions(address.artifactId, address.version ?? "latest"))
+  useArtifactUpdates(address.version === undefined ? address.artifactId : undefined)
   const version = query.data
   // An artifact that exists but is not shared where the reader reads this one says so, calmly.
   const notShared = isSixbApiError(query.error) && query.error.code === "not_shared"

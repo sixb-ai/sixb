@@ -1,10 +1,10 @@
 import { isSixbApiError, type ListArtifactsResponse } from "@sixb/client"
-import { getArtifactVersionOptions, listArtifactsInfiniteOptions } from "@sixb/client/hooks"
+import { listArtifactsInfiniteOptions } from "@sixb/client/hooks"
 import { ARTIFACT_KINDS, type ArtifactKind } from "@sixb/core/artifacts"
 import { ToggleGroup, ToggleGroupItem } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery } from "@tanstack/react-query"
 import { Layers } from "lucide-react"
 import {
   type ReactNode,
@@ -23,7 +23,7 @@ import { ArtifactLabel, ArtifactPreview, SlideFace } from "./card-preview"
 import { ArtifactFrame } from "./frame"
 import { ArtifactKindIcon } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
-import { type ArtifactVersion, useArtifactTheme } from "./queries"
+import { type ArtifactVersion, useArtifactTheme, useArtifactVersion } from "./queries"
 import { PageScreen } from "./renderers/page"
 import { artifactThemeAttributes } from "./theme"
 
@@ -195,14 +195,11 @@ function GalleryCard({ artifact }: { readonly artifact: ArtifactSummary }) {
   const pane = useRef<HTMLDivElement | null>(null)
   const [seen, setSeen] = useState(() => typeof IntersectionObserver === "undefined")
   useNearScreen(pane, "400px 0px", () => setSeen(true), !seen)
-  const version = useQuery({
-    ...getArtifactVersionOptions({
-      path: { artifactId: artifact.id, version: String(artifact.latestVersion) },
-    }),
-    // A version never changes once published; the card reads it when it nears the screen.
+  // The card reads the latest version when it nears the screen, and again once the list knows the
+  // artifact has changed since.
+  const version = useArtifactVersion(artifact.id, artifact.latestVersion, {
     enabled: seen,
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: false,
+    revision: artifact.revision,
   })
   return (
     <Link

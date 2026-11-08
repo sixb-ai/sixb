@@ -33,6 +33,9 @@ export function artifactVersion(
     references: [],
     author: { type: "user", id: "user-1" },
     createdAt: "2026-10-02T12:00:00.000Z",
+    updatedAt: "2026-10-02T12:00:00.000Z",
+    revision: 1,
+    frozen: true,
     ...version,
   }
 }

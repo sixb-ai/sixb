@@ -19,17 +19,18 @@ const LONGEST_CHECK_MS = 30_000
 
 /**
  * How long to wait before asking the version again which pictures are ready: never when none is
- * pending or the version is past the server's wait, else a little longer each time it is asked.
+ * pending or the version's last write is past the server's wait, else a little longer each time
+ * it is asked. An open version waits from its last write, as the server does.
  */
 export function nextPreviewCheck(
   previews: BoardPreviews,
-  version: Pick<ArtifactVersion, "createdAt">,
+  version: Pick<ArtifactVersion, "updatedAt">,
   checks: number,
   now: number
 ): number | false {
   if (!Object.values(previews).includes("pending")) return false
 
-  if (now - Date.parse(version.createdAt) >= BOARD_PREVIEW_WAIT_MS) return false
+  if (now - Date.parse(version.updatedAt) >= BOARD_PREVIEW_WAIT_MS) return false
 
   return Math.min(LONGEST_CHECK_MS, FIRST_CHECK_MS * 1.5 ** checks)
 }
@@ -49,7 +50,8 @@ export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPre
  */
 export function boardPreviewsQuery(version: ArtifactVersion | undefined) {
   return {
-    queryKey: ["artifact-board-previews", version?.artifactId, version?.version],
+    // A revision's boards are pictured once: an open version that changed asks again.
+    queryKey: ["artifact-board-previews", version?.artifactId, version?.version, version?.revision],
     queryFn: async (): Promise<BoardPreviews> => {
       if (!version) return NO_PREVIEWS
 

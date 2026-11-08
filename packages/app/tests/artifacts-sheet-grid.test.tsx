@@ -617,6 +617,7 @@ function sheetCache(): QueryClient {
         title: artifactId,
         owner: { type: "user", id: "user-1" },
         latestVersion: 1,
+        revision: 1,
         createdAt: "2026-10-01T12:00:00.000Z",
         updatedAt: "2026-10-01T12:00:00.000Z",
       },
@@ -626,6 +627,9 @@ function sheetCache(): QueryClient {
           title: artifactId,
           author: { type: "user", id: "user-1" },
           createdAt: "2026-10-01T12:00:00.000Z",
+          updatedAt: "2026-10-01T12:00:00.000Z",
+          revision: 1,
+          frozen: true,
         },
       ],
       access: "owner",
@@ -640,6 +644,9 @@ function sheetCache(): QueryClient {
       references: [],
       author: { type: "user", id: "user-1" },
       createdAt: "2026-10-01T12:00:00.000Z",
+      updatedAt: "2026-10-01T12:00:00.000Z",
+      revision: 1,
+      frozen: true,
     } satisfies GetArtifactVersionResponse)
     for (const file of files) {
       const source = artifactFileSource({ artifactId, version: 1, ...file, fileRef: file.file })

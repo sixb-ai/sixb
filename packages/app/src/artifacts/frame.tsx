@@ -132,8 +132,8 @@ export function ArtifactFrame({
 
   // Each frame keeps the link it loaded until it loads again: every frame of a version shares the
   // query, and a link minted for a later mount would otherwise load every mounted frame again, at
-  // its start.
-  const identity = `${version.artifactId}@${version.version}`
+  // its start. A link serves one revision, so an open version that changed loads the new one.
+  const identity = frameIdentity(version)
   const [kept, setKept] = useState<{ readonly identity: string; readonly path: string } | null>(
     null
   )
@@ -260,7 +260,7 @@ export function ArtifactFrame({
 
     if (link.path === pathRef.current) return send("reload", {})
 
-    setKept({ identity: `${version.artifactId}@${version.version}`, path: link.path })
+    setKept({ identity: frameIdentity(version), path: link.path })
   }, [queries, send, version])
 
   useQueryChanges(version, readNames, (name) => {
@@ -368,10 +368,18 @@ function openWebLink(frame: HTMLIFrameElement, url: string): void {
 
 const NO_QUERIES: readonly string[] = []
 
-/** A version's frame link, shared by its frames and reused while it has most of its hour left. */
+/** What a frame shows: a version at one revision, which its link serves. */
+function frameIdentity(version: ArtifactVersion): string {
+  return `${version.artifactId}@${version.version}r${version.revision}`
+}
+
+/**
+ * A version's frame link, shared by its frames and reused while it has most of its hour left. A
+ * link serves the revision it was minted at: an open version that changed asks for another.
+ */
 function frameLink(version: ArtifactVersion) {
   return queryOptions({
-    queryKey: ["artifact-frame", version.artifactId, version.version],
+    queryKey: frameLinkKey(version),
     queryFn: async () => {
       const { data } = await createArtifactFrame({
         path: { artifactId: version.artifactId, version: String(version.version) },
@@ -383,6 +391,13 @@ function frameLink(version: ArtifactVersion) {
     gcTime: FRAME_REUSE_MS,
     retry: false,
   })
+}
+
+/** Where a version's frame link is cached, at its revision; a test seeds it there. */
+export function frameLinkKey(
+  version: Pick<ArtifactVersion, "artifactId" | "version" | "revision">
+) {
+  return ["artifact-frame", version.artifactId, version.version, version.revision] as const
 }
 
 /** The frame's entry on the API, which may be another origin than the app's. */
