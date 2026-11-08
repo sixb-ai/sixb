@@ -3964,7 +3964,7 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
 /**
  * Get the preview of a canvas's board
  *
- * A PNG of the board as its version shows it, in the reader's mode, which a viewer shows until the board is opened. It shows the data the version's author can see. A numbered version's preview never changes, and is cached as such; "latest" is revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.
+ * A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A numbered version's preview never changes, and is cached as such; "latest" is revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.
  */
 export const getArtifactBoardPreview = <ThrowOnError extends boolean = false>(
   options: Options<GetArtifactBoardPreviewData, ThrowOnError>

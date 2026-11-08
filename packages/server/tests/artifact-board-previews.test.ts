@@ -119,7 +119,7 @@ async function canvas(options: { readonly dark?: boolean } = {}) {
   }
   const artifactId = published.artifact.id
 
-  // The worker pictured Welcome in each mode the canvas is seen in.
+  // The worker pictured Welcome in each mode the canvas is seen in, at both sizes.
   const version = (await storage.artifacts.getVersion({
     projectId: PROJECT_ID,
     artifactId,
@@ -132,14 +132,26 @@ async function canvas(options: { readonly dark?: boolean } = {}) {
   if (!renderKey) throw new Error("Expected Welcome's render key.")
   await storage.artifacts.putBoardPreviews({
     projectId: PROJECT_ID,
-    previews: await Promise.all(
-      (outline.themes ?? []).map(async (theme) => ({
-        renderKey,
-        theme,
-        file: (await put(`welcome.${theme}.png`, `welcome ${theme}`, "image/png")).file,
-        createdAt: new Date(),
-      }))
-    ),
+    previews: (
+      await Promise.all(
+        (outline.themes ?? []).map(async (theme) => [
+          {
+            renderKey,
+            theme,
+            size: "full" as const,
+            file: (await put(`welcome.${theme}.png`, `welcome ${theme}`, "image/png")).file,
+            createdAt: new Date(),
+          },
+          {
+            renderKey,
+            theme,
+            size: "small" as const,
+            file: (await put(`welcome.${theme}.webp`, `small ${theme}`, "image/webp")).file,
+            createdAt: new Date(),
+          },
+        ])
+      )
+    ).flat(),
   })
 
   const preview = (
@@ -177,6 +189,24 @@ describe("a canvas board's preview", () => {
       "if-none-match": etag,
     })
     expect(again.status).toBe(304)
+  })
+
+  test("is a small WebP when asked for one, and a full PNG otherwise", async () => {
+    // Reproduce by serving the full picture whatever the size: a canvas of a hundred boards
+    // decodes every one at its own size on a phone.
+    const { alice, preview } = await canvas()
+
+    const small = await preview(alice, "1/boards/welcome/preview?theme=light&size=small")
+    expect(small.status).toBe(200)
+    expect(small.headers.get("content-type")).toBe("image/webp")
+    expect(await small.text()).toBe("small light")
+
+    const full = await preview(alice, "1/boards/welcome/preview?theme=light&size=full")
+    expect(full.headers.get("content-type")).toBe("image/png")
+    expect(await full.text()).toBe("welcome light")
+
+    // The API refuses a size it does not keep, as it refuses any query outside its schema.
+    expect((await preview(alice, "1/boards/welcome/preview?size=huge")).status).toBe(422)
   })
 
   test("is the mode the canvas pins, whatever the reader's", async () => {
