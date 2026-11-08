@@ -125,6 +125,8 @@ export interface ComposerProps {
    * on: appended to the input, never sent, each time `nonce` changes to a non-zero value.
    */
   readonly insertion?: { readonly text: string; readonly nonce: number }
+  /** The insertion of that `nonce` joined the input: its holder lets it go. */
+  readonly onInserted?: (nonce: number) => void
   /** Ambient context offered for the next turn. Explicit @ selections remain composer-local. */
   readonly ambientContext?: readonly AgentContextInput[]
   /** Scope drag/drop and overlays to an embedded panel instead of the whole viewport. */
@@ -229,6 +231,7 @@ export function Composer({
   draftContext,
   draftNonce,
   insertion,
+  onInserted,
   ambientContext = [],
   compact = false,
   approvalMode,
@@ -389,6 +392,7 @@ export function Composer({
     setValue((current) =>
       current.trim() ? `${current.trimEnd()}\n\n${insertion.text}` : insertion.text
     )
+    onInserted?.(insertion.nonce)
     requestAnimationFrame(() => {
       const input = textareaRef.current
       if (!input) return
