@@ -26,6 +26,15 @@
  * When the objects a query reads change, the app reads it again and tells the frame, which fires
  * `sixb:query` on the window with `detail.name`, for the page to call `sixb.query(name)` again.
  * Opened on its own, nothing tells it: the rows the check served are all there is.
+ *
+ * A canvas's board served for editing has each static element marked with its address
+ * (`data-sixb-at`), its kind (`data-sixb-edit`) and a text's words hashed (`data-sixb-text`), as
+ * `annotateBoard` writes them. While the app has editing on, a click picks an element instead of
+ * following it, the frame reports what the reader points at and picks, and a text element takes
+ * the reader's typing, each change posted as its words. What a script built, or a text whose words
+ * a script rewrote, is reported as scripted and takes nothing. What others change arrives as
+ * patches, element by element; the one the reader is typing in takes its own once they leave it,
+ * so their caret stays.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -50,6 +59,11 @@ export function frameRuntime(): void {
   const QUERY_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/
   /** The longest words a press reports, an arrow's label's, as `ARTIFACT_LIMITS` says. */
   const MAX_LABEL_LENGTH = 120
+  /** What `annotateBoard` marks a board's elements with. */
+  const AT = "data-sixb-at"
+  const KIND = "data-sixb-edit"
+  const WORDS = "data-sixb-text"
+  const MAX_EDIT_LABEL = 80
   const root = document.documentElement
   // Only set while the runtime itself runs, so kept for what reads it later.
   const script = document.currentScript as HTMLScriptElement | null
@@ -188,6 +202,171 @@ export function frameRuntime(): void {
     reportEmbeds()
   }
 
+  // ── Editing a board ─────────────────────────────────────────────────
+
+  let editing = false
+  let pointed: Element | null = null
+  let picked: Element | null = null
+  let typing: HTMLElement | null = null
+  /** What others changed in the element the reader is typing in, for when they leave it. */
+  let held: Record<string, unknown> | null = null
+
+  /** FNV-1a over the words' UTF-16 code units, as `boardTextHash` hashes them. */
+  const wordsHash = (text: string): string => {
+    let hash = 0x811c9dc5
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index)
+      hash = Math.imul(hash, 0x01000193) >>> 0
+    }
+    return hash.toString(16)
+  }
+
+  /** The element the reader means by `node`, as the app is told of it. */
+  const editTarget = (node: EventTarget | null) => {
+    const start = node instanceof Element ? node : null
+    const element = start?.closest(`[${AT}]`) ?? null
+    const box = (start ?? element)?.getBoundingClientRect()
+    const rect = {
+      x: box?.left ?? 0,
+      y: box?.top ?? 0,
+      width: box?.width ?? 0,
+      height: box?.height ?? 0,
+    }
+    const kind = element?.getAttribute(KIND) ?? ""
+    const scripted = {
+      address: null,
+      kind: "scripted",
+      within: element?.getAttribute(AT) ?? null,
+      rect,
+    }
+    if (!element) return { element: null, target: scripted }
+
+    // What is inside a text, or drawn whole, is part of it; anything else inside a box that has
+    // no address of its own is a script's.
+    if (element !== start && kind !== "text" && kind !== "whole") {
+      return { element: null, target: scripted }
+    }
+    const words = element.textContent ?? ""
+    if (kind === "text" && wordsHash(words) !== element.getAttribute(WORDS)) {
+      return { element: null, target: { ...scripted, within: element.getAttribute(AT) } }
+    }
+
+    const own = element.getBoundingClientRect()
+    const label = (kind === "image" ? (element.getAttribute("alt") ?? "") : words)
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_EDIT_LABEL)
+    return {
+      element,
+      target: {
+        address: element.getAttribute(AT),
+        kind,
+        label,
+        rect: { x: own.left, y: own.top, width: own.width, height: own.height },
+      },
+    }
+  }
+
+  const mark = (attribute: string, previous: Element | null, next: Element | null) => {
+    previous?.removeAttribute(attribute)
+    next?.setAttribute(attribute, "")
+    return next
+  }
+
+  const stopTyping = () => {
+    const element = typing
+    if (!element) return
+    typing = null
+    element.removeAttribute("contenteditable")
+    const patch = held
+    held = null
+    if (patch) applyPatch(element, patch)
+  }
+
+  /** Makes an element what a patch says it holds now: its attributes, then what is inside it. */
+  const applyPatch = (element: Element, patch: Record<string, unknown>) => {
+    const attributes = patch.attributes
+    if (attributes && typeof attributes === "object") {
+      const next = attributes as Record<string, unknown>
+      for (const name of element.getAttributeNames()) {
+        if (!(name in next) && !name.startsWith("data-sixb-")) element.removeAttribute(name)
+      }
+      for (const [name, value] of Object.entries(next)) {
+        if (typeof value === "string" && /^[a-z_:][a-z0-9_.:-]*$/i.test(name)) {
+          element.setAttribute(name, value)
+        }
+      }
+    }
+    if (typeof patch.html === "string") element.innerHTML = patch.html
+  }
+
+  const startEditing = (on: boolean) => {
+    editing = on
+    root.toggleAttribute("data-sixb-editing", on)
+    if (on && !document.getElementById("sixb-editing")) {
+      const style = document.createElement("style")
+      style.id = "sixb-editing"
+      style.textContent =
+        "[data-sixb-editing] [data-sixb-hover] { outline: 1px dashed #0090ff; outline-offset: 2px; } [data-sixb-editing] [data-sixb-picked] { outline: 2px solid #0090ff; outline-offset: 2px; } [data-sixb-editing] [contenteditable] { cursor: text; }"
+      document.head.append(style)
+    }
+    if (!on) {
+      stopTyping()
+      pointed = mark("data-sixb-hover", pointed, null)
+      picked = mark("data-sixb-picked", picked, null)
+    }
+  }
+
+  // Before anything of the page's own: editing, a click picks, and nothing follows it.
+  window.addEventListener(
+    "click",
+    (event) => {
+      if (!editing) return
+      if (typing?.contains(event.target as Node | null)) return
+      event.preventDefault()
+      event.stopPropagation()
+      stopTyping()
+
+      const { element, target } = editTarget(event.target)
+      picked = mark("data-sixb-picked", picked, element)
+      post({ event: "edit.select", params: { target } })
+      if (element instanceof HTMLElement && target.kind === "text") {
+        typing = element
+        element.setAttribute("contenteditable", "plaintext-only")
+        element.focus()
+      }
+    },
+    true
+  )
+  document.addEventListener("mouseover", (event) => {
+    if (!editing) return
+    const { element, target } = editTarget(event.target)
+    if (element === pointed && element !== null) return
+    pointed = mark("data-sixb-hover", pointed, element)
+    post({ event: "edit.hover", params: { target } })
+  })
+  document.addEventListener("input", (event) => {
+    if (!editing || !typing || !typing.contains(event.target as Node | null)) return
+    const text = typing.textContent ?? ""
+    // Its words are the reader's now: still theirs to type in.
+    typing.setAttribute(WORDS, wordsHash(text))
+    post({ event: "edit.text", params: { address: typing.getAttribute(AT), text } })
+  })
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!typing) return
+      // A text element's words are one block: a new line would be new markup.
+      if (event.key === "Enter") event.preventDefault()
+      if (event.key === "Escape") typing.blur()
+      event.stopPropagation()
+    },
+    true
+  )
+  document.addEventListener("focusout", (event) => {
+    if (typing && event.target === typing) stopTyping()
+  })
+
   const handle = (method: string, params: Record<string, unknown>) => {
     switch (method) {
       case "theme": {
@@ -237,6 +416,22 @@ export function frameRuntime(): void {
         if (!QUERY_NAME.test(name)) throw new Error(`Unknown query '${name}'.`)
 
         window.dispatchEvent(new CustomEvent("sixb:query", { detail: { name } }))
+        return
+      }
+      case "edit":
+        startEditing(params.on === true)
+        return
+      case "edit.patch": {
+        const patches = Array.isArray(params.patches) ? params.patches : []
+        for (const patch of patches as Record<string, unknown>[]) {
+          const address = typeof patch?.address === "string" ? patch.address : null
+          const element = address
+            ? document.querySelector(`[${AT}="${CSS.escape(address)}"]`)
+            : null
+          if (!element) continue
+          if (element === typing) held = { ...(held ?? {}), ...patch }
+          else applyPatch(element, patch)
+        }
         return
       }
       case "scroll":
