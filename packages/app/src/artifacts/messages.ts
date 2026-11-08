@@ -334,8 +334,9 @@ export const en = {
         count === 1 ? "Send 1 comment to the agent" : `Send ${number(count)} comments to the agent`,
       chooseHint: "Choose the comments to send",
       sent: "Added to your message to the agent",
-      draftIntro: (title: string, artifactId: string) =>
-        `Please address these comments on the canvas “${title}” (${artifactId}):`,
+      askAgent: "Please address these comments.",
+      contextLabel: (count: number, title: string) =>
+        `${count === 1 ? "1 comment" : `${number(count)} comments`} · ${title}`,
       pin: (count: number, author: string) => `Comment ${number(count)} by ${author}`,
       newPin: "New comment",
       close: "Close comments",
@@ -923,8 +924,9 @@ export const fr: Translation<ArtifactMessages> = {
           : `Envoyer ${numberFr(count)} commentaires à l’agent`,
       chooseHint: "Choisissez les commentaires à envoyer",
       sent: "Ajouté à votre message pour l’agent",
-      draftIntro: (title, artifactId) =>
-        `Peux-tu traiter ces commentaires sur le canevas « ${title} » (${artifactId}) :`,
+      askAgent: "Peux-tu traiter ces commentaires ?",
+      contextLabel: (count, title) =>
+        `${count === 1 ? "1 commentaire" : `${numberFr(count)} commentaires`} · ${title}`,
       pin: (count, author) => `Commentaire ${numberFr(count)} de ${author}`,
       newPin: "Nouveau commentaire",
       close: "Fermer les commentaires",

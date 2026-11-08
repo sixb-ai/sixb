@@ -8,7 +8,7 @@ import {
   artifactTargetHref,
   withArtifactTarget,
 } from "./target"
-import { AgentDraftContext, keepAgentDraft } from "./view-context"
+import { type AgentDraft, AgentDraftContext, keepAgentDraft } from "./view-context"
 import { Viewer } from "./viewer"
 
 /**
@@ -34,11 +34,11 @@ export function ArtifactPage() {
 
   // Asked of the Agent from here, words wait for the conversation at home, in its input, for
   // this person in this project.
-  const draftForAgent = (text: string) => {
+  const draftForAgent = (draft: AgentDraft) => {
     void queries
       .fetchQuery({ ...getProjectInfoOptions(), staleTime: Number.POSITIVE_INFINITY })
       .then((project) => {
-        keepAgentDraft({ userId: user?.id ?? null, projectId: project.id, artifactId, text })
+        keepAgentDraft({ userId: user?.id ?? null, projectId: project.id, artifactId, ...draft })
         navigate("/")
       })
       .catch(() => navigate("/"))

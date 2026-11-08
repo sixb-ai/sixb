@@ -1,8 +1,13 @@
+import type { AgentContextInput } from "@sixb/core/agents/context"
 import { useCallback, useState } from "react"
 
-/** Words waiting to join the composer's input, numbered so the same words handed twice join twice. */
+/**
+ * Words waiting to join the composer's input, and context to join its chips, numbered so the same
+ * handed twice joins twice.
+ */
 export interface ComposerInsertion {
   readonly text: string
+  readonly context?: AgentContextInput
   readonly nonce: number
 }
 
@@ -13,13 +18,14 @@ export interface ComposerInsertion {
  */
 export function useComposerInsertion(): {
   readonly insertion: ComposerInsertion | undefined
-  readonly insert: (text: string) => void
+  readonly insert: (draft: { readonly text: string; readonly context?: AgentContextInput }) => void
   readonly inserted: (nonce: number) => void
 } {
   const [pending, setPending] = useState<ComposerInsertion | undefined>(undefined)
 
   const insert = useCallback(
-    (text: string) => setPending((current) => ({ text, nonce: (current?.nonce ?? 0) + 1 })),
+    (draft: { readonly text: string; readonly context?: AgentContextInput }) =>
+      setPending((current) => ({ ...draft, nonce: (current?.nonce ?? 0) + 1 })),
     []
   )
   const inserted = useCallback(

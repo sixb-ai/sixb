@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { MessageSquare, MessageSquarePlus } from "lucide-react"
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useCurrentUser } from "../../../session"
+import { commentsContext } from "../../comments-context"
 import { liveBoardSource } from "../../live/boards"
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
@@ -13,7 +14,6 @@ import type { CommentPick } from "./board-editor"
 import type { DraftPlace, PinPlace } from "./comment-pins"
 import {
   addComment,
-  agentDraftOf,
   type CommentThread,
   canManageComment,
   deleteComment,
@@ -171,12 +171,20 @@ export function useCanvasCommenting({
     [artifactId, queries]
   )
 
+  // Sent to the Agent, the comments go as context of the reader's message, a chip they read as
+  // words; the sentence that asks for them is theirs to change.
   const send = useMemo(
     () =>
-      agentDraft
+      agentDraft && artifactId
         ? (chosen: readonly CommentThread[]) => {
             if (chosen.length === 0) return
-            agentDraft(agentDraftOf(messages.draftIntro(title, artifactId ?? ""), chosen))
+            const { context } = commentsContext({
+              artifactId,
+              title,
+              label: (count) => messages.contextLabel(count, title),
+              threads: chosen,
+            })
+            agentDraft({ text: messages.askAgent, context })
           }
         : null,
     [agentDraft, messages, title, artifactId]

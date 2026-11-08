@@ -7,17 +7,19 @@ import {
 } from "@sixb/client/hooks"
 import { formatCanvas } from "@sixb/core/artifacts"
 import { LIVE_FILES } from "@sixb/core/artifacts/live"
+import { serializeAgentContextForModel } from "@sixb/core/internal/agents"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import type * as Y from "yjs"
+import { commentsContext } from "../src/artifacts/comments-context"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import { LiveHubProvider } from "../src/artifacts/live/hooks"
 import { LiveHub } from "../src/artifacts/live/session"
 import type { ArtifactComment } from "../src/artifacts/renderers/canvas/comments"
-import { agentDraftOf, commentThreads } from "../src/artifacts/renderers/canvas/comments"
-import { AgentDraftContext } from "../src/artifacts/view-context"
+import { commentThreads } from "../src/artifacts/renderers/canvas/comments"
+import { type AgentDraft, AgentDraftContext } from "../src/artifacts/view-context"
 import { Viewer } from "../src/artifacts/viewer"
 import { installDom } from "./helpers/dom"
 import { canvasOf, FakeServer, settle } from "./helpers/live-server"
@@ -229,7 +231,7 @@ function serveComments(initial: readonly ArtifactComment[]) {
 }
 
 async function open(
-  options: { readonly draft?: (text: string) => void; readonly edits?: boolean } = {}
+  options: { readonly draft?: (draft: AgentDraft) => void; readonly edits?: boolean } = {}
 ) {
   const server = new FakeServer(ARTIFACT_ID, CANVAS)
   server.access = options.edits ? "edit" : "watch"
@@ -379,9 +381,9 @@ describe("comments on a canvas", () => {
     ui.unmount()
   })
 
-  // Guard proof: send every open thread from the panel instead of those chosen; the draft then
-  // quotes the third.
-  test("send the chosen ones to the Agent's input, quoted with where they are", async () => {
+  // Guard proof: send every open thread from the panel instead of those chosen; the context then
+  // carries the third. Put the quotes back in the draft's text; the person reads addresses.
+  test("send the chosen ones to the Agent as context of the reader's message, their words theirs", async () => {
     serveComments([
       comment("cmt_1", alice, "Warmer colors"),
       comment("cmt_2", alice, "Bigger button", {
@@ -389,8 +391,8 @@ describe("comments on a canvas", () => {
       }),
       comment("cmt_3", alice, "Leave this one"),
     ])
-    const drafts: string[] = []
-    const { ui } = await open({ draft: (text) => drafts.push(text) })
+    const drafts: AgentDraft[] = []
+    const { ui } = await open({ draft: (draft) => drafts.push(draft) })
     const panel = await openPanel(ui)
     await waitFor(() => expect(thread(panel, "cmt_3")).toBeTruthy())
 
@@ -406,26 +408,57 @@ describe("comments on a canvas", () => {
       fireEvent.click(within(panel).getByRole("button", { name: "Send 2 comments to the agent" }))
     })
 
-    expect(drafts).toEqual([
-      [
-        `Please address these comments on the canvas “Onboarding” (${ARTIFACT_ID}):`,
-        '- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1 · from Alice Martin] Warmer colors',
-        "- [home · revision 1 · comment cmt_2 · from Alice Martin] Bigger button",
-      ].join("\n"),
-    ])
+    expect(drafts).toHaveLength(1)
+    const [draft] = drafts
+    expect(draft?.text).toBe("Please address these comments.")
+    expect(draft?.context).toMatchObject({
+      kind: "app-state",
+      id: `artifact-comments:${ARTIFACT_ID}`,
+      label: "2 comments · Onboarding",
+      value: {
+        artifactId: ARTIFACT_ID,
+        title: "Onboarding",
+        comments: [
+          {
+            id: "cmt_1",
+            quote:
+              '[home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1 · from Alice Martin] Warmer colors',
+            author: "Alice Martin",
+            body: "Warmer colors",
+            replies: [],
+          },
+          {
+            id: "cmt_2",
+            quote: "[home · revision 1 · comment cmt_2 · from Alice Martin] Bigger button",
+            body: "Bigger button",
+          },
+        ],
+      },
+    })
+    expect(draft?.text).not.toContain("body>")
     expect(within(panel).getByText("Added to your message to the agent")).toBeTruthy()
     ui.unmount()
   })
 
-  test("are drafted for the Agent with their replies under each", () => {
-    const threads = commentThreads([
-      comment("cmt_1", alice, "Warmer colors"),
-      comment("cmt_2", bob, "Agreed,\n warmer", { parentId: "cmt_1" }),
-    ])
-    expect(threads.map((each) => [each.number, each.replies.length])).toEqual([[1, 1]])
-    expect(agentDraftOf("Please:", threads)).toBe(
-      'Please:\n- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1 · from Alice Martin] Warmer colors\n  - Agreed, warmer'
-    )
+  // Guard proof: leave the quote out of commentsContext's entries; the Agent no longer finds where
+  // the comments are.
+  test("reach the Agent with where they are, quoted as its skill reads them", () => {
+    const { context, sent } = commentsContext({
+      artifactId: ARTIFACT_ID,
+      title: "Onboarding",
+      label: (count) => `${count} comments · Onboarding`,
+      threads: commentThreads([
+        comment("cmt_1", alice, "Warmer colors"),
+        comment("cmt_2", bob, "Agreed,\n warmer", { parentId: "cmt_1" }),
+      ]),
+    })
+    expect(sent).toBe(1)
+
+    const block = serializeAgentContextForModel([{ type: "context", context, origin: "explicit" }])
+    expect(block).toContain(`<id>artifact-comments:${ARTIFACT_ID}</id>`)
+    expect(block).toContain("comment cmt_1 · from Alice Martin] Warmer colors")
+    expect(block).toContain("body&gt;main:0&gt;h1:0")
+    expect(block).toContain("Agreed, warmer")
   })
 
   // Guard proof: drop `.closest(COMMENTS)` from the canvas's key handler; Delete on the panel's

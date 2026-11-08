@@ -124,6 +124,10 @@ export const en = {
     searching: "Searching…",
     empty: (query: string) => `No objects found for “${query}”`,
     remove: (label: string) => `Remove ${label} context`,
+    /** A chip of comments: what shows them, and a comment the project cannot name the author of. */
+    showComments: (label: string) => `Show ${label}`,
+    someone: "Someone",
+    replies: (count: number) => (count === 1 ? "1 reply" : `${count} replies`),
     /** A context entry with no readable name. */
     unnamed: "Context",
   },

@@ -121,10 +121,16 @@ export interface ComposerProps {
   readonly draftContext?: readonly AgentContextEntryInput[]
   readonly draftNonce?: number
   /**
-   * Words to add to what the reader is writing, such as comments an artifact asks the Agent to act
-   * on: appended to the input, never sent, each time `nonce` changes to a non-zero value.
+   * What an artifact hands the conversation, such as the comments the reader asks the Agent to
+   * act on, each time `nonce` changes to a non-zero value: its context joins the chips, replacing
+   * one of the same identity, and its words start an empty input, the reader's own kept. Nothing
+   * is sent.
    */
-  readonly insertion?: { readonly text: string; readonly nonce: number }
+  readonly insertion?: {
+    readonly text: string
+    readonly context?: AgentContextInput
+    readonly nonce: number
+  }
   /** The insertion of that `nonce` joined the input: its holder lets it go. */
   readonly onInserted?: (nonce: number) => void
   /** Ambient context offered for the next turn. Explicit @ selections remain composer-local. */
@@ -385,13 +391,20 @@ export function Composer({
     textareaRef.current?.focus()
   }, [draftNonce])
 
-  // Words handed to the input join what is there, after a blank line, the caret after them.
+  // What an artifact hands the input: its context as a chip, its words in an empty input, the
+  // caret after what the input holds.
   // biome-ignore lint/correctness/useExhaustiveDependencies: added only when the nonce changes
   useEffect(() => {
     if (!insertion?.nonce) return
-    setValue((current) =>
-      current.trim() ? `${current.trimEnd()}\n\n${insertion.text}` : insertion.text
-    )
+    const { context, text } = insertion
+    if (context) {
+      const identity = agentContextIdentity(context)
+      setContextEntries((current) => [
+        ...current.filter((entry) => agentContextIdentity(entry.context) !== identity),
+        { context, origin: "explicit" },
+      ])
+    }
+    setValue((current) => (current.trim() ? current : text))
     onInserted?.(insertion.nonce)
     requestAnimationFrame(() => {
       const input = textareaRef.current
