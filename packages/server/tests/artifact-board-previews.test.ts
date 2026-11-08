@@ -222,6 +222,21 @@ describe("a canvas board's preview", () => {
     expect((await preview(alice, "1/boards/welcome/preview?size=huge")).status).toBe(422)
   })
 
+  test("is a revision's: kept for good at it, not found once the version moved past it", async () => {
+    // A viewer names the revision it shows, so a picture of an open version is never kept past a
+    // write. Reproduce by ignoring revision: the old revision's picture is served, and kept.
+    const { alice, preview } = await canvas()
+
+    const at = await preview(alice, "1/boards/welcome/preview?theme=light&revision=1")
+    expect(at.status).toBe(200)
+    expect(at.headers.get("cache-control")).toBe("private, max-age=31536000, immutable")
+
+    const moved = await preview(alice, "1/boards/welcome/preview?theme=light&revision=2")
+    expect(moved.status).toBe(404)
+    expect(moved.headers.get("cache-control")).toBe("no-store")
+    expect(await moved.json()).toMatchObject({ code: "preview_not_found" })
+  })
+
   test("is the mode the canvas pins, whatever the reader's", async () => {
     const { alice, preview } = await canvas({ dark: true })
 

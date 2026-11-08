@@ -419,13 +419,16 @@ async function artifactBoardPreviewResponse(
     const version = await requireRequestSixb(context).artifacts.getVersion(artifactId, number)
     if (!version) return await refusal(context, artifactId, context.set)
 
+    // A picture of a revision the version moved past is not this one's.
+    const current = query.revision === undefined || query.revision === version.revision
+
     // The reader's mode, unless the canvas pins another.
     const themes = version.outline.kind === "canvas" ? (version.outline.themes ?? []) : []
     const theme = query.theme && themes.includes(query.theme) ? query.theme : themes[0]
 
     const storage = host.storage.artifacts
     const preview =
-      storage && theme
+      storage && theme && current
         ? boardPreview(
             (await boardPreviews(storage, version)).get(board),
             theme,
@@ -446,10 +449,11 @@ async function artifactBoardPreviewResponse(
       return { error: "Board preview not found", code: "preview_not_found" as const }
     }
 
-    // A frozen version never changes, nor its boards' pictures; an open one does at each write.
+    // A frozen version never changes, nor its boards' pictures, and neither does a revision; an
+    // open version asked for without one does at each write.
     response.headers.set(
       "cache-control",
-      number !== "latest" && version.frozenAt
+      (number !== "latest" && version.frozenAt) || query.revision !== undefined
         ? "private, max-age=31536000, immutable"
         : "private, no-cache"
     )
@@ -1028,7 +1032,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Get the preview of a canvas's board",
           description:
-            "A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A frozen version's preview never changes, and is cached as such; an open version's, and \"latest\", are revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.",
+            "A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A frozen version's preview never changes, and is cached as such, as is one asked for at a revision; an open version's otherwise, and \"latest\", are revalidated. 404 preview_not_found until it is rendered, when it never will be, or when revision is not the version's current one: the version says which.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactBoardPreview",
           security: accessTokenSecurityRequirement("getArtifactBoardPreview"),
