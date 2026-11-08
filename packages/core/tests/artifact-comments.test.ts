@@ -188,6 +188,12 @@ describe("comments on an artifact", () => {
     expect(await add({ body: "Hm", anchor: { board: "welcome", point: { x: 1.5, y: 0 } } })).toBe(
       "invalid_comment"
     )
+    // A number written as text compares as one: it is refused all the same. Guard proof: drop
+    // `Number.isFinite` from checkAnchor; the text point is kept.
+    const textPoint = { x: "0.5", y: "0.5" } as unknown as { x: number; y: number }
+    expect(await add({ body: "Hm", anchor: { board: "welcome", point: textPoint } })).toBe(
+      "invalid_comment"
+    )
     expect(await add({ body: "Hm", parentId: "cmt_missing" })).toBe("comment_not_found")
   })
 
