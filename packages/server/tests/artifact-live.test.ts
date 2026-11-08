@@ -348,15 +348,15 @@ describe("an artifact edited live", () => {
       artifactId: context.artifactId,
       state: "saved",
       revision: version.revision,
-      stateVector: expect.any(String),
+      snapshot: expect.any(String),
     })
     // Written as the last editor.
     expect(version.author).toEqual({ type: "user", id: "bob" })
   })
 
-  // Guard proof: send the document's state vector as it is now in LiveRoom.status, rather than
-  // the one written back; a change made since reads as written, and a client forgets it.
-  test("says what it wrote back as a state vector, which a change made since is past", async () => {
+  // Guard proof: send a snapshot of the document as it is now in LiveRoom.status, rather than the
+  // one written back; a change made since reads as written, and a client forgets it.
+  test("says what it wrote back as a snapshot, its deletions too, which a change made since is past", async () => {
     jest.useFakeTimers()
     const context = await setup()
     const rooms = context.rooms()
@@ -367,21 +367,38 @@ describe("an artifact edited live", () => {
     const written = () => {
       const status = marie.statuses().at(-1)
       if (status?.type !== "status") throw new Error("Expected a status.")
-      return Y.decodeStateVector(decodeLiveData(status.stateVector) as Uint8Array)
+      return Y.decodeSnapshot(decodeLiveData(status.snapshot) as Uint8Array)
     }
-    const own = () => Y.decodeStateVector(Y.encodeStateVector(marie.doc)).get(marie.doc.clientID)
+    const save = async () => {
+      jest.advanceTimersByTime(SAVE_IDLE_MS)
+      await marie.settle()
+    }
+    /** Every deletion an update makes is in the snapshot's delete set. */
+    const deletes = (update: Uint8Array, snapshot: Y.Snapshot) =>
+      [...Y.decodeUpdate(update).ds.clients].every(([client, ranges]) =>
+        ranges.every((range) => Y.isDeleted(snapshot.ds, Y.createID(client, range.clock)))
+      )
 
     marie.canvas.items.get("hi")?.set("x", 320)
     await marie.settle()
-    jest.advanceTimersByTime(SAVE_IDLE_MS)
-    await marie.settle()
+    await save()
     expect(marie.statuses().at(-1)).toMatchObject({ state: "saved" })
-    expect(written().get(marie.doc.clientID)).toBe(own())
+    expect(written().sv.get(marie.doc.clientID)).toBe(Y.getState(marie.doc.store, marie.doc.clientID))
 
-    marie.canvas.items.get("hi")?.set("x", 640)
+    // Deleting the note moves no clock: only the delete set says it was written.
+    let removal: Uint8Array | undefined
+    marie.doc.once("update", (update: Uint8Array) => {
+      removal = update
+    })
+    marie.canvas.items.delete("hi")
     await marie.settle()
+    if (!removal) throw new Error("Expected the deletion's update.")
     expect(marie.statuses().at(-1)).toMatchObject({ state: "unsaved" })
-    expect(written().get(marie.doc.clientID)).toBeLessThan(own() as number)
+    expect(deletes(removal, written())).toBe(false)
+
+    await save()
+    expect(marie.statuses().at(-1)).toMatchObject({ state: "saved" })
+    expect(deletes(removal, written())).toBe(true)
   })
 
   test("writes back changes made without pause at most every few seconds, and when the last editor leaves", async () => {

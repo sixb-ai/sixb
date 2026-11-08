@@ -54,11 +54,11 @@ export type ArtifactLiveServerMessage =
       readonly state: ArtifactLiveSaveState
       readonly revision: number
       /**
-       * The state vector of what is written back, in base64: a client forgets the changes it
-       * kept once this covers them, and keeps those it does not, as one sent while this was
-       * being written.
+       * What is written back, as a Yjs snapshot in base64: its state vector and its delete set. A
+       * client forgets the changes it kept once this covers them, insertions and deletions, and
+       * keeps those it does not, as one sent while this was being written.
        */
-      readonly stateVector: string
+      readonly snapshot: string
       readonly error?: string
     }
   /** The connection may now only watch: the person lost the right to change the artifact. */
