@@ -12,7 +12,12 @@ const ArtifactId = z.string().min(1).max(200)
 const LiveMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("join"), artifactId: ArtifactId }),
   z.object({ type: z.literal("leave"), artifactId: ArtifactId }),
-  z.object({ type: z.literal("sync"), artifactId: ArtifactId, data: z.string().min(1) }),
+  z.object({
+    type: z.literal("sync"),
+    artifactId: ArtifactId,
+    data: z.string().min(1),
+    more: z.literal(true).optional(),
+  }),
   z.object({ type: z.literal("awareness"), artifactId: ArtifactId, data: z.string().min(1) }),
 ])
 

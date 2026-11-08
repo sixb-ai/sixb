@@ -16,6 +16,8 @@ import {
   documentCanvas,
   documentFiles,
   encodeLiveData,
+  LIVE_SYNC_PART_BYTES,
+  liveSync,
   mergeIntoDocument,
   patchText,
 } from "@sixb/core/artifacts/live"
@@ -252,13 +254,9 @@ class Client {
   }
 
   private sync(bytes: Uint8Array): void {
-    this.track(
-      this.rooms.receive(this.connection, {
-        type: "sync",
-        artifactId: this.artifactId,
-        data: encodeLiveData(bytes),
-      })
-    )
+    for (const message of liveSync(this.artifactId, bytes)) {
+      this.track(this.rooms.receive(this.connection, message))
+    }
   }
 
   private track(work: Promise<void>): void {
@@ -613,6 +611,30 @@ describe("an artifact edited live", () => {
       reason: "not_shared",
     })
     expect(marie.canvas.items.get("hi")?.get("text")?.toString()).toBe("Hello")
+  })
+
+  // Guard proof: in LiveRooms.assemble, pass each part on alone instead of keeping it; the room
+  // reads half a message and Bob never sees the comment.
+  test("takes a change larger than a socket message in parts", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
+    await marie.join()
+    await bob.join()
+    await marie.settle()
+
+    const comment = `<!-- ${"a".repeat(LIVE_SYNC_PART_BYTES * 2)} -->`
+    marie.html("boards/welcome.html").insert(0, comment)
+    await marie.settle()
+    expect(bob.html("boards/welcome.html").toString()).toBe(comment + WELCOME)
+
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await marie.settle()
+    expect(await context.read((await context.latest()).files, "boards/welcome.html")).toBe(
+      comment + WELCOME
+    )
   })
 
   // Guard proof: close the room as soon as the last connection leaves, with no linger. Marie then

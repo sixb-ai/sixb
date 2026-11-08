@@ -231,10 +231,9 @@ export class LiveRoom {
    * A y-protocols sync message from a connection. One that watches may ask for the document, never
    * change it; one that edits is read again at most every {@link ACCESS_RECHECK_MS}.
    */
-  async sync(connectionId: string, data: string): Promise<void> {
+  async sync(connectionId: string, bytes: Uint8Array): Promise<void> {
     const member = this.members.get(connectionId)
-    const bytes = decodeLiveData(data)
-    if (!member || !bytes) return
+    if (!member) return
 
     const type = decoding.readVarUint(decoding.createDecoder(bytes))
     if (type !== syncProtocol.messageYjsSyncStep1 && !(await this.mayEdit(member))) {
