@@ -111,6 +111,20 @@ for (const [axis, side] of [
   })
 }
 
+// An opened board fits the room it is given, which happy-dom lays out at nothing: 1200 by 700.
+const ROOM = { width: 1200, height: 700 }
+for (const [axis, side] of [
+  ["clientWidth", "width"],
+  ["clientHeight", "height"],
+] as const) {
+  Object.defineProperty(browser.HTMLElement.prototype, axis, {
+    configurable: true,
+    get() {
+      return ROOM[side]
+    },
+  })
+}
+
 function canvasOf(value: unknown): Canvas {
   const parsed = parseCanvas(JSON.stringify(value))
   if (!("canvas" in parsed)) throw new Error(parsed.error)
@@ -610,6 +624,35 @@ describe("a board opened over its canvas", () => {
   const arrows = CANVAS.items.filter((item) => item.type === "arrow")
   const client = () =>
     new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+
+  test("opens a board at its own size, scaled to fit, over its picture until its page is ready", async () => {
+    // As the canvas and its picture show it: a page laid out at 390 by 400, here 1.75 times as
+    // large to fit 700 pixels of height. Reproduce by laying the page out at the viewer's height
+    // again: the board opens as a page as tall as the viewer, blank until it is ready.
+    const view = render(
+      <QueryClientProvider client={client()}>
+        <BoardFocus
+          version={version}
+          boards={boards}
+          arrows={arrows}
+          id="home"
+          pictureOf={(id) => `/previews/${id}.png`}
+          onOpen={() => {}}
+          onClose={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    await act(async () => {})
+
+    const page = view.container.querySelector<HTMLElement>('[style*="scale("]')
+    expect(page?.style.width).toBe("390px")
+    expect(page?.style.height).toBe("400px")
+    expect(page?.style.transform).toBe("scale(1.75)")
+    expect(page?.parentElement?.style.width).toBe("682.5px")
+    expect(page?.parentElement?.style.height).toBe("700px")
+    expect(page?.querySelector("img")?.getAttribute("src")).toBe("/previews/home.png")
+    view.unmount()
+  })
 
   test("steps through the boards with ← and →, and goes back with Esc", async () => {
     const opened: string[] = []

@@ -167,6 +167,7 @@ export const en = {
     position: (board: number, total: number) => `${number(board)} of ${number(total)}`,
     previousBoard: "Previous board",
     nextBoard: "Next board",
+    boardFailed: "This board's page could not be opened.",
     toolbar: {
       label: "Canvas tools",
       note: "Add a note",
@@ -607,6 +608,7 @@ export const fr: Translation<ArtifactMessages> = {
     position: (board, total) => `${numberFr(board)} sur ${numberFr(total)}`,
     previousBoard: "Planche précédente",
     nextBoard: "Planche suivante",
+    boardFailed: "La page de cette planche n’a pas pu s’ouvrir.",
     toolbar: {
       label: "Outils du canevas",
       note: "Ajouter une note",
