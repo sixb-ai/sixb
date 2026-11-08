@@ -96,6 +96,7 @@ export const en = {
     saving: "Saving…",
     failed: "Couldn't save — retrying",
     offline: "Offline — your changes are kept here",
+    reconnecting: "Offline — reconnecting",
     connecting: "Connecting…",
     /** Who is here, for the avatars' label: `names` lists them. */
     here: (names: string) => `Here now: ${names}`,
@@ -591,6 +592,7 @@ export const fr: Translation<ArtifactMessages> = {
     saving: "Enregistrement…",
     failed: "Échec de l’enregistrement — nouvel essai",
     offline: "Hors ligne — vos modifications sont gardées ici",
+    reconnecting: "Hors ligne — reconnexion",
     connecting: "Connexion…",
     here: (names) => `Présents : ${names}`,
     more: (count) => `+${numberFr(count)}`,
