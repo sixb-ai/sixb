@@ -291,30 +291,40 @@
   animation: none;
 }
 
-/* A board an Agent turn is changing: its outline shimmers, a light passing round it. */
+/*
+ * A board an Agent turn is changing: a ring in the accent, and a soft light sweeping across it,
+ * faint enough to read the page through. Still, a faint tint, for who asks for less motion.
+ */
 .sixb-agent-board {
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
-  background: linear-gradient(
-      110deg,
-      transparent 35%,
-      color-mix(in oklab, var(--primary) 9%, transparent) 50%,
-      transparent 65%
-    )
-    0 0 / 250% 100%;
-  animation: sixb-agent-shimmer 2.4s ease-in-out infinite;
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--primary) 50%, transparent);
 }
 
-@keyframes sixb-agent-shimmer {
+.sixb-agent-board::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--primary);
+  opacity: 0.09;
+  mask-image: linear-gradient(105deg, transparent 35%, #000 50%, transparent 65%);
+  mask-size: 250% 100%;
+  mask-repeat: no-repeat;
+  animation: sixb-agent-sweep 2.6s ease-in-out infinite;
+}
+
+@keyframes sixb-agent-sweep {
   from {
-    background-position: 100% 0;
+    mask-position: 100% 0;
   }
   to {
-    background-position: -150% 0;
+    mask-position: 0% 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sixb-agent-board {
+  .sixb-agent-board::before {
+    mask-image: none;
+    opacity: 0.05;
     animation: none;
   }
 }
