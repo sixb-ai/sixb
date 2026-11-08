@@ -394,6 +394,12 @@ export function canvasNoteFontSize(width: number): number {
  */
 export const BOARD_PREVIEW_WAIT_MS = 15 * 60_000
 
+/**
+ * The widest a board's small preview is, in pixels: a viewer shows it while the board is drawn at
+ * most this wide on screen, in device pixels, and the full one past it.
+ */
+export const SMALL_BOARD_PREVIEW_WIDTH = 480
+
 /** A shape's words, larger in a larger shape, as a note's are. */
 export function canvasShapeFontSize(width: number, height: number): number {
   return Math.round(Math.min(22, Math.max(15, Math.min(width, height * 2) / 12)))

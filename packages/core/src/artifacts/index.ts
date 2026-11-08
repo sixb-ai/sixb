@@ -34,6 +34,7 @@ export {
   canvasNoteFontSize,
   canvasShapeFontSize,
   parseCanvas,
+  SMALL_BOARD_PREVIEW_WIDTH,
 } from "./canvas"
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
 export {
