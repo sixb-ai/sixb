@@ -23,6 +23,27 @@ Where a screen sits comes from its address: `/quotes` is a top-level screen, `/q
 pushed on it, and Back from a screen opened directly goes up to `/quotes`. Call `useBack()` for a
 back button of your own.
 
+## Opening, offline and coming back
+
+A production build gives the installed app the rest of a native app's life cycle:
+
+| Moment | What happens |
+| --- | --- |
+| Opening | iOS shows a launch image of the app's background with its icon in the middle, and the app takes over from an identical loading screen. Both follow the app's light or dark theme |
+| Offline | The app opens from the device. Its pages and files are kept by a service worker; its data still comes from the API, so with no connection it says it is offline and opens once the connection is back |
+| Coming back | Back after 30 seconds or more, the installed app refreshes what is on screen. Opened again within 30 minutes after iOS closed it, it reopens on the screen it was left on |
+
+The icon is the app's `favicon` ([metadata](./customization.md#metadata)). Safari draws the launch
+image for the device in hand when the app is added to the Home Screen, so an existing install must
+be added again to get one.
+
+The service worker is `/sixb-service-worker.js`, registered once the page has loaded. Each deploy
+replaces it, so the next launch runs the new version; the last version's files stay one more round
+for a page still running it. Pages go to the network first and open from the device only when the
+network fails or takes longer than three seconds; the API, sign-in and shared links always go to the
+network. A browser gives the site's root one service worker, so a project that registers its own
+there keeps it and Sixb's is not registered. The development server has no service worker.
+
 ## The phone shell
 
 `AppShell` builds it from your `nav`. Mark the places the tab bar holds with `tab`; the rest are in
@@ -105,4 +126,5 @@ is the height to lay a full-screen view out in.
 
 Desktop browsers cannot reproduce the iOS keyboard, safe areas or the installed app. Use an iPhone,
 or the iOS Simulator with the app added to the Home Screen. The simulator's synthetic touches never
-trigger iOS's back swipe, so check that on a device.
+trigger iOS's back swipe, so check that on a device. The launch image, offline opening and the
+service worker need a production build: `sixb build`, then `sixb app`.

@@ -24,6 +24,7 @@ import { readAppFrameOrigins } from "./frame-origins"
 import { collectPublicEnv, renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
 import { sectionCatalog } from "./sections/catalog"
+import { IMMUTABLE_ASSET_PATTERN, SERVICE_WORKER_PATH } from "./service-worker"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
 import { createTailwindCssCompiler, type TailwindCssCompiler } from "./tailwind"
 
@@ -1192,18 +1193,19 @@ function secureSharedHtml(
   }
 }
 
-// buildApp emits content-hashed entry, chunk, and asset names. Their contents can never change
-// under the same URL, so they are safe to cache forever. Files copied from `public/` keep their
-// names across deploys and stay uncached.
-const IMMUTABLE_ASSET_PATTERN =
-  /^(?:(?:app|shared|chunk)-[a-z0-9]+|(?:chunk|asset)-.+-[a-z0-9]+)\.[a-z0-9]+(?:\.map)?$/
-
+// buildApp emits content-hashed entry, chunk, and asset names (IMMUTABLE_ASSET_PATTERN). Their
+// contents can never change under the same URL, so they are safe to cache forever. Files copied
+// from `public/` keep their names across deploys and stay uncached.
 function staticAssetHeaders(pathname: string): Record<string, string> {
   if (pathname === customAppManifestRoute) {
     return {
       "content-type": "application/manifest+json; charset=utf-8",
       "cache-control": "no-cache",
     }
+  }
+  // Checked on every launch, so a deploy reaches installed apps at once.
+  if (pathname === SERVICE_WORKER_PATH) {
+    return { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" }
   }
 
   const lastSegment = pathname.split("/").pop() ?? ""

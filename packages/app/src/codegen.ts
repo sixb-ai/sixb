@@ -5,6 +5,7 @@ import { renderAppManifest } from "./manifest"
 import { resolveAppMetadata } from "./metadata"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import { type AppRouteLayout, type PageRoute, routePatternKey } from "./scanner"
+import { RESERVED_PATH_PREFIXES, SERVICE_WORKER_PATH } from "./service-worker"
 
 export interface BuiltInRouteManifestEntry {
   readonly path: string
@@ -558,7 +559,7 @@ import {
   SixbEventsProvider,
 } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
-import { PhoneFoundations } from "@sixb/app/pages"
+import { PhoneFoundations, refreshOnReturn, restoreLastScreen } from "@sixb/app/pages"
 ${sectionsImport}${toolViewsImport}import { activityRoutePaths, routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
@@ -614,7 +615,7 @@ function createQueryClient(): QueryClient {
   })
 }
 
-const RESERVED_PATH_PREFIXES = ["/api", "/auth", "/ws", "/docs", "/shared"]
+const RESERVED_PATH_PREFIXES = [${RESERVED_PATH_PREFIXES.map((prefix) => JSON.stringify(prefix)).join(", ")}]
 
 function isReservedPath(pathname: string) {
   return RESERVED_PATH_PREFIXES.some(
@@ -1044,6 +1045,9 @@ function App({ basename }: StartAppOptions) {
 
 export function startApp(options: StartAppOptions = {}) {
   if (options.session) queryClient.setQueryData(getAuthSessionQueryKey(), options.session)
+  // The installed app reopens where it was left, and shows what changed while it was away.
+  if (!options.basename) restoreLastScreen()
+  refreshOnReturn(queryClient)
   // The HTML is built without loading the project: declare the project's language on the document
   // as soon as the API answers, without waiting for the page tree to render.
   if (!options.basename) {
@@ -1068,10 +1072,27 @@ export function renderApiUnavailable(apiBaseUrl: string) {
 
 function ApiUnavailableView({ apiBaseUrl }: { readonly apiBaseUrl: string }) {
   const messages = useAppMessages()
+  // Opened offline, from the device: say so, and open by itself once the connection is back. A
+  // phone can report itself online with no way out, so the app's own server out of reach as well
+  // as the API means offline too; the API alone is the API.
+  const [offline, setOffline] = React.useState<boolean | null>(() => (navigator.onLine ? null : true))
+  React.useEffect(() => {
+    if (offline === null) {
+      // A request that hangs for want of a route out is offline too.
+      fetch("/", { method: "HEAD", cache: "no-store", signal: AbortSignal.timeout(3000) }).then(
+        () => setOffline(false),
+        () => setOffline(true)
+      )
+    }
+    const retry = () => window.location.reload()
+    window.addEventListener("online", retry)
+    return () => window.removeEventListener("online", retry)
+  }, [offline])
+  if (offline === null) return null
   return (
     <AppFallback
-      title={messages.apiUnavailable.title}
-      detail={messages.apiUnavailable.detail(apiBaseUrl)}
+      title={offline ? messages.offline.title : messages.apiUnavailable.title}
+      detail={offline ? messages.offline.detail : messages.apiUnavailable.detail(apiBaseUrl)}
       action={
         <button
           type="button"
@@ -1129,6 +1150,39 @@ const browserClient = configureSixbBrowserClient(runtimeConfig)
 if (import.meta.hot) {
   import.meta.hot.accept()
   import.meta.hot.dispose(() => browserClient.dispose())
+}
+
+// A production build keeps the app on the device, so the installed app opens without the network.
+// A browser gives the root one worker: a project that registers its own there keeps it. The
+// development server has no worker, and removes Sixb's if an earlier build left it on its address.
+if ("serviceWorker" in navigator) {
+  const isSixbWorker = (registration: ServiceWorkerRegistration) =>
+    [registration.installing, registration.waiting, registration.active].some((worker) =>
+      worker?.scriptURL.endsWith(${JSON.stringify(SERVICE_WORKER_PATH)})
+    )
+  if (import.meta.hot) {
+    void navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        if (isSixbWorker(registration)) void registration.unregister()
+      }
+    })
+  } else {
+    // Once the page has loaded, so installing never competes with opening the app.
+    const register = () => {
+      navigator.serviceWorker
+        .getRegistration("/")
+        .then((existing) =>
+          existing && !isSixbWorker(existing)
+            ? undefined
+            : navigator.serviceWorker.register(${JSON.stringify(SERVICE_WORKER_PATH)})
+        )
+        .catch((error: unknown) => {
+          console.warn("[SixbCustomApp] Could not register the service worker:", error)
+        })
+    }
+    if (document.readyState === "complete") register()
+    else window.addEventListener("load", register, { once: true })
+  }
 }
 
 // Without the API's answer the app can neither render nor send the user to sign in.
@@ -1643,6 +1697,9 @@ function renderMetadataHead(metadata: Awaited<ReturnType<typeof resolveAppMetada
       ? [`    <meta name="description" content="${escapeHtmlAttribute(metadata.description)}" />`]
       : []),
     `    <meta name="theme-color" content="${escapeHtmlAttribute(metadata.themeColor)}" />`,
+    // iOS shows a Home Screen app's launch image only with the first; Chrome asks for the second.
+    '    <meta name="apple-mobile-web-app-capable" content="yes" />',
+    '    <meta name="mobile-web-app-capable" content="yes" />',
     // iOS reads this when the app is added to the Home Screen.
     ...(metadata.statusBar === "under"
       ? ['    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />']
