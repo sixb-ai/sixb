@@ -1,0 +1,88 @@
+import { client, getArtifactVersion } from "@sixb/client"
+import { type Query, useQuery } from "@tanstack/react-query"
+import type { ArtifactVersion } from "../../queries"
+
+/**
+ * Whether a board's picture can be shown: `ready`, `pending` while it is rendered, `none` when
+ * none will come and the board shows its outline.
+ */
+export type BoardPreviewStatus = "ready" | "pending" | "none"
+
+export type BoardPreviews = Readonly<Record<string, BoardPreviewStatus>>
+
+const NO_PREVIEWS: BoardPreviews = {}
+
+/**
+ * How long after a version is published its pictures may still come, as the server waits for
+ * them: past it, the server says `none` for what is missing, so the viewer stops asking.
+ */
+export const PREVIEW_WAIT_MS = 15 * 60_000
+
+/** The first look again for pictures still rendered, and the longest between two. */
+const FIRST_CHECK_MS = 2_000
+const LONGEST_CHECK_MS = 30_000
+
+/**
+ * How long to wait before asking the version again which pictures are ready: never when none is
+ * pending or the version is past the server's wait, else a little longer each time it is asked.
+ */
+export function nextPreviewCheck(
+  previews: BoardPreviews,
+  version: Pick<ArtifactVersion, "createdAt">,
+  checks: number,
+  now: number
+): number | false {
+  if (!Object.values(previews).includes("pending")) return false
+
+  if (now - Date.parse(version.createdAt) >= PREVIEW_WAIT_MS) return false
+
+  return Math.min(LONGEST_CHECK_MS, FIRST_CHECK_MS * 1.5 ** checks)
+}
+
+/**
+ * A canvas version's boards and whether each one's picture is ready, asked again while some are
+ * rendered, as {@link nextPreviewCheck} says. Its own query, so the viewer's version stays as it
+ * was read. Without a version, a canvas drawn on its own, no board has a picture.
+ */
+export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPreviews {
+  const query = useQuery({
+    queryKey: ["artifact-board-previews", version?.artifactId, version?.version],
+    queryFn: async () => {
+      if (!version) return NO_PREVIEWS
+
+      const { data } = await getArtifactVersion({
+        path: { artifactId: version.artifactId, version: String(version.version) },
+        throwOnError: true,
+      })
+      return data.boardPreviews ?? NO_PREVIEWS
+    },
+    initialData: version?.boardPreviews ?? NO_PREVIEWS,
+    enabled: version !== undefined,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+    refetchInterval: (current: Query<BoardPreviews>) =>
+      version
+        ? nextPreviewCheck(
+            current.state.data ?? NO_PREVIEWS,
+            version,
+            current.state.dataUpdateCount,
+            Date.now()
+          )
+        : false,
+  })
+
+  return query.data
+}
+
+/** Where a board's picture is, in the reader's mode: the server picks the one a canvas pins. */
+export function boardPreviewUrl(
+  version: Pick<ArtifactVersion, "artifactId" | "version">,
+  board: string,
+  mode: "light" | "dark"
+): string {
+  const artifact = `/api/artifacts/${encodeURIComponent(version.artifactId)}`
+  const path = `${artifact}/versions/${version.version}/boards/${encodeURIComponent(board)}/preview`
+  const url = new URL(path, client.getConfig().baseUrl || window.location.origin)
+  url.searchParams.set("theme", mode)
+  return url.toString()
+}

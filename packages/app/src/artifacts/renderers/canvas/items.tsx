@@ -19,6 +19,7 @@ import { TONE_COLORS } from "../../tones"
 import { ItemTile, LiveBoard, useLive, useLiveBoards } from "./board"
 import { EditChrome, InPlaceText, useCanvasEditing } from "./editing"
 import type { CanvasFlowNode } from "./layout"
+import { boardPreviewUrl } from "./previews"
 
 /**
  * Every item's look on the board. Boards and embeds are pages and artifacts under their names,
@@ -127,7 +128,7 @@ function itemOf<Item>(props: NodeProps<CanvasFlowNode>): Item {
 function BoardNode(props: NodeProps<CanvasFlowNode>) {
   const board = itemOf<CanvasBoard>(props)
   const messages = useArtifactMessages().canvas
-  const { open } = useLiveBoards()
+  const { version, previews, mode, open } = useLiveBoards()
   const shown = useNamesShown()
   const named = useNamed(board.w)
   const title = board.title ?? board.id
@@ -161,7 +162,15 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
           id={board.id}
           file={board.file}
           title={title}
-          tile={<ItemTile icon={AppWindow} />}
+          tile={
+            <ItemTile
+              icon={AppWindow}
+              {...(version && previews[board.id] === "ready"
+                ? { preview: boardPreviewUrl(version, board.id, mode) }
+                : {})}
+              pending={previews[board.id] === "pending"}
+            />
+          }
         />
       </div>
     </div>
