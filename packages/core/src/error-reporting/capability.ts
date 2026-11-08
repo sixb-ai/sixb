@@ -1,6 +1,7 @@
 import { SixbErrorReporter } from "./reporter"
 import {
   type ReportActionPhaseFailureInput,
+  type ReportArtifactLiveWriteFailureInput,
   type ReportDatasetIngestFlushFailureInput,
   type ReportDatasetIngestRejectionInput,
   type ReportEventDeliveryFailureInput,
@@ -11,6 +12,7 @@ import {
   type ReportRunFailureInput,
   type ReportVectorIndexingFailureInput,
   reportActionPhaseFailure as reportActionPhaseFailureWith,
+  reportArtifactLiveWriteFailure as reportArtifactLiveWriteFailureWith,
   reportDatasetIngestFlushFailure as reportDatasetIngestFlushFailureWith,
   reportDatasetIngestRejection as reportDatasetIngestRejectionWith,
   reportEventDeliveryFailure as reportEventDeliveryFailureWith,
@@ -57,6 +59,7 @@ export function shareSixbErrorReporter(source: object, target: object): void {
 
 export type {
   ReportActionPhaseFailureInput,
+  ReportArtifactLiveWriteFailureInput,
   ReportDatasetIngestFlushFailureInput,
   ReportDatasetIngestRejectionInput,
   ReportEventDeliveryFailureInput,
@@ -114,6 +117,14 @@ export function reportRuleEvaluationFailure(
   input: ReportRuleEvaluationFailureInput
 ): void {
   reportRuleEvaluationFailureWith(resolveSixbErrorReporter(host), error, input)
+}
+
+export function reportArtifactLiveWriteFailure(
+  host: unknown,
+  error: unknown,
+  input: ReportArtifactLiveWriteFailureInput
+): void {
+  reportArtifactLiveWriteFailureWith(resolveSixbErrorReporter(host), error, input)
 }
 
 export async function flushSixbErrors(host: unknown, timeoutMs?: number): Promise<void> {

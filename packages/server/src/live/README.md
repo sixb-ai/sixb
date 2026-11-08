@@ -80,8 +80,12 @@ The server vouches for every awareness state it shares:
   - `artifact_not_found`: the room closes and every member gets `left`.
   - An access error: the author is demoted, and another editor is tried at once.
   - `invalid_artifact`: waits for the next change while someone is connected.
-  - Anything else: retries with backoff from 2 s doubling to 30 s. A room nobody holds gives up
-    after `RETRIES_UNHELD` attempts, with `console.error`.
+  - Anything else: retries with backoff from 2 s doubling to 30 s, for as long as the server runs,
+    whether or not anyone still holds the room.
+- Changes are lost only when nobody can write them: the server stops first, or storage refuses
+  them (an access error, `invalid_artifact`) once nobody is left who could change that. The room
+  then reports `artifact.live_write.failed` to the project's `onError`, through
+  `LiveRoomHost.errorReporterHost`, and drops them.
 
 ## Writes made elsewhere
 

@@ -233,6 +233,42 @@ export function reportOrchestratorDispatchFailure(
   })
 }
 
+export interface ReportArtifactLiveWriteFailureInput {
+  readonly projectId: string
+  readonly artifactId: string
+  readonly revision: number
+  readonly attempts: number
+  readonly occurredAt?: Date | string
+  /** Identity of this loss. Defaults to a fresh id; pass one to make a report reproducible. */
+  readonly occurrenceId?: string
+}
+
+/** Report that changes made to a canvas live were never stored. */
+export function reportArtifactLiveWriteFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportArtifactLiveWriteFailureInput
+): void {
+  const occurredAt = resolveOccurredAt(input.occurredAt)
+  const failure = captureSixbFailure(error, {
+    allowedCodes: ["storage.unavailable", "internal.unexpected"],
+    defaultCode: "internal.unexpected",
+    details: { artifactId: input.artifactId, revision: input.revision, attempts: input.attempts },
+    at: new Date(occurredAt),
+  })
+
+  reporter.report(error, {
+    type: "artifact.live_write.failed",
+    notificationId: `project:${input.projectId}:artifact:${input.artifactId}:live-write:${input.occurrenceId ?? randomUUID()}`,
+    projectId: input.projectId,
+    occurredAt,
+    failure,
+    artifactId: input.artifactId,
+    revision: input.revision,
+    attempts: input.attempts,
+  })
+}
+
 export interface ReportVectorIndexingFailureInput {
   readonly projectId: string
   readonly indexingId: string

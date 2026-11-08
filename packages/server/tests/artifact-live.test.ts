@@ -7,6 +7,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type SandboxFactory,
+  type SixbErrorContext,
   SixbHost,
 } from "@sixb/core"
 import { CANVAS_FILE, parseCanvas } from "@sixb/core/artifacts"
@@ -24,6 +25,7 @@ import {
 import { appendArtifactLive } from "@sixb/core/internal/artifacts/live"
 import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
+import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import * as decoding from "lib0/decoding"
 import * as encoding from "lib0/encoding"
@@ -69,6 +71,7 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
   const blobStorage = new InMemoryBlobStorage()
   const broker = new InMemoryBroker()
   const queues = new InMemoryQueues()
+  const reported: SixbErrorContext[] = []
   const host = new SixbHost({
     id: projectId,
     ontology: [],
@@ -78,7 +81,15 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
     lakeStorage: new InMemoryLakeStorage(),
     queues,
     ...(options.sandboxes ? { sandboxes: unusedSandboxes } : {}),
+    onError: (_error, context) => {
+      reported.push(context)
+    },
   })
+  /** What the project's `onError` heard. */
+  const errors = async () => {
+    await flushSixbErrors(host)
+    return reported
+  }
 
   // Signed in with a session, the only credential a conversation shares artifacts with.
   const as = (id: string, grants: Partial<GrantIndex> = {}) =>
@@ -139,7 +150,15 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
   })
 
   const rooms = (instance = "server-a") =>
-    new LiveRooms({ projectId, storage, blobStorage, broker, events: host.events, instance })
+    new LiveRooms({
+      projectId,
+      storage,
+      blobStorage,
+      broker,
+      events: host.events,
+      instance,
+      errorReporterHost: host,
+    })
 
   const read = async (files: readonly ArtifactFile[], path: string) => {
     const file = files.find((entry) => entry.path === path)
@@ -169,6 +188,7 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
     blobStorage,
     broker,
     queues,
+    errors,
     artifactId,
     revision: shared.version.revision,
     marie,
@@ -759,6 +779,84 @@ describe("an artifact edited live", () => {
     }
   })
 
+  // Guard proof: give up after a few attempts once nobody holds the room, as it once did; what
+  // Marie typed before she left, while storage was down, is never written.
+  test("keeps changes nobody holds any more until storage takes them, however long", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    await marie.join()
+    await marie.settle()
+
+    const put = context.blobStorage.put.bind(context.blobStorage)
+    let down = true
+    context.blobStorage.put = async (input) => {
+      if (down) throw new Error("blob storage is unavailable")
+      return put(input)
+    }
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      ;(marie.canvas.items.get("hi")?.get("text") as Y.Text).insert(5, " again")
+      await marie.settle()
+      await marie.leave()
+      await marie.settle()
+
+      // Ten minutes of attempts, each refused.
+      for (let waited = 0; waited < 10 * 60_000; waited += 30_000) {
+        jest.advanceTimersByTime(30_000)
+        await marie.settle()
+      }
+      expect((await context.latest()).revision).toBe(context.revision)
+
+      down = false
+      jest.advanceTimersByTime(30_000)
+      await marie.settle()
+      expect((await context.items()).find((item) => item.id === "hi")).toMatchObject({
+        text: "Hello again",
+      })
+      expect(await context.errors()).toEqual([])
+    } finally {
+      warn.mockRestore()
+      context.blobStorage.put = put
+    }
+  })
+
+  // Guard proof: drop `lose()` from LiveRoom.close; the server stops with Marie's words unwritten,
+  // and the project's onError never hears of it.
+  test("reports the changes it could not store before the server stopped", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    await marie.join()
+    await marie.settle()
+
+    const put = context.blobStorage.put.bind(context.blobStorage)
+    context.blobStorage.put = async () => {
+      throw new Error("blob storage is unavailable")
+    }
+    try {
+      ;(marie.canvas.items.get("hi")?.get("text") as Y.Text).insert(5, " again")
+      await marie.settle()
+      jest.advanceTimersByTime(SAVE_IDLE_MS)
+      await marie.settle()
+      await rooms.close()
+    } finally {
+      context.blobStorage.put = put
+    }
+
+    expect(await context.errors()).toEqual([
+      expect.objectContaining({
+        type: "artifact.live_write.failed",
+        artifactId: context.artifactId,
+        revision: context.revision,
+        attempts: 2,
+        failure: expect.objectContaining({ code: "internal.unexpected" }),
+      }),
+    ])
+  })
+
   // Guard proof: answer `true` for any editor in LiveRoom.mayEdit; Bob's change after his removal
   // reaches Marie and storage.
   test("stops the writes of an editor who lost the right to change the artifact", async () => {
@@ -1044,6 +1142,7 @@ describe("an artifact edited live, under strain", () => {
       broker: context.broker,
       events: events as typeof context.host.events,
       instance: "server-a",
+      errorReporterHost: context.host,
     })
     const error = spyOn(console, "error").mockImplementation(() => {})
     try {
@@ -1092,6 +1191,7 @@ describe("an artifact edited live, under strain", () => {
       broker,
       events: context.host.events,
       instance: "server-a",
+      errorReporterHost: context.host,
     })
     // The client's own awareness keeps a timer: counted before the join.
     const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")

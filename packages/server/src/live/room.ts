@@ -24,6 +24,7 @@ import {
   storeLiveFiles,
   writeLiveArtifact,
 } from "@sixb/core/internal/artifacts/live"
+import { reportArtifactLiveWriteFailure } from "@sixb/core/internal/error-reporting"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { ArtifactFile } from "@sixb/core/storage"
 import * as decoding from "lib0/decoding"
@@ -46,8 +47,6 @@ export const ACCESS_RECHECK_MS = 2_000
 /** The first wait before a failed write-back is tried again; it doubles, up to the next. */
 const RETRY_MS = 2_000
 const RETRY_MAX_MS = 30_000
-/** How many times a document nobody holds any more tries to write itself back before it gives up. */
-const RETRIES_UNHELD = 5
 /** How old another server's awareness update may be for a server joining late to apply it. */
 const AWARENESS_REPLAY_MS = awarenessProtocol.outdatedTimeout
 /**
@@ -75,6 +74,8 @@ export interface LiveRoomHost {
   readonly broker: Broker
   /** This server, among those that hold the artifact live. */
   readonly instance: string
+  /** What reports to the project's `onError`: changes that could never be stored. */
+  readonly errorReporterHost: object
 }
 
 interface Member {
@@ -128,6 +129,8 @@ export class LiveRoom {
   private shadow: Y.Doc
   private state: ArtifactLiveSaveState = "saved"
   private error: string | undefined
+  /** The last write-back's failure, which a loss of the changes reports. */
+  private failure: unknown
   private attempts = 0
   private idle: ReturnType<typeof setTimeout> | undefined
   private deadline: ReturnType<typeof setTimeout> | undefined
@@ -352,10 +355,15 @@ export class LiveRoom {
     return this.queue
   }
 
-  /** Stops the room. What it still holds unwritten is the caller's to save first. */
+  /**
+   * Stops the room. What it still holds unwritten is the caller's to save first: changes it could
+   * not write are reported lost.
+   */
   close(): void {
     if (this.closed) return
+    const lost = this.dirty
     this.closed = true
+    if (lost) this.lose()
     this.clearTimers()
     if (this.recheck) clearInterval(this.recheck)
     if (this.sharing) clearTimeout(this.sharing)
@@ -482,19 +490,22 @@ export class LiveRoom {
     this.savedSnapshot = written
     this.attempts = 0
     this.error = undefined
+    this.failure = undefined
     this.setState(this.dirty ? "unsaved" : "saved", true)
     if (this.dirty && !this.idle) this.idle = setTimeout(() => this.save(), SAVE_IDLE_MS)
   }
 
   /**
    * Keeps the changes and says why they were not written. A refusal of what the document holds
-   * waits for the next change; one of who wrote it is tried as another editor; anything else is
-   * tried again later, and given up only once nobody holds the document any more.
+   * waits for the next change; one of who wrote it is tried as another editor. Either is lost once
+   * nobody is left to write it. Anything else is tried again later, for as long as the server
+   * runs: the changes are lost only if it stops first.
    */
   private failed(author: LiveConnection, error: unknown): void {
     this.dirty = true
     this.attempts += 1
     this.error = error instanceof Error ? error.message : String(error)
+    this.failure = error
     this.setState("failed", true)
 
     const code = error instanceof ArtifactRequestError ? error.code : undefined
@@ -503,27 +514,45 @@ export class LiveRoom {
         member.connection.send({ type: "left", artifactId: this.artifactId, reason: "not_found" })
       }
       this.members.clear()
+      // Deleted: there is nothing left to write the changes into.
+      this.dirty = false
       this.close()
       return
     }
+
     if (code === "not_shared" || code === "read_only" || code === "not_allowed") {
       const member = this.members.get(author.id)
       if (member) this.demote(member)
       this.author = [...this.members.values()].find((each) => each.access === "edit")?.connection
       if (this.author) this.scheduleRetry(0)
+      else if (this.members.size === 0) this.lose()
       return
     }
-    if (code === "invalid_artifact" && this.members.size > 0) return
 
-    if (this.members.size === 0 && this.attempts > RETRIES_UNHELD) {
-      console.error(
-        `[SixbServer] Gave up writing back the live changes to artifact '${this.artifactId}' after ${this.attempts} attempts; they are lost:`,
+    if (code === "invalid_artifact") {
+      if (this.members.size === 0) this.lose()
+      return
+    }
+
+    if (this.members.size === 0) {
+      console.warn(
+        `[SixbServer] Could not write back the live changes to artifact '${this.artifactId}' (attempt ${this.attempts}); trying again:`,
         error
       )
-      this.dirty = false
-      return
     }
     this.scheduleRetry(Math.min(RETRY_MS * 2 ** (this.attempts - 1), RETRY_MAX_MS))
+  }
+
+  /** The changes will never be stored: the project's `onError` hears of it, and they are dropped. */
+  private lose(): void {
+    reportArtifactLiveWriteFailure(this.host.errorReporterHost, this.failure, {
+      projectId: this.host.projectId,
+      artifactId: this.artifactId,
+      revision: this.synced.revision,
+      attempts: this.attempts,
+    })
+    this.dirty = false
+    this.closeWhenDone()
   }
 
   private scheduleRetry(delayMs: number): void {

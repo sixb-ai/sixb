@@ -53,6 +53,7 @@ export function registerArtifactLiveRoutes(app: Elysia, server: SixbServer) {
     broker: host.broker,
     events: host.events,
     instance: randomUUID(),
+    errorReporterHost: host,
   })
   const connections = new WeakMap<object, LiveConnection>()
   /** The socket's connection, as the person its request authenticated. */
