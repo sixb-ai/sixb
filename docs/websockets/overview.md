@@ -131,16 +131,16 @@ connection holds the version as a Yjs document and exchanges
 
 | You receive | |
 | --- | --- |
-| `joined` | `access` (`edit` or `watch`), `revision`, and `document`, the server's copy of the document |
+| `joined` | `access` (`edit` or `watch`), `revision`, and `user`, who you are to the others |
 | `sync`, `awareness` | Apply them to your document and your awareness |
 | `status` | Whether changes are written: `saved` at `revision`, `unsaved`, `saving`, or `failed` with an `error` |
 | `access` | You may now only watch |
 | `left` | You no longer hold the artifact: `not_found`, `not_shared`, or `not_live` (not a canvas) |
 
 - A watcher's updates are refused with an `error`; it may still send step 1 and awareness.
-- Only documents from the same copy sync. When you reconnect, a `joined` with the `document` you
-  had lets your document sync what you changed while away. A different one means the server
-  loaded the artifact again: start from an empty document and, once in step, apply your changes
-  with `mergeIntoDocument`.
-- While an Agent turn changes boards, the server's awareness state holds `sixbAgent`: each turn's
-  `runId` and the `boards` it changed.
+- Keep your document when you reconnect, to any server: sync step 1 sends what you changed while
+  away.
+- The server sets `user` in every awareness state it shares (`id`, `name` and `color`), whatever
+  your own state says. It shares your states only for awareness clients nobody else uses.
+- While an Agent turn changes boards, the server's own awareness state holds `sixbAgent`: each
+  turn's `runId` and the `boards` it changed. A client's state never holds it.

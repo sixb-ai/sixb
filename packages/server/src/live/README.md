@@ -1,25 +1,40 @@
 # Live artifacts
 
 `/ws/artifacts` lets several people edit a canvas at once. Every connected client holds the
-artifact's open version as a Yjs document (`@sixb/core/artifacts/live`). The server holds one copy
-per artifact and writes it back into storage as an ordinary artifact write.
+artifact's open version as a Yjs document (`@sixb/core/artifacts/live`). Each server holding the
+artifact keeps one copy, and writes it back into storage as an ordinary artifact write.
 
 | File | Role |
 | --- | --- |
 | `routes/ws/artifacts.ts` | The socket: auth as `/ws/agents`, message parsing, one `LiveRooms` per server |
-| `rooms.ts` | Which artifacts this server holds, joins and leaves, and the `artifact.updated` feed |
-| `room.ts` | One artifact: its document, its members, write-back, merges, presence |
+| `rooms.ts` | Which artifacts this server holds, joins and leaves, who each connection is, the `artifact.updated` feed |
+| `room.ts` | One artifact: its document, its members, write-back, the live stream, presence |
+| `awareness.ts` | What a connection may say of itself in awareness |
+
+## One history
+
+Yjs merges only documents that share a history. Two documents built separately from the same
+files each own their `canvas.json`, and syncing them keeps one by client id. So storage keeps the
+document itself: `ArtifactRecord.document`, the whole encoded state in a blob, replaced with every
+content write (see `packages/core/src/artifacts/live/state.ts`).
+
+- Every server loads a room from that state, and every client's document comes from a room. Any
+  copy, on any server and after any reload, continues the same history.
+- Every write to a canvas is made into that document, whoever makes it
+  (`packages/core/src/artifacts/publish/merge.ts`):
+  - A live write-back carries the room's state, which is applied to the stored one.
+  - A write of files (the Agent, HTTP) is applied as the change from the files it was made from.
+  - A restore, or a retried turn's undo, is applied as the change back to the restored files.
+- An artifact that keeps no document yet (written before documents were kept) is built from its
+  files under a client id derived from them. Every server that builds it builds the same document,
+  and the first write stores it.
 
 ## Joining
 
 - On `join`, the server reads the person's access to the artifact. `owner` and `update` edit,
   `read` watches, and anything else is refused with `left`.
-- The first join opens the room. It loads the latest version's files, holding text files as
-  `Y.Text` and `canvas.json` as items plus order. Other kinds are refused as `not_live`.
-- `joined` names the room's copy (`document`). Yjs merges only documents that share a history: two
-  copies loaded separately from the same files each own their `canvas.json`, so syncing them picks
-  one by client id. A client whose document came from another copy starts from an empty document.
-  Once in step, it applies what it changed meanwhile with `mergeIntoDocument`.
+- The first join opens the room from the stored document. Other kinds are refused as `not_live`.
+- `joined` says who the connection is (`user`: id, name and color, read once per connection).
 - A socket message is at most 64 KiB. A larger sync message is sent in parts (`more: true`, see
   `liveSync`), each its own base64, and assembled per connection and artifact up to
   `MAX_LIVE_SYNC_BYTES`.
@@ -27,15 +42,26 @@ per artifact and writes it back into storage as an ordinary artifact write.
   editor's access is read again at most every `ACCESS_RECHECK_MS` while it writes. Losing `update`
   demotes it to a watcher (`access`), and losing `read` removes it (`left`).
 
+## Presence
+
+The server vouches for every awareness state it shares:
+
+- A connection may speak for awareness clients that nobody else speaks for, up to
+  `MAX_AWARENESS_CLIENTS`. It may not speak for another connection's client, another server's, or
+  the room's own.
+- Each state it sets is stored with `user` replaced by who the server knows the person to be, and
+  without `sixbAgent`.
+- `sixbAgent` is only the server's own state: the boards each Agent turn changed, read from the
+  live stream.
+
 ## Write-back
 
 - An editor's change marks the room dirty. It is written `SAVE_IDLE_MS` after the last change, at
   most `SAVE_MAX_MS` after the first, and at once when the last editor leaves.
-- `flush` stores the changed texts (unchanged ones keep their blob reference) and publishes through
-  the SDK of the last editor. The write is authored by that person, bumps the revision, and emits
-  `artifact.updated`. It carries `baseRevision` and `baseFiles`, so a canvas written meanwhile is
-  merged rather than refused. When it was merged, the result is merged back into the document under
-  the `MERGED` origin, which is never written back again.
+- `flush` publishes through the SDK of the last editor, with the room's state as `document`. The
+  write is authored by that person, bumps the revision, and emits `artifact.updated`. If someone
+  wrote meanwhile, storage merges both. The room then takes the stored state back under the
+  `MERGED` origin, which is never written back again.
 - A failure leaves the room dirty, reports `status: failed` with the error, and retries:
   - `artifact_not_found`: the room closes and every member gets `left`.
   - An access error: the author is demoted, and another editor is tried at once.
@@ -45,31 +71,33 @@ per artifact and writes it back into storage as an ordinary artifact write.
 
 ## Writes made elsewhere
 
-Every `artifact.updated` for a held artifact queues a `reconcile`, whether an Agent turn, an
-HTTP write, or another server made it. The room reads the latest version and merges it into the
-document as a diff against the files it last matched (`synced`), so unsaved edits stay. The room's
-work (flush, reconcile) runs on one queue, one task at a time.
+Every `artifact.updated` for a held artifact queues a `reconcile`, whoever made the write. The
+room applies the stored document, which shares its history, so unsaved edits stay. A version
+written without one, by a server from before documents were kept, is merged as the change from the
+files the room last took in. The room's work (flush, reconcile) runs on one queue, one task at a
+time.
 
 ## Several servers
 
-Each server holds its own copy, and copies do not exchange Yjs updates: independently loaded
-copies cannot merge (see Joining), and each server would otherwise merge the same storage writes
-again. Copies meet in storage. Each one writes back, and every other one merges that write through
-`artifact.updated`. Edits therefore reach people on another server one write-back later (about
-`SAVE_IDLE_MS`).
+The broker stream `artifacts.live.<artifactId>` (10 minutes, 5,000 records) carries what reaches
+every server at once. Each record is tagged with the server that heard it, so it is not taken back:
 
-The broker stream `artifacts.live.<artifactId>` (short retention) carries what has to be instant
-everywhere:
-
-- `awareness`: who is here and what they point at, tagged with the server that heard it, so it is
-  not shared back.
+- `update`: a Yjs update an editor made. Other servers apply it under the `REMOTE` origin: they show
+  it to their members, and leave its write-back to the server that heard it. Applying an update
+  twice changes nothing, so a room that opens replays the stream from its start, to get what was
+  changed since the last write-back.
+- `awareness`: what people point at, as their server vouched for it.
 - `agent` / `agent-ended`: the boards an Agent turn changed, appended by `run-artifacts` after each
-  canvas write and at the turn's end. Each server shows them as its own awareness state under
-  `sixbAgent`, and drops one after `AGENT_PRESENCE_MS` if the turn never ends.
+  canvas write and at the turn's end. Each server drops one after `AGENT_PRESENCE_MS` if the turn
+  never ends.
+
+An update the stream no longer holds reaches storage with the write-back of the server that heard
+it, so a server that missed it gets it then. A server that dies before writing back loses nothing
+its editors still hold: when they reconnect, wherever, their documents sync it again.
 
 ## Lifetime
 
-Once the last connection leaves and nothing waits to be written, the room stays open for
-`ROOM_LINGER_MS`. A client that reconnects meanwhile finds the same copy and syncs what it changed
-while away. Then the room closes and frees its document. A connection holds at most
+Once the last connection leaves and nothing waits to be written, the room closes and frees its
+document. A client that reconnects later gets a room loaded from storage, with the same history, so
+plain sync brings back what it changed while away. A connection holds at most
 `MAX_LIVE_ARTIFACTS_PER_CONNECTION` artifacts. On server stop, every room writes back first.
