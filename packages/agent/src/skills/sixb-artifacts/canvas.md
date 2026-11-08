@@ -115,9 +115,12 @@ text on a board.
 
 Once a canvas publishes, Sixb opens each board at its own size in the sandbox's browser, in light
 and dark mode or the one its `theme.json` pins, and warns as it does for a page, naming the board.
-The result names each board's screenshot, `<id>.png`, under `$SIXB_CONTEXT_DIR/checks/`.
+The result names each board's screenshot, `<id>.png`, and `overview.png`, the whole canvas as it
+opens, under `$SIXB_CONTEXT_DIR/checks/`. The check also takes each board's preview, the picture
+readers see until they open it, so a board that looks wrong there looks wrong on the canvas too.
 
-1. Open the screenshots with `view_file` and look at each board as the reader will.
+1. Open the screenshots with `view_file` and look at each board as the reader will. Open
+   `overview.png` to see whether the canvas reads at the zoom it opens at.
 2. Fix what the warnings name and what you see, in the boards' files or `canvas.json`.
 3. Publish the next version with `publish_artifact_version`, and check again.
 
