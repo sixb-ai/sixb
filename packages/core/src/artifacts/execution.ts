@@ -29,6 +29,7 @@ import { announceArtifactUpdates } from "./events"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { invalidArtifact, readArtifactText } from "./publish/files"
+import { withMergedWrite } from "./publish/merge"
 import {
   type BoardPreviewRequester,
   boardsReadLiveData,
@@ -81,9 +82,16 @@ export type ArtifactQueryInput =
 export interface UpdateArtifactRuntimeInput extends ArtifactContentInput {
   /**
    * The revision this content was made from, such as the one a person edited. When the artifact
-   * changed since, the update fails with `artifact_moved`, naming its revision and who wrote it.
+   * changed since, the update fails with `artifact_moved`, naming its revision and who wrote it;
+   * a canvas instead takes what changed from that revision's files into what it holds now.
    */
   readonly baseRevision?: number
+  /**
+   * The files of `baseRevision`, which a canvas's merge starts from. Without them, it looks for
+   * them among the artifact's versions and restore points, and refuses with `artifact_moved` when
+   * none holds them.
+   */
+  readonly baseFiles?: readonly ArtifactFile[]
 }
 
 /** A change made from what the caller saw: past `baseRevision`, it fails with `artifact_moved`. */
@@ -468,21 +476,37 @@ export function createArtifactsRuntime(
       await requireUpdatable(artifactId)
 
       const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
-      const prepared = await prepareArtifactVersion(context, {
+      const files = await contentFiles(input)
+      const write = {
         artifactId,
         kind: input.kind,
-        title: input.title,
-        files: await contentFiles(input),
+        files,
         ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
-        author,
-        readable: readableBy(rule()),
-        checkQuery,
-      })
-      const stored = await store(prepared)
-      await announceArtifactUpdates(runtime.events, [stored.version])
-      await requestPreviews(stored.version)
+        ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
+      }
 
-      return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+      // A canvas written since the base is merged into, not refused: the merge is what is checked.
+      return withMergedWrite(context, write, async (merged) => {
+        const prepared = await prepareArtifactVersion(context, {
+          artifactId,
+          kind: input.kind,
+          title: input.title,
+          files: merged.files,
+          ...(merged.baseRevision === undefined ? {} : { baseRevision: merged.baseRevision }),
+          author,
+          readable: readableBy(rule()),
+          checkQuery,
+        })
+        const stored = await store(prepared)
+        await announceArtifactUpdates(runtime.events, [stored.version])
+        await requestPreviews(stored.version)
+
+        return {
+          ...stored,
+          warnings: await artifactVersionWarnings(context, prepared, stored),
+          ...(merged.merged ? { merged: true as const } : {}),
+        }
+      })
     },
 
     async freeze(artifactId, input = {}) {

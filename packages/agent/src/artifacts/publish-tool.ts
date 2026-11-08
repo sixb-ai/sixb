@@ -196,8 +196,10 @@ async function publish(
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
   // An installed artifact is updated from its copy: writing past the revision the copy holds would
-  // drop whatever was written since.
+  // drop whatever was written since. A canvas is merged instead, from the copy's files.
   const installed = await input.installed
+  const base =
+    "artifactId" in request.target ? installed.baseOf(request.target.artifactId) : undefined
   const baseRevision =
     "artifactId" in request.target ? installed.revisionOf(request.target.artifactId) : undefined
 
@@ -248,6 +250,7 @@ async function publish(
         ? {
             artifactId: request.target.artifactId,
             ...(baseRevision === undefined ? {} : { baseRevision }),
+            ...(base ? { baseFiles: base.files } : {}),
           }
         : { kind }),
       title: request.title,
@@ -287,9 +290,14 @@ async function publish(
   // The write exists by now: nothing below may read as a failed publish, which the Agent would
   // publish again.
   const { artifact, version } = published
+  // Merged with what others wrote since, the version holds more than the Agent's files: the copy
+  // and the check take what it holds.
+  const written = published.merged ? await mergedFiles(input, published, signal) : contents
+  let copy: string | undefined
   try {
     // Revising from $SIXB_ARTIFACTS_DIR must start from this revision, not the one before.
-    await installed.replace(handle.sandbox, published, contents, signal)
+    await installed.replace(handle.sandbox, published, written ?? contents, signal)
+    copy = installed.directoryOf(artifact.id)
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
@@ -302,8 +310,13 @@ async function publish(
   const layout = frameLayout(kind)
   const { outline, entry } = version
   const root = layout ? sources.find((source) => source.path === entry) : undefined
-  const bytesOf = (path: string) => contents.find((file) => file.path === path)?.bytes
-  const themeFile = contents.find((file) => file.path === ARTIFACT_THEME_FILE)
+  // A merged version is checked from its installed copy, which holds what it holds.
+  const checked = published.merged ? (written && copy ? written : undefined) : contents
+  const checkDirectory = published.merged
+    ? copy && posix.resolve(handle.sandbox.workingDirectory, copy)
+    : root && posix.dirname(root.absolutePath)
+  const bytesOf = (path: string) => checked?.find((file) => file.path === path)?.bytes
+  const themeFile = checked?.find((file) => file.path === ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
   const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
   // A reader sees a canvas's boards as pictures until they open one: the check takes those its
@@ -337,15 +350,20 @@ async function publish(
         : null
   let check: LayoutCheck | undefined
   let queries: CheckedQueries = { answers: {}, warnings: [] }
-  if (root && pages && (pages.layout !== "canvas" || pages.boards.length > 0)) {
+  if (
+    checked &&
+    checkDirectory &&
+    pages &&
+    (pages.layout !== "canvas" || pages.boards.length > 0)
+  ) {
     queries = await checkedQueries(input.artifacts, published)
     signal.throwIfAborted()
     try {
       check = await checkLayout({
         handle,
         ...pages,
-        directory: posix.dirname(root.absolutePath),
-        files: contents.map((file) => file.path),
+        directory: checkDirectory,
+        files: checked.map((file) => file.path),
         // A revision's check: two updates of one open version never share their pictures.
         name: `${artifact.id}-r${version.revision}`,
         ...(theme && "theme" in theme ? { theme: theme.theme } : {}),
@@ -368,6 +386,7 @@ async function publish(
     revision: version.revision,
     // An Agent's write always leaves the version open: only the user creates a version.
     open: version.frozenAt === undefined,
+    ...(published.merged ? { mergedSince: baseRevision ?? null } : {}),
     kind: artifact.kind,
     title: version.title,
     warnings: [
@@ -391,6 +410,27 @@ async function publish(
                 }
               : { skipped: check.reason },
         }),
+  }
+}
+
+/**
+ * The files of a version merged with what others wrote, as its bytes; none when they cannot be
+ * read, and the copy then holds the Agent's own files until the next install.
+ */
+async function mergedFiles(
+  input: PublishToolsInput,
+  published: PublishedArtifact,
+  signal: AbortSignal
+): Promise<PublishedArtifactFile[] | undefined> {
+  try {
+    return await readArtifactVersionFiles(input.blobStorage, published.version, signal)
+  } catch (error) {
+    if (signal.aborted) throw error
+    console.warn(
+      `[SixbAgent] Could not read revision ${published.version.revision} of '${published.artifact.id}', merged:`,
+      error
+    )
+    return undefined
   }
 }
 
@@ -689,6 +729,11 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
       ? "The version is frozen."
       : `The version is open: each update replaces it until the user creates a version. To change it, call ${UPDATE_TOOL} with this id.`,
   ]
+  if ("mergedSince" in output) {
+    lines.push(
+      `Others changed it since${typeof output.mergedSince === "number" ? ` revision ${output.mergedSince}` : ""}, which you started from: your changes were merged with theirs. $SIXB_ARTIFACTS_DIR/${String(output.artifactId)}/ holds the result: start your next update from it, not from your working copy, and say in your reply that others were editing it.`
+    )
+  }
   const warnings = Array.isArray(output.warnings) ? output.warnings : []
   for (const warning of warnings) {
     if (typeof warning === "object" && warning !== null && !Array.isArray(warning)) {

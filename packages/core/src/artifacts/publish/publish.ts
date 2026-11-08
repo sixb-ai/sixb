@@ -94,6 +94,8 @@ export interface PublishedArtifact {
   readonly artifact: ArtifactRecord
   readonly version: ArtifactVersionRecord
   readonly warnings: readonly ArtifactWarning[]
+  /** The write was merged with what others wrote since its base revision, as a canvas's is. */
+  readonly merged?: true
 }
 
 const CREATE_ATTEMPTS = 3

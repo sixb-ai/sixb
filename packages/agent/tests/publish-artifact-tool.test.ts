@@ -978,6 +978,65 @@ describe("publish_artifact", () => {
     )
   })
 
+  // Reproduce by leaving `baseFiles` out of the update in publish(): the person's note, saved in
+  // the app meanwhile, refuses the update; drop `mergedFiles`, and the copy lacks their note.
+  test("merges an update to a canvas with a save made during the run, and says so", async () => {
+    const items = (note?: string) =>
+      JSON.stringify({
+        items: [
+          { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          ...(note ? [{ id: "todo", type: "note", x: 0, y: 900, w: 200, text: note }] : []),
+        ],
+      })
+    write("work/flow/canvas.json", items())
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person adds a note in the app.
+    const latest = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    if (!latest) throw new Error("Expected version 1.")
+    const body = new TextEncoder().encode(items("Ship it"))
+    const canvas = await blobStorage.put({ body, expectedSizeBytes: body.byteLength })
+    await storage.artifacts.publish({
+      projectId,
+      artifactId,
+      kind: "canvas",
+      version: {
+        ...latest,
+        files: latest.files.map((entry) =>
+          entry.path === "canvas.json" ? { ...entry, file: canvas } : entry
+        ),
+        updatedAt: new Date(),
+      },
+      baseRevision: 1,
+    })
+
+    // The Agent, from its copy at revision 1, rewrites the board.
+    write("work/flow/welcome.html", "<main><h1>Hello</h1></main>")
+    const output = (await publishVersion(
+      { id: artifactId, path: "work/flow", title: "Flow" },
+      { installed }
+    )) as { revision: number; mergedSince?: number }
+
+    expect(output).toMatchObject({ revision: 3, mergedSince: 1 })
+    expect(tools().version.toModelOutput?.(output as unknown as JsonValue, context)).toMatchObject({
+      value: expect.stringContaining("Others changed it since revision 1, which you started from"),
+    })
+    const copy = `.sixb/agent/artifacts/${artifactId}`
+    expect(
+      JSON.parse(read(`${copy}/canvas.json`)).items.map((item: { id: string }) => item.id)
+    ).toEqual(["welcome", "todo"])
+    expect(read(`${copy}/welcome.html`)).toBe("<main><h1>Hello</h1></main>")
+  })
+
   test("refuses to update over a save made during the run, and installs it", async () => {
     // Reproduce by publishing without the installed revision as base: the Agent's update replaces
     // the person's save unseen. Reproduce the install by skipping it on the refusal: the copy
