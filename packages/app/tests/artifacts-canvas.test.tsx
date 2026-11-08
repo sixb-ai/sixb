@@ -454,6 +454,10 @@ describe("board previews", () => {
     expect(picture?.getAttribute("src")).toEndWith(
       "/api/artifacts/art_0nb0ard1ng/versions/3/boards/home/preview?theme=dark&size=small"
     )
+    // At its width from its top. Reproduce with object-cover: a board taller than its picture,
+    // which stops 4000 pixels down, shows it zoomed in and cut at its sides.
+    expect(picture?.className).toContain("object-contain")
+    expect(picture?.className).toContain("object-top")
     // While it is rendered, the outline says it is on its way.
     expect(node("pay")?.querySelector("img")).toBeNull()
     expect(node("pay")?.querySelector('[aria-busy="true"]')).not.toBeNull()
