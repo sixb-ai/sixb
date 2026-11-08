@@ -213,6 +213,8 @@ function write(path: string, contents: string): void {
 }
 
 type ToolOptions = {
+  /** What the sandbox's layout check reports; it has no browser when omitted. */
+  readonly check?: Check
   readonly budget?: AgentFileBudget
   readonly executionToken?: string
   /** The run's install; each call is a run of its own without one. */
@@ -248,14 +250,57 @@ function install(
  * The run's sandbox: a real bash in the directory, without the agent image's browser, so a deck's
  * layout check skips at once on any host. layout-check.test.ts runs the check itself.
  */
-function sandbox(): LocalBashSandbox {
+function sandbox(check: Check = skippedCheck): LocalBashSandbox {
   const local = new LocalBashSandbox(root)
   const run = local.runCommand.bind(local)
   local.runCommand = async (command, args, options) =>
     options?.env?.SIXB_CHECK_DECK === undefined
       ? run(command, args, options)
-      : { exitCode: 0, stdout: '{"skipped":"no_browser"}\n', stderr: "", durationMs: 0 }
+      : {
+          exitCode: 0,
+          stdout: `${JSON.stringify(check(options.env.SIXB_CHECK_OUT ?? ""))}\n`,
+          stderr: "",
+          durationMs: 0,
+        }
   return local
+}
+
+/** What the check's script reports, given its output directory. */
+type Check = (output: string) => Record<string, unknown>
+const skippedCheck: Check = () => ({ skipped: "no_browser" })
+
+/**
+ * A canvas's check as the browser runs it: each board screenshot in light mode, and a board
+ * `pictured` in dark mode too, each picture holding the board's id and mode.
+ */
+const canvasCheck: Check = (output) => {
+  const boards = JSON.parse(readFileSync(join(output, "boards.json"), "utf8")) as {
+    readonly id: string
+    readonly pictured: boolean
+  }[]
+  const shot = (name: string, contents: string) => {
+    mkdirSync(join(output, "boards"), { recursive: true })
+    writeFileSync(join(output, "boards", name), contents)
+    return join(output, "boards", name)
+  }
+  writeFileSync(join(output, "overview.png"), "the canvas")
+  return {
+    layout: "canvas",
+    problems: [],
+    errors: [],
+    screenshots: boards.map((board) => shot(`${board.id}.png`, `${board.id} light`)),
+    previews: boards
+      .filter((board) => board.pictured)
+      .flatMap((board) => [
+        { board: board.id, theme: "light", path: join(output, "boards", `${board.id}.png`) },
+        {
+          board: board.id,
+          theme: "dark",
+          path: shot(`${board.id}.dark.png`, `${board.id} dark`),
+        },
+      ]),
+    overview: join(output, "overview.png"),
+  }
 }
 
 function tools(options: ToolOptions = {}) {
@@ -266,7 +311,7 @@ function tools(options: ToolOptions = {}) {
     blobStorage,
     budget: options.budget ?? new AgentFileBudget(),
     resolveSandbox: async () => ({
-      sandbox: sandbox(),
+      sandbox: sandbox(options.check),
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
@@ -414,6 +459,81 @@ describe("publish_artifact", () => {
         "Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_0nb0ard1ng-v1/boards/<id>.png (2 boards)."
       ),
     })
+  })
+
+  test("keeps the pictures of a canvas's boards, and pictures only the boards it changed", async () => {
+    // Reproduce the second half by picturing every board: the welcome board, kept as it was, is
+    // pictured again. Reproduce the first by dropping storePreviews: nothing is kept.
+    const board = (id: string, x: number) => ({
+      id,
+      type: "board",
+      file: `${id}.html`,
+      x,
+      y: 0,
+      w: 390,
+      h: 844,
+    })
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({ items: [board("welcome", 0), board("region", 480)] })
+    )
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    write("work/flow/region.html", "<main><h1>Regions</h1></main>")
+    const pictures = async (artifactId: string, version: number) => {
+      const stored = await storage.artifacts.getVersion({ projectId, artifactId, version })
+      const outline = stored?.outline
+      const keys =
+        outline?.kind === "canvas"
+          ? outline.items.flatMap((item) => (item.type === "board" ? [item.renderKey ?? ""] : []))
+          : []
+      const kept = await storage.artifacts.listBoardPreviews({ projectId, renderKeys: keys })
+      return Promise.all(
+        kept.map(
+          async ({ theme, file }) =>
+            `${theme}: ${await new Response(await blobStorage.open(file.blobId)).text()}`
+        )
+      )
+    }
+
+    const first = (await publish(
+      { path: "work/flow", kind: "canvas", title: "Onboarding" },
+      { check: canvasCheck }
+    )) as { artifactId: string; layoutCheck: { overview: string } }
+    expect((await pictures(first.artifactId, 1)).sort()).toEqual([
+      "dark: region dark",
+      "dark: welcome dark",
+      "light: region light",
+      "light: welcome light",
+    ])
+    expect(first.layoutCheck.overview).toBe(
+      `.sixb/agent/checks/${first.artifactId}-v1/overview.png`
+    )
+    expect(tools().create.toModelOutput?.(first as unknown as JsonValue, context)).toMatchObject({
+      value: expect.stringContaining(
+        `Open .sixb/agent/checks/${first.artifactId}-v1/overview.png to see the canvas as it opens`
+      ),
+    })
+
+    write("work/flow/region.html", "<main><h1>Regions, by city</h1></main>")
+    await publishVersion(
+      { id: first.artifactId, path: "work/flow", title: "Onboarding" },
+      { check: canvasCheck }
+    )
+
+    const checked = JSON.parse(read(`.sixb/agent/checks/${first.artifactId}-v2/boards.json`)) as {
+      readonly id: string
+      readonly pictured: boolean
+    }[]
+    expect(checked.map(({ id, pictured }) => `${id}: ${pictured}`)).toEqual([
+      "welcome: false",
+      "region: true",
+    ])
+    expect((await pictures(first.artifactId, 2)).sort()).toEqual([
+      "dark: region dark",
+      "dark: welcome dark",
+      "light: region light",
+      "light: welcome light",
+    ])
   })
 
   test("publishes one Markdown file as a document and any other file under its name", async () => {

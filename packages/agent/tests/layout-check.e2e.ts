@@ -1,5 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
@@ -416,6 +424,98 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       expect(wide[0]?.message).toStartWith("Board 'region': div “North, Harbor, Keystone”")
       // The boards found the kit and their shared stylesheet: nothing failed to load.
       expect(result.warnings.filter((warning) => warning.code === "layout_load_error")).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "pictures many boards at once in both themes, goes on past one that hangs, and draws the canvas",
+    async () => {
+      // Reproduce the hang by opening every board in one page, as the check did: the frozen board
+      // stops the check, and no board after it is pictured. Reproduce the pictures by taking the
+      // first theme only: there is no dark picture of any board.
+      const before = await browsers()
+      mkdirSync(join(root, "many"), { recursive: true })
+      const ids = Array.from({ length: 12 }, (_, index) => `board-${index + 1}`)
+      const html = (title: string) =>
+        `<!doctype html><html><head></head><body><main><h1>${title}</h1><p class="lede">One of many.</p></main></body></html>`
+      // Freezes once the check sends it its first theme, after it loaded.
+      const hanging = `<!doctype html><html><head></head><body><main><h1>Hangs</h1></main><script>addEventListener("message", (event) => { if (event.data?.method === "theme") for (;;) {} })</script></body></html>`
+      for (const id of ids) writeFileSync(join(root, "many", `${id}.html`), html(id))
+      writeFileSync(join(root, "many", "hangs.html"), hanging)
+
+      const boards = [
+        ...ids.slice(0, 4).map((id) => ({ id, file: `${id}.html`, html: html(id) })),
+        { id: "hangs", file: "hangs.html", html: hanging },
+        ...ids.slice(4).map((id) => ({ id, file: `${id}.html`, html: html(id) })),
+      ].map((board, index) => ({
+        ...board,
+        w: 390,
+        h: 844,
+        html: new TextEncoder().encode(board.html),
+        pictured: true,
+        x: (index % 5) * 480,
+        y: Math.floor(index / 5) * 1000,
+      }))
+
+      const started = Date.now()
+      const result = await checkLayout({
+        layout: "canvas",
+        boards,
+        canvas: {
+          items: [
+            { id: "flow", type: "text", x: 0, y: -120, text: "A flow of many boards", size: "xl" },
+            ...boards.map(({ id, file, w, h, x, y }) => ({
+              id,
+              type: "board" as const,
+              file,
+              x,
+              y,
+              w,
+              h,
+            })),
+            { id: "first", type: "arrow", from: "board-1", to: "board-2", dashed: false },
+          ],
+        },
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: {
+            SIXB_PLAYWRIGHT: playwright,
+            ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
+          },
+        },
+        directory: join(root, "many"),
+        files: [...ids.map((id) => `${id}.html`), "hangs.html"],
+        name: "many",
+        signal: AbortSignal.timeout(110_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+
+      // Thirteen boards, one at a time, take longer than the frozen board's bound alone.
+      expect(Date.now() - started).toBeLessThan(60_000)
+      expect(result.screenshots).toHaveLength(12)
+      expect(result.warnings.map((warning) => `${warning.part} ${warning.code}`)).toContain(
+        "hangs layout_incomplete"
+      )
+
+      // Every other board in both themes, the dark picture apart from the light one.
+      expect(result.previews).toHaveLength(24)
+      for (const id of ids) {
+        const light = result.previews.find((each) => each.board === id && each.theme === "light")
+        const dark = result.previews.find((each) => each.board === id && each.theme === "dark")
+        if (!light || !dark) throw new Error(`Board '${id}' was not pictured in both themes.`)
+        expect(readFileSync(light.path).equals(readFileSync(dark.path))).toBe(false)
+      }
+
+      expect(result.overview).toBe(".sixb/agent/checks/many/overview.png")
+      const overview = readFileSync(join(root, ".sixb/agent/checks/many/overview.png"))
+      // A PNG's width and height, at bytes 16 to 24 of its header.
+      expect([overview.readUInt32BE(16), overview.readUInt32BE(20)]).toEqual([1440, 900])
+
+      const left = async () => [...(await browsers())].filter((pid) => !before.has(pid))
+      for (let wait = 0; (await left()).length > 0 && wait < 30; wait++) await Bun.sleep(100)
+      expect(await left()).toEqual([])
     },
     { timeout: 120_000 }
   )

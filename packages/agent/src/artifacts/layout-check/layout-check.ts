@@ -1,6 +1,6 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
-import type { ArtifactTheme } from "@sixb/core/artifacts"
+import type { ArtifactTheme, ArtifactThemeMode, Canvas } from "@sixb/core/artifacts"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,
@@ -10,9 +10,11 @@ import {
   layoutProbe,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
+import { artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
+import { canvasOverviewHtml, OVERVIEW_VIEWPORT } from "./overview"
 
 /** The check's library and each check's files, in the run's context directory. */
 const LIBRARY = "lib/layout-check"
@@ -32,6 +34,10 @@ export type LayoutCheck =
       readonly warnings: readonly LayoutWarning[]
       /** One per slide, or a page's at each width, as the agent names them. */
       readonly screenshots: readonly string[]
+      /** Each `pictured` board in each mode the reader sees it in, at its path in the sandbox. */
+      readonly previews: readonly CheckedPreview[]
+      /** A canvas as it opens in the app, as the agent names it, when the check took it. */
+      readonly overview?: string
     }
   | { readonly status: "skipped"; readonly reason: string }
 
@@ -53,6 +59,16 @@ export interface CheckedBoard {
   readonly w: number
   readonly h: number
   readonly html: Uint8Array
+  /** Screenshot in every mode, not only the first: it needs its pictures for readers. */
+  readonly pictured?: boolean
+}
+
+/** A board's picture in one mode, which the check took. */
+export interface CheckedPreview {
+  readonly board: string
+  readonly theme: ArtifactThemeMode
+  /** Absolute, in the sandbox. */
+  readonly path: string
 }
 
 interface CheckReport {
@@ -62,6 +78,10 @@ interface CheckReport {
   readonly problems?: readonly CheckedProblem[]
   readonly errors?: readonly string[]
   readonly screenshots?: readonly string[]
+  readonly previews?: readonly CheckedPreview[]
+  /** A canvas's boards that stopped answering, which the check went on without. */
+  readonly stalls?: readonly { readonly board: string; readonly message: string }[]
+  readonly overview?: string
   /** Why the check stopped before it finished; what it found until then is above. */
   readonly stopped?: string
   readonly skipped?: string
@@ -103,7 +123,12 @@ export async function checkLayout(
     readonly timeoutMs?: number
   } & (
     | { readonly layout: FrameLayout; readonly entry: Uint8Array }
-    | { readonly layout: "canvas"; readonly boards: readonly CheckedBoard[] }
+    | {
+        readonly layout: "canvas"
+        readonly boards: readonly CheckedBoard[]
+        /** The canvas's items, for a picture of it as it opens; none without. */
+        readonly canvas?: Canvas
+      }
   )
 ): Promise<LayoutCheck> {
   const { sandbox } = input.handle
@@ -154,9 +179,16 @@ export async function checkLayout(
           {
             path: posix.join(output, "boards.json"),
             contents: JSON.stringify(
-              input.boards.map(({ id, file, w, h }) => ({ id, file, w, h }))
+              input.boards.map(({ id, file, w, h, pictured }) => ({
+                id,
+                file,
+                w,
+                h,
+                pictured: pictured === true,
+              }))
             ),
           },
+          ...overviewFiles(output, input.canvas, input.theme),
         ]
       : []),
     { path: posix.join(output, "themes.json"), contents: JSON.stringify(deckThemes(input.theme)) },
@@ -209,14 +241,20 @@ export async function checkLayout(
   const noun = { deck: "deck", page: "page", canvas: "canvas" }[input.layout]
   const reached = { deck: "Slides", page: "Widths", canvas: "Boards" }[input.layout]
   const checks = posix.join(input.handle.contextDirectory, CHECKS, input.name)
-  const screenshots = (report.screenshots ?? []).map((path) =>
-    posix.join(checks, posix.relative(output, path))
-  )
+  const named = (path: string) => posix.join(checks, posix.relative(output, path))
+  const screenshots = (report.screenshots ?? []).map(named)
   return {
     status: "checked",
     screenshots,
+    previews: report.previews ?? [],
+    ...(report.overview ? { overview: named(report.overview) } : {}),
     warnings: [
       ...layoutWarnings(report.problems ?? []),
+      ...(report.stalls ?? []).map(({ board, message }) => ({
+        code: "layout_incomplete",
+        part: board,
+        message: `Board '${board}' stopped answering: ${message.slice(0, 200)}. The check went on without it.`,
+      })),
       ...(report.errors ?? []).map((error) => ({
         code: "layout_load_error",
         message: `While the ${noun} loaded: ${error.slice(0, 200)}.`,
@@ -261,13 +299,34 @@ function queryFiles(
  * pins, each with the deck's tokens over Sixb's.
  */
 function deckThemes(theme: ArtifactTheme | undefined) {
-  const modes = theme?.mode ? [theme.mode] : (["light", "dark"] as const)
   return Object.fromEntries(
-    modes.map((mode) => {
+    artifactThemeModes(theme).map((mode) => {
       const base = FRAME_DEFAULT_THEMES[mode]
       return [mode, { ...base, tokens: { ...base.tokens, ...theme?.tokens } }]
     })
   )
+}
+
+/**
+ * A canvas's page of itself as it opens, in the first theme the reader sees it in, each board
+ * the screenshot the check takes of it, and the window to screenshot it in.
+ */
+function overviewFiles(
+  output: string,
+  canvas: Canvas | undefined,
+  theme: ArtifactTheme | undefined
+): { path: string; contents: string }[] {
+  if (!canvas) return []
+
+  const [mode = "light"] = artifactThemeModes(theme)
+  const tokens = { ...FRAME_DEFAULT_THEMES[mode].tokens, ...theme?.tokens }
+  return [
+    {
+      path: posix.join(output, "overview.html"),
+      contents: canvasOverviewHtml({ canvas, tokens, image: (id) => `boards/${id}.png` }),
+    },
+    { path: posix.join(output, "overview.json"), contents: JSON.stringify(OVERVIEW_VIEWPORT) },
+  ]
 }
 
 function asset(path: string): string {
