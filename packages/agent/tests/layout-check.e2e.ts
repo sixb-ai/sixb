@@ -121,16 +121,21 @@ const HANGING_DECK = `<!doctype html>
 </body>
 </html>`
 
-/** The processes running now whose command line names Playwright's browser profile. */
-async function browsers(): Promise<Set<string>> {
-  const ps = Bun.spawn(["ps", "-A", "-o", "pid=,command="], { stdout: "pipe", stderr: "ignore" })
+/**
+ * The browsers running now that this file's checks launched: each check runs with its temporary
+ * directory under `root`, where Playwright puts each browser's profile. Another Playwright on the
+ * machine, such as a script taking screenshots of the app while the suite runs, is not counted:
+ * matching on the profile's name alone once counted one as a browser the check left behind.
+ */
+async function browsers(root: string): Promise<Set<string>> {
+  const ps = Bun.spawn(["ps", "-ww", "-A", "-o", "pid=,command="], { stdout: "pipe", stderr: "ignore" })
   const kill = setTimeout(() => ps.kill("SIGKILL"), 10_000)
   try {
     const [output] = await Promise.all([new Response(ps.stdout).text(), ps.exited])
     return new Set(
       output
         .split("\n")
-        .filter((line) => line.includes("playwright_chromiumdev_profile"))
+        .filter((line) => line.includes(join(root, "tmp", "playwright_chromiumdev_profile")))
         .map((line) => line.trim().split(/\s+/)[0] ?? "")
     )
   } finally {
@@ -142,10 +147,18 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   let root: string
   beforeAll(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-layout-e2e-")))
+    mkdirSync(join(root, "tmp"))
     mkdirSync(join(root, "deck/img"), { recursive: true })
     writeFileSync(join(root, "deck/index.html"), DECK)
   })
   afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  /** Where the check finds Playwright, and its temporary directory: see `browsers`. */
+  const env = () => ({
+    SIXB_PLAYWRIGHT: playwright,
+    TMPDIR: join(root, "tmp"),
+    ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
+  })
 
   const check = (
     deck: string,
@@ -160,10 +173,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       handle: {
         sandbox: new LocalBashSandbox(root),
         contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-        env: {
-          SIXB_PLAYWRIGHT: playwright,
-          ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
-        },
+        env: env(),
       },
       directory: join(root, "deck"),
       files,
@@ -404,10 +414,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         handle: {
           sandbox: new LocalBashSandbox(root),
           contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-          env: {
-            SIXB_PLAYWRIGHT: playwright,
-            ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
-          },
+          env: env(),
         },
         directory: join(root, "canvas"),
         files: ["canvas.json", "boards/welcome.html", "boards/region.html", "boards/shared.css"],
@@ -434,7 +441,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       // Reproduce the hang by opening every board in one page, as the check did: the frozen board
       // stops the check, and no board after it is pictured. Reproduce the pictures by taking the
       // first theme only: there is no dark picture of any board.
-      const before = await browsers()
+      const before = await browsers(root)
       mkdirSync(join(root, "many"), { recursive: true })
       const ids = Array.from({ length: 12 }, (_, index) => `board-${index + 1}`)
       const html = (title: string) =>
@@ -480,10 +487,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         handle: {
           sandbox: new LocalBashSandbox(root),
           contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-          env: {
-            SIXB_PLAYWRIGHT: playwright,
-            ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
-          },
+          env: env(),
         },
         directory: join(root, "many"),
         files: [...ids.map((id) => `${id}.html`), "hangs.html"],
@@ -513,7 +517,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       // A PNG's width and height, at bytes 16 to 24 of its header.
       expect([overview.readUInt32BE(16), overview.readUInt32BE(20)]).toEqual([1440, 900])
 
-      const left = async () => [...(await browsers())].filter((pid) => !before.has(pid))
+      const left = async () => [...(await browsers(root))].filter((pid) => !before.has(pid))
       for (let wait = 0; (await left()).length > 0 && wait < 30; wait++) await Bun.sleep(100)
       expect(await left()).toEqual([])
     },
@@ -525,13 +529,13 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
     async () => {
       // Reproduce by removing check.cjs's bounds and deadline: the check waits on the frozen
       // page until the command's timeout kills node, and Chromium keeps running.
-      const before = await browsers()
+      const before = await browsers(root)
       const result = await check(HANGING_DECK, ["index.html"], "hanging")
       if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
       expect(result.screenshots).toEqual([".sixb/agent/checks/hanging/slide-01.png"])
       expect(result.warnings.at(-1)).toMatchObject({ code: "layout_incomplete" })
       expect(result.warnings.at(-1)?.message).toContain("slide 2 in light mode did not respond")
-      const left = async () => [...(await browsers())].filter((pid) => !before.has(pid))
+      const left = async () => [...(await browsers(root))].filter((pid) => !before.has(pid))
       for (let wait = 0; (await left()).length > 0 && wait < 30; wait++) await Bun.sleep(100)
       expect(await left()).toEqual([])
     },
