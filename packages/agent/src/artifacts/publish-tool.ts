@@ -4,9 +4,7 @@ import {
   AgentToolPublicError,
   type ArtifactKind,
   ArtifactRequestError,
-  AuthorizationError,
   type JsonValue,
-  ObjectQueryExecutionError,
   type Principal,
   principalsEqual,
 } from "@sixb/core"
@@ -24,10 +22,10 @@ import {
   type AgentRunFileStore,
   type AgentRunMissingPreview,
 } from "@sixb/core/internal/agents"
-import { frameLayout, serializeArtifactQueryResult } from "@sixb/core/internal/artifacts/frames"
+import { frameLayout } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
-  artifactQueryName,
+  answerArtifactQueries,
   isArtifactId,
   type PublishedArtifact,
 } from "@sixb/core/internal/artifacts/publish"
@@ -466,22 +464,10 @@ async function checkedQueries(
   published: PublishedArtifact
 ): Promise<CheckedQueries> {
   const { artifact, version } = published
-  const names = version.files.flatMap((file) => {
-    const name = artifactQueryName(file.path)
-    return name === undefined ? [] : [name]
-  })
-
-  const answers = await Promise.all(
-    names.map(async (name): Promise<readonly [string, CheckedQuery]> => {
-      try {
-        const result = await reader.query(artifact.id, name, { version: version.version })
-        if (!result) throw new Error(`[SixbAgent] Version ${version.version} is missing.`)
-
-        return [name, { result: serializeArtifactQueryResult(result) }]
-      } catch (error) {
-        return [name, { error: queryErrorText(error) }]
-      }
-    })
+  const answers = Object.entries(
+    await answerArtifactQueries(version, (name) =>
+      reader.query(artifact.id, name, { version: version.version })
+    )
   )
 
   return {
@@ -497,20 +483,6 @@ async function checkedQueries(
         : []
     ),
   }
-}
-
-/** A refusal in the words the API gives a reader; anything else stays internal. */
-function queryErrorText(error: unknown): string {
-  if (
-    error instanceof ArtifactRequestError ||
-    error instanceof AuthorizationError ||
-    error instanceof ObjectQueryExecutionError
-  ) {
-    return /[.!?]$/.test(error.message) ? error.message : `${error.message}.`
-  }
-
-  console.warn("[SixbAgent] A query of the published version did not run:", error)
-  return "[Sixb] The query could not be read."
 }
 
 /** How storing refuses an artifact the requester may not publish to: as if it did not exist. */
