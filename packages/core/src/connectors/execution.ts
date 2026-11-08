@@ -92,10 +92,13 @@ export function createConnectorRuntime(
           slot: connection.slot,
           account: connection.account,
         },
-        connect: (signal) =>
-          service.connectExecutionConnection(definition, connection, signal) as Promise<
+        // A grant that can no longer give a token fails here, before anything is read.
+        connect: async (signal): Promise<ConnectorClient<TAdapter>> => {
+          await service.assertExecutionConnectionUsable(definition, connection)
+          return service.connectExecutionConnection(definition, connection, signal) as Promise<
             ConnectorClient<TAdapter>
-          >,
+          >
+        },
       }))
     },
   })

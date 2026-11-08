@@ -202,6 +202,25 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       .sort((left, right) => left.id.localeCompare(right.id))
   }
 
+  /**
+   * Fails with `connector.authorization_required` when a connection's grant can no longer give a
+   * token, refreshing it if due. Syncs call it before reading, so a dead grant is skipped before
+   * any of its rows are read.
+   */
+  async assertExecutionConnectionUsable<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    connection: ConnectorConnectionRecord
+  ): Promise<void> {
+    this.assertOAuthRegistered(definition)
+    const authorization = await this.authorizations.requireStableActiveAuthorization(
+      definition,
+      connection.authorizationId
+    )
+    await this.authorizations
+      .createTokenSource(definition, authorization.id, connection.account)
+      .get()
+  }
+
   /** Resolve a client from an immutable connection snapshot captured for one execution. */
   async connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
