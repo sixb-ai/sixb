@@ -219,7 +219,9 @@ export function ItemTile({
         loading="lazy"
         draggable={false}
         onError={picture.fail}
-        className="block size-full object-cover"
+        // From the top at the item's width: a board taller than its picture, which stops 4000
+        // pixels down, shows the rest empty rather than a picture zoomed to fill it.
+        className="block size-full object-contain object-top"
       />
     )
   }
