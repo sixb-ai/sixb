@@ -381,7 +381,7 @@ brainstorm or a retro, a diagram, a mood board.
 | `board`   | An HTML file of the canvas, shown as a page `w` by `h`: a screen, a mockup, a poster |
 | `section` | A group's heading, drawn at the top left of the region it names                      |
 | `note`    | A sticky note of plain text that grows to hold it; `tone` picks its color            |
-| `text`    | A label or a heading, `size` `s`, `m`, `l`, or `xl`                                  |
+| `text`    | A label or a heading, `size` `s`, `m`, `l`, `xl`, or `xxl` (120 px, a title)          |
 | `shape`   | A `rect`, `ellipse`, or `diamond`, with optional text                                |
 | `arrow`   | From one item, or a point `{ "x", "y" }`, to another, with an optional `label`, `dashed` |
 | `embed`   | Another artifact, or a part of one, at a size                                        |
