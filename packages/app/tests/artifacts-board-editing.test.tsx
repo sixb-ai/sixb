@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, jest, mock, test } from "bun:test"
 import { client, type GetArtifactVersionResponse } from "@sixb/client"
 import { type CanvasBoard, FRAME_PROTOCOL, type FrameEditTarget } from "@sixb/core/artifacts"
 import { LIVE_FILES } from "@sixb/core/artifacts/live"
@@ -63,8 +63,36 @@ afterAll(() => {
 
 const originalConfig = client.getConfig()
 client.setConfig({ baseUrl: "https://api.sixb.test" })
-afterEach(() => client.setConfig({ fetch: originalConfig.fetch }))
+afterEach(() => {
+  jest.useRealTimers()
+  client.setConfig({ fetch: originalConfig.fetch })
+})
 afterAll(() => client.setConfig({ baseUrl: originalConfig.baseUrl }))
+
+/**
+ * The stage's channels, each telling the test once its port handled a message: a message on a
+ * port arrives a task later, and the test waits for its own instead of for time to pass.
+ */
+const handled: (() => void)[] = []
+const NativeChannel = globalThis.MessageChannel
+globalThis.MessageChannel = class extends NativeChannel {
+  constructor() {
+    super()
+    const port = this.port1
+    Object.defineProperty(port, "onmessage", {
+      set(handler: (message: MessageEvent) => void) {
+        port.addEventListener("message", (message) => {
+          handler(message)
+          handled.shift()?.()
+        })
+        port.start()
+      },
+    })
+  }
+}
+afterAll(() => {
+  globalThis.MessageChannel = NativeChannel
+})
 
 const ARTIFACT_ID = "art_b0ardedit"
 const FILE = "boards/home.html"
@@ -125,13 +153,15 @@ function liveCanvas(page = SOURCE) {
 
 /**
  * Unmounts what a test opened, and lets a popover's focus scope finish leaving while this file's
- * window is still the one installed: it dispatches its last event a moment later.
+ * window is still the one installed: it dispatches its last event on a timer.
  */
 async function closePopovers(view: ReturnType<typeof render>) {
+  jest.useFakeTimers()
   view.unmount()
   await act(async () => {
-    await new Promise((done) => setTimeout(done, 20))
+    jest.runAllTimers()
   })
+  jest.useRealTimers()
 }
 
 function stage(
@@ -206,8 +236,9 @@ function stage(
     if (!event.startsWith("edit.")) return postToWindow(event, params)
     await act(async () => {
       if (!port) throw new Error("Expected the frame's port.")
+      const taken = new Promise<void>((done) => handled.push(done))
       port.postMessage({ protocol: FRAME_PROTOCOL, event, params })
-      await new Promise((done) => setTimeout(done, 5))
+      await taken
     })
   }
   const target = (address: string, kind: "text" | "image", label: string): FrameEditTarget => ({

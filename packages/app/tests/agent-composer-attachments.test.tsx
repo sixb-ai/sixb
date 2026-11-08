@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, jest, mock, test } from "bun:test"
 import { client } from "@sixb/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor } from "@testing-library/react"
@@ -50,6 +50,7 @@ const originalConfig = client.getConfig()
 beforeAll(() => client.setConfig({ baseUrl: "https://api.sixb.test" }))
 
 afterEach(() => {
+  jest.useRealTimers()
   client.setConfig({ fetch: originalConfig.fetch })
 })
 
@@ -266,9 +267,13 @@ test("a comments chip shows the comments' words on a tap", async () => {
   expect(preview.textContent).toContain("Ava MartinWarmer title")
   expect(preview.textContent).toContain("SomeoneBigger button1 reply")
   expect(preview.textContent).not.toContain("cmt_")
+
+  // The popover's focus scope dispatches its last event on a timer, while this file's window is
+  // still the one installed.
+  jest.useFakeTimers()
   view.unmount()
   await act(async () => {
-    await new Promise((done) => setTimeout(done, 20))
+    jest.runAllTimers()
   })
 })
 
@@ -298,14 +303,15 @@ test("words handed to the input join it once, however often the composer is draw
 
   await act(async () => insert({ text: "Please address these comments." }))
   await waitFor(() => expect(input().value).toBe("Please address these comments."))
+  const first = input()
 
+  // Drawn again, the new composer's effects have run once its input is in the page: an insertion
+  // still held would have joined it by then.
   view.rerender(
     <QueryClientProvider client={queryClient}>
       <Conversation drawing={2} />
     </QueryClientProvider>
   )
-  await act(async () => {
-    await new Promise((done) => setTimeout(done, 20))
-  })
+  await waitFor(() => expect(input()).not.toBe(first))
   expect(input().value).toBe("")
 })
