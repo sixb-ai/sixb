@@ -11,8 +11,9 @@ Connect to the API origin using `wss://` in production. Connections use an authe
 | `/ws/events` | Domain events. | Events are filtered by the caller's resource permissions. |
 | `/ws/logs` | Handler logs. | Requires `can.observe(project.logs)`. |
 | `/ws/agents` | Agent run output and activity. | Requires access to the agent and requested run. |
+| `/ws/artifacts` | Artifacts edited live. | Changing an artifact edits it; reading it watches. |
 
-After receiving `connected`, send a subscription message. The server acknowledges it with `subscribed`. Send `unsubscribe` or close the socket when finished. Errors arrive as a message with `type: "error"` and a `message` string. A message you send can be at most 64 KiB; the server closes a connection that sends a larger one.
+After receiving `connected`, send a subscription message (`/ws/artifacts` has its own messages, below). The server acknowledges it with `subscribed`. Send `unsubscribe` or close the socket when finished. Errors arrive as a message with `type: "error"` and a `message` string. A message you send can be at most 64 KiB; the server closes a connection that sends a larger one.
 
 Session identity is established when connecting. WebSocket traffic does not renew the browser session; reconnect after signing in again or changing accounts.
 
@@ -114,3 +115,32 @@ A sub-agent's run streams the same way to the owner and participants of its conv
 Send `replay` with a run ID, optional cursor, and `limit` to read a bounded page. `subscribe.activity` selects project agent activity instead of an individual run. A socket has one active subscription.
 
 React apps can use `useAgentRunStream` from `@sixb/client/hooks` instead of handling these messages directly.
+
+## Live artifacts
+
+`/ws/artifacts` keeps a canvas's current version in step between everyone editing it. Each
+connection holds the version as a Yjs document and exchanges
+[y-protocols](https://github.com/yjs/y-protocols) sync and awareness messages, base64-encoded.
+
+| You send | |
+| --- | --- |
+| `{ "type": "join", "artifactId" }` | Start editing, or watching, an artifact. A connection holds at most 16 |
+| `{ "type": "sync", "artifactId", "data", "more"? }` | A sync message: step 1 after `joined`, then your document's updates. A larger one goes in parts of at most 32 KiB, `more: true` on all but the last |
+| `{ "type": "awareness", "artifactId", "data" }` | Who you are and what you point at |
+| `{ "type": "leave", "artifactId" }` | Stop |
+
+| You receive | |
+| --- | --- |
+| `joined` | `access` (`edit` or `watch`), `revision`, and `document`, the server's copy of the document |
+| `sync`, `awareness` | Apply them to your document and your awareness |
+| `status` | Whether changes are written: `saved` at `revision`, `unsaved`, `saving`, or `failed` with an `error` |
+| `access` | You may now only watch |
+| `left` | You no longer hold the artifact: `not_found`, `not_shared`, or `not_live` (not a canvas) |
+
+- A watcher's updates are refused with an `error`; it may still send step 1 and awareness.
+- Only documents from the same copy sync. When you reconnect, a `joined` with the `document` you
+  had lets your document sync what you changed while away. A different one means the server
+  loaded the artifact again: start from an empty document and, once in step, apply your changes
+  with `mergeIntoDocument`.
+- While an Agent turn changes boards, the server's awareness state holds `sixbAgent`: each turn's
+  `runId` and the `boards` it changed.
