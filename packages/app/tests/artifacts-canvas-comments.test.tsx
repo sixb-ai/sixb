@@ -6,10 +6,12 @@ import {
   getAuthSessionQueryKey,
 } from "@sixb/client/hooks"
 import { formatCanvas } from "@sixb/core/artifacts"
+import { LIVE_FILES } from "@sixb/core/artifacts/live"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
+import type * as Y from "yjs"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import { LiveHubProvider } from "../src/artifacts/live/hooks"
 import { LiveHub } from "../src/artifacts/live/session"
@@ -87,6 +89,7 @@ const CANVAS = canvasOf({
       w: 390,
       h: 400,
     },
+    { id: "ask", type: "note", x: 0, y: 560, w: 260, text: "Annual first?" },
   ],
 })
 
@@ -112,8 +115,8 @@ const comment = (
   ...extra,
 })
 
-/** Alice's canvas, which Bob only reads, as the viewer reads it. */
-function seeded(): QueryClient {
+/** Alice's canvas, which Bob reads, or may change, as the viewer reads it. */
+function seeded(access: "read" | "update" = "read"): QueryClient {
   const queries = new QueryClient({
     defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
   })
@@ -145,7 +148,7 @@ function seeded(): QueryClient {
         updatedAt: at,
       },
     ],
-    access: "read",
+    access,
   } satisfies GetArtifactResponse)
   const file = {
     blobId: "blob_canvas",
@@ -225,12 +228,14 @@ function serveComments(initial: readonly ArtifactComment[]) {
   return state
 }
 
-async function open(options: { readonly draft?: (text: string) => void } = {}) {
+async function open(
+  options: { readonly draft?: (text: string) => void; readonly edits?: boolean } = {}
+) {
   const server = new FakeServer(ARTIFACT_ID, CANVAS)
-  server.access = "watch"
+  server.access = options.edits ? "edit" : "watch"
   const hub = new LiveHub(server.open)
   const ui = render(
-    <QueryClientProvider client={seeded()}>
+    <QueryClientProvider client={seeded(options.edits ? "update" : "read")}>
       <MemoryRouter>
         <AgentDraftContext.Provider value={options.draft ?? null}>
           <LiveHubProvider hub={hub}>
@@ -306,11 +311,11 @@ describe("comments on a canvas", () => {
     await flush()
     expect(panel.querySelector('[data-comment-thread="cmt_1"]')).toBeNull()
     expect(api.requests).toContain("POST /cmt_1/resolve")
-    expect(within(panel).getByRole("tab", { name: /Resolved/ }).textContent).toBe("Resolved1")
+    expect(within(panel).getByRole("button", { name: /^Resolved/ }).textContent).toBe("Resolved1")
 
     // Reopened from the resolved ones, then deleted, replies and all.
     await act(async () => {
-      fireEvent.click(within(panel).getByRole("tab", { name: /Resolved/ }))
+      fireEvent.click(within(panel).getByRole("button", { name: /^Resolved/ }))
     })
     const more = within(thread(panel, "cmt_1")).getByRole("button", { name: "More actions" })
     await act(async () => {
@@ -404,8 +409,8 @@ describe("comments on a canvas", () => {
     expect(drafts).toEqual([
       [
         `Please address these comments on the canvas “Onboarding” (${ARTIFACT_ID}):`,
-        '- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1] Warmer colors',
-        "- [home · revision 1 · comment cmt_2] Bigger button",
+        '- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1 · from Alice Martin] Warmer colors',
+        "- [home · revision 1 · comment cmt_2 · from Alice Martin] Bigger button",
       ].join("\n"),
     ])
     expect(within(panel).getByText("Added to your message to the agent")).toBeTruthy()
@@ -419,7 +424,74 @@ describe("comments on a canvas", () => {
     ])
     expect(threads.map((each) => [each.number, each.replies.length])).toEqual([[1, 1]])
     expect(agentDraftOf("Please:", threads)).toBe(
-      'Please:\n- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1] Warmer colors\n  - Agreed, warmer'
+      'Please:\n- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1 · from Alice Martin] Warmer colors\n  - Agreed, warmer'
     )
+  })
+
+  // Guard proof: drop `.closest(COMMENTS)` from the canvas's key handler; Delete on the panel's
+  // button deletes the board the reader selected.
+  test("keep their keys: Delete in the panel deletes nothing of the canvas", async () => {
+    serveComments([comment("cmt_1", alice, "Warmer colors")])
+    const { ui, server } = await open({ edits: true })
+    await act(async () => {
+      fireEvent.click(ui.getByRole("button", { name: "Edit" }))
+    })
+    const panel = await openPanel(ui)
+    await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
+    const note = ui.container.querySelector('.react-flow__node[data-id="ask"]')
+    if (!note) throw new Error("Expected the note.")
+    await act(async () => {
+      fireEvent.click(note)
+    })
+    expect(ui.container.querySelectorAll(".react-flow__node.selected").length).toBe(1)
+
+    const resolve = within(thread(panel, "cmt_1")).getByRole("button", { name: "Resolve" })
+    await act(async () => {
+      fireEvent.keyDown(resolve, { key: "Delete" })
+      fireEvent.keyDown(resolve, { key: "Backspace" })
+      await settle()
+    })
+    const structure = server.doc.getMap<Y.Map<unknown>>(LIVE_FILES).get("canvas.json")
+    expect((structure?.get("items") as Y.Map<unknown>).has("ask")).toBe(true)
+    ui.unmount()
+  })
+
+  // Guard proof: drop the focus and pointer check from the C shortcut; a C typed anywhere on the
+  // page, out of the canvas, starts placing a comment.
+  test("start being placed with C only while the canvas has the focus or the pointer", async () => {
+    serveComments([])
+    const { ui } = await open()
+    const tool = await waitFor(() => ui.getByRole("button", { name: "Comment", exact: true }))
+
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "c" })
+    })
+    expect(tool.getAttribute("aria-pressed")).toBe("false")
+
+    const canvas = ui.getByRole("region", { name: "Canvas Onboarding" })
+    await act(async () => {
+      fireEvent.pointerEnter(canvas)
+      fireEvent.keyDown(document.body, { key: "c" })
+    })
+    expect(tool.getAttribute("aria-pressed")).toBe("true")
+    ui.unmount()
+  })
+
+  // Guard proof: drop the `origin` branch from useCommentAuthors; the Agent's reply reads as
+  // Alice's own.
+  test("say when the Agent wrote one, and for whom", async () => {
+    serveComments([
+      comment("cmt_1", alice, "Warmer colors"),
+      comment("cmt_2", alice, "Done: the title is warmer.", {
+        parentId: "cmt_1",
+        origin: { threadId: "thr_1", runId: "run_1" },
+      }),
+    ])
+    const { ui } = await open()
+    const panel = await openPanel(ui)
+    await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
+
+    expect(within(thread(panel, "cmt_1")).getByText("Agent, for Alice Martin")).toBeTruthy()
+    ui.unmount()
   })
 })

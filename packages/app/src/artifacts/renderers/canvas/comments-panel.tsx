@@ -165,7 +165,7 @@ export function CommentsPanel({
 
       <div className="flex shrink-0 items-center gap-2 px-3 pb-2">
         <div
-          role="tablist"
+          role="group"
           aria-label={messages.filter}
           className="flex flex-1 items-center rounded-lg bg-muted/70 p-0.5"
         >
@@ -173,8 +173,7 @@ export function CommentsPanel({
             <button
               key={each}
               type="button"
-              role="tab"
-              aria-selected={filter === each}
+              aria-pressed={filter === each}
               onClick={() => {
                 onFilter(each)
                 setChoosing(false)
@@ -484,7 +483,13 @@ function Message({
   return (
     <div className="mt-1.5">
       <div className="flex items-center gap-1.5 text-xs">
-        <PersonAvatar name={author?.name || name} size="xs" />
+        {author?.agent ? (
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--primary)_14%,var(--background))] text-primary">
+            <Sparkles className="size-3" aria-hidden="true" />
+          </span>
+        ) : (
+          <PersonAvatar name={author?.name || name} size="xs" />
+        )}
         <span className="truncate font-medium text-foreground">{name}</span>
         <time dateTime={comment.createdAt} className="shrink-0 text-muted-foreground">
           {when(comment.createdAt)}

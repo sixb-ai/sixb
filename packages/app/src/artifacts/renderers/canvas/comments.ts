@@ -12,6 +12,7 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useEffect, useMemo } from "react"
 import { useCurrentUser } from "../../../session"
 import type { LiveArtifact } from "../../live/session"
+import { useArtifactMessages } from "../../messages"
 
 // The comments on a canvas: read once, kept in step as anyone adds, resolves or deletes one, over
 // the live socket while the canvas is held live and over the events socket otherwise, and changed
@@ -198,21 +199,27 @@ export function canManageComment(
 export interface CommentAuthor {
   readonly name: string
   readonly you: boolean
+  /** The Agent wrote it, for its author. */
+  readonly agent?: boolean
 }
 
 /**
- * Who wrote a comment: the reader themselves, else the name the API gives its author. Null for an
- * author the project cannot name.
+ * Who wrote a comment: the reader themselves, else the name the API gives its author, and the
+ * Agent for them when its run wrote it. Null for an author the project cannot name.
  */
 export function useCommentAuthors(): (
-  comment: Pick<ArtifactComment, "author" | "authorName">
+  comment: Pick<ArtifactComment, "author" | "authorName" | "origin">
 ) => CommentAuthor | null {
   const user = useCurrentUser()
+  const messages = useArtifactMessages().canvas.comments
 
-  return ({ author, authorName }) => {
-    if (author.type === "user" && author.id === user?.id) {
-      return { name: user.displayName ?? user.email ?? authorName ?? "", you: true }
+  return ({ author, authorName, origin }) => {
+    const own = author.type === "user" && author.id === user?.id
+    if (origin) {
+      const name = own ? messages.you.toLowerCase() : (authorName ?? messages.someone)
+      return { name: messages.agentFor(name), you: false, agent: true }
     }
+    if (own) return { name: user.displayName ?? user.email ?? authorName ?? "", you: true }
     return authorName ? { name: authorName, you: false } : null
   }
 }
