@@ -537,7 +537,8 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "yjs": "13.6.33"
   },
   "license": "MIT",
   "engines": {
@@ -552,7 +553,7 @@
     "README.md",
     "LICENSE"
   ],
-  "dependencies": {
-    "yjs": "13.6.33"
+  "peerDependencies": {
+    "yjs": "^13.6.33"
   }
 }
