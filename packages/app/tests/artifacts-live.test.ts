@@ -289,6 +289,27 @@ describe("a live artifact", () => {
     expect(keeper.kept.size).toBe(0)
   })
 
+  test("leaves once its own changes are written, whatever others left unsaved", async () => {
+    // Reproduce by lingering on the room's save state in LiveHub.linger: an artifact Bob keeps
+    // changing stays held by Alice's page, which no longer shows it.
+    jest.useFakeTimers()
+    try {
+      const server = new FakeServer(ARTIFACT, CANVAS)
+      const alice = tab(server)
+      await settle()
+      alice.connection().deliver(server.status("unsaved", 1))
+      await settle()
+
+      alice.hub.release(alice.artifact)
+      jest.advanceTimersByTime(60_000)
+      const again = alice.hub.acquire(ARTIFACT)
+      held.push({ hub: alice.hub, artifact: again })
+      expect(again).not.toBe(alice.artifact)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   test("sends nothing once it may only watch, and leaves when the server says so", async () => {
     // Reproduce by sending every change in session.ts whatever the access: the server takes
     // Alice's move after she lost the right to make it.
