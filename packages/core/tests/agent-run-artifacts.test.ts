@@ -1,6 +1,7 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, jest, spyOn, test } from "bun:test"
 import { defineObjectType, prop, type SandboxFactory, SixbHost } from "../src"
 import { AgentExecutionLostError, agentRunArtifacts } from "../src/agents"
+import { BOARD_PREVIEW_GRACE_MS } from "../src/artifacts/publish/previews"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { bindDurableAgentExecution } from "../src/execution/agent"
 import { bindRequestExecution } from "../src/execution/request"
@@ -250,27 +251,60 @@ describe("a run's artifacts", () => {
     expect(refused).toMatchObject({ code: "not_allowed" })
   })
 
-  // Guard proof: answer the queries of a run's publish as an app save's are; the run's queries
-  // run once more than its layout check runs them, and the job carries their answers.
-  test("asks for the previews its check may miss without reading its queries again", async () => {
+  // Guard proof: answer the queries of every run's publish, or of none. A publisher that renders
+  // its own previews then runs each query twice, or a command in the sandbox leaves its live
+  // boards without a preview.
+  test("answers its queries for previews only when it does not render them itself", async () => {
     const { deps, runSdk, artifacts, canvas } = await setup()
     const query = spyOn(runSdk.artifacts, "query")
+    const files = () =>
+      canvas({ "queries/tasks.json": JSON.stringify({ kind: "start", objectTypeId: Task.id }) })
+    const claim = async () =>
+      (
+        await deps.queues.agents.claim({
+          projectId,
+          workerId: "test",
+          limit: 10,
+          leaseMs: 3_600_000,
+        })
+      )[0]?.job
 
-    const published = await artifacts.publish({
+    // The publish tool, whose layout check reads the answers and pictures the boards.
+    const checked = await artifacts.publish({
       kind: "canvas",
       title: "Tasks",
-      files: await canvas({
-        "queries/tasks.json": JSON.stringify({ kind: "start", objectTypeId: Task.id }),
-      }),
+      files: await files(),
+      rendersPreviews: true,
+    })
+    expect(query).not.toHaveBeenCalled()
+
+    // A command in the sandbox, which publishes through the API with the run's token.
+    const commanded = await artifacts.publish({
+      kind: "canvas",
+      title: "Tasks",
+      files: await files(),
+    })
+    expect(query).toHaveBeenCalledTimes(1)
+    const job = await claim()
+    expect(job).toMatchObject({
+      type: "agent.artifact-previews.requested",
+      payload: {
+        artifactId: commanded.artifact.id,
+        version: 1,
+        queries: { blobId: expect.any(String) },
+      },
     })
 
-    expect(query).not.toHaveBeenCalled()
-    const [claimed] = await deps.queues.agents.claim({ projectId, workerId: "test", limit: 10 })
-    expect(claimed?.job).toMatchObject({
-      type: "agent.artifact-previews.requested",
-      payload: { artifactId: published.artifact.id, version: 1 },
-    })
-    expect(claimed?.job.payload).not.toHaveProperty("queries")
+    // The publish tool's job waits out the check's grace, and carries no answers.
+    expect(await claim()).toBeUndefined()
+    jest.useFakeTimers()
+    try {
+      jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_GRACE_MS))
+      const waited = await claim()
+      expect(waited?.payload).toEqual({ artifactId: checked.artifact.id, version: 1 })
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   // Guard proof: drop assertAgentRunOwned from the publish transaction; the run that ended while
