@@ -10,7 +10,9 @@ import {
 } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
+import { AppWindow } from "lucide-react"
 import {
+  ItemTile,
   LiveBoard,
   LiveBoardsProvider,
   liveBoards,
@@ -18,7 +20,7 @@ import {
 } from "../src/artifacts/renderers/canvas/board"
 import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
 import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
-import { nextPreviewCheck } from "../src/artifacts/renderers/canvas/previews"
+import { boardPreviewSize, nextPreviewCheck } from "../src/artifacts/renderers/canvas/previews"
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
 import { installDom } from "./helpers/dom"
 
@@ -441,9 +443,11 @@ describe("board previews", () => {
     const node = (id: string) =>
       view.container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)
 
+    // Drawn 370 pixels wide, it shows the small picture. Reproduce by asking for the full one
+    // whatever the board's size: a canvas fitted to a hundred boards decodes a hundred screens.
     const picture = node("home")?.querySelector("img")
     expect(picture?.getAttribute("src")).toEndWith(
-      "/api/artifacts/art_0nb0ard1ng/versions/3/boards/home/preview?theme=dark"
+      "/api/artifacts/art_0nb0ard1ng/versions/3/boards/home/preview?theme=dark&size=small"
     )
     // While it is rendered, the outline says it is on its way.
     expect(node("pay")?.querySelector("img")).toBeNull()
@@ -493,6 +497,52 @@ describe("board previews", () => {
     expect(view.container.querySelector("iframe")).not.toBeNull()
     expect(view.container.querySelector("img")).toBe(before)
     view.unmount()
+  })
+
+  test("show the small picture while it covers the board pixel for pixel, the full one past it", () => {
+    expect(boardPreviewSize(390 * 0.5, 2)).toBe("small")
+    expect(boardPreviewSize(480, 1)).toBe("small")
+    expect(boardPreviewSize(390, 2)).toBe("full")
+    expect(boardPreviewSize(1280 * 0.4, 1)).toBe("full")
+  })
+
+  test("keep the picture shown until the next has decoded, and fall back when one fails", async () => {
+    // A sharper picture, or one in the other mode, takes the shown one's place once it can be
+    // drawn. Reproduce by showing each new source at once: the tile shows the one still loading.
+    const decoding: { src: string; done: () => void; fail: () => void }[] = []
+    const Image = class {
+      src = ""
+      decode() {
+        return new Promise<void>((resolve, reject) => {
+          decoding.push({ src: this.src, done: resolve, fail: reject })
+        })
+      }
+    }
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "Image")
+    Object.defineProperty(globalThis, "Image", { configurable: true, value: Image })
+    try {
+      const view = render(<ItemTile icon={AppWindow} preview="small.png" fallback="full.png" />)
+      const shown = () => view.container.querySelector("img")?.getAttribute("src")
+      expect(shown()).toBe("small.png")
+
+      view.rerender(<ItemTile icon={AppWindow} preview="full.png" />)
+      expect(shown()).toBe("small.png")
+      await act(async () => decoding.at(-1)?.done())
+      expect(shown()).toBe("full.png")
+
+      // A picture that can't be had gives way to its fallback, then to the outline.
+      view.rerender(<ItemTile icon={AppWindow} preview="missing.png" fallback="full.png" />)
+      await act(async () => decoding.at(-1)?.fail())
+      expect(shown()).toBe("full.png")
+      const image = view.container.querySelector("img")
+      if (!image) throw new Error("Expected the picture.")
+      fireEvent.error(image)
+      expect(view.container.querySelector("img")).toBeNull()
+      view.unmount()
+    } finally {
+      if (previous) Object.defineProperty(globalThis, "Image", previous)
+      else Reflect.deleteProperty(globalThis, "Image")
+    }
   })
 
   test("ask the version again while pictures are rendered, less often each time, and no longer than the server waits", () => {

@@ -19,7 +19,7 @@ import { TONE_COLORS } from "../../tones"
 import { ItemTile, LiveBoard, useLive, useLiveBoards } from "./board"
 import { EditChrome, InPlaceText, useCanvasEditing } from "./editing"
 import type { CanvasFlowNode } from "./layout"
-import { boardPreviewUrl } from "./previews"
+import { boardPreviewSize, boardPreviewUrl } from "./previews"
 
 /**
  * Every item's look on the board. Boards and embeds are pages and artifacts under their names,
@@ -129,6 +129,13 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
   const board = itemOf<CanvasBoard>(props)
   const messages = useArtifactMessages().canvas
   const { version, previews, mode, open } = useLiveBoards()
+  // Until the view is fitted it is at 100%, which is not where the reader sees the board: the
+  // small picture first, then the full one if the board is drawn large.
+  const previewSize = useStore((state) =>
+    state.fitViewQueued
+      ? "small"
+      : boardPreviewSize(board.w * state.transform[2], window.devicePixelRatio || 1)
+  )
   const shown = useNamesShown()
   const named = useNamed(board.w)
   const title = board.title ?? board.id
@@ -166,7 +173,13 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
             <ItemTile
               icon={AppWindow}
               {...(version && previews[board.id] === "ready"
-                ? { preview: boardPreviewUrl(version, board.id, mode) }
+                ? {
+                    preview: boardPreviewUrl(version, board.id, mode, previewSize),
+                    // A small picture that can't be had gives way to the full one.
+                    ...(previewSize === "small"
+                      ? { fallback: boardPreviewUrl(version, board.id, mode) }
+                      : {}),
+                  }
                 : {})}
               pending={previews[board.id] === "pending"}
             />
