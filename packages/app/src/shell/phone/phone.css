@@ -1,0 +1,125 @@
+/*
+ * Phone navigation: screens that move as native ones do, and pull to refresh. The page's scroll
+ * container carries `data-app-scroll`; a shell sets `--phone-top-bar` to the height of its top bar,
+ * safe area included, so the refresh indicator waits just under it.
+ */
+
+/* Screen transitions (screen-motion.ts). While screens move, the page scroller and an inert copy of
+   the other screen share its frame: the one on top casts a soft edge shadow and the one beneath
+   dims, as native navigation stacks do. */
+
+.screen-ghost,
+.screen-dim {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --screen-dim: rgb(0 0 0 / 0.1);
+    --screen-edge-shadow: -0.5px 0 0 rgb(0 0 0 / 0.06), -12px 0 32px rgb(0 0 0 / 0.1);
+  }
+
+  .dark {
+    --screen-dim: rgb(0 0 0 / 0.5);
+    --screen-edge-shadow: -0.5px 0 0 rgb(255 255 255 / 0.06), -12px 0 32px rgb(0 0 0 / 0.5);
+  }
+
+  [data-app-scroll] {
+    overscroll-behavior: contain;
+  }
+
+  [data-app-scroll][data-screen-moving] {
+    position: relative;
+    background: var(--background);
+    will-change: transform;
+  }
+
+  [data-app-scroll][data-screen-moving="over"] {
+    z-index: 2;
+    box-shadow: var(--screen-edge-shadow);
+  }
+
+  [data-app-scroll][data-screen-moving="under"] {
+    z-index: 0;
+  }
+
+  .screen-ghost {
+    position: absolute !important;
+    inset: 0;
+    z-index: 0;
+    display: block;
+    overflow: hidden !important;
+    background: var(--background);
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  .screen-ghost[data-place="over"] {
+    z-index: 3;
+    box-shadow: var(--screen-edge-shadow);
+  }
+
+  .screen-dim {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: block;
+    background: var(--screen-dim);
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* Pull to refresh (pull-to-refresh.tsx): the page follows the pull and the activity indicator
+   waits in the gap above it, drawing a tick for each step of the pull until it is armed, then
+   turning while the data reloads. */
+
+.pull-refresh {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .pull-refresh {
+    position: fixed;
+    top: var(--phone-top-bar, var(--safe-top));
+    left: 50%;
+    z-index: 25;
+    display: block;
+    width: 28px;
+    height: 28px;
+    color: var(--muted-foreground);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(-50%, 0, 0);
+  }
+
+  .pull-refresh-spinner {
+    width: 100%;
+    height: 100%;
+  }
+
+  .pull-refresh-spinner line {
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    /* While pulling, each tick appears in turn; once armed they shade around the circle. */
+    opacity: clamp(0, calc(var(--pull-progress, 0) * 8 - var(--tick)), 1);
+    transition: opacity 120ms linear;
+  }
+
+  .pull-refresh[data-refreshing] .pull-refresh-spinner {
+    animation: pull-refresh-spin 800ms steps(8) infinite;
+  }
+
+  .pull-refresh[data-refreshing] .pull-refresh-spinner line,
+  .pull-refresh[data-armed] .pull-refresh-spinner line {
+    /* The last tick drawn leads the turn; the ones behind it fade. */
+    opacity: calc(0.3 + var(--tick) * 0.1);
+  }
+}
+
+@keyframes pull-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

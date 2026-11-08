@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useRef } from "react"
 import { useLocation, useNavigationType } from "react-router-dom"
-import { appScroller } from "./phone-dom"
+import { appScroller } from "./routes"
 
 // Data can take a moment to arrive; until the page is tall enough the saved position can't apply.
 const RESTORE_WINDOW_MS = 1500
 
 /**
  * The app scrolls inside one container that stays mounted between pages, so the browser can't
- * manage its position. A new screen starts at the top; Back returns to where the previous screen
- * was left. Changing only the query string, such as a filter, keeps the position.
+ * manage its position. A new screen starts at the top; Back comes back to where the screen was
+ * left. Changing only the query string, such as a filter, keeps the position.
  */
 export function ScrollRestoration() {
   const location = useLocation()
@@ -20,10 +20,15 @@ export function ScrollRestoration() {
     const scroller = appScroller()
     if (!scroller) return
     const key = location.key
-    const save = () => positions.current.set(key, scroller.scrollTop)
+    const path = location.pathname + location.search
+    const save = () => {
+      // The next screen resets the scroller before this listener is gone; that isn't this screen.
+      if (window.location.pathname + window.location.search !== path) return
+      positions.current.set(key, scroller.scrollTop)
+    }
     scroller.addEventListener("scroll", save, { passive: true })
     return () => scroller.removeEventListener("scroll", save)
-  }, [location.key])
+  }, [location.key, location.pathname, location.search])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per navigation, keyed by it.
   useLayoutEffect(() => {

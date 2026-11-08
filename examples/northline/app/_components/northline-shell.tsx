@@ -14,7 +14,6 @@ import { OperationsAssistant } from "./operations-assistant"
 import { SidebarOrMoreSheet } from "./phone/phone-shell"
 import { PhoneTabBar } from "./phone/phone-tab-bar"
 import { PhoneTopBar } from "./phone/phone-top-bar"
-import { PullToRefresh } from "./phone/pull-to-refresh"
 
 const quotesWithCustomer = objects(Quote)
   .query()
@@ -68,7 +67,6 @@ export function NorthlineShell({ children }: PropsWithChildren) {
       >
         <SidebarInset className="relative h-svh min-h-0 overflow-hidden bg-background">
           <PhoneTopBar />
-          <PullToRefresh />
           <div className="min-h-0 flex-1 overflow-y-auto" data-app-scroll>
             <div
               className={

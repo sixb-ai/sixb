@@ -125,6 +125,7 @@ export {
   NavItems,
   type NavItemsProps,
 } from "./shell/nav-items"
+export { useBack } from "./shell/phone/back"
 export { SearchCommand, type SearchCommandProps } from "./shell/search-command"
 export { SectionNav, type SectionNavProps } from "./shell/section-nav"
 export { UserMenu, type UserMenuItemProps, type UserMenuProps } from "./shell/user-menu"
