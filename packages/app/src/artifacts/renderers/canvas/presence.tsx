@@ -16,9 +16,23 @@ interface Box {
 }
 
 /**
+ * How far down the board view a selection's top must be for its name to show above it: the
+ * toolbar, while editing, and a name's height. Higher, the name shows under the selection's top
+ * edge, never under the toolbar nor off the view.
+ */
+export const NAME_CLEARANCE = 96
+
+/** Whether a selection's name goes under its top edge, where the view puts its box now. */
+export function nameBelow(box: { readonly y: number }, transform: readonly number[]): boolean {
+  const [, panY = 0, zoom = 1] = transform
+  return box.y * zoom + panY < NAME_CLEARANCE
+}
+
+/**
  * Over the canvas, where the others are: each person's selection outlined in their color, their
- * name above it, and each board an Agent turn is changing, its outline shimmering and a badge
- * saying so. Drawn in the canvas's own coordinates, it takes no pointer.
+ * name above it, or just under its top edge near the top of the view, and each board an Agent
+ * turn is changing, its outline shimmering and a badge saying so, kept within the board. Drawn
+ * in the canvas's own coordinates, it takes no pointer.
  */
 export const PresenceLayer = memo(function PresenceLayer({
   live,
@@ -35,6 +49,18 @@ export const PresenceLayer = memo(function PresenceLayer({
   }
   const changing = [...new Set(agents.flatMap((agent) => agent.boards))]
   const boxes = useBoxes([...selected.keys(), ...changing])
+  // The selections whose names go under their top edge: read again as the view moves, drawn
+  // again only as one of them crosses.
+  const below = useStore(
+    useCallback(
+      (state: { readonly transform: readonly number[] }) =>
+        [...boxes]
+          .filter(([, box]) => nameBelow(box, state.transform))
+          .map(([id]) => id)
+          .join("\n"),
+      [boxes]
+    )
+  )
 
   if (boxes.size === 0) return null
   return (
@@ -48,13 +74,30 @@ export const PresenceLayer = memo(function PresenceLayer({
             className="sixb-agent-board pointer-events-none absolute rounded-[12px]"
             style={place(box, 4)}
           >
-            <span
-              className="absolute top-3 right-3 flex origin-top-right items-center gap-1.5 rounded-full bg-background/95 px-2.5 py-1 text-[12px] font-medium whitespace-nowrap text-primary shadow-[0_1px_2px_rgb(0_0_0/0.08),0_6px_16px_-8px_rgb(0_0_0/0.3)] ring-1 ring-[color-mix(in_oklab,var(--primary)_25%,transparent)]"
-              style={{ transform: `scale(${NAME_SCALE_VALUE})` }}
+            {/*
+             * The badge's lane: the board's width less its margins, at the badge's scale, so the
+             * badge never reaches past the board. Narrow, its words truncate, then leave the icon.
+             */}
+            <div
+              className="@container absolute top-3 right-3 flex origin-top-right justify-end"
+              style={{
+                width: `calc(${Math.max(box.w - 16, 0)}px / ${NAME_SCALE_VALUE})`,
+                transform: `scale(${NAME_SCALE_VALUE})`,
+              }}
             >
-              <Sparkles className="size-3.5 motion-safe:animate-pulse" aria-hidden="true" />
-              {messages.agentChanging}
-            </span>
+              <span
+                title={messages.agentChanging}
+                className="flex max-w-full min-w-0 items-center gap-1.5 rounded-full bg-background/95 px-2.5 py-1 text-[12px] font-medium whitespace-nowrap text-primary shadow-[0_1px_2px_rgb(0_0_0/0.08),0_6px_16px_-8px_rgb(0_0_0/0.3)] ring-1 ring-[color-mix(in_oklab,var(--primary)_25%,transparent)] @max-[8rem]:px-1.5"
+              >
+                <Sparkles
+                  className="size-3.5 shrink-0 motion-safe:animate-pulse"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate @max-[8rem]:sr-only">
+                  {messages.agentChanging}
+                </span>
+              </span>
+            </div>
           </div>
         ) : null
       })}
@@ -71,7 +114,8 @@ export const PresenceLayer = memo(function PresenceLayer({
             }}
           >
             <span
-              className="absolute bottom-full left-0 mb-1 origin-bottom-left rounded-[4px] px-1.5 py-px text-[11px] leading-4 font-medium whitespace-nowrap text-white"
+              data-name={below.split("\n").includes(id) ? "below" : "above"}
+              className="absolute left-0 rounded-[4px] px-1.5 py-px text-[11px] leading-4 font-medium whitespace-nowrap text-white data-[name=above]:bottom-full data-[name=above]:mb-1 data-[name=above]:origin-bottom-left data-[name=below]:top-1 data-[name=below]:left-1 data-[name=below]:origin-top-left"
               style={{ backgroundColor: user.color, transform: `scale(${NAME_SCALE_VALUE})` }}
             >
               {user.name}

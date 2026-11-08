@@ -159,9 +159,15 @@ describe("who is on a live canvas", () => {
     const peer = view.container.querySelector('[data-peer-selection="pay"]') as HTMLElement | null
     expect(peer?.textContent).toBe("Bob")
     expect(peer?.style.boxShadow).toContain("#0090ff")
+    expect(peer?.querySelector("[data-name]")?.getAttribute("data-name")).toMatch(/^(above|below)$/)
     const agent = view.container.querySelector('[data-agent-board="home"]')
     expect(agent?.textContent).toBe("Agent is changing this board")
     expect(view.container.querySelectorAll("[data-agent-board]")).toHaveLength(1)
+    // The badge's lane is the board's width at the badge's scale: it never reaches past the
+    // board. Reproduce by scaling the badge alone in PresenceLayer: zoomed out, it overflows.
+    const lane = agent?.firstElementChild as HTMLElement | null
+    expect(lane?.style.width).toBe("calc(374px / var(--sixb-name-scale, 1))")
+    expect(lane?.className).toContain("@container")
 
     // Bob leaves and the turn ends: nothing is left over the canvas.
     await act(async () => {
@@ -170,6 +176,17 @@ describe("who is on a live canvas", () => {
     })
     expect(view.container.querySelector("[data-peer-selection], [data-agent-board]")).toBeNull()
     live.destroy()
+  })
+
+  test("puts a name under its selection's top edge where the toolbar would hide it above", async () => {
+    // Reproduce by always putting the name above in PresenceLayer: a board at the top of the view
+    // has its editor's name under the canvas toolbar, or off the view.
+    const { nameBelow, NAME_CLEARANCE } = await import("../src/artifacts/renderers/canvas/presence")
+    expect(nameBelow({ y: 0 }, [0, 0, 1])).toBe(true)
+    expect(nameBelow({ y: 0 }, [0, NAME_CLEARANCE, 1])).toBe(false)
+    // At half size, 200 canvas pixels down sits 100 down the view, clear of the toolbar.
+    expect(nameBelow({ y: 200 }, [0, 0, 0.5])).toBe(false)
+    expect(nameBelow({ y: 120 }, [0, 0, 0.5])).toBe(true)
   })
 
   test("puts a face in the header for each other person, once, and the Agent while it works", async () => {
