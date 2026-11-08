@@ -212,11 +212,9 @@ async function publish(
   }
   const reservation = input.budget.reserve(0, tool)
   const contents: PublishedArtifactFile[] = []
-  /** The files as the Agent wrote them: its next update starts from them. */
-  const publishedFiles: ArtifactFile[] = []
   let published: PublishedArtifact
   try {
-    const files = publishedFiles
+    const files: ArtifactFile[] = []
     for (const source of sources) {
       const bytes =
         source.bytes ??
@@ -295,14 +293,21 @@ async function publish(
   // Merged with what others wrote since, the version holds more than the Agent's files: the copy
   // and the check take what it holds.
   const written = published.merged ? await mergedFiles(input, published, signal) : contents
+  // The folder the Agent published from takes the merged result too: its next update, from
+  // whichever folder it edits, then holds its own changes alone, and is merged from this revision.
+  if (published.merged && written) {
+    await syncPublishedFolder(handle, request.path, sources, written, signal).catch((error) => {
+      if (signal.aborted) throw error
+      console.warn(
+        `[SixbAgent] Could not write the merged result back to '${request.path}':`,
+        error
+      )
+    })
+  }
   let copy: string | undefined
   try {
     // Revising from $SIXB_ARTIFACTS_DIR must start from this revision, not the one before.
-    // What it wrote is what its next update starts from: the merged version holds others' words
-    // its working copy may never hold.
-    await installed.replace(handle.sandbox, published, written ?? contents, signal, {
-      base: publishedFiles,
-    })
+    await installed.replace(handle.sandbox, published, written ?? contents, signal)
     copy = installed.directoryOf(artifact.id)
   } catch (error) {
     if (signal.aborted) throw error
@@ -654,6 +659,43 @@ interface PublishSource {
  * a dot. A single file publishes alone: a document's Markdown as `document.md`, any other file
  * under its own name.
  */
+/**
+ * Writes what a merged publish stored into the folder it was published from: each file as the
+ * version holds it, and none it no longer holds. Only a folder: one file is never merged.
+ */
+async function syncPublishedFolder(
+  handle: AgentSandboxHandle,
+  path: string,
+  sources: readonly PublishSource[],
+  stored: readonly PublishedArtifactFile[],
+  signal: AbortSignal
+): Promise<void> {
+  const folder = resolveSandboxPath(handle, path)
+  const inFolder = (file: string) => posix.join(folder, file)
+  if (!sources.every((source) => source.absolutePath === inFolder(source.path))) return
+
+  const kept = new Set(stored.map((file) => file.path))
+  const gone = sources
+    .filter((source) => !kept.has(source.path))
+    .map((source) => source.absolutePath)
+  if (gone.length > 0) {
+    const removed = await handle.sandbox.runCommand(
+      "bash",
+      ["-c", 'rm -f -- "$@"', "rm", ...gone],
+      {
+        timeout: SANDBOX_TIMEOUT_MS,
+        signal,
+      }
+    )
+    if (removed.exitCode !== 0 || removed.timedOut) {
+      throw new Error(removed.stderr.trim() || `rm exited ${removed.exitCode}`)
+    }
+  }
+  await handle.sandbox.writeFiles(
+    stored.map((file) => ({ path: inFolder(file.path), contents: file.bytes }))
+  )
+}
+
 async function listSources(
   handle: AgentSandboxHandle,
   path: string,
@@ -737,7 +779,7 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
   ]
   if ("mergedSince" in output) {
     lines.push(
-      `Others changed it since${typeof output.mergedSince === "number" ? ` revision ${output.mergedSince}` : ""}, which you started from: your changes were merged with theirs. $SIXB_ARTIFACTS_DIR/${String(output.artifactId)}/ holds the result: start your next update from it, not from your working copy, and say in your reply that others were editing it.`
+      `Merged with changes made meanwhile${typeof output.mergedSince === "number" ? `, since revision ${output.mergedSince}, which you started from` : ""}: your folder now holds the merged result, as does $SIXB_ARTIFACTS_DIR/${String(output.artifactId)}/. Keep editing from it, and say in your reply that others were editing it.`
     )
   }
   const warnings = Array.isArray(output.warnings) ? output.warnings : []

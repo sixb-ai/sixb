@@ -1031,7 +1031,9 @@ describe("publish_artifact", () => {
 
     expect(output).toMatchObject({ revision: 3, mergedSince: 1 })
     expect(tools().version.toModelOutput?.(output as unknown as JsonValue, context)).toMatchObject({
-      value: expect.stringContaining("Others changed it since revision 1, which you started from"),
+      value: expect.stringContaining(
+        "Merged with changes made meanwhile, since revision 1, which you started from: your folder now holds the merged result"
+      ),
     })
     const copy = `.sixb/agent/artifacts/${artifactId}`
     expect(
@@ -1040,10 +1042,9 @@ describe("publish_artifact", () => {
     expect(read(`${copy}/welcome.html`)).toBe("<main><h1>Hello</h1></main>")
   })
 
-  // Reproduce by installing the merged version as the base of the copy, as publish() did, or by
-  // diffing an update at the latest revision from that version in mergeArtifactWrite, not from
-  // its baseFiles: the Agent's next update, written from its working copy, takes out the words
-  // typed meanwhile.
+  // Reproduce by dropping `syncPublishedFolder` from publish(): the Agent's folder keeps what it
+  // wrote, without the words merged in, and its next update, made from that folder, takes them
+  // out.
   test("keeps every word a person types in a board live while the Agent's turn updates it", async () => {
     const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
     write(
@@ -1105,10 +1106,16 @@ describe("publish_artifact", () => {
     await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
     await follow()
 
-    // Again from its working copy, which never held the words, while the person types: nobody
+    // It edits its folder again, which holds the merged result, while the person types: nobody
     // wrote since its last update, which merged their first word in.
+    const edit = (heading: string) =>
+      write(
+        "work/flow/welcome.html",
+        read("work/flow/welcome.html").replace(/<h1>.*<\/h1>/, `<h1>${heading}</h1>`)
+      )
+    expect(read("work/flow/welcome.html")).toContain("Notes: w1</p>")
     type("w2")
-    write("work/flow/welcome.html", board("Hello again"))
+    edit("Hello again")
     await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
     await follow()
     type("w3")
@@ -1117,7 +1124,7 @@ describe("publish_artifact", () => {
     type("w5")
 
     // And once more, now that the person wrote since.
-    write("work/flow/welcome.html", board("Hello, team"))
+    edit("Hello, team")
     await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
     await follow()
     type("w6")
@@ -1134,8 +1141,8 @@ describe("publish_artifact", () => {
     expect(text().toString()).toBe(html)
   })
 
-  // Reproduce by keeping both insertions in the text merge's `interleave`, as it did: the word the
-  // Agent's copy holds, and the person typed, is in the board twice.
+  // Reproduce by recording the files the Agent submitted as the base of its next update, instead
+  // of the stored result: the word its copy holds, and the person typed, is in the board twice.
   test("keeps each of their words once when the Agent updates from its installed copy", async () => {
     const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
     write(
