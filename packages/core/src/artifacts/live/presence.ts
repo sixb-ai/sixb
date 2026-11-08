@@ -1,6 +1,7 @@
 import type { Broker, BrokerRetention, BrokerStreamDefinition } from "../../broker"
 import type { JsonObject } from "../../json"
 import type { ArtifactVersionRecord } from "../../storage/artifacts/types"
+import { boardRenderKey } from "../publish/previews"
 
 // What servers holding an artifact live tell each other, on one broker stream per artifact: the
 // document's updates, so editors on two servers edit as one, and the Agent's presence, so a board
@@ -105,23 +106,39 @@ export async function appendArtifactLive(
 
 /**
  * The boards of a canvas a write changed: added, or showing something else, as their render keys
- * say. A board only moved shows what it showed.
+ * say. A board only moved shows what it showed. Both versions are keyed as the write's author's:
+ * a render key names its author too, and a board left as it was is no news because someone else
+ * wrote the version before.
  */
 export function changedBoards(
-  before: Pick<ArtifactVersionRecord, "outline"> | null,
-  after: Pick<ArtifactVersionRecord, "outline">
+  before: Pick<ArtifactVersionRecord, "outline" | "files"> | null,
+  after: Pick<ArtifactVersionRecord, "artifactId" | "outline" | "files" | "author">
 ): string[] {
   if (after.outline.kind !== "canvas") return []
 
-  const kept = new Map<string, string | undefined>()
-  if (before?.outline.kind === "canvas") {
-    for (const item of before.outline.items) {
-      if (item.type === "board") kept.set(item.id, item.renderKey)
-    }
-  }
-  return after.outline.items.flatMap((item) =>
-    item.type === "board" && (!kept.has(item.id) || kept.get(item.id) !== item.renderKey)
-      ? [item.id]
-      : []
+  const kept = boardKeys(before, after)
+  return [...boardKeys(after, after)].flatMap(([id, key]) => (kept.get(id) === key ? [] : [id]))
+}
+
+/** Each board of a version by its render key, as `as` would picture it. */
+function boardKeys(
+  version: Pick<ArtifactVersionRecord, "outline" | "files"> | null,
+  as: Pick<ArtifactVersionRecord, "artifactId" | "author">
+): Map<string, string> {
+  if (version?.outline.kind !== "canvas") return new Map()
+
+  const boards = version.outline.items.flatMap((item) => (item.type === "board" ? [item] : []))
+  const boardFiles = new Set(boards.map((board) => board.file))
+  return new Map(
+    boards.map((board) => [
+      board.id,
+      boardRenderKey({
+        board,
+        files: version.files,
+        boardFiles,
+        author: as.author,
+        artifactId: as.artifactId,
+      }),
+    ])
   )
 }
