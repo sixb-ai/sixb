@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ARTIFACT_STATE_LIMITS } from "../artifacts/limits"
+import { ARTIFACT_RESTORE_POINTS, ARTIFACT_STATE_LIMITS } from "../artifacts/limits"
 import type { Principal } from "../auth"
 import type { FileRef } from "../blob-storage"
 import {
@@ -9,6 +9,7 @@ import {
   type ArtifactStorageErrorCode,
   type ArtifactVersionInput,
   type CreateArtifactInput,
+  type PublishArtifactVersionInput,
 } from "../storage/artifacts"
 import type { Storage } from "../storage/types"
 
@@ -49,7 +50,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
   }
 
   describe(label, () => {
-    test("creates an artifact with its first version and reads both back", async () => {
+    test("creates an artifact with its first version, open, and reads both back", async () => {
       await withStorage(async (artifacts) => {
         const created = await artifacts.create(createInput())
 
@@ -60,6 +61,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           title: "Q3 report",
           owner,
           latestVersion: 1,
+          revision: 1,
           createdAt: t0,
           updatedAt: t0,
         })
@@ -67,8 +69,11 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           projectId,
           artifactId: "art_report",
           version: 1,
+          revision: 1,
           ...versionInput(),
+          createdAt: t0,
         })
+        expect(created.version).not.toHaveProperty("frozenAt")
         expect(await artifacts.get({ projectId, id: "art_report" })).toEqual(created.artifact)
         expect(
           await artifacts.getVersion({ projectId, artifactId: "art_report", version: 1 })
@@ -85,23 +90,93 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    test("numbers versions in order and makes the newest the latest", async () => {
+    // Regression proof: append a version on every write in a provider's `publish`; the second
+    // write is then version 2.
+    test("replaces the open version's content in place, one revision at a time", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
         const second = await artifacts.publish(
-          publishInput({ title: "Q3 report, revised", createdAt: at(1) })
+          publishInput({ title: "Q3 report, revised", author: otherOwner, updatedAt: at(1) })
         )
-        const third = await artifacts.publish(publishInput({ createdAt: at(2) }))
+        const third = await artifacts.publish(publishInput({ origin: undefined, updatedAt: at(2) }))
 
-        expect(second.version.version).toBe(2)
-        expect(third.version.version).toBe(3)
-        expect(third.artifact).toMatchObject({ latestVersion: 3, updatedAt: at(2), createdAt: t0 })
-        expect(second.artifact.title).toBe("Q3 report, revised")
-        expect((await artifacts.get({ projectId, id: "art_report" }))?.title).toBe("Q3 report")
+        expect(second.version).toMatchObject({
+          version: 1,
+          revision: 2,
+          title: "Q3 report, revised",
+          author: otherOwner,
+          createdAt: t0,
+          updatedAt: at(1),
+        })
+        expect(third.artifact).toMatchObject({
+          latestVersion: 1,
+          revision: 3,
+          title: "Q3 report",
+          createdAt: t0,
+          updatedAt: at(2),
+        })
+        // The last write's author and origin are the version's: it had none.
+        expect(third.version).toMatchObject({ version: 1, revision: 3, author: owner })
+        expect(third.version).not.toHaveProperty("origin")
+        expect(
+          await artifacts.getVersion({ projectId, artifactId: "art_report", version: 1 })
+        ).toEqual(third.version)
+        expect((await artifacts.listVersions({ projectId, artifactId: "art_report" })).total).toBe(
+          1
+        )
       })
     })
 
-    test("keeps the kind fixed and refuses versions for a missing artifact", async () => {
+    // Regression proof: write in place whatever the latest version is in a provider's `publish`;
+    // the frozen version then changes.
+    test("freezes the latest version, and the next write opens the next one", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const frozen = await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          baseRevision: 1,
+          frozenAt: at(1),
+        })
+        expect(frozen.artifact).toMatchObject({ latestVersion: 1, revision: 2, updatedAt: at(1) })
+        expect(frozen.version).toMatchObject({ version: 1, revision: 2, frozenAt: at(1) })
+
+        // Freezing a frozen version changes nothing, from any base.
+        expect(
+          await artifacts.freeze({
+            projectId,
+            artifactId: "art_report",
+            baseRevision: 1,
+            frozenAt: at(2),
+          })
+        ).toEqual(frozen)
+
+        const opened = await artifacts.publish(publishInput({ title: "Draft", updatedAt: at(3) }))
+        expect(opened.version).toMatchObject({
+          version: 2,
+          revision: 3,
+          title: "Draft",
+          createdAt: at(3),
+          updatedAt: at(3),
+        })
+        expect(opened.version).not.toHaveProperty("frozenAt")
+        expect(opened.artifact).toMatchObject({ latestVersion: 2, revision: 3, title: "Draft" })
+
+        // The next write replaces version 2, and version 1 stays as it was frozen.
+        const replaced = await artifacts.publish(publishInput({ title: "Final", updatedAt: at(4) }))
+        expect(replaced.version).toMatchObject({ version: 2, revision: 4, title: "Final" })
+        expect(
+          await artifacts.getVersion({ projectId, artifactId: "art_report", version: 1 })
+        ).toEqual(frozen.version)
+
+        await expectArtifactError(
+          artifacts.freeze({ projectId, artifactId: "art_missing", frozenAt: at(5) }),
+          "artifact_not_found"
+        )
+      })
+    })
+
+    test("keeps the kind fixed and refuses writes to a missing artifact", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
 
@@ -117,22 +192,22 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           artifacts.publish({ ...publishInput(), projectId: otherProjectId }),
           "artifact_not_found"
         )
-        expect((await artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(1)
+        expect((await artifacts.get({ projectId, id: "art_report" }))?.revision).toBe(1)
       })
     })
 
-    test("publishes from a base version, and refuses one the artifact has moved past", async () => {
+    test("writes from a base revision, and refuses one the artifact has moved past", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
         const edited = await artifacts.publish({
-          ...publishInput({ author: otherOwner, origin: undefined, createdAt: at(1) }),
-          baseVersion: 1,
+          ...publishInput({ author: otherOwner, origin: undefined, updatedAt: at(1) }),
+          baseRevision: 1,
         })
-        expect(edited.version.version).toBe(2)
+        expect(edited.artifact.revision).toBe(2)
 
-        // A second save from version 1 would replace version 2's changes unseen.
+        // A second save from revision 1 would replace revision 2's changes unseen.
         const error = await artifacts
-          .publish({ ...publishInput({ createdAt: at(2) }), baseVersion: 1 })
+          .publish({ ...publishInput({ updatedAt: at(2) }), baseRevision: 1 })
           .then(
             () => null,
             (caught: unknown) => caught
@@ -140,28 +215,39 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(error).toBeInstanceOf(ArtifactStorageError)
         expect(error).toMatchObject({
           code: "artifact_moved",
-          latest: { version: 2, author: otherOwner },
+          latest: { version: 1, revision: 2, author: otherOwner },
         })
-        expect((await artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(2)
+        expect((await artifacts.get({ projectId, id: "art_report" }))?.revision).toBe(2)
 
-        // Of two publishes racing from one base, one is stored and the other finds it moved. This
+        // A freeze moves it too: nobody freezes content they never saw.
+        await expectArtifactError(
+          artifacts.freeze({
+            projectId,
+            artifactId: "art_report",
+            baseRevision: 1,
+            frozenAt: at(2),
+          }),
+          "artifact_moved"
+        )
+
+        // Of two writes racing from one base, one is stored and the other finds it moved. This
         // fixes the outcome only: the in-memory and SQLite storages run each call whole under
         // their own lock, so the race cannot fail there. Postgres proves its row lock in
         // `storage/pg/tests/pg-artifact-storage.e2e.ts`.
         const raced = await Promise.allSettled([
-          artifacts.publish({ ...publishInput({ createdAt: at(3) }), baseVersion: 2 }),
-          artifacts.publish({ ...publishInput({ createdAt: at(4) }), baseVersion: 2 }),
+          artifacts.publish({ ...publishInput({ updatedAt: at(3) }), baseRevision: 2 }),
+          artifacts.publish({ ...publishInput({ updatedAt: at(4) }), baseRevision: 2 }),
         ])
         expect(raced.filter((result) => result.status === "fulfilled")).toHaveLength(1)
         const refused = raced.find((result) => result.status === "rejected")
         expect(refused?.status === "rejected" && refused.reason).toMatchObject({
           code: "artifact_moved",
-          latest: { version: 3 },
+          latest: { revision: 3 },
         })
-        // Without a base, a publish is stored over whatever is latest.
-        expect((await artifacts.publish(publishInput({ createdAt: at(5) }))).version.version).toBe(
-          4
-        )
+        // Without a base, a write is stored over whatever is latest.
+        expect(
+          (await artifacts.publish(publishInput({ updatedAt: at(5) }))).artifact.revision
+        ).toBe(4)
       })
     })
 
@@ -190,7 +276,14 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(created.version).not.toHaveProperty("origin")
         expect(
           await artifacts.getVersion({ projectId, artifactId: "art_report", version: 1 })
-        ).toEqual({ projectId, artifactId: "art_report", version: 1, ...version })
+        ).toEqual({
+          projectId,
+          artifactId: "art_report",
+          version: 1,
+          revision: 1,
+          ...version,
+          createdAt: t0,
+        })
       })
     })
 
@@ -233,9 +326,13 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         // A longer id that starts with the same letters is another artifact.
         await create("art_longer", ["artifact:art_numbersx#chart=revenue"])
         await create("art_elsewhere", ["artifact:art_numbers"], otherProjectId)
-        // Only the latest version counts: this one dropped its reference.
+        // Only the latest version counts: this one dropped its reference, frozen before.
         await create("art_dropped", ["artifact:art_numbers#Summary"])
-        await artifacts.publish(publishInput({ createdAt: at(1) }, "art_dropped"))
+        await artifacts.freeze({ projectId, artifactId: "art_dropped", frozenAt: at(1) })
+        await artifacts.publish(publishInput({ updatedAt: at(2) }, "art_dropped"))
+        // And this one dropped it from its open version.
+        await create("art_rewritten", ["artifact:art_numbers"])
+        await artifacts.publish(publishInput({ updatedAt: at(2) }, "art_rewritten"))
 
         const referencing = await artifacts.listReferencingVersions({
           projectId,
@@ -296,19 +393,21 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_a" }))
         await artifacts.create(
-          createInput({ id: "art_b", version: versionInput({ createdAt: at(1) }) })
+          createInput({ id: "art_b", version: versionInput({ updatedAt: at(1) }) })
         )
         await artifacts.create(
-          createInput({ id: "art_c", version: versionInput({ createdAt: at(2) }) })
+          createInput({ id: "art_c", version: versionInput({ updatedAt: at(2) }) })
         )
-        await artifacts.publish(publishInput({ createdAt: at(3) }, "art_a"))
+        await artifacts.publish(publishInput({ updatedAt: at(3) }, "art_a"))
+        // A freeze is a change too.
+        await artifacts.freeze({ projectId, artifactId: "art_b", frozenAt: at(4) })
 
         const all = await artifacts.list({ projectId })
-        expect(all.artifacts.map((artifact) => artifact.id)).toEqual(["art_a", "art_c", "art_b"])
+        expect(all.artifacts.map((artifact) => artifact.id)).toEqual(["art_b", "art_a", "art_c"])
         expect(all).toMatchObject({ total: 3, hasMore: false })
 
         const page = await artifacts.list({ projectId, limit: 2, offset: 1 })
-        expect(page.artifacts.map((artifact) => artifact.id)).toEqual(["art_c", "art_b"])
+        expect(page.artifacts.map((artifact) => artifact.id)).toEqual(["art_a", "art_c"])
         expect(page).toMatchObject({ total: 3, hasMore: false })
         expect((await artifacts.list({ projectId, limit: 1 })).hasMore).toBe(true)
       })
@@ -322,7 +421,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           createInput({
             id: "art_deck_b",
             kind: "slides",
-            version: versionInput({ createdAt: at(1) }),
+            version: versionInput({ updatedAt: at(1) }),
           })
         )
         const decks = await artifacts.list({ projectId, kind: "slides", limit: 1 })
@@ -350,7 +449,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         )
         await artifacts.publish(
           publishInput(
-            { origin: { threadId: "thr_3", runId: "run_3" }, createdAt: at(1) },
+            { origin: { threadId: "thr_3", runId: "run_3" }, updatedAt: at(1) },
             "art_api"
           )
         )
@@ -370,16 +469,16 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
 
     // Regression proof: drop `sharedIn` from the in-memory publish, or the link insert from a SQL
     // provider's; the revised artifact is then not shared in thr_2.
-    test("shares an artifact in each thread a version came from", async () => {
+    test("shares an artifact in each thread a write came from, after the next write too", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_mine" }))
         await artifacts.publish(
           publishInput(
-            { origin: { threadId: "thr_2", runId: "run_2" }, createdAt: at(1) },
+            { origin: { threadId: "thr_2", runId: "run_2" }, updatedAt: at(1) },
             "art_mine"
           )
         )
-        await artifacts.publish(publishInput({ origin: undefined, createdAt: at(2) }, "art_mine"))
+        await artifacts.publish(publishInput({ origin: undefined, updatedAt: at(2) }, "art_mine"))
         expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
           "thr_1",
           "thr_2",
@@ -399,40 +498,341 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    // Regression proof: keep every link in a provider's `deleteVersionsByOrigin`; thr_2 then keeps
-    // sharing art_mine with nothing from it left.
-    test("unshares an artifact from a retried run's thread once nothing from there remains", async () => {
+    // Regression proof: take a restore point on every write of a turn in a provider's `publish`;
+    // the turn then keeps three, the last two of its own content.
+    test("keeps a restore point before a turn's first write to an artifact, once per turn", async () => {
       await withStorage(async (artifacts) => {
-        await artifacts.create(createInput({ id: "art_mine" }))
-        await artifacts.publish(
-          publishInput(
-            { origin: { threadId: "thr_2", runId: "run_2" }, createdAt: at(1) },
-            "art_mine"
-          )
+        await artifacts.create(createInput({ version: versionInput({ origin: undefined }) }))
+        await artifacts.publish({
+          ...publishInput({ title: "First", updatedAt: at(1) }),
+          turnRunId: "run_1",
+        })
+        await artifacts.publish({
+          ...publishInput({ title: "Second", updatedAt: at(2) }),
+          turnRunId: "run_1",
+        })
+        // A sub-agent of the turn writes as the turn.
+        await artifacts.publish({
+          ...publishInput({
+            title: "Third",
+            origin: { threadId: "thr_1", runId: "run_child" },
+            updatedAt: at(3),
+          }),
+          turnRunId: "run_1",
+        })
+
+        const points = await artifacts.listRestorePoints({ projectId, id: "art_report" })
+        expect(points).toEqual([
+          {
+            projectId,
+            artifactId: "art_report",
+            revision: 1,
+            version: 1,
+            frozen: false,
+            ...versionInput({ origin: undefined }),
+            reason: "turn",
+            turnRunId: "run_1",
+            createdAt: at(1),
+          },
+        ])
+        expect(
+          await artifacts.getRestorePoint({ projectId, artifactId: "art_report", revision: 1 })
+        ).toEqual(points[0] ?? null)
+        expect(
+          await artifacts.getRestorePoint({ projectId, artifactId: "art_report", revision: 2 })
+        ).toBeNull()
+
+        // Writes outside a turn keep none; a created artifact has nothing to go back to.
+        await artifacts.publish(publishInput({ updatedAt: at(4) }))
+        await artifacts.create({ ...createInput({ id: "art_new" }), turnRunId: "run_2" })
+        expect(await artifacts.listRestorePoints({ projectId, id: "art_new" })).toEqual([])
+
+        // Another turn keeps its own, of the frozen version it opens the next one past.
+        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(5) })
+        await artifacts.publish({ ...publishInput({ updatedAt: at(6) }), turnRunId: "run_3" })
+        const [newest] = await artifacts.listRestorePoints({ projectId, id: "art_report" })
+        expect(newest).toMatchObject({
+          revision: 6,
+          version: 1,
+          frozen: true,
+          title: "Q3 report",
+          turnRunId: "run_3",
+        })
+
+        expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_1" })).toEqual([
+          { artifactId: "art_report", created: false, revision: 4 },
+        ])
+        expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_2" })).toEqual([
+          { artifactId: "art_new", created: true, revision: 1 },
+        ])
+        expect(
+          await artifacts.listTurnWrites({ projectId: otherProjectId, turnRunId: "run_1" })
+        ).toEqual([])
+      })
+    })
+
+    // Regression proof: drop the prune after the insert in a provider's restore point; the
+    // artifact then keeps one more.
+    test(`keeps an artifact's last ${ARTIFACT_RESTORE_POINTS} restore points`, async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        for (let turn = 1; turn <= ARTIFACT_RESTORE_POINTS + 1; turn++) {
+          await artifacts.publish({
+            ...publishInput({ updatedAt: at(turn) }),
+            turnRunId: `run_${turn}`,
+          })
+        }
+
+        const points = await artifacts.listRestorePoints({ projectId, id: "art_report" })
+        expect(points).toHaveLength(ARTIFACT_RESTORE_POINTS)
+        expect(points[0]?.revision).toBe(ARTIFACT_RESTORE_POINTS + 1)
+        expect(points.at(-1)?.revision).toBe(2)
+      })
+    })
+
+    test("restores a restore point into the latest version, keeping what it replaces", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        await artifacts.publish({
+          ...publishInput({ title: "Agent's", updatedAt: at(1) }),
+          turnRunId: "run_1",
+        })
+
+        const restored = await artifacts.restoreTo({
+          projectId,
+          artifactId: "art_report",
+          revision: 1,
+          baseRevision: 2,
+          author: otherOwner,
+          restoredAt: at(2),
+        })
+        expect(restored.artifact).toMatchObject({
+          latestVersion: 1,
+          revision: 3,
+          title: "Q3 report",
+          updatedAt: at(2),
+        })
+        expect(restored.version).toMatchObject({
+          version: 1,
+          revision: 3,
+          title: "Q3 report",
+          author: otherOwner,
+          updatedAt: at(2),
+        })
+        expect(restored.version).not.toHaveProperty("origin")
+
+        // The restore can be undone: what it replaced is a restore point too.
+        const [before] = await artifacts.listRestorePoints({ projectId, id: "art_report" })
+        expect(before).toMatchObject({
+          revision: 2,
+          title: "Agent's",
+          reason: "restore",
+          createdAt: at(2),
+        })
+        expect(before).not.toHaveProperty("turnRunId")
+
+        // A frozen version stays: restoring opens the next one.
+        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(3) })
+        const reopened = await artifacts.restoreTo({
+          projectId,
+          artifactId: "art_report",
+          revision: 2,
+          author: owner,
+          restoredAt: at(4),
+        })
+        expect(reopened.version).toMatchObject({ version: 2, revision: 5, title: "Agent's" })
+        expect(
+          (await artifacts.getVersion({ projectId, artifactId: "art_report", version: 1 }))
+            ?.frozenAt
+        ).toEqual(at(3))
+
+        await expectArtifactError(
+          artifacts.restoreTo({
+            projectId,
+            artifactId: "art_report",
+            revision: 9,
+            author: owner,
+            restoredAt: at(5),
+          }),
+          "restore_point_not_found"
         )
-        await artifacts.publish(
-          publishInput(
-            { origin: { threadId: "thr_3", runId: "run_3" }, createdAt: at(2) },
-            "art_mine"
-          )
+        await expectArtifactError(
+          artifacts.restoreTo({
+            projectId,
+            artifactId: "art_report",
+            revision: 1,
+            baseRevision: 4,
+            author: owner,
+            restoredAt: at(5),
+          }),
+          "artifact_moved"
         )
+        await expectArtifactError(
+          artifacts.restoreTo({
+            projectId,
+            artifactId: "art_missing",
+            revision: 1,
+            author: owner,
+            restoredAt: at(5),
+          }),
+          "artifact_not_found"
+        )
+      })
+    })
+
+    // Regression proof: skip the revision check in a provider's `undoTurnWrites`; the person's
+    // edit to art_edited is then lost.
+    test("undoes a retried turn's writes to what nobody changed since", async () => {
+      await withStorage(async (artifacts) => {
+        const turn = { threadId: "thr_turn", runId: "run_turn" }
+        const write = (artifactId: string, overrides: Partial<ArtifactVersionInput> = {}) =>
+          artifacts.publish({
+            ...publishInput(
+              { title: "Turn's", origin: turn, updatedAt: at(1), ...overrides },
+              artifactId
+            ),
+            turnRunId: "run_turn",
+          })
+
+        // Replaced in place: back to what it held, by whoever wrote it.
+        await artifacts.create(
+          createInput({ id: "art_open", version: versionInput({ author: otherOwner }) })
+        )
+        await write("art_open")
+        await write("art_open", { title: "Turn's again", updatedAt: at(2) })
+
+        // Opened past a frozen version: the version it opened goes.
+        await artifacts.create(createInput({ id: "art_frozen" }))
+        await artifacts.freeze({ projectId, artifactId: "art_frozen", frozenAt: at(1) })
+        await write("art_frozen")
+
+        // Changed since by someone else: it keeps the change.
+        await artifacts.create(createInput({ id: "art_edited" }))
+        await write("art_edited")
         await artifacts.publish(
-          publishInput(
-            { origin: { threadId: "thr_3", runId: "run_4" }, createdAt: at(3) },
-            "art_mine"
-          )
+          publishInput({ title: "Person's", origin: undefined, updatedAt: at(3) }, "art_edited")
         )
 
-        // A retried turn takes back what it published, and the link it alone made.
-        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_2" })
+        // Created by the turn: it goes, with its frame grants, unless changed since.
+        await artifacts.create({
+          ...createInput({ id: "art_created", version: versionInput({ origin: turn }) }),
+          turnRunId: "run_turn",
+        })
+        await artifacts.createFrameGrant(frameGrant("a", { artifactId: "art_created" }))
+        await artifacts.create({
+          ...createInput({ id: "art_kept", version: versionInput({ origin: turn }) }),
+          turnRunId: "run_turn",
+        })
+        await artifacts.freeze({ projectId, artifactId: "art_kept", frozenAt: at(3) })
+
+        expect(
+          await artifacts.undoTurnWrites({ projectId: otherProjectId, turnRunId: "run_turn" })
+        ).toEqual({ restored: [], deleted: [] })
+        const undone = await artifacts.undoTurnWrites({ projectId, turnRunId: "run_turn" })
+
+        expect(undone.deleted).toEqual(["art_created"])
+        expect(undone.restored.map(({ artifact }) => artifact.id).sort()).toEqual([
+          "art_frozen",
+          "art_open",
+        ])
+
+        const open = await artifacts.getVersion({ projectId, artifactId: "art_open", version: 1 })
+        expect(open).toMatchObject({
+          title: "Q3 report",
+          author: otherOwner,
+          origin: agentRun,
+          revision: 4,
+          updatedAt: t0,
+          createdAt: t0,
+        })
+        expect(await artifacts.get({ projectId, id: "art_open" })).toMatchObject({
+          title: "Q3 report",
+          latestVersion: 1,
+          revision: 4,
+          updatedAt: t0,
+        })
+        expect(undone.restored.find(({ artifact }) => artifact.id === "art_open")?.version).toEqual(
+          open ?? undefined
+        )
+
+        expect(await artifacts.get({ projectId, id: "art_frozen" })).toMatchObject({
+          latestVersion: 1,
+          revision: 4,
+          updatedAt: at(1),
+        })
+        expect(
+          await artifacts.getVersion({ projectId, artifactId: "art_frozen", version: 2 })
+        ).toBeNull()
+        expect(
+          await artifacts.getVersion({ projectId, artifactId: "art_frozen", version: 1 })
+        ).toMatchObject({ revision: 4, frozenAt: at(1) })
+        // A version number is never reused: an address that named version 2 never lands on other content.
+        expect(
+          (await artifacts.publish(publishInput({ updatedAt: at(4) }, "art_frozen"))).version
+            .version
+        ).toBe(3)
+
+        expect(await artifacts.get({ projectId, id: "art_edited" })).toMatchObject({
+          title: "Person's",
+          revision: 3,
+        })
+        expect(await artifacts.get({ projectId, id: "art_created" })).toBeNull()
+        expect(await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })).toBeNull()
+        expect(await artifacts.get({ projectId, id: "art_kept" })).not.toBeNull()
+
+        // Undone to it, the turn's restore point is gone; one it was not undone to stays.
+        expect(await artifacts.listRestorePoints({ projectId, id: "art_open" })).toEqual([])
+        expect(
+          (await artifacts.listRestorePoints({ projectId, id: "art_edited" })).map(
+            (point) => point.turnRunId
+          )
+        ).toEqual(["run_turn"])
+        expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_turn" })).toEqual([])
+        // A second retry finds nothing left to undo.
+        expect(await artifacts.undoTurnWrites({ projectId, turnRunId: "run_turn" })).toEqual({
+          restored: [],
+          deleted: [],
+        })
+      })
+    })
+
+    // Regression proof: keep every link in a provider's `undoTurnWrites`; thr_2 then keeps
+    // sharing art_mine with nothing from it left.
+    test("unshares an artifact from the threads only a retried turn shared it in", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput({ id: "art_mine" }))
+        await artifacts.publish({
+          ...publishInput(
+            { origin: { threadId: "thr_2", runId: "run_2" }, updatedAt: at(1) },
+            "art_mine"
+          ),
+          turnRunId: "run_2",
+        })
+        await artifacts.publish({
+          ...publishInput(
+            { origin: { threadId: "thr_3", runId: "run_3" }, updatedAt: at(2) },
+            "art_mine"
+          ),
+          turnRunId: "run_3",
+        })
+        await artifacts.publish({
+          ...publishInput(
+            { origin: { threadId: "thr_3", runId: "run_4" }, updatedAt: at(3) },
+            "art_mine"
+          ),
+          turnRunId: "run_4",
+        })
+
+        // A retried turn takes back the link it made, even when its writes stay.
+        await artifacts.undoTurnWrites({ projectId, turnRunId: "run_2" })
         expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
           "thr_1",
           "thr_3",
         ])
         expect((await artifacts.list({ projectId, threadId: "thr_2" })).total).toBe(0)
 
-        // Another turn's version from thr_3 keeps it shared there.
-        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_3" })
+        // A turn in a thread that already shared it made no link.
+        await artifacts.undoTurnWrites({ projectId, turnRunId: "run_4" })
         expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
           "thr_1",
           "thr_3",
@@ -474,27 +874,33 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
     test("copies an artifact with every version under its number, shared in one thread", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
+        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(1) })
         await artifacts.publish(
-          publishInput({ title: "Second", author: otherOwner, createdAt: at(1) })
+          publishInput({ title: "Second", author: otherOwner, updatedAt: at(2) })
         )
-        await artifacts.publish(publishInput({ title: "Third", createdAt: at(2) }))
-        // Version 4 was a retried turn's: the copy numbers its next version 5, as the source does.
-        await artifacts.publish(
-          publishInput({
+        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(3) })
+        // Version 3 was a retried turn's: the copy numbers its next version 4, as the source does.
+        await artifacts.publish({
+          ...publishInput({
             title: "Retried",
             origin: { threadId: "thr_1", runId: "run_9" },
-            createdAt: at(3),
-          })
+            updatedAt: at(4),
+          }),
+          turnRunId: "run_9",
+        })
+        await artifacts.undoTurnWrites({ projectId, turnRunId: "run_9" })
+        await artifacts.publish(
+          publishInput({ title: "Third", origin: undefined, updatedAt: at(5) })
         )
-        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_9" })
 
+        const source = await artifacts.get({ projectId, id: "art_report" })
         const copy = await artifacts.copy({
           projectId,
           sourceId: "art_report",
           id: "art_copy",
           owner: otherOwner,
           threadId: "thr_fork",
-          copiedAt: at(5),
+          copiedAt: at(6),
         })
         expect(copy).toEqual({
           projectId,
@@ -502,35 +908,48 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           kind: "document",
           title: "Third",
           owner: otherOwner,
-          latestVersion: 3,
+          latestVersion: 4,
+          revision: source?.revision ?? 0,
           createdAt: t0,
-          updatedAt: at(2),
+          updatedAt: at(5),
         })
 
         const { versions } = await artifacts.listVersions({ projectId, artifactId: "art_copy" })
-        expect(versions.map(({ version, title, author }) => ({ version, title, author }))).toEqual([
-          { version: 3, title: "Third", author: owner },
-          { version: 2, title: "Second", author: otherOwner },
-          { version: 1, title: "Q3 report", author: owner },
+        expect(
+          versions.map(({ version, title, author, frozenAt }) => ({
+            version,
+            title,
+            author,
+            frozenAt,
+          }))
+        ).toEqual([
+          { version: 4, title: "Third", author: owner, frozenAt: undefined },
+          { version: 2, title: "Second", author: otherOwner, frozenAt: at(3) },
+          { version: 1, title: "Q3 report", author: owner, frozenAt: at(1) },
         ])
         // Without an origin, a retry of the source's turns never takes the copy's versions.
         expect(versions.every((version) => version.origin === undefined)).toBe(true)
-        const source = await artifacts.getVersion({
+        const latest = await artifacts.getVersion({
           projectId,
           artifactId: "art_report",
-          version: 3,
+          version: 4,
         })
-        expect(versions[0]?.files).toEqual(source?.files ?? [])
+        expect(versions[0]?.files).toEqual(latest?.files ?? [])
+        expect(versions[0]?.revision).toBe(latest?.revision ?? 0)
+        // Restore points stay with the source.
+        expect(await artifacts.listRestorePoints({ projectId, id: "art_copy" })).toEqual([])
 
         expect(await artifacts.listThreadIds({ projectId, id: "art_copy" })).toEqual(["thr_fork"])
         expect(await artifacts.listThreadIds({ projectId, id: "art_report" })).toEqual(["thr_1"])
 
         // A turn in the fork revises the copy, and a retry of it keeps the copy shared there.
-        const revised = await artifacts.publish(
-          publishInput({ origin: { threadId: "thr_fork", runId: "run_fork" } }, "art_copy")
-        )
+        await artifacts.freeze({ projectId, artifactId: "art_copy", frozenAt: at(7) })
+        const revised = await artifacts.publish({
+          ...publishInput({ origin: { threadId: "thr_fork", runId: "run_fork" } }, "art_copy"),
+          turnRunId: "run_fork",
+        })
         expect(revised.version.version).toBe(5)
-        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_fork" })
+        await artifacts.undoTurnWrites({ projectId, turnRunId: "run_fork" })
         expect(await artifacts.listThreadIds({ projectId, id: "art_copy" })).toEqual(["thr_fork"])
 
         await expectArtifactError(
@@ -560,8 +979,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
     test("lists versions newest first, a page at a time", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        await artifacts.publish(publishInput({ createdAt: at(1) }))
-        await artifacts.publish(publishInput({ createdAt: at(2) }))
+        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(1) })
+        await artifacts.publish(publishInput({ updatedAt: at(2) }))
+        await artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(3) })
+        await artifacts.publish(publishInput({ updatedAt: at(4) }))
 
         const all = await artifacts.listVersions({ projectId, artifactId: "art_report" })
         expect(all.versions.map((version) => version.version)).toEqual([3, 2, 1])
@@ -583,10 +1004,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    test("deletes an artifact with every version", async () => {
+    test("deletes an artifact with every version and restore point", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        await artifacts.publish(publishInput({ createdAt: at(1) }))
+        await artifacts.publish({ ...publishInput({ updatedAt: at(1) }), turnRunId: "run_1" })
 
         expect(await artifacts.delete({ projectId: otherProjectId, id: "art_report" })).toBe(false)
         expect(await artifacts.delete({ projectId, id: "art_report" })).toBe(true)
@@ -598,61 +1019,8 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
 
         // The id is free again, and numbering starts over for the new artifact.
         expect((await artifacts.create(createInput())).version.version).toBe(1)
-      })
-    })
-
-    test("deletes a run's versions, repoints latest, and never reuses a number", async () => {
-      await withStorage(async (artifacts) => {
-        await artifacts.create(
-          createInput({ version: versionInput({ origin: { threadId: "thr_1", runId: "run_0" } }) })
-        )
-        await artifacts.publish(
-          publishInput({
-            title: "Kept",
-            createdAt: at(1),
-            origin: { threadId: "thr_1", runId: "run_0" },
-          })
-        )
-        await artifacts.publish(publishInput({ title: "Retried", createdAt: at(2) }))
-        await artifacts.create(
-          createInput({ id: "art_new_in_run", version: versionInput({ createdAt: at(2) }) })
-        )
-        await artifacts.create(
-          createInput({
-            id: "art_other_run",
-            version: versionInput({ origin: { threadId: "thr_1", runId: "run_9" } }),
-          })
-        )
-        await artifacts.createFrameGrant(frameGrant("a"))
-        await artifacts.createFrameGrant(frameGrant("b", { artifactId: "art_new_in_run" }))
-
-        expect(
-          await artifacts.deleteVersionsByOrigin({ projectId: otherProjectId, runId: "run_1" })
-        ).toBe(0)
-        expect(await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_1" })).toBe(2)
-
-        expect(await artifacts.get({ projectId, id: "art_report" })).toMatchObject({
-          title: "Kept",
-          latestVersion: 2,
-          updatedAt: at(1),
-        })
-        expect(
-          await artifacts.getVersion({ projectId, artifactId: "art_report", version: 3 })
-        ).toBeNull()
-        expect(await artifacts.get({ projectId, id: "art_new_in_run" })).toBeNull()
-        expect(await artifacts.get({ projectId, id: "art_other_run" })).not.toBeNull()
-        // A deleted artifact's frame grants go with it; a kept one's stay. To see this fail, delete
-        // the artifact from the map alone in `InMemoryArtifactStorage.deleteVersionsByOrigin`.
-        expect(await artifacts.findFrameGrant({ projectId, tokenHash: "b".repeat(64) })).toBeNull()
-        expect(
-          await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })
-        ).not.toBeNull()
-
-        // Version 3 belonged to the retried run; the next one is 4, so an address pinned to @3
-        // can never land on different content.
-        expect((await artifacts.publish(publishInput({ createdAt: at(3) }))).version.version).toBe(
-          4
-        )
+        expect(await artifacts.listRestorePoints({ projectId, id: "art_report" })).toEqual([])
+        expect(await artifacts.listTurnWrites({ projectId, turnRunId: "run_1" })).toEqual([])
       })
     })
 
@@ -841,7 +1209,11 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         await expect(
           storage.transaction(async (tx) => {
             if (!tx.artifacts) throw new Error("Expected artifact storage in the transaction.")
-            await tx.artifacts.publish(publishInput({ createdAt: at(1) }))
+            await tx.artifacts.publish({
+              ...publishInput({ updatedAt: at(1) }),
+              turnRunId: "run_1",
+            })
+            await tx.artifacts.freeze({ projectId, artifactId: "art_report", frozenAt: at(1) })
             await tx.artifacts.create(createInput({ id: "art_rolled_back" }))
             await tx.artifacts.createFrameGrant(frameGrant("a"))
             await tx.artifacts.putBoardPreviews({
@@ -864,13 +1236,15 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
               value: "450",
               updatedAt: at(1),
             })
-            expect((await tx.artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(2)
+            expect((await tx.artifacts.get({ projectId, id: "art_report" }))?.revision).toBe(3)
             throw rollback
           })
         ).rejects.toBe(rollback)
 
-        expect((await artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(1)
+        expect((await artifacts.get({ projectId, id: "art_report" }))?.revision).toBe(1)
         expect(await artifacts.get({ projectId, id: "art_rolled_back" })).toBeNull()
+        // To see this fail, leave restore points out of `InMemoryArtifactStorage.restore`.
+        expect(await artifacts.listRestorePoints({ projectId, id: "art_report" })).toEqual([])
         // To see this fail, leave frame grants out of `InMemoryArtifactStorage.restore`.
         expect(await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })).toBeNull()
         // To see this fail, leave board previews out of `InMemoryArtifactStorage.restore`.
@@ -881,8 +1255,8 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(
           await artifacts.listState({ projectId, artifactId: "art_report", principal: owner })
         ).toEqual([])
-        expect((await artifacts.publish(publishInput({ createdAt: at(2) }))).version.version).toBe(
-          2
+        expect((await artifacts.publish(publishInput({ updatedAt: at(2) }))).version).toMatchObject(
+          { version: 1, revision: 2 }
         )
       })
     })
@@ -912,11 +1286,14 @@ function createInput(overrides: Partial<CreateArtifactInput> = {}): CreateArtifa
   }
 }
 
-function publishInput(overrides: Partial<ArtifactVersionInput> = {}, artifactId = "art_report") {
+function publishInput(
+  overrides: Partial<ArtifactVersionInput> = {},
+  artifactId = "art_report"
+): PublishArtifactVersionInput {
   return {
     projectId,
     artifactId,
-    kind: "document" as const,
+    kind: "document",
     version: versionInput({ origin: agentRun, ...overrides }),
   }
 }
@@ -930,7 +1307,7 @@ function versionInput(overrides: Partial<ArtifactVersionInput> = {}): ArtifactVe
     references: [],
     author: owner,
     origin: agentRun,
-    createdAt: t0,
+    updatedAt: t0,
     ...overrides,
   }
   if (input.origin) return input
@@ -947,8 +1324,14 @@ function frameGrant(
     tokenHash: seed.repeat(64).slice(0, 64),
     artifactId: "art_report",
     version: 1,
+    revision: 1,
     targets: [
-      { address: "artifact:art_other/figures/revenue.svg", artifactId: "art_other", version: 3 },
+      {
+        address: "artifact:art_other/figures/revenue.svg",
+        artifactId: "art_other",
+        version: 3,
+        revision: 5,
+      },
     ],
     createdAt: t0,
     expiresAt: at(60),

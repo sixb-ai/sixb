@@ -1,5 +1,6 @@
 /** Implementation exports for Sixb packages only. */
 
+export { ARTIFACT_RESTORE_POINTS } from "../artifacts/limits"
 export { normalizeRecordActionRunInput, resolveActionRunEffects } from "./action-runs/record"
 export type { ActivitySourceState, StoredActivityEvent } from "./activity/policy"
 export {
@@ -38,8 +39,10 @@ export {
   checkArtifactStateWrite,
   parseArtifactBoardPreviewRow,
   parseArtifactFrameGrantRow,
+  parseArtifactRestorePointRow,
   parseArtifactRow,
   parseArtifactStateRow,
+  parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
 } from "./artifacts/record"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"

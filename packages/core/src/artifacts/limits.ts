@@ -56,3 +56,9 @@ export const ARTIFACT_STATE_LIMITS = {
   maxKeys: 100,
   maxBytes: 1024 * 1024,
 } as const
+
+/**
+ * The restore points each artifact keeps: one before each Agent turn's first write to it, and one
+ * before each restore. Taking one more forgets the oldest.
+ */
+export const ARTIFACT_RESTORE_POINTS = 20

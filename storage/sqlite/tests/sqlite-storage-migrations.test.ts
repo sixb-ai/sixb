@@ -26,6 +26,7 @@ import {
 import { legacySourceFixture } from "../../tests/legacy-source-fixture"
 import { SqliteStorage } from "../src"
 import { SqliteActionRunStorage } from "../src/action-run-storage"
+import { SqliteArtifactStorage } from "../src/artifact-storage"
 import {
   createSqliteStorageMigrators,
   migrateSqliteStorage,
@@ -210,6 +211,7 @@ const shippedMigrationIds = [
   "089-run-recovery",
   "090-webhook-and-projection-leases",
   "091-artifact-board-previews",
+  "092-artifact-open-versions",
 ]
 
 afterEach(async () => {
@@ -2765,6 +2767,71 @@ describe("SQLite storage migrations", () => {
           shared_at: "2026-07-01T12:00:00.000Z",
         },
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("freezes every existing version, so an address pinned to one keeps naming it", async () => {
+    // Removal proof: drop the UPDATE of `artifact_versions` from migration 092; the latest version
+    // is then open, and the next write replaces what @2 names.
+    const db = replayedDatabase("092-artifact-open-versions")
+    try {
+      db.run(`
+        INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id,
+          latest_version, next_version, created_at, updated_at
+        ) VALUES (
+          'project-a', 'art_0000000001', 'document', 'Report', 'user', 'usr-1', 2, 4,
+          '2026-07-01T12:00:00.000Z', '2026-07-01T12:01:00.000Z'
+        )
+      `)
+      for (const [version, at] of [
+        [1, "2026-07-01T12:00:00.000Z"],
+        [2, "2026-07-01T12:01:00.000Z"],
+      ] as const) {
+        db.run(`
+          INSERT INTO artifact_versions (
+            project_id, artifact_id, version, title, entry, files, outline, refs,
+            author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
+          ) VALUES (
+            'project-a', 'art_0000000001', ${version}, 'Report', 'document.md', '[]',
+            '{"kind":"document","headings":[]}', '[]', 'user', 'usr-1', 'thread-1', 'run-1', '${at}'
+          )
+        `)
+      }
+
+      const applied = migration("092-artifact-open-versions").up(db)
+      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+
+      const artifacts = new SqliteArtifactStorage({ db, ownsConnection: false })
+      const at = { projectId: "project-a", artifactId: "art_0000000001" }
+      expect(await artifacts.get({ projectId: "project-a", id: at.artifactId })).toMatchObject({
+        latestVersion: 2,
+        revision: 2,
+      })
+      expect(await artifacts.getVersion({ ...at, version: 2 })).toMatchObject({
+        revision: 2,
+        updatedAt: new Date("2026-07-01T12:01:00.000Z"),
+        frozenAt: new Date("2026-07-01T12:01:00.000Z"),
+      })
+
+      // The next write opens version 4: 3 was a retried turn's, and is never reused.
+      const written = await artifacts.publish({
+        ...at,
+        kind: "document",
+        version: {
+          title: "Report, revised",
+          entry: "document.md",
+          files: [],
+          outline: { kind: "document", headings: [] },
+          references: [],
+          author: { type: "user", id: "usr-1" },
+          updatedAt: new Date("2026-07-02T12:00:00.000Z"),
+        },
+      })
+      expect(written.version).toMatchObject({ version: 4, revision: 3 })
+      expect((await artifacts.getVersion({ ...at, version: 2 }))?.title).toBe("Report")
     } finally {
       db.close()
     }

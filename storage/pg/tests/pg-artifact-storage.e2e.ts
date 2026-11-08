@@ -20,16 +20,16 @@ const version = (runId: string, minute: number): ArtifactVersionInput => ({
   references: [],
   author: owner,
   origin: { threadId: "thr_1", runId },
-  createdAt: new Date(Date.UTC(2026, 9, 17, 12, minute)),
+  updatedAt: new Date(Date.UTC(2026, 9, 17, 12, minute)),
 })
 
 describe("PgArtifactStorage under concurrent writes", () => {
-  test("a failed run's cleanup keeps a version published while it waited", async () => {
-    // Reproduce by dropping the `FOR UPDATE` lock at the start of `deleteVersionsByOrigin`: the
-    // cleanup reads the artifact as the failed run left it, deletes it, and the cascade takes the
-    // version published meanwhile.
+  test("a retried turn's undo keeps a write made while it waited", async () => {
+    // Reproduce by dropping the `FOR UPDATE` lock at the start of `undoTurnWrites`: the undo reads
+    // the artifact as the failed turn left it, deletes it, and the cascade takes the write made
+    // meanwhile.
     const { storage, schemaName, connectionString } = await createTestStorage()
-    // Another process on the same database, as a retry's cleanup would be.
+    // Another process on the same database, as a retry's undo would be.
     const other = new PostgresStorage({
       connectionString,
       schemaName,
@@ -43,37 +43,34 @@ describe("PgArtifactStorage under concurrent writes", () => {
         kind: "document",
         owner,
         version: version("run_failed", 0),
+        turnRunId: "run_failed",
       })
-      let cleanup: Promise<number> | undefined
+      let undo: Promise<unknown> | undefined
       await storage.transaction(async (tx) => {
-        // The publish holds the artifact's lock until this transaction commits.
+        // The write holds the artifact's lock until this transaction commits.
         await tx.artifacts?.publish({
           projectId,
           artifactId: "art_raced",
           kind: "document",
           version: version("run_retried", 1),
         })
-        cleanup = other.artifacts.deleteVersionsByOrigin({ projectId, runId: "run_failed" })
-        await waitForLockWait(connectionString, cleanup)
+        undo = other.artifacts.undoTurnWrites({ projectId, turnRunId: "run_failed" })
+        await waitForLockWait(connectionString, undo)
       })
-      expect(await cleanup).toBe(1)
+      expect(await undo).toEqual({ restored: [], deleted: [] })
       expect(await artifacts.get({ projectId, id: "art_raced" })).toMatchObject({
-        latestVersion: 2,
+        latestVersion: 1,
+        revision: 2,
       })
-      expect(
-        await artifacts.getVersion({ projectId, artifactId: "art_raced", version: 2 })
-      ).not.toBeNull()
     } finally {
       await other.close()
       await disposeTestStorage(storage)
     }
   })
 
-  test("of two publishes from one base, the one that waited finds the artifact moved", async () => {
-    // Reproduce by checking the base against a `latest_version` read with `this.sql` before
-    // `runPgTransaction` in `publish`: the second publish reads version 1 while the first is
-    // uncommitted and is stored as version 3. Dropping the `FOR UPDATE` instead fails it with a
-    // duplicate `artifact_versions` key rather than `artifact_moved`.
+  test("of two writes from one base, the one that waited finds the artifact moved", async () => {
+    // Reproduce by dropping the `FOR UPDATE` from `lockArtifact`: the second write reads revision
+    // 1 while the first is uncommitted, and replaces the first one's content unseen.
     const { storage, schemaName, connectionString } = await createTestStorage()
     // Another process on the same database, as a save from a second tab can reach.
     const other = new PostgresStorage({ connectionString, schemaName, max: 2 })
@@ -94,7 +91,7 @@ describe("PgArtifactStorage under concurrent writes", () => {
           projectId,
           artifactId: "art_raced",
           kind: "document",
-          baseVersion: 1,
+          baseRevision: 1,
           version: version("run_first", 1),
         })
 
@@ -103,7 +100,7 @@ describe("PgArtifactStorage under concurrent writes", () => {
             projectId,
             artifactId: "art_raced",
             kind: "document",
-            baseVersion: 1,
+            baseRevision: 1,
             version: version("run_second", 2),
           })
           .catch((error: unknown) => error)
@@ -112,11 +109,15 @@ describe("PgArtifactStorage under concurrent writes", () => {
 
       expect(await second).toMatchObject({
         code: "artifact_moved",
-        latest: { version: 2, author: owner },
+        latest: { version: 1, revision: 2, author: owner },
       })
       expect(await artifacts.get({ projectId, id: "art_raced" })).toMatchObject({
-        latestVersion: 2,
+        latestVersion: 1,
+        revision: 2,
       })
+      expect(
+        await artifacts.getVersion({ projectId, artifactId: "art_raced", version: 1 })
+      ).toMatchObject({ origin: { runId: "run_first" } })
     } finally {
       await other.close()
       await disposeTestStorage(storage)

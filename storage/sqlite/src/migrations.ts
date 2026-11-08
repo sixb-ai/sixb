@@ -323,6 +323,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("089-run-recovery", runRecoverySql),
     sqliteSql("090-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
     sqliteSql("091-artifact-board-previews", artifactBoardPreviewsSql),
+    sqliteSql("092-artifact-open-versions", artifactOpenVersionsSql),
   ],
 })
 
@@ -743,5 +744,8 @@ import webhookAndProjectionLeasesSql from "./migrations/090-webhook-and-projecti
   type: "text",
 }
 import artifactBoardPreviewsSql from "./migrations/091-artifact-board-previews.sql" with {
+  type: "text",
+}
+import artifactOpenVersionsSql from "./migrations/092-artifact-open-versions.sql" with {
   type: "text",
 }

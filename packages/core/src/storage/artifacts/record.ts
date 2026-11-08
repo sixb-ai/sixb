@@ -12,7 +12,9 @@ import type {
   ArtifactFrameTarget,
   ArtifactKind,
   ArtifactRecord,
+  ArtifactRestorePointRecord,
   ArtifactStateEntry,
+  ArtifactTurnWriteRecord,
   ArtifactVersionRecord,
 } from "./types"
 
@@ -34,6 +36,7 @@ export function parseArtifactRow(row: Row): ArtifactRecord {
     title: text(row.title, "title", where),
     owner: principal(row.ownerPrincipalType, row.ownerPrincipalId, "owner", where),
     latestVersion: positiveInteger(row.latestVersion, "latestVersion", where),
+    revision: positiveInteger(row.revision, "revision", where),
     createdAt: date(row.createdAt, "createdAt", where),
     updatedAt: date(row.updatedAt, "updatedAt", where),
   }
@@ -43,15 +46,60 @@ export function parseArtifactVersionRow(row: Row): ArtifactVersionRecord {
   const artifactId = text(row.artifactId, "artifactId", "artifact version")
   const version = positiveInteger(row.version, "version", `artifact '${artifactId}'`)
   const where = `artifact '${artifactId}' version ${version}`
+  return {
+    projectId: text(row.projectId, "projectId", where),
+    artifactId,
+    version,
+    revision: positiveInteger(row.revision, "revision", where),
+    ...content(row, where),
+    createdAt: date(row.createdAt, "createdAt", where),
+    updatedAt: date(row.updatedAt, "updatedAt", where),
+    ...(row.frozenAt == null ? {} : { frozenAt: date(row.frozenAt, "frozenAt", where) }),
+  }
+}
+
+export function parseArtifactRestorePointRow(row: Row): ArtifactRestorePointRecord {
+  const artifactId = text(row.artifactId, "artifactId", "artifact restore point")
+  const revision = positiveInteger(row.revision, "revision", `artifact '${artifactId}'`)
+  const where = `restore point of artifact '${artifactId}' at revision ${revision}`
+  const reason = row.reason
+  if (reason !== "turn" && reason !== "restore")
+    throw corrupt(where, "reason is not turn or restore")
+  if ((reason === "turn") !== (row.turnRunId != null)) {
+    throw corrupt(where, "a turn's restore point names its run, and only it does")
+  }
+  return {
+    projectId: text(row.projectId, "projectId", where),
+    artifactId,
+    revision,
+    version: positiveInteger(row.version, "version", where),
+    frozen: flag(row.frozen, "frozen", where),
+    ...content(row, where),
+    updatedAt: date(row.updatedAt, "updatedAt", where),
+    reason,
+    ...(reason === "turn" ? { turnRunId: text(row.turnRunId, "turnRunId", where) } : {}),
+    createdAt: date(row.createdAt, "createdAt", where),
+  }
+}
+
+export function parseArtifactTurnWriteRow(row: Row): ArtifactTurnWriteRecord {
+  const artifactId = text(row.artifactId, "artifactId", "artifact turn write")
+  const where = `turn write to artifact '${artifactId}'`
+  return {
+    artifactId,
+    created: flag(row.created, "created", where),
+    revision: positiveInteger(row.revision, "revision", where),
+  }
+}
+
+/** What a version or a restore point holds, and who last wrote it from where. */
+function content(row: Row, where: string) {
   const originThreadId = row.originThreadId
   const originRunId = row.originRunId
   if ((originThreadId == null) !== (originRunId == null)) {
     throw corrupt(where, "origin needs both a thread and a run")
   }
   return {
-    projectId: text(row.projectId, "projectId", where),
-    artifactId,
-    version,
     title: text(row.title, "title", where),
     entry: text(row.entry, "entry", where),
     files: files(json(row.files, "files", where), where),
@@ -66,7 +114,6 @@ export function parseArtifactVersionRow(row: Row): ArtifactVersionRecord {
             runId: text(originRunId, "originRunId", where),
           },
         }),
-    createdAt: date(row.createdAt, "createdAt", where),
   }
 }
 
@@ -79,6 +126,7 @@ export function parseArtifactFrameGrantRow(row: Row): ArtifactFrameGrantRecord {
     tokenHash: text(row.tokenHash, "tokenHash", where),
     artifactId,
     version: positiveInteger(row.version, "version", where),
+    revision: positiveInteger(row.revision, "revision", where),
     targets: frameTargets(json(row.targets, "targets", where), where),
     createdAt: date(row.createdAt, "createdAt", where),
     expiresAt: date(row.expiresAt, "expiresAt", where),
@@ -166,11 +214,16 @@ export const artifactStorageErrors = {
       "artifact_kind_mismatch",
       `[Sixb] Artifact '${id}' is a ${kind}; it cannot take a ${requested} version.`
     ),
-  moved: (id: string, baseVersion: number, latest: ArtifactLatestVersion) =>
+  moved: (id: string, baseRevision: number, latest: ArtifactLatestVersion) =>
     new ArtifactStorageError(
       "artifact_moved",
-      `[Sixb] Artifact '${id}' is at version ${latest.version}, not version ${baseVersion}, which this publish was based on.`,
+      `[Sixb] Artifact '${id}' changed since revision ${baseRevision}, which this was based on: it is at revision ${latest.revision}, version ${latest.version}.`,
       latest
+    ),
+  restorePointNotFound: (id: string, revision: number) =>
+    new ArtifactStorageError(
+      "restore_point_not_found",
+      `[Sixb] Artifact '${id}' keeps no restore point of revision ${revision}.`
     ),
   stateFull: (message: string) => new ArtifactStorageError("artifact_state_full", message),
 }
@@ -222,14 +275,17 @@ function frameTargets(value: unknown, where: string): ArtifactFrameTarget[] {
       typeof entry.address !== "string" ||
       typeof entry.artifactId !== "string" ||
       !Number.isSafeInteger(entry.version) ||
-      (entry.version as number) < 1
+      (entry.version as number) < 1 ||
+      !Number.isSafeInteger(entry.revision) ||
+      (entry.revision as number) < 1
     ) {
-      throw corrupt(where, "a target is not an address, an artifact, and a version")
+      throw corrupt(where, "a target is not an address, an artifact, a version, and a revision")
     }
     return {
       address: entry.address,
       artifactId: entry.artifactId,
       version: entry.version as number,
+      revision: entry.revision as number,
     }
   })
 }
@@ -241,6 +297,13 @@ function principal(type: unknown, id: unknown, column: string, where: string): P
     throw corrupt(where, `${column} is not a principal`)
   }
   return { type: type as Principal["type"], id: text(id, column, where) }
+}
+
+/** A boolean, as Postgres returns it or as SQLite keeps it: 0 or 1. */
+function flag(value: unknown, column: string, where: string): boolean {
+  if (typeof value === "boolean") return value
+  if (value === 0 || value === 1) return value === 1
+  throw corrupt(where, `${column} is not true or false`)
 }
 
 function json(value: unknown, column: string, where: string): unknown {
