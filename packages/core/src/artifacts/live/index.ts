@@ -5,6 +5,8 @@
  */
 
 export {
+  canvasItemMap,
+  canvasItemObject,
   documentCanvas,
   documentFiles,
   documentKind,
@@ -12,6 +14,7 @@ export {
   LIVE_FILES,
   type LiveFile,
   type LiveFiles,
+  mergeCanvasItem,
   patchText,
 } from "./document"
 export {

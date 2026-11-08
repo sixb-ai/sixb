@@ -215,7 +215,7 @@ function patchArray(array: Y.Array<string>, to: readonly string[]): void {
 function canvasStructure(items: readonly CanvasItem[]): Y.Map<unknown> {
   const structure = new Y.Map<unknown>()
   const byId = new Y.Map<Y.Map<unknown>>()
-  for (const item of items) byId.set(item.id, itemMap(item))
+  for (const item of items) byId.set(item.id, canvasItemMap(item))
   const order = new Y.Array<string>()
   order.push(items.map((item) => item.id))
   structure.set("items", byId)
@@ -223,9 +223,12 @@ function canvasStructure(items: readonly CanvasItem[]): Y.Map<unknown> {
   return structure
 }
 
-function itemMap(item: CanvasItem): Y.Map<unknown> {
+/** An item of a canvas as its structure holds it: the words people type as `Y.Text`. */
+export function canvasItemMap(item: CanvasItem): Y.Map<unknown> {
   const map = new Y.Map<unknown>()
-  for (const [key, value] of Object.entries(item)) map.set(key, itemValue(key, value))
+  for (const [key, value] of Object.entries(item)) {
+    if (value !== undefined) map.set(key, itemValue(key, value))
+  }
   return map
 }
 
@@ -233,7 +236,8 @@ function itemValue(key: string, value: unknown): unknown {
   return CANVAS_TEXT_KEYS.has(key) && typeof value === "string" ? new Y.Text(value) : value
 }
 
-function itemObject(map: Y.Map<unknown>): Record<string, unknown> {
+/** An item of a canvas's structure read back as a plain object, its words as strings. */
+export function canvasItemObject(map: Y.Map<unknown>): Record<string, unknown> {
   const item: Record<string, unknown> = {}
   map.forEach((value, key) => {
     item[key] = value instanceof Y.Text ? value.toString() : value
@@ -259,7 +263,7 @@ function canvasText(structure: Y.Map<unknown>): string {
   }
 
   // Someone deleted the item an arrow joins while another drew it: the arrow goes with it.
-  const items = ids.map((id) => itemObject(byId.get(id) as Y.Map<unknown>))
+  const items = ids.map((id) => canvasItemObject(byId.get(id) as Y.Map<unknown>))
   const joined = (end: unknown) => typeof end !== "string" || seen.has(end)
   const kept = items.filter(
     (item) => item.type !== "arrow" || (joined(item.from) && joined(item.to))
@@ -298,10 +302,10 @@ function mergeCanvas(structure: Y.Map<unknown>, baseText: string, nextText: stri
     const current = byId.get(id)
     if (!before || !current) {
       // Added by `next`; one deleted meanwhile that `next` kept stays deleted.
-      if (!before) byId.set(id, itemMap(item))
+      if (!before) byId.set(id, canvasItemMap(item))
       continue
     }
-    mergeItem(current, before, item)
+    mergeCanvasItem(current, before, item)
   }
   for (const id of baseById.keys()) {
     if (!nextById.has(id)) byId.delete(id)
@@ -325,8 +329,8 @@ function mergeCanvas(structure: Y.Map<unknown>, baseText: string, nextText: stri
   return true
 }
 
-/** Applies to an item each key that changed from `base` to `next`. */
-function mergeItem(current: Y.Map<unknown>, base: CanvasItem, next: CanvasItem): void {
+/** Applies to an item each key that changed from `base` to `next`, the words merged as text. */
+export function mergeCanvasItem(current: Y.Map<unknown>, base: CanvasItem, next: CanvasItem): void {
   const before = base as unknown as Record<string, unknown>
   const after = next as unknown as Record<string, unknown>
 
