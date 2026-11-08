@@ -37,9 +37,10 @@ work/onboarding-flow/
 ## Principles
 
 - **A board shows; the canvas annotates.** A board holds the visual alone: a screen, a frame, a
-  poster, a diagram. Captions, specs, voice-over, and rationale go in `text` and `note` items
-  beside or under it, a `section` groups each set, and arrows give the order. Never put small
-  explanatory text inside a board.
+  poster, a diagram, with the words the viewer would see on it, such as an end card's title.
+  Captions, specs, voice-over, and rationale go in `text` and `note` items beside or under it, a
+  `section` groups each set, and arrows give the order. Never put small explanatory text inside a
+  board.
 - **It reads as it opens.** A canvas opens fitted to everything, so its headings, notes, and
   labels must read at that zoom: an `xl` heading over each group, `l` within it. Lay boards out in
   rows, four or five wide boards at most, so the fitted view isn't tiny. The reader opens a board
@@ -89,7 +90,8 @@ holds at most 500 files, boards and images included.
   pixels apart. A heading (`text`, `xl`) above everything says what the canvas is, and a line
   under it (`m`) what it is for; `s` is small print, read close up.
 - Arrows for the order of a flow, labeled with what moves the user on: the button, the choice.
-  Dashed arrows for asides: a note about a board.
+  Dashed arrows for asides: a note about a board. An arrow joins neighbours in a row; a sequence
+  that wraps reads on from the start of the next row, with no arrow crossing back over the notes.
 - Notes and captions beside or below a board, never on it: a note over a board covers its page.
 - Size boards as their screens are: 390 by 844 for a phone, 1280 by 800 for a laptop, 1440 by 900
   for a wide screen, 1280 by 720 for a video or presentation frame.
