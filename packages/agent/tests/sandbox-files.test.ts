@@ -8,6 +8,7 @@ import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import {
   listSandboxFiles,
   readSandboxFile,
+  readSandboxFiles,
   resolveSandboxPath,
   SandboxFileError,
 } from "../src/sandbox-files"
@@ -252,3 +253,48 @@ describe("listHandedSources", () => {
 function unused(): never {
   throw new Error("Not used by this test.")
 }
+
+describe("readSandboxFiles", () => {
+  test("reads many files in one command, each in its place, and says why one was not read", async () => {
+    // Reproduce by stopping at the first failure: the files after the missing one are lost.
+    writeFileSync(join(root, "a.png"), "first")
+    writeFileSync(join(root, "big.png"), "x".repeat(32))
+    writeFileSync(join(outside, "secret"), "secret")
+    symlinkSync(join(outside, "secret"), join(root, "link.png"))
+    writeFileSync(join(root, "b.webp"), new Uint8Array([0, 255, 10, 13]))
+    const sandbox = new LocalBashSandbox(root)
+    const runs: string[] = []
+    const run = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = (command, args, options) => {
+      runs.push(command)
+      return run(command, args, options)
+    }
+
+    const read = await readSandboxFiles(
+      { sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY },
+      {
+        paths: ["a.png", "missing.png", "big.png", "link.png", "b.webp"].map((name) =>
+          join(root, name)
+        ),
+        maxBytes: 16,
+        signal,
+        timeoutMs: 10_000,
+      }
+    )
+
+    expect(runs).toHaveLength(1)
+    expect(
+      read.map((file) =>
+        "bytes" in file
+          ? [...file.bytes].join(",")
+          : `${file.path.slice(root.length)} ${file.error}`
+      )
+    ).toEqual([
+      [..."first"].map((letter) => letter.charCodeAt(0)).join(","),
+      "/missing.png not_found",
+      "/big.png too_large",
+      "/link.png not_found",
+      "0,255,10,13",
+    ])
+  })
+})
