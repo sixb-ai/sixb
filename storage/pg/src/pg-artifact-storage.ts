@@ -1,30 +1,38 @@
 import {
+  ARTIFACT_RESTORE_POINTS,
   artifactStateBytes,
   artifactStorageErrors,
   checkArtifactStateWrite,
   parseArtifactBoardPreviewRow,
   parseArtifactFrameGrantRow,
+  parseArtifactRestorePointRow,
   parseArtifactRow,
   parseArtifactStateRow,
+  parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactBoardPreviewRecord,
   ArtifactFrameGrantRecord,
   ArtifactRecord,
+  ArtifactRestorePointReason,
+  ArtifactRestorePointRecord,
   ArtifactStateEntry,
   ArtifactStateKeyInput,
   ArtifactStateScope,
   ArtifactStorage,
+  ArtifactTurnInput,
+  ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
-  DeleteArtifactVersionsByOriginInput,
   DeleteExpiredArtifactFrameGrantsInput,
   FindArtifactFrameGrantInput,
+  FreezeArtifactVersionInput,
   GetArtifactInput,
+  GetArtifactRestorePointInput,
   GetArtifactVersionInput,
   ListArtifactBoardPreviewsInput,
   ListArtifactsInput,
@@ -35,7 +43,9 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   PutArtifactBoardPreviewsInput,
+  RestoreArtifactInput,
   SetArtifactStateInput,
+  UndoneArtifactTurn,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -49,18 +59,32 @@ interface PgRow {
 const ARTIFACT_COLUMNS = `
   project_id AS "projectId", id, kind, title,
   owner_principal_type AS "ownerPrincipalType", owner_principal_id AS "ownerPrincipalId",
-  latest_version AS "latestVersion", created_at AS "createdAt", updated_at AS "updatedAt"
+  latest_version AS "latestVersion", revision, created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`
+
+/** What a version and a restore point both hold, and who last wrote it from where. */
+const CONTENT_COLUMNS = `
+  title, entry, files, outline, refs, author_principal_type AS "authorPrincipalType",
+  author_principal_id AS "authorPrincipalId", origin_thread_id AS "originThreadId",
+  origin_run_id AS "originRunId", updated_at AS "updatedAt"
 `
 
 const VERSION_COLUMNS = `
-  project_id AS "projectId", artifact_id AS "artifactId", version, title, entry, files, outline,
-  refs, author_principal_type AS "authorPrincipalType", author_principal_id AS "authorPrincipalId",
-  origin_thread_id AS "originThreadId", origin_run_id AS "originRunId", created_at AS "createdAt"
+  project_id AS "projectId", artifact_id AS "artifactId", version, revision, ${CONTENT_COLUMNS},
+  created_at AS "createdAt", frozen_at AS "frozenAt"
 `
+
+const RESTORE_POINT_COLUMNS = `
+  project_id AS "projectId", artifact_id AS "artifactId", revision, version, frozen,
+  ${CONTENT_COLUMNS}, reason, turn_run_id AS "turnRunId", created_at AS "createdAt"
+`
+
+const TURN_WRITE_COLUMNS = `artifact_id AS "artifactId", created, revision`
 
 const FRAME_GRANT_COLUMNS = `
   project_id AS "projectId", token_hash AS "tokenHash", artifact_id AS "artifactId", version,
-  targets, created_at AS "createdAt", expires_at AS "expiresAt"
+  revision, targets, created_at AS "createdAt", expires_at AS "expiresAt"
 `
 
 const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "updatedAt"`
@@ -75,68 +99,227 @@ export class PgArtifactStorage implements ArtifactStorage {
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     return runPgTransaction(this.sql, async (tx) => {
+      const content = input.version
       const [artifact] = await tx<PgRow[]>`
         INSERT INTO artifacts (
           project_id, id, kind, title, owner_principal_type, owner_principal_id,
-          latest_version, next_version, created_at, updated_at
+          latest_version, next_version, revision, created_at, updated_at
         ) VALUES (
-          ${input.projectId}, ${input.id}, ${input.kind}, ${input.version.title},
-          ${input.owner.type}, ${input.owner.id}, 1, 2,
-          ${input.version.createdAt}, ${input.version.createdAt}
+          ${input.projectId}, ${input.id}, ${input.kind}, ${content.title},
+          ${input.owner.type}, ${input.owner.id}, 1, 2, 1,
+          ${content.updatedAt}, ${content.updatedAt}
         )
         ON CONFLICT (project_id, id) DO NOTHING
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
       `
       if (!artifact) throw artifactStorageErrors.exists(input.id)
-      return {
-        artifact: parseArtifactRow(artifact),
-        version: await insertVersion(tx, input.projectId, input.id, 1, input.version),
+
+      const version = await insertVersion(tx, {
+        projectId: input.projectId,
+        artifactId: input.id,
+        version: 1,
+        revision: 1,
+        content,
+      })
+      await shareIn(tx, input.projectId, input.id, content, input.turnRunId)
+      if (input.turnRunId) {
+        await recordTurnWrite(tx, {
+          projectId: input.projectId,
+          artifactId: input.id,
+          turnRunId: input.turnRunId,
+          created: true,
+          revision: 1,
+        })
       }
+
+      return { artifact: parseArtifactRow(artifact), version }
     })
   }
 
   async publish(input: PublishArtifactVersionInput): Promise<PublishedArtifactVersion> {
     return runPgTransaction(this.sql, async (tx) => {
-      // The row lock serializes concurrent publishes of one artifact.
-      const [current] = await tx<PgRow[]>`
-        SELECT kind, next_version, latest_version FROM artifacts
-        WHERE project_id = ${input.projectId} AND id = ${input.artifactId}
-        FOR UPDATE
-      `
+      const current = await lockArtifact(tx, input.projectId, input.artifactId)
       if (!current) throw artifactStorageErrors.notFound(input.artifactId)
-      const kind = current.kind as ArtifactRecord["kind"]
-      if (kind !== input.kind) {
-        throw artifactStorageErrors.kindMismatch(input.artifactId, kind, input.kind)
+      const { artifact } = current
+      if (artifact.kind !== input.kind) {
+        throw artifactStorageErrors.kindMismatch(input.artifactId, artifact.kind, input.kind)
       }
-      // Under the row lock: a publish from the same base after this one finds it moved.
-      const latestVersion = Number(current.latest_version)
-      if (input.baseVersion !== undefined && latestVersion !== input.baseVersion) {
-        const [row] = await tx<PgRow[]>`
-          SELECT ${tx.unsafe(VERSION_COLUMNS)} FROM artifact_versions
-          WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
-            AND version = ${latestVersion}
-        `
-        const latest = parseArtifactVersionRow(row as PgRow)
-        throw artifactStorageErrors.moved(input.artifactId, input.baseVersion, {
-          version: latest.version,
-          author: latest.author,
+
+      // Under the row lock: a write from the same base after this one finds it moved.
+      const latest = await latestVersion(tx, artifact)
+      assertBase(artifact, latest, input.baseRevision)
+
+      // A turn's first write keeps what it replaces, so the turn can be undone.
+      const { turnRunId } = input
+      if (turnRunId && !(await turnWrote(tx, artifact, turnRunId))) {
+        await keepRestorePoint(tx, latest, {
+          reason: "turn",
+          turnRunId,
+          createdAt: input.version.updatedAt,
         })
       }
-      const version = await insertVersion(
-        tx,
-        input.projectId,
-        input.artifactId,
-        Number(current.next_version),
-        input.version
-      )
-      const [artifact] = await tx<PgRow[]>`
-        UPDATE artifacts
-        SET title = ${input.version.title}, latest_version = ${version.version},
-            next_version = ${version.version + 1}, updated_at = ${input.version.createdAt}
+
+      const written = await writeLatest(tx, current, latest, input.version)
+      await shareIn(tx, input.projectId, input.artifactId, input.version, turnRunId)
+      if (turnRunId) {
+        await recordTurnWrite(tx, {
+          projectId: input.projectId,
+          artifactId: input.artifactId,
+          turnRunId,
+          created: false,
+          revision: written.artifact.revision,
+        })
+      }
+
+      return written
+    })
+  }
+
+  async freeze(input: FreezeArtifactVersionInput): Promise<PublishedArtifactVersion> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const current = await lockArtifact(tx, input.projectId, input.artifactId)
+      if (!current) throw artifactStorageErrors.notFound(input.artifactId)
+      const { artifact } = current
+
+      const latest = await latestVersion(tx, artifact)
+      if (latest.frozenAt) return { artifact, version: latest }
+      assertBase(artifact, latest, input.baseRevision)
+
+      const revision = artifact.revision + 1
+      const [version] = await tx<PgRow[]>`
+        UPDATE artifact_versions SET revision = ${revision}, frozen_at = ${input.frozenAt}
+        WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+          AND version = ${latest.version}
+        RETURNING ${tx.unsafe(VERSION_COLUMNS)}
+      `
+      const [updated] = await tx<PgRow[]>`
+        UPDATE artifacts SET revision = ${revision}, updated_at = ${input.frozenAt}
         WHERE project_id = ${input.projectId} AND id = ${input.artifactId}
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
       `
-      return { artifact: parseArtifactRow(artifact), version }
+      return {
+        artifact: parseArtifactRow(updated as PgRow),
+        version: parseArtifactVersionRow(version as PgRow),
+      }
+    })
+  }
+
+  async listRestorePoints(input: GetArtifactInput): Promise<ArtifactRestorePointRecord[]> {
+    const rows = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(RESTORE_POINT_COLUMNS)} FROM artifact_restore_points
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
+      ORDER BY revision DESC
+    `
+    return rows.map(parseArtifactRestorePointRow)
+  }
+
+  async getRestorePoint(
+    input: GetArtifactRestorePointInput
+  ): Promise<ArtifactRestorePointRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(RESTORE_POINT_COLUMNS)} FROM artifact_restore_points
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND revision = ${input.revision}
+    `
+    return row ? parseArtifactRestorePointRow(row) : null
+  }
+
+  async restoreTo(input: RestoreArtifactInput): Promise<PublishedArtifactVersion> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const current = await lockArtifact(tx, input.projectId, input.artifactId)
+      if (!current) throw artifactStorageErrors.notFound(input.artifactId)
+      const { artifact } = current
+
+      const [row] = await tx<PgRow[]>`
+        SELECT ${tx.unsafe(RESTORE_POINT_COLUMNS)} FROM artifact_restore_points
+        WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+          AND revision = ${input.revision}
+      `
+      if (!row) throw artifactStorageErrors.restorePointNotFound(input.artifactId, input.revision)
+      const point = parseArtifactRestorePointRow(row)
+
+      const latest = await latestVersion(tx, artifact)
+      assertBase(artifact, latest, input.baseRevision)
+
+      // What the restore replaces is kept first, so the restore can be undone.
+      await keepRestorePoint(tx, latest, { reason: "restore", createdAt: input.restoredAt })
+      return writeLatest(tx, current, latest, {
+        title: point.title,
+        entry: point.entry,
+        files: point.files,
+        outline: point.outline,
+        references: point.references,
+        author: input.author,
+        updatedAt: input.restoredAt,
+      })
+    })
+  }
+
+  async listTurnWrites(input: ArtifactTurnInput): Promise<ArtifactTurnWriteRecord[]> {
+    const rows = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(TURN_WRITE_COLUMNS)} FROM artifact_turn_writes
+      WHERE project_id = ${input.projectId} AND turn_run_id = ${input.turnRunId}
+      ORDER BY artifact_id COLLATE "C"
+    `
+    return rows.map(parseArtifactTurnWriteRow)
+  }
+
+  async undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const { projectId, turnRunId } = input
+
+      // Lock the turn's artifacts first, in id order so two of these never deadlock. A write
+      // holds the same lock, and under READ COMMITTED each statement below then reads a snapshot
+      // taken after any write that held it committed: a revision read here is the artifact's.
+      await tx`
+        SELECT id FROM artifacts
+        WHERE project_id = ${projectId} AND id IN (
+          SELECT artifact_id FROM artifact_turn_writes
+          WHERE project_id = ${projectId} AND turn_run_id = ${turnRunId}
+        )
+        ORDER BY id
+        FOR UPDATE
+      `
+      const writes = await tx<PgRow[]>`
+        SELECT w.artifact_id AS "artifactId", w.created, w.revision
+        FROM artifact_turn_writes w
+        JOIN artifacts a ON a.project_id = w.project_id AND a.id = w.artifact_id
+        WHERE w.project_id = ${projectId} AND w.turn_run_id = ${turnRunId}
+          AND a.revision = w.revision
+        ORDER BY w.artifact_id COLLATE "C"
+      `
+
+      const restored: PublishedArtifactVersion[] = []
+      const deleted: string[] = []
+      for (const write of writes.map(parseArtifactTurnWriteRow)) {
+        if (write.created) {
+          await tx`DELETE FROM artifacts WHERE project_id = ${projectId} AND id = ${write.artifactId}`
+          deleted.push(write.artifactId)
+          continue
+        }
+
+        const undone = await undoTurn(tx, projectId, write.artifactId, turnRunId)
+        if (undone) restored.push(undone)
+      }
+
+      // What the turn left: the restore points it was undone to, its writes, and its links.
+      if (restored.length > 0) {
+        await tx`
+          DELETE FROM artifact_restore_points
+          WHERE project_id = ${projectId} AND turn_run_id = ${turnRunId}
+            AND artifact_id IN ${tx(restored.map(({ artifact }) => artifact.id))}
+        `
+      }
+      await tx`
+        DELETE FROM artifact_turn_writes
+        WHERE project_id = ${projectId} AND turn_run_id = ${turnRunId}
+      `
+      await tx`
+        DELETE FROM artifact_threads
+        WHERE project_id = ${projectId} AND linked_by_run_id = ${turnRunId} AND NOT copied
+      `
+
+      return { restored, deleted }
     })
   }
 
@@ -207,8 +390,8 @@ export class PgArtifactStorage implements ArtifactStorage {
 
   async copy(input: CopyArtifactInput): Promise<ArtifactRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      // The share lock keeps the source from being deleted or published to while it is copied, so
-      // the copy holds every version it has.
+      // The share lock keeps the source from being deleted or written while it is copied, so the
+      // copy holds every version it has, as it is.
       const [source] = await tx<PgRow[]>`
         SELECT id FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.sourceId}
         FOR SHARE
@@ -218,10 +401,10 @@ export class PgArtifactStorage implements ArtifactStorage {
       const [artifact] = await tx<PgRow[]>`
         INSERT INTO artifacts (
           project_id, id, kind, title, owner_principal_type, owner_principal_id,
-          latest_version, next_version, created_at, updated_at
+          latest_version, next_version, revision, created_at, updated_at
         )
         SELECT project_id, ${input.id}, kind, title, ${input.owner.type}, ${input.owner.id},
-               latest_version, next_version, created_at, updated_at
+               latest_version, next_version, revision, created_at, updated_at
         FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.sourceId}
         ON CONFLICT (project_id, id) DO NOTHING
         RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
@@ -230,11 +413,11 @@ export class PgArtifactStorage implements ArtifactStorage {
 
       await tx`
         INSERT INTO artifact_versions (
-          project_id, artifact_id, version, title, entry, files, outline, refs,
-          author_principal_type, author_principal_id, created_at
+          project_id, artifact_id, version, revision, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, created_at, updated_at, frozen_at
         )
-        SELECT project_id, ${input.id}, version, title, entry, files, outline, refs,
-               author_principal_type, author_principal_id, created_at
+        SELECT project_id, ${input.id}, version, revision, title, entry, files, outline, refs,
+               author_principal_type, author_principal_id, created_at, updated_at, frozen_at
         FROM artifact_versions
         WHERE project_id = ${input.projectId} AND artifact_id = ${input.sourceId}
       `
@@ -308,10 +491,10 @@ export class PgArtifactStorage implements ArtifactStorage {
   async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
     const rows = await this.sql`
       INSERT INTO artifact_frame_grants
-        (project_id, token_hash, artifact_id, version, targets, created_at, expires_at)
+        (project_id, token_hash, artifact_id, version, revision, targets, created_at, expires_at)
       SELECT ${record.projectId}, ${record.tokenHash}, ${record.artifactId}, ${record.version},
-             ${JSON.stringify(record.targets)}::text::jsonb, ${record.createdAt},
-             ${record.expiresAt}
+             ${record.revision}, ${JSON.stringify(record.targets)}::text::jsonb,
+             ${record.createdAt}, ${record.expiresAt}
       WHERE EXISTS (
         SELECT 1 FROM artifacts WHERE project_id = ${record.projectId} AND id = ${record.artifactId}
       )
@@ -465,115 +648,341 @@ export class PgArtifactStorage implements ArtifactStorage {
   }
 
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    // Versions, frame grants, and state go with the artifact through ON DELETE CASCADE.
+    // Versions, restore points, turn writes, thread links, frame grants, and state go with the
+    // artifact through ON DELETE CASCADE.
     const rows = await this.sql`
       DELETE FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.id}
       RETURNING id
     `
     return rows.length > 0
   }
+}
 
-  async deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number> {
-    return runPgTransaction(this.sql, async (tx) => {
-      // Lock the run's artifacts first, in id order so two of these never deadlock. `publish`
-      // holds the same lock while it adds a version, and under READ COMMITTED each statement
-      // below then reads a snapshot taken after any publish that held it committed. Without the
-      // lock they would wait on a publish's row lock and then apply what they read before it: the
-      // UPDATE would point `latest_version` back past the new version, and the DELETE would drop
-      // an artifact whose versions were all the run's, cascading the new version with it.
-      const locked = await tx<{ id: string }[]>`
-        SELECT id FROM artifacts
-        WHERE project_id = ${input.projectId} AND id IN (
-          SELECT artifact_id FROM artifact_versions
-          WHERE project_id = ${input.projectId} AND origin_run_id = ${input.runId}
-        )
-        ORDER BY id
-        FOR UPDATE
-      `
-      const affected = locked.map((row) => row.id)
-      if (affected.length === 0) return 0
-      const deleted = await tx<{ origin_thread_id: string }[]>`
-        DELETE FROM artifact_versions
-        WHERE project_id = ${input.projectId} AND origin_run_id = ${input.runId}
-          AND artifact_id IN ${tx(affected)}
-        RETURNING origin_thread_id
-      `
-      // A run publishes from one thread: its artifacts stay shared there only while a version
-      // from it remains, or when they were copied for it.
-      const threadId = deleted[0]?.origin_thread_id
-      await tx`
-        DELETE FROM artifact_threads t
-        WHERE t.project_id = ${input.projectId} AND t.artifact_id IN ${tx(affected)}
-          AND t.thread_id = ${threadId ?? null} AND NOT t.copied
-          AND NOT EXISTS (
-            SELECT 1 FROM artifact_versions v
-            WHERE v.project_id = t.project_id AND v.artifact_id = t.artifact_id
-              AND v.origin_thread_id = t.thread_id
-          )
-      `
-      // An artifact left without versions goes; the rest point at their newest remaining one.
-      await tx`
-        DELETE FROM artifacts a
-        WHERE a.project_id = ${input.projectId} AND a.id IN ${tx(affected)}
-          AND NOT EXISTS (
-            SELECT 1 FROM artifact_versions v
-            WHERE v.project_id = a.project_id AND v.artifact_id = a.id
-          )
-      `
-      await tx`
-        UPDATE artifacts a
-        SET latest_version = latest.version, title = latest.title, updated_at = latest.created_at
-        FROM (
-          SELECT DISTINCT ON (artifact_id) artifact_id, version, title, created_at
-          FROM artifact_versions
-          WHERE project_id = ${input.projectId} AND artifact_id IN ${tx(affected)}
-          ORDER BY artifact_id, version DESC
-        ) latest
-        WHERE a.project_id = ${input.projectId} AND a.id = latest.artifact_id
-      `
-      return deleted.length
+/** The artifact, locked for the write: writes to one artifact take turns. */
+async function lockArtifact(
+  sql: SQLClient,
+  projectId: string,
+  artifactId: string
+): Promise<{ readonly artifact: ArtifactRecord; readonly nextVersion: number } | null> {
+  const [row] = await sql<PgRow[]>`
+    SELECT ${sql.unsafe(ARTIFACT_COLUMNS)}, next_version AS "nextVersion" FROM artifacts
+    WHERE project_id = ${projectId} AND id = ${artifactId}
+    FOR UPDATE
+  `
+  return row ? { artifact: parseArtifactRow(row), nextVersion: Number(row.nextVersion) } : null
+}
+
+async function latestVersion(
+  sql: SQLClient,
+  artifact: ArtifactRecord
+): Promise<ArtifactVersionRecord> {
+  const [row] = await sql<PgRow[]>`
+    SELECT ${sql.unsafe(VERSION_COLUMNS)} FROM artifact_versions
+    WHERE project_id = ${artifact.projectId} AND artifact_id = ${artifact.id}
+      AND version = ${artifact.latestVersion}
+  `
+  if (!row) throw new Error(`[SixbPg] Artifact '${artifact.id}' has no latest version.`)
+  return parseArtifactVersionRow(row)
+}
+
+/** Refuses a write made from a revision the artifact has moved past. */
+function assertBase(
+  artifact: ArtifactRecord,
+  latest: ArtifactVersionRecord,
+  baseRevision: number | undefined
+): void {
+  if (baseRevision === undefined || baseRevision === artifact.revision) return
+
+  throw artifactStorageErrors.moved(artifact.id, baseRevision, {
+    version: latest.version,
+    revision: artifact.revision,
+    author: latest.author,
+  })
+}
+
+/**
+ * Writes content to the latest version: in place while it is open, as the next version when it is
+ * frozen. The artifact takes the next revision.
+ */
+async function writeLatest(
+  sql: SQLClient,
+  { artifact, nextVersion }: { readonly artifact: ArtifactRecord; readonly nextVersion: number },
+  latest: ArtifactVersionRecord,
+  content: ArtifactVersionInput
+): Promise<PublishedArtifactVersion> {
+  const { projectId, id: artifactId } = artifact
+  const revision = artifact.revision + 1
+
+  if (latest.frozenAt) {
+    const version = await insertVersion(sql, {
+      projectId,
+      artifactId,
+      version: nextVersion,
+      revision,
+      content,
     })
+    const [row] = await sql<PgRow[]>`
+      UPDATE artifacts
+      SET title = ${content.title}, latest_version = ${version.version},
+          next_version = ${version.version + 1}, revision = ${revision},
+          updated_at = ${content.updatedAt}
+      WHERE project_id = ${projectId} AND id = ${artifactId}
+      RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
+    `
+    return { artifact: parseArtifactRow(row as PgRow), version }
   }
+
+  const version = await replaceContent(sql, {
+    projectId,
+    artifactId,
+    version: latest.version,
+    revision,
+    content,
+  })
+  const [row] = await sql<PgRow[]>`
+    UPDATE artifacts
+    SET title = ${content.title}, revision = ${revision}, updated_at = ${content.updatedAt}
+    WHERE project_id = ${projectId} AND id = ${artifactId}
+    RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
+  `
+  return { artifact: parseArtifactRow(row as PgRow), version }
+}
+
+/** Replaces an open version's content, at a new revision. */
+async function replaceContent(
+  sql: SQLClient,
+  input: {
+    readonly projectId: string
+    readonly artifactId: string
+    readonly version: number
+    readonly revision: number
+    readonly content: ArtifactVersionInput
+  }
+): Promise<ArtifactVersionRecord> {
+  const { content } = input
+  const [row] = await sql<PgRow[]>`
+    UPDATE artifact_versions
+    SET revision = ${input.revision}, title = ${content.title}, entry = ${content.entry},
+        files = ${JSON.stringify(content.files)}::text::jsonb,
+        outline = ${JSON.stringify(content.outline)}::text::jsonb,
+        refs = ${JSON.stringify(content.references)}::text::jsonb,
+        author_principal_type = ${content.author.type},
+        author_principal_id = ${content.author.id},
+        origin_thread_id = ${content.origin?.threadId ?? null},
+        origin_run_id = ${content.origin?.runId ?? null}, updated_at = ${content.updatedAt}
+    WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+      AND version = ${input.version}
+    RETURNING ${sql.unsafe(VERSION_COLUMNS)}
+  `
+  return parseArtifactVersionRow(row as PgRow)
 }
 
 async function insertVersion(
   sql: SQLClient,
-  projectId: string,
-  artifactId: string,
-  version: number,
-  input: ArtifactVersionInput
+  input: {
+    readonly projectId: string
+    readonly artifactId: string
+    readonly version: number
+    readonly revision: number
+    readonly content: ArtifactVersionInput
+  }
 ): Promise<ArtifactVersionRecord> {
+  const { content } = input
   const [row] = await sql<PgRow[]>`
     INSERT INTO artifact_versions (
-      project_id, artifact_id, version, title, entry, files, outline, refs,
-      author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
+      project_id, artifact_id, version, revision, title, entry, files, outline, refs,
+      author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at,
+      updated_at
     ) VALUES (
-      ${projectId}, ${artifactId}, ${version}, ${input.title}, ${input.entry},
-      ${JSON.stringify(input.files)}::text::jsonb,
-      ${JSON.stringify(input.outline)}::text::jsonb,
-      ${JSON.stringify(input.references)}::text::jsonb,
-      ${input.author.type}, ${input.author.id},
-      ${input.origin?.threadId ?? null}, ${input.origin?.runId ?? null}, ${input.createdAt}
+      ${input.projectId}, ${input.artifactId}, ${input.version}, ${input.revision},
+      ${content.title}, ${content.entry},
+      ${JSON.stringify(content.files)}::text::jsonb,
+      ${JSON.stringify(content.outline)}::text::jsonb,
+      ${JSON.stringify(content.references)}::text::jsonb,
+      ${content.author.type}, ${content.author.id},
+      ${content.origin?.threadId ?? null}, ${content.origin?.runId ?? null},
+      ${content.updatedAt}, ${content.updatedAt}
     )
     RETURNING ${sql.unsafe(VERSION_COLUMNS)}
   `
-  if (input.origin) {
-    await linkThread(sql, projectId, artifactId, input.origin.threadId, input.createdAt)
-  }
-  return parseArtifactVersionRow(row)
+  return parseArtifactVersionRow(row as PgRow)
 }
 
-/** Shares an artifact in a thread, keeping when it was first shared there. */
-async function linkThread(
+/**
+ * Keeps a restore point of the latest version, under the artifact's lock, and forgets the oldest
+ * past what an artifact keeps.
+ */
+async function keepRestorePoint(
+  sql: SQLClient,
+  latest: ArtifactVersionRecord,
+  input: {
+    readonly reason: ArtifactRestorePointReason
+    readonly turnRunId?: string
+    readonly createdAt: Date
+  }
+): Promise<void> {
+  const { projectId, artifactId } = latest
+  await sql`
+    INSERT INTO artifact_restore_points (
+      project_id, artifact_id, revision, version, frozen, title, entry, files, outline, refs,
+      author_principal_type, author_principal_id, origin_thread_id, origin_run_id, updated_at,
+      reason, turn_run_id, created_at
+    )
+    SELECT project_id, artifact_id, revision, version, frozen_at IS NOT NULL, title, entry, files,
+           outline, refs, author_principal_type, author_principal_id, origin_thread_id,
+           origin_run_id, updated_at, ${input.reason}, ${input.turnRunId ?? null},
+           ${input.createdAt}
+    FROM artifact_versions
+    WHERE project_id = ${projectId} AND artifact_id = ${artifactId} AND version = ${latest.version}
+  `
+  await sql`
+    DELETE FROM artifact_restore_points
+    WHERE project_id = ${projectId} AND artifact_id = ${artifactId} AND revision NOT IN (
+      SELECT revision FROM artifact_restore_points
+      WHERE project_id = ${projectId} AND artifact_id = ${artifactId}
+      ORDER BY revision DESC LIMIT ${ARTIFACT_RESTORE_POINTS}
+    )
+  `
+}
+
+/** Whether a turn wrote the artifact already. */
+async function turnWrote(
+  sql: SQLClient,
+  artifact: ArtifactRecord,
+  turnRunId: string
+): Promise<boolean> {
+  const rows = await sql`
+    SELECT 1 FROM artifact_turn_writes
+    WHERE project_id = ${artifact.projectId} AND artifact_id = ${artifact.id}
+      AND turn_run_id = ${turnRunId}
+  `
+  return rows.length > 0
+}
+
+/** Remembers the revision a turn's write left, and forgets the oldest turns past those kept. */
+async function recordTurnWrite(
+  sql: SQLClient,
+  input: {
+    readonly projectId: string
+    readonly artifactId: string
+    readonly turnRunId: string
+    readonly created: boolean
+    readonly revision: number
+  }
+): Promise<void> {
+  const { projectId, artifactId } = input
+  await sql`
+    INSERT INTO artifact_turn_writes (project_id, artifact_id, turn_run_id, created, revision)
+    VALUES (${projectId}, ${artifactId}, ${input.turnRunId}, ${input.created}, ${input.revision})
+    ON CONFLICT (project_id, artifact_id, turn_run_id) DO UPDATE SET revision = excluded.revision
+  `
+  await sql`
+    DELETE FROM artifact_turn_writes
+    WHERE project_id = ${projectId} AND artifact_id = ${artifactId} AND turn_run_id NOT IN (
+      SELECT turn_run_id FROM artifact_turn_writes
+      WHERE project_id = ${projectId} AND artifact_id = ${artifactId}
+      ORDER BY revision DESC LIMIT ${ARTIFACT_RESTORE_POINTS}
+    )
+  `
+}
+
+/**
+ * Puts a locked artifact back as the turn's restore point holds it, at a new revision: an open
+ * version takes its content back, and a version the turn opened past a frozen one goes. `null`
+ * when the turn kept no restore point of it, or its version is gone.
+ */
+async function undoTurn(
   sql: SQLClient,
   projectId: string,
   artifactId: string,
-  threadId: string,
-  sharedAt: Date
-): Promise<void> {
+  turnRunId: string
+): Promise<PublishedArtifactVersion | null> {
+  const [row] = await sql<PgRow[]>`
+    SELECT ${sql.unsafe(RESTORE_POINT_COLUMNS)} FROM artifact_restore_points
+    WHERE project_id = ${projectId} AND artifact_id = ${artifactId}
+      AND turn_run_id = ${turnRunId}
+  `
+  if (!row) return null
+  const point = parseArtifactRestorePointRow(row)
+
+  const [current] = await sql<{ revision: number }[]>`
+    SELECT revision FROM artifacts WHERE project_id = ${projectId} AND id = ${artifactId}
+  `
+  const [kept] = await sql`
+    SELECT 1 FROM artifact_versions
+    WHERE project_id = ${projectId} AND artifact_id = ${artifactId} AND version = ${point.version}
+  `
+  if (!current || !kept) return null
+  const revision = Number(current.revision) + 1
+
   await sql`
-    INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at)
-    VALUES (${projectId}, ${artifactId}, ${threadId}, ${sharedAt})
+    DELETE FROM artifact_versions
+    WHERE project_id = ${projectId} AND artifact_id = ${artifactId} AND version > ${point.version}
+  `
+  const at = { projectId, artifactId, version: point.version, revision }
+  const undone = point.frozen
+    ? await freshRevision(sql, at)
+    : await replaceContent(sql, {
+        ...at,
+        content: {
+          title: point.title,
+          entry: point.entry,
+          files: point.files,
+          outline: point.outline,
+          references: point.references,
+          author: point.author,
+          ...(point.origin ? { origin: point.origin } : {}),
+          updatedAt: point.updatedAt,
+        },
+      })
+  // As it was before the turn: when its content was written, or when it was frozen.
+  const updatedAt = new Date(Math.max(undone.updatedAt.getTime(), undone.frozenAt?.getTime() ?? 0))
+
+  const [artifact] = await sql<PgRow[]>`
+    UPDATE artifacts
+    SET title = ${undone.title}, latest_version = ${undone.version}, revision = ${revision},
+        updated_at = ${updatedAt}
+    WHERE project_id = ${projectId} AND id = ${artifactId}
+    RETURNING ${sql.unsafe(ARTIFACT_COLUMNS)}
+  `
+  return { artifact: parseArtifactRow(artifact as PgRow), version: undone }
+}
+
+/** A frozen version at the artifact's new revision: it is the latest again, as it was. */
+async function freshRevision(
+  sql: SQLClient,
+  input: {
+    readonly projectId: string
+    readonly artifactId: string
+    readonly version: number
+    readonly revision: number
+  }
+): Promise<ArtifactVersionRecord> {
+  const [row] = await sql<PgRow[]>`
+    UPDATE artifact_versions SET revision = ${input.revision}
+    WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+      AND version = ${input.version}
+    RETURNING ${sql.unsafe(VERSION_COLUMNS)}
+  `
+  return parseArtifactVersionRow(row as PgRow)
+}
+
+/** Shares an artifact in its origin's thread, keeping when, and by which turn, it was first. */
+async function shareIn(
+  sql: SQLClient,
+  projectId: string,
+  artifactId: string,
+  content: ArtifactVersionInput,
+  turnRunId: string | undefined
+): Promise<void> {
+  if (!content.origin) return
+
+  await sql`
+    INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at, linked_by_run_id)
+    VALUES (
+      ${projectId}, ${artifactId}, ${content.origin.threadId}, ${content.updatedAt},
+      ${turnRunId ?? null}
+    )
     ON CONFLICT (project_id, artifact_id, thread_id) DO NOTHING
   `
 }

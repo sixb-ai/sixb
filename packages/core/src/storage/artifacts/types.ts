@@ -7,7 +7,11 @@ import type { FileRef } from "../../blob-storage"
 
 export type { ArtifactKind, ArtifactOutline, ArtifactReference, ArtifactThemeMode }
 
-/** A versioned document, sheet, deck, or file. Its kind never changes. */
+/**
+ * A versioned document, sheet, deck, or file. Its kind never changes. Its latest version is open
+ * until someone creates a version, which freezes it: writes replace an open version's content, and
+ * the first write after a freeze opens the next version.
+ */
 export interface ArtifactRecord {
   readonly projectId: string
   readonly id: string
@@ -17,8 +21,13 @@ export interface ArtifactRecord {
   /** Who created the artifact; reading and publishing are decided from it. */
   readonly owner: Principal
   readonly latestVersion: number
+  /**
+   * Counts the artifact's changes: a write, a freeze, a restore. It only grows, so content read at
+   * one revision is that revision's for good. Always the latest version's revision.
+   */
+  readonly revision: number
   readonly createdAt: Date
-  /** When the latest version was published. */
+  /** When it last changed. */
   readonly updatedAt: Date
 }
 
@@ -30,35 +39,49 @@ export interface ArtifactFile {
 }
 
 /**
- * Where a version was published from: an Agent turn in a thread. Publishing one shares the artifact
- * in that thread.
+ * Where a version's content was last written from: an Agent turn in a thread. Writing from one
+ * shares the artifact in that thread.
  */
 export interface ArtifactOrigin {
   readonly threadId: string
   readonly runId: string
 }
 
-/** One published version. A version never changes once stored. */
+/**
+ * One version. While it is open, the latest, each write replaces its content; once frozen it never
+ * changes. An artifact has at most one open version.
+ */
 export interface ArtifactVersionRecord {
   readonly projectId: string
   readonly artifactId: string
   readonly version: number
+  /**
+   * The artifact's revision when this version last changed. The latest version's is the
+   * artifact's, so it moves with every change to the artifact while the version is the latest.
+   */
+  readonly revision: number
   readonly title: string
   /** The path of the file the kind renders from, one of `files`. */
   readonly entry: string
   readonly files: readonly ArtifactFile[]
   readonly outline: ArtifactOutline
   readonly references: readonly ArtifactReference[]
-  /** Who published this version. */
+  /** Who last wrote its content. */
   readonly author: Principal
+  /** Where its content was last written from. */
   readonly origin?: ArtifactOrigin
+  /** When the version was opened, by its first write. */
   readonly createdAt: Date
+  /** When its content was last written. */
+  readonly updatedAt: Date
+  /** When someone created the version, which froze it; absent while it is open. */
+  readonly frozenAt?: Date
 }
 
-/** A version's content before storage numbers it. */
+/** What a write puts in a version: its content, who wrote it, and when (`updatedAt`). */
 export type ArtifactVersionInput = Omit<
   ArtifactVersionRecord,
-  "projectId" | "artifactId" | "version"
+  "projectId" | "artifactId" | "version" | "revision" | "createdAt" | "frozenAt"
 >
 
 export interface CreateArtifactInput {
@@ -66,8 +89,10 @@ export interface CreateArtifactInput {
   readonly id: string
   readonly kind: ArtifactKind
   readonly owner: Principal
-  /** Becomes version 1. */
+  /** Becomes version 1, open, at revision 1. */
   readonly version: ArtifactVersionInput
+  /** The Agent turn that creates it: a retry of the turn deletes it, unless it changed since. */
+  readonly turnRunId?: string
 }
 
 export interface PublishArtifactVersionInput {
@@ -77,10 +102,94 @@ export interface PublishArtifactVersionInput {
   readonly kind: ArtifactKind
   readonly version: ArtifactVersionInput
   /**
-   * The version this one was made from. When the latest version is another, the publish fails
+   * The revision this content was made from. When the artifact is at another, the write fails
    * with `artifact_moved` rather than replace changes it never saw.
    */
-  readonly baseVersion?: number
+  readonly baseRevision?: number
+  /**
+   * The Agent turn that writes: its own run, or its parent's for a sub-agent. The turn's first
+   * write keeps a restore point of what it replaces, and a retry of the turn undoes its writes.
+   */
+  readonly turnRunId?: string
+}
+
+export interface FreezeArtifactVersionInput {
+  readonly projectId: string
+  readonly artifactId: string
+  /** The revision the caller saw: past it, `artifact_moved`, so nobody freezes content unseen. */
+  readonly baseRevision?: number
+  readonly frozenAt: Date
+}
+
+/**
+ * What an artifact's latest version held before a change that can be undone: an Agent turn's
+ * first write to it, or a restore. It is not a version, and is kept by the revision it holds.
+ */
+export interface ArtifactRestorePointRecord {
+  readonly projectId: string
+  readonly artifactId: string
+  /** The artifact's revision whose content it holds: one restore point per revision at most. */
+  readonly revision: number
+  /** The version it was taken of, and whether that version was frozen then. */
+  readonly version: number
+  readonly frozen: boolean
+  readonly title: string
+  readonly entry: string
+  readonly files: readonly ArtifactFile[]
+  readonly outline: ArtifactOutline
+  readonly references: readonly ArtifactReference[]
+  /** Who had last written that content, from where, and when. */
+  readonly author: Principal
+  readonly origin?: ArtifactOrigin
+  readonly updatedAt: Date
+  /** What it was taken before: an Agent turn's first write, or a restore. */
+  readonly reason: ArtifactRestorePointReason
+  /** With `turn`: the turn's run. */
+  readonly turnRunId?: string
+  /** When it was taken. */
+  readonly createdAt: Date
+}
+
+export type ArtifactRestorePointReason = "turn" | "restore"
+
+export interface GetArtifactRestorePointInput {
+  readonly projectId: string
+  readonly artifactId: string
+  readonly revision: number
+}
+
+export interface RestoreArtifactInput {
+  readonly projectId: string
+  readonly artifactId: string
+  /** The restore point's revision. */
+  readonly revision: number
+  /** The revision the caller saw: past it, `artifact_moved`. */
+  readonly baseRevision?: number
+  /** Who restores: the restored content's author from now on. */
+  readonly author: Principal
+  readonly restoredAt: Date
+}
+
+/** An artifact an Agent turn wrote, and the artifact's revision after the turn's last write. */
+export interface ArtifactTurnWriteRecord {
+  readonly artifactId: string
+  /** The turn created the artifact. */
+  readonly created: boolean
+  readonly revision: number
+}
+
+export interface ArtifactTurnInput {
+  readonly projectId: string
+  /** The turn's run: a conversation's, never a sub-agent's. */
+  readonly turnRunId: string
+}
+
+/** What undoing a turn's writes changed. */
+export interface UndoneArtifactTurn {
+  /** The artifacts put back as they were before the turn, each at a new revision. */
+  readonly restored: readonly PublishedArtifactVersion[]
+  /** The ids of the artifacts the turn created, deleted. */
+  readonly deleted: readonly string[]
 }
 
 export interface PublishedArtifactVersion {
@@ -160,8 +269,9 @@ export interface ListReferencingVersionsInput {
 }
 
 /**
- * A short-lived link to one version, which a sandboxed frame loads a deck's files through. Only
- * the SHA-256 of the link's token is stored; the token is the credential.
+ * A short-lived link to one version at one revision, which a sandboxed frame loads a deck's files
+ * through: once the version changes, the link serves nothing, so a frame never mixes two contents.
+ * Only the SHA-256 of the link's token is stored; the token is the credential.
  */
 export interface ArtifactFrameGrantRecord {
   readonly projectId: string
@@ -169,17 +279,19 @@ export interface ArtifactFrameGrantRecord {
   readonly tokenHash: string
   readonly artifactId: string
   readonly version: number
+  readonly revision: number
   /** What the frame may show from other artifacts, decided for its reader when it was issued. */
   readonly targets: readonly ArtifactFrameTarget[]
   readonly createdAt: Date
   readonly expiresAt: Date
 }
 
-/** An address a version embeds, and the version of its target a frame shows. */
+/** An address a version embeds, and the version of its target a frame shows, at its revision. */
 export interface ArtifactFrameTarget {
   readonly address: string
   readonly artifactId: string
   readonly version: number
+  readonly revision: number
 }
 
 export interface FindArtifactFrameGrantInput {
@@ -191,11 +303,6 @@ export interface DeleteExpiredArtifactFrameGrantsInput {
   readonly projectId: string
   readonly expiredBefore: Date
   readonly limit: number
-}
-
-export interface DeleteArtifactVersionsByOriginInput {
-  readonly projectId: string
-  readonly runId: string
 }
 
 /** Whose values, kept by which artifact: a page keeps its own for each reader. */
@@ -262,18 +369,45 @@ export interface PutArtifactBoardPreviewsInput {
  */
 export interface ArtifactStorage {
   /**
-   * Creates the artifact with its first version, shared in its origin's thread. Throws
+   * Creates the artifact with its first version, open, shared in its origin's thread. Throws
    * `artifact_exists` when the id is taken.
    */
   create(input: CreateArtifactInput): Promise<PublishedArtifactVersion>
   /**
-   * Stores the next version and makes it the latest, sharing the artifact in its origin's thread.
-   * Throws `artifact_not_found`, `artifact_kind_mismatch`, or `artifact_moved` with the latest version and its author when
-   * `baseVersion` is not the latest, checked in the same transaction as the write, so of two
-   * publishes from one base only the first is stored. A version number is never reused, even
-   * after its version is deleted.
+   * Writes the latest version's content: in place while it is open, or as the next version, open,
+   * when it is frozen. Either way the revision grows, and the artifact is shared in its origin's
+   * thread. A turn's first write keeps a restore point of the latest version first.
+   *
+   * Throws `artifact_not_found`, `artifact_kind_mismatch`, or `artifact_moved` with the latest
+   * version, the revision and who last wrote it when `baseRevision` is not the artifact's,
+   * checked in the same transaction as the write, so of two writes from one base only the first is
+   * stored. A version number is never reused, even after its version is deleted.
    */
   publish(input: PublishArtifactVersionInput): Promise<PublishedArtifactVersion>
+  /**
+   * Freezes the open latest version, at a new revision: the next write opens the next version.
+   * A frozen latest version is returned as it is, whatever `baseRevision` says. Throws
+   * `artifact_not_found`, or `artifact_moved` when the open version changed past `baseRevision`.
+   */
+  freeze(input: FreezeArtifactVersionInput): Promise<PublishedArtifactVersion>
+  /** Newest first: each artifact keeps its last `ARTIFACT_RESTORE_POINTS`. */
+  listRestorePoints(input: GetArtifactInput): Promise<ArtifactRestorePointRecord[]>
+  getRestorePoint(input: GetArtifactRestorePointInput): Promise<ArtifactRestorePointRecord | null>
+  /**
+   * Writes a restore point's content to the latest version, as `publish` writes, after
+   * keeping a restore point of what it replaces, so the restore can be undone. Throws
+   * `artifact_not_found`, `restore_point_not_found`, or `artifact_moved` past `baseRevision`.
+   */
+  restoreTo(input: RestoreArtifactInput): Promise<PublishedArtifactVersion>
+  /** The artifacts a turn wrote, its sub-agents' writes among them, by artifact id. */
+  listTurnWrites(input: ArtifactTurnInput): Promise<ArtifactTurnWriteRecord[]>
+  /**
+   * Undoes what a turn wrote, for a retry of it: an artifact nobody changed since the turn's last
+   * write is put back as its restore point holds it, and deleted when the turn created it; one that
+   * changed since keeps the changes. The turn's restore points and writes are forgotten, and the
+   * threads it alone shared an artifact in no longer share it, unless it was copied for them.
+   */
+  undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn>
   get(input: GetArtifactInput): Promise<ArtifactRecord | null>
   /** Most recently updated first. */
   list(input: ListArtifactsInput): Promise<ListArtifactsResult>
@@ -281,15 +415,16 @@ export interface ArtifactStorage {
   /** Newest first. */
   listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult>
   /**
-   * The threads the artifact is shared in, by id: each one a version it keeps was published from,
-   * and the one it was copied for.
+   * The threads the artifact is shared in, by id: each one it was written from, and the one it was
+   * copied for.
    */
   listThreadIds(input: GetArtifactInput): Promise<string[]>
   /**
-   * Copies an artifact with every version under its number, each without its origin, as a new
-   * artifact shared in `threadId` for as long as it lasts: a fork's copy, whose `@N` addresses
-   * still resolve. The files are reused, not copied. Throws `artifact_not_found` without the
-   * source and `artifact_exists` when the id is taken.
+   * Copies an artifact with every version under its number, frozen or open as it is, each without
+   * its origin, as a new artifact shared in `threadId` for as long as it lasts: a fork's copy,
+   * whose `@N` addresses still resolve. Its restore points stay with the source. The files are
+   * reused, not copied. Throws `artifact_not_found` without the source and `artifact_exists` when
+   * the id is taken.
    */
   copy(input: CopyArtifactInput): Promise<ArtifactRecord>
   /**
@@ -325,14 +460,8 @@ export interface ArtifactStorage {
    */
   putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void>
   /**
-   * Deletes the artifact, every version, its frame grants, and what it keeps for its readers.
-   * `false` when it does not exist.
+   * Deletes the artifact, every version, its restore points, its frame grants, and what it keeps
+   * for its readers. `false` when it does not exist.
    */
   delete(input: DeleteArtifactInput): Promise<boolean>
-  /**
-   * Deletes the versions a run published and returns how many. An artifact left without versions
-   * is deleted; one that lost its latest version points at its newest remaining one. One left
-   * without a version from the run's thread is no longer shared there, unless it was copied for it.
-   */
-  deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number>
 }

@@ -1,31 +1,39 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite"
 import {
+  ARTIFACT_RESTORE_POINTS,
   artifactStateBytes,
   artifactStorageErrors,
   checkArtifactStateWrite,
   parseArtifactBoardPreviewRow,
   parseArtifactFrameGrantRow,
+  parseArtifactRestorePointRow,
   parseArtifactRow,
   parseArtifactStateRow,
+  parseArtifactTurnWriteRow,
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactBoardPreviewRecord,
   ArtifactFrameGrantRecord,
   ArtifactRecord,
+  ArtifactRestorePointReason,
+  ArtifactRestorePointRecord,
   ArtifactStateEntry,
   ArtifactStateKeyInput,
   ArtifactStateScope,
   ArtifactStorage,
+  ArtifactTurnInput,
+  ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
-  DeleteArtifactVersionsByOriginInput,
   DeleteExpiredArtifactFrameGrantsInput,
   FindArtifactFrameGrantInput,
+  FreezeArtifactVersionInput,
   GetArtifactInput,
+  GetArtifactRestorePointInput,
   GetArtifactVersionInput,
   ListArtifactBoardPreviewsInput,
   ListArtifactsInput,
@@ -36,25 +44,40 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   PutArtifactBoardPreviewsInput,
+  RestoreArtifactInput,
   SetArtifactStateInput,
+  UndoneArtifactTurn,
 } from "@sixb/core/storage"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
 const ARTIFACT_COLUMNS = `
   project_id AS projectId, id, kind, title,
   owner_principal_type AS ownerPrincipalType, owner_principal_id AS ownerPrincipalId,
-  latest_version AS latestVersion, created_at AS createdAt, updated_at AS updatedAt
+  latest_version AS latestVersion, revision, created_at AS createdAt, updated_at AS updatedAt
+`
+
+/** What a version and a restore point both hold, and who last wrote it from where. */
+const CONTENT_COLUMNS = `
+  title, entry, files, outline, refs, author_principal_type AS authorPrincipalType,
+  author_principal_id AS authorPrincipalId, origin_thread_id AS originThreadId,
+  origin_run_id AS originRunId, updated_at AS updatedAt
 `
 
 const VERSION_COLUMNS = `
-  project_id AS projectId, artifact_id AS artifactId, version, title, entry, files, outline, refs,
-  author_principal_type AS authorPrincipalType, author_principal_id AS authorPrincipalId,
-  origin_thread_id AS originThreadId, origin_run_id AS originRunId, created_at AS createdAt
+  project_id AS projectId, artifact_id AS artifactId, version, revision, ${CONTENT_COLUMNS},
+  created_at AS createdAt, frozen_at AS frozenAt
 `
 
+const RESTORE_POINT_COLUMNS = `
+  project_id AS projectId, artifact_id AS artifactId, revision, version, frozen,
+  ${CONTENT_COLUMNS}, reason, turn_run_id AS turnRunId, created_at AS createdAt
+`
+
+const TURN_WRITE_COLUMNS = "artifact_id AS artifactId, created, revision"
+
 const FRAME_GRANT_COLUMNS = `
-  project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId, version, targets,
-  created_at AS createdAt, expires_at AS expiresAt
+  project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId, version, revision,
+  targets, created_at AS createdAt, expires_at AS expiresAt
 `
 
 const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS updatedAt"
@@ -80,13 +103,14 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     return runImmediateTransaction(this.db, () => {
-      const createdAt = input.version.createdAt.toISOString()
+      const content = input.version
+      const createdAt = content.updatedAt.toISOString()
       const artifact = this.db
         .query(
           `INSERT INTO artifacts (
             project_id, id, kind, title, owner_principal_type, owner_principal_id,
-            latest_version, next_version, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, ?, ?)
+            latest_version, next_version, revision, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, 1, ?, ?)
           ON CONFLICT (project_id, id) DO NOTHING
           RETURNING ${ARTIFACT_COLUMNS}`
         )
@@ -94,73 +118,207 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.projectId,
           input.id,
           input.kind,
-          input.version.title,
+          content.title,
           input.owner.type,
           input.owner.id,
           createdAt,
           createdAt
         ) as Row | null
       if (!artifact) throw artifactStorageErrors.exists(input.id)
-      return {
-        artifact: parseArtifactRow(artifact),
-        version: this.insertVersion(input.projectId, input.id, 1, input.version),
+
+      const version = this.insertVersion({
+        projectId: input.projectId,
+        artifactId: input.id,
+        version: 1,
+        revision: 1,
+        content,
+      })
+      this.shareIn(input.projectId, input.id, content, input.turnRunId)
+      if (input.turnRunId) {
+        this.recordTurnWrite({
+          projectId: input.projectId,
+          artifactId: input.id,
+          turnRunId: input.turnRunId,
+          created: true,
+          revision: 1,
+        })
       }
+
+      return { artifact: parseArtifactRow(artifact), version }
     })
   }
 
   async publish(input: PublishArtifactVersionInput): Promise<PublishedArtifactVersion> {
     return runImmediateTransaction(this.db, () => {
-      const current = this.db
-        .query(
-          `SELECT kind, next_version AS nextVersion, latest_version AS latestVersion
-           FROM artifacts WHERE project_id = ? AND id = ?`
-        )
-        .get(input.projectId, input.artifactId) as {
-        readonly kind: ArtifactRecord["kind"]
-        readonly nextVersion: number
-        readonly latestVersion: number
-      } | null
+      const current = this.readArtifact(input.projectId, input.artifactId)
       if (!current) throw artifactStorageErrors.notFound(input.artifactId)
-      if (current.kind !== input.kind) {
-        throw artifactStorageErrors.kindMismatch(input.artifactId, current.kind, input.kind)
+      const { artifact } = current
+      if (artifact.kind !== input.kind) {
+        throw artifactStorageErrors.kindMismatch(input.artifactId, artifact.kind, input.kind)
       }
-      // Inside the write transaction: a publish from the same base after this one finds it moved.
-      if (input.baseVersion !== undefined && current.latestVersion !== input.baseVersion) {
-        const latest = parseArtifactVersionRow(
-          this.db
-            .query(
-              `SELECT ${VERSION_COLUMNS} FROM artifact_versions
-               WHERE project_id = ? AND artifact_id = ? AND version = ?`
-            )
-            .get(input.projectId, input.artifactId, current.latestVersion) as Row
-        )
-        throw artifactStorageErrors.moved(input.artifactId, input.baseVersion, {
-          version: latest.version,
-          author: latest.author,
+
+      // Inside the write transaction: a write from the same base after this one finds it moved.
+      const latest = this.latestVersion(artifact)
+      assertBase(artifact, latest, input.baseRevision)
+
+      // A turn's first write keeps what it replaces, so the turn can be undone.
+      const { turnRunId } = input
+      if (turnRunId && !this.turnWrote(artifact, turnRunId)) {
+        this.keepRestorePoint(latest, {
+          reason: "turn",
+          turnRunId,
+          createdAt: input.version.updatedAt,
         })
       }
-      const version = this.insertVersion(
-        input.projectId,
-        input.artifactId,
-        current.nextVersion,
-        input.version
-      )
-      const artifact = this.db
+
+      const written = this.writeLatest(current, latest, input.version)
+      this.shareIn(input.projectId, input.artifactId, input.version, turnRunId)
+      if (turnRunId) {
+        this.recordTurnWrite({
+          projectId: input.projectId,
+          artifactId: input.artifactId,
+          turnRunId,
+          created: false,
+          revision: written.artifact.revision,
+        })
+      }
+
+      return written
+    })
+  }
+
+  async freeze(input: FreezeArtifactVersionInput): Promise<PublishedArtifactVersion> {
+    return runImmediateTransaction(this.db, () => {
+      const current = this.readArtifact(input.projectId, input.artifactId)
+      if (!current) throw artifactStorageErrors.notFound(input.artifactId)
+      const { artifact } = current
+
+      const latest = this.latestVersion(artifact)
+      if (latest.frozenAt) return { artifact, version: latest }
+      assertBase(artifact, latest, input.baseRevision)
+
+      const revision = artifact.revision + 1
+      const frozenAt = input.frozenAt.toISOString()
+      const version = this.db
         .query(
-          `UPDATE artifacts
-           SET title = ?, latest_version = ?, next_version = ?, updated_at = ?
-           WHERE project_id = ? AND id = ?
+          `UPDATE artifact_versions SET revision = ?, frozen_at = ?
+           WHERE project_id = ? AND artifact_id = ? AND version = ?
+           RETURNING ${VERSION_COLUMNS}`
+        )
+        .get(revision, frozenAt, input.projectId, input.artifactId, latest.version) as Row
+      const updated = this.db
+        .query(
+          `UPDATE artifacts SET revision = ?, updated_at = ? WHERE project_id = ? AND id = ?
            RETURNING ${ARTIFACT_COLUMNS}`
         )
-        .get(
-          input.version.title,
-          version.version,
-          version.version + 1,
-          input.version.createdAt.toISOString(),
-          input.projectId,
-          input.artifactId
-        ) as Row
-      return { artifact: parseArtifactRow(artifact), version }
+        .get(revision, frozenAt, input.projectId, input.artifactId) as Row
+      return { artifact: parseArtifactRow(updated), version: parseArtifactVersionRow(version) }
+    })
+  }
+
+  async listRestorePoints(input: GetArtifactInput): Promise<ArtifactRestorePointRecord[]> {
+    const rows = this.db
+      .query(
+        `SELECT ${RESTORE_POINT_COLUMNS} FROM artifact_restore_points
+         WHERE project_id = ? AND artifact_id = ? ORDER BY revision DESC`
+      )
+      .all(input.projectId, input.id) as Row[]
+    return rows.map(parseArtifactRestorePointRow)
+  }
+
+  async getRestorePoint(
+    input: GetArtifactRestorePointInput
+  ): Promise<ArtifactRestorePointRecord | null> {
+    return this.readRestorePoint(input.projectId, input.artifactId, input.revision)
+  }
+
+  async restoreTo(input: RestoreArtifactInput): Promise<PublishedArtifactVersion> {
+    return runImmediateTransaction(this.db, () => {
+      const current = this.readArtifact(input.projectId, input.artifactId)
+      if (!current) throw artifactStorageErrors.notFound(input.artifactId)
+      const { artifact } = current
+
+      const point = this.readRestorePoint(input.projectId, input.artifactId, input.revision)
+      if (!point) throw artifactStorageErrors.restorePointNotFound(input.artifactId, input.revision)
+
+      const latest = this.latestVersion(artifact)
+      assertBase(artifact, latest, input.baseRevision)
+
+      // What the restore replaces is kept first, so the restore can be undone.
+      this.keepRestorePoint(latest, { reason: "restore", createdAt: input.restoredAt })
+      return this.writeLatest(current, latest, {
+        title: point.title,
+        entry: point.entry,
+        files: point.files,
+        outline: point.outline,
+        references: point.references,
+        author: input.author,
+        updatedAt: input.restoredAt,
+      })
+    })
+  }
+
+  async listTurnWrites(input: ArtifactTurnInput): Promise<ArtifactTurnWriteRecord[]> {
+    const rows = this.db
+      .query(
+        `SELECT ${TURN_WRITE_COLUMNS} FROM artifact_turn_writes
+         WHERE project_id = ? AND turn_run_id = ? ORDER BY artifact_id`
+      )
+      .all(input.projectId, input.turnRunId) as Row[]
+    return rows.map(parseArtifactTurnWriteRow)
+  }
+
+  async undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn> {
+    return runImmediateTransaction(this.db, () => {
+      const { projectId, turnRunId } = input
+
+      // The writes nobody changed the artifact past: the write transaction holds every other.
+      const writes = this.db
+        .query(
+          `SELECT w.artifact_id AS artifactId, w.created, w.revision
+           FROM artifact_turn_writes w
+           JOIN artifacts a ON a.project_id = w.project_id AND a.id = w.artifact_id
+           WHERE w.project_id = ? AND w.turn_run_id = ? AND a.revision = w.revision
+           ORDER BY w.artifact_id`
+        )
+        .all(projectId, turnRunId) as Row[]
+
+      const restored: PublishedArtifactVersion[] = []
+      const deleted: string[] = []
+      for (const write of writes.map(parseArtifactTurnWriteRow)) {
+        if (write.created) {
+          this.db
+            .query("DELETE FROM artifacts WHERE project_id = ? AND id = ?")
+            .run(projectId, write.artifactId)
+          deleted.push(write.artifactId)
+          continue
+        }
+
+        const undone = this.undoTurn(projectId, write.artifactId, turnRunId)
+        if (!undone) continue
+
+        restored.push(undone)
+        // Undone to it, the turn's restore point is what the artifact holds again.
+        this.db
+          .query(
+            `DELETE FROM artifact_restore_points
+             WHERE project_id = ? AND artifact_id = ? AND turn_run_id = ?`
+          )
+          .run(projectId, write.artifactId, turnRunId)
+      }
+
+      // What else the turn left: its writes, and its links.
+      this.db
+        .query("DELETE FROM artifact_turn_writes WHERE project_id = ? AND turn_run_id = ?")
+        .run(projectId, turnRunId)
+      this.db
+        .query(
+          `DELETE FROM artifact_threads
+           WHERE project_id = ? AND linked_by_run_id = ? AND copied = 0`
+        )
+        .run(projectId, turnRunId)
+
+      return { restored, deleted }
     })
   }
 
@@ -283,10 +441,10 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifacts (
             project_id, id, kind, title, owner_principal_type, owner_principal_id,
-            latest_version, next_version, created_at, updated_at
+            latest_version, next_version, revision, created_at, updated_at
           )
-          SELECT project_id, ?, kind, title, ?, ?, latest_version, next_version, created_at,
-                 updated_at
+          SELECT project_id, ?, kind, title, ?, ?, latest_version, next_version, revision,
+                 created_at, updated_at
           FROM artifacts WHERE project_id = ? AND id = ?
           ON CONFLICT (project_id, id) DO NOTHING
           RETURNING ${ARTIFACT_COLUMNS}`
@@ -303,11 +461,11 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       this.db
         .query(
           `INSERT INTO artifact_versions (
-            project_id, artifact_id, version, title, entry, files, outline, refs,
-            author_principal_type, author_principal_id, created_at
+            project_id, artifact_id, version, revision, title, entry, files, outline, refs,
+            author_principal_type, author_principal_id, created_at, updated_at, frozen_at
           )
-          SELECT project_id, ?, version, title, entry, files, outline, refs,
-                 author_principal_type, author_principal_id, created_at
+          SELECT project_id, ?, version, revision, title, entry, files, outline, refs,
+                 author_principal_type, author_principal_id, created_at, updated_at, frozen_at
           FROM artifact_versions WHERE project_id = ? AND artifact_id = ?`
         )
         .run(input.id, input.projectId, input.sourceId)
@@ -353,14 +511,16 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       this.db
         .query(
           `INSERT INTO artifact_frame_grants
-             (project_id, token_hash, artifact_id, version, targets, created_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+             (project_id, token_hash, artifact_id, version, revision, targets, created_at,
+              expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           record.projectId,
           record.tokenHash,
           record.artifactId,
           record.version,
+          record.revision,
           JSON.stringify(record.targets),
           record.createdAt.toISOString(),
           record.expiresAt.toISOString()
@@ -483,7 +643,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
   }
 
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    // Versions, frame grants, and state go with the artifact through ON DELETE CASCADE.
+    // Versions, restore points, turn writes, thread links, frame grants, and state go with the
+    // artifact through ON DELETE CASCADE.
     return (
       this.db
         .query("DELETE FROM artifacts WHERE project_id = ? AND id = ?")
@@ -491,121 +652,374 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     )
   }
 
-  async deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number> {
-    return runImmediateTransaction(this.db, () => {
-      const affected = this.db
-        .query(
-          `SELECT DISTINCT artifact_id AS artifactId FROM artifact_versions
-           WHERE project_id = ? AND origin_run_id = ?`
-        )
-        .all(input.projectId, input.runId) as { readonly artifactId: string }[]
-      const deleted = this.db
-        .query(
-          `DELETE FROM artifact_versions WHERE project_id = ? AND origin_run_id = ?
-           RETURNING origin_thread_id AS threadId`
-        )
-        .all(input.projectId, input.runId) as { readonly threadId: string }[]
-      // A run publishes from one thread: its artifacts stay shared there only while a version
-      // from it remains, or when they were copied for it.
-      const threadId = deleted[0]?.threadId
-      for (const { artifactId } of affected) {
-        this.db
-          .query(
-            `DELETE FROM artifact_threads
-             WHERE project_id = ? AND artifact_id = ? AND thread_id = ? AND copied = 0
-               AND NOT EXISTS (
-                 SELECT 1 FROM artifact_versions
-                 WHERE project_id = ? AND artifact_id = ? AND origin_thread_id = ?
-               )`
-          )
-          .run(
-            input.projectId,
-            artifactId,
-            threadId ?? null,
-            input.projectId,
-            artifactId,
-            threadId ?? null
-          )
-        this.repointLatest(input.projectId, artifactId)
-      }
-      return deleted.length
-    })
-  }
-
-  /** Point an artifact at its newest remaining version, or delete it when none remains. */
-  private repointLatest(projectId: string, artifactId: string): void {
-    const latest = this.db
-      .query(
-        `SELECT version, title, created_at AS createdAt FROM artifact_versions
-         WHERE project_id = ? AND artifact_id = ? ORDER BY version DESC LIMIT 1`
-      )
-      .get(projectId, artifactId) as {
-      readonly version: number
-      readonly title: string
-      readonly createdAt: string
-    } | null
-    if (!latest) {
-      this.db
-        .query("DELETE FROM artifacts WHERE project_id = ? AND id = ?")
-        .run(projectId, artifactId)
-      return
-    }
-    this.db
-      .query(
-        `UPDATE artifacts SET title = ?, latest_version = ?, updated_at = ?
-         WHERE project_id = ? AND id = ?`
-      )
-      .run(latest.title, latest.version, latest.createdAt, projectId, artifactId)
-  }
-
-  private insertVersion(
+  /** The artifact, and the number its next version takes. */
+  private readArtifact(
     projectId: string,
-    artifactId: string,
-    version: number,
-    input: ArtifactVersionInput
-  ): ArtifactVersionRecord {
+    artifactId: string
+  ): { readonly artifact: ArtifactRecord; readonly nextVersion: number } | null {
     const row = this.db
       .query(
-        `INSERT INTO artifact_versions (
-          project_id, artifact_id, version, title, entry, files, outline, refs,
-          author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING ${VERSION_COLUMNS}`
+        `SELECT ${ARTIFACT_COLUMNS}, next_version AS nextVersion FROM artifacts
+         WHERE project_id = ? AND id = ?`
       )
-      .get(
-        projectId,
-        artifactId,
-        version,
-        input.title,
-        input.entry,
-        JSON.stringify(input.files),
-        JSON.stringify(input.outline),
-        JSON.stringify(input.references),
-        input.author.type,
-        input.author.id,
-        input.origin?.threadId ?? null,
-        input.origin?.runId ?? null,
-        input.createdAt.toISOString()
-      ) as Row
-    if (input.origin) {
-      this.linkThread(projectId, artifactId, input.origin.threadId, input.createdAt)
-    }
+      .get(projectId, artifactId) as Row | null
+    return row ? { artifact: parseArtifactRow(row), nextVersion: Number(row.nextVersion) } : null
+  }
+
+  private latestVersion(artifact: ArtifactRecord): ArtifactVersionRecord {
+    const row = this.db
+      .query(
+        `SELECT ${VERSION_COLUMNS} FROM artifact_versions
+         WHERE project_id = ? AND artifact_id = ? AND version = ?`
+      )
+      .get(artifact.projectId, artifact.id, artifact.latestVersion) as Row | null
+    if (!row)
+      throw new Error(`[SixbSqliteStorage] Artifact '${artifact.id}' has no latest version.`)
     return parseArtifactVersionRow(row)
   }
 
-  /** Shares an artifact in a thread, keeping when it was first shared there. */
-  private linkThread(
+  private readRestorePoint(
     projectId: string,
     artifactId: string,
-    threadId: string,
-    sharedAt: Date
+    revision: number
+  ): ArtifactRestorePointRecord | null {
+    const row = this.db
+      .query(
+        `SELECT ${RESTORE_POINT_COLUMNS} FROM artifact_restore_points
+         WHERE project_id = ? AND artifact_id = ? AND revision = ?`
+      )
+      .get(projectId, artifactId, revision) as Row | null
+    return row ? parseArtifactRestorePointRow(row) : null
+  }
+
+  /**
+   * Writes content to the latest version: in place while it is open, as the next version when it
+   * is frozen. The artifact takes the next revision.
+   */
+  private writeLatest(
+    { artifact, nextVersion }: { readonly artifact: ArtifactRecord; readonly nextVersion: number },
+    latest: ArtifactVersionRecord,
+    content: ArtifactVersionInput
+  ): PublishedArtifactVersion {
+    const { projectId, id: artifactId } = artifact
+    const revision = artifact.revision + 1
+    const updatedAt = content.updatedAt.toISOString()
+
+    if (latest.frozenAt) {
+      const version = this.insertVersion({
+        projectId,
+        artifactId,
+        version: nextVersion,
+        revision,
+        content,
+      })
+      const row = this.db
+        .query(
+          `UPDATE artifacts
+           SET title = ?, latest_version = ?, next_version = ?, revision = ?, updated_at = ?
+           WHERE project_id = ? AND id = ?
+           RETURNING ${ARTIFACT_COLUMNS}`
+        )
+        .get(
+          content.title,
+          version.version,
+          version.version + 1,
+          revision,
+          updatedAt,
+          projectId,
+          artifactId
+        ) as Row
+      return { artifact: parseArtifactRow(row), version }
+    }
+
+    const version = this.replaceContent({
+      projectId,
+      artifactId,
+      version: latest.version,
+      revision,
+      content,
+    })
+    const row = this.db
+      .query(
+        `UPDATE artifacts SET title = ?, revision = ?, updated_at = ?
+         WHERE project_id = ? AND id = ?
+         RETURNING ${ARTIFACT_COLUMNS}`
+      )
+      .get(content.title, revision, updatedAt, projectId, artifactId) as Row
+    return { artifact: parseArtifactRow(row), version }
+  }
+
+  /** Replaces an open version's content, at a new revision. */
+  private replaceContent(input: {
+    readonly projectId: string
+    readonly artifactId: string
+    readonly version: number
+    readonly revision: number
+    readonly content: ArtifactVersionInput
+  }): ArtifactVersionRecord {
+    const { content } = input
+    const row = this.db
+      .query(
+        `UPDATE artifact_versions
+         SET revision = ?, title = ?, entry = ?, files = ?, outline = ?, refs = ?,
+             author_principal_type = ?, author_principal_id = ?, origin_thread_id = ?,
+             origin_run_id = ?, updated_at = ?
+         WHERE project_id = ? AND artifact_id = ? AND version = ?
+         RETURNING ${VERSION_COLUMNS}`
+      )
+      .get(
+        input.revision,
+        content.title,
+        content.entry,
+        JSON.stringify(content.files),
+        JSON.stringify(content.outline),
+        JSON.stringify(content.references),
+        content.author.type,
+        content.author.id,
+        content.origin?.threadId ?? null,
+        content.origin?.runId ?? null,
+        content.updatedAt.toISOString(),
+        input.projectId,
+        input.artifactId,
+        input.version
+      ) as Row
+    return parseArtifactVersionRow(row)
+  }
+
+  private insertVersion(input: {
+    readonly projectId: string
+    readonly artifactId: string
+    readonly version: number
+    readonly revision: number
+    readonly content: ArtifactVersionInput
+  }): ArtifactVersionRecord {
+    const { content } = input
+    const writtenAt = content.updatedAt.toISOString()
+    const row = this.db
+      .query(
+        `INSERT INTO artifact_versions (
+          project_id, artifact_id, version, revision, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, origin_thread_id, origin_run_id,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING ${VERSION_COLUMNS}`
+      )
+      .get(
+        input.projectId,
+        input.artifactId,
+        input.version,
+        input.revision,
+        content.title,
+        content.entry,
+        JSON.stringify(content.files),
+        JSON.stringify(content.outline),
+        JSON.stringify(content.references),
+        content.author.type,
+        content.author.id,
+        content.origin?.threadId ?? null,
+        content.origin?.runId ?? null,
+        writtenAt,
+        writtenAt
+      ) as Row
+    return parseArtifactVersionRow(row)
+  }
+
+  /** Keeps a restore point of the latest version, and forgets the oldest past those kept. */
+  private keepRestorePoint(
+    latest: ArtifactVersionRecord,
+    input: {
+      readonly reason: ArtifactRestorePointReason
+      readonly turnRunId?: string
+      readonly createdAt: Date
+    }
   ): void {
+    const { projectId, artifactId } = latest
     this.db
       .query(
-        `INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO artifact_restore_points (
+          project_id, artifact_id, revision, version, frozen, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, origin_thread_id, origin_run_id,
+          updated_at, reason, turn_run_id, created_at
+        )
+        SELECT project_id, artifact_id, revision, version, frozen_at IS NOT NULL, title, entry,
+               files, outline, refs, author_principal_type, author_principal_id,
+               origin_thread_id, origin_run_id, updated_at, ?, ?, ?
+        FROM artifact_versions WHERE project_id = ? AND artifact_id = ? AND version = ?`
+      )
+      .run(
+        input.reason,
+        input.turnRunId ?? null,
+        input.createdAt.toISOString(),
+        projectId,
+        artifactId,
+        latest.version
+      )
+    this.db
+      .query(
+        `DELETE FROM artifact_restore_points
+         WHERE project_id = ? AND artifact_id = ? AND revision NOT IN (
+           SELECT revision FROM artifact_restore_points
+           WHERE project_id = ? AND artifact_id = ? ORDER BY revision DESC LIMIT ?
+         )`
+      )
+      .run(projectId, artifactId, projectId, artifactId, ARTIFACT_RESTORE_POINTS)
+  }
+
+  /** Whether a turn wrote the artifact already. */
+  private turnWrote(artifact: ArtifactRecord, turnRunId: string): boolean {
+    return (
+      this.db
+        .query(
+          `SELECT 1 FROM artifact_turn_writes
+           WHERE project_id = ? AND artifact_id = ? AND turn_run_id = ?`
+        )
+        .get(artifact.projectId, artifact.id, turnRunId) !== null
+    )
+  }
+
+  /** Remembers the revision a turn's write left, and forgets the oldest turns past those kept. */
+  private recordTurnWrite(input: {
+    readonly projectId: string
+    readonly artifactId: string
+    readonly turnRunId: string
+    readonly created: boolean
+    readonly revision: number
+  }): void {
+    const { projectId, artifactId } = input
+    this.db
+      .query(
+        `INSERT INTO artifact_turn_writes (project_id, artifact_id, turn_run_id, created, revision)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, artifact_id, turn_run_id) DO UPDATE SET
+           revision = excluded.revision`
+      )
+      .run(projectId, artifactId, input.turnRunId, input.created ? 1 : 0, input.revision)
+    this.db
+      .query(
+        `DELETE FROM artifact_turn_writes
+         WHERE project_id = ? AND artifact_id = ? AND turn_run_id NOT IN (
+           SELECT turn_run_id FROM artifact_turn_writes
+           WHERE project_id = ? AND artifact_id = ? ORDER BY revision DESC LIMIT ?
+         )`
+      )
+      .run(projectId, artifactId, projectId, artifactId, ARTIFACT_RESTORE_POINTS)
+  }
+
+  /**
+   * Puts an artifact back as the turn's restore point holds it, at a new revision: an open version
+   * takes its content back, and a version the turn opened past a frozen one goes. `null` when the
+   * turn kept no restore point of it, or its version is gone.
+   */
+  private undoTurn(
+    projectId: string,
+    artifactId: string,
+    turnRunId: string
+  ): PublishedArtifactVersion | null {
+    const row = this.db
+      .query(
+        `SELECT ${RESTORE_POINT_COLUMNS} FROM artifact_restore_points
+         WHERE project_id = ? AND artifact_id = ? AND turn_run_id = ?`
+      )
+      .get(projectId, artifactId, turnRunId) as Row | null
+    if (!row) return null
+    const point = parseArtifactRestorePointRow(row)
+
+    const current = this.readArtifact(projectId, artifactId)
+    const kept = this.db
+      .query(
+        "SELECT 1 FROM artifact_versions WHERE project_id = ? AND artifact_id = ? AND version = ?"
+      )
+      .get(projectId, artifactId, point.version)
+    if (!current || !kept) return null
+    const revision = current.artifact.revision + 1
+
+    this.db
+      .query(
+        "DELETE FROM artifact_versions WHERE project_id = ? AND artifact_id = ? AND version > ?"
+      )
+      .run(projectId, artifactId, point.version)
+    const at = { projectId, artifactId, version: point.version, revision }
+    const undone = point.frozen
+      ? parseArtifactVersionRow(
+          this.db
+            .query(
+              `UPDATE artifact_versions SET revision = ?
+               WHERE project_id = ? AND artifact_id = ? AND version = ?
+               RETURNING ${VERSION_COLUMNS}`
+            )
+            .get(revision, projectId, artifactId, point.version) as Row
+        )
+      : this.replaceContent({
+          ...at,
+          content: {
+            title: point.title,
+            entry: point.entry,
+            files: point.files,
+            outline: point.outline,
+            references: point.references,
+            author: point.author,
+            ...(point.origin ? { origin: point.origin } : {}),
+            updatedAt: point.updatedAt,
+          },
+        })
+    // As it was before the turn: when its content was written, or when it was frozen.
+    const updatedAt = new Date(
+      Math.max(undone.updatedAt.getTime(), undone.frozenAt?.getTime() ?? 0)
+    )
+
+    const artifact = this.db
+      .query(
+        `UPDATE artifacts SET title = ?, latest_version = ?, revision = ?, updated_at = ?
+         WHERE project_id = ? AND id = ?
+         RETURNING ${ARTIFACT_COLUMNS}`
+      )
+      .get(
+        undone.title,
+        undone.version,
+        revision,
+        updatedAt.toISOString(),
+        projectId,
+        artifactId
+      ) as Row
+    return { artifact: parseArtifactRow(artifact), version: undone }
+  }
+
+  /** Shares an artifact in its origin's thread, keeping when, and by which turn, it was first. */
+  private shareIn(
+    projectId: string,
+    artifactId: string,
+    content: ArtifactVersionInput,
+    turnRunId: string | undefined
+  ): void {
+    if (!content.origin) return
+
+    this.db
+      .query(
+        `INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at, linked_by_run_id)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (project_id, artifact_id, thread_id) DO NOTHING`
       )
-      .run(projectId, artifactId, threadId, sharedAt.toISOString())
+      .run(
+        projectId,
+        artifactId,
+        content.origin.threadId,
+        content.updatedAt.toISOString(),
+        turnRunId ?? null
+      )
   }
+}
+
+/** Refuses a write made from a revision the artifact has moved past. */
+function assertBase(
+  artifact: ArtifactRecord,
+  latest: ArtifactVersionRecord,
+  baseRevision: number | undefined
+): void {
+  if (baseRevision === undefined || baseRevision === artifact.revision) return
+
+  throw artifactStorageErrors.moved(artifact.id, baseRevision, {
+    version: latest.version,
+    revision: artifact.revision,
+    author: latest.author,
+  })
 }
