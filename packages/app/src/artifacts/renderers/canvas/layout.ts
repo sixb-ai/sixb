@@ -1,5 +1,5 @@
 import type { Canvas, CanvasArrow, CanvasEnd, CanvasItem } from "@sixb/core/artifacts"
-import { CANVAS_TEXT_PIXELS } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, CANVAS_TEXT_PIXELS } from "@sixb/core/artifacts"
 import type { Edge, Node } from "@xyflow/react"
 
 /** What a node on the board draws: one of the canvas's items, or an arrow's end at a point. */
@@ -23,11 +23,26 @@ export interface Box {
   readonly height: number
 }
 
+/** Over every item: an arrow to a point on a board shows on it. */
+const ARROW_Z_INDEX = ARTIFACT_LIMITS.maxCanvasItems + 1
+
+/** What an item drew as, at the place it had in the canvas's order. */
+interface Drawn {
+  readonly order: number
+  readonly nodes: readonly CanvasFlowNode[]
+  readonly edges: readonly CanvasFlowEdge[]
+}
+
+const drawn = new WeakMap<CanvasItem, Drawn>()
+
 /**
  * The canvas as React Flow's nodes and edges. Each item is a node of its type at its place and
  * size; a note and a text without a width are measured once drawn. Sections draw
  * behind everything, the rest in the order the canvas lists them. An arrow is an edge between two
  * items, drawn over them all, and its end at a bare point is an invisible node there.
+ *
+ * An item that is the same object as before, at the same place in the order, draws as the same
+ * nodes and edge: React Flow draws again only what changed.
  */
 export function canvasGraph(canvas: Canvas): {
   readonly nodes: CanvasFlowNode[]
@@ -36,55 +51,71 @@ export function canvasGraph(canvas: Canvas): {
   const nodes: CanvasFlowNode[] = []
   const edges: CanvasFlowEdge[] = []
   canvas.items.forEach((item, order) => {
-    if (item.type === "arrow") {
-      const end = (side: "from" | "to", value: CanvasEnd) => {
-        if (typeof value === "string") return value
-        const id = `${item.id}:${side}`
-        nodes.push({
-          id,
-          type: "point",
-          position: { x: value.x, y: value.y },
-          width: 1,
-          height: 1,
-          data: { item: null },
-          selectable: false,
-          focusable: false,
-        })
-        return id
-      }
-      edges.push({
-        id: item.id,
-        type: "floating",
-        source: end("from", item.from),
-        target: end("to", item.to),
-        data: { ...(item.label ? { label: item.label } : {}), dashed: item.dashed },
-        // Over every item: an arrow to a point on a board shows on it.
-        zIndex: canvas.items.length,
-        focusable: false,
-        selectable: false,
-      })
-      return
+    let entry = drawn.get(item)
+    if (!entry || entry.order !== order) {
+      entry = { order, ...itemGraph(item, order) }
+      drawn.set(item, entry)
     }
-    // A note grows to hold its text, its height only the least it takes: it is measured.
-    const height = "h" in item && item.type !== "note" ? item.h : undefined
-    const width = "w" in item ? item.w : undefined
-    nodes.push({
+    nodes.push(...entry.nodes)
+    edges.push(...entry.edges)
+  })
+  return { nodes, edges }
+}
+
+/** One item's nodes and edges. */
+function itemGraph(
+  item: CanvasItem,
+  order: number
+): { readonly nodes: CanvasFlowNode[]; readonly edges: CanvasFlowEdge[] } {
+  const nodes: CanvasFlowNode[] = []
+  const edges: CanvasFlowEdge[] = []
+  if (item.type === "arrow") {
+    const end = (side: "from" | "to", value: CanvasEnd) => {
+      if (typeof value === "string") return value
+      const id = `${item.id}:${side}`
+      nodes.push({
+        id,
+        type: "point",
+        position: { x: value.x, y: value.y },
+        width: 1,
+        height: 1,
+        data: { item: null },
+        selectable: false,
+        focusable: false,
+      })
+      return id
+    }
+    edges.push({
       id: item.id,
-      type: item.type,
-      position: { x: item.x, y: item.y },
-      ...(width === undefined ? {} : { width }),
-      ...(height === undefined ? {} : { height }),
-      data: { item },
-      zIndex: item.type === "section" ? -1 : order,
-      draggable: false,
-      connectable: false,
+      type: "floating",
+      source: end("from", item.from),
+      target: end("to", item.to),
+      data: { ...(item.label ? { label: item.label } : {}), dashed: item.dashed },
+      zIndex: ARROW_Z_INDEX,
+      focusable: false,
       selectable: false,
-      // Boards are the items a reader opens; the rest are read where they lie. React Flow lets an
-      // item it can't select or drag take no pointer, so a board takes it back: a double-click
-      // reaches it, and a drag across it still pans.
-      focusable: item.type === "board",
-      ...(item.type === "board" ? { style: { pointerEvents: "all" } } : {}),
     })
+    return { nodes, edges }
+  }
+  // A note grows to hold its text, its height only the least it takes: it is measured.
+  const height = "h" in item && item.type !== "note" ? item.h : undefined
+  const width = "w" in item ? item.w : undefined
+  nodes.push({
+    id: item.id,
+    type: item.type,
+    position: { x: item.x, y: item.y },
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    data: { item },
+    zIndex: item.type === "section" ? -1 : order,
+    draggable: false,
+    connectable: false,
+    selectable: false,
+    // Boards are the items a reader opens; the rest are read where they lie. React Flow lets an
+    // item it can't select or drag take no pointer, so a board takes it back: a double-click
+    // reaches it, and a drag across it still pans.
+    focusable: item.type === "board",
+    ...(item.type === "board" ? { style: { pointerEvents: "all" } } : {}),
   })
   return { nodes, edges }
 }
