@@ -1,8 +1,8 @@
 /** What one version may hold. Publishing refuses a version over any of these. */
 export const ARTIFACT_LIMITS = {
-  maxFiles: 200,
+  maxFiles: 500,
   maxFileBytes: 25 * 1024 * 1024,
-  maxVersionBytes: 100 * 1024 * 1024,
+  maxVersionBytes: 250 * 1024 * 1024,
   maxPathLength: 512,
   maxTitleLength: 200,
   /** A document's Markdown is parsed whole when it is published. */
