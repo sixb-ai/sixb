@@ -27,6 +27,7 @@ import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider } from "./editing"
 import { BoardFocus } from "./focus"
 import { CANVAS_NODE_TYPES, NAME_SCALE, nameScale } from "./items"
+import { useBoardPreviews } from "./previews"
 
 /**
  * A canvas on an endless board: drag or scroll to pan, pinch or ⌘-scroll to zoom, the zoom
@@ -96,6 +97,9 @@ function Board({
     [canvas]
   )
 
+  // Each board's picture, while it is rendered and once it is ready.
+  const previews = useBoardPreviews(version)
+
   // The boards and embeds to run, as the view comes to them: each knows whether it is one, so a
   // pan draws nothing again. Those running keep running while they are on screen.
   const places = useMemo(
@@ -121,8 +125,14 @@ function Board({
     void fitView({ nodes: [{ id }], padding: CANVAS_FIT_PADDING, maxZoom: 1, duration: 220 })
   }, [opened, fitView])
   const live = useMemo(
-    () => ({ version: version ?? null, live: running, ...(version ? { open: setOpened } : {}) }),
-    [version, running]
+    () => ({
+      version: version ?? null,
+      live: running,
+      previews,
+      mode,
+      ...(version ? { open: setOpened } : {}),
+    }),
+    [version, running, previews, mode]
   )
   const board = useBoardEditing(canvas, edit, version ? setOpened : undefined)
   useNameScaleVariable(board.root)

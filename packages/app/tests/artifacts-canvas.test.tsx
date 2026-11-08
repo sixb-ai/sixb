@@ -10,9 +10,15 @@ import {
 } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
-import { liveBoards, MAX_LIVE_BOARDS } from "../src/artifacts/renderers/canvas/board"
+import {
+  LiveBoard,
+  LiveBoardsProvider,
+  liveBoards,
+  MAX_LIVE_BOARDS,
+} from "../src/artifacts/renderers/canvas/board"
 import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
 import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
+import { nextPreviewCheck } from "../src/artifacts/renderers/canvas/previews"
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
 import { installDom } from "./helpers/dom"
 
@@ -385,6 +391,109 @@ describe("live boards", () => {
     expect(live.has("g7")).toBe(true)
     // A corner already running keeps its place over a board nearer the middle.
     expect(liveBoards(grid, view, new Set(["g0"]))).toContain("g0")
+  })
+})
+
+describe("board previews", () => {
+  const version = (boardPreviews?: Record<string, "ready" | "pending" | "none">) =>
+    ({
+      artifactId: "art_0nb0ard1ng",
+      version: 3,
+      title: "Onboarding",
+      entry: "canvas.json",
+      files: [],
+      outline: { kind: "canvas", items: [] },
+      references: [],
+      author: { type: "user", id: "user-1" },
+      createdAt: "2026-10-18T12:00:00.000Z",
+      ...(boardPreviews ? { boardPreviews } : {}),
+    }) as unknown as GetArtifactVersionResponse
+
+  async function mount(previewed: GetArtifactVersionResponse, mode: "light" | "dark") {
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(
+        <QueryClientProvider client={cache}>
+          <CanvasBoard canvas={CANVAS} version={previewed} title="Checkout" mode={mode} />
+        </QueryClientProvider>
+      )
+    })
+    if (!view) throw new Error("The board did not render.")
+    return view
+  }
+
+  test("show a board's picture in the reader's mode once it is ready, its outline until then", async () => {
+    // Reproduce by drawing every tile as its outline: no picture shows.
+    const view = await mount(version({ home: "ready", pay: "pending" }), "dark")
+    const node = (id: string) =>
+      view.container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)
+
+    const picture = node("home")?.querySelector("img")
+    expect(picture?.getAttribute("src")).toEndWith(
+      "/api/artifacts/art_0nb0ard1ng/versions/3/boards/home/preview?theme=dark"
+    )
+    // While it is rendered, the outline says it is on its way.
+    expect(node("pay")?.querySelector("img")).toBeNull()
+    expect(node("pay")?.querySelector('[aria-busy="true"]')).not.toBeNull()
+    view.unmount()
+
+    // A version without previews, or past their wait, shows outlines at rest.
+    const bare = await mount(version({ home: "none", pay: "none" }), "light")
+    expect(bare.container.querySelector(".react-flow__node img")).toBeNull()
+    expect(bare.container.querySelector('[aria-busy="true"]')).toBeNull()
+    bare.unmount()
+  })
+
+  test("keep the picture under a board's frame as it starts, so it never flashes blank", async () => {
+    // The frame fades in over the picture once its page is ready. Reproduce by giving the frame
+    // the tile as its fallback again: the picture is drawn anew as the board starts.
+    const previewed = version({ home: "ready" })
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    cache.setQueryData(["artifact-frame", previewed.artifactId, previewed.version], {
+      path: "/api/artifact-frames/token/",
+      expiresAt: "2026-10-18T13:00:00.000Z",
+    })
+    let running = false
+    const listeners = new Set<() => void>()
+    const live = {
+      has: () => running,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+    }
+    const picture = <img src="home.png" alt="" />
+    const view = render(
+      <QueryClientProvider client={cache}>
+        <LiveBoardsProvider value={{ version: previewed, live, previews: {}, mode: "light" }}>
+          <LiveBoard id="home" file="boards/home.html" title="Home" tile={picture} />
+        </LiveBoardsProvider>
+      </QueryClientProvider>
+    )
+    const before = view.container.querySelector("img")
+    expect(view.container.querySelector("iframe")).toBeNull()
+
+    await act(async () => {
+      running = true
+      for (const listener of listeners) listener()
+    })
+    expect(view.container.querySelector("iframe")).not.toBeNull()
+    expect(view.container.querySelector("img")).toBe(before)
+    view.unmount()
+  })
+
+  test("ask the version again while pictures are rendered, less often each time, and no longer than the server waits", () => {
+    const published = { createdAt: "2026-10-18T12:00:00.000Z" }
+    const at = (minutes: number) => Date.parse(published.createdAt) + minutes * 60_000
+
+    expect(nextPreviewCheck({ home: "pending" }, published, 0, at(1))).toBe(2_000)
+    expect(nextPreviewCheck({ home: "pending" }, published, 2, at(1))).toBe(4_500)
+    expect(nextPreviewCheck({ home: "pending" }, published, 20, at(1))).toBe(30_000)
+    // Reproduce by dropping either stop: it asks for good.
+    expect(nextPreviewCheck({ home: "ready", pay: "none" }, published, 0, at(1))).toBe(false)
+    expect(nextPreviewCheck({ home: "pending" }, published, 3, at(15))).toBe(false)
   })
 })
 

@@ -1,3 +1,4 @@
+import { cn } from "@sixb/ui/lib/utils"
 import { useStoreApi } from "@xyflow/react"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -10,6 +11,7 @@ import {
 } from "react"
 import { ArtifactFrame } from "../../frame"
 import type { ArtifactVersion } from "../../queries"
+import type { BoardPreviews } from "./previews"
 
 /** The most boards and embeds live at once: each board is a page running in its own frame. */
 export const MAX_LIVE_BOARDS = 8
@@ -142,13 +144,21 @@ const NOTHING_LIVE: LiveSet = { has: () => false, subscribe: () => () => {} }
 interface LiveBoards {
   readonly version: ArtifactVersion | null
   readonly live: LiveSet
+  /** Whether each board's picture is ready, and the mode the reader sees it in. */
+  readonly previews: BoardPreviews
+  readonly mode: "light" | "dark"
   /** Opens a board over the canvas. */
   readonly open?: (id: string) => void
 }
 
-const LiveBoardsContext = createContext<LiveBoards>({ version: null, live: NOTHING_LIVE })
+const LiveBoardsContext = createContext<LiveBoards>({
+  version: null,
+  live: NOTHING_LIVE,
+  previews: {},
+  mode: "light",
+})
 
-/** The board view's version, the boards it runs, and how to open one. */
+/** The board view's version, the boards it runs, their pictures, and how to open one. */
 export function useLiveBoards(): LiveBoards {
   return useContext(LiveBoardsContext)
 }
@@ -175,17 +185,22 @@ export function LiveBoardsProvider({
 
 /**
  * What a board or an embed shows while it doesn't run: a picture of it when there is one, else
- * its outline, the icon of what it is in the middle. The name above says which it is.
+ * its outline, the icon of what it is in the middle, breathing while its picture is on its way.
+ * A picture that can't be loaded gives way to the outline. The name above says which it is.
  */
 export function ItemTile({
   icon: Icon,
   preview,
+  pending = false,
 }: {
   readonly icon: LucideIcon
   /** A picture of the item, the size of its box. */
   readonly preview?: string
+  readonly pending?: boolean
 }) {
-  if (preview) {
+  const [failed, setFailed] = useState<string | null>(null)
+
+  if (preview && failed !== preview) {
     return (
       <img
         src={preview}
@@ -193,21 +208,29 @@ export function ItemTile({
         decoding="async"
         loading="lazy"
         draggable={false}
+        onError={() => setFailed(preview)}
         className="block size-full object-cover"
       />
     )
   }
   return (
-    <div className="flex size-full items-center justify-center bg-card">
+    <div
+      className={cn(
+        "flex size-full items-center justify-center bg-card",
+        pending && "motion-safe:animate-pulse"
+      )}
+      {...(pending ? { "aria-busy": true } : {})}
+    >
       <Icon className="size-12 text-muted-foreground/30" strokeWidth={1} aria-hidden="true" />
     </div>
   )
 }
 
 /**
- * A board's page, running, when the view shows it large enough: otherwise, and until it is ready,
- * its tile. On the board a frame takes no clicks, so dragging across it pans; it is a picture
- * until the reader opens it.
+ * A board's page, running, when the view shows it large enough, over its tile: the tile stays
+ * under the frame, which fades in once its page is ready, so a board never flashes blank as it
+ * starts or stops. On the board a frame takes no clicks, so dragging across it pans; it is a
+ * picture until the reader opens it.
  */
 export function LiveBoard({
   id,
@@ -222,15 +245,18 @@ export function LiveBoard({
 }) {
   const { version } = useContext(LiveBoardsContext)
   const live = useLive(id)
-  if (!version || !live) return <>{tile}</>
   return (
-    <ArtifactFrame
-      version={version}
-      entry={file}
-      title={title}
-      decorative
-      className="size-full overflow-hidden rounded-[10px]"
-      fallback={tile}
-    />
+    <div className="relative size-full">
+      {tile}
+      {version && live ? (
+        <ArtifactFrame
+          version={version}
+          entry={file}
+          title={title}
+          decorative
+          className="absolute inset-0 overflow-hidden rounded-[10px]"
+        />
+      ) : null}
+    </div>
   )
 }
