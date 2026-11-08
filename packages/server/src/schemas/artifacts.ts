@@ -41,6 +41,8 @@ const SlidesOutlineSchema = z.object({
 
 const PageOutlineSchema = z.object({ kind: z.literal("page"), title: z.string().optional() })
 
+const ArtifactThemeModeSchema = z.enum(["light", "dark"])
+
 const CanvasOutlineSchema = z.object({
   kind: z.literal("canvas"),
   items: z.array(
@@ -52,10 +54,18 @@ const CanvasOutlineSchema = z.object({
         file: z.string(),
         w: z.number(),
         h: z.number(),
+        renderKey: z
+          .string()
+          .optional()
+          .describe("What the board's preview is a picture of: a board kept as it was keeps it"),
       }),
       z.object({ id: z.string(), type: z.literal("section"), title: z.string().optional() }),
     ])
   ),
+  themes: z
+    .array(ArtifactThemeModeSchema)
+    .optional()
+    .describe("The modes each board has a preview in: both, or the one its theme.json pins"),
 })
 
 const FileOutlineSchema = z.object({ kind: z.literal("file"), mediaType: z.string() })
@@ -106,6 +116,12 @@ export const ArtifactVersionSchema = z.object({
   author: PrincipalSchema,
   origin: ArtifactOriginSchema.optional(),
   createdAt: z.string(),
+  boardPreviews: z
+    .record(z.string(), z.enum(["ready", "pending", "none"]))
+    .optional()
+    .describe(
+      "A canvas's boards by id, as GET returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline"
+    ),
 })
 
 const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
@@ -124,6 +140,18 @@ export const ArtifactVersionParamsSchema = ArtifactParamsSchema.extend({
     .regex(/^(?:latest|[1-9]\d*)$/)
     .describe('A version number, or "latest"'),
 })
+
+export const ArtifactBoardPreviewParamsSchema = ArtifactVersionParamsSchema.extend({
+  board: z.string().min(1).describe("The board's id in the canvas"),
+})
+
+export const ArtifactBoardPreviewQuerySchema = z
+  .object({
+    theme: ArtifactThemeModeSchema.optional().describe(
+      "The reader's mode; a canvas whose theme.json pins one is pictured only in it"
+    ),
+  })
+  .strict()
 
 export const ArtifactQueryParamsSchema = ArtifactVersionParamsSchema.extend({
   name: z.string().min(1).describe("The query's name: queries/<name>.json in the version"),
@@ -237,7 +265,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({ version: z.number().int(), author: PrincipalSchema })

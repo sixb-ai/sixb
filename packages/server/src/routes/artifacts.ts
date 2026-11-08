@@ -17,6 +17,7 @@ import {
   createArtifactFrame,
   serializeArtifactQueryResult,
 } from "@sixb/core/internal/artifacts/frames"
+import { boardPreviewStatuses, boardPreviews } from "@sixb/core/internal/artifacts/publish"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -28,6 +29,8 @@ import {
 } from "../files/content"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
+  ArtifactBoardPreviewParamsSchema,
+  ArtifactBoardPreviewQuerySchema,
   ArtifactErrorResponseSchema,
   ArtifactFrameResponseSchema,
   ArtifactListQuerySchema,
@@ -272,6 +275,62 @@ async function artifactFileContentResponse(
       context.set.status = 400
       return { error: "Invalid file content query" }
     }
+    return handleArtifactRouteError(error, context.set)
+  }
+}
+
+/**
+ * A board's preview, to whoever reads its version: reading the version as the caller is the
+ * check. Its render key names what the board shows, so a numbered version's preview never changes.
+ */
+async function artifactBoardPreviewResponse(
+  host: SixbHostView,
+  context: {
+    readonly params: {
+      readonly artifactId: string
+      readonly version: string
+      readonly board: string
+    }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: RouteSet & { headers: Record<string, string | number> }
+  }
+) {
+  try {
+    const query = ArtifactBoardPreviewQuerySchema.parse(context.query)
+    const { artifactId, board } = context.params
+    const number = versionParam(context.params.version)
+
+    const version = await requireRequestSixb(context).artifacts.getVersion(artifactId, number)
+    if (!version) return await refusal(context, artifactId, context.set)
+
+    // The reader's mode, unless the canvas pins another.
+    const themes = version.outline.kind === "canvas" ? (version.outline.themes ?? []) : []
+    const theme = query.theme && themes.includes(query.theme) ? query.theme : themes[0]
+
+    const storage = host.storage.artifacts
+    const preview =
+      storage && theme ? (await boardPreviews(storage, version)).get(board)?.get(theme) : undefined
+    const response =
+      preview &&
+      (await createFileContentResponse({
+        blobStorage: host.blobStorage,
+        fileRef: preview.file,
+        request: context.request,
+      }))
+    if (!response) {
+      context.set.status = 404
+      // It may be rendered in a moment: nothing may keep this answer.
+      context.set.headers["cache-control"] = "no-store"
+      return { error: "Board preview not found", code: "preview_not_found" as const }
+    }
+
+    response.headers.set(
+      "cache-control",
+      number === "latest" ? "private, no-cache" : "private, max-age=31536000, immutable"
+    )
+    return response
+  } catch (error) {
     return handleArtifactRouteError(error, context.set)
   }
 }
@@ -653,7 +712,21 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             versionParam(context.params.version)
           )
           if (!version) return await refusal(context, context.params.artifactId, context.set)
-          return ArtifactVersionSchema.parse(versionBody(version))
+
+          // A canvas's boards say whether their previews are worth waiting for.
+          const storage = host.storage.artifacts
+          const statuses =
+            storage && version.outline.kind === "canvas"
+              ? await boardPreviewStatuses(storage, version, {
+                  renders: host.sandboxes !== undefined,
+                  now: new Date(),
+                })
+              : undefined
+
+          return ArtifactVersionSchema.parse({
+            ...versionBody(version),
+            ...(statuses ? { boardPreviews: Object.fromEntries(statuses) } : {}),
+          })
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -672,6 +745,33 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactVersion",
           security: accessTokenSecurityRequirement("getArtifactVersion"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/boards/:board/preview",
+      async (context) => artifactBoardPreviewResponse(host, context),
+      {
+        params: ArtifactBoardPreviewParamsSchema,
+        query: ArtifactBoardPreviewQuerySchema,
+        detail: {
+          summary: "Get the preview of a canvas's board",
+          description:
+            "A PNG of the board as its version shows it, in the reader's mode, which a viewer shows until the board is opened. It shows the data the version's author can see. A numbered version's preview never changes, and is cached as such; \"latest\" is revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactBoardPreview",
+          security: accessTokenSecurityRequirement("getArtifactBoardPreview"),
+          responses: {
+            200: {
+              description: "The board's preview",
+              content: { "image/png": { schema: { type: "string", format: "binary" } } },
+            },
+            304: { description: "The preview is unchanged; reuse the privately cached one" },
+            400: artifactErrorResponse(400),
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+            501: artifactErrorResponse(501),
+          },
         },
       }
     )

@@ -67,6 +67,7 @@ import {
   getAiModelCallFileContent,
   getAiModelCallFiles,
   getArtifact,
+  getArtifactBoardPreview,
   getArtifactFileContent,
   getArtifactQuery,
   getArtifactState,
@@ -376,6 +377,9 @@ import type {
   GetAiModelCallFilesData,
   GetAiModelCallFilesError,
   GetAiModelCallFilesResponse,
+  GetArtifactBoardPreviewData,
+  GetArtifactBoardPreviewError,
+  GetArtifactBoardPreviewResponse,
   GetArtifactData,
   GetArtifactError,
   GetArtifactFileContentData,
@@ -6372,6 +6376,33 @@ export const getArtifactVersionOptions = (options: Options<GetArtifactVersionDat
       return data
     },
     queryKey: getArtifactVersionQueryKey(options),
+  })
+
+export const getArtifactBoardPreviewQueryKey = (options: Options<GetArtifactBoardPreviewData>) =>
+  createQueryKey("getArtifactBoardPreview", options)
+
+/**
+ * Get the preview of a canvas's board
+ *
+ * A PNG of the board as its version shows it, in the reader's mode, which a viewer shows until the board is opened. It shows the data the version's author can see. A numbered version's preview never changes, and is cached as such; "latest" is revalidated. 404 preview_not_found until it is rendered, or when it never will be: the version says which.
+ */
+export const getArtifactBoardPreviewOptions = (options: Options<GetArtifactBoardPreviewData>) =>
+  queryOptions<
+    GetArtifactBoardPreviewResponse,
+    GetArtifactBoardPreviewError,
+    GetArtifactBoardPreviewResponse,
+    ReturnType<typeof getArtifactBoardPreviewQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactBoardPreview({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactBoardPreviewQueryKey(options),
   })
 
 export const getArtifactQueryQueryKey = (options: Options<GetArtifactQueryData>) =>
