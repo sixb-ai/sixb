@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test"
-import type { QuickBooksCdcEntity, QuickBooksClient, QuickBooksInvoiceLine } from "../src"
+import type {
+  QuickBooksAccount,
+  QuickBooksCdcEntity,
+  QuickBooksClient,
+  QuickBooksInvoiceLine,
+} from "../src"
 import { revision, withJournal } from "./live"
 
 const live = test.skipIf(process.env.QUICKBOOKS_LIVE !== "accounting-writes")
@@ -312,6 +317,129 @@ live(
         qb.paymentMethods.reactivate(input, o)
       )
       expect(method.Active).toBe(true)
+    })
+  },
+  5 * 60_000
+)
+
+async function accountsByType(qb: QuickBooksClient) {
+  const accounts: QuickBooksAccount[] = []
+  for await (const account of qb.accounts.listAll()) accounts.push(account)
+  const find = (type: string) => {
+    const account = accounts.find((row) => row.AccountType === type)
+    if (!account) throw new Error(`[QuickBooksLive] Sandbox needs an active ${type} account`)
+    return account
+  }
+  return { bank: find("Bank"), card: find("Credit Card"), expense: find("Expense"), accounts }
+}
+
+live(
+  "sales receipt and refund receipt lifecycles",
+  async () => {
+    await withJournal("receipts", async ({ qb, tag, write, defer }) => {
+      const customerInput = {
+        DisplayName: `${tag}-customer`,
+        PrimaryEmailAddr: { Address: sendTo },
+      }
+      const customer = await write("Customer.create", customerInput, (o) =>
+        qb.customers.create(customerInput, o)
+      )
+      defer("Customer.deactivate", async () => {
+        const input = revision(await qb.customers.get(customer.Id))
+        await write("Customer.deactivate", input, (o) => qb.customers.deactivate(input, o))
+      })
+      const item = await serviceItem(qb)
+      const { bank } = await accountsByType(qb)
+      const lines: QuickBooksInvoiceLine[] = [
+        {
+          Amount: 12,
+          DetailType: "SalesItemLineDetail",
+          SalesItemLineDetail: { ItemRef: { value: item.Id }, Qty: 1, UnitPrice: 12 },
+        },
+      ]
+
+      const receiptInput = {
+        CustomerRef: { value: customer.Id },
+        BillEmail: { Address: sendTo },
+        DepositToAccountRef: { value: bank.Id },
+        PrivateNote: tag,
+        Line: lines,
+      }
+      let receipt = await write("SalesReceipt.create", receiptInput, (o) =>
+        qb.salesReceipts.create(receiptInput, o)
+      )
+      const receiptId = receipt.Id
+      defer("SalesReceipt.delete", async () => {
+        const input = revision(await qb.salesReceipts.get(receiptId))
+        expect(
+          (await write("SalesReceipt.delete", input, (o) => qb.salesReceipts.delete(input, o)))
+            .status
+        ).toBe("Deleted")
+        expect((await qb.salesReceipts.list({ ids: [receiptId] })).items).toHaveLength(0)
+      })
+      expect(receipt.TotalAmt).toBe(12)
+      expect(
+        (await qb.salesReceipts.list({ customerIds: [customer.Id] })).items.map((row) => row.Id)
+      ).toEqual([receiptId])
+      const receiptUpdate = { ...revision(receipt), PrivateNote: `${tag}-updated` }
+      receipt = await write("SalesReceipt.update", receiptUpdate, (o) =>
+        qb.salesReceipts.update(receiptUpdate, o)
+      )
+      expect(receipt.PrivateNote).toBe(receiptUpdate.PrivateNote)
+      expect(receipt.TotalAmt).toBe(12)
+      receipt = await write("SalesReceipt.send", { id: receiptId, sendTo }, (o) =>
+        qb.salesReceipts.send(receiptId, { ...o, sendTo })
+      )
+      expect(receipt.EmailStatus).toBe("EmailSent")
+      const receiptPdf = await qb.salesReceipts.downloadPdf(receiptId)
+      expect(new TextDecoder().decode(receiptPdf.slice(0, 5))).toBe("%PDF-")
+      const receiptVoid = revision(receipt)
+      receipt = await write("SalesReceipt.void", receiptVoid, (o) =>
+        qb.salesReceipts.void(receiptVoid, o)
+      )
+      expect(receipt.TotalAmt).toBe(0)
+      expect((await qb.salesReceipts.get(receiptId)).TotalAmt).toBe(0)
+
+      const refundInput = {
+        CustomerRef: { value: customer.Id },
+        BillEmail: { Address: sendTo },
+        DepositToAccountRef: { value: bank.Id },
+        PrivateNote: tag,
+        Line: lines,
+      }
+      let refund = await write("RefundReceipt.create", refundInput, (o) =>
+        qb.refundReceipts.create(refundInput, o)
+      )
+      const refundId = refund.Id
+      defer("RefundReceipt.delete", async () => {
+        const input = revision(await qb.refundReceipts.get(refundId))
+        expect(
+          (await write("RefundReceipt.delete", input, (o) => qb.refundReceipts.delete(input, o)))
+            .status
+        ).toBe("Deleted")
+        expect((await qb.refundReceipts.list({ ids: [refundId] })).items).toHaveLength(0)
+      })
+      expect(refund.TotalAmt).toBe(12)
+      const refundUpdate = { ...revision(refund), PrivateNote: `${tag}-updated` }
+      refund = await write("RefundReceipt.update", refundUpdate, (o) =>
+        qb.refundReceipts.update(refundUpdate, o)
+      )
+      expect(refund.PrivateNote).toBe(refundUpdate.PrivateNote)
+      const refundPdf = await qb.refundReceipts.downloadPdf(refundId)
+      expect(new TextDecoder().decode(refundPdf.slice(0, 5))).toBe("%PDF-")
+      // RefundReceipt has no EmailStatus; the send response is the refund receipt itself.
+      refund = await write("RefundReceipt.send", { id: refundId, sendTo }, (o) =>
+        qb.refundReceipts.send(refundId, { ...o, sendTo })
+      )
+      expect(refund.Id).toBe(refundId)
+      expect(refund.BillEmail?.Address).toBe(sendTo)
+      expect(refund.DeliveryInfo?.DeliveryType).toBe("Email")
+      const refundVoid = revision(refund)
+      refund = await write("RefundReceipt.void", refundVoid, (o) =>
+        qb.refundReceipts.void(refundVoid, o)
+      )
+      expect(refund.TotalAmt).toBe(0)
+      expect((await qb.refundReceipts.get(refundId)).TotalAmt).toBe(0)
     })
   },
   5 * 60_000

@@ -54,6 +54,24 @@ export function deleteEntity(
   })
 }
 
+/** Void by sparse update with include=void (Payment, BillPayment, SalesReceipt). */
+export function voidByUpdate<T>(
+  http: QuickBooksWriteHttp,
+  entity: string,
+  input: QuickBooksRevision,
+  options?: QuickBooksWriteOptions
+): Promise<T> {
+  const identity = revision(input)
+  return writeEntity(
+    http,
+    entity,
+    `${entity.toLowerCase()}?operation=update&include=void`,
+    { ...identity, sparse: true },
+    options,
+    { id: identity.Id }
+  )
+}
+
 export function sendEntity<T>(
   http: QuickBooksWriteHttp,
   entity: string,

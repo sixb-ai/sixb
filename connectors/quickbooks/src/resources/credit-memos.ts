@@ -1,3 +1,4 @@
+import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksCreditMemoListOptions, QuickBooksPage } from "../types/query"
 import type { QuickBooksCreditMemo } from "../types/transactions"
@@ -36,12 +37,14 @@ export interface QuickBooksCreditMemosResource {
   send(id: string, options?: QuickBooksCreditMemoSendOptions): Promise<QuickBooksCreditMemo>
   /** GET /v3/company/{realmId}/creditmemo/{id} */
   get(id: string): Promise<QuickBooksCreditMemo>
+  /** GET /v3/company/{realmId}/creditmemo/{id}/pdf */
+  downloadPdf(id: string): Promise<Uint8Array<ArrayBuffer>>
   list(options?: QuickBooksCreditMemoListOptions): Promise<QuickBooksPage<QuickBooksCreditMemo>>
   listAll(options?: QuickBooksCreditMemoListOptions): AsyncIterable<QuickBooksCreditMemo>
 }
 
 export function createCreditMemosResource(
-  http: QuickBooksWriteHttp
+  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
 ): QuickBooksCreditMemosResource {
   const resource: QuickBooksCreditMemosResource = {
     async create(input, options) {
@@ -58,6 +61,7 @@ export function createCreditMemosResource(
     delete: async (input, options) => deleteEntity(http, "CreditMemo", input, options),
     send: async (id, options) => sendEntity(http, "CreditMemo", id, options),
     get: (id) => readEntity(http, "CreditMemo", `creditmemo/${pathId(id)}`, id),
+    downloadPdf: (id) => http.getPdf(`creditmemo/${pathId(id)}/pdf`),
     list: (options) => listTransactions(http, "CreditMemo", options, { party: "customer" }),
     listAll: (options) => listAll(resource.list, options),
   }

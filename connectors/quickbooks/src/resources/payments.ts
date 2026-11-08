@@ -19,6 +19,7 @@ import {
   revision,
   sendEntity,
   updateEntity,
+  voidByUpdate,
   writeEntity,
 } from "../write"
 import { allocations } from "../write-validation"
@@ -66,16 +67,7 @@ export function createPaymentsResource(
       return updateEntity(http, "Payment", input, options)
     },
     delete: async (input, options) => deleteEntity(http, "Payment", input, options),
-    async void(input, options) {
-      return writeEntity(
-        http,
-        "Payment",
-        "payment?operation=update&include=void",
-        { ...revision(input), sparse: true },
-        options,
-        { id: input.Id }
-      )
-    },
+    void: async (input, options) => voidByUpdate(http, "Payment", input, options),
     async send(id, options) {
       nonEmpty(options?.sendTo, "sendTo")
       return sendEntity(http, "Payment", id, options)

@@ -19,7 +19,9 @@ import type { QuickBooksItemsResource } from "./resources/items"
 import type { QuickBooksPaymentMethodsResource } from "./resources/payment-methods"
 import type { QuickBooksPaymentsResource } from "./resources/payments"
 import type { QuickBooksPreferencesResource } from "./resources/preferences"
+import type { QuickBooksRefundReceiptsResource } from "./resources/refund-receipts"
 import type { QuickBooksReportsResource } from "./resources/reports"
+import type { QuickBooksSalesReceiptsResource } from "./resources/sales-receipts"
 import type { QuickBooksTaxAgenciesResource } from "./resources/tax-agencies"
 import type { QuickBooksTaxClassificationsResource } from "./resources/tax-classifications"
 import type { QuickBooksTaxCodesResource } from "./resources/tax-codes"
@@ -95,6 +97,8 @@ export interface QuickBooksClient {
   readonly items: QuickBooksItemsResource
   readonly terms: QuickBooksTermsResource
   readonly preferences: QuickBooksPreferencesResource
+  readonly refundReceipts: QuickBooksRefundReceiptsResource
+  readonly salesReceipts: QuickBooksSalesReceiptsResource
   readonly paymentMethods: QuickBooksPaymentMethodsResource
   readonly departments: QuickBooksDepartmentsResource
   readonly classes: QuickBooksClassesResource

@@ -21,7 +21,9 @@ import { createItemsResource } from "./resources/items"
 import { createPaymentMethodsResource } from "./resources/payment-methods"
 import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
+import { createRefundReceiptsResource } from "./resources/refund-receipts"
 import { createReportsResource } from "./resources/reports"
+import { createSalesReceiptsResource } from "./resources/sales-receipts"
 import { createTaxAgenciesResource } from "./resources/tax-agencies"
 import { createTaxClassificationsResource } from "./resources/tax-classifications"
 import { createTaxCodesResource } from "./resources/tax-codes"
@@ -99,6 +101,8 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
         bills: createBillsResource(http),
         billPayments: createBillPaymentsResource(http),
         vendorCredits: createVendorCreditsResource(http),
+        refundReceipts: createRefundReceiptsResource(http),
+        salesReceipts: createSalesReceiptsResource(http),
         paymentMethods: createPaymentMethodsResource(http),
         departments: createDepartmentsResource(http),
         classes: createClassesResource(http),

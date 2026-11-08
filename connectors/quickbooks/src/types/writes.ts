@@ -24,8 +24,10 @@ import type {
   QuickBooksItemExpenseLine,
   QuickBooksLinkedTransaction,
   QuickBooksPayment,
+  QuickBooksRefundReceipt,
   QuickBooksSalesItemLine,
   QuickBooksSalesLine,
+  QuickBooksSalesReceipt,
   QuickBooksVendorCredit,
 } from "./transactions"
 
@@ -198,6 +200,51 @@ export interface QuickBooksDeleteResult {
   readonly Id: string
   readonly status: "Deleted"
 }
+
+type ReceiptFields =
+  | "CustomerRef"
+  | "TxnDate"
+  | "DocNumber"
+  | "PrivateNote"
+  | "CurrencyRef"
+  | "ExchangeRate"
+  | "DepartmentRef"
+  | "ClassRef"
+  | "ProjectRef"
+  | "CustomField"
+  | "TxnTaxDetail"
+  | "GlobalTaxCalculation"
+  | "BillAddr"
+  | "ShipAddr"
+  | "ShipFromAddr"
+  | "BillEmail"
+  | "CustomerMemo"
+  | "ShipMethodRef"
+  | "ShipDate"
+  | "TrackingNum"
+  | "PrintStatus"
+  | "ApplyTaxAfterDiscount"
+  | "DepositToAccountRef"
+  | "PaymentMethodRef"
+  | "PaymentRefNum"
+
+/** CustomerRef is optional: a sales receipt can record an anonymous sale. */
+export type QuickBooksSalesReceiptCreate = Pick<
+  QuickBooksSalesReceipt,
+  ReceiptFields | "EmailStatus"
+> & { readonly Line: readonly QuickBooksInvoiceLine[] }
+/** Sparse update; supplying Line follows Intuit's line-ID replacement semantics. */
+export type QuickBooksSalesReceiptUpdate = QuickBooksRevision &
+  Partial<QuickBooksSalesReceiptCreate>
+export type QuickBooksSalesReceiptSendOptions = QuickBooksInvoiceSendOptions
+
+/** DepositToAccountRef is the account the refund is paid from. */
+export type QuickBooksRefundReceiptCreate = Pick<QuickBooksRefundReceipt, ReceiptFields> & {
+  readonly Line: readonly QuickBooksInvoiceLine[]
+  readonly DepositToAccountRef: QuickBooksReference
+}
+export type QuickBooksRefundReceiptUpdate = QuickBooksRevision &
+  Partial<QuickBooksRefundReceiptCreate>
 
 export interface QuickBooksPaymentSendOptions extends QuickBooksWriteOptions {
   /** Payment receipt emails require an explicit recipient. */

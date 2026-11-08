@@ -203,6 +203,41 @@ export interface QuickBooksCreditMemo extends QuickBooksSalesTransaction {
   readonly PaymentMethodRef?: QuickBooksReference
 }
 
+/** Opaque card-processing details retained without interpretation. */
+export interface QuickBooksCreditCardPaymentInfo {
+  readonly CreditChargeInfo?: Readonly<Record<string, unknown>>
+  readonly CreditChargeResponse?: Readonly<Record<string, unknown>>
+}
+
+/** A sale paid at the time of sale; it records money received rather than an open balance. */
+export interface QuickBooksSalesReceipt extends QuickBooksSalesTransaction {
+  readonly DepositToAccountRef?: QuickBooksReference
+  readonly PaymentMethodRef?: QuickBooksReference
+  readonly PaymentRefNum?: string
+  readonly CreditCardPayment?: QuickBooksCreditCardPaymentInfo
+  readonly TxnSource?: string
+  readonly HomeBalance?: number
+  readonly RecurDataRef?: QuickBooksReference
+}
+
+export interface QuickBooksRefundReceipt extends QuickBooksSalesTransaction {
+  readonly DepositToAccountRef?: QuickBooksReference
+  readonly PaymentMethodRef?: QuickBooksReference
+  readonly PaymentRefNum?: string
+  readonly PaymentType?: string
+  readonly CheckPayment?: {
+    readonly CheckNum?: string
+    readonly Status?: string
+    readonly NameOnAcct?: string
+    readonly AcctNum?: string
+    readonly BankName?: string
+  }
+  readonly CreditCardPayment?: QuickBooksCreditCardPaymentInfo
+  readonly TxnSource?: string
+  readonly HomeBalance?: number
+  readonly RecurDataRef?: QuickBooksReference
+}
+
 /** Accounting payment allocations can span invoices, credit memos, and other linked transactions. */
 export type QuickBooksPaymentLine = QuickBooksLineBase
 
