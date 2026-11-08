@@ -299,6 +299,39 @@ describe("publishing a canvas", () => {
     ])
   })
 
+  test("warns of an arrow drawn across other items, never of one across its section", async () => {
+    // A row of two boards wrapping to a second row, a note under the first row, and a section
+    // around them all. Reproduce by testing arrows against nothing: the wrap's arrow runs back
+    // across the note unseen; or against every item: each arrow crosses the section it sits in.
+    const { publish } = setup()
+    const published = await publish({
+      "canvas.json": JSON.stringify({
+        items: [
+          { id: "flow", type: "section", x: -80, y: -80, w: 2900, h: 2000, title: "Flow" },
+          board("home"),
+          board("pricing", 1400),
+          { ...board("checkout"), y: 1100 },
+          { id: "why", type: "note", x: 1200, y: 850, w: 300, text: "Annual first?" },
+          { id: "next", type: "arrow", from: "home", to: "pricing" },
+          { id: "wrap", type: "arrow", from: "pricing", to: "checkout" },
+          { id: "aside", type: "arrow", from: { x: 2800, y: 400 }, to: "pricing" },
+        ],
+      }),
+      "boards/home.html": "<main></main>",
+      "boards/pricing.html": "<main></main>",
+      "boards/checkout.html": "<main></main>",
+    })
+
+    expect(published.warnings).toEqual([
+      {
+        code: "canvas_arrow_crosses",
+        part: "wrap",
+        message:
+          "Arrow 'wrap' is drawn across note 'why': join neighbours in a row with arrows, and let a sequence that wraps to the next row read on without one.",
+      },
+    ])
+  })
+
   test("refuses a board without its file, and what its HTML can't show", async () => {
     const { publish } = setup()
     const canvas = JSON.stringify({ items: [board("home")] })

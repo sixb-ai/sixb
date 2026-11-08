@@ -2,6 +2,7 @@ import type { Canvas, CanvasEnd, CanvasItem } from "@sixb/core/artifacts"
 import {
   CANVAS_FIT_PADDING,
   CANVAS_TEXT_PIXELS,
+  canvasArrowLine,
   canvasNoteFontSize,
   canvasShapeFontSize,
 } from "@sixb/core/artifacts"
@@ -236,8 +237,7 @@ function drawArrows(canvas: Canvas, boxes: ReadonlyMap<string, Box>): string {
     const to = endBox(item.to)
     if (!from || !to) continue
 
-    const start = exitPoint(from, center(to))
-    const end = exitPoint(to, center(from))
+    const { start, end } = canvasArrowLine(from, to)
     lines.push(
       `<line x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" style="stroke: ${color}" stroke-width="2" stroke-linecap="round"${item.dashed ? ' stroke-dasharray="7 7"' : ""} marker-end="url(#head)"/>`
     )
@@ -250,24 +250,6 @@ function drawArrows(canvas: Canvas, boxes: ReadonlyMap<string, Box>): string {
   if (lines.length === 0) return ""
 
   return `<svg class="arrows" width="1" height="1"><defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" style="fill: ${color}"/></marker></defs>${lines.join("")}</svg>${labels.join("")}`
-}
-
-function center(box: Box): { x: number; y: number } {
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
-}
-
-/** Where the line from a box's center toward `toward` leaves the box. */
-function exitPoint(box: Box, toward: { x: number; y: number }): { x: number; y: number } {
-  const { x: cx, y: cy } = center(box)
-  const dx = toward.x - cx
-  const dy = toward.y - cy
-  if ((dx === 0 && dy === 0) || box.width <= 1) return { x: cx, y: cy }
-
-  const scale = Math.min(
-    dx === 0 ? Number.POSITIVE_INFINITY : box.width / 2 / Math.abs(dx),
-    dy === 0 ? Number.POSITIVE_INFINITY : box.height / 2 / Math.abs(dy)
-  )
-  return { x: cx + dx * scale, y: cy + dy * scale }
 }
 
 function union(boxes: readonly Box[]): Box {

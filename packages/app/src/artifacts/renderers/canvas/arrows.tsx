@@ -1,4 +1,4 @@
-import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, type CanvasBox, canvasArrowLine } from "@sixb/core/artifacts"
 import {
   EdgeLabelRenderer,
   type EdgeProps,
@@ -12,8 +12,6 @@ import type { CanvasFlowEdge } from "./layout"
 
 export const CANVAS_EDGE_TYPES: EdgeTypes = { floating: memo(FloatingArrow) }
 
-/** Room between an item's edge and the arrow that leaves or meets it. */
-const GAP = 10
 const HEAD_LENGTH = 13
 const HEAD_WIDTH = 11
 /**
@@ -24,39 +22,13 @@ const LABEL_LAYER = ARTIFACT_LIMITS.maxCanvasItems + 1
 /** The most of its arrow a label covers, so the line still shows on both sides of it. */
 const LABEL_SHARE = 0.7
 
-interface Rect {
-  readonly x: number
-  readonly y: number
-  readonly width: number
-  readonly height: number
-}
-
-function rectOf(node: InternalNode): Rect {
+function rectOf(node: InternalNode): CanvasBox {
   return {
     x: node.internals.positionAbsolute.x,
     y: node.internals.positionAbsolute.y,
     width: node.measured.width ?? node.width ?? 0,
     height: node.measured.height ?? node.height ?? 0,
   }
-}
-
-/**
- * Where the line from a rectangle's center toward a point leaves the rectangle, plus a gap; the
- * center itself for a point, which has no size.
- */
-export function exitPoint(rect: Rect, toward: { x: number; y: number }): { x: number; y: number } {
-  const cx = rect.x + rect.width / 2
-  const cy = rect.y + rect.height / 2
-  const dx = toward.x - cx
-  const dy = toward.y - cy
-  if ((dx === 0 && dy === 0) || rect.width <= 1) return { x: cx, y: cy }
-  const scale = Math.min(
-    dx === 0 ? Number.POSITIVE_INFINITY : rect.width / 2 / Math.abs(dx),
-    dy === 0 ? Number.POSITIVE_INFINITY : rect.height / 2 / Math.abs(dy)
-  )
-  const length = Math.hypot(dx, dy)
-  const reach = scale * length + GAP
-  return { x: cx + (dx / length) * reach, y: cy + (dy / length) * reach }
 }
 
 /**
@@ -71,8 +43,7 @@ function FloatingArrow({ id, source, target, data, selected }: EdgeProps<CanvasF
   if (!from || !to) return null
   const a = rectOf(from)
   const b = rectOf(to)
-  const start = exitPoint(a, { x: b.x + b.width / 2, y: b.y + b.height / 2 })
-  const end = exitPoint(b, { x: a.x + a.width / 2, y: a.y + a.height / 2 })
+  const { start, end } = canvasArrowLine(a, b)
   const angle = Math.atan2(end.y - start.y, end.x - start.x)
   // The line stops where the head begins, so a thick line doesn't poke through its point.
   const stem = {
