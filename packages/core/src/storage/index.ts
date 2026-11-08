@@ -287,6 +287,7 @@ export type {
 } from "./ai-usage"
 export { AiUsageStorageError, aggregateAiModelCallUsage, InMemoryAiUsageStorage } from "./ai-usage"
 export type {
+  ArtifactBoardPreviewRecord,
   ArtifactFile,
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
@@ -302,6 +303,7 @@ export type {
   ArtifactStorage,
   ArtifactStorageError,
   ArtifactStorageErrorCode,
+  ArtifactThemeMode,
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
@@ -312,6 +314,7 @@ export type {
   FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
+  ListArtifactBoardPreviewsInput,
   ListArtifactsInput,
   ListArtifactsResult,
   ListArtifactVersionsInput,
@@ -319,6 +322,7 @@ export type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  PutArtifactBoardPreviewsInput,
   SetArtifactStateInput,
 } from "./artifacts"
 export type {

@@ -108,6 +108,10 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     session.artifacts.updatable(artifactId as string),
   "artifacts.publish": (session, [input]) =>
     session.artifacts.publish(input as Parameters<AgentRunSession["artifacts"]["publish"]>[0]),
+  "artifacts.storePreviews": (session, [input]) =>
+    session.artifacts.storePreviews(
+      input as Parameters<AgentRunSession["artifacts"]["storePreviews"]>[0]
+    ),
   callTool: (session, [call, options], signal) =>
     session.callTool(call as Parameters<AgentRunSession["callTool"]>[0], {
       ...((options ?? {}) as { maxFileBytes?: number; contextDirectory?: string }),

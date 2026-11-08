@@ -2,6 +2,7 @@ import { type Principal, principalsEqual } from "../../auth"
 import { paginate } from "../pagination"
 import { artifactStateBytes, artifactStorageErrors, checkArtifactStateWrite } from "./record"
 import type {
+  ArtifactBoardPreviewRecord,
   ArtifactFrameGrantRecord,
   ArtifactRecord,
   ArtifactStateEntry,
@@ -18,6 +19,7 @@ import type {
   FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
+  ListArtifactBoardPreviewsInput,
   ListArtifactsInput,
   ListArtifactsResult,
   ListArtifactVersionsInput,
@@ -25,6 +27,7 @@ import type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  PutArtifactBoardPreviewsInput,
   SetArtifactStateInput,
 } from "./types"
 
@@ -49,6 +52,7 @@ interface InMemoryArtifactSnapshot {
   readonly artifacts: ReadonlyMap<string, StoredArtifact>
   readonly frameGrants: ReadonlyMap<string, ArtifactFrameGrantRecord>
   readonly state: ReadonlyMap<string, ReadonlyMap<string, ArtifactStateEntry>>
+  readonly boardPreviews: ReadonlyMap<string, ArtifactBoardPreviewRecord>
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
@@ -56,6 +60,8 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   private frameGrants = new Map<string, ArtifactFrameGrantRecord>()
   /** By artifact and reader, then by key. */
   private state = new Map<string, Map<string, ArtifactStateEntry>>()
+  /** By project, render key, and mode; no artifact owns one. */
+  private boardPreviews = new Map<string, ArtifactBoardPreviewRecord>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     const key = artifactKey(input.projectId, input.id)
@@ -268,6 +274,28 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return count
   }
 
+  async listBoardPreviews(
+    input: ListArtifactBoardPreviewsInput
+  ): Promise<ArtifactBoardPreviewRecord[]> {
+    const keys = new Set(input.renderKeys)
+    const kept = [...this.boardPreviews.values()].filter(
+      (preview) => preview.projectId === input.projectId && keys.has(preview.renderKey)
+    )
+
+    // By key then mode, in code-unit order, as SQLite compares text.
+    const order = (preview: ArtifactBoardPreviewRecord) => `${preview.renderKey}\0${preview.theme}`
+    return structuredClone(kept.sort((left, right) => (order(left) < order(right) ? -1 : 1)))
+  }
+
+  async putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void> {
+    for (const preview of input.previews) {
+      const key = `${input.projectId}\0${preview.renderKey}\0${preview.theme}`
+      if (this.boardPreviews.has(key)) continue
+
+      this.boardPreviews.set(key, structuredClone({ projectId: input.projectId, ...preview }))
+    }
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
     return this.deleteArtifact(artifactKey(input.projectId, input.id))
   }
@@ -317,6 +345,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       artifacts: this.artifacts,
       frameGrants: this.frameGrants,
       state: this.state,
+      boardPreviews: this.boardPreviews,
     })
   }
 
@@ -325,6 +354,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     this.artifacts = new Map(restored.artifacts)
     this.frameGrants = new Map(restored.frameGrants)
     this.state = new Map([...restored.state].map(([key, kept]) => [key, new Map(kept)]))
+    this.boardPreviews = new Map(restored.boardPreviews)
   }
 
   /**

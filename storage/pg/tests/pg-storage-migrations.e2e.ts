@@ -132,6 +132,7 @@ const SHIPPED_MIGRATIONS = [
   "091-dataset-ingest-inbox",
   "092-run-recovery",
   "093-webhook-and-projection-leases",
+  "094-artifact-board-previews",
 ]
 
 const steps = postgresStorageMigrations.steps

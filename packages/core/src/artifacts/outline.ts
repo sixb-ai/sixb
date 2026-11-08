@@ -1,3 +1,5 @@
+import type { ArtifactThemeMode } from "./theme"
+
 /**
  * What a version contains, read from its files when it is published. Addresses resolve against
  * it, and previews and hover cards show it without opening the files.
@@ -54,6 +56,11 @@ export interface CanvasOutline {
   readonly kind: "canvas"
   /** The boards and sections an address can name, by id, in the canvas's order. */
   readonly items: readonly CanvasOutlineItem[]
+  /**
+   * The modes each board has a preview in: light and dark, or the one its `theme.json` pins.
+   * Absent from a version published before boards had previews.
+   */
+  readonly themes?: readonly ArtifactThemeMode[]
 }
 
 export type CanvasOutlineItem =
@@ -65,6 +72,11 @@ export type CanvasOutlineItem =
       readonly file: string
       readonly w: number
       readonly h: number
+      /**
+       * What its preview is a picture of, as a hash: a version that keeps the board as it was
+       * keeps its key, and so its preview.
+       */
+      readonly renderKey?: string
     }
   | { readonly id: string; readonly type: "section"; readonly title?: string }
 

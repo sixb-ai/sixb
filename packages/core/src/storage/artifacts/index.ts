@@ -2,6 +2,7 @@ export type { ArtifactLatestVersion, ArtifactStorageErrorCode } from "./errors"
 export { ArtifactStorageError } from "./errors"
 export { InMemoryArtifactStorage } from "./in-memory"
 export type {
+  ArtifactBoardPreviewRecord,
   ArtifactFile,
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
@@ -14,6 +15,7 @@ export type {
   ArtifactStateKeyInput,
   ArtifactStateScope,
   ArtifactStorage,
+  ArtifactThemeMode,
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
@@ -24,6 +26,7 @@ export type {
   FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
+  ListArtifactBoardPreviewsInput,
   ListArtifactsInput,
   ListArtifactsResult,
   ListArtifactVersionsInput,
@@ -31,5 +34,6 @@ export type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  PutArtifactBoardPreviewsInput,
   SetArtifactStateInput,
 } from "./types"
