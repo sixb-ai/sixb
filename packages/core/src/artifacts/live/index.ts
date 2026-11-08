@@ -23,6 +23,7 @@ export {
   boardFilePath,
   boardFramePatches,
   boardTextHash,
+  mergeBoardText,
   setBoardImage,
   setBoardStyle,
   setBoardText,

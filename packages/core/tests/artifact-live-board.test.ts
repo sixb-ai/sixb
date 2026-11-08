@@ -9,6 +9,7 @@ import {
   boardFilePath,
   boardFramePatches,
   boardTextHash,
+  mergeBoardText,
   patchText,
   setBoardImage,
   setBoardStyle,
@@ -137,6 +138,32 @@ describe("an edit to a board", () => {
     expect(edited(BOARD, setBoardText(BOARD, "body>main:0>p:1", "New"))).toContain("<p>New</p>")
     expect(() => setBoardText(BOARD, "body>main:0>div:0", "x")).toThrow("a box of elements")
     expect(() => setBoardText(BOARD, "body>main:0>h2:0", "x")).toThrow("or a script builds it")
+  })
+
+  // Guard proof: in mergeBoardText, set the typed words as they are; the word someone else added
+  // to the heading meanwhile is lost.
+  test("merges what was typed with what others changed in the same text since", () => {
+    const at = "body>main:0>h1:0"
+    const theirs = applyBoardEdit(BOARD, setBoardText(BOARD, at, "Welcome home"))
+
+    expect(edited(theirs, mergeBoardText(theirs, at, "Welcome", "Hello. Welcome"))).toContain(
+      "<h1>Hello. Welcome home</h1>"
+    )
+    // Unchanged since: as typed.
+    expect(edited(BOARD, mergeBoardText(BOARD, at, "Welcome", "Hi"))).toContain("<h1>Hi</h1>")
+    expect(() => mergeBoardText(BOARD, "body>main:0>h2:0", "x", "y")).toThrow("changed")
+  })
+
+  // Guard proof: in startTagClose, take any `/` before the `>` for a self-closing one; the edit
+  // lands inside the unquoted value.
+  test("adds attributes after an unquoted value that ends in a slash", () => {
+    const unquoted = "<main><img src=/a/b/></main>"
+    expect(edited(unquoted, setBoardStyle(unquoted, "body>main:0>img:0", { color: "red" }))).toBe(
+      '<main><img src=/a/b/ style="color: red"></main>'
+    )
+    expect(annotateBoard(unquoted)).toContain(
+      '<img src=/a/b/ data-sixb-at="body>main:0>img:0" data-sixb-edit="image">'
+    )
   })
 
   test("replaces an image's picture and description", () => {
