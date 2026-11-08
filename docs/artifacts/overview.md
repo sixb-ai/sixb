@@ -397,10 +397,11 @@ brainstorm or a retro, a diagram, a mood board.
 Readers drag or scroll to pan, pinch or ⌘-scroll to zoom, fit everything with the controls, and
 press the zoom to go to 100%. Boards and embeds run live once the view shows them at half their
 size, or 360 pixels wide while a board has no preview yet, up to 8 at once, and keep running as
-the reader zooms out; on the canvas they're pictures, so dragging over one pans. Double-click a board, press Enter on it, or press the
-button by its name to open it: it fills the viewer and answers like a page, ← and → step through
-the boards in order, and Esc goes back to the canvas. In an opened board, a button or a `#` link
-whose words are the label of an arrow leaving it opens the board the arrow points to.
+the reader zooms out; on the canvas they're pictures, so dragging over one pans. Double-click a
+board, press Enter on it, or press the button by its name to open it: it opens at its own size,
+scaled to fit the viewer, and answers like a page, ← and → step through the boards in order, and
+Esc goes back to the canvas. In an opened board, a button or a `#` link whose words are the label
+of an arrow leaving it opens the board the arrow points to.
 
 Publishing warns of boards that overlap and of notes or text on a board. When the Agent publishes a
 canvas, its sandbox's browser opens each board at its own size, as it checks a page, and the Agent

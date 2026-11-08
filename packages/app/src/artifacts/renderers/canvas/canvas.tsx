@@ -23,7 +23,7 @@ import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider } from "./editing"
 import { BoardFocus } from "./focus"
 import { CANVAS_NODE_TYPES, NAME_SCALE, nameScale } from "./items"
-import { useBoardPreviews } from "./previews"
+import { boardPreviewUrl, useBoardPreviews } from "./previews"
 
 /**
  * A canvas on an endless board: drag or scroll to pan, pinch or ⌘-scroll to zoom, the zoom
@@ -132,6 +132,13 @@ function Board({
     }),
     [version, running, previews, mode]
   )
+  // An opened board's picture, at its own size, under its page until the page is ready.
+  const pictureOf = useCallback(
+    (id: string) =>
+      version && previews[id] === "ready" ? boardPreviewUrl(version, id, mode) : undefined,
+    [version, previews, mode]
+  )
+
   const board = useBoardEditing(canvas, edit, version ? setOpened : undefined)
   useNameScaleVariable(board.root)
 
@@ -221,6 +228,7 @@ function Board({
           boards={boards}
           arrows={arrows}
           id={opened}
+          pictureOf={pictureOf}
           onOpen={setOpened}
           onClose={close}
         />
