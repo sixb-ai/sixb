@@ -14,10 +14,19 @@ export const ARTIFACT_LIVE_ROUTE = "/ws/artifacts"
 /** What a connection may do with an artifact it joined: edit it, or watch others edit it. */
 export type ArtifactLiveAccess = "edit" | "watch"
 
+/** The most bytes one `sync` message carries: a larger one is sent in parts, as {@link liveSync} splits it. */
+export const LIVE_SYNC_PART_BYTES = 32 * 1024
+
 export type ArtifactLiveClientMessage =
   | { readonly type: "join"; readonly artifactId: string }
   | { readonly type: "leave"; readonly artifactId: string }
-  | { readonly type: "sync"; readonly artifactId: string; readonly data: string }
+  | {
+      readonly type: "sync"
+      readonly artifactId: string
+      readonly data: string
+      /** The message goes on in the next `sync`, whose bytes follow these. */
+      readonly more?: true
+    }
   | { readonly type: "awareness"; readonly artifactId: string; readonly data: string }
 
 /**
@@ -62,6 +71,24 @@ export const AGENT_AWARENESS_FIELD = "sixbAgent"
 export interface ArtifactAgentPresence {
   readonly runId: string
   readonly boards: readonly string[]
+}
+
+/**
+ * A y-protocols sync message as the `sync` messages that carry it: one, or parts for one larger
+ * than a socket message may be.
+ */
+export function liveSync(artifactId: string, bytes: Uint8Array): ArtifactLiveClientMessage[] {
+  const messages: ArtifactLiveClientMessage[] = []
+  for (let start = 0; start === 0 || start < bytes.length; start += LIVE_SYNC_PART_BYTES) {
+    const end = start + LIVE_SYNC_PART_BYTES
+    const data = encodeLiveData(bytes.subarray(start, end))
+    messages.push(
+      end < bytes.length
+        ? { type: "sync", artifactId, data, more: true }
+        : { type: "sync", artifactId, data }
+    )
+  }
+  return messages
 }
 
 /** Bytes as the socket carries them. */

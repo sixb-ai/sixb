@@ -1,12 +1,15 @@
 import type { SixbHostView } from "@sixb/core"
-import type {
-  ArtifactLiveClientMessage,
-  ArtifactLiveServerMessage,
+import {
+  type ArtifactLiveClientMessage,
+  type ArtifactLiveServerMessage,
+  decodeLiveData,
 } from "@sixb/core/artifacts/live"
 import { type LiveConnection, LiveRoom, type LiveRoomHost } from "./room"
 
 /** How many artifacts one connection may hold live at once. */
 export const MAX_LIVE_ARTIFACTS_PER_CONNECTION = 16
+/** The largest sync message a connection may send in parts: four boards' worth of HTML. */
+export const MAX_LIVE_SYNC_BYTES = 8 * 1024 * 1024
 
 /**
  * The artifacts this server holds live, one room each, opened by the first connection that joins
@@ -17,6 +20,8 @@ export class LiveRooms {
   private readonly rooms = new Map<string, Promise<LiveRoom | "not_found" | "not_live">>()
   /** The artifacts each connection joined. */
   private readonly joined = new Map<string, Set<string>>()
+  /** The parts of a sync message a connection is sending, by connection and artifact. */
+  private readonly parts = new Map<string, { chunks: Uint8Array[]; bytes: number }>()
   private events: Promise<() => void> | undefined
   private closed = false
 
@@ -31,7 +36,8 @@ export class LiveRooms {
         return this.leave(connection, message.artifactId)
       case "sync": {
         const room = await this.held(connection, message.artifactId)
-        await room?.sync(connection.id, message.data)
+        const bytes = room && this.assemble(connection, message)
+        if (bytes) await room.sync(connection.id, bytes)
         return
       }
       case "awareness": {
@@ -111,11 +117,53 @@ export class LiveRooms {
   }
 
   private async leave(connection: LiveConnection, artifactId: string): Promise<void> {
+    this.parts.delete(partsKey(connection, artifactId))
     const held = this.joined.get(connection.id)
     if (!held?.delete(artifactId)) return
 
     const room = await this.rooms.get(artifactId)
     if (room instanceof LiveRoom) room.leave(connection.id)
+  }
+
+  /**
+   * The bytes of a whole sync message: this one's, or, on its last part, every part's. Null while
+   * parts are still to come, and for a message that is not base64 or grew too large.
+   */
+  private assemble(
+    connection: LiveConnection,
+    message: Extract<ArtifactLiveClientMessage, { type: "sync" }>
+  ): Uint8Array | null {
+    const key = partsKey(connection, message.artifactId)
+    const bytes = decodeLiveData(message.data)
+    const parts = this.parts.get(key)
+    const size = (parts?.bytes ?? 0) + (bytes?.length ?? 0)
+
+    if (!bytes || size > MAX_LIVE_SYNC_BYTES) {
+      this.parts.delete(key)
+      connection.send({
+        type: "error",
+        artifactId: message.artifactId,
+        message: bytes
+          ? `[SixbServer] A sync message holds at most ${MAX_LIVE_SYNC_BYTES} bytes.`
+          : "[SixbServer] A sync message's data is base64.",
+      })
+      return null
+    }
+
+    if (message.more) {
+      this.parts.set(key, { chunks: [...(parts?.chunks ?? []), bytes], bytes: size })
+      return null
+    }
+    if (!parts) return bytes
+
+    this.parts.delete(key)
+    const whole = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of [...parts.chunks, bytes]) {
+      whole.set(chunk, offset)
+      offset += chunk.length
+    }
+    return whole
   }
 
   /** The room of an artifact the connection joined. */
@@ -165,4 +213,8 @@ export class LiveRooms {
       }
     )
   }
+}
+
+function partsKey(connection: LiveConnection, artifactId: string): string {
+  return `${connection.id}\n${artifactId}`
 }

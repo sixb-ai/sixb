@@ -26,4 +26,6 @@ export {
   type ArtifactLiveServerMessage,
   decodeLiveData,
   encodeLiveData,
+  LIVE_SYNC_PART_BYTES,
+  liveSync,
 } from "./protocol"

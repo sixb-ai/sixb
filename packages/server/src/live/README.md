@@ -20,6 +20,9 @@ per artifact and writes it back into storage as an ordinary artifact write.
   copies loaded separately from the same files each own their `canvas.json`, so syncing them picks
   one by client id. A client whose document came from another copy starts from an empty document.
   Once in step, it applies what it changed meanwhile with `mergeIntoDocument`.
+- A socket message is at most 64 KiB. A larger sync message is sent in parts (`more: true`, see
+  `liveSync`), each its own base64, and assembled per connection and artifact up to
+  `MAX_LIVE_SYNC_BYTES`.
 - A watcher may send sync step 1 (to receive the document) and awareness, never an update. An
   editor's access is read again at most every `ACCESS_RECHECK_MS` while it writes. Losing `update`
   demotes it to a watcher (`access`), and losing `read` removes it (`left`).
