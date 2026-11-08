@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import type { ArtifactLiveSocket } from "@sixb/client"
 import { type Canvas, type CanvasItem, formatCanvas, parseCanvas } from "@sixb/core/artifacts"
 import {
@@ -14,7 +14,12 @@ import * as encoding from "lib0/encoding"
 import * as syncProtocol from "y-protocols/sync"
 import * as Y from "yjs"
 import { LiveCanvas, liveCanvasOf } from "../src/artifacts/live/canvas"
-import { type LiveArtifact, LiveHub, type LiveSocketFactory } from "../src/artifacts/live/session"
+import {
+  type LiveArtifact,
+  LiveHub,
+  type LiveKeeper,
+  type LiveSocketFactory,
+} from "../src/artifacts/live/session"
 import { moveItems, setItemText } from "../src/artifacts/renderers/canvas/draft"
 import { canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 
@@ -161,7 +166,22 @@ async function settle(): Promise<void> {
 const held: { hub: LiveHub; artifact: LiveArtifact }[] = []
 
 /** One tab holding the artifact live through its own hub. */
-function tab(server: FakeServer): {
+/** A page's local storage, shared by the tabs and reloads of one test. */
+function memoryKeeper(): LiveKeeper & { readonly kept: Map<string, Uint8Array> } {
+  const kept = new Map<string, Uint8Array>()
+  return {
+    kept,
+    read: (id) => kept.get(id) ?? null,
+    write: (id, update) => kept.set(id, update),
+    clear: (id) => kept.delete(id),
+  }
+}
+
+function tab(
+  server: FakeServer,
+  keeper: LiveKeeper = memoryKeeper()
+): {
+  readonly hub: LiveHub
   readonly artifact: LiveArtifact
   readonly canvas: () => LiveCanvas
   readonly connection: () => FakeConnection
@@ -171,10 +191,11 @@ function tab(server: FakeServer): {
     const socket = server.open(handlers) as FakeConnection
     connection = socket
     return socket
-  })
+  }, keeper)
   const artifact = hub.acquire(ARTIFACT)
   held.push({ hub, artifact })
   return {
+    hub,
     artifact,
     canvas: () => liveCanvasOf(artifact),
     connection: () => {
@@ -237,6 +258,69 @@ describe("a live artifact", () => {
       expect(item(each.canvas().getCanvas(), "ask")).toMatchObject({ x: 80, y: 900 })
       expect(item(each.canvas().getCanvas(), "home")).toMatchObject({ x: -200, y: 0 })
     }
+  })
+
+  test("keeps what changed offline after its view went away, until the server took it", async () => {
+    // Reproduce by leaving an artifact LINGER_MS after its last view whatever it holds: the view
+    // that comes back after the outage gets a new document, and Alice's move is lost.
+    jest.useFakeTimers()
+    try {
+      const server = new FakeServer()
+      const alice = tab(server)
+      const bob = tab(server)
+      await settle()
+
+      alice.connection().drop()
+      alice.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
+      // The view goes away during the outage, and long enough for the artifact to be left.
+      alice.hub.release(alice.artifact)
+      jest.advanceTimersByTime(60_000)
+      expect(alice.hub.acquire(ARTIFACT)).toBe(alice.artifact)
+      alice.hub.release(alice.artifact)
+
+      alice.connection().connect()
+      await settle()
+      expect(item(bob.canvas().getCanvas(), "ask")).toMatchObject({ x: 80, y: 900 })
+
+      // Once the server says it saved, nothing keeps it.
+      alice
+        .connection()
+        .deliver({ type: "status", artifactId: ARTIFACT, state: "saved", revision: 2 })
+      await settle()
+      jest.advanceTimersByTime(60_000)
+      const again = alice.hub.acquire(ARTIFACT)
+      held.push({ hub: alice.hub, artifact: again })
+      expect(again).not.toBe(alice.artifact)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("keeps what changed offline across a reload, and forgets it once the server saved it", async () => {
+    // Reproduce by dropping the keeper from LiveArtifact: the page reloaded during the outage
+    // starts from the server's document, and Alice's move is lost.
+    const server = new FakeServer()
+    const keeper = memoryKeeper()
+    const alice = tab(server, keeper)
+    const bob = tab(server)
+    await settle()
+
+    alice.connection().drop()
+    alice.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
+    expect(keeper.kept.has(ARTIFACT)).toBe(true)
+
+    // The page reloads while the server is away: a new hub, a new document.
+    const reloaded = tab(server, keeper)
+    await settle()
+    expect(reloaded.artifact.doc).not.toBe(alice.artifact.doc)
+    expect(item(reloaded.canvas().getCanvas(), "ask")).toMatchObject({ x: 80, y: 900 })
+    expect(item(bob.canvas().getCanvas(), "ask")).toMatchObject({ x: 80, y: 900 })
+
+    reloaded
+      .connection()
+      .deliver({ type: "status", artifactId: ARTIFACT, state: "saved", revision: 2 })
+    await settle()
+    expect(keeper.kept.has(ARTIFACT)).toBe(false)
   })
 
   test("sends nothing once it may only watch, and leaves when the server says so", async () => {

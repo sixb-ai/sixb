@@ -66,6 +66,48 @@ const INITIAL: LiveArtifactState = {
   left: null,
 }
 
+/**
+ * Where a page keeps the changes made to an artifact that the server has not said it saved, so a
+ * reload, or a tab closed during an outage, does not lose them: the next copy of the document
+ * merges them in, and sends them with its sync.
+ */
+export interface LiveKeeper {
+  read(artifactId: string): Uint8Array | null
+  write(artifactId: string, update: Uint8Array): void
+  clear(artifactId: string): void
+}
+
+/** The browser's local storage, which a private window or a full disk may refuse: then nothing. */
+export const browserKeeper: LiveKeeper = {
+  read(artifactId) {
+    try {
+      const kept = globalThis.localStorage?.getItem(keeperKey(artifactId))
+      return kept ? decodeLiveData(kept) : null
+    } catch {
+      return null
+    }
+  },
+  write(artifactId, update) {
+    try {
+      globalThis.localStorage?.setItem(keeperKey(artifactId), encodeLiveData(update))
+    } catch {
+      // Kept in the document while the page lasts.
+    }
+  },
+  clear(artifactId) {
+    try {
+      globalThis.localStorage?.removeItem(keeperKey(artifactId))
+    } catch {
+      // Nothing was kept.
+    }
+  },
+}
+
+const keeperKey = (artifactId: string) => `sixb.live.unsaved.${artifactId}`
+
+/** The origin of changes taken back from the keeper: this page's own, sent as any other. */
+const KEPT = Symbol("sixb-live-kept")
+
 /** One artifact a page holds live: its document, its awareness, and what the server says. */
 export class LiveArtifact {
   readonly doc = new Y.Doc()
@@ -73,16 +115,30 @@ export class LiveArtifact {
   private state: LiveArtifactState = INITIAL
   private readonly listeners = new Set<() => void>()
   private joined = false
+  /** What this page changed that the server has not said it saved, merged into one update. */
+  private unsaved: Uint8Array | null = null
 
   constructor(
     readonly artifactId: string,
-    private readonly send: (message: ArtifactLiveClientMessage) => boolean
+    private readonly send: (message: ArtifactLiveClientMessage) => boolean,
+    private readonly keeper: LiveKeeper = browserKeeper
   ) {
     this.doc.on("update", this.onUpdate)
     this.awareness.on("update", this.onAwareness)
     // Others take a state only past its first clock, which the empty one starts at: one set now
     // is the first they see.
     this.awareness.setLocalStateField(SELECTION_FIELD, [])
+
+    // What an earlier copy changed and never saw saved: it waits in the document for what it
+    // was made on, which the first sync brings, and goes with this copy's own changes.
+    const kept = keeper.read(artifactId)
+    if (kept) {
+      try {
+        Y.applyUpdate(this.doc, kept, KEPT)
+      } catch {
+        keeper.clear(artifactId)
+      }
+    }
   }
 
   getState = (): LiveArtifactState => this.state
@@ -146,6 +202,7 @@ export class LiveArtifact {
       }
       case "status": {
         const { state, revision, error } = message
+        if (state === "saved") this.forget()
         this.update({
           save: { state, revision, ...(error ? { error } : {}) },
           pending: state !== "saved",
@@ -157,6 +214,7 @@ export class LiveArtifact {
         return
       case "left":
         this.joined = false
+        if (message.reason !== "left") this.forget()
         this.update({ left: message.reason })
         return
       case "error":
@@ -188,7 +246,16 @@ export class LiveArtifact {
       syncProtocol.writeUpdate(message, update)
       this.sendSync(encoding.toUint8Array(message))
     }
+
+    this.unsaved = this.unsaved ? Y.mergeUpdates([this.unsaved, update]) : update
+    this.keeper.write(this.artifactId, this.unsaved)
     if (!this.state.pending) this.update({ pending: true })
+  }
+
+  /** The server saved what this page changed, or the artifact is gone: nothing is kept. */
+  private forget(): void {
+    this.unsaved = null
+    this.keeper.clear(this.artifactId)
   }
 
   private onAwareness = (
@@ -237,7 +304,10 @@ export class LiveHub {
     { readonly artifact: LiveArtifact; holders: number; linger?: ReturnType<typeof setTimeout> }
   >()
 
-  constructor(private readonly open: LiveSocketFactory = openLiveSocket) {}
+  constructor(
+    private readonly open: LiveSocketFactory = openLiveSocket,
+    private readonly keeper: LiveKeeper = browserKeeper
+  ) {}
 
   acquire(artifactId: string): LiveArtifact {
     const entry = this.held.get(artifactId)
@@ -248,7 +318,11 @@ export class LiveHub {
       return entry.artifact
     }
 
-    const artifact = new LiveArtifact(artifactId, (message) => this.socket?.send(message) ?? false)
+    const artifact = new LiveArtifact(
+      artifactId,
+      (message) => this.socket?.send(message) ?? false,
+      this.keeper
+    )
     this.held.set(artifactId, { artifact, holders: 1 })
     if (!this.socket) this.connect()
     else if (this.online) artifact.connected()
@@ -262,7 +336,26 @@ export class LiveHub {
     entry.holders -= 1
     if (entry.holders > 0) return
 
+    this.linger(entry)
+  }
+
+  /**
+   * Leaves an artifact no view holds after {@link LINGER_MS}, once the server took what was
+   * changed in it: changes made offline, or whose view went away before they were saved, wait
+   * in it for the next connection, and a view that comes back finds them.
+   */
+  private linger(entry: {
+    readonly artifact: LiveArtifact
+    linger?: ReturnType<typeof setTimeout>
+  }) {
+    const { artifact } = entry
     entry.linger = setTimeout(() => {
+      const { pending, left } = artifact.getState()
+      if (pending && !left) {
+        this.linger(entry)
+        return
+      }
+
       this.held.delete(artifact.artifactId)
       artifact.destroy()
       if (this.held.size === 0) this.disconnect()
