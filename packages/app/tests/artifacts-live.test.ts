@@ -10,7 +10,7 @@ import {
   LiveHub,
   type LiveKeeper,
 } from "../src/artifacts/live/session"
-import { moveItems, setItemText } from "../src/artifacts/renderers/canvas/draft"
+import { moveItems, removeItems, setItemText } from "../src/artifacts/renderers/canvas/draft"
 import { canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 import {
   canvasOf,
@@ -282,6 +282,28 @@ describe("a live artifact", () => {
     alice.connection().deliver(before)
     await settle()
     expect(item(storedCanvas(server.doc), "ask")).toMatchObject({ x: 80, y: 900 })
+    expect(keeper.kept.has(keyOf(alice))).toBe(true)
+
+    alice.connection().deliver(server.status("saved", 2))
+    await settle()
+    expect(keeper.kept.size).toBe(0)
+  })
+
+  test("keeps a deletion made offline until the server says it wrote that deletion", async () => {
+    // Reproduce by checking only the snapshot's state vector in covers(), session.ts: deleting
+    // moves no clock, so the status sent as Alice joins again reads as covering it.
+    const server = new FakeServer(ARTIFACT, CANVAS)
+    const keeper = memoryKeeper()
+    const alice = tab(server, keeper)
+    await settle()
+
+    alice.connection().drop()
+    alice.canvas().apply(removeItems(new Set(["ask"])))
+    const before = server.status("saved", 1)
+    alice.connection().connect()
+    alice.connection().deliver(before)
+    await settle()
+    expect(item(storedCanvas(server.doc), "ask")).toBeUndefined()
     expect(keeper.kept.has(keyOf(alice))).toBe(true)
 
     alice.connection().deliver(server.status("saved", 2))

@@ -78,7 +78,7 @@ export class FakeServer {
       artifactId: this.artifactId,
       state,
       revision,
-      stateVector: encodeLiveData(Y.encodeStateVector(this.doc)),
+      snapshot: encodeLiveData(Y.encodeSnapshot(Y.snapshot(this.doc))),
     }
   }
 

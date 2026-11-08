@@ -145,16 +145,33 @@ function readKept(key: string, value: string | null): KeptChanges | null {
 }
 
 /**
- * What of `update` a state vector does not cover; null when it covers it all. A change that only
- * deletes moves no clock, so it reads as covered: it was sent with the rest.
+ * Whether a snapshot of what was written covers `update`: what it inserts, by its clocks, and
+ * what it deletes, by the snapshot's delete set. A change that only deletes moves no clock.
  */
-function uncovered(update: Uint8Array, vector: Uint8Array): Uint8Array | null {
-  const written = Y.decodeStateVector(vector)
+function covers(written: Y.Snapshot, update: Uint8Array): boolean {
   const made = Y.decodeStateVector(Y.encodeStateVectorFromUpdate(update))
   for (const [client, clock] of made) {
-    if ((written.get(client) ?? 0) < clock) return Y.diffUpdate(update, vector)
+    if ((written.sv.get(client) ?? 0) < clock) return false
   }
-  return null
+  for (const [client, ranges] of Y.decodeUpdate(update).ds.clients) {
+    for (const { clock, len } of ranges) {
+      for (let offset = 0; offset < len; offset += 1) {
+        if (!Y.isDeleted(written.ds, Y.createID(client, clock + offset))) return false
+      }
+    }
+  }
+  return true
+}
+
+/** A snapshot from the server; null for one that does not read. */
+function readSnapshot(data: string): Y.Snapshot | null {
+  const bytes = decodeLiveData(data)
+  if (!bytes) return null
+  try {
+    return Y.decodeSnapshot(bytes)
+  } catch {
+    return null
+  }
 }
 
 /** The origin of changes taken back from the keeper: this page's own, sent as any other. */
@@ -254,7 +271,7 @@ export class LiveArtifact {
       }
       case "status": {
         const { state, revision, error } = message
-        const written = message.stateVector ? decodeLiveData(message.stateVector) : null
+        const written = message.snapshot ? readSnapshot(message.snapshot) : null
         if (written) this.forget(written)
         this.update({
           save: { state, revision, ...(error ? { error } : {}) },
@@ -336,18 +353,20 @@ export class LiveArtifact {
   }
 
   /**
-   * Forgets what the server wrote back, as its state vector says, here and in the copies merged
-   * in, and keeps the rest: a change sent while the server was writing is not in what it wrote.
+   * Forgets what the server wrote back, as its snapshot says, here and in the copies merged in,
+   * and keeps the rest whole: a change sent while the server was writing is not in what it wrote.
    * Null when the artifact is gone: nothing is kept.
    */
-  private forget(written: Uint8Array | null): void {
-    const rest = written && this.unsaved ? uncovered(this.unsaved, written) : null
-    this.unsaved = rest
-    if (rest) this.keep()
-    else this.keeper.remove(this.key)
+  private forget(written: Y.Snapshot | null): void {
+    if (written && this.unsaved && !covers(written, this.unsaved)) {
+      this.keep()
+    } else {
+      this.unsaved = null
+      this.keeper.remove(this.key)
+    }
 
     for (const [key, update] of this.merged) {
-      if (written && uncovered(update, written)) continue
+      if (written && !covers(written, update)) continue
       this.keeper.remove(key)
       this.merged.delete(key)
     }

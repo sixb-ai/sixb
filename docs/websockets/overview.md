@@ -133,7 +133,7 @@ connection holds the version as a Yjs document and exchanges
 | --- | --- |
 | `joined` | `access` (`edit` or `watch`), `revision`, and `user`, who you are to the others |
 | `sync`, `awareness` | Apply them to your document and your awareness |
-| `status` | Whether changes are written: `saved` at `revision`, `unsaved`, `saving`, or `failed` with an `error`; `stateVector` is what is written, so you can forget the changes it covers |
+| `status` | Whether changes are written: `saved` at `revision`, `unsaved`, `saving`, or `failed` with an `error`; `snapshot` is what is written, as a Yjs snapshot, so you can forget the changes it covers |
 | `access` | You may now only watch |
 | `left` | You no longer hold the artifact: `left`, as you asked, `not_found`, `not_shared`, or `not_live` (not a canvas) |
 
