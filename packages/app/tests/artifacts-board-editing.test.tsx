@@ -123,6 +123,17 @@ function liveCanvas(page = SOURCE) {
   return { live, canvas, source: () => liveBoardSource(live.doc, FILE) ?? "" }
 }
 
+/**
+ * Unmounts what a test opened, and lets a popover's focus scope finish leaving while this file's
+ * window is still the one installed: it dispatches its last event a moment later.
+ */
+async function closePopovers(view: ReturnType<typeof render>) {
+  view.unmount()
+  await act(async () => {
+    await new Promise((done) => setTimeout(done, 20))
+  })
+}
+
 function stage(
   mode: StageMode,
   options: {
@@ -282,6 +293,7 @@ describe("an opened board, edited in place", () => {
     })
 
     expect(source()).toContain('<h1 style="color: #db2777">Welcome</h1>')
+    await closePopovers(view)
   })
 
   // Guard proof: drop the `files` argument from ImageTool's `show`; the page points at a picture
@@ -323,10 +335,12 @@ describe("an opened board, edited in place", () => {
     const path = `boards/${/src="(images\/[^"]+)"/.exec(source())?.[1]}`
     expect(uploads).toEqual(["POST /api/files"])
     expect(files.get(path)).toMatchObject({ blobId: "blob_new" })
+    await closePopovers(view)
 
     canvas.undo()
     expect(source()).toContain('src="hero.png"')
     expect(files.get(path)).toMatchObject({ blobId: "blob_new" })
+    await closePopovers(view)
   })
 
   // Guard proof: send `typing: true` in comment mode from BoardStage; the frame lets the reader
@@ -411,5 +425,6 @@ describe("an opened board, edited in place", () => {
     expect(view.getByRole("alert").textContent).toBe(
       "This element is no longer an image: pick it again."
     )
+    await closePopovers(view)
   })
 })
