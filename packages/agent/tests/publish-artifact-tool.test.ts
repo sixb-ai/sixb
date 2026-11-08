@@ -34,7 +34,11 @@ import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorizat
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import * as Y from "yjs"
-import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
+import {
+  type InstalledArtifacts,
+  installTurnArtifacts,
+  materializeThreadArtifacts,
+} from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
@@ -1222,6 +1226,70 @@ describe("publish_artifact", () => {
     expect(text().toString()).toBe(html)
   })
 
+  // Reproduce by not writing the revision into the folder the Agent published from in
+  // InstalledArtifacts.replace: the folder lacks the child's note, and the parent's update from
+  // it takes the note out.
+  test("writes a child's write into the folder the parent published from, so the parent keeps it", async () => {
+    const items = (note?: string) =>
+      JSON.stringify({
+        items: [
+          { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          ...(note ? [{ id: "todo", type: "note", x: 0, y: 900, w: 200, text: note }] : []),
+        ],
+      })
+    write("work/flow/canvas.json", items())
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    const installed = install()
+    const { artifactId } = (await publish(
+      { path: "work/flow", kind: "canvas", title: "Flow" },
+      { installed }
+    )) as { artifactId: string }
+
+    // A child of the turn adds a note to the canvas.
+    const latest = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    if (!latest) throw new Error("Expected version 1.")
+    const body = new TextEncoder().encode(items("Ship it"))
+    const canvas = await blobStorage.put({ body, expectedSizeBytes: body.byteLength })
+    await runArtifactsFor().publish({
+      artifactId,
+      title: "Flow",
+      files: latest.files.map((entry) =>
+        entry.path === "canvas.json" ? { ...entry, file: canvas } : entry
+      ),
+      baseRevision: latest.revision,
+      baseFiles: latest.files,
+    })
+
+    // Waiting for it, the parent installs what it wrote: in its copy, and in its folder.
+    const folders = await installTurnArtifacts({
+      installed: await installed,
+      artifacts: runArtifactsFor(),
+      blobStorage,
+      sandbox: sandbox(),
+      signal: new AbortController().signal,
+    })
+    expect(folders).toEqual(["work/flow"])
+    expect(read("work/flow/canvas.json")).toContain("Ship it")
+
+    // It updates from its folder: the child's note stays.
+    write("work/flow/welcome.html", "<main><h1>Hello</h1></main>")
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    const artifact = await storage.artifacts.get({ projectId, id: artifactId })
+    const version =
+      artifact &&
+      (await storage.artifacts.getVersion({
+        projectId,
+        artifactId,
+        version: artifact.latestVersion,
+      }))
+    const stored = version?.files.find((entry) => entry.path === "canvas.json")
+    const json = stored ? await new Response(await blobStorage.open(stored.file.blobId)).text() : ""
+    expect(JSON.parse(json).items.map((item: { id: string }) => item.id)).toEqual([
+      "welcome",
+      "todo",
+    ])
+  })
+
   test("refuses to update over a save made during the run, and installs it", async () => {
     // Reproduce by publishing without the installed revision as base: the Agent's update replaces
     // the person's save unseen. Reproduce the install by skipping it on the refusal: the copy
@@ -1273,6 +1341,17 @@ describe("publish_artifact", () => {
     expect(version.errorText(stale)).toContain(
       "whose version 1 was last written earlier in this conversation, and then created as a version by user 'usr_bob', so nothing was published"
     )
+
+    // Published from work/plan since, that folder takes what a refusal installs, as the copy does.
+    await publishElsewhere(artifactId, "# Plan\n\nThe person's second edit.\n")
+    write("work/plan/document.md", "# Plan\n\nThe Agent's second edit.\n")
+    const refused = await version
+      .execute(version.parseInput({ id: artifactId, path: "work/plan", title: "Plan" }), context)
+      .catch((error: unknown) => error)
+    expect(version.errorText(refused)).toContain(
+      "and written into work/plan, the folder you published it from"
+    )
+    expect(read("work/plan/document.md")).toBe("# Plan\n\nThe person's second edit.\n")
   })
 
   test("lays a deck out with the files it publishes, and only those", async () => {

@@ -1034,9 +1034,9 @@ async function startAgentEnvironment(
     blobStorage: context.blobStorage,
     budget: fileBudget,
     async installTurnArtifacts(signal) {
-      if (!artifacts) return
+      if (!artifacts) return []
 
-      await installTurnArtifacts({
+      return installTurnArtifacts({
         installed: await artifacts.installed,
         artifacts: artifacts.reader,
         blobStorage: context.blobStorage,
