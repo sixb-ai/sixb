@@ -4,6 +4,7 @@ import { ARTIFACT_THEME_FILE, CANVAS_FILE, parseArtifactTheme } from "@sixb/core
 import type { AgentRunMissingPreview } from "@sixb/core/internal/agents"
 import {
   artifactQueryName,
+  BOARD_PREVIEW_MEDIA_TYPES,
   type BoardPreviewInput,
   MAX_BOARD_PREVIEW_BYTES,
   type MissingBoardPreview,
@@ -47,7 +48,7 @@ export async function storeCheckedPreviews(input: {
     const batch = pictures.slice(start, start + READS)
     stored.push(
       ...(await Promise.all(
-        batch.map(async ({ board, theme, path }) => {
+        batch.map(async ({ board, theme, size, path }) => {
           const bytes = await readSandboxFile(input.handle, {
             path,
             maxBytes: MAX_BOARD_PREVIEW_BYTES,
@@ -58,10 +59,10 @@ export async function storeCheckedPreviews(input: {
             body: bytes,
             expectedSizeBytes: bytes.byteLength,
             signal: input.signal,
-            fileName: `${board}.${theme}.png`,
-            mediaType: "image/png",
+            fileName: posix.basename(path),
+            mediaType: BOARD_PREVIEW_MEDIA_TYPES[size],
           })
-          return { board, theme, file }
+          return { board, theme, size, file }
         })
       ))
     )

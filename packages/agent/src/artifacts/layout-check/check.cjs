@@ -5,7 +5,8 @@
 // loads at 1280px and at a phone's 390px, is measured whole in each theme, its top 4000px, and
 // screenshot at each width. A canvas's boards load each at its own size, four at a time, measured
 // as a page is and screenshot as boards/<id>.png; a board boards.json marks `pictured` also in
-// each other theme, as boards/<id>.<theme>.png, its picture for readers. With overview.html, the
+// each other theme, as boards/<id>.<theme>.png, and each of its pictures for readers also at most
+// `smallWidth` wide, as boards/<id>.<theme>.small.webp. With overview.html, the
 // whole canvas as it opens is screenshot as overview.png. It writes one line of JSON:
 // { layout, slides, problems, errors, screenshots, previews, stalls, overview?, stopped? } or
 // { skipped }.
@@ -238,9 +239,16 @@ async function checkCanvas(browser, port, probe, themes) {
 
       if (index > 0 && !board.pictured) continue
       const file = path.join(out, "boards", index === 0 ? `${board.id}.png` : `${board.id}.${name}.png`)
-      await tab.page.screenshot({ path: file, timeout: STEP_MS })
+      const png = await tab.page.screenshot({ path: file, timeout: STEP_MS })
       if (index === 0) found.screenshots.push(file)
-      if (board.pictured) found.previews.push({ board: board.id, theme: name, path: file })
+      if (!board.pictured) continue
+
+      const small = path.join(out, "boards", `${board.id}.${name}.small.webp`)
+      await shrink(browser, png, board.smallWidth, small)
+      found.previews.push(
+        { board: board.id, theme: name, size: "full", path: file },
+        { board: board.id, theme: name, size: "small", path: small }
+      )
     }
   }
 
@@ -267,6 +275,49 @@ async function checkCanvas(browser, port, probe, themes) {
   await Promise.all(Array.from({ length: Math.min(LANES, boards.length) }, lane))
   await overview(browser)
   return stalled
+}
+
+/** How a small picture's WebP is encoded: as sharp as text needs at its size, by eye. */
+const SMALL_QUALITY = 0.85
+/** A blank page where small pictures are encoded, apart from every board's scripts. */
+let encoder
+
+/**
+ * A board's screenshot at most `width` wide, its aspect kept, as WebP in `file`: what a canvas
+ * shows when it draws the board small. Encoded by the browser's own canvas.
+ */
+async function shrink(browser, png, width, file) {
+  encoder ??= within("the browser", browser.newContext()).then((context) =>
+    within("the browser", context.newPage())
+  )
+  const page = await encoder
+  const webp = await within(
+    "a small picture",
+    page.evaluate(
+      async ({ data, width, quality }) => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${data}`
+        await image.decode()
+        const scale = Math.min(1, width / image.naturalWidth)
+        const canvas = document.createElement("canvas")
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+        const context = canvas.getContext("2d")
+        context.imageSmoothingQuality = "high"
+        context.drawImage(image, 0, 0, canvas.width, canvas.height)
+        const blob = await new Promise((done) => canvas.toBlob(done, "image/webp", quality))
+        if (blob?.type !== "image/webp") throw new Error("this browser does not encode WebP")
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        let binary = ""
+        for (let at = 0; at < bytes.length; at += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+        }
+        return btoa(binary)
+      },
+      { data: png.toString("base64"), width, quality: SMALL_QUALITY }
+    )
+  )
+  fs.writeFileSync(file, Buffer.from(webp, "base64"))
 }
 
 /**

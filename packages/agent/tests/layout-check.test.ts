@@ -444,8 +444,18 @@ exports.chromium = {
         errors: [],
         screenshots: [join(output, "boards/welcome.png")],
         previews: [
-          { board: "welcome", theme: "light", path: join(output, "boards/welcome.png") },
-          { board: "welcome", theme: "dark", path: join(output, "boards/welcome.dark.png") },
+          {
+            board: "welcome",
+            theme: "light",
+            size: "full",
+            path: join(output, "boards/welcome.png"),
+          },
+          {
+            board: "welcome",
+            theme: "dark",
+            size: "small",
+            path: join(output, "boards/welcome.dark.small.webp"),
+          },
         ],
         stalls: [{ board: "region", message: "board 'region' in light mode did not respond" }],
         overview: join(output, "overview.png"),
@@ -475,8 +485,18 @@ exports.chromium = {
     expect(result).toMatchObject({
       status: "checked",
       previews: [
-        { board: "welcome", theme: "light", path: join(output, "boards/welcome.png") },
-        { board: "welcome", theme: "dark", path: join(output, "boards/welcome.dark.png") },
+        {
+          board: "welcome",
+          theme: "light",
+          size: "full",
+          path: join(output, "boards/welcome.png"),
+        },
+        {
+          board: "welcome",
+          theme: "dark",
+          size: "small",
+          path: join(output, "boards/welcome.dark.small.webp"),
+        },
       ],
       overview: ".sixb/agent/checks/art_0000000000-v2/overview.png",
       warnings: [
