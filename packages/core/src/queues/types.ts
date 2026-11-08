@@ -37,6 +37,18 @@ export type NewQueueJob<TQueueJob extends QueueJob> =
         readonly payload: TPayload
         readonly availableAt?: string
         readonly metadata?: Readonly<Record<string, JsonValue>>
+        /**
+         * With `id`, this job takes the place of the job of that id instead of being dropped as
+         * its repeat, so one id keeps at most one job waiting, the latest asked for:
+         *
+         * - One waiting is replaced: its payload, metadata and `availableAt` become this job's.
+         * - One settled, completed or failed, is delivered again as this job.
+         * - One claimed keeps its delivery. Once it is settled, however it is, or its lease lapses,
+         *   the id waits as this job.
+         *
+         * Either way the job starts again at attempt 0.
+         */
+        readonly replace?: boolean
       }
     : never
 
@@ -65,7 +77,8 @@ export interface Queue<
 > {
   /**
    * Adds durable work to the lane. Jobs become claimable at `availableAt`, or immediately.
-   * Repeating a caller-supplied job id is idempotent while that job remains in the provider.
+   * Repeating a caller-supplied job id is idempotent while that job remains in the provider,
+   * unless the repeat says `replace`.
    */
   enqueue(params: {
     projectId: string

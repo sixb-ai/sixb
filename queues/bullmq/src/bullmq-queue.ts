@@ -79,26 +79,26 @@ export class BullMqQueue<
       if (job.id !== undefined) assertNonEmpty(job.id, "job.id")
     }
 
-    const envelopes = params.jobs.map((job) => buildEnvelope<TQueueJob>(params.projectId, job))
+    const envelopes = params.jobs.map((job) => ({
+      ...buildEnvelope<TQueueJob>(params.projectId, job),
+      replace: job.replace === true && job.id !== undefined,
+    }))
     const queue = this.getQueue(params.projectId)
 
     // BullMQ's `addBulk` signature uses `ExtractNameType<Data>` which only narrows when the
     // data type is a discriminated union of literal `name`s. Our generic `TQueueJob["type"]`
     // doesn't satisfy that inference, so we widen the array at the call site.
     type AddBulkArg = Parameters<typeof queue.addBulk>[0]
-    await queue.addBulk(
-      envelopes.map((envelope) => ({
-        name: envelope.data.type,
-        data: envelope.data,
-        opts: {
-          jobId: toBullMqJobId(envelope.data.id),
-          delay: envelope.delayMs,
-          attempts: 1,
-          removeOnComplete: this.shared.removeOnComplete,
-          removeOnFail: this.shared.removeOnFail,
-        },
-      })) as unknown as AddBulkArg
-    )
+    const added = envelopes.filter((envelope) => !envelope.replace)
+    if (added.length > 0) {
+      await queue.addBulk(
+        added.map((envelope) => this.addition(envelope.data)) as unknown as AddBulkArg
+      )
+    }
+
+    for (const envelope of envelopes) {
+      if (envelope.replace) await this.replaceJob(queue, envelope.data)
+    }
 
     return envelopes.map((envelope) => envelope.job)
   }
@@ -132,6 +132,13 @@ export class BullMqQueue<
       ) as BullJob<QueueJobData<TQueueJob>> | undefined
       if (!bullJob) break
 
+      // Replaced while a delivery whose lease lapsed held it: it waits as its replacement.
+      if ((bullJob.data as ReplaceableData<TQueueJob>).replacement) {
+        await bullJob.moveToDelayed(Date.now(), token).catch(noop)
+        await this.settleReplaced(params.projectId, bullJob.data.id)
+        continue
+      }
+
       const claimedAtMs = Date.now()
       const extended = await extendLockOrZero(bullJob, token, leaseMs)
       if (!extended) {
@@ -157,6 +164,7 @@ export class BullMqQueue<
     } catch (error) {
       throw wrapLeaseError(error, params.jobId)
     }
+    await this.settleReplaced(params.projectId, params.jobId)
   }
 
   async retry(params: {
@@ -178,6 +186,7 @@ export class BullMqQueue<
     } catch (error) {
       throw wrapLeaseError(error, params.jobId)
     }
+    await this.settleReplaced(params.projectId, params.jobId)
   }
 
   async fail(params: {
@@ -202,6 +211,7 @@ export class BullMqQueue<
     } catch (error) {
       throw wrapLeaseError(error, params.jobId)
     }
+    await this.settleReplaced(params.projectId, params.jobId)
   }
 
   async renewLease(params: {
@@ -280,6 +290,76 @@ export class BullMqQueue<
     return undefined
   }
 
+  /** What BullMQ adds for a job: its data, under the job's own id, due at its `availableAt`. */
+  private addition(data: QueueJobData<TQueueJob>) {
+    return {
+      name: data.type,
+      data,
+      opts: {
+        jobId: toBullMqJobId(data.id),
+        delay: Math.max(0, parseTimestamp(data.availableAt, "availableAt") - Date.now()),
+        attempts: 1,
+        removeOnComplete: this.shared.removeOnComplete,
+        removeOnFail: this.shared.removeOnFail,
+      },
+    }
+  }
+
+  /**
+   * Puts a job in the place of the one of its id. One not claimed is removed and added again; one
+   * claimed carries it as its `replacement`, which settling it puts in its place. A job that is
+   * claimed or settles between these reads is read again.
+   */
+  private async replaceJob(
+    queue: BullQueue<QueueJobData<TQueueJob>>,
+    data: QueueJobData<TQueueJob>
+  ): Promise<void> {
+    const { name, data: added, opts } = this.addition(data)
+    const add = () => (queue.add as AddOne<TQueueJob>)(name, added, opts)
+
+    for (let attempt = 1; attempt <= REPLACE_ATTEMPTS; attempt++) {
+      const existing = (await queue.getJob(opts.jobId)) as
+        | BullJob<ReplaceableData<TQueueJob>>
+        | undefined
+      if (!existing) {
+        await add()
+        return
+      }
+
+      if ((await existing.getState()) === "active") {
+        await existing.updateData({ ...existing.data, replacement: data })
+        // Settled before it could see the replacement: put it in its place here.
+        if ((await existing.getState()) === "active") return
+        continue
+      }
+
+      // A job a worker holds cannot be removed: it was claimed meanwhile.
+      const removed = await existing.remove().then(
+        () => true,
+        () => false
+      )
+      if (removed) {
+        await add()
+        return
+      }
+    }
+    throw new QueueError(`[Sixb] Could not replace queue job '${data.id}'; enqueue it again.`)
+  }
+
+  /** Once a replaced job's delivery is settled, its replacement takes its place. */
+  private async settleReplaced(projectId: string, jobId: string): Promise<void> {
+    const queue = this.getQueue(projectId)
+    const job = (await queue.getJob(toBullMqJobId(jobId))) as
+      | BullJob<ReplaceableData<TQueueJob>>
+      | undefined
+    const replacement = job?.data.replacement
+    if (!job || !replacement) return
+
+    const { name, data, opts } = this.addition(replacement)
+    await job.remove()
+    await (queue.add as AddOne<TQueueJob>)(name, data, opts)
+  }
+
   private async loadKnownJob(
     projectId: string,
     jobId: string
@@ -345,6 +425,21 @@ export class BullMqQueue<
 }
 
 function noop(): void {}
+
+/** How many times a replace reads a job again that was claimed or settled while it read it. */
+const REPLACE_ATTEMPTS = 5
+
+/** A job's data, with the job asked for in its place while a worker held it. */
+type ReplaceableData<TQueueJob extends QueueJob> = QueueJobData<TQueueJob> & {
+  readonly replacement?: QueueJobData<TQueueJob>
+}
+
+/** `Queue.add`, widened as `addBulk` is: a generic job type does not narrow BullMQ's names. */
+type AddOne<TQueueJob extends QueueJob> = (
+  name: string,
+  data: QueueJobData<TQueueJob>,
+  opts: object
+) => Promise<unknown>
 
 function stopStalledCheckTimer(worker: BullWorker): void {
   ;(worker as unknown as { stalledCheckStopper?: (() => void) | undefined }).stalledCheckStopper?.()

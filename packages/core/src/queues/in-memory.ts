@@ -38,6 +38,8 @@ interface QueueRecord<TQueueJob extends QueueJob = QueueJob> {
   leaseId: string | null
   claimedAt: string | null
   leaseExpiresAt: string | null
+  /** The job asked for in its place while it was claimed: the id waits as it once settled. */
+  replacement: TQueueJob | null
 }
 
 function assertNonEmpty(value: string, fieldName: string): void {
@@ -99,6 +101,11 @@ function createQueueJob<TQueueJob extends QueueJob>(
   } as TQueueJob
 }
 
+/** Whether a worker holds the job now: it is queued under a lease that has not lapsed. */
+function isLeased(record: QueueRecord, now: number): boolean {
+  return record.state === "queued" && record.leaseExpiryMs !== null && record.leaseExpiryMs > now
+}
+
 function leaseExpiresAtMs(record: QueueRecord): number | null {
   return record.leaseExpiryMs
 }
@@ -152,6 +159,13 @@ class InMemoryQueueStore {
       leaseId: null,
       claimedAt: null,
       leaseExpiresAt: null,
+      replacement: null,
+    }
+    // A record this one replaces leaves the delivery indexes with it.
+    const replaced = lane.records.get(job.id)
+    if (replaced) {
+      lane.ready.delete(replaced)
+      lane.waiting.delete(replaced)
     }
     lane.records.set(job.id, record)
     this.schedule(projectId, record, Date.now())
@@ -273,9 +287,16 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
       const existing = job.id
         ? this.store.find<TQueueJob>(params.projectId, this.queueId, job.id)
         : null
-      if (existing) return existing.job
+      if (existing && !job.replace) return existing.job
 
       const created = createQueueJob(params.projectId, job)
+
+      // A claimed job finishes its delivery first; the id then waits as this one.
+      if (existing && isLeased(existing, Date.now())) {
+        existing.replacement = created
+        return created
+      }
+
       this.store.add(params.projectId, this.queueId, created)
       return created
     })
@@ -314,7 +335,14 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
         continue
       }
 
-      return claimable.map((record) => {
+      // A job replaced while its lease lapsed waits as its replacement instead.
+      const replaced = claimable.filter((record) => record.replacement)
+      for (const record of replaced) this.settleReplaced(params.projectId, record)
+      if (replaced.length === claimable.length && replaced.length > 0) continue
+
+      return claimable.flatMap((record) => {
+        if (replaced.includes(record)) return []
+
         // Attempts count claims so redelivery after lease expiry or retry is visible to workers.
         record.job = {
           ...record.job,
@@ -326,13 +354,15 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
         record.leaseExpiryMs = leaseExpiry.getTime()
         this.store.schedule(params.projectId, record, now)
 
-        return toClaimedQueueJob(record)
+        return [toClaimedQueueJob(record)]
       })
     }
   }
 
   async complete(params: { projectId: string; jobId: string; leaseId: string }): Promise<void> {
     const record = this.requireActiveLease(params)
+    if (this.settleReplaced(params.projectId, record)) return
+
     record.state = "completed"
     clearLease(record)
     this.store.schedule(params.projectId, record, Date.now())
@@ -345,6 +375,8 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     availableAt?: string
   }): Promise<void> {
     const record = this.requireActiveLease(params)
+    if (this.settleReplaced(params.projectId, record)) return
+
     const availableAt = params.availableAt ?? new Date().toISOString()
     const availableAtMs = parseTimestamp(availableAt, "availableAt")
 
@@ -364,6 +396,8 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     failure: QueueJobFailure<TFailureCode>
   }): Promise<void> {
     const record = this.requireActiveLease(params)
+    if (this.settleReplaced(params.projectId, record)) return
+
     record.state = "failed"
     record.failure = structuredClone(params.failure)
     clearLease(record)
@@ -398,6 +432,14 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     record.leaseExpiryMs = leaseExpiry.getTime()
     this.store.schedule(params.projectId, record, now)
     return toClaimedQueueJob(record)
+  }
+
+  /** Puts the job asked for in a claimed one's place, if any: its delivery is over. */
+  private settleReplaced(projectId: string, record: QueueRecord<TQueueJob>): boolean {
+    if (!record.replacement) return false
+
+    this.store.add(projectId, this.queueId, record.replacement)
+    return true
   }
 
   private requireActiveLease(params: {
