@@ -176,10 +176,10 @@ export function useCanvasCommenting({
       agentDraft
         ? (chosen: readonly CommentThread[]) => {
             if (chosen.length === 0) return
-            agentDraft(agentDraftOf(messages.draftIntro(title), chosen))
+            agentDraft(agentDraftOf(messages.draftIntro(title, artifactId ?? ""), chosen))
           }
         : null,
-    [agentDraft, messages, title]
+    [agentDraft, messages, title, artifactId]
   )
 
   const access = view?.access ?? "read"

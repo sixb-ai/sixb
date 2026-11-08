@@ -403,9 +403,9 @@ describe("comments on a canvas", () => {
 
     expect(drafts).toEqual([
       [
-        "Please address these comments on the canvas “Onboarding”:",
-        '- [home · body>main:0>h1:0 · "Welcome" · revision 1] Warmer colors',
-        "- [home · revision 1] Bigger button",
+        `Please address these comments on the canvas “Onboarding” (${ARTIFACT_ID}):`,
+        '- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1] Warmer colors',
+        "- [home · revision 1 · comment cmt_2] Bigger button",
       ].join("\n"),
     ])
     expect(within(panel).getByText("Added to your message to the agent")).toBeTruthy()
@@ -419,7 +419,7 @@ describe("comments on a canvas", () => {
     ])
     expect(threads.map((each) => [each.number, each.replies.length])).toEqual([[1, 1]])
     expect(agentDraftOf("Please:", threads)).toBe(
-      'Please:\n- [home · body>main:0>h1:0 · "Welcome" · revision 1] Warmer colors\n  - Agreed, warmer'
+      'Please:\n- [home · body>main:0>h1:0 · "Welcome" · revision 1 · comment cmt_1] Warmer colors\n  - Agreed, warmer'
     )
   })
 })
