@@ -109,8 +109,19 @@ export type FrameEvent =
   | FrameEventOf<"edit.hover", { readonly target: FrameEditTarget | null }>
   /** Editing, the reader picked an element, or none. */
   | FrameEventOf<"edit.select", { readonly target: FrameEditTarget | null }>
-  /** Editing, the reader typed in a text element: all its words now, as plain text. */
-  | FrameEventOf<"edit.text", { readonly address: string; readonly text: string }>
+  /**
+   * Editing, the reader typed in a text element: all its words now, as plain text, and `base`,
+   * its words as the frame last posted them, or as they were when the reader started typing. The
+   * app makes it with `mergeBoardText`, so what others changed in the element since stays.
+   *
+   * The board's own scripts run in the frame and can post this too: the runtime acts only on the
+   * reader's own clicks and keys, and the app takes `edit.text` only for the element the reader
+   * picked, the last `edit.select` it heard.
+   */
+  | FrameEventOf<
+      "edit.text",
+      { readonly address: string; readonly base: string; readonly text: string }
+    >
 
 /**
  * An element of a board being edited. One a script built, or whose words a script rewrote, is
@@ -340,8 +351,10 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
     case "edit.text":
       return isEditAddress(params.address) &&
         typeof params.text === "string" &&
-        params.text.length <= MAX_EDIT_TEXT_LENGTH
-        ? event("edit.text", { address: params.address, text: params.text })
+        params.text.length <= MAX_EDIT_TEXT_LENGTH &&
+        typeof params.base === "string" &&
+        params.base.length <= MAX_EDIT_TEXT_LENGTH
+        ? event("edit.text", { address: params.address, base: params.base, text: params.text })
         : null
     case "press":
       return typeof params.text === "string" &&

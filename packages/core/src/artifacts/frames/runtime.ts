@@ -210,6 +210,8 @@ export function frameRuntime(): void {
   let typing: HTMLElement | null = null
   /** What others changed in the element the reader is typing in, for when they leave it. */
   let held: Record<string, unknown> | null = null
+  /** The words the reader's typing starts from: as they began, then as last posted. */
+  let typedFrom = ""
 
   /** FNV-1a over the words' UTF-16 code units, as `boardTextHash` hashes them. */
   const wordsHash = (text: string): string => {
@@ -321,7 +323,8 @@ export function frameRuntime(): void {
   window.addEventListener(
     "click",
     (event) => {
-      if (!editing) return
+      // Only the reader's own clicks: the page's scripts can click too.
+      if (!editing || !event.isTrusted) return
       if (typing?.contains(event.target as Node | null)) return
       event.preventDefault()
       event.stopPropagation()
@@ -332,6 +335,7 @@ export function frameRuntime(): void {
       post({ event: "edit.select", params: { target } })
       if (element instanceof HTMLElement && target.kind === "text") {
         typing = element
+        typedFrom = element.textContent ?? ""
         element.setAttribute("contenteditable", "plaintext-only")
         element.focus()
       }
@@ -339,23 +343,29 @@ export function frameRuntime(): void {
     true
   )
   document.addEventListener("mouseover", (event) => {
-    if (!editing) return
+    if (!editing || !event.isTrusted) return
     const { element, target } = editTarget(event.target)
     if (element === pointed && element !== null) return
     pointed = mark("data-sixb-hover", pointed, element)
     post({ event: "edit.hover", params: { target } })
   })
   document.addEventListener("input", (event) => {
-    if (!editing || !typing || !typing.contains(event.target as Node | null)) return
+    if (!editing || !event.isTrusted || !typing || !typing.contains(event.target as Node | null)) {
+      return
+    }
     const text = typing.textContent ?? ""
     // Its words are the reader's now: still theirs to type in.
     typing.setAttribute(WORDS, wordsHash(text))
-    post({ event: "edit.text", params: { address: typing.getAttribute(AT), text } })
+    post({
+      event: "edit.text",
+      params: { address: typing.getAttribute(AT), base: typedFrom, text },
+    })
+    typedFrom = text
   })
   window.addEventListener(
     "keydown",
     (event) => {
-      if (!typing) return
+      if (!typing || !event.isTrusted) return
       // A text element's words are one block: a new line would be new markup.
       if (event.key === "Enter") event.preventDefault()
       if (event.key === "Escape") typing.blur()

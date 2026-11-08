@@ -177,12 +177,14 @@ pictures, and inline styles.
 | --- | --- |
 | `boardElements(source)` | Every static element: its address, kind, source range, and first words |
 | `setBoardText`, `setBoardImage`, `setBoardStyle` | An edit, as changes to the source |
+| `mergeBoardText(source, address, base, typed)` | Typed words, merged with what others changed in the element since `base` |
 | `applyBoardEditToText(text, edit)` | Makes it in the board's `Y.Text` |
 | `boardFramePatches(before, after)` | What a frame showing `before` changes in place to show `after` |
 
 A board's frame link serves it for editing with `?sixb-edit`. The frame's `edit` request then
 turns editing on: the frame reports `edit.hover`, `edit.select` and `edit.text`, and takes
-`edit.patch`.
+`edit.patch`. It acts only on the reader's own clicks and keys. A board's scripts can still post
+messages, so take `edit.text` only for the element the reader picked.
 
 ## Comment on an artifact
 

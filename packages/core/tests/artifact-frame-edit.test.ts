@@ -90,10 +90,19 @@ function frame(source: string) {
     posted.filter((message) => message.event === name).map((message) => parseFrameEvent(message))
   const at = (address: string) =>
     document.querySelector(`[data-sixb-at="${address}"]`) as unknown as HTMLElement
-  const fire = (target: unknown, type: string) =>
-    (target as { dispatchEvent(event: unknown): boolean }).dispatchEvent(
-      new window.MouseEvent(type, { bubbles: true, cancelable: true })
-    )
+  /** An event as the reader's own, trusted as a browser marks it, or as a page's script's. */
+  const fire = (
+    target: unknown,
+    type: string,
+    { trusted = true, kind = "mouse" }: { trusted?: boolean; kind?: "mouse" | "input" } = {}
+  ) => {
+    const event =
+      kind === "input"
+        ? new window.Event(type, { bubbles: true })
+        : new window.MouseEvent(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(event, "isTrusted", { value: trusted })
+    return (target as { dispatchEvent(event: unknown): boolean }).dispatchEvent(event)
+  }
   return { window, document, posted, request, events, at, fire }
 }
 
@@ -122,7 +131,7 @@ describe("a board's frame, editing", () => {
   })
 
   test("lets the reader type into a text element, and posts its words", () => {
-    const { request, events, at, fire, window } = frame(BOARD)
+    const { request, events, at, fire } = frame(BOARD)
     request("edit", { on: true })
 
     const heading = at("body>main:0>h1:0")
@@ -130,10 +139,20 @@ describe("a board's frame, editing", () => {
     expect(heading.getAttribute("contenteditable")).toBe("plaintext-only")
 
     heading.textContent = "Welcome back"
-    heading.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event)
+    fire(heading, "input", { kind: "input" })
     expect(events("edit.text").at(-1)?.params).toEqual({
       address: "body>main:0>h1:0",
+      base: "Welcome",
       text: "Welcome back",
+    })
+
+    // Each change starts from the words last posted.
+    heading.textContent = "Welcome back!"
+    fire(heading, "input", { kind: "input" })
+    expect(events("edit.text").at(-1)?.params).toEqual({
+      address: "body>main:0>h1:0",
+      base: "Welcome back",
+      text: "Welcome back!",
     })
 
     // Editing off, nothing is editable any more.
@@ -185,6 +204,20 @@ describe("a board's frame, editing", () => {
 
     heading.dispatchEvent(new window.FocusEvent("focusout", { bubbles: true }) as unknown as Event)
     expect(heading.textContent).toBe("Hello")
+    expect(heading.hasAttribute("contenteditable")).toBe(false)
+  })
+
+  // Guard proof: drop the `isTrusted` check from the runtime's click handler; the page's script
+  // picks the heading and makes it editable.
+  test("acts on the reader's own clicks only, never a page script's", () => {
+    const { request, events, at, fire } = frame(BOARD)
+    request("edit", { on: true })
+
+    const heading = at("body>main:0>h1:0")
+    fire(heading, "click", { trusted: false })
+    fire(heading, "mouseover", { trusted: false })
+    expect(events("edit.select")).toEqual([])
+    expect(events("edit.hover")).toEqual([])
     expect(heading.hasAttribute("contenteditable")).toBe(false)
   })
 })
