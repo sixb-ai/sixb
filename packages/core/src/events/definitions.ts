@@ -202,6 +202,10 @@ export const ARTIFACT_EVENT_DEFINITIONS = defineEventGroup<ArtifactEvent>({
     topic: "artifacts",
     partitionKey: (payload) => payload.artifactId,
   },
+  "artifact.commented": {
+    topic: "artifacts",
+    partitionKey: (payload) => payload.artifactId,
+  },
 })
 
 export const EVENT_DEFINITIONS = {
