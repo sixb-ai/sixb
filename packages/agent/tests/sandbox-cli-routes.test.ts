@@ -54,6 +54,9 @@ const CLI_API_ROUTES = [
   "GET /api/agent-memory/:repo",
   "POST /api/agent-memory/:repo/revisions",
   "GET /api/agent-threads/:threadId/messages",
+  "GET /api/artifacts/:artifactId/comments",
+  "POST /api/artifacts/:artifactId/comments",
+  "POST /api/artifacts/:artifactId/comments/:commentId/resolve",
 ] as const
 
 const ARTIFACTS_THROUGH_THE_RUNNER =

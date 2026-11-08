@@ -241,6 +241,11 @@ Members:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
 
+Artifact comments:
+  sixb artifacts comments list <artifact-id>
+                                      Open comments, as threads with where each is
+  sixb artifacts comments resolve|reply ...
+
 A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
 \`sixb users search <name>\`.
 
@@ -443,6 +448,16 @@ Options:
 exact email, ignoring case, and finds suspended members too. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
+  artifacts: `Usage:
+  sixb artifacts comments list <artifact-id> [--status open|resolved|all]
+  sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
+  sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
+
+\`list\` prints {"threads"}, open ones by default: each comment with its anchor (board, element
+address, label, revision), its body, authorName and its replies. A message quoting comments
+names each one's id as \`comment <id>\`. Resolve a comment once the change it asks for is made;
+reply to one to say why it is not. Reading takes access to the artifact; resolving, the right to
+change it or being the comment's author.`,
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]
@@ -677,6 +692,58 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
     }
   }
   fail(`Unknown actions command '${sub}'.`);
+}
+
+// src/commands/artifacts.ts
+var STATUSES = ["open", "resolved", "all"];
+var MAX_BODY_LENGTH = 4000;
+async function artifacts(api, args) {
+  const [group, sub, ...rest] = args;
+  if (!group || isHelp(group))
+    return writeText(GROUP_HELP.artifacts);
+  if (group !== "comments")
+    fail(`Unknown artifacts command '${group}'.`);
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.artifacts);
+  if (sub === "list") {
+    const { positionals, options } = parseCommandArgs(rest, { "--status": "string" }, "artifacts comments list", 1);
+    const artifact = idSegment(positionals[0]?.trim());
+    const status = enumValue("--status", options["--status"] ?? "open", STATUSES);
+    const page = await api.get(`/api/artifacts/${artifact}/comments`);
+    return writeJson({ threads: threadsOf(commentsOf(page), status) });
+  }
+  if (sub === "resolve") {
+    const { positionals, options } = parseCommandArgs(rest, { "--reopen": "boolean" }, "artifacts comments resolve", 2);
+    const [artifact, comment] = positionals.map((value) => idSegment(value.trim()));
+    return writeJson(await api.post(`/api/artifacts/${artifact}/comments/${comment}/resolve`, {
+      resolved: options["--reopen"] !== true
+    }));
+  }
+  if (sub === "reply") {
+    const { positionals, options } = parseCommandArgs(rest, { "--file": "string" }, "artifacts comments reply", [2, 3]);
+    const [artifactId, commentId, words] = positionals;
+    const body = (options["--file"] ? await readText(options["--file"], "reply") : words ?? "").trim();
+    if (!body)
+      fail("artifacts comments reply requires the reply's words, or --file <path|->.");
+    if (body.length > MAX_BODY_LENGTH) {
+      fail(`A reply holds at most ${MAX_BODY_LENGTH} characters.`);
+    }
+    return writeJson(await api.post(`/api/artifacts/${idSegment(artifactId?.trim())}/comments`, {
+      body,
+      parentId: commentId?.trim()
+    }));
+  }
+  fail(`Unknown artifacts comments command '${sub}'.`);
+}
+function commentsOf(page) {
+  const comments = typeof page === "object" && page !== null && "comments" in page ? page.comments : [];
+  return Array.isArray(comments) ? comments.filter((comment) => typeof comment === "object" && comment !== null && typeof comment.id === "string") : [];
+}
+function threadsOf(comments, status) {
+  return comments.filter((comment) => !comment.parentId).filter((comment) => status === "all" || status === "resolved" === Boolean(comment.resolvedAt)).map((comment) => ({
+    ...comment,
+    replies: comments.filter((reply) => reply.parentId === comment.id)
+  }));
 }
 
 // src/commands/data.ts
@@ -1718,7 +1785,7 @@ var WORKFLOW_RUN_STATUSES = [
   "cancelled"
 ];
 var DATA_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"];
-var STATUSES = {
+var STATUSES2 = {
   action: ACTION_RUN_STATUSES,
   workflow: WORKFLOW_RUN_STATUSES,
   sync: DATA_RUN_STATUSES,
@@ -1755,7 +1822,7 @@ async function runs(api, kind, args) {
       offset: true
     });
     if (options.status !== undefined) {
-      options.status = enumValue("--status", options.status, STATUSES[kind]);
+      options.status = enumValue("--status", options.status, STATUSES2[kind]);
     }
     for (const [name, flag] of [
       ["startedAfter", "--started-after"],
@@ -1935,6 +2002,7 @@ var INSTANCE_COMMANDS = [
   "workflows",
   "workflow-runs",
   "users",
+  "artifacts",
   "models",
   "datasets",
   "syncs",
@@ -1965,6 +2033,8 @@ async function dispatch(api, command, args) {
       return workflows(api, args);
     case "workflow-runs":
       return runs(api, "workflow", args);
+    case "artifacts":
+      return artifacts(api, args);
     case "users":
       return users(api, args);
     case "models":
