@@ -81,6 +81,7 @@ export function useBoardEditing(
   const messages = useArtifactMessages().canvas.toolbar
   const store = useStoreApi()
   const graph = useMemo(() => canvasGraph(canvas), [canvas])
+  const read = useReadGraph(graph, store)
   const editing = !!edit
   const [nodes, setNodes] = useState<Node[]>(graph.nodes)
   const [edges, setEdges] = useState<Edge[]>(graph.edges)
@@ -106,7 +107,7 @@ export function useBoardEditing(
       const chosen = selected.current
       setNodes((current) => {
         const drawn = new Map(current.map((node) => [node.id, node]))
-        return graph.nodes.map((node) => {
+        const next = graph.nodes.map((node) => {
           const was = drawn.get(node.id)
           const choose = node.type !== "point"
           const isSelected = choose && chosen.has(node.id)
@@ -127,10 +128,11 @@ export function useBoardEditing(
           madeFrom.set(next, node)
           return next
         })
+        return sameItems(current, next) ? current : next
       })
       setEdges((current) => {
         const drawn = new Map(current.map((edge) => [edge.id, edge]))
-        return graph.edges.map((edge) => {
+        const next = graph.edges.map((edge) => {
           const was = drawn.get(edge.id)
           const isSelected = chosen.has(edge.id)
           const same =
@@ -141,6 +143,7 @@ export function useBoardEditing(
           madeFrom.set(next, edge)
           return next
         })
+        return sameItems(current, next) ? current : next
       })
     }
   }
@@ -203,7 +206,7 @@ export function useBoardEditing(
   )
 
   if (!edit) {
-    return { nodes: graph.nodes, edges: graph.edges, editing: false as const, root }
+    return { nodes: read.nodes, edges: read.edges, editing: false as const, root }
   }
 
   const chosenItems = canvas.items.filter((item) => selection.has(item.id))
@@ -370,4 +373,49 @@ export function useBoardEditing(
       },
     },
   }
+}
+
+/** Whether two lists hold the same items, in the same order. */
+function sameItems<T>(left: readonly T[], right: readonly T[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index])
+}
+
+/**
+ * The graph as a read board hands it to React Flow. Its lists stay the ones given before while
+ * they hold the same items: React Flow takes a list in again, and works out every arrow's ends,
+ * whenever it is a new one. A node made again, as for an item someone moved, keeps the size React
+ * Flow measured while its own stays the same: without it, React Flow measures it again, in a
+ * commit of its own that redraws every arrow.
+ */
+function useReadGraph(
+  graph: { readonly nodes: Node[]; readonly edges: Edge[] },
+  store: ReturnType<typeof useStoreApi>
+): { readonly nodes: Node[]; readonly edges: Edge[] } {
+  // Caches of what the graph draws as: one kept from a render that was thrown away is as good.
+  const [measuredFrom] = useState(() => new WeakMap<Node, Node>())
+  const last = useRef<{ readonly nodes: Node[]; readonly edges: Edge[] } | null>(null)
+
+  const { nodeLookup } = store.getState()
+  const measured = graph.nodes.map((node) => {
+    const kept = measuredFrom.get(node)
+    if (kept) return kept
+
+    const drawn = nodeLookup.get(node.id)
+    const same =
+      drawn?.measured.width !== undefined &&
+      drawn.measured.height !== undefined &&
+      drawn.internals.userNode.width === node.width &&
+      drawn.internals.userNode.height === node.height
+    const next = same ? { ...node, measured: { ...drawn.measured } } : node
+    measuredFrom.set(node, next)
+    return next
+  })
+
+  const nodes =
+    last.current && sameItems(last.current.nodes, measured) ? last.current.nodes : measured
+  const edges =
+    last.current && sameItems(last.current.edges, graph.edges) ? last.current.edges : graph.edges
+  if (nodes !== last.current?.nodes || edges !== last.current?.edges)
+    last.current = { nodes, edges }
+  return last.current
 }
