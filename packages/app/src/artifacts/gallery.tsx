@@ -241,7 +241,8 @@ function GalleryCard({ artifact }: { readonly artifact: ArtifactSummary }) {
             >
               {format.relative(artifact.updatedAt)}
             </time>
-            {artifact.latestVersion > 1 ? (
+            {/* A created version is named; the current one changes in place, and goes unnamed. */}
+            {version.data?.frozen ? (
               <>
                 <span aria-hidden="true">·</span>
                 <span className="shrink-0">{messages.viewer.version(artifact.latestVersion)}</span>

@@ -447,6 +447,67 @@ describe("an artifact shared in a conversation", () => {
 })
 
 describe("a conversation's artifacts menu", () => {
+  test("names a created version, and leaves the current one unnamed", async () => {
+    // The current version changes in place. Reproduce by naming every latest version: the
+    // current one reads v3.
+    for (const [frozen, detail] of [
+      [true, "Sheet · v3"],
+      [false, "Sheet"],
+    ] as const) {
+      const requests = stubApi((url) =>
+        url.pathname === "/api/artifacts"
+          ? Response.json({
+              artifacts: [
+                {
+                  id: ARTIFACT_ID,
+                  projectId: "proj",
+                  kind: "sheet",
+                  title: "Regions",
+                  owner: alice,
+                  latestVersion: 3,
+                  revision: 3,
+                  createdAt: at,
+                  updatedAt: at,
+                },
+              ],
+              hasMore: false,
+            })
+          : url.pathname === `/api/artifacts/${ARTIFACT_ID}/versions/3`
+            ? Response.json({
+                artifactId: ARTIFACT_ID,
+                version: 3,
+                revision: 3,
+                frozen,
+                title: "Regions",
+                entry: "workbook.json",
+                files: [],
+                outline: { kind: "sheet", sheets: [], charts: [] },
+                references: [],
+                author: alice,
+                createdAt: at,
+                updatedAt: at,
+              })
+            : undefined
+      )
+      const ui = render(
+        <Wrap queries={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <ThreadArtifactsMenu threadId="thr_1" onOpen={() => {}} withGallery={false} />
+        </Wrap>
+      )
+      await openMenu(await ui.findByRole("button", { name: "1 artifact in this conversation" }))
+      const item = await ui.findByRole("menuitem", { name: /Regions/ })
+      // Once its latest version is read, it says what it is.
+      await waitFor(() =>
+        expect(requests).toContain(`GET /api/artifacts/${ARTIFACT_ID}/versions/3`)
+      )
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      expect(item.textContent).toBe(`Regions${detail}`)
+      ui.unmount()
+    }
+  })
+
   test("opens an artifact where there is no panel, as an observer's header does", async () => {
     // Reproduce by dropping `onOpen ??` from ThreadArtifactsMenu: outside a panel it shows nothing.
     const requests = stubApi((url) =>
@@ -480,7 +541,7 @@ describe("a conversation's artifacts menu", () => {
       fireEvent.click(await ui.findByRole("menuitem", { name: /Regions/ }))
     })
     expect(opened).toHaveBeenCalledWith({ type: "artifact", artifactId: ARTIFACT_ID })
-    expect(requests).toEqual(["GET /api/artifacts?thread=thr_1"])
+    expect(requests[0]).toBe("GET /api/artifacts?thread=thr_1")
     // An observer's gallery holds none of these: no way to it.
     expect(ui.queryByRole("menuitem", { name: "All artifacts" })).toBeNull()
   })
