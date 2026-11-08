@@ -90,8 +90,9 @@ artifact held before one of the Agent's turns, or before a restore, once you con
 conversation's header lists every artifact it published.
 
 A cancelled reply keeps what it already published. Retrying a reply that failed takes back what it
-changed, along with what it said: an artifact nobody changed since goes back to its restore point,
-and one it created is removed.
+changed, along with what it said: an artifact only the reply changed goes back to its restore
+point, and one it created is removed. One anyone else changed meanwhile, even between two of the
+reply's writes, or whose version someone created, keeps every change.
 
 The Agent learns the formats from a built-in skill, `sixb-artifacts`.
 

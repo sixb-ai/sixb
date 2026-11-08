@@ -57292,7 +57292,7 @@
                           },
                           "frozen": {
                             "type": "boolean",
-                            "description": "That version was frozen then: restoring opens the next one"
+                            "description": "Whether that version was already created, and so frozen, when the point was taken: its content is then that version's"
                           },
                           "title": {
                             "type": "string"
@@ -57624,7 +57624,7 @@
                     },
                     "frozen": {
                       "type": "boolean",
-                      "description": "That version was frozen then: restoring opens the next one"
+                      "description": "Whether that version was already created, and so frozen, when the point was taken: its content is then that version's"
                     },
                     "title": {
                       "type": "string"

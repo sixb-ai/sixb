@@ -162,8 +162,9 @@ holds its execution token and asks core's access rule again, so a run reclaimed 
 delivery, or a requester removed meanwhile, writes nothing. A child writes as its parent's turn:
 the turn's first write to an existing artifact keeps a restore point, and its writes are recorded
 under the turn. The write exists when the tool returns: the conversation shows it mid-turn, a
-cancelled run keeps it, and retrying the run undoes it with the run's messages, unless someone
-changed the artifact since. After a deck publishes, the
+cancelled run keeps it, and retrying the run undoes it with the run's messages, unless anyone else
+changed the artifact since the turn's first write to it, between its writes included, or created
+the version that write replaced. After a deck publishes, the
 layout check (`../agent/src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
 the files the version holds; it bounds every wait on the page and exits before its command's
 timeout, so a deck that hangs costs a partial report rather than a browser left running.

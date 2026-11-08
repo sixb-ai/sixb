@@ -19899,7 +19899,7 @@ export type ListArtifactRestorePointsResponses = {
        */
       version: number
       /**
-       * That version was frozen then: restoring opens the next one
+       * Whether that version was already created, and so frozen, when the point was taken: its content is then that version's
        */
       frozen: boolean
       title: string
@@ -20046,7 +20046,7 @@ export type GetArtifactRestorePointResponses = {
      */
     version: number
     /**
-     * That version was frozen then: restoring opens the next one
+     * Whether that version was already created, and so frozen, when the point was taken: its content is then that version's
      */
     frozen: boolean
     title: string

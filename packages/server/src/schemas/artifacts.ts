@@ -274,7 +274,11 @@ const ArtifactRestorePointSummarySchema = z.object({
   artifactId: z.string(),
   revision: RevisionSchema.describe("The revision whose content it holds, which restores it"),
   version: z.number().int().positive().describe("The version it was taken of"),
-  frozen: z.boolean().describe("That version was frozen then: restoring opens the next one"),
+  frozen: z
+    .boolean()
+    .describe(
+      "Whether that version was already created, and so frozen, when the point was taken: its content is then that version's"
+    ),
   title: z.string(),
   author: PrincipalSchema.describe("Who had last written that content"),
   origin: ArtifactOriginSchema.optional(),
