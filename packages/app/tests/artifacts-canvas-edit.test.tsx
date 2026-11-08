@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ARTIFACT_LIMITS, type Canvas, parseCanvas } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, type Canvas, formatCanvas, parseCanvas } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { Suspense } from "react"
@@ -10,8 +10,8 @@ import {
   canvasFiles,
   connectItems,
   duplicateItems,
-  formatCanvas,
   moveItems,
+  newItemId,
   removeItems,
   resizeItem,
   setItemText,
@@ -107,45 +107,59 @@ describe("arranging a canvas", () => {
     expect(saved(resized)).toEqual(resized)
   })
 
-  test("adds items under free ids, and connects them", () => {
+  test("adds items under ids nobody else adding at once picks, and connects them", () => {
+    // Two people editing live add their notes at once: each gets an id of its own. Reproduce by
+    // naming items by the next free number, as the draft did: both are `note`, and one is lost.
     const note = addItem("note", { x: 100, y: 700 }, "")
-    expect(note.id(CANVAS)).toBe("note")
+    expect(note.id).toMatch(/^note-[a-z0-9]{6}$/)
+    expect(addItem("note", { x: 100, y: 700 }, "").id).not.toBe(note.id)
     const added = note.change(CANVAS)
-    const typed = setItemText("note", "Ship it")(added)
-    const linked = connectItems("note", "ask")(typed)
+    const typed = setItemText(note.id, "Ship it")(added)
+    const linked = connectItems(note.id, "ask")(typed)
     expect(linked.items.at(-1)).toEqual({
-      id: "arrow",
+      id: expect.stringMatching(/^arrow-[a-z0-9]{6}$/),
       type: "arrow",
-      from: "note",
+      from: note.id,
       to: "ask",
       dashed: false,
     })
     // An arrow already there, or from an item to itself, is no change.
-    expect(connectItems("note", "ask")(linked)).toBe(linked)
-    expect(connectItems("note", "note")(linked)).toBe(linked)
-    expect(addItem("note", { x: 0, y: 0 }, "").id(linked)).toBe("note-2")
+    expect(connectItems(note.id, "ask")(linked)).toBe(linked)
+    expect(connectItems(note.id, note.id)(linked)).toBe(linked)
     expect(saved(linked)).toEqual(linked)
+  })
+
+  test("names a copy after what it copies, within the ids canvas.json takes", () => {
+    expect(newItemId("home")).toMatch(/^home-[a-z0-9]{6}$/)
+    // A copy of a copy drops the suffix its original was given, not a word of the id.
+    expect(newItemId("note-k3m9q2")).toMatch(/^note-[a-z0-9]{6}$/)
+    expect(newItemId("home-screen")).toMatch(/^home-screen-[a-z0-9]{6}$/)
+    expect(newItemId("x".repeat(40))).toHaveLength(40)
   })
 
   test("throws away a note left empty, and drops a shape's text to none", () => {
     const empty = setItemText("ask", "  ")(CANVAS)
     expect(ids(empty)).not.toContain("ask")
-    const shaped = addItem("shape", { x: 0, y: 0 }, "Paid?").change(CANVAS)
-    const blank = setItemText("shape", "")(shaped)
-    expect(blank.items.find((item) => item.id === "shape")).not.toHaveProperty("text")
+    const shape = addItem("shape", { x: 0, y: 0 }, "Paid?")
+    const blank = setItemText(shape.id, "")(shape.change(CANVAS))
+    expect(blank.items.find((item) => item.id === shape.id)).not.toHaveProperty("text")
   })
 
   test("removes items with the arrows they hold up, and copies a flow with its arrows", () => {
     const removed = removeItems(new Set(["pay"]))(CANVAS)
     expect(ids(removed)).toEqual(["flow", "home", "ask", "title"])
     const copies = duplicateItems(new Set(["home", "pay"]))
-    expect(copies.copies(CANVAS)).toEqual(["home-2", "pay-2"])
+    const [home, pay] = copies.copies(CANVAS)
+    expect(home).toMatch(/^home-[a-z0-9]{6}$/)
+    expect(pay).toMatch(/^pay-[a-z0-9]{6}$/)
     const copied = copies.change(CANVAS)
     expect(copied.items.slice(-3)).toEqual([
-      expect.objectContaining({ id: "home-2", x: 32, y: 32 }),
-      expect.objectContaining({ id: "pay-2", x: 662, y: 32 }),
-      expect.objectContaining({ id: "next-2", from: "home-2", to: "pay-2" }),
+      expect.objectContaining({ id: home, x: 32, y: 32 }),
+      expect.objectContaining({ id: pay, x: 662, y: 32 }),
+      expect.objectContaining({ id: expect.stringMatching(/^next-/), from: home, to: pay }),
     ])
+    // The copies it names are the ones it makes, however often it is asked.
+    expect(copies.copies(CANVAS)).toEqual([home as string, pay as string])
     expect(saved(copied)).toEqual(copied)
   })
 
@@ -267,9 +281,9 @@ describe("a canvas in the viewer, edited", () => {
     })
     const reported = draft as ArtifactDraft | null
     expect(reported?.changed).toBe(true)
-    expect(reported?.files().get("canvas.json")).toBe(
-      formatCanvas(duplicateItems(new Set(ids(CANVAS))).change(CANVAS))
-    )
+    // Each item copied, and the arrow between the two boards copied.
+    const copied = canvasOf(JSON.parse(reported?.files().get("canvas.json") ?? ""))
+    expect(copied.items).toHaveLength(CANVAS.items.length * 2)
     // ⌘Z takes the copies back: nothing left to save.
     await act(async () => {
       fireEvent.keyDown(board, { key: "z", metaKey: true })

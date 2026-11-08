@@ -7,6 +7,7 @@ import {
   type CanvasItem,
   type CanvasShape,
   type CanvasTextSize,
+  formatCanvas,
 } from "@sixb/core/artifacts"
 
 /**
@@ -67,19 +68,20 @@ export function resizeItem(id: string, box: Box): CanvasChange {
     })
 }
 
-/** An item added at a point, its top left there; the next free id names it. */
+/** An item added at a point, its top left there, under a new id of its kind. */
 export function addItem(
   kind: NewItem,
   at: { x: number; y: number },
   text: string
 ): {
   readonly change: CanvasChange
-  readonly id: (canvas: Canvas) => string
+  readonly id: string
 } {
-  const id = (canvas: Canvas) => freeId(new Set(canvas.items.map((item) => item.id)), kind)
+  const id = newItemId(kind)
   const change: CanvasChange = (canvas) => {
     if (canvas.items.length >= ARTIFACT_LIMITS.maxCanvasItems) return canvas
-    const place = { id: id(canvas), x: position(at.x), y: position(at.y) }
+    if (canvas.items.some((item) => item.id === id)) return canvas
+    const place = { id, x: position(at.x), y: position(at.y) }
     const item: CanvasItem =
       kind === "note"
         ? { ...place, type: "note", w: 240, text }
@@ -119,20 +121,27 @@ export function duplicateItems(ids: ReadonlySet<string>): {
   readonly change: CanvasChange
   readonly copies: (canvas: Canvas) => readonly string[]
 } {
-  /** Each item copied, by its id, and its copy's: the next free. */
+  // Each copy's id, new once and then the same: the change and the copies it names agree.
+  const names = new Map<string, string>()
+  const copyOf = (id: string) => {
+    let name = names.get(id)
+    if (!name) {
+      name = newItemId(id)
+      names.set(id, name)
+    }
+    return name
+  }
+  /** Each item copied, by its id, and its copy's. */
   const plan = (canvas: Canvas) => {
-    const taken = new Set(canvas.items.map((item) => item.id))
     const renamed = new Map<string, string>()
     for (const item of canvas.items) {
       if (!ids.has(item.id) || item.type === "arrow") continue
-      const id = freeId(taken, item.id)
-      taken.add(id)
-      renamed.set(item.id, id)
+      renamed.set(item.id, copyOf(item.id))
     }
-    return { taken, renamed }
+    return renamed
   }
   const change: CanvasChange = (canvas) => {
-    const { taken, renamed } = plan(canvas)
+    const renamed = plan(canvas)
     if (renamed.size === 0) return canvas
     const copies: CanvasItem[] = []
     for (const item of canvas.items) {
@@ -140,9 +149,7 @@ export function duplicateItems(ids: ReadonlySet<string>): {
         const from = typeof item.from === "string" ? renamed.get(item.from) : undefined
         const to = typeof item.to === "string" ? renamed.get(item.to) : undefined
         if (!from || !to) continue
-        const id = freeId(taken, item.id)
-        taken.add(id)
-        copies.push({ ...item, id, from, to })
+        copies.push({ ...item, id: copyOf(item.id), from, to })
         continue
       }
       const id = renamed.get(item.id)
@@ -151,7 +158,7 @@ export function duplicateItems(ids: ReadonlySet<string>): {
     const room = Math.max(0, ARTIFACT_LIMITS.maxCanvasItems - canvas.items.length)
     return { ...canvas, items: [...canvas.items, ...copies.slice(0, room)] }
   }
-  return { change, copies: (canvas) => [...plan(canvas).renamed.values()] }
+  return { change, copies: (canvas) => [...plan(canvas).values()] }
 }
 
 /**
@@ -191,8 +198,9 @@ export function setItemText(id: string, typed: string): CanvasChange {
   }
 }
 
-/** An arrow from one item to another, its id the next free; none when they are one item. */
+/** An arrow from one item to another, under a new id; none when they are one item. */
 export function connectItems(from: string, to: string): CanvasChange {
+  const id = newItemId("arrow")
   return (canvas) => {
     if (from === to || canvas.items.length >= ARTIFACT_LIMITS.maxCanvasItems) return canvas
     const exists = canvas.items.some(
@@ -200,7 +208,7 @@ export function connectItems(from: string, to: string): CanvasChange {
     )
     if (exists) return canvas
     const arrow: CanvasArrow = {
-      id: freeId(new Set(canvas.items.map((item) => item.id)), "arrow"),
+      id,
       type: "arrow",
       from,
       to,
@@ -248,42 +256,25 @@ export function canvasFiles(original: Canvas, canvas: Canvas): Map<string, strin
   return files
 }
 
-/**
- * A canvas as `canvas.json` writes it, the inverse of `parseCanvas`: its items in order, each
- * without what is a default, positions and sizes in whole pixels.
- */
-export function formatCanvas(canvas: Canvas): string {
-  const items = canvas.items.map((item) => {
-    if (item.type === "arrow") {
-      const { dashed, ...rest } = item
-      return dashed ? item : rest
-    }
-    const rounded = Object.fromEntries(
-      Object.entries(item).map(([key, value]) => [
-        key,
-        typeof value === "number" && ["x", "y", "w", "h"].includes(key) ? Math.round(value) : value,
-      ])
-    )
-    if (item.type === "text" && item.size === "m") {
-      const { size: _, ...rest } = rounded
-      return rest
-    }
-    return rounded
-  })
-  return `${JSON.stringify({ items }, null, 2)}\n`
-}
-
 /** How far a copy sits from what it copies, down and to the right. */
 const STEP = 32
 
-/** The first id of the form `note`, `note-2`, … not taken; one ending in a number counts on. */
-function freeId(taken: ReadonlySet<string>, base: string): string {
-  const stem = base.replace(/-\d+$/, "").slice(0, 34)
-  if (!taken.has(stem)) return stem
-  for (let number = 2; ; number += 1) {
-    const id = `${stem}-${number}`
-    if (!taken.has(id)) return id
-  }
+/** The letters and digits a new id ends in, after a dash, and how many. */
+const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+const ID_SUFFIX = 6
+/** A suffix a new id was given, letters and digits mixed, or a number. */
+const RANDOM_SUFFIX = /-(?:(?=[a-z]*\d)(?=\d*[a-z])[a-z0-9]{6}|\d+)$/
+
+/**
+ * A new item's id: what it is or what it copies, then a dash and six random letters and digits,
+ * as `note-k3m9q2`, so two people adding at once never name two items alike. A copy of a copy
+ * drops the suffix its original was given. Ids stay within what `canvas.json` takes: forty at most.
+ */
+export function newItemId(base: string): string {
+  const stem = base.replace(RANDOM_SUFFIX, "").slice(0, 40 - ID_SUFFIX - 1)
+  const bytes = crypto.getRandomValues(new Uint8Array(ID_SUFFIX))
+  const suffix = [...bytes].map((byte) => ID_ALPHABET[byte % ID_ALPHABET.length]).join("")
+  return `${stem || "item"}-${suffix}`
 }
 
 function joins(end: CanvasArrow["from"], ids: ReadonlySet<string>): boolean {
