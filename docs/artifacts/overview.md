@@ -412,17 +412,21 @@ pins, shown in place of the board until it runs, in the reader's mode. Each come
 while the board is drawn small. While it is rendered, the board shows its outline, and the viewer
 shows the preview as soon as it is ready.
 
-- The Agent's check takes them as it publishes. A version published otherwise, such as boards
-  moved in the app, is pictured by the agent worker in a blank sandbox of the project; without
-  sandboxes, boards have no preview.
-- A board kept as it was keeps its preview: each is named by what the board shows, its HTML, the
-  files it can load, and its size.
+- The Agent's check takes them as it publishes. A version published otherwise, such as one whose
+  boards were resized in the app, is pictured by the agent worker in a blank sandbox of the
+  project, which reaches only the CDNs a board may load from; without sandboxes, boards have no
+  preview.
+- A preview is named by what the board shows: its HTML, the files it can load, its size, and who
+  published it. Moving a board keeps its preview; resizing it or changing what it loads renders a
+  new one. A board kept as it was keeps the picture it was first given.
+- A board whose page does not load whole, a file or a font that fails, gets no preview and shows
+  its outline: a broken picture would stay.
 - A board that reads a query is pictured with the data its publisher could read when they
   published it, which everyone who can open the canvas then sees in its preview; publishing warns
-  of it.
-- `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark&size=small` serves one
-  to whoever reads the version, and the version says which boards' previews are `ready`, `pending`,
-  or `none`.
+  of it. A copy of the canvas, such as a forked conversation's, gets none of those pictures.
+- `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark&size=small`
+  serves one to whoever reads the version, and reading or publishing a version says which boards'
+  previews are `ready`, `pending`, or `none`.
 
 ## Declare a query
 
