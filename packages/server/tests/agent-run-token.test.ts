@@ -528,10 +528,19 @@ describe("run tokens", () => {
         kind: "document",
         title: "Plan",
         files: [{ path: "document.md", file: fileRefJson(file) }],
-        baseVersion: 1,
+        baseRevision: 1,
       })
     )
     expect(next.status).toBe(201)
+    await expect(next.json()).resolves.toMatchObject({ version: { version: 1, revision: 2 } })
+
+    // Creating a version and restoring are a person's: a run token reaches neither.
+    for (const path of ["freeze", "restore-points/1/restore"]) {
+      const refused = await app.fetch(
+        jsonRequest("POST", `/api/artifacts/${published.artifact.id}/${path}`, {})
+      )
+      expect(refused.status, path).toBe(403)
+    }
   })
 
   test("gives a shared conversation the project's memory alone", async () => {

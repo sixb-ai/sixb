@@ -3,6 +3,7 @@ import { parseArtifactAddress } from "@sixb/core/artifacts"
 import {
   ARTIFACT_FRAME_ROUTE_PREFIX,
   FRAME_ASSETS,
+  FRAME_REFERENCE_PATH,
   FRAME_REFERENCE_PREFIX,
   frameEntries,
   frameLayout,
@@ -84,13 +85,15 @@ async function frameResponse(
   }
   let lent = false
   if (path?.startsWith(FRAME_REFERENCE_PREFIX)) {
-    // A file another artifact lends this one: only one its frame was issued with, at that version.
-    const match = /^([^/@]+)@(\d+)\/(.+)$/.exec(path.slice(FRAME_REFERENCE_PREFIX.length))
+    // A file another artifact lends this one: only one its frame was issued with, at that version
+    // and revision. Once the lender changes, the file is gone from the frame, never mixed in.
+    const match = FRAME_REFERENCE_PATH.exec(path.slice(FRAME_REFERENCE_PREFIX.length))
     const target = frame.targets.find(
       (candidate) =>
         candidate.artifactId === match?.[1] &&
         candidate.version === Number(match?.[2]) &&
-        parseArtifactAddress(candidate.address)?.path === match?.[3]
+        candidate.revision === Number(match?.[3]) &&
+        parseArtifactAddress(candidate.address)?.path === match?.[4]
     )
     const lender = target
       ? await storage.getVersion({
@@ -99,9 +102,9 @@ async function frameResponse(
           version: target.version,
         })
       : null
-    if (!lender || !match) return notFound()
+    if (!lender || !match || lender.revision !== target?.revision) return notFound()
     version = lender
-    path = match[3] ?? null
+    path = match[4] ?? null
     lent = true
   }
   const file = version.files.find((candidate) => candidate.path === path)

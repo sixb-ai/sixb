@@ -2074,7 +2074,7 @@ describe("a shared conversation's artifacts over HTTP", () => {
       outline: { kind: "document" as const, headings: [] },
       references: [],
       author: alice,
-      createdAt: new Date(),
+      updatedAt: new Date(),
     }
     await storage.artifacts.create({
       projectId: sixb.id,
@@ -2117,8 +2117,8 @@ describe("a shared conversation's artifacts over HTTP", () => {
     })
     expect(saved.status).toBe(201)
     expect(await saved.json()).toMatchObject({
-      artifact: { owner: alice, latestVersion: 2 },
-      version: { author: { type: "user", id: "usr_bob" } },
+      artifact: { owner: alice, latestVersion: 1, revision: 2 },
+      version: { version: 1, revision: 2, author: { type: "user", id: "usr_bob" } },
     })
     const kept = await call("/api/artifacts/art_0000000001/state/filters", bob, {
       method: "PUT",
