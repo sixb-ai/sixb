@@ -250,6 +250,10 @@ function canvasText(structure: Y.Map<unknown>): string {
   const seen = new Set<string>()
   for (const id of [...order.toArray(), ...[...byId.keys()].sort()]) {
     if (seen.has(id) || !byId.has(id)) continue
+    const item = byId.get(id) as Y.Map<unknown>
+    // A note or a text someone just added and is still typing its first words into has none
+    // yet: it is written once it has them, and thrown away if it never does.
+    if (unwritten(item)) continue
     seen.add(id)
     ids.push(id)
   }
@@ -261,6 +265,16 @@ function canvasText(structure: Y.Map<unknown>): string {
     (item) => item.type !== "arrow" || (joined(item.from) && joined(item.to))
   )
   return formatCanvas({ items: kept as unknown as CanvasItem[] })
+}
+
+/** Whether an item is a note or a text without words yet. */
+function unwritten(item: Y.Map<unknown>): boolean {
+  const type = item.get("type")
+  if (type !== "note" && type !== "text") return false
+  const text = item.get("text")
+  return (
+    (text instanceof Y.Text ? text.toString() : typeof text === "string" ? text : "").trim() === ""
+  )
 }
 
 /**

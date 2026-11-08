@@ -329,6 +329,38 @@ describe("merging files into a document", () => {
     expect(canvasOf(documentFiles(person)).map((item) => item.id)).toEqual(["welcome", "hi"])
   })
 
+  test("writes a note someone just added once it has words, and an arrow to it with it", () => {
+    // Reproduce by writing every item in canvasText: the canvas holds a note without text, which
+    // publishing refuses, and every write-back fails until someone types into it.
+    const { left: person } = pair(base)
+    const canvas = documentCanvas(person)
+    const note = new Y.Map<unknown>(
+      Object.entries({ id: "new", type: "note", x: 0, y: 900, w: 240, text: new Y.Text("") })
+    )
+    canvas?.items.set("new", note)
+    canvas?.items.set(
+      "to-new",
+      new Y.Map(
+        Object.entries({ id: "to-new", type: "arrow", from: "welcome", to: "new", dashed: false })
+      )
+    )
+    canvas?.order.push(["new", "to-new"])
+    expect(canvasOf(documentFiles(person)).map((item) => item.id)).toEqual([
+      "welcome",
+      "region",
+      "hi",
+    ])
+
+    ;(note.get("text") as Y.Text).insert(0, "Ship it")
+    expect(canvasOf(documentFiles(person)).map((item) => item.id)).toEqual([
+      "welcome",
+      "region",
+      "hi",
+      "new",
+      "to-new",
+    ])
+  })
+
   test("replaces a binary file, deletes a removed one, and takes `next` for a file both added", () => {
     const doc = createArtifactDocument("canvas", base)
     doc.getMap("files").set("notes.md", new Y.Text("Mine\n"))
