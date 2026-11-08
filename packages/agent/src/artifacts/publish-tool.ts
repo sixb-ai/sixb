@@ -212,9 +212,11 @@ async function publish(
   }
   const reservation = input.budget.reserve(0, tool)
   const contents: PublishedArtifactFile[] = []
+  /** The files as the Agent wrote them: its next update starts from them. */
+  const publishedFiles: ArtifactFile[] = []
   let published: PublishedArtifact
   try {
-    const files: ArtifactFile[] = []
+    const files = publishedFiles
     for (const source of sources) {
       const bytes =
         source.bytes ??
@@ -296,7 +298,11 @@ async function publish(
   let copy: string | undefined
   try {
     // Revising from $SIXB_ARTIFACTS_DIR must start from this revision, not the one before.
-    await installed.replace(handle.sandbox, published, written ?? contents, signal)
+    // What it wrote is what its next update starts from: the merged version holds others' words
+    // its working copy may never hold.
+    await installed.replace(handle.sandbox, published, written ?? contents, signal, {
+      base: publishedFiles,
+    })
     copy = installed.directoryOf(artifact.id)
   } catch (error) {
     if (signal.aborted) throw error

@@ -126,13 +126,18 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   /**
    * Install the revision just written in place of the artifact's copy, and list it first. One
    * update runs at a time, so parallel publishes never write an older manifest over a newer one.
+   *
+   * The next update's base, what a canvas's update is merged from, moves only to what the Agent
+   * itself wrote, `base`: a version it did not write, merged or another's, holds words it may
+   * never have read, and its next files, made from its own, would take them out. Without `base`,
+   * the base stays what it was.
    */
   replace(
     sandbox: Sandbox,
     published: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
-    options: { readonly edited?: boolean } = {}
+    options: { readonly edited?: boolean; readonly base?: readonly ArtifactFile[] } = {}
   ): Promise<void> {
     const update = this.#updates.then(() =>
       this.#replace(sandbox, published, files, signal, options)
@@ -149,7 +154,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     }: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
-    options: { readonly edited?: boolean }
+    options: { readonly edited?: boolean; readonly base?: readonly ArtifactFile[] }
   ): Promise<void> {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
@@ -172,7 +177,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     }
     if (install) this.#installed.set(artifact.id, sizeBytes)
     else this.#installed.delete(artifact.id)
-    this.#bases.set(artifact.id, version.files)
+    if (options.base) this.#bases.set(artifact.id, options.base)
+    else if (!this.#bases.has(artifact.id)) this.#bases.set(artifact.id, version.files)
     this.#entries = [
       manifestEntry(artifact, version, install ? directory : undefined, options),
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
