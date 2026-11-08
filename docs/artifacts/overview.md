@@ -51,6 +51,11 @@ revision and who last wrote it, rather than replace changes you never saw:
 await sixb.artifacts.update(artifact.id, { ...input, baseRevision: artifact.revision })
 ```
 
+A canvas is edited by several people at once, so an update to one is merged instead. Your changes
+since `baseRevision` are applied, item by item and line by line, to what it holds now, and the
+result says `merged: true`. Where you and someone else changed the same value, yours wins. A
+canvas still fails with `artifact_moved` when Sixb no longer holds the files of `baseRevision`.
+
 From outside the server, use `POST /api/artifacts` and `PUT /api/artifacts/{artifactId}/content`
 with files uploaded through `POST /api/files`.
 
@@ -125,6 +130,24 @@ Boards' pages are the Agent's to change; on the canvas you arrange them. If some
 artifact while you were editing, the save stops and says so: open what they saved, or save yours
 over it. The next time the Agent works on the artifact, it starts from your save and keeps your
 changes.
+
+## Edit a canvas live
+
+A canvas is edited by everyone at once over `/ws/artifacts`. Each person sees the others' changes
+as they make them, and who else is there.
+
+- Whoever may change the canvas edits it; whoever may only read it watches.
+- Changes are written to the current version about 1.5 seconds after the last one, at most every
+  10 seconds while someone keeps editing, and when the last editor leaves. Each write is a normal
+  change, by the last person who edited, and sends `artifact.updated`.
+- What the Agent or anyone else publishes meanwhile is merged into what people are editing, and
+  their unsaved changes stay. While an Agent turn changes boards, everyone sees which ones.
+- People connected to different servers see each other's presence at once, and each other's
+  changes after the next write, so after a pause of about 1.5 seconds.
+- A write that fails is reported and tried again; the changes stay meanwhile.
+
+`@sixb/core/artifacts/live` holds the document and the socket's messages for a client to build
+on. The [WebSockets](../websockets/overview.md#live-artifacts) page lists the messages.
 
 ## Write a document
 
