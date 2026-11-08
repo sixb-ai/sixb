@@ -1242,6 +1242,56 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    // Regression proof: drop the `othersCommented` check from a provider's `undoTurnWrites`; the
+    // retry deletes art_reviewed, and the other person's comment goes with it.
+    test("keeps an artifact a retried turn created once anyone but its requester commented on it", async () => {
+      await withStorage(async (artifacts) => {
+        const turn = { threadId: "thr_turn", runId: "run_turn" }
+        const created = (id: string) =>
+          artifacts.create({
+            ...createInput({ id, version: versionInput({ origin: turn }) }),
+            turnRunId: "run_turn",
+          })
+        const comment = (
+          artifactId: string,
+          id: string,
+          author: Principal,
+          origin?: { readonly threadId: string; readonly runId: string }
+        ) =>
+          artifacts.createComment({
+            projectId,
+            artifactId,
+            id,
+            anchor: { revision: 1 },
+            body: `Comment ${id}`,
+            author,
+            ...(origin ? { origin } : {}),
+            createdAt: at(2),
+          })
+
+        // Commented by the requester, and by the turn for them: it goes all the same.
+        await created("art_mine")
+        await comment("art_mine", "cmt_own", owner)
+        await comment("art_mine", "cmt_turn", owner, turn)
+
+        // Commented by someone else: kept, with their comment.
+        await created("art_reviewed")
+        await comment("art_reviewed", "cmt_other", otherOwner)
+
+        const undone = await artifacts.undoTurnWrites({
+          projectId,
+          turnRunId: "run_turn",
+          requester: owner,
+        })
+
+        expect(undone).toEqual({ restored: [], deleted: ["art_mine"] })
+        expect(await artifacts.get({ projectId, id: "art_mine" })).toBeNull()
+        expect(
+          (await artifacts.listComments({ projectId, id: "art_reviewed" })).map(({ id }) => id)
+        ).toEqual(["cmt_other"])
+      })
+    })
+
     test("keeps comments and their replies, oldest first, and resolves and deletes them", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())

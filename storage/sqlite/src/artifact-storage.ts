@@ -6,6 +6,7 @@ import {
   artifactStateBytes,
   artifactStorageErrors,
   checkArtifactStateWrite,
+  othersCommented,
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
@@ -341,6 +342,14 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
         if (write.created) {
           if (!turnUndoable({ write, revision })) continue
+
+          const comments = this.db
+            .query(
+              `SELECT ${COMMENT_COLUMNS} FROM artifact_comments
+               WHERE project_id = ? AND artifact_id = ?`
+            )
+            .all(projectId, write.artifactId) as Row[]
+          if (othersCommented(comments.map(parseArtifactCommentRow), input)) continue
 
           this.db
             .query("DELETE FROM artifacts WHERE project_id = ? AND id = ?")

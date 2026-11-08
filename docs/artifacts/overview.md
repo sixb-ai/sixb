@@ -99,7 +99,8 @@ conversation's header lists every artifact it published.
 A cancelled reply keeps what it already published. Retrying a reply that failed takes back what it
 changed, along with what it said: an artifact only the reply changed goes back to its restore
 point, and one it created is removed. One anyone else changed meanwhile, even between two of the
-reply's writes, or whose version someone created, keeps every change.
+reply's writes, or whose version someone created, keeps every change. One it created that someone
+else commented on stays too, with its comments.
 
 The Agent learns the formats from a built-in skill, `sixb-artifacts`.
 

@@ -2,7 +2,7 @@ import { isArtifactKind } from "../../artifacts/kinds"
 import { ARTIFACT_COMMENT_LIMITS, ARTIFACT_STATE_LIMITS } from "../../artifacts/limits"
 import type { ArtifactOutline } from "../../artifacts/outline"
 import type { ArtifactReference } from "../../artifacts/references"
-import type { Principal } from "../../auth"
+import { type Principal, principalsEqual } from "../../auth"
 import { isFileRef } from "../../blob-storage"
 import { type ArtifactLatestVersion, ArtifactStorageError } from "./errors"
 import type {
@@ -148,6 +148,21 @@ export function turnUndoable(input: {
   if (target.frozen && !point.frozen) return false
 
   return revision - point.revision === write.writes
+}
+
+/**
+ * Whether someone other than a retried turn and its requester commented on an artifact the turn
+ * created. Their words would go with it, so a retry keeps it, as it keeps one someone else wrote:
+ * a comment never moves the revision, which is all `turnUndoable` reads.
+ */
+export function othersCommented(
+  comments: readonly Pick<ArtifactCommentRecord, "author" | "origin">[],
+  turn: { readonly turnRunId: string; readonly requester?: Principal }
+): boolean {
+  return comments.some(({ author, origin }) => {
+    if (origin?.runId === turn.turnRunId) return false
+    return !turn.requester || !principalsEqual(author, turn.requester)
+  })
 }
 
 /** What a version or a restore point holds, and who last wrote it from where. */

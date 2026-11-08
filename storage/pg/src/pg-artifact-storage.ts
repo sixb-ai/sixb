@@ -5,6 +5,7 @@ import {
   artifactStateBytes,
   artifactStorageErrors,
   checkArtifactStateWrite,
+  othersCommented,
   parseArtifactBoardPreviewRow,
   parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
@@ -333,6 +334,12 @@ export class PgArtifactStorage implements ArtifactStorage {
 
         if (write.created) {
           if (!turnUndoable({ write, revision })) continue
+
+          const comments = await tx<PgRow[]>`
+            SELECT ${tx.unsafe(COMMENT_COLUMNS)} FROM artifact_comments
+            WHERE project_id = ${projectId} AND artifact_id = ${write.artifactId}
+          `
+          if (othersCommented(comments.map(parseArtifactCommentRow), input)) continue
 
           await tx`DELETE FROM artifacts WHERE project_id = ${projectId} AND id = ${write.artifactId}`
           deleted.push(write.artifactId)

@@ -214,6 +214,11 @@ export interface ArtifactTurnInput {
 
 export interface UndoArtifactTurnInput extends ArtifactTurnInput {
   /**
+   * Whom the turn answered. An artifact the turn created is kept when anyone else commented on it;
+   * their comments, and the Agent's for them, don't keep it.
+   */
+  readonly requester?: Principal
+  /**
    * The Yjs document of each artifact put back, by id, as its turn's restore point holds it: made
    * at the revision the turn's last write left, which is the only one an artifact is put back
    * from. An artifact put back without one leaves its document behind, for the next reader to
