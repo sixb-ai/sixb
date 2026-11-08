@@ -89,6 +89,11 @@ export type FrameEvent =
   | FrameEventOf<"embeds", { readonly embeds: readonly FrameEmbed[] }>
   /** A page's height as laid out at the frame's width, so a document can size the frame to it. */
   | FrameEventOf<"size", { readonly height: number }>
+  /**
+   * The reader pressed a button, or a link within the page, that reads `text`: a canvas's opened
+   * board follows the arrow that leaves it with that label. At most a label's length.
+   */
+  | FrameEventOf<"press", { readonly text: string }>
 
 /** One `<sixb-embed>` the frame shows. */
 export interface FrameEmbed {
@@ -283,6 +288,12 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
     case "size":
       return Number.isFinite(params.height) && Number(params.height) >= 0
         ? event("size", { height: Math.min(Number(params.height), MAX_HEIGHT) })
+        : null
+    case "press":
+      return typeof params.text === "string" &&
+        params.text.length > 0 &&
+        params.text.length <= ARTIFACT_LIMITS.maxCanvasLabelLength
+        ? event("press", { text: params.text })
         : null
     default:
       return null

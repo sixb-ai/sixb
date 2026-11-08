@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
 import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
-import { type Canvas, parseCanvas } from "@sixb/core/artifacts"
+import {
+  type Canvas,
+  type CanvasArrow,
+  type CanvasBoard,
+  FRAME_PROTOCOL,
+  parseCanvas,
+} from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { liveBoards, MAX_LIVE_BOARDS } from "../src/artifacts/renderers/canvas/board"
-import { BoardFocus } from "../src/artifacts/renderers/canvas/focus"
+import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
 import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
 import { installDom } from "./helpers/dom"
@@ -63,8 +69,10 @@ const browser = installDom(
     "Node",
     "Element",
     "HTMLElement",
+    "HTMLIFrameElement",
     "SVGElement",
     "Event",
+    "MessageEvent",
     "MouseEvent",
     "PointerEvent",
     "EventTarget",
@@ -95,6 +103,16 @@ function canvasOf(value: unknown): Canvas {
   if (!("canvas" in parsed)) throw new Error(parsed.error)
   return parsed.canvas
 }
+
+const board = (id: string, x = 0) => ({
+  id,
+  type: "board",
+  file: `boards/${id}.html`,
+  x,
+  y: 0,
+  w: 390,
+  h: 400,
+})
 
 const CANVAS = canvasOf({
   items: [
@@ -383,6 +401,7 @@ describe("a board opened over its canvas", () => {
     createdAt: "2026-10-18T12:00:00.000Z",
   } as unknown as GetArtifactVersionResponse
   const boards = CANVAS.items.filter((item) => item.type === "board")
+  const arrows = CANVAS.items.filter((item) => item.type === "arrow")
   const client = () =>
     new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
 
@@ -394,6 +413,7 @@ describe("a board opened over its canvas", () => {
         <BoardFocus
           version={version}
           boards={boards}
+          arrows={arrows}
           id="home"
           onOpen={(id) => opened.push(id)}
           onClose={() => {
@@ -411,6 +431,74 @@ describe("a board opened over its canvas", () => {
     expect(opened).toEqual(["pay"])
     expect(closed).toBe(1)
     view.unmount()
+  })
+
+  test("goes where the arrow points whose label the reader pressed in the board", async () => {
+    // "Continue" leads from home to pay. Reproduce by dropping BoardFocus's onEvent: the press
+    // opens nothing.
+    const cache = client()
+    cache.setQueryData(["artifact-frame", version.artifactId, version.version], {
+      path: "/api/artifact-frames/token/",
+      expiresAt: "2026-10-18T13:00:00.000Z",
+    })
+    const opened: string[] = []
+    const view = render(
+      <QueryClientProvider client={cache}>
+        <BoardFocus
+          version={version}
+          boards={boards}
+          arrows={arrows}
+          id="home"
+          onOpen={(id) => opened.push(id)}
+          onClose={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    const frame = view.container.querySelector("iframe")?.contentWindow
+    if (!frame) throw new Error("Expected the board's frame.")
+    const press = async (text: string) => {
+      await act(async () => {
+        browser.dispatchEvent(
+          new browser.MessageEvent("message", {
+            data: { protocol: FRAME_PROTOCOL, event: "press", params: { text } },
+            source: frame as never,
+          })
+        )
+      })
+    }
+
+    await press("Save draft")
+    expect(opened).toEqual([])
+    await press("continue")
+    expect(opened).toEqual(["pay"])
+    view.unmount()
+  })
+
+  test("follows an arrow by its label, case and spaces aside, only from the board and to one", () => {
+    const flow = canvasOf({
+      items: [
+        board("home"),
+        board("pay", 520),
+        board("done", 1040),
+        { id: "paid", type: "shape", shape: "diamond", x: 0, y: 900, w: 160, h: 120 },
+        { id: "go", type: "arrow", from: "home", to: "pay", label: "Get  started" },
+        { id: "check", type: "arrow", from: "home", to: "paid", label: "Check" },
+        { id: "back", type: "arrow", from: "pay", to: "home", label: "Back" },
+        { id: "aside", type: "arrow", from: "home", to: { x: 0, y: 2000 }, label: "Aside" },
+        { id: "again", type: "arrow", from: "home", to: "done", label: "get started" },
+      ],
+    })
+    const arrows = flow.items.filter((item): item is CanvasArrow => item.type === "arrow")
+    const boards = flow.items.filter((item): item is CanvasBoard => item.type === "board")
+    const follow = (from: string, text: string) => followedArrow(arrows, boards, from, text)
+
+    // The first the canvas lists wins.
+    expect(follow("home", " GET STARTED ")).toBe("pay")
+    expect(follow("pay", "back")).toBe("home")
+    // An arrow from another board, to a shape, or to a point leads nowhere.
+    expect(follow("pay", "Get started")).toBeNull()
+    expect(follow("home", "Check")).toBeNull()
+    expect(follow("home", "Aside")).toBeNull()
   })
 
   test("opens focused when an address names a board", async () => {

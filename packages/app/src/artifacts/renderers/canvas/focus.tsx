@@ -1,6 +1,6 @@
-import type { CanvasBoard } from "@sixb/core/artifacts"
+import type { CanvasArrow, CanvasBoard, FrameEvent } from "@sixb/core/artifacts"
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react"
-import { type ReactNode, useEffect } from "react"
+import { type ReactNode, useCallback, useEffect } from "react"
 import { ArtifactFrame } from "../../frame"
 import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
@@ -9,16 +9,21 @@ import type { ArtifactVersion } from "../../queries"
  * A board opened over the canvas: its page at its own width, or the viewer's when that is
  * narrower, as tall as the viewer, scrolling and answering like a page. ← and → step through the
  * boards in the canvas's order, and Esc goes back to the canvas.
+ *
+ * It is a prototype too: pressing a button or a link within the page that reads as the label of an
+ * arrow leaving the board opens the board the arrow points to.
  */
 export function BoardFocus({
   version,
   boards,
+  arrows,
   id,
   onOpen,
   onClose,
 }: {
   readonly version: ArtifactVersion
   readonly boards: readonly CanvasBoard[]
+  readonly arrows: readonly CanvasArrow[]
   readonly id: string
   readonly onOpen: (id: string) => void
   readonly onClose: () => void
@@ -28,6 +33,16 @@ export function BoardFocus({
   const board = boards[index]
   const previous = boards[index - 1]
   const next = boards[index + 1]
+
+  const onEvent = useCallback(
+    (event: FrameEvent) => {
+      if (event.event !== "press") return
+
+      const to = followedArrow(arrows, boards, id, event.params.text)
+      if (to) onOpen(to)
+    },
+    [arrows, boards, id, onOpen]
+  )
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -95,11 +110,36 @@ export function BoardFocus({
             entry={board.file}
             title={messages.boardFrame(title)}
             className="sixb-canvas-surface size-full overflow-hidden"
+            onEvent={onEvent}
           />
         </div>
       </div>
     </div>
   )
+}
+
+/**
+ * The board an arrow leaving `from` points to, when its label reads as `pressed`, case and spaces
+ * aside: the first such arrow the canvas lists, to a board.
+ */
+export function followedArrow(
+  arrows: readonly CanvasArrow[],
+  boards: readonly CanvasBoard[],
+  from: string,
+  pressed: string
+): string | null {
+  const words = wordsOf(pressed)
+  for (const arrow of arrows) {
+    const to = arrow.to
+    if (arrow.from !== from || typeof to !== "string" || !arrow.label) continue
+    if (wordsOf(arrow.label) !== words) continue
+    if (boards.some((board) => board.id === to)) return to
+  }
+  return null
+}
+
+function wordsOf(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase()
 }
 
 function Step({
