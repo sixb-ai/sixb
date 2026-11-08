@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { type QuickBooksInvoiceLinkOptions, quickbooks } from "../src"
+import { type QuickBooksInvoiceListOptions, quickbooks } from "../src"
 import { invoice } from "./fixtures/transactions"
 
 const originalFetch = globalThis.fetch
@@ -31,25 +31,19 @@ function mock(handler: (url: URL, init: RequestInit) => Response) {
 }
 const link = "https://payments.example.test/invoice/opaque-token"
 
-test("invoice reads request include=invoiceLink only when asked and keep the provider link", async () => {
+// Removal proof: restore an options parameter on invoices.get; `ids.map(qb.invoices.get)` then
+// passes the array index as options and this call shape breaks.
+test("invoice reads by ID keep the one-argument get used by callbacks", async () => {
   const qb = await client()
-  for (const includeInvoiceLink of [undefined, false, true]) {
-    mock((url) => {
-      expect(url.pathname).toBe("/v3/company/123/invoice/42")
-      expect(url.searchParams.get("include")).toBe(includeInvoiceLink ? "invoiceLink" : null)
-      expect(url.searchParams.get("minorversion")).toBe("75")
-      return Response.json({
-        Invoice: includeInvoiceLink ? { ...invoice, InvoiceLink: link } : invoice,
-      })
-    })
-    const result = await qb.invoices.get("42", { includeInvoiceLink })
-    expect(result.InvoiceLink).toBe(includeInvoiceLink ? link : undefined)
-  }
-  // Ineligible invoices (in the sandbox: no BillEmail) omit the field; it is never synthesized.
-  mock(() => Response.json({ Invoice: invoice }))
-  expect(await qb.invoices.get("42", { includeInvoiceLink: true })).not.toHaveProperty(
-    "InvoiceLink"
-  )
+  const paths: string[] = []
+  mock((url) => {
+    paths.push(`${url.pathname}${url.searchParams.has("include") ? "?include" : ""}`)
+    const id = url.pathname.split("/").at(-1) ?? ""
+    return Response.json({ Invoice: { ...invoice, Id: id, InvoiceLink: link } })
+  })
+  const rows = await Promise.all(["41", "42"].map(qb.invoices.get))
+  expect(rows.map((row) => row.InvoiceLink)).toEqual([link, link])
+  expect(paths).toEqual(["/v3/company/123/invoice/41", "/v3/company/123/invoice/42"])
 })
 
 test("invoice queries pass include=invoiceLink beside the query on every page", async () => {
@@ -79,19 +73,16 @@ test("invoice queries pass include=invoiceLink beside the query on every page", 
   )
 })
 
-test("invoice link options are validated before any request", async () => {
+test("includeInvoiceLink is validated before any request", async () => {
   let calls = 0
   mock(() => {
     calls++
     return Response.json({})
   })
   const qb = await client()
-  const invalid = { includeInvoiceLink: "yes" } as unknown as QuickBooksInvoiceLinkOptions
-  expect(() => qb.invoices.get("42", invalid)).toThrow("includeInvoiceLink")
-  expect(() =>
-    qb.invoices.get("42", { include: "invoiceLink" } as unknown as QuickBooksInvoiceLinkOptions)
-  ).toThrow("Unsupported invoice read option")
-  await expect(qb.invoices.list(invalid)).rejects.toThrow("includeInvoiceLink")
+  await expect(
+    qb.invoices.list({ includeInvoiceLink: "yes" } as unknown as QuickBooksInvoiceListOptions)
+  ).rejects.toThrow("includeInvoiceLink")
   expect(calls).toBe(0)
 })
 

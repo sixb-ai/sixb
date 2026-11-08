@@ -190,9 +190,9 @@ live(
       expect(closed.TxnStatus).toBe("Converted")
       expect(closed.LinkedTxn).toContainEqual({ TxnId: invoice.Id, TxnType: "Invoice" })
 
-      // Queries return the pay link only with include=invoiceLink; reads by ID returned it
-      // for eligible invoices either way. In the sandbox, eligibility required BillEmail.
-      const linked = await qb.invoices.get(invoice.Id, { includeInvoiceLink: true })
+      // Queries return the pay link only with include=invoiceLink; reads by ID return it for
+      // eligible invoices (in the sandbox: invoices with BillEmail).
+      const linked = await qb.invoices.get(invoice.Id)
       expect(linked.InvoiceLink).toMatch(/^https:\/\//)
       const listed = await qb.invoices.list({ ids: [invoice.Id], includeInvoiceLink: true })
       expect(listed.items[0]?.InvoiceLink).toBe(linked.InvoiceLink)
