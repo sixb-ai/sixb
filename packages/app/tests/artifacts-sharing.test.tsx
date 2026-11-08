@@ -351,27 +351,24 @@ describe("an artifact shared in a conversation", () => {
       ["owner", false],
     ] as const) {
       stubApi((url) =>
-        url.pathname === `/api/artifacts/${ARTIFACT_ID}/versions`
-          ? Response.json(
-              {
-                artifact: {},
-                version: {
-                  artifactId: ARTIFACT_ID,
-                  version: 3,
-                  revision: 4,
-                  frozen: false,
-                  title: "Regions",
-                  entry: "workbook.json",
-                  files: [],
-                  outline: { kind: "sheet", sheets: [], charts: [] },
-                  references: [],
-                  author: bob,
-                  createdAt: "2026-10-21T10:30:00.000Z",
-                  updatedAt: "2026-10-21T12:00:00.000Z",
-                },
+        url.pathname === `/api/artifacts/${ARTIFACT_ID}/content`
+          ? Response.json({
+              artifact: {},
+              version: {
+                artifactId: ARTIFACT_ID,
+                version: 3,
+                revision: 4,
+                frozen: false,
+                title: "Regions",
+                entry: "workbook.json",
+                files: [],
+                outline: { kind: "sheet", sheets: [], charts: [] },
+                references: [],
+                author: bob,
+                createdAt: "2026-10-21T10:30:00.000Z",
+                updatedAt: "2026-10-21T12:00:00.000Z",
               },
-              { status: 201 }
-            )
+            })
           : undefined
       )
       const ui = viewer(sharedArtifact("sheet", access))

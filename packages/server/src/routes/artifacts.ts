@@ -56,11 +56,11 @@ import {
   DeleteArtifactStateResponseSchema,
   FreezeArtifactBodySchema,
   PublishArtifactBodySchema,
-  PublishArtifactVersionBodySchema,
   PublishedArtifactResponseSchema,
   RestoreArtifactBodySchema,
   SetArtifactStateBodySchema,
   SetArtifactStateResponseSchema,
+  UpdateArtifactBodySchema,
 } from "../schemas/artifacts"
 import { FileContentQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
@@ -301,14 +301,17 @@ function artifactErrorResponse(status: number) {
   }
 }
 
-const publishResponses = {
-  201: PublishedArtifactResponseSchema,
+const writeRefusals = {
   400: ArtifactErrorResponseSchema,
   403: ArtifactErrorResponseSchema,
   404: ArtifactErrorResponseSchema,
   409: ArtifactErrorResponseSchema,
   501: ArtifactErrorResponseSchema,
 }
+
+const createResponses = { 201: PublishedArtifactResponseSchema, ...writeRefusals }
+
+const updateResponses = { 200: PublishedArtifactResponseSchema, ...writeRefusals }
 
 async function artifactFileContentResponse(
   host: SixbHostView,
@@ -521,7 +524,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       },
       {
         body: PublishArtifactBodySchema,
-        response: publishResponses,
+        response: createResponses,
         detail: {
           summary: "Create an artifact",
           description:
@@ -749,11 +752,11 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
-    .post(
-      "/api/artifacts/:artifactId/versions",
+    .put(
+      "/api/artifacts/:artifactId/content",
       async (context) => {
         try {
-          const body = PublishArtifactVersionBodySchema.parse(context.body)
+          const body = UpdateArtifactBodySchema.parse(context.body)
           const { artifactId } = context.params
           const content = {
             ...contentInput(body),
@@ -763,7 +766,6 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const published = run
             ? await run.publish({ ...content, artifactId })
             : await requireRequestSixb(context).artifacts.update(artifactId, content)
-          context.set.status = 201
           return await serializePublished(host, published)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
@@ -771,15 +773,15 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       },
       {
         params: ArtifactParamsSchema,
-        body: PublishArtifactVersionBodySchema,
-        response: publishResponses,
+        body: UpdateArtifactBodySchema,
+        response: updateResponses,
         detail: {
           summary: "Update an artifact",
           description:
             "Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.",
           tags: [OPENAPI_TAGS.artifacts.name],
-          operationId: "publishArtifactVersion",
-          security: accessTokenSecurityRequirement("publishArtifactVersion"),
+          operationId: "updateArtifact",
+          security: accessTokenSecurityRequirement("updateArtifact"),
         },
       }
     )

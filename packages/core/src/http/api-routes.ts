@@ -565,9 +565,9 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
-    operationId: "publishArtifactVersion",
-    method: "POST",
-    path: "/api/artifacts/:artifactId/versions",
+    operationId: "updateArtifact",
+    method: "PUT",
+    path: "/api/artifacts/:artifactId/content",
     accessToken: true,
     agentApi: true,
     agentEffect: "artifact",

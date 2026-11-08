@@ -524,14 +524,14 @@ describe("run tokens", () => {
       artifacts: [{ id: published.artifact.id }],
     })
     const next = await app.fetch(
-      jsonRequest("POST", `/api/artifacts/${published.artifact.id}/versions`, {
+      jsonRequest("PUT", `/api/artifacts/${published.artifact.id}/content`, {
         kind: "document",
         title: "Plan",
         files: [{ path: "document.md", file: fileRefJson(file) }],
         baseRevision: 1,
       })
     )
-    expect(next.status).toBe(201)
+    expect(next.status).toBe(200)
     await expect(next.json()).resolves.toMatchObject({ version: { version: 1, revision: 2 } })
 
     // Creating a version and restoring are a person's: a run token reaches neither.

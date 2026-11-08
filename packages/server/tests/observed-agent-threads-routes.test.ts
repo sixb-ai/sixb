@@ -382,8 +382,8 @@ describe("observed agent thread routes", () => {
     expect(frame.status).toBe(409)
 
     // An observer only reads: no version, no page data, no delete.
-    const publish = await fixture.request("/api/artifacts/art_0000000001/versions", observer, {
-      method: "POST",
+    const publish = await fixture.request("/api/artifacts/art_0000000001/content", observer, {
+      method: "PUT",
       body: { kind: "document", title: "Mine now", files: [{ path: "document.md", file }] },
     })
     expect(publish.status).toBe(403)

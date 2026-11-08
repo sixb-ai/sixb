@@ -1,8 +1,8 @@
 import {
   isSixbApiError,
-  type PublishArtifactVersionResponse,
-  publishArtifactVersion,
   type SixbClient,
+  type UpdateArtifactResponse,
+  updateArtifact,
   uploadFile,
 } from "@sixb/client"
 import type { ArtifactVersion } from "./queries"
@@ -47,7 +47,7 @@ export async function publishEdit(
     readonly client?: SixbClient
     readonly signal?: AbortSignal
   } = {}
-): Promise<PublishArtifactVersionResponse> {
+): Promise<UpdateArtifactResponse> {
   const transport = {
     ...(options.client ? { client: options.client } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
@@ -68,7 +68,7 @@ export async function publishEdit(
     ),
   ])
   try {
-    const { data } = await publishArtifactVersion({
+    const { data } = await updateArtifact({
       path: { artifactId: version.artifactId },
       body: {
         kind: version.outline.kind,
