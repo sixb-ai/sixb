@@ -63,7 +63,7 @@ export function createBillPaymentsResource(
       )
     },
     get: (id) => readEntity(http, "BillPayment", `billpayment/${pathId(id)}`, id),
-    list: (options) => listTransactions(http, "BillPayment", options),
+    list: (options) => listTransactions(http, "BillPayment", options, { party: "vendor" }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource

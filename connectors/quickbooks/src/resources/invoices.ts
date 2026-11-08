@@ -81,7 +81,7 @@ export function createInvoicesResource(
     },
     get: (id) => readEntity(http, "Invoice", `invoice/${pathId(id)}`, id),
     downloadPdf: (id) => http.getPdf(`invoice/${pathId(id)}/pdf`),
-    list: (options) => listTransactions(http, "Invoice", options),
+    list: (options) => listTransactions(http, "Invoice", options, { party: "customer" }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource

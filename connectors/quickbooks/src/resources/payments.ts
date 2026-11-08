@@ -82,7 +82,7 @@ export function createPaymentsResource(
     },
     get: (id) => readEntity(http, "Payment", `payment/${pathId(id)}`, id),
     downloadPdf: (id) => http.getPdf(`payment/${pathId(id)}/pdf`),
-    list: (options) => listTransactions(http, "Payment", options),
+    list: (options) => listTransactions(http, "Payment", options, { party: "customer" }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource

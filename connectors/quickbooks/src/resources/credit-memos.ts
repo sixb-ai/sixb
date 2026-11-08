@@ -58,7 +58,7 @@ export function createCreditMemosResource(
     delete: async (input, options) => deleteEntity(http, "CreditMemo", input, options),
     send: async (id, options) => sendEntity(http, "CreditMemo", id, options),
     get: (id) => readEntity(http, "CreditMemo", `creditmemo/${pathId(id)}`, id),
-    list: (options) => listTransactions(http, "CreditMemo", options),
+    list: (options) => listTransactions(http, "CreditMemo", options, { party: "customer" }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource
