@@ -5,9 +5,17 @@ import { approximateBox, type Box, canvasExtent } from "./layout"
 /**
  * A canvas drawn small, as a card previews it: boards, embeds, notes, and shapes as their shapes in
  * the theme's colors, texts and sections' headings as lines, arrows between what they join. Plain
- * SVG, so a card never loads the board.
+ * SVG, so a card never loads the board. A board with a picture shows it, up to
+ * {@link MAX_PICTURED_BOARDS}: past them, each is a few pixels on a card, and drawn as its shape.
  */
-export function CanvasThumbnail({ canvas }: { readonly canvas: Canvas }) {
+export function CanvasThumbnail({
+  canvas,
+  pictures = NO_PICTURES,
+}: {
+  readonly canvas: Canvas
+  /** Each board's small picture, by board id, for those that have one. */
+  readonly pictures?: ReadonlyMap<string, string>
+}) {
   const extent = canvasExtent(canvas)
   // A margin around everything, a twentieth of the larger side.
   const margin = Math.max(extent.width, extent.height) / 20
@@ -24,6 +32,9 @@ export function CanvasThumbnail({ canvas }: { readonly canvas: Canvas }) {
     })
   )
   const stroke = Math.max(view.width, view.height) / 400
+  const boards = canvas.items.filter((item) => item.type === "board").length
+  const pictured = boards <= MAX_PICTURED_BOARDS ? pictures : NO_PICTURES
+
   return (
     <svg
       viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
@@ -32,20 +43,33 @@ export function CanvasThumbnail({ canvas }: { readonly canvas: Canvas }) {
       aria-hidden="true"
     >
       {canvas.items.map((item) => (
-        <Shape key={item.id} item={item} boxes={boxes} stroke={stroke} />
+        <Shape
+          key={item.id}
+          item={item}
+          boxes={boxes}
+          stroke={stroke}
+          picture={pictured.get(item.id)}
+        />
       ))}
     </svg>
   )
 }
 
+/** The most boards a card draws as their pictures: a hundred would fetch a hundred pictures. */
+const MAX_PICTURED_BOARDS = 24
+
+const NO_PICTURES: ReadonlyMap<string, string> = new Map()
+
 function Shape({
   item,
   boxes,
   stroke,
+  picture,
 }: {
   readonly item: CanvasItem
   readonly boxes: ReadonlyMap<string, Box>
   readonly stroke: number
+  readonly picture: string | undefined
 }) {
   const box = boxes.get(item.id)
   const line = "color-mix(in oklab, var(--foreground) 30%, transparent)"
@@ -85,18 +109,35 @@ function Shape({
       ) : null
     }
     case "board":
-    case "embed":
-      return box ? (
-        <rect
-          {...rect(box)}
-          rx={stroke * 2}
-          style={{
-            fill: "var(--card)",
-            stroke: "color-mix(in oklab, var(--foreground) 14%, transparent)",
-          }}
-          strokeWidth={stroke}
-        />
-      ) : null
+    case "embed": {
+      if (!box) return null
+
+      const edge = "color-mix(in oklab, var(--foreground) 14%, transparent)"
+      if (!picture) {
+        return (
+          <rect
+            {...rect(box)}
+            rx={stroke * 2}
+            style={{ fill: "var(--card)", stroke: edge }}
+            strokeWidth={stroke}
+          />
+        )
+      }
+
+      // The picture from the top at the board's width, as its tile shows it, edged on top.
+      return (
+        <g>
+          <rect {...rect(box)} rx={stroke * 2} style={{ fill: "var(--card)" }} />
+          <image {...rect(box)} href={picture} preserveAspectRatio="xMidYMin meet" />
+          <rect
+            {...rect(box)}
+            rx={stroke * 2}
+            style={{ fill: "none", stroke: edge }}
+            strokeWidth={stroke}
+          />
+        </g>
+      )
+    }
     case "note":
       // A neutral note is plain paper, edged as a board is.
       return box ? (

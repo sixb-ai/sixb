@@ -26,6 +26,21 @@ export function useCanvas(version: ArtifactVersion): Canvas | null | undefined {
   }, [file.text, file.loading])
 }
 
+/** The mode a canvas's boards draw in: the one its theme.json pins, else the app's. */
+export function useCanvasMode(version: ArtifactVersion): "light" | "dark" {
+  const theme = useArtifactThemeAttributes(version)
+  const app = useOptionalTheme()?.resolvedTheme
+
+  if (theme.className === "dark" || theme.className === "light") return theme.className
+
+  return (
+    app ??
+    (typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+      ? "dark"
+      : "light")
+  )
+}
+
 /** A canvas artifact: its board, in the app's theme or its own, opened where an address points. */
 export function CanvasRenderer({
   version,
@@ -36,17 +51,9 @@ export function CanvasRenderer({
 }) {
   const messages = useArtifactMessages()
   const theme = useArtifactThemeAttributes(version)
-  const app = useOptionalTheme()?.resolvedTheme
+  const mode = useCanvasMode(version)
   const canvas = useCanvas(version)
   const draft = useCanvasDraft(canvas)
-  // The board draws in the mode its theme.json pins, else the app's.
-  const mode =
-    theme.className === "dark" || theme.className === "light"
-      ? theme.className
-      : (app ??
-        (typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-          ? "dark"
-          : "light"))
   const loading = <ViewerLoading label={messages.viewer.loading} />
   if (canvas === undefined) return loading
   if (canvas === null) return <ViewerNotice title={messages.canvas.loadFailed} />
