@@ -1,5 +1,5 @@
 import { isArtifactKind } from "../../artifacts/kinds"
-import { ARTIFACT_STATE_LIMITS } from "../../artifacts/limits"
+import { ARTIFACT_COMMENT_LIMITS, ARTIFACT_STATE_LIMITS } from "../../artifacts/limits"
 import type { ArtifactOutline } from "../../artifacts/outline"
 import type { ArtifactReference } from "../../artifacts/references"
 import type { Principal } from "../../auth"
@@ -7,6 +7,7 @@ import { isFileRef } from "../../blob-storage"
 import { type ArtifactLatestVersion, ArtifactStorageError } from "./errors"
 import type {
   ArtifactBoardPreviewRecord,
+  ArtifactCommentRecord,
   ArtifactDocument,
   ArtifactFile,
   ArtifactFrameGrantRecord,
@@ -283,6 +284,59 @@ export const artifactStorageErrors = {
       `[Sixb] Artifact '${id}' keeps no restore point of revision ${revision}.`
     ),
   stateFull: (message: string) => new ArtifactStorageError("artifact_state_full", message),
+  commentNotFound: (artifactId: string, id: string) =>
+    new ArtifactStorageError(
+      "comment_not_found",
+      `[Sixb] Artifact '${artifactId}' has no comment '${id}' to reply to.`
+    ),
+  commentsFull: (artifactId: string) =>
+    new ArtifactStorageError(
+      "artifact_comments_full",
+      `[Sixb] Artifact '${artifactId}' holds ${ARTIFACT_COMMENT_LIMITS.maxComments} comments, as many as it may: delete some first.`
+    ),
+}
+
+export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
+  const id = text(row.id, "id", "artifact comment")
+  const where = `artifact comment '${id}'`
+  if ((row.resolvedAt == null) !== (row.resolvedByPrincipalType == null)) {
+    throw corrupt(where, "resolvedAt and resolvedBy are not both set")
+  }
+  const anchor = json(row.anchor, "anchor", where)
+  if (!isObject(anchor) || !Number.isSafeInteger(anchor.revision) || Number(anchor.revision) < 1) {
+    throw corrupt(where, "anchor names no revision")
+  }
+  for (const key of ["board", "element", "label"] as const) {
+    if (anchor[key] !== undefined && typeof anchor[key] !== "string") {
+      throw corrupt(where, `anchor's ${key} is not text`)
+    }
+  }
+  return {
+    projectId: text(row.projectId, "projectId", where),
+    artifactId: text(row.artifactId, "artifactId", where),
+    id,
+    ...(row.parentId == null ? {} : { parentId: text(row.parentId, "parentId", where) }),
+    anchor: {
+      ...(typeof anchor.board === "string" ? { board: anchor.board } : {}),
+      ...(typeof anchor.element === "string" ? { element: anchor.element } : {}),
+      ...(typeof anchor.label === "string" ? { label: anchor.label } : {}),
+      revision: Number(anchor.revision),
+    },
+    body: text(row.body, "body", where),
+    author: principal(row.authorPrincipalType, row.authorPrincipalId, "author", where),
+    createdAt: date(row.createdAt, "createdAt", where),
+    ...(row.resolvedAt == null
+      ? {}
+      : {
+          resolvedAt: date(row.resolvedAt, "resolvedAt", where),
+          resolvedBy: principal(
+            row.resolvedByPrincipalType,
+            row.resolvedByPrincipalId,
+            "resolvedBy",
+            where
+          ),
+        }),
+  }
 }
 
 function files(value: unknown, where: string): ArtifactFile[] {

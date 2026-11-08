@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { ARTIFACT_RESTORE_POINTS, ARTIFACT_STATE_LIMITS } from "../artifacts/limits"
+import {
+  ARTIFACT_COMMENT_LIMITS,
+  ARTIFACT_RESTORE_POINTS,
+  ARTIFACT_STATE_LIMITS,
+} from "../artifacts/limits"
 import type { Principal } from "../auth"
 import type { FileRef } from "../blob-storage"
 import {
@@ -8,6 +12,7 @@ import {
   ArtifactStorageError,
   type ArtifactStorageErrorCode,
   type ArtifactVersionInput,
+  type CreateArtifactCommentInput,
   type CreateArtifactInput,
   type PublishArtifactVersionInput,
 } from "../storage/artifacts"
@@ -1234,6 +1239,167 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           { file: undone, revision: 3 },
         ])
         expect((await get("art_turn"))?.document).toEqual({ file: undone, revision: 3 })
+      })
+    })
+
+    test("keeps comments and their replies, oldest first, and resolves and deletes them", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const comment = (id: string, overrides: Partial<CreateArtifactCommentInput> = {}) =>
+          artifacts.createComment({
+            projectId,
+            artifactId: "art_report",
+            id,
+            anchor: {
+              board: "welcome",
+              element: "body>main:0>h1:0",
+              label: "Welcome",
+              revision: 1,
+            },
+            body: `Comment ${id}`,
+            author: otherOwner,
+            createdAt: at(1),
+            ...overrides,
+          })
+
+        const first = await comment("cmt_b")
+        expect(first).toEqual({
+          projectId,
+          artifactId: "art_report",
+          id: "cmt_b",
+          anchor: { board: "welcome", element: "body>main:0>h1:0", label: "Welcome", revision: 1 },
+          body: "Comment cmt_b",
+          author: otherOwner,
+          createdAt: at(1),
+        })
+        // At the same time: as they were made. A reply takes its own anchor.
+        await comment("cmt_a", { anchor: { revision: 2 } })
+        await comment("cmt_reply", { parentId: "cmt_b", author: owner, createdAt: at(2) })
+        expect(
+          (await artifacts.listComments({ projectId, id: "art_report" })).map((each) => [
+            each.id,
+            each.parentId,
+            each.anchor,
+          ])
+        ).toEqual([
+          ["cmt_b", undefined, first.anchor],
+          ["cmt_a", undefined, { revision: 2 }],
+          ["cmt_reply", "cmt_b", first.anchor],
+        ])
+
+        // Resolved, then opened again.
+        const resolved = await artifacts.resolveComment({
+          projectId,
+          artifactId: "art_report",
+          id: "cmt_b",
+          resolved: { at: at(3), by: owner },
+        })
+        expect(resolved).toMatchObject({ id: "cmt_b", resolvedAt: at(3), resolvedBy: owner })
+        expect(
+          await artifacts.getComment({ projectId, artifactId: "art_report", id: "cmt_b" })
+        ).toEqual(resolved)
+        const reopened = await artifacts.resolveComment({
+          projectId,
+          artifactId: "art_report",
+          id: "cmt_b",
+          resolved: null,
+        })
+        expect(reopened).toEqual(first)
+        expect(
+          await artifacts.resolveComment({
+            projectId,
+            artifactId: "art_report",
+            id: "cmt_missing",
+            resolved: null,
+          })
+        ).toBeNull()
+
+        // Deleted with its replies.
+        expect(
+          await artifacts.deleteComment({ projectId, artifactId: "art_report", id: "cmt_b" })
+        ).toBe(true)
+        expect(
+          await artifacts.deleteComment({ projectId, artifactId: "art_report", id: "cmt_b" })
+        ).toBe(false)
+        expect(
+          (await artifacts.listComments({ projectId, id: "art_report" })).map(({ id }) => id)
+        ).toEqual(["cmt_a"])
+      })
+    })
+
+    // Regression proof: let a provider take a reply to a reply; the thread then nests, which the
+    // panel cannot show.
+    test("refuses a reply to no comment or to a reply, and a comment past the limit", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const comment = (id: string, parentId?: string) =>
+          artifacts.createComment({
+            projectId,
+            artifactId: "art_report",
+            id,
+            ...(parentId ? { parentId } : {}),
+            anchor: { revision: 1 },
+            body: "Hm",
+            author: owner,
+            createdAt: at(1),
+          })
+        const code = (promise: Promise<unknown>) =>
+          promise.then(
+            () => null,
+            (error: unknown) => (error instanceof ArtifactStorageError ? error.code : error)
+          )
+
+        expect(
+          await code(
+            artifacts.createComment({
+              projectId,
+              artifactId: "art_missing",
+              id: "cmt_x",
+              anchor: { revision: 1 },
+              body: "Hm",
+              author: owner,
+              createdAt: at(1),
+            })
+          )
+        ).toBe("artifact_not_found")
+        await comment("cmt_0")
+        await comment("cmt_reply", "cmt_0")
+        expect(await code(comment("cmt_y", "cmt_missing"))).toBe("comment_not_found")
+        expect(await code(comment("cmt_z", "cmt_reply"))).toBe("comment_not_found")
+
+        for (let index = 2; index < ARTIFACT_COMMENT_LIMITS.maxComments; index += 1) {
+          await comment(`cmt_${index}`)
+        }
+        expect(await code(comment("cmt_over"))).toBe("artifact_comments_full")
+      })
+    })
+
+    test("deletes an artifact's comments with it, and copies none", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        await artifacts.createComment({
+          projectId,
+          artifactId: "art_report",
+          id: "cmt_1",
+          anchor: { revision: 1 },
+          body: "Hm",
+          author: owner,
+          createdAt: at(1),
+        })
+        await artifacts.copy({
+          projectId,
+          sourceId: "art_report",
+          id: "art_copy",
+          owner,
+          threadId: "thr_fork",
+        })
+        expect(await artifacts.listComments({ projectId, id: "art_copy" })).toEqual([])
+
+        await artifacts.delete({ projectId, id: "art_report" })
+        expect(await artifacts.listComments({ projectId, id: "art_report" })).toEqual([])
+        expect(
+          await artifacts.getComment({ projectId, artifactId: "art_report", id: "cmt_1" })
+        ).toBeNull()
       })
     })
 

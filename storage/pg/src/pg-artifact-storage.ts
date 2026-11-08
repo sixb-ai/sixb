@@ -1,10 +1,12 @@
 import type { FileRef } from "@sixb/core"
+import { ARTIFACT_COMMENT_LIMITS } from "@sixb/core/artifacts"
 import {
   ARTIFACT_RESTORE_POINTS,
   artifactStateBytes,
   artifactStorageErrors,
   checkArtifactStateWrite,
   parseArtifactBoardPreviewRow,
+  parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
@@ -15,6 +17,9 @@ import {
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactBoardPreviewRecord,
+  ArtifactCommentAnchor,
+  ArtifactCommentKey,
+  ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
   ArtifactRecord,
   ArtifactRestorePointReason,
@@ -28,6 +33,7 @@ import type {
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
+  CreateArtifactCommentInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteExpiredArtifactFrameGrantsInput,
@@ -45,6 +51,7 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   PutArtifactBoardPreviewsInput,
+  ResolveArtifactCommentInput,
   RestoreArtifactInput,
   SetArtifactStateInput,
   UndoArtifactTurnInput,
@@ -90,6 +97,14 @@ const TURN_WRITE_COLUMNS = `artifact_id AS "artifactId", created, revision, writ
 const FRAME_GRANT_COLUMNS = `
   project_id AS "projectId", token_hash AS "tokenHash", artifact_id AS "artifactId", version,
   files_digest AS "filesDigest", targets, created_at AS "createdAt", expires_at AS "expiresAt"
+`
+
+const COMMENT_COLUMNS = `
+  project_id AS "projectId", artifact_id AS "artifactId", id, parent_id AS "parentId", anchor,
+  body, author_principal_type AS "authorPrincipalType", author_principal_id AS "authorPrincipalId",
+  created_at AS "createdAt", resolved_at AS "resolvedAt",
+  resolved_by_principal_type AS "resolvedByPrincipalType",
+  resolved_by_principal_id AS "resolvedByPrincipalId"
 `
 
 const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "updatedAt"`
@@ -686,6 +701,85 @@ export class PgArtifactStorage implements ArtifactStorage {
     })
   }
 
+  async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      // Under the artifact's lock: two comments at once cannot both pass the limit.
+      if (!(await lockArtifact(tx, input.projectId, input.artifactId))) {
+        throw artifactStorageErrors.notFound(input.artifactId)
+      }
+      if (input.parentId !== undefined) {
+        const [parent] = await tx<PgRow[]>`
+          SELECT 1 FROM artifact_comments
+          WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+            AND id = ${input.parentId} AND parent_id IS NULL
+        `
+        if (!parent) throw artifactStorageErrors.commentNotFound(input.artifactId, input.parentId)
+      }
+      const [counted] = await tx<{ total: number }[]>`
+        SELECT COUNT(*)::int AS total FROM artifact_comments
+        WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+      `
+      if ((counted?.total ?? 0) >= ARTIFACT_COMMENT_LIMITS.maxComments) {
+        throw artifactStorageErrors.commentsFull(input.artifactId)
+      }
+
+      const [row] = await tx<PgRow[]>`
+        INSERT INTO artifact_comments (
+          project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
+          author_principal_id, created_at
+        ) VALUES (
+          ${input.projectId}, ${input.artifactId}, ${input.id}, ${input.parentId ?? null},
+          ${JSON.stringify(commentAnchor(input.anchor))}::text::jsonb, ${input.body},
+          ${input.author.type}, ${input.author.id}, ${input.createdAt}
+        )
+        RETURNING ${tx.unsafe(COMMENT_COLUMNS)}
+      `
+      return parseArtifactCommentRow(row as PgRow)
+    })
+  }
+
+  async getComment(input: ArtifactCommentKey): Promise<ArtifactCommentRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(COMMENT_COLUMNS)} FROM artifact_comments
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND id = ${input.id}
+    `
+    return row ? parseArtifactCommentRow(row) : null
+  }
+
+  async listComments(input: GetArtifactInput): Promise<ArtifactCommentRecord[]> {
+    const rows = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(COMMENT_COLUMNS)} FROM artifact_comments
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
+      ORDER BY created_at, seq
+    `
+    return rows.map(parseArtifactCommentRow)
+  }
+
+  async resolveComment(input: ResolveArtifactCommentInput): Promise<ArtifactCommentRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      UPDATE artifact_comments
+      SET resolved_at = ${input.resolved?.at ?? null},
+          resolved_by_principal_type = ${input.resolved?.by.type ?? null},
+          resolved_by_principal_id = ${input.resolved?.by.id ?? null}
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND id = ${input.id}
+      RETURNING ${this.sql.unsafe(COMMENT_COLUMNS)}
+    `
+    return row ? parseArtifactCommentRow(row) : null
+  }
+
+  async deleteComment(input: ArtifactCommentKey): Promise<boolean> {
+    // Its replies go with it, through ON DELETE CASCADE.
+    const rows = await this.sql`
+      DELETE FROM artifact_comments
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND id = ${input.id}
+      RETURNING id
+    `
+    return rows.length > 0
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
     // Versions, restore points, turn writes, thread links, frame grants, and state go with the
     // artifact through ON DELETE CASCADE.
@@ -694,6 +788,16 @@ export class PgArtifactStorage implements ArtifactStorage {
       RETURNING id
     `
     return rows.length > 0
+  }
+}
+
+/** A comment's anchor as its column holds it: only what it names. */
+function commentAnchor(anchor: ArtifactCommentAnchor): ArtifactCommentAnchor {
+  return {
+    ...(anchor.board === undefined ? {} : { board: anchor.board }),
+    ...(anchor.element === undefined ? {} : { element: anchor.element }),
+    ...(anchor.label === undefined ? {} : { label: anchor.label }),
+    revision: anchor.revision,
   }
 }
 

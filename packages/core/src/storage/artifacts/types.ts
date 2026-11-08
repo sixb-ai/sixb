@@ -411,6 +411,48 @@ export interface PutArtifactBoardPreviewsInput {
  * Persistence only: who may read or publish, and what a version may contain, are decided in Core
  * before a call reaches storage.
  */
+/**
+ * What a comment is about: a canvas's board, an element of it by its address, as
+ * `boardElements` writes one, or the artifact itself, at the revision the author saw.
+ */
+export interface ArtifactCommentAnchor {
+  readonly board?: string
+  readonly element?: string
+  /** The element's first words, which name it once it is gone. */
+  readonly label?: string
+  readonly revision: number
+}
+
+/** A comment on an artifact, or a reply to one. */
+export interface ArtifactCommentRecord {
+  readonly projectId: string
+  readonly artifactId: string
+  readonly id: string
+  /** The comment this one replies to: a reply takes no replies of its own. */
+  readonly parentId?: string
+  readonly anchor: ArtifactCommentAnchor
+  /** Plain text. */
+  readonly body: string
+  readonly author: Principal
+  readonly createdAt: Date
+  /** When someone marked it resolved, and who; a reply is resolved with what it replies to. */
+  readonly resolvedAt?: Date
+  readonly resolvedBy?: Principal
+}
+
+export type CreateArtifactCommentInput = Omit<ArtifactCommentRecord, "resolvedAt" | "resolvedBy">
+
+export interface ArtifactCommentKey {
+  readonly projectId: string
+  readonly artifactId: string
+  readonly id: string
+}
+
+export interface ResolveArtifactCommentInput extends ArtifactCommentKey {
+  /** Resolved then, by them; null opens it again. */
+  readonly resolved: { readonly at: Date; readonly by: Principal } | null
+}
+
 export interface ArtifactStorage {
   /**
    * Creates the artifact with its first version, open, shared in its origin's thread. Throws
@@ -506,8 +548,21 @@ export interface ArtifactStorage {
    */
   putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void>
   /**
-   * Deletes the artifact, every version, its restore points, its frame grants, and what it keeps
-   * for its readers. `false` when it does not exist.
+   * Adds a comment, or a reply to one. Throws `artifact_not_found`; `comment_not_found` when
+   * `parentId` names no comment of the artifact, or a reply; and `artifact_comments_full` past
+   * `ARTIFACT_COMMENT_LIMITS.maxComments`, checked in the same transaction as the write.
+   */
+  createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord>
+  getComment(input: ArtifactCommentKey): Promise<ArtifactCommentRecord | null>
+  /** Every comment and reply of the artifact, oldest first. */
+  listComments(input: GetArtifactInput): Promise<ArtifactCommentRecord[]>
+  /** Marks a comment resolved, or opens it again. Null when there is no such comment. */
+  resolveComment(input: ResolveArtifactCommentInput): Promise<ArtifactCommentRecord | null>
+  /** Deletes a comment and its replies. `false` when there is no such comment. */
+  deleteComment(input: ArtifactCommentKey): Promise<boolean>
+  /**
+   * Deletes the artifact, every version, its restore points, its comments, its frame grants, and
+   * what it keeps for its readers. `false` when it does not exist.
    */
   delete(input: DeleteArtifactInput): Promise<boolean>
 }

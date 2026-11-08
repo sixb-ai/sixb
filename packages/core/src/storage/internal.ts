@@ -38,6 +38,7 @@ export {
   artifactStorageErrors,
   checkArtifactStateWrite,
   parseArtifactBoardPreviewRow,
+  parseArtifactCommentRow,
   parseArtifactFrameGrantRow,
   parseArtifactRestorePointRow,
   parseArtifactRow,
