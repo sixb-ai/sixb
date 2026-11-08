@@ -92,52 +92,58 @@ export function useBoardEditing(
   const [typing, setTyping] = useState<string | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
 
-  // Drawn from the canvas as it changes, what was selected still selected, what React Flow
-  // measured kept, and an item being dragged where the drag has it.
-  useEffect(() => {
-    const chosen = selected.current
-    setNodes((current) => {
-      const drawn = new Map(current.map((node) => [node.id, node]))
-      return graph.nodes.map((node) => {
-        const was = drawn.get(node.id)
-        const choose = editing && node.type !== "point"
-        const isSelected = choose && chosen.has(node.id)
-        const same =
-          was &&
-          madeFrom.get(was) === node &&
-          !!was.draggable === choose &&
-          !!was.selected === isSelected &&
-          !was.dragging
-        if (same) return was
+  // Editing, drawn from the canvas as it changes, what was selected still selected, what React
+  // Flow measured kept, and an item being dragged where the drag has it. Brought up to date as
+  // the board draws, not in an effect after it, so a change of the canvas is one commit. Read, the
+  // graph is drawn as it is, and nothing is kept.
+  const [drawnFrom, setDrawnFrom] = useState<{
+    readonly graph: typeof graph | null
+    readonly editing: boolean
+  }>({ graph: null, editing: false })
+  if (drawnFrom.graph !== graph || drawnFrom.editing !== editing) {
+    if (editing || drawnFrom.editing) setDrawnFrom({ graph, editing })
+    if (editing) {
+      const chosen = selected.current
+      setNodes((current) => {
+        const drawn = new Map(current.map((node) => [node.id, node]))
+        return graph.nodes.map((node) => {
+          const was = drawn.get(node.id)
+          const choose = node.type !== "point"
+          const isSelected = choose && chosen.has(node.id)
+          const same =
+            was &&
+            madeFrom.get(was) === node &&
+            !!was.draggable === choose &&
+            !!was.selected === isSelected &&
+            !was.dragging
+          if (same) return was
 
-        const next: Node = {
-          ...node,
-          ...(choose ? { draggable: true, selectable: true, selected: isSelected } : {}),
-          ...(was?.measured ? { measured: was.measured } : {}),
-          ...(was?.dragging ? { position: was.position, dragging: true } : {}),
-        }
-        madeFrom.set(next, node)
-        return next
+          const next: Node = {
+            ...node,
+            ...(choose ? { draggable: true, selectable: true, selected: isSelected } : {}),
+            ...(was?.measured ? { measured: was.measured } : {}),
+            ...(was?.dragging ? { position: was.position, dragging: true } : {}),
+          }
+          madeFrom.set(next, node)
+          return next
+        })
       })
-    })
-    setEdges((current) => {
-      const drawn = new Map(current.map((edge) => [edge.id, edge]))
-      return graph.edges.map((edge) => {
-        const was = drawn.get(edge.id)
-        const isSelected = editing && chosen.has(edge.id)
-        const same =
-          was &&
-          madeFrom.get(was) === edge &&
-          !!was.selectable === editing &&
-          !!was.selected === isSelected
-        if (same) return was
+      setEdges((current) => {
+        const drawn = new Map(current.map((edge) => [edge.id, edge]))
+        return graph.edges.map((edge) => {
+          const was = drawn.get(edge.id)
+          const isSelected = chosen.has(edge.id)
+          const same =
+            was && madeFrom.get(was) === edge && !!was.selectable && !!was.selected === isSelected
+          if (same) return was
 
-        const next: Edge = editing ? { ...edge, selectable: true, selected: isSelected } : edge
-        madeFrom.set(next, edge)
-        return next
+          const next: Edge = { ...edge, selectable: true, selected: isSelected }
+          madeFrom.set(next, edge)
+          return next
+        })
       })
-    })
-  }, [graph, editing, madeFrom])
+    }
+  }
   useEffect(() => {
     if (!editing) {
       selected.current = new Set()

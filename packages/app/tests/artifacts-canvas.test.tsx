@@ -10,7 +10,8 @@ import {
   parseCanvas,
 } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render } from "@testing-library/react"
+import { act, fireEvent, render, renderHook } from "@testing-library/react"
+import { ReactFlowProvider } from "@xyflow/react"
 import { AppWindow } from "lucide-react"
 import { frameLinkKey } from "../src/artifacts/frame"
 import {
@@ -352,6 +353,30 @@ describe("a canvas's board", () => {
     expect(node("home")?.getAttribute("tabindex")).toBe("0")
     expect(node("ask")?.getAttribute("tabindex")).toBeNull()
     expect(view.getByRole("region").getAttribute("aria-label")).toBe("Canvas Checkout")
+    view.unmount()
+  })
+
+  test("draws a change of the canvas, read, once", async () => {
+    // Reproduce by bringing the drawn nodes up to date in an effect in useBoardEditing: each
+    // change of the canvas draws the board twice, the second time for nodes nobody edits.
+    const { useBoardEditing } = await import("../src/artifacts/renderers/canvas/edit-mode")
+    let draws = 0
+    const view = renderHook(
+      ({ canvas }: { readonly canvas: Canvas }) => {
+        draws += 1
+        return useBoardEditing(canvas, undefined, undefined)
+      },
+      { initialProps: { canvas: CANVAS }, wrapper: ReactFlowProvider }
+    )
+    const moved = {
+      items: CANVAS.items.map((entry) => (entry.id === "ask" ? { ...entry, x: 640 } : entry)),
+    }
+    draws = 0
+    await act(async () => {
+      view.rerender({ canvas: moved })
+    })
+    expect(draws).toBe(1)
+    expect(view.result.current.nodes.find((node) => node.id === "ask")?.position.x).toBe(640)
     view.unmount()
   })
 
