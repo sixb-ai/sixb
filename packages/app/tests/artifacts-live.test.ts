@@ -3,7 +3,13 @@ import { type Canvas, type CanvasItem, formatCanvas } from "@sixb/core/artifacts
 import { LIVE_FILES } from "@sixb/core/artifacts/live"
 import * as Y from "yjs"
 import { LiveCanvas, liveCanvasOf } from "../src/artifacts/live/canvas"
-import { type LiveArtifact, LiveHub, type LiveKeeper } from "../src/artifacts/live/session"
+import {
+  type KeptChanges,
+  keptChangesKey,
+  type LiveArtifact,
+  LiveHub,
+  type LiveKeeper,
+} from "../src/artifacts/live/session"
 import { moveItems, setItemText } from "../src/artifacts/renderers/canvas/draft"
 import { canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 import {
@@ -27,18 +33,25 @@ const CANVAS = canvasOf({
 
 const held: { hub: LiveHub; artifact: LiveArtifact }[] = []
 
-/** One tab holding the artifact live through its own hub. */
 /** A page's local storage, shared by the tabs and reloads of one test. */
-function memoryKeeper(): LiveKeeper & { readonly kept: Map<string, Uint8Array> } {
-  const kept = new Map<string, Uint8Array>()
+function memoryKeeper(): LiveKeeper & { readonly kept: Map<string, KeptChanges> } {
+  const kept = new Map<string, KeptChanges>()
   return {
     kept,
-    read: (id) => kept.get(id) ?? null,
-    write: (id, update) => kept.set(id, update),
-    clear: (id) => kept.delete(id),
+    list: (artifactId) =>
+      [...kept.values()].filter((changes) =>
+        changes.key.startsWith(`sixb.live.unsaved.${artifactId}.`)
+      ),
+    write: (changes) => kept.set(changes.key, changes),
+    remove: (key) => kept.delete(key),
   }
 }
 
+/** The key a tab keeps its changes under. */
+const keyOf = (each: { readonly artifact: LiveArtifact }) =>
+  keptChangesKey(ARTIFACT, each.artifact.doc.clientID)
+
+/** One tab holding the artifact live through its own hub. */
 function tab(
   server: FakeServer,
   keeper: LiveKeeper = memoryKeeper()
@@ -145,9 +158,7 @@ describe("a live artifact", () => {
       expect(item(bob.canvas().getCanvas(), "ask")).toMatchObject({ x: 80, y: 900 })
 
       // Once the server says it saved, nothing keeps it.
-      alice
-        .connection()
-        .deliver({ type: "status", artifactId: ARTIFACT, state: "saved", revision: 2 })
+      alice.connection().deliver(server.status("saved", 2))
       await settle()
       jest.advanceTimersByTime(60_000)
       const again = alice.hub.acquire(ARTIFACT)
@@ -169,7 +180,7 @@ describe("a live artifact", () => {
 
     alice.connection().drop()
     alice.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
-    expect(keeper.kept.has(ARTIFACT)).toBe(true)
+    expect(keeper.kept.get(keyOf(alice))?.userId).toBe("user:alice")
 
     // The page reloads while the server is away: a new hub, a new document.
     const reloaded = tab(server, keeper)
@@ -178,11 +189,9 @@ describe("a live artifact", () => {
     expect(item(reloaded.canvas().getCanvas(), "ask")).toMatchObject({ x: 80, y: 900 })
     expect(item(bob.canvas().getCanvas(), "ask")).toMatchObject({ x: 80, y: 900 })
 
-    reloaded
-      .connection()
-      .deliver({ type: "status", artifactId: ARTIFACT, state: "saved", revision: 2 })
+    reloaded.connection().deliver(server.status("saved", 2))
     await settle()
-    expect(keeper.kept.has(ARTIFACT)).toBe(false)
+    expect(keeper.kept.size).toBe(0)
   })
 
   test("never brings back a change it kept over a newer one, even read again after it was saved", async () => {
@@ -196,23 +205,88 @@ describe("a live artifact", () => {
     await settle()
 
     alice.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
-    const stale = keeper.kept.get(ARTIFACT)
+    const stale = keeper.kept.get(keyOf(alice))
     await settle()
-    alice
-      .connection()
-      .deliver({ type: "status", artifactId: ARTIFACT, state: "saved", revision: 2 })
+    alice.connection().deliver(server.status("saved", 2))
     await settle()
-    expect(keeper.kept.has(ARTIFACT)).toBe(false)
+    expect(keeper.kept.size).toBe(0)
 
     bob.canvas().apply(moveItems(new Map([["ask", { x: 500, y: 100 }]])))
     await settle()
     // A copy of the page from before the save, say another tab's storage read late.
-    if (stale) keeper.write(ARTIFACT, stale)
+    if (stale) keeper.write(stale)
     const late = tab(server, keeper)
     await settle()
     for (const each of [late, alice, bob]) {
       expect(item(each.canvas().getCanvas(), "ask")).toMatchObject({ x: 500, y: 100 })
     }
+  })
+
+  test("keeps each tab's changes apart: one saved never forgets another's", async () => {
+    // Reproduce by keeping an artifact's changes under one key in session.ts: Bob's tab saving
+    // clears what Alice's offline tab kept.
+    const server = new FakeServer(ARTIFACT, CANVAS)
+    const keeper = memoryKeeper()
+    const first = tab(server, keeper)
+    const second = tab(server, keeper)
+    await settle()
+
+    first.connection().drop()
+    first.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
+    second.canvas().apply(moveItems(new Map([["home", { x: -200, y: 0 }]])))
+    await settle()
+    second.connection().deliver(server.status("saved", 2))
+    await settle()
+
+    expect([...keeper.kept.keys()]).toEqual([keyOf(first)])
+  })
+
+  test("takes back kept changes only for the person who made them, while they may edit", async () => {
+    // Reproduce by applying every kept change in the LiveArtifact constructor: Bob, signed in
+    // after Alice on the same browser, sends her unsaved move as his own.
+    const server = new FakeServer(ARTIFACT, CANVAS)
+    const keeper = memoryKeeper()
+    const alice = tab(server, keeper)
+    await settle()
+    alice.connection().drop()
+    alice.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
+    const kept = keyOf(alice)
+
+    server.user = { id: "user:bob", name: "Bob", color: "#3e63dd" }
+    const bob = tab(server, keeper)
+    await settle()
+    expect(item(bob.canvas().getCanvas(), "ask")).toMatchObject({ x: 0, y: 560 })
+    expect(keeper.kept.has(kept)).toBe(true)
+
+    // Alice again, who may only watch now: her kept move is dropped, never sent.
+    server.user = { id: "user:alice", name: "Alice", color: "#e5484d" }
+    server.access = "watch"
+    const watching = tab(server, keeper)
+    await settle()
+    expect(item(watching.canvas().getCanvas(), "ask")).toMatchObject({ x: 0, y: 560 })
+    expect(keeper.kept.has(kept)).toBe(false)
+  })
+
+  test("forgets only what the server says it wrote, not a change it took after", async () => {
+    // Reproduce by forgetting everything on any `saved` in session.ts: the status the server
+    // sends as Alice joins again was written before her offline move reached it.
+    const server = new FakeServer(ARTIFACT, CANVAS)
+    const keeper = memoryKeeper()
+    const alice = tab(server, keeper)
+    await settle()
+
+    alice.connection().drop()
+    alice.canvas().apply(moveItems(new Map([["ask", { x: 80, y: 900 }]])))
+    const before = server.status("saved", 1)
+    alice.connection().connect()
+    alice.connection().deliver(before)
+    await settle()
+    expect(item(storedCanvas(server.doc), "ask")).toMatchObject({ x: 80, y: 900 })
+    expect(keeper.kept.has(keyOf(alice))).toBe(true)
+
+    alice.connection().deliver(server.status("saved", 2))
+    await settle()
+    expect(keeper.kept.size).toBe(0)
   })
 
   test("sends nothing once it may only watch, and leaves when the server says so", async () => {

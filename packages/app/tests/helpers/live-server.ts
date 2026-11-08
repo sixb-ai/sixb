@@ -3,7 +3,9 @@ import { type Canvas, parseCanvas } from "@sixb/core/artifacts"
 import {
   type ArtifactLiveAccess,
   type ArtifactLiveClientMessage,
+  type ArtifactLiveSaveState,
   type ArtifactLiveServerMessage,
+  type ArtifactLiveUser,
   decodeLiveData,
   encodeLiveData,
   LIVE_FILES,
@@ -52,6 +54,8 @@ export class FakeServer {
   readonly doc: Y.Doc
   readonly connections = new Set<FakeConnection>()
   access: ArtifactLiveAccess = "edit"
+  /** Who each connection joins as. */
+  user: ArtifactLiveUser = { id: "user:alice", name: "Alice", color: "#e5484d" }
 
   constructor(
     readonly artifactId: string,
@@ -65,6 +69,17 @@ export class FakeServer {
         if (connection !== origin) connection.sync(encoding.toUint8Array(message))
       }
     })
+  }
+
+  /** A `status` saying the server wrote back its document as it is now. */
+  status(state: ArtifactLiveSaveState, revision: number): ArtifactLiveServerMessage {
+    return {
+      type: "status",
+      artifactId: this.artifactId,
+      state,
+      revision,
+      stateVector: encodeLiveData(Y.encodeStateVector(this.doc)),
+    }
   }
 
   /** A hub's socket factory: each socket a connection to this server. */
@@ -125,7 +140,7 @@ export class FakeConnection implements ArtifactLiveSocket {
         artifactId: this.server.artifactId,
         access: this.server.access,
         revision: 1,
-        user: { id: "user:alice", name: "Alice", color: "#e5484d" },
+        user: this.server.user,
       })
       const step1 = encoding.createEncoder()
       syncProtocol.writeSyncStep1(step1, this.server.doc)
