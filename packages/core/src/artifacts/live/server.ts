@@ -9,6 +9,7 @@ export {
   AGENT_PRESENCE_MS,
   appendArtifactLive,
   artifactLiveStream,
+  artifactPresenceStream,
   parseArtifactLiveRecord,
 } from "./presence"
 export { loadArtifactDocument, readDocumentState } from "./state"
