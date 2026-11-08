@@ -6,12 +6,12 @@
  *
  * In every layout it applies the theme the app sends, then fires `sixb:theme` on the window for
  * what draws its own colors; answers the app's requests; and tells the app about the links the
- * reader follows, to other artifacts or to web pages, for the app to open them, and where its
- * `<sixb-embed>` boxes are, for the app to draw them over the frame. A deck it also lays out:
- * every `section.slide` is a 1280×720 slide, shown one at a time scaled to fit, or all at once in
- * a grid. The URL's fragment can open it at a slide, and with `sixb-fill` show that slide alone
- * filling the frame, as a thumbnail or an embed does; it tells the app about keys and picks in the
- * overview. A page scrolls as it is: it reports the embeds near its view as it scrolls, and its
+ * reader follows, to other artifacts or to web pages, for the app to open them, the words of the
+ * buttons they press, and where its `<sixb-embed>` boxes are, for the app to draw them over the
+ * frame. A deck it also lays out: every `section.slide` is a 1280×720 slide, shown one at a time
+ * scaled to fit, or all at once in a grid. The URL's fragment can open it at a slide, and with
+ * `sixb-fill` show that slide alone filling the frame, as a thumbnail or an embed does; it tells
+ * the app about keys and picks in the overview. A page scrolls as it is: it reports the embeds near its view as it scrolls, and its
  * height as it changes.
  *
  * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
@@ -48,6 +48,8 @@ export function frameRuntime(): void {
   const MAX_VALUE_BYTES = 65536
   /** A query's name, as `isArtifactQueryName` says: refused here before it is sent. */
   const QUERY_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/
+  /** The longest words a press reports, an arrow's label's, as `ARTIFACT_LIMITS` says. */
+  const MAX_LABEL_LENGTH = 120
   const root = document.documentElement
   // Only set while the runtime itself runs, so kept for what reads it later.
   const script = document.currentScript as HTMLScriptElement | null
@@ -391,6 +393,13 @@ export function frameRuntime(): void {
 
   document.addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null
+
+    // A button, or a link within the page, by its words: on a canvas, an opened board follows the
+    // arrow they label.
+    const pressed = target?.closest<HTMLElement>('button, [role="button"], a[href^="#"]')
+    const words = (pressed?.innerText ?? pressed?.textContent ?? "").replace(/\s+/g, " ").trim()
+    if (words && words.length <= MAX_LABEL_LENGTH) post({ event: "press", params: { text: words } })
+
     const link = target?.closest<HTMLAnchorElement>("a[href]")
     if (link) {
       const href = link.getAttribute("href") ?? ""

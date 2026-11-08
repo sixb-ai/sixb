@@ -1,6 +1,11 @@
 // Loaded only when a canvas opens, so React Flow's code stays out of every other artifact's bundle.
 // Its stylesheet, canvas.css, is part of the framework's.
-import type { Canvas, CanvasBoard as CanvasBoardItem, CanvasEmbed } from "@sixb/core/artifacts"
+import type {
+  Canvas,
+  CanvasArrow,
+  CanvasBoard as CanvasBoardItem,
+  CanvasEmbed,
+} from "@sixb/core/artifacts"
 import {
   Background,
   BackgroundVariant,
@@ -86,6 +91,10 @@ function Board({
   const messages = useArtifactMessages().canvas
   const boards = useMemo(
     () => canvas.items.filter((item): item is CanvasBoardItem => item.type === "board"),
+    [canvas]
+  )
+  const arrows = useMemo(
+    () => canvas.items.filter((item): item is CanvasArrow => item.type === "arrow"),
     [canvas]
   )
 
@@ -196,6 +205,7 @@ function Board({
         <BoardFocus
           version={version}
           boards={boards}
+          arrows={arrows}
           id={opened}
           onOpen={setOpened}
           onClose={close}
