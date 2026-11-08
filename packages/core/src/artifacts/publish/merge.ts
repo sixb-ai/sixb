@@ -87,18 +87,19 @@ export async function mergeArtifactWrite(
     if (write.update) {
       Y.applyUpdate(doc, write.update)
     } else {
-      // The changes from the files it was made from: the latest's, unless it moved past them.
-      let base: LiveFiles = documentFiles(doc)
-      if (moved) {
-        const files =
-          write.baseFiles ??
-          (await filesAtRevision(storage, projectId, artifact.id, write.baseRevision ?? 0))
-        if (!files) return unmerged
+      // The changes from the files it was made from. Those the writer names are its base, even
+      // at the latest revision: an Agent's copy may hold less than the version it was installed
+      // at, which merged others' words in, and a diff from the version would take them out.
+      const files = moved
+        ? (write.baseFiles ??
+          (await filesAtRevision(storage, projectId, artifact.id, write.baseRevision ?? 0)))
+        : write.baseFiles
+      if (moved && !files) return unmerged
 
-        // Moved without changing its files, as a freeze moves it: nothing to merge with.
-        if (sameArtifactFiles(files, latest.files)) merged = false
-        else base = await readLiveFiles(blobStorage, files)
-      }
+      // Made from what the latest version holds, as after a freeze: nothing to merge with.
+      let base: LiveFiles = documentFiles(doc)
+      merged = files !== undefined && files !== null && !sameArtifactFiles(files, latest.files)
+      if (merged && files) base = await readLiveFiles(blobStorage, files)
       mergeIntoDocument(doc, base, await readLiveFiles(blobStorage, write.files))
     }
 

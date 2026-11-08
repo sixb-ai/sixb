@@ -266,12 +266,25 @@ export function interleave<T>(base: readonly T[], ours: readonly T[], theirs: re
   for (let index = 0; index <= base.length; index += 1) {
     const at = inserted.get(index)
     if (at) {
-      merged.push(...at.ours)
-      if (!sameRun(at.ours, at.theirs)) merged.push(...at.theirs)
+      // What both inserted is kept once: where one side's words start or end with the other's, as
+      // when one copied what the other typed and typed more, the longer stands for both.
+      if (holds(at.theirs, at.ours)) merged.push(...at.theirs)
+      else if (holds(at.ours, at.theirs)) merged.push(...at.ours)
+      else merged.push(...at.ours, ...at.theirs)
     }
     if (index < base.length && !deleted.has(index)) merged.push(base[index] as T)
   }
   return merged
+}
+
+/** Whether `run` starts or ends with all of `part`. */
+function holds<T>(run: readonly T[], part: readonly T[]): boolean {
+  if (part.length > run.length) return false
+  const tail = run.length - part.length
+  return (
+    part.every((item, index) => run[index] === item) ||
+    part.every((item, index) => run[tail + index] === item)
+  )
 }
 
 /** What one side holds over `base[start, end)`, given its hunks within that region. */
