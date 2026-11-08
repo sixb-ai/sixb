@@ -23,7 +23,7 @@ import { CanvasControls } from "./controls"
 import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider } from "./editing"
 import { BoardFocus } from "./focus"
-import { CANVAS_NODE_TYPES, NAME_SCALE, nameScale } from "./items"
+import { CANVAS_NODE_TYPES, NAME_SCALE, zoomMarks } from "./items"
 import { PresenceLayer } from "./presence"
 import { boardPreviewUrl, useBoardPreviews } from "./previews"
 
@@ -252,8 +252,9 @@ function Board({
 }
 
 /**
- * Sets how much names grow, {@link NAME_SCALE}, on the board as it zooms, so names, headings, and
- * labels keep their size on screen without an item drawing again for each frame of a zoom.
+ * Sets on the board as it zooms how much names grow, {@link NAME_SCALE}, so names, headings, and
+ * labels keep their size on screen, and whether it is far, so tiles stop breathing: no item draws
+ * again for a frame of a zoom.
  */
 function useNameScaleVariable(root: RefObject<HTMLDivElement | null>): void {
   const store = useStoreApi()
@@ -262,12 +263,13 @@ function useNameScaleVariable(root: RefObject<HTMLDivElement | null>): void {
     let last = ""
     const update = () => {
       const element = root.current
-      // Rounded, so a zoom between the steps it can show changes nothing.
-      const value = nameScale(store.getState().transform[2]).toFixed(3)
-      if (!element || value === last) return
+      const marks = zoomMarks(store.getState().transform[2])
+      const key = `${marks.nameScale} ${marks.far}`
+      if (!element || key === last) return
 
-      last = value
-      element.style.setProperty(NAME_SCALE, value)
+      last = key
+      element.style.setProperty(NAME_SCALE, marks.nameScale)
+      element.toggleAttribute("data-far", marks.far)
     }
 
     update()

@@ -9,9 +9,9 @@ import type {
 import { CANVAS_TEXT_PIXELS, canvasNoteFontSize, canvasShapeFontSize } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
-import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
+import { Handle, type NodeProps, type NodeTypes, Position, useStoreApi } from "@xyflow/react"
 import { AppWindow, ArrowUpRight, Link2, Maximize2 } from "lucide-react"
-import { memo, type ReactNode } from "react"
+import { memo, type ReactNode, useSyncExternalStore } from "react"
 import { useArtifactMessages } from "../../messages"
 import { artifactChanged } from "../../queries"
 import { ArtifactEmbed, ArtifactLink } from "../../references/references"
@@ -74,14 +74,99 @@ export function nameScale(zoom: number): number {
   return Math.min(MAX_NAME_SCALE, Math.max(1, 1 / zoom))
 }
 
+/**
+ * Below this zoom, the board marks itself far (`data-far`): a tile waiting for its picture, a few
+ * dozen pixels wide, stops breathing, which would repaint every such tile at each frame.
+ */
+export const FAR_BELOW_ZOOM = 0.2
+
+/** What the board sets on itself as it zooms, so no item draws again for a frame of a zoom. */
+export function zoomMarks(zoom: number): { readonly nameScale: string; readonly far: boolean } {
+  // Rounded, so a zoom between the steps it can show changes nothing.
+  return { nameScale: nameScale(zoom).toFixed(3), far: zoom < FAR_BELOW_ZOOM }
+}
+
+/** Where React Flow's view is zoomed, and whether it waits to be fitted. */
+export interface Zoom {
+  readonly zoom: number
+  readonly fitViewQueued: boolean
+}
+
+/** What of React Flow's store the zoom is read from. */
+interface ZoomSource {
+  getState(): {
+    readonly transform: readonly [number, number, number]
+    readonly fitViewQueued: boolean
+  }
+  subscribe(listener: () => void): () => void
+}
+
+const zooms = new WeakMap<
+  ZoomSource,
+  { readonly get: () => Zoom; readonly subscribe: (listener: () => void) => () => void }
+>()
+
+/**
+ * The zoom of a React Flow store, told to its listeners only as it changes: the store changes for
+ * every node someone moves, and an item that asks only how far the view is zoomed is not asked
+ * again for each. One subscription to the store, while anyone listens.
+ */
+export function zoomOf(source: ZoomSource) {
+  let entry = zooms.get(source)
+  if (entry) return entry
+
+  const read = (): Zoom => {
+    const { transform, fitViewQueued } = source.getState()
+    return { zoom: transform[2], fitViewQueued }
+  }
+  let current = read()
+  const listeners = new Set<() => void>()
+  let unsubscribe: (() => void) | null = null
+
+  entry = {
+    // Nobody listening, nothing keeps it up to date: it is read as it is asked for.
+    get: () => {
+      if (!unsubscribe) current = same(current, read())
+      return current
+    },
+    subscribe: (listener) => {
+      listeners.add(listener)
+      unsubscribe ??= source.subscribe(() => {
+        const next = same(current, read())
+        if (next === current) return
+        current = next
+        for (const each of listeners) each()
+      })
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size > 0 || !unsubscribe) return
+        unsubscribe()
+        unsubscribe = null
+      }
+    },
+  }
+  zooms.set(source, entry)
+  return entry
+}
+
+function same(last: Zoom, next: Zoom): Zoom {
+  return last.zoom === next.zoom && last.fitViewQueued === next.fitViewQueued ? last : next
+}
+
+/** What an item reads of the zoom, read again only as the zoom changes. */
+function useZoomed<T>(select: (zoom: Zoom) => T): T {
+  const zoom = zoomOf(useStoreApi())
+  return useSyncExternalStore(zoom.subscribe, () => select(zoom.get()))
+}
+
 /** Whether names show at all: zoomed out further, they give way to the canvas. */
 export function useNamesShown(): boolean {
-  return useStore((state) => state.transform[2] >= NAMES_FROM_ZOOM)
+  return useZoomed(({ zoom }) => zoom >= NAMES_FROM_ZOOM)
 }
 
 /** Whether an item is wide enough on screen to show its name above it. */
 function useNamed(width: number): boolean {
-  return useStore((state) => width * state.transform[2] >= NAMED_FROM_WIDTH)
+  return useZoomed(({ zoom }) => width * zoom >= NAMED_FROM_WIDTH)
 }
 
 /**
@@ -132,10 +217,8 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
   const queries = useQueryClient()
   // Until the view is fitted it is at 100%, which is not where the reader sees the board: the
   // small picture first, then the full one if the board is drawn large.
-  const previewSize = useStore((state) =>
-    state.fitViewQueued
-      ? "small"
-      : boardPreviewSize(board.w * state.transform[2], window.devicePixelRatio || 1)
+  const previewSize = useZoomed(({ zoom, fitViewQueued }) =>
+    fitViewQueued ? "small" : boardPreviewSize(board.w * zoom, window.devicePixelRatio || 1)
   )
   const shown = useNamesShown()
   const named = useNamed(board.w)
