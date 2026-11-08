@@ -28,15 +28,18 @@ export type ArtifactVersion = GetArtifactVersionResponse
 const OPEN_VERSION_STALE_MS = 30_000
 
 /**
- * A version as a view reads it. A frozen version never changes, so it is read once; the open one
- * changes at each write, which `artifact.updated` announces to the views that follow the artifact
- * ({@link useArtifactUpdates}), and is read again when a view opens after half a minute.
+ * A version as a view reads it. A frozen version never changes, so it is read once by its number;
+ * the open one changes at each write, which `artifact.updated` announces to the views that follow
+ * the artifact ({@link useArtifactUpdates}), and is read again when a view opens after half a
+ * minute. So is `latest` when frozen: the next write opens a newer version.
  */
 export function artifactVersionOptions(artifactId: string, version: number | "latest") {
   return queryOptions({
     ...getArtifactVersionOptions({ path: { artifactId, version: String(version) } }),
     staleTime: (query) =>
-      query.state.data?.frozen ? Number.POSITIVE_INFINITY : OPEN_VERSION_STALE_MS,
+      version !== "latest" && query.state.data?.frozen
+        ? Number.POSITIVE_INFINITY
+        : OPEN_VERSION_STALE_MS,
     retry: false,
   })
 }
