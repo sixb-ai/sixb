@@ -200,7 +200,7 @@ unless the user asked for a snapshot. A live sheet has no `sheets/<name>.csv`: i
 - Totals, charts, highlights, and formulas work as on any sheet. A link that reaches several objects
   shows their values joined by commas.
 - A value the reader is not cleared for shows locked, as does a total over it. A live sheet is not
-  edited in the app: change its query or columns, and publish its next version.
+  edited in the app: change its query or columns, and update it.
 - The sheet shows up to 10,000 rows, and says when there were more: filter or limit the query.
 - Publishing refuses a `from` its query's rows don't hold, such as a link the query doesn't
   expand, and a facets query: a sheet shows rows.

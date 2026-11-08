@@ -148,10 +148,7 @@ import {
 } from "@sixb/core/testing"
 import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
 import { renderAgentSystemPrompt, renderCurrentTime } from "../../agent/src/agent-prompt"
-import {
-  InstalledArtifacts,
-  installArtifactsPublishedBy,
-} from "../../agent/src/artifacts/materialize"
+import { InstalledArtifacts, installTurnArtifacts } from "../../agent/src/artifacts/materialize"
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
 import { estimateAgentRequestTokens, prepareAgentModel } from "../../agent/src/context-budget"
@@ -2246,6 +2243,7 @@ function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
       broker: sixb.broker,
       recoverAiModelCall: recoverAiModelCall(sixb),
       events: NOOP_STREAM_SINK,
+      domainEvents: sixb.events,
       security: sixb.definitions.security,
       sdk: sixb,
       definitions: sixb.definitions,
@@ -2300,6 +2298,7 @@ function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
       broker: sixb.broker,
       recoverAiModelCall: context.recoverAiModelCall,
       events: context.streamSink,
+      domainEvents: sixb.events,
       security: sixb.definitions.security,
       sdk: sixb,
       definitions: sixb.definitions,
@@ -9500,9 +9499,9 @@ describe("AgentWorker", () => {
   test("a child publishes into its parent's thread and answers once; a retry takes it back", async () => {
     // Removal proofs: drop `publishing` from createSubagentEnvironment, and nothing is published;
     // build the child's result from every step again, and its narration reaches the parent; drop
-    // installArtifactsFrom from SubagentCoordinator.installOutputs, and the parent's
-    // $SIXB_ARTIFACTS never lists the child's artifact; drop the children from retryAgentRun's
-    // cleanup, and the child's artifact outlives the retry.
+    // installTurnArtifacts from SubagentCoordinator.deliverFiles, and the parent's
+    // $SIXB_ARTIFACTS never lists the child's artifact; write the child's artifact under its own
+    // run rather than its turn in `agentRunArtifacts`, and the child's artifact outlives the retry.
     let childRunId = ""
     const parentCalls: LanguageModelRequest[] = []
     let childCall = 0
@@ -9615,7 +9614,8 @@ describe("AgentWorker", () => {
           {
             id: artifact.id,
             version: 1,
-            pinned: `artifact:${artifact.id}@1`,
+            revision: 1,
+            open: true,
             directory: `.sixb/agent/artifacts/${artifact.id}`,
           },
         ],
@@ -9997,7 +9997,7 @@ describe("AgentWorker", () => {
     sixb: TestSixb,
     options: {
       readonly budget?: AgentFileBudget
-      readonly installArtifactsFrom?: AgentRunFiles["installArtifactsFrom"]
+      readonly installTurnArtifacts?: AgentRunFiles["installTurnArtifacts"]
     } = {}
   ) {
     const sandbox = new RecordingSandbox("run-files")
@@ -10005,7 +10005,7 @@ describe("AgentWorker", () => {
       sandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
       blobStorage: sixb.blobStorage,
       budget: options.budget ?? new AgentFileBudget(),
-      installArtifactsFrom: options.installArtifactsFrom ?? (async () => {}),
+      installTurnArtifacts: options.installTurnArtifacts ?? (async () => {}),
     }
     return { sandbox, runFiles }
   }
@@ -10062,7 +10062,7 @@ describe("AgentWorker", () => {
     }
     const [a, b, c, d] = runIds as [string, string, string, string]
     const { runFiles } = recordingRunFiles(sixb, {
-      installArtifactsFrom: async () => {
+      installTurnArtifacts: async () => {
         throw new Error("[SixbAgent] Could not install artifacts art_q3.")
       },
     })
@@ -10097,7 +10097,7 @@ describe("AgentWorker", () => {
       "Its 30 files did not fit in this result, which holds at most 50 files, 100.0MB in all. Wait for this child again to get them."
     )
     expect(second.artifactsError).toBe(
-      "What these children published could not all be installed in $SIXB_ARTIFACTS (Could not install artifacts art_q3.). The addresses in their answers still work."
+      "What these children wrote could not all be installed in $SIXB_ARTIFACTS (Could not install artifacts art_q3.). The addresses in their answers still work."
     )
 
     const third = await coordinator.wait({ runIds: [d] }, signal)
@@ -10154,27 +10154,28 @@ describe("AgentWorker", () => {
     expect(stored).not.toHaveProperty("error")
   })
 
-  test("installs an artifact a waited child published, whoever published its latest version", async () => {
-    // Removal proof: look only at the latest version's origin in installArtifactsPublishedBy; the
-    // artifact the child made is not installed once someone else revised it.
+  test("installs an artifact the turn's children wrote, whoever wrote it since", async () => {
+    // Removal proof: install only what the latest version's origin names in installTurnArtifacts;
+    // the artifact the child made is not installed once someone else revised it.
     const sixb = buildSixb(answerModel())
     const sandbox = new RecordingSandbox("artifacts")
     const bytes = new TextEncoder().encode(Q3_REVIEW_MARKDOWN)
     const fileRef = await sixb.blobStorage.put({ body: bytes, fileName: "document.md" })
-    const version = (number: number, runId: string) =>
-      ({
-        artifactId: "art_q3",
-        version: number,
-        title: "Q3 review",
-        files: [{ path: "document.md", file: fileRef }],
-        entry: "document.md",
-        outline: { kind: "document", headings: [] },
-        origin: { threadId: "thread", runId },
-      }) as unknown as ArtifactVersionRecord
+    const latest = {
+      artifactId: "art_q3",
+      version: 1,
+      revision: 4,
+      title: "Q3 review",
+      files: [{ path: "document.md", file: fileRef }],
+      entry: "document.md",
+      outline: { kind: "document", headings: [] },
+      origin: { threadId: "thread", runId: "someone-else" },
+    } as unknown as ArtifactVersionRecord
     const artifact = {
       id: "art_q3",
       kind: "document",
-      latestVersion: 2,
+      latestVersion: 1,
+      revision: 4,
     } as unknown as ArtifactRecord
     const installed = new InstalledArtifacts(
       {
@@ -10187,24 +10188,20 @@ describe("AgentWorker", () => {
       []
     )
 
-    await installArtifactsPublishedBy({
+    // The child created it at revision 1 and left it at 3; another conversation wrote it since.
+    await installTurnArtifacts({
       installed,
       artifacts: {
         list: async () => [artifact],
-        listVersions: async () => ({
-          versions: [version(2, "someone-else"), version(1, "child-run")],
-          hasMore: false,
-          total: 2,
-        }),
-        getVersion: async () => version(2, "someone-else"),
-      } as never,
+        turnWrites: async () => [{ artifactId: "art_q3", created: true, revision: 3 }],
+        getVersion: async () => latest,
+      },
       blobStorage: sixb.blobStorage,
       sandbox,
-      runIds: ["child-run"],
       signal: new AbortController().signal,
     })
 
-    expect(installed.versionOf("art_q3")).toBe(2)
+    expect(installed.revisionOf("art_q3")).toBe(4)
     expect(
       sandbox.files.get(join(sandbox.workingDirectory, ".sixb/agent/artifacts/art_q3/document.md"))
     ).toEqual(bytes)
@@ -12118,14 +12115,14 @@ describe("AgentWorker", () => {
         call += 1
         if (call === 1) return toolCallStream("bob-1", "bash", { command: "write-q3-review" })
         if (call === 2) {
-          return toolCallStream("bob-2", "publish_artifact_version", {
+          return toolCallStream("bob-2", "update_artifact", {
             id: ids.notes,
             path: "work/q3-review",
             title: "Taken over",
           })
         }
         if (call === 3) {
-          return toolCallStream("bob-3", "publish_artifact_version", {
+          return toolCallStream("bob-3", "update_artifact", {
             id: ids.shared,
             path: "work/q3-review",
             title: "Q3 review, Bob's",
@@ -12180,7 +12177,7 @@ describe("AgentWorker", () => {
       outline: { kind: "document" as const, headings: [] },
       references: [],
       author: alice,
-      createdAt: new Date(),
+      updatedAt: new Date(),
     }
     ids.shared = (
       await artifacts.create({
@@ -12223,12 +12220,13 @@ describe("AgentWorker", () => {
       expect(JSON.stringify(outputs[1])).toContain(`there is no artifact '${ids.notes}'`)
       expect((await artifacts.get({ projectId: PROJECT_ID, id: ids.notes }))?.latestVersion).toBe(1)
 
+      // Bob's update replaces the shared artifact's open version.
       const revised = await artifacts.getVersion({
         projectId: PROJECT_ID,
         artifactId: ids.shared,
-        version: 2,
+        version: 1,
       })
-      expect(revised).toMatchObject({ author: bob, title: "Q3 review, Bob's" })
+      expect(revised).toMatchObject({ revision: 2, author: bob, title: "Q3 review, Bob's" })
 
       const { artifacts: created } = await artifacts.list({
         projectId: PROJECT_ID,
@@ -12283,7 +12281,7 @@ describe("AgentWorker", () => {
         if (call === 4) {
           // The next turn starts from what was published, installed in its sandbox.
           const artifact = await onlyArtifact(host.sixb)
-          return toolCallStream("publish-4", "publish_artifact_version", {
+          return toolCallStream("publish-4", "update_artifact", {
             id: artifact.id,
             path: `.sixb/agent/artifacts/${artifact.id}`,
             title: "Q3 review, final",
@@ -12355,27 +12353,22 @@ describe("AgentWorker", () => {
             kind: "document",
             title: "Q3 review",
             version: 1,
+            revision: 1,
+            open: true,
             address: `artifact:${artifact.id}`,
-            pinned: `artifact:${artifact.id}@1`,
             parts: [
-              {
-                address: `artifact:${artifact.id}#q3-review`,
-                pinned: `artifact:${artifact.id}@1#q3-review`,
-                name: "Q3 review",
-              },
-              {
-                address: `artifact:${artifact.id}#regions`,
-                pinned: `artifact:${artifact.id}@1#regions`,
-                name: "Regions",
-              },
+              { address: `artifact:${artifact.id}#q3-review`, name: "Q3 review" },
+              { address: `artifact:${artifact.id}#regions`, name: "Regions" },
             ],
             directory: `.sixb/agent/artifacts/${artifact.id}`,
             files: ["document.md"],
           },
         ],
       })
+      // The next turn's update replaces the open version, as its last writer.
       expect(await onlyArtifact(sixb)).toMatchObject({
-        latestVersion: 2,
+        latestVersion: 1,
+        revision: 2,
         title: "Q3 review, final",
       })
       expect(
@@ -12383,7 +12376,7 @@ describe("AgentWorker", () => {
           await artifactStorageOf(sixb).getVersion({
             projectId: PROJECT_ID,
             artifactId: artifact.id,
-            version: 2,
+            version: 1,
           })
         )?.origin
       ).toEqual({ threadId: first.run.threadId, runId: second.run.id })
@@ -12505,6 +12498,7 @@ describe("AgentWorker", () => {
           broker: host.broker,
           recoverAiModelCall: context.recoverAiModelCall,
           events: context.streamSink,
+          domainEvents: host.events,
           security: host.definitions.security,
           sdk: host,
           definitions: host.definitions,

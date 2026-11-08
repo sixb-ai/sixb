@@ -57,8 +57,8 @@ import {
 } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
-const VERSION_TOOL = "publish_artifact_version"
-type PublishToolName = typeof CREATE_TOOL | typeof VERSION_TOOL
+const UPDATE_TOOL = "update_artifact"
+type PublishToolName = typeof CREATE_TOOL | typeof UPDATE_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
 const PUBLISHABLE_KINDS = ARTIFACT_KINDS
@@ -80,7 +80,7 @@ const TITLE_PROPERTY = {
 export const PUBLISH_ARTIFACT_TOOL_SPEC = {
   name: CREATE_TOOL,
   description:
-    "Publish a new artifact from a file or directory in the sandbox: a deliverable the user opens beside the conversation. Read the sixb-artifacts skill before the first publish. To change an artifact you already published, use publish_artifact_version. Returns the artifact's id and version; a refusal says what to fix.",
+    "Publish a new artifact from a file or directory in the sandbox: a deliverable the user opens beside the conversation. Read the sixb-artifacts skill before the first publish. To change an artifact you already published, use update_artifact. Returns the artifact's id and version; a refusal says what to fix.",
   inputSchema: {
     type: "object",
     properties: {
@@ -93,10 +93,10 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
   } satisfies JsonObject,
 } as const
 
-export const PUBLISH_ARTIFACT_VERSION_TOOL_SPEC = {
-  name: VERSION_TOOL,
+export const UPDATE_ARTIFACT_TOOL_SPEC = {
+  name: UPDATE_TOOL,
   description:
-    "Publish the next version of an artifact you published, from a file or directory in the sandbox. It keeps its kind, and its earlier versions stay readable. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its latest version under $SIXB_ARTIFACTS_DIR/<id>/. Returns the new version; a refusal says what to fix.",
+    "Update an artifact of this conversation from a file or directory in the sandbox: your files replace its current version's, which stays open, and its kind stays. Versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/. Returns the version and revision it wrote; a refusal says what to fix.",
   inputSchema: {
     type: "object",
     properties: {
@@ -115,7 +115,7 @@ export interface PublishArtifactToolInput {
   readonly title: string
 }
 
-export interface PublishArtifactVersionToolInput {
+export interface UpdateArtifactToolInput {
   readonly id: string
   readonly path: string
   readonly title: string
@@ -137,14 +137,15 @@ interface PublishToolsInput {
 }
 
 /**
- * `publish_artifact` and `publish_artifact_version`: each reads a file or a directory from the
- * sandbox, stores its bytes, and publishes them through the run's session, which applies a run's
- * rules (see `AgentRunArtifacts.publish`). The version exists when the tool returns, so the
+ * `publish_artifact` and `update_artifact`: each reads a file or a directory from the sandbox,
+ * stores its bytes, and publishes them through the run's session, which applies a run's rules (see
+ * `AgentRunArtifacts.publish`). An update replaces the open version's content, or opens the next
+ * version after one the user created. What it wrote exists when the tool returns, so the
  * conversation shows it mid-turn and a cancelled run keeps it.
  */
 export function createPublishArtifactTools(
   input: PublishToolsInput
-): readonly [ModelTool<PublishArtifactToolInput>, ModelTool<PublishArtifactVersionToolInput>] {
+): readonly [ModelTool<PublishArtifactToolInput>, ModelTool<UpdateArtifactToolInput>] {
   return [
     {
       ...PUBLISH_ARTIFACT_TOOL_SPEC,
@@ -155,12 +156,12 @@ export function createPublishArtifactTools(
       errorText: (error) => publishErrorText(error, CREATE_TOOL),
     },
     {
-      ...PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
-      parseInput: parsePublishArtifactVersionInput,
+      ...UPDATE_ARTIFACT_TOOL_SPEC,
+      parseInput: parseUpdateArtifactInput,
       execute: (request, { signal }) =>
-        publish(input, VERSION_TOOL, { ...request, target: { artifactId: request.id } }, signal),
-      toModelOutput: (output) => ({ type: "text", value: publishSummary(output, VERSION_TOOL) }),
-      errorText: (error) => publishErrorText(error, VERSION_TOOL),
+        publish(input, UPDATE_TOOL, { ...request, target: { artifactId: request.id } }, signal),
+      toModelOutput: (output) => ({ type: "text", value: publishSummary(output, UPDATE_TOOL) }),
+      errorText: (error) => publishErrorText(error, UPDATE_TOOL),
     },
   ]
 }
@@ -176,7 +177,7 @@ function publishErrorText(error: unknown, tool: PublishToolName): string {
 interface PublishRequest {
   readonly path: string
   readonly title: string
-  /** A new artifact of this kind, or the next version of this artifact. */
+  /** A new artifact of this kind, or this artifact's latest version. */
   readonly target: { readonly kind: PublishableKind } | { readonly artifactId: string }
 }
 
@@ -194,11 +195,11 @@ async function publish(
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
-  // A version of an installed artifact is made from its copy: publishing past the version the copy
-  // holds would drop whatever was published since.
+  // An installed artifact is updated from its copy: writing past the revision the copy holds would
+  // drop whatever was written since.
   const installed = await input.installed
-  const baseVersion =
-    "artifactId" in request.target ? installed.versionOf(request.target.artifactId) : undefined
+  const baseRevision =
+    "artifactId" in request.target ? installed.revisionOf(request.target.artifactId) : undefined
 
   const totalBytes = sources.reduce((sum, source) => sum + source.sizeBytes, 0)
   if (totalBytes > ARTIFACT_LIMITS.maxVersionBytes) {
@@ -226,8 +227,8 @@ async function publish(
       if (bytes.byteLength !== source.sizeBytes) {
         throw publishError(tool, `'${source.path}' changed while it was being read; publish again`)
       }
-      // Blob storage keeps identical bytes once, so a file the run already stored, such as one a
-      // next version keeps, costs the budget nothing again.
+      // Blob storage keeps identical bytes once, so a file the run already stored, such as one an
+      // update keeps, costs the budget nothing again.
       reservation.addContent(createHash("sha256").update(bytes).digest("hex"), bytes.byteLength)
       const fileName = posix.basename(source.path)
       const fileRef = await input.blobStorage.put({
@@ -246,7 +247,7 @@ async function publish(
       ...("artifactId" in request.target
         ? {
             artifactId: request.target.artifactId,
-            ...(baseVersion === undefined ? {} : { baseVersion }),
+            ...(baseRevision === undefined ? {} : { baseRevision }),
           }
         : { kind }),
       title: request.title,
@@ -262,12 +263,12 @@ async function publish(
       error instanceof ArtifactRequestError &&
       error.code === "artifact_moved" &&
       "artifactId" in request.target &&
-      baseVersion !== undefined
+      baseRevision !== undefined
     ) {
       throw await artifactMoved(
         input,
         { installed, handle },
-        { artifactId: request.target.artifactId, baseVersion },
+        { artifactId: request.target.artifactId, baseRevision },
         signal
       )
     }
@@ -283,22 +284,23 @@ async function publish(
     throw toPublishError(error, tool)
   }
 
-  // The version exists by now: nothing below may read as a failed publish, which the Agent would
+  // The write exists by now: nothing below may read as a failed publish, which the Agent would
   // publish again.
+  const { artifact, version } = published
   try {
-    // Revising from $SIXB_ARTIFACTS_DIR must start from this version, not the one before.
+    // Revising from $SIXB_ARTIFACTS_DIR must start from this revision, not the one before.
     await installed.replace(handle.sandbox, published, contents, signal)
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
-      `[SixbAgent] Could not install version ${published.version.version} of artifact '${published.artifact.id}':`,
+      `[SixbAgent] Could not install revision ${version.revision} of artifact '${artifact.id}':`,
       error
     )
   }
   // A published deck, page, or canvas is laid out in the sandbox's browser, so the Agent sees what
-  // the reader will, and fixes it in its next version.
+  // the reader will, and fixes it in its next update.
   const layout = frameLayout(kind)
-  const { outline, entry } = published.version
+  const { outline, entry } = version
   const root = layout ? sources.find((source) => source.path === entry) : undefined
   const bytesOf = (path: string) => contents.find((file) => file.path === path)?.bytes
   const themeFile = contents.find((file) => file.path === ARTIFACT_THEME_FILE)
@@ -344,7 +346,8 @@ async function publish(
         ...pages,
         directory: posix.dirname(root.absolutePath),
         files: contents.map((file) => file.path),
-        name: `${published.artifact.id}-v${published.version.version}`,
+        // A revision's check: two updates of one open version never share their pictures.
+        name: `${artifact.id}-r${version.revision}`,
         ...(theme && "theme" in theme ? { theme: theme.theme } : {}),
         queries: queries.answers,
         signal,
@@ -360,10 +363,13 @@ async function publish(
       ? await storePreviews({ input, handle, published, missing, checked: check.previews, signal })
       : []
   return {
-    artifactId: published.artifact.id,
-    version: published.version.version,
-    kind: published.artifact.kind,
-    title: published.version.title,
+    artifactId: artifact.id,
+    version: version.version,
+    revision: version.revision,
+    // An Agent's write always leaves the version open: only the user creates a version.
+    open: version.frozenAt === undefined,
+    kind: artifact.kind,
+    title: version.title,
     warnings: [
       ...published.warnings,
       ...queries.warnings,
@@ -389,7 +395,7 @@ async function publish(
 }
 
 /**
- * The boards of the version just published that miss a picture. A preview never costs a publish:
+ * The boards of the revision just written that miss a picture. A preview never costs a publish:
  * when they cannot be read, the check pictures none and the worker renders what is missing.
  */
 async function missingPreviews(
@@ -397,10 +403,7 @@ async function missingPreviews(
   published: PublishedArtifact
 ): Promise<readonly AgentRunMissingPreview[]> {
   try {
-    return await artifacts.missingPreviews({
-      artifactId: published.artifact.id,
-      version: published.version.version,
-    })
+    return await artifacts.missingPreviews(writtenAt(published))
   } catch (error) {
     console.warn(
       `[SixbAgent] Could not read which boards of '${published.artifact.id}' miss a preview:`,
@@ -411,9 +414,10 @@ async function missingPreviews(
 }
 
 /**
- * Hands the pictures the check took over as the version's previews, and warns of each board one
- * of whose pictures was not kept: it shows its outline in that size and mode. The version exists
- * by now, so a failure is only logged: the worker renders what is still missing.
+ * Hands the pictures the check took over as the revision's previews, and warns of each board one
+ * of whose pictures was not kept: it shows its outline in that size and mode. The write exists by
+ * now, so a failure is only logged: the worker renders what is still missing, and an update
+ * written since gets its own.
  */
 async function storePreviews(context: {
   readonly input: PublishToolsInput
@@ -432,20 +436,21 @@ async function storePreviews(context: {
       blobStorage: input.blobStorage,
       signal,
     })
-    const refused = await input.artifacts.storePreviews({
-      artifactId: published.artifact.id,
-      version: published.version.version,
-      previews,
-    })
+    const refused = await input.artifacts.storePreviews({ ...writtenAt(published), previews })
     return unkeptPreviewWarnings([...dropped, ...refused])
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
-      `[SixbAgent] Could not keep the previews of version ${published.version.version} of '${published.artifact.id}':`,
+      `[SixbAgent] Could not keep the previews of revision ${published.version.revision} of '${published.artifact.id}':`,
       error
     )
     return []
   }
+}
+
+/** The version a publish wrote, at the revision it left. */
+function writtenAt({ artifact, version }: PublishedArtifact) {
+  return { artifactId: artifact.id, version: version.version, revision: version.revision }
 }
 
 /** One warning per board whose pictures were not all kept, naming each and why. */
@@ -510,9 +515,9 @@ async function checkedQueries(
 const UNREACHABLE: ReadonlySet<string> = new Set(["artifact_not_found", "not_shared", "read_only"])
 
 /**
- * The artifact to publish a version of: one the requester owns, or one this conversation shares
- * that they take part in. Another is refused as if it did not exist, even one they could update
- * from another conversation: publishing here would share it in this one.
+ * The artifact to update: one the requester owns, or one this conversation shares that they take
+ * part in. Another is refused as if it did not exist, even one they could update from another
+ * conversation: writing it here would share it in this one.
  */
 async function updatableArtifact(
   input: PublishToolsInput,
@@ -532,9 +537,9 @@ function noArtifact(tool: PublishToolName, artifactId: string): AgentToolPublicE
 }
 
 /**
- * The refusal for a version made from a copy the artifact has moved past, such as a person saving
- * in the app while the run works. The version it moved to replaces the copy, so the Agent starts
- * again from it instead of publishing over it.
+ * The refusal for an update made from a copy the artifact has moved past, such as a person saving
+ * in the app while the run works. What it moved to replaces the copy, so the Agent starts again
+ * from it instead of writing over it.
  */
 async function artifactMoved(
   input: PublishToolsInput,
@@ -542,11 +547,11 @@ async function artifactMoved(
     installed,
     handle,
   }: { readonly installed: InstalledArtifacts; readonly handle: AgentSandboxHandle },
-  { artifactId, baseVersion }: { readonly artifactId: string; readonly baseVersion: number },
+  { artifactId, baseRevision }: { readonly artifactId: string; readonly baseRevision: number },
   signal: AbortSignal
 ): Promise<AgentToolPublicError> {
   // Read as the requester: whatever moved it, it is a version they can read.
-  const artifact = await updatableArtifact(input, artifactId, VERSION_TOOL)
+  const artifact = await updatableArtifact(input, artifactId, UPDATE_TOOL)
   const latest = await input.artifacts.getVersion(artifactId, artifact.latestVersion)
   if (!latest) {
     throw new Error(`[SixbAgent] Version ${artifact.latestVersion} of '${artifactId}' is missing.`)
@@ -561,7 +566,8 @@ async function artifactMoved(
       : latest.origin.threadId === input.threadId
         ? "earlier in this conversation"
         : `by ${author} in another conversation`
-  const moved = `artifact '${artifactId}' moved on from version ${baseVersion}, which you started from: version ${latest.version} was published ${where}, so nothing was published`
+  const created = latest.frozenAt ? ", and then created as a version" : ""
+  const moved = `artifact '${artifactId}' changed since revision ${baseRevision}, which you started from: it is at revision ${latest.revision}, whose version ${latest.version} was last written ${where}${created}, so nothing was published`
 
   try {
     const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
@@ -571,18 +577,18 @@ async function artifactMoved(
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
-      `[SixbAgent] Could not install version ${latest.version} of artifact '${artifactId}':`,
+      `[SixbAgent] Could not install revision ${latest.revision} of artifact '${artifactId}':`,
       error
     )
     return publishError(
-      VERSION_TOOL,
-      `${moved}. Version ${latest.version} could not be installed in the sandbox, so tell the user you could not build on it`
+      UPDATE_TOOL,
+      `${moved}. Its revision ${latest.revision} could not be installed in the sandbox, so tell the user you could not build on it`
     )
   }
 
   return publishError(
-    VERSION_TOOL,
-    `${moved}. $SIXB_ARTIFACTS lists version ${latest.version}, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and publish`
+    UPDATE_TOOL,
+    `${moved}. $SIXB_ARTIFACTS lists revision ${latest.revision}, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and update it`
   )
 }
 
@@ -672,12 +678,15 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
   if (typeof output !== "object" || output === null || Array.isArray(output)) {
     return JSON.stringify(output)
   }
+  const written = `artifact ${String(output.artifactId)}, version ${String(output.version)} at revision ${String(output.revision)}`
   const lines = [
-    `Published "${String(output.title)}" as artifact ${String(output.artifactId)}, version ${String(output.version)}.`,
+    tool === CREATE_TOOL
+      ? `Published "${String(output.title)}" as ${written}.`
+      : `Updated "${String(output.title)}": ${written}.`,
+    output.open === false
+      ? "The version is frozen."
+      : `The version is open: each update replaces it until the user creates a version. To change it, call ${UPDATE_TOOL} with this id.`,
   ]
-  if (tool === CREATE_TOOL) {
-    lines.push(`To change it, publish its next version with ${VERSION_TOOL} and this id.`)
-  }
   const warnings = Array.isArray(output.warnings) ? output.warnings : []
   for (const warning of warnings) {
     if (typeof warning === "object" && warning !== null && !Array.isArray(warning)) {
@@ -704,14 +713,14 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
       const directory = posix.dirname(screenshots[0] ?? "")
       lines.push(
         kind === "page"
-          ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and publish the next version.`
+          ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and update the artifact.`
           : kind === "canvas"
-            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with view_file, fix what the warnings name, and publish the next version.${
+            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with view_file, fix what the warnings name, and update the artifact.${
                 typeof check.overview === "string"
                   ? ` Open ${check.overview} to see the canvas as it opens, fitted to a 1440×900 window, and check that it reads at that zoom.`
                   : ""
               }`
-            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
+            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and update the artifact.`
       )
     }
   }
@@ -730,19 +739,19 @@ function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   }
 }
 
-function parsePublishArtifactVersionInput(value: unknown): PublishArtifactVersionToolInput {
-  const input = inputObject(value, VERSION_TOOL, ["id", "path", "title"])
+function parseUpdateArtifactInput(value: unknown): UpdateArtifactToolInput {
+  const input = inputObject(value, UPDATE_TOOL, ["id", "path", "title"])
   const id = typeof input.id === "string" ? input.id.trim() : ""
   if (!isArtifactId(id)) {
     throw publishError(
-      VERSION_TOOL,
+      UPDATE_TOOL,
       `id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call ${CREATE_TOOL}`
     )
   }
   return {
     id,
-    path: pathInput(input.path, VERSION_TOOL),
-    title: titleInput(input.title, VERSION_TOOL),
+    path: pathInput(input.path, UPDATE_TOOL),
+    title: titleInput(input.title, UPDATE_TOOL),
   }
 }
 

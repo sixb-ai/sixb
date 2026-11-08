@@ -125,7 +125,7 @@ the screenshots, one per slide, under `$SIXB_CONTEXT_DIR/checks/`.
 1. Open the screenshots with `view_file`, at least the slides a warning names, and look at each
    as the reader will: is anything crowded, misaligned, or unreadable?
 2. Fix what the warnings name and what you see, in the deck's files.
-3. Publish the next version with `publish_artifact_version`, and check again.
+3. Update the artifact with `update_artifact`, and check again.
 
 Contrast that fails only in dark mode means a fixed color: use the theme's variables. When the
 result says the check did not run, read `index.html` slide by slide instead.

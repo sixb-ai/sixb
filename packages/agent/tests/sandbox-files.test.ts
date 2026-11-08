@@ -222,7 +222,7 @@ describe("listHandedSources", () => {
         sandbox: async () => ({ sandbox: new LocalBashSandbox(root), contextDirectory }),
         blobStorage: { put: unused, open: unused, stat: unused },
         budget: new AgentFileBudget(),
-        installArtifactsFrom: unused,
+        installTurnArtifacts: unused,
       },
       paths,
       signal,

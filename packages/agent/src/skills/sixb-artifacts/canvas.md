@@ -175,7 +175,7 @@ readers see until they open it, so a board that looks wrong there looks wrong on
    designer would: one composition on one grid, words at three levels, nothing that looks like a
    default or a draft.
 2. Fix what the warnings name and what you see, in the boards' files or `canvas.json`.
-3. Publish the next version with `publish_artifact_version`, and check again.
+3. Update the artifact with `update_artifact`, and check again.
 
 ## Examples
 

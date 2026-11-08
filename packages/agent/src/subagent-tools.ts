@@ -1093,7 +1093,7 @@ export class SubagentCoordinator {
 
   /**
    * Copy what each finished child wrote under `out/` into the parent's sandbox, once, and install
-   * what the children published in its `$SIXB_ARTIFACTS`, as the parent's own. A result holds at
+   * the artifacts the children wrote in its `$SIXB_ARTIFACTS`, as the parent's own. A result holds at
    * most the attachment limits of new files, a child's whole or not at all; a child that does not
    * fit, or whose files cannot be copied, says so, and its files come with a later wait.
    */
@@ -1167,13 +1167,10 @@ export class SubagentCoordinator {
 
     let artifactsError: string | undefined
     try {
-      await this.#runFiles?.installArtifactsFrom(
-        children.map((child) => child.id),
-        signal
-      )
+      await this.#runFiles?.installTurnArtifacts(signal)
     } catch (error) {
       if (signal.aborted) throw error
-      artifactsError = `What these children published could not all be installed in $SIXB_ARTIFACTS (${errorMessage(error)}). The addresses in their answers still work.`
+      artifactsError = `What these children wrote could not all be installed in $SIXB_ARTIFACTS (${errorMessage(error)}). The addresses in their answers still work.`
     }
     return { byChild, attached, ...(artifactsError === undefined ? {} : { artifactsError }) }
   }
