@@ -177,6 +177,12 @@ function setup() {
       title: "Q3 numbers",
       files: await put({ "workbook.json": workbook(), "sheets/Summary.csv": SUMMARY }),
     })
+  /** The sheet with its first version created, so an address may pin it. */
+  const frozenNumbers = async (user = "alice") => {
+    const sheet = await numbers(user)
+    await as(user).artifacts.freeze(sheet.artifact.id)
+    return sheet
+  }
   const report = async (markdown: string, user = "alice") =>
     as(user).artifacts.create({
       kind: "document",
@@ -185,7 +191,7 @@ function setup() {
     })
   // No authorization context: system code, which reads every artifact in the project.
   const system = createTestSixb(host)
-  return { as, put, numbers, report, system, storage: deps.storage }
+  return { as, put, numbers, frozenNumbers, report, system, storage: deps.storage }
 }
 
 async function refusal(promise: Promise<unknown>): Promise<string> {
@@ -200,8 +206,8 @@ async function refusal(promise: Promise<unknown>): Promise<string> {
 
 describe("publishing references", () => {
   test("records each address with where it sits and the version it resolved to", async () => {
-    const { numbers, report } = setup()
-    const sheet = await numbers()
+    const { frozenNumbers, report } = setup()
+    const sheet = await frozenNumbers()
     const id = sheet.artifact.id
     const published = await report(
       [
@@ -259,6 +265,20 @@ describe("publishing references", () => {
     )
   })
 
+  test("refuses an address pinned to a version still open", async () => {
+    // Reproduce by dropping the open-version check in resolveReferences: the report pins content
+    // that the sheet's next save replaces.
+    const { as, numbers, report } = setup()
+    const id = (await numbers()).artifact.id
+    expect(await refusal(report(`# R\n\n![x](artifact:${id}@1#chart=revenue)\n`))).toBe(
+      `[Sixb] In 'r', 'artifact:${id}@1#chart=revenue' pins version 1 of “Q3 numbers”, which is still open and changes with every write. Write artifact:${id} without @1 to follow its latest version; a version can be pinned once someone creates it.`
+    )
+
+    await as("alice").artifacts.freeze(id)
+    const pinned = await report(`# R\n\n![x](artifact:${id}@1#chart=revenue)\n`)
+    expect(pinned.version.references).toMatchObject([{ resolvedVersion: 1 }])
+  })
+
   test("resolves only artifacts the author can read", async () => {
     // Reproduce by dropping the owner check in resolveReferences: Bob's report publishes.
     const { numbers, report } = setup()
@@ -281,8 +301,8 @@ describe("publishing references", () => {
 
 describe("a new version that breaks another artifact", () => {
   test("publishes, naming each artifact that follows it and what no longer resolves", async () => {
-    const { as, put, numbers, report } = setup()
-    const id = (await numbers()).artifact.id
+    const { as, put, frozenNumbers, report } = setup()
+    const id = (await frozenNumbers()).artifact.id
     const follows = await report(`# Q3 report\n\n![Revenue](artifact:${id}#chart=revenue)\n`)
     await report(`# Pinned\n\n![Revenue](artifact:${id}@1#chart=revenue)\n`)
 
@@ -299,7 +319,7 @@ describe("a new version that breaks another artifact", () => {
     expect(renamed.warnings).toEqual([
       {
         code: "reference_broken",
-        message: `“Q3 report” (${follows.artifact.id}) shows artifact:${id}#chart=revenue, but version 2 has no chart 'revenue'; its charts are 'revenue-by-quarter'. Publish its next version with an address that resolves, or restore what it names.`,
+        message: `“Q3 report” (${follows.artifact.id}) shows artifact:${id}#chart=revenue, but version 2 has no chart 'revenue'; its charts are 'revenue-by-quarter'. Update it with an address that resolves, or restore what it names.`,
       },
     ])
   })
@@ -342,7 +362,7 @@ describe("a new version that breaks another artifact", () => {
         title: "Q3 numbers",
         files: await put({ "workbook.json": workbook(), "sheets/Summary.csv": SUMMARY }),
       })
-      expect(next.version.version).toBe(2)
+      expect(next.version).toMatchObject({ version: 1, revision: 2 })
       expect(next.warnings).toEqual([])
     } finally {
       console.warn = warn

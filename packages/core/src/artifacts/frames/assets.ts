@@ -75,15 +75,21 @@ export function injectFrameAssets(html: string, layout: FrameLayout, entry = "in
   return `${doctype}${assets}${html.slice(doctype.length)}`
 }
 
-/** Where a frame serves a file another artifact lends it: `__sixb/ref/<id>@<version>/<path>`. */
+/**
+ * Where a frame serves a file another artifact lends it, at the revision it was issued with:
+ * `__sixb/ref/<id>@<version>r<revision>/<path>`.
+ */
 export const FRAME_REFERENCE_PREFIX = `${FRAME_ASSET_PREFIX}ref/`
+
+/** A lent file's path under {@link FRAME_REFERENCE_PREFIX}: its artifact, version, revision, path. */
+export const FRAME_REFERENCE_PATH = /^([^/@]+)@(\d+)r(\d+)\/(.+)$/
 
 /** The path, from an entry, of a file one of its frame's targets lends it. */
 function frameReferencePath(target: ArtifactFrameTarget, entry: string): string | null {
   const file = parseArtifactAddress(target.address)?.path
   if (!file) return null
   const path = file.split("/").map(encodeURIComponent).join("/")
-  return `${rootOf(entry)}${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${path}`
+  return `${rootOf(entry)}${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}r${target.revision}/${path}`
 }
 
 /**

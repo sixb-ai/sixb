@@ -42,7 +42,8 @@ export interface ArtifactPreviewsHost {
 /**
  * Renders what a version's boards miss and keeps it as their previews. Repeating it renders
  * nothing more: what an earlier delivery kept is no longer missing. A project without sandboxes
- * renders nothing, and neither does a version that was deleted since.
+ * renders nothing, and neither does a version deleted or written again since: the job of its new
+ * revision renders that, with the query answers of its own.
  */
 export async function renderArtifactPreviews(input: {
   readonly host: ArtifactPreviewsHost
@@ -53,9 +54,9 @@ export async function renderArtifactPreviews(input: {
   const artifacts = host.storage.artifacts
   if (!artifacts || !host.sandboxes) return
 
-  const { artifactId, version: number } = job.payload
+  const { artifactId, version: number, revision } = job.payload
   const version = await artifacts.getVersion({ projectId: host.id, artifactId, version: number })
-  if (!version) return
+  if (!version || (revision !== undefined && version.revision !== revision)) return
 
   const missing = await missingBoardPreviews(artifacts, version)
   if (missing.length === 0) return

@@ -281,7 +281,7 @@ describe("artifact ownership", () => {
       title: "Report, revised",
       files,
     })
-    expect(second.version.version).toBe(2)
+    expect(second.version).toMatchObject({ version: 1, revision: 2 })
     expect((await as("alice").artifacts.getVersion(artifact.id, "latest"))?.title).toBe(
       "Report, revised"
     )

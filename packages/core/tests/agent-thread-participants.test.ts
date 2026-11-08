@@ -705,7 +705,8 @@ describe("artifacts a shared conversation shares", () => {
     await owner.artifacts.publish(artifact.id, { ...content, title: "Edited in the app" })
     expect(await participant.artifacts.access(artifact.id)).toBe("update")
     expect(await participant.artifacts.get(artifact.id)).toMatchObject({
-      latestVersion: 3,
+      latestVersion: 1,
+      revision: 3,
       title: "Edited in the app",
       owner: alice,
     })
@@ -714,7 +715,7 @@ describe("artifacts a shared conversation shares", () => {
       ...content,
       title: "Bob's edit",
     })
-    expect(saved.version).toMatchObject({ version: 4, author: bob })
+    expect(saved.version).toMatchObject({ version: 1, revision: 4, author: bob })
     expect(saved.artifact.owner).toEqual(alice)
 
     await participant.artifacts.state(artifact.id).set("filters", { region: "EMEA" })
@@ -753,7 +754,105 @@ describe("artifacts a shared conversation shares", () => {
     await expect(
       participant.artifacts.publish(artifact.id, { ...content, title: "Too late" })
     ).rejects.toMatchObject({ code: "not_shared" })
-    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ revision: 3 })
+  })
+
+  // Guard proof: answer freeze and restore from `accessTo` without `assertUpdatable` in the
+  // runtime's `change`; Cleo, whom the conversation does not share it with, then creates a version.
+  test("whoever may update one creates its versions and restores it; nobody else", async () => {
+    const { host } = setup()
+    const { owner, participant, other, artifact, content } = await sharedArtifact(host)
+
+    const frozen = await participant.artifacts.freeze(artifact.id, { baseRevision: 2 })
+    expect(frozen.version).toMatchObject({ version: 1, revision: 3, frozenAt: expect.any(Date) })
+    // Creating it again changes nothing.
+    expect((await owner.artifacts.freeze(artifact.id)).artifact.revision).toBe(3)
+
+    // A turn rewrites it: the turn's first write kept what it replaced.
+    const opened = await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: artifact.id,
+      kind: "document",
+      version: { ...frozen.version, title: "Turn's draft", updatedAt: new Date() },
+      turnRunId: "run_turn",
+    })
+    expect(opened?.version).toMatchObject({ version: 2, revision: 4 })
+    const [point] = (await participant.artifacts.listRestorePoints(artifact.id)) ?? []
+    expect(point).toMatchObject({ revision: 3, version: 1, frozen: true, reason: "turn" })
+
+    const restored = await participant.artifacts.restore(artifact.id, 3, { baseRevision: 4 })
+    expect(restored.version).toMatchObject({
+      version: 2,
+      revision: 5,
+      title: content.title,
+      author: bob,
+    })
+    expect(await owner.artifacts.getRestorePoint(artifact.id, 4)).toMatchObject({
+      title: "Turn's draft",
+      reason: "restore",
+    })
+
+    for (const refused of [
+      () => other.artifacts.freeze(artifact.id),
+      () => other.artifacts.restore(artifact.id, 4),
+    ]) {
+      expect(await refused().catch((error: unknown) => error)).toMatchObject({
+        code: "not_shared",
+      })
+    }
+    expect(await other.artifacts.listRestorePoints(artifact.id)).toBeNull()
+    expect(await other.artifacts.getRestorePoint(artifact.id, 4)).toBeNull()
+    await expect(participant.artifacts.restore(artifact.id, 9)).rejects.toMatchObject({
+      code: "restore_point_not_found",
+    })
+  })
+
+  // Guard proof: show artifact events to every principal in `createEventsRuntime`; Cleo then
+  // learns that Alice's artifact changed. Drop `undoTurnWrites` from retryAgentRun, and the
+  // turn's draft outlives its retry.
+  test("a retry puts back what the turn wrote, and tells only whoever reads it", async () => {
+    const { host } = setup()
+    const { owner, participant, other, run, artifact, content } = await sharedArtifact(host)
+    const before = await owner.artifacts.getVersion(artifact.id, "latest")
+    if (!before) throw new Error("Expected the shared version.")
+
+    // Alice's failed turn rewrote the report and created a chart.
+    await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: artifact.id,
+      kind: "document",
+      version: { ...before, title: "Turn's draft", updatedAt: new Date() },
+      turnRunId: run.id,
+    })
+    const chart = await host.storage.artifacts?.create({
+      projectId,
+      id: "art_turnchart",
+      kind: "document",
+      owner: alice,
+      version: { ...before, title: "Chart", updatedAt: new Date() },
+      turnRunId: run.id,
+    })
+    const cursor = await host.events.latestCursor()
+
+    await owner.agent.runs.retry(run.id)
+
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({
+      title: content.title,
+      revision: 4,
+    })
+    expect(await owner.artifacts.get(chart?.artifact.id ?? "")).toBeNull()
+
+    const read = async (reader: typeof owner) =>
+      (
+        await reader.events.read({
+          ...(cursor === undefined ? {} : { afterCursor: cursor }),
+          types: ["artifact.updated"],
+        })
+      ).map((event) => event.payload)
+    const updated = { artifactId: artifact.id, version: 1, revision: 4, frozen: false }
+    expect(await read(owner)).toEqual([updated])
+    expect(await read(participant)).toEqual([updated])
+    expect(await read(other)).toEqual([])
   })
 
   // Guard proof: keep the author in every render key in previews.ts; Bob moving the board names it
@@ -859,8 +958,12 @@ describe("artifacts a shared conversation shares", () => {
   test("a fork gets its own copies, with their history, and its messages name them", async () => {
     const { host } = setup()
     const { owner, participant, thread, run, artifact, content } = await sharedArtifact(host)
+    // Alice creates versions 1 and 2, and writes the open version 3.
+    await owner.artifacts.freeze(artifact.id)
+    await owner.artifacts.publish(artifact.id, content)
+    await owner.artifacts.freeze(artifact.id)
     await owner.artifacts.publish(artifact.id, { ...content, title: "Latest" })
-    // A card for version 2, as publish_artifact_version leaves one, and an embed pinned to @1.
+    // A card for version 2, as update_artifact leaves one, and an embed pinned to @1.
     await host.storage.agents?.messages.append({
       projectId,
       id: "msg_shown",
@@ -871,7 +974,7 @@ describe("artifacts a shared conversation shares", () => {
         {
           type: "tool-call",
           toolCallId: "call_publish",
-          toolName: "publish_artifact_version",
+          toolName: "update_artifact",
           input: { id: artifact.id },
           state: "output-available",
           output: { artifactId: artifact.id, version: 2 },

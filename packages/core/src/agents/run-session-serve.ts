@@ -108,6 +108,7 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     session.artifacts.updatable(artifactId as string),
   "artifacts.publish": (session, [input]) =>
     session.artifacts.publish(input as Parameters<AgentRunSession["artifacts"]["publish"]>[0]),
+  "artifacts.turnWrites": (session) => session.artifacts.turnWrites(),
   "artifacts.storePreviews": (session, [input]) =>
     session.artifacts.storePreviews(
       input as Parameters<AgentRunSession["artifacts"]["storePreviews"]>[0]

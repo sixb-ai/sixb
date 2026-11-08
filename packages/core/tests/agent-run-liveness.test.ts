@@ -27,7 +27,8 @@ function setup() {
       },
     },
     security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
-    // Ending a run binds no SDK and reads no plan.
+    // Ending a run binds no SDK, reads no plan, and writes no artifact.
+    domainEvents: { emit: async () => {} },
     sdk: {
       id: PROJECT_ID,
       withScope: () => {

@@ -239,14 +239,14 @@ describe("publishing a canvas", () => {
       files: await put({ "canvas.json": CANVAS, ...BOARDS }),
     })
 
-    const job = {
-      id: `art_previews_${first.artifact.id}_v1`,
+    const job = (revision: number) => ({
+      id: `art_previews_${first.artifact.id}_r${revision}`,
       type: "agent.artifact-previews.requested" as const,
-      payload: { artifactId: first.artifact.id, version: 1 },
-    }
-    expect(await claimable()).toEqual([job])
+      payload: { artifactId: first.artifact.id, version: 1, revision },
+    })
+    expect(await claimable()).toEqual([job(1)])
 
-    // Asking again for the same version is the same job.
+    // Asking again for the same revision is the same job.
     await requestBoardPreviews(requester(deps), first.version)
     expect(await claimable()).toEqual([])
 
@@ -268,6 +268,19 @@ describe("publishing a canvas", () => {
       }),
     })
     expect(await claimable()).toEqual([])
+
+    // Writing the open version again with one board changed asks for that board's pictures, in a
+    // job of the new revision's. Reproduce by keying the job by version: it is the first job.
+    await as(alice).artifacts.publish(first.artifact.id, {
+      kind: "canvas",
+      title: "Onboarding",
+      files: await put({
+        "canvas.json": CANVAS,
+        ...BOARDS,
+        "boards/region.html": "<main><h1>Regions, by city</h1></main>",
+      }),
+    })
+    expect(await claimable()).toEqual([job(3)])
   })
 
   test("asks for nothing in a project without sandboxes, where nothing renders them", async () => {
@@ -298,7 +311,7 @@ describe("publishing a canvas", () => {
 
     jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
     expect((await claimable()).map((job) => job.payload)).toEqual([
-      { artifactId: version.artifactId, version: 1 },
+      { artifactId: version.artifactId, version: 1, revision: 1 },
     ])
   })
 })

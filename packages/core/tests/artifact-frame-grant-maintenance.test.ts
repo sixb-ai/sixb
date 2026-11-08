@@ -35,7 +35,7 @@ describe("expired frame grants", () => {
         outline: { kind: "slides", slides: [] },
         references: [],
         author: owner,
-        createdAt: new Date(now.getTime() - 2 * 60 * minute),
+        updatedAt: new Date(now.getTime() - 2 * 60 * minute),
       },
     })
     const tokenHash = (seed: string) => seed.repeat(64)
@@ -45,6 +45,7 @@ describe("expired frame grants", () => {
         tokenHash: tokenHash(seed),
         artifactId: "art_deck",
         version: 1,
+        revision: 1,
         targets: [],
         createdAt: new Date(expiresAt.getTime() - 60 * minute),
         expiresAt,

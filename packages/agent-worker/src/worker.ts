@@ -501,6 +501,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       broker: this.host.broker,
       recoverAiModelCall: context.recoverAiModelCall,
       events: context.streamSink,
+      domainEvents: this.host.events,
       security: this.host.definitions.security,
       maxActiveChildren: context.subagentConcurrencyPerRun,
       sdk: this.host,

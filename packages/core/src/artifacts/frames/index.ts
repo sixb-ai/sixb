@@ -12,6 +12,7 @@ export {
 export {
   FRAME_ASSETS,
   FRAME_CDN_ALLOWLIST,
+  FRAME_REFERENCE_PATH,
   FRAME_REFERENCE_PREFIX,
   injectFrameAssets,
   rewriteFrameReferences,

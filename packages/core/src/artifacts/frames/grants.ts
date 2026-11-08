@@ -28,10 +28,11 @@ type ReadArtifactVersion = (
 ) => Promise<ArtifactVersionRecord | null>
 
 /**
- * Issues a link that serves a version to a sandboxed frame, with the files it embeds from other
- * artifacts that `read` finds. The token in the link is the credential: only its hash is stored.
- * Whoever asks must already have been allowed to read the version, and `read` reads as them. Only
- * a kind with a frame layout opens in one, since the frame serves its entry as a page.
+ * Issues a link that serves a version, at its revision, to a sandboxed frame, with the files it
+ * embeds from other artifacts that `read` finds. The token in the link is the credential: only its
+ * hash is stored. Whoever asks must already have been allowed to read the version, and `read`
+ * reads as them. Only a kind with a frame layout opens in one, since the frame serves its entry as
+ * a page.
  */
 export async function createArtifactFrame(input: {
   readonly projectId: string
@@ -55,6 +56,7 @@ export async function createArtifactFrame(input: {
     tokenHash: hashToken(token),
     artifactId: version.artifactId,
     version: version.version,
+    revision: version.revision,
     targets: input.read ? await frameTargets(version, input.read) : [],
     createdAt,
     expiresAt,
@@ -65,7 +67,7 @@ export async function createArtifactFrame(input: {
 /**
  * The files from other artifacts a version's frame may show its reader: each file it embeds
  * (`<img src="artifact:…/figure.svg">`) that `read`, as the reader, finds, at the version the
- * address pins or the latest. A chart, range, or section is drawn by the app over the frame, under
+ * address pins or the latest, and at that version's revision. A chart, range, or section is drawn by the app over the frame, under
  * the reader's own session, and needs nothing here.
  */
 async function frameTargets(
@@ -88,6 +90,7 @@ async function frameTargets(
       address: reference.address,
       artifactId: target.artifactId,
       version: target.version,
+      revision: target.revision,
     })
   }
   return targets
@@ -95,7 +98,8 @@ async function frameTargets(
 
 /**
  * What a frame link serves: its version, and what it may show from other artifacts; `null` once
- * the link is unknown, expired, or its version gone, and for a kind that does not open in a frame.
+ * the link is unknown, expired, or its version gone or changed since, so a frame never mixes two
+ * contents, and for a kind that does not open in a frame.
  */
 export async function resolveArtifactFrame(input: {
   readonly projectId: string
@@ -117,7 +121,9 @@ export async function resolveArtifactFrame(input: {
     artifactId: grant.artifactId,
     version: grant.version,
   })
-  return version && frameLayout(version.outline.kind) ? { version, targets: grant.targets } : null
+  if (!version || version.revision !== grant.revision) return null
+
+  return frameLayout(version.outline.kind) ? { version, targets: grant.targets } : null
 }
 
 function hashToken(token: string): string {

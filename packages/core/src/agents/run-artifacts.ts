@@ -1,5 +1,6 @@
 import { BOARD_PREVIEW_JOB } from "../artifacts/canvas-display"
 import { ArtifactRequestError } from "../artifacts/errors"
+import { announceArtifactUpdates } from "../artifacts/events"
 import {
   type ArtifactsRuntime,
   artifactAccessRule,
@@ -21,12 +22,14 @@ import {
 } from "../artifacts/publish/publish"
 import type { ArtifactThemeMode } from "../artifacts/theme"
 import { type Principal, principalsEqual } from "../auth/types"
+import type { DomainEventLog } from "../events/service"
 import type { Sixb } from "../runtime/sixb"
 import type { Storage } from "../storage"
 import type { AgentStorage, ConversationAgentRunRecord, SubagentRunRecord } from "../storage/agents"
 import type {
   ArtifactFile,
   ArtifactRecord,
+  ArtifactTurnWriteRecord,
   ArtifactVersionRecord,
 } from "../storage/artifacts/types"
 import { assertAgentRunOwned } from "./run-fence"
@@ -47,35 +50,45 @@ export interface AgentRunArtifacts {
   listVersions: ArtifactsRuntime["listVersions"]
   query: ArtifactsRuntime["query"]
   /**
-   * The artifact, when the run may publish its next version: its requester owns it, or the
-   * conversation shares it and they take part. Another is `null`, even one they could update from
-   * another conversation: publishing here would share it in this one.
+   * The artifact, when the run may write it: its requester owns it, or the conversation shares it
+   * and they take part. Another is `null`, even one they could update from another conversation:
+   * writing it here would share it in this one.
    */
   updatable(artifactId: string): Promise<ArtifactRecord | null>
   /**
-   * Publish as the run: a new artifact owned by the conversation's owner, or the next version of an
-   * updatable one, authored by the requester, with the run and its conversation as origin. Nothing
-   * is stored once the run lost its execution ({@link AgentExecutionLostError}), or a child's
-   * parent ended. Refusals are {@link ArtifactRequestError}s.
+   * Publish as the run: a new artifact owned by the conversation's owner, or the latest version of
+   * an updatable one, authored by the requester, with the run and its conversation as origin. A
+   * write replaces the open version's content, or opens the next version after a frozen one; the
+   * turn's first write to an artifact keeps a restore point, and a retry of the turn undoes its
+   * writes. Nothing is stored once the run lost its execution ({@link AgentExecutionLostError}),
+   * or a child's parent ended. Refusals are {@link ArtifactRequestError}s.
    */
   publish(input: AgentRunArtifactPublish): Promise<PublishedArtifact>
   /**
-   * Keeps the pictures the run took of the boards of a version it published, as their previews:
-   * its requester authored the version, and the pictures show what they can see. Refuses any
-   * other version. Each picture stands alone: those not kept are returned, with why.
+   * The artifacts the run's turn wrote, its sub-agents' writes among them, each with the revision
+   * the turn's last write left it at.
+   */
+  turnWrites(): Promise<readonly ArtifactTurnWriteRecord[]>
+  /**
+   * Keeps the pictures the run took of the boards of a version it wrote, as their previews: its
+   * requester authored the content, and the pictures show what they can see. Refuses any other
+   * version, and one written again since. Each picture stands alone: those not kept are
+   * returned, with why.
    */
   storePreviews(input: AgentRunBoardPreviews): Promise<readonly RefusedBoardPreview[]>
   /**
-   * The boards of a version the run published still without a picture, and the modes each
-   * misses: a board it kept as it was keeps the pictures it had. Refuses any other version.
+   * The boards of a version the run wrote still without a picture, and the modes each misses: a
+   * board it kept as it was keeps the pictures it had. Refuses any other version, and one written
+   * again since.
    */
   missingPreviews(input: AgentRunVersion): Promise<readonly AgentRunMissingPreview[]>
 }
 
-/** A version of an artifact. */
+/** A version of an artifact, as one revision left it. */
 export interface AgentRunVersion {
   readonly artifactId: string
   readonly version: number
+  readonly revision: number
 }
 
 /** The pictures a run took of a version's boards. */
@@ -106,14 +119,16 @@ export type AgentRunArtifactPublish = {
       readonly artifactId: string
       /** The artifact's kind, when the caller names one: another is refused. */
       readonly kind?: ArtifactKind
-      /** The version this one was made from: publishing fails with `artifact_moved` past it. */
-      readonly baseVersion?: number
+      /** The revision this content was made from: publishing fails with `artifact_moved` past it. */
+      readonly baseRevision?: number
     }
 )
 
 export interface AgentRunArtifactsHost {
   readonly projectId: string
   readonly storage: Storage
+  /** Where `artifact.updated` goes once a write to an artifact is stored. */
+  readonly domainEvents: Pick<DomainEventLog, "emit">
 }
 
 /** The SDK a run acts through, bound to its execution: as its requester. */
@@ -140,6 +155,8 @@ export function agentRunArtifacts(
     return publisher
   }
   const fence = { projectId, id: run.id, executionToken }
+  // A child writes as the turn it works under: one restore point per turn, undone by its retry.
+  const turnRunId = run.kind === "subagent" ? run.parentRunId : run.id
 
   const updatable = async (artifactId: string): Promise<ArtifactRecord | null> => {
     const [{ threadId }, { artifacts: reader }] = await Promise.all([publisherOf(), sdk()])
@@ -189,7 +206,7 @@ export function agentRunArtifacts(
         ...("artifactId" in input
           ? {
               artifactId: input.artifactId,
-              ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
+              ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
             }
           : {}),
         kind,
@@ -201,6 +218,7 @@ export function agentRunArtifacts(
         // As the requester, so a query never reads what they cannot.
         checkQuery: artifactQueryChecker(reader),
         origin: { threadId, runId: run.id },
+        turnRunId,
       })
       const stored = await storage.transaction(async (tx) => {
         await assertAgentRunOwned(requireAgents(tx), fence)
@@ -219,6 +237,8 @@ export function agentRunArtifacts(
           (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
         )
       })
+      if ("artifactId" in input) await announceArtifactUpdates(host.domainEvents, [stored.version])
+
       // A publisher that renders its own previews reads the query answers in its layout check, and
       // normally pictures every board: answering them here too would run each query twice. So its
       // job waits, carries none, and a board that reads one and that the check missed keeps its
@@ -229,6 +249,10 @@ export function agentRunArtifacts(
       )
 
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+    },
+
+    async turnWrites() {
+      return requireArtifacts(storage).listTurnWrites({ projectId, turnRunId })
     },
 
     async storePreviews({ previews, ...at }) {
@@ -249,13 +273,20 @@ export function agentRunArtifacts(
     },
   }
 
-  /** Only the run that published a version pictures its boards with its author's rights. */
+  /**
+   * Only the run that wrote a version's content pictures its boards with its author's rights, and
+   * only while the version holds that content: the pictures are kept under its boards' render keys.
+   */
   async function publishedVersion(at: AgentRunVersion): Promise<ArtifactVersionRecord> {
-    const version = await requireArtifacts(storage).getVersion({ projectId, ...at })
-    if (!version || version.origin?.runId !== run.id) {
+    const version = await requireArtifacts(storage).getVersion({
+      projectId,
+      artifactId: at.artifactId,
+      version: at.version,
+    })
+    if (!version || version.origin?.runId !== run.id || version.revision !== at.revision) {
       throw new ArtifactRequestError(
         "not_allowed",
-        `[Sixb] Version ${at.version} of artifact '${at.artifactId}' was not published by this run.`
+        `[Sixb] Version ${at.version} of artifact '${at.artifactId}' does not hold what this run wrote at revision ${at.revision}.`
       )
     }
     return version

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { announceArtifactUpdates } from "../artifacts/events"
 import type { Principal } from "../auth"
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
@@ -334,7 +335,7 @@ export async function retryAgentRun(
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
-  const run = await runtime.storage.transaction(async (tx) => {
+  const { run, undone } = await runtime.storage.transaction(async (tx) => {
     const agents = tx.agents
     if (!agents) {
       throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
@@ -344,16 +345,15 @@ export async function retryAgentRun(
       threadId: failedRun.threadId,
       runId: failedRun.id,
     })
-    // What the failed turn published goes with what it said, so the retry starts clean. Its
-    // children published into the thread too, each as its own run.
-    const artifacts = tx.artifacts
-    if (artifacts) {
-      for (const publishedBy of [failedRun.id, ...(await childRunIds(agents, failedRun))]) {
-        await artifacts.deleteVersionsByOrigin({ projectId: runtime.projectId, runId: publishedBy })
-      }
-    }
+    // What the failed turn wrote goes with what it said, so the retry starts clean: each artifact
+    // nobody changed since is put back as it was, or deleted when the turn created it. Its
+    // children wrote as the turn.
+    const undone = await tx.artifacts?.undoTurnWrites({
+      projectId: runtime.projectId,
+      turnRunId: failedRun.id,
+    })
     await tx.executions.create(durableExecution)
-    return agents.runs.create({
+    const run = await agents.runs.create({
       id: runId,
       projectId: runtime.projectId,
       executionId: durableExecution.id,
@@ -365,7 +365,12 @@ export async function retryAgentRun(
           (await resolveConversationRunSpec({ models, selection: {}, settings: {} }))
       ),
     })
+    return { run, undone }
   })
+  await announceArtifactUpdates(
+    runtime.events,
+    (undone?.restored ?? []).map(({ version }) => version)
+  )
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
@@ -555,26 +560,6 @@ async function resumedConversationRunSpec(
           },
         })
   return Object.freeze({ ...kept, approvalMode })
-}
-
-/** Every child a turn spawned, whatever its status. */
-async function childRunIds(
-  agents: AgentStorage,
-  parent: ConversationAgentRunRecord
-): Promise<string[]> {
-  const ids: string[] = []
-  for (;;) {
-    const page = await agents.runs.list({
-      projectId: parent.projectId,
-      kinds: ["subagent"],
-      parentRunId: parent.id,
-      order: "asc",
-      limit: 100,
-      offset: ids.length,
-    })
-    ids.push(...page.runs.map((run) => run.id))
-    if (!page.hasMore || page.runs.length === 0) return ids
-  }
 }
 
 /**

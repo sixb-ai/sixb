@@ -1,4 +1,5 @@
-import { assertPrivileged, canViewEvent } from "../authorization"
+import { createRuntimeArtifactAccessRule } from "../artifacts/execution"
+import { type AuthorizationContext, assertPrivileged, canViewEvent } from "../authorization"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import {
   type AuthorizedObjectReader,
@@ -73,34 +74,45 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
       case "unrestricted":
         return events
       case "principal": {
-        const reader = runtime.objectReader
-        const conditions = readerViewConditions(reader)
-        const viewable = events.filter((event) =>
-          canViewEvent(authority.context, event, conditions)
-        )
-        if (viewable.length === 0) return viewable
+        const shown = await visibleByGrants(authority.context, events)
+        if (!events.some((event) => event.topic === "artifacts")) return shown
 
-        const clearance = await readerClearance(reader)
-        const clearanceFor = await eventClearances(reader, viewable, clearance)
+        // Artifact events go to whoever reads the artifact, in the log's order with the others.
+        const readable = await readableArtifactEvents(runtime, events)
+        const byCursor = new Map(shown.map((event) => [event.cursor, event]))
 
-        const readable = clearance
-          ? viewable.filter((event) => !readsUnreadable(event, clearance))
-          : viewable
-        const shown = await visibleUnderConditions(
-          reader,
-          readable,
-          conditions,
-          clearanceFor,
-          history
-        )
-
-        return shown.map((event) => {
-          const redacting = clearanceFor(event)
-          const redacted = redacting ? redactDomainEvent(event, redacting) : event
-          return withoutHiddenPriorState(event, redacted, conditions)
-        })
+        return events
+          .filter((event) =>
+            event.topic === "artifacts" ? readable.has(event) : byCursor.has(event.cursor)
+          )
+          .map((event) => byCursor.get(event.cursor) ?? event)
       }
     }
+  }
+
+  /** The events a principal's grants show it, redacted as its clearance says. */
+  const visibleByGrants = async (
+    context: AuthorizationContext,
+    events: readonly StoredDomainEvent[]
+  ): Promise<readonly StoredDomainEvent[]> => {
+    const reader = runtime.objectReader
+    const conditions = readerViewConditions(reader)
+    const viewable = events.filter((event) => canViewEvent(context, event, conditions))
+    if (viewable.length === 0) return viewable
+
+    const clearance = await readerClearance(reader)
+    const clearanceFor = await eventClearances(reader, viewable, clearance)
+
+    const readable = clearance
+      ? viewable.filter((event) => !readsUnreadable(event, clearance))
+      : viewable
+    const shown = await visibleUnderConditions(reader, readable, conditions, clearanceFor, history)
+
+    return shown.map((event) => {
+      const redacting = clearanceFor(event)
+      const redacted = redacting ? redactDomainEvent(event, redacting) : event
+      return withoutHiddenPriorState(event, redacted, conditions)
+    })
   }
 
   return {
@@ -161,6 +173,38 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
       })
     },
   }
+}
+
+/**
+ * The artifact events the runtime's caller receives: those about an artifact it reads, as the
+ * artifact access rule decides now. One read per artifact, however many of its events the batch
+ * holds; without artifact storage, none.
+ */
+async function readableArtifactEvents(
+  runtime: SixbRuntimeContext,
+  events: readonly StoredDomainEvent[]
+): Promise<ReadonlySet<StoredDomainEvent>> {
+  const storage = runtime.storage.artifacts
+  if (!storage) return new Set()
+
+  const rule = createRuntimeArtifactAccessRule(runtime)
+  const readable = new Map<string, Promise<boolean>>()
+  const reads = (artifactId: string) => {
+    let read = readable.get(artifactId)
+    if (!read) {
+      read = storage
+        .get({ projectId: runtime.projectId, id: artifactId })
+        .then(async (artifact) => artifact !== null && (await rule.accessTo(artifact)) !== "none")
+      readable.set(artifactId, read)
+    }
+    return read
+  }
+
+  const shown = new Set<StoredDomainEvent>()
+  for (const event of events) {
+    if (event.topic === "artifacts" && (await reads(event.payload.artifactId))) shown.add(event)
+  }
+  return shown
 }
 
 /**

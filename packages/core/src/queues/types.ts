@@ -207,7 +207,7 @@ export interface AgentAiUsageRecordRequestedQueueJob
 
 /**
  * A canvas version's boards miss pictures: the agent worker renders them in a blank sandbox of
- * the project, with the data the version's author can see. One job per version.
+ * the project, with the data the version's author can see. One job per revision of the version.
  */
 export interface AgentArtifactPreviewsRequestedQueueJob
   extends QueueJob<
@@ -215,6 +215,11 @@ export interface AgentArtifactPreviewsRequestedQueueJob
     {
       readonly artifactId: string
       readonly version: number
+      /**
+       * The version's revision when it was asked for: once the version is written again, the
+       * job of its new revision renders it. Absent on jobs asked for before revisions.
+       */
+      readonly revision?: number
       /**
        * The version's query answers as its publisher read them when publishing, by name: a JSON
        * blob the boards read their queries from. Absent for a version without queries.
