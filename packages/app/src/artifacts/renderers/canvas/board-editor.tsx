@@ -4,6 +4,7 @@ import {
   type CanvasBoard,
   type FrameEditTarget,
   type FrameEvent,
+  parseFrameEvent,
 } from "@sixb/core/artifacts"
 import {
   boardFilePath,
@@ -14,6 +15,7 @@ import {
 } from "@sixb/core/artifacts/live"
 import type { FileRef } from "@sixb/core/blob-storage"
 import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Code2, ImageIcon, LoaderCircle, MessageSquarePlus, Paintbrush } from "lucide-react"
 import {
@@ -22,10 +24,12 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react"
+import { formatFileSize } from "../../file-size"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
 import { useLiveBoardSource, useLiveStoredFiles } from "../../live/boards"
 import type { LiveCanvas } from "../../live/canvas"
@@ -101,6 +105,11 @@ function useBoardFrame({
   const previews = useRef(new Map<string, string>())
   /** The frame must load a newer version: the elements changed, or a picture is missing. */
   const [stale, setStale] = useState(false)
+  /**
+   * The elements themselves changed: the frame's addresses name other elements than the
+   * document's, so nothing is edited through it until it loads a version that has them.
+   */
+  const [moved, setMoved] = useState(false)
   const [holding, setHolding] = useState(false)
 
   const ready = useCallback(() => {
@@ -115,8 +124,10 @@ function useBoardFrame({
     const patches = boardFramePatches(shown.current ?? stored, source)
     if (patches === null) {
       setStale(true)
+      setMoved(true)
       return
     }
+    setMoved(false)
 
     const holds = (path: string) => shows.files.some((file) => file.path === path)
     const showable = showablePatches(patches, board.file, holds, previews.current)
@@ -128,12 +139,12 @@ function useBoardFrame({
   }, [loads, stored, source, shows, board.file])
 
   // A stale frame loads the version the viewer has now once it is past the one it shows, and
-  // while the reader is not typing in it.
+  // while the reader is not typing in it, unless what they type in is no longer where it was.
   useEffect(() => {
-    if (!stale || holding || version.revision <= pinned.revision) return
+    if (!stale || (holding && !moved) || version.revision <= pinned.revision) return
     setStale(false)
     setPinned(version)
-  }, [stale, holding, version, pinned.revision])
+  }, [stale, holding, moved, version, pinned.revision])
 
   /** Loads the frame's page again, as what it shows can no longer be patched. */
   const resync = useCallback(() => {
@@ -149,6 +160,7 @@ function useBoardFrame({
     ready,
     resync,
     stale,
+    moved,
     previews: previews.current,
     hold: setHolding,
   }
@@ -202,26 +214,57 @@ export function BoardStage({
   const editing = mode === "edit" && canvas !== null
   const [selected, setSelected] = useState<FrameEditTarget | null>(null)
   // The element picked, as the event handler reads it: what the frame says the reader typed in is
-  // taken only for it.
+  // taken only for it, and nothing while the frame's elements are not the document's.
   const picked = useRef<FrameEditTarget | null>(null)
   picked.current = editing ? selected : null
+  const moved = useRef(frame.moved)
+  moved.current = frame.moved
 
   const { hold } = frame
   useEffect(() => {
     hold(editing && selected?.kind === "text")
   }, [hold, editing, selected])
 
-  // Out of editing, nothing stays picked.
+  // Out of editing, or once the frame's elements no longer match the document's, nothing stays
+  // picked: its address may name another element now.
   useEffect(() => {
-    if (!editing) setSelected(null)
-  }, [editing])
+    if (!editing || frame.moved) {
+      picked.current = null
+      setSelected(null)
+    }
+  }, [editing, frame.moved])
 
-  // The frame picks and types as the mode says, each time it loads.
+  // Each load of the frame, a port of its own, handed over with its first `edit` request: what
+  // editing reports comes through it alone, never through the window, where the board's scripts
+  // post too.
+  const port = useRef<{ readonly mine: MessagePort; handed: MessagePort | null } | null>(null)
+  const onEditRef = useRef<(event: FrameEvent) => void>(() => {})
+  useEffect(() => {
+    if (frame.loads === 0) return
+    const channel = new MessageChannel()
+    channel.port1.onmessage = (message: MessageEvent) => {
+      const event = parseFrameEvent(message.data)
+      if (event?.event.startsWith("edit.")) onEditRef.current(event)
+    }
+    port.current = { mine: channel.port1, handed: channel.port2 }
+    return () => channel.port1.close()
+  }, [frame.loads])
+
+  // The frame picks and types as the mode says, each time it loads; while its elements are not
+  // the document's, it does neither.
   const send = frame.handle
   useEffect(() => {
     if (frame.loads === 0) return
-    send.current?.send("edit", { on: mode !== "read", typing: editing }).catch(() => {})
-  }, [frame.loads, mode, editing, send])
+    const handed = port.current?.handed
+    if (port.current) port.current.handed = null
+    send.current
+      ?.send(
+        "edit",
+        { on: mode !== "read" && !frame.moved, typing: editing },
+        handed ? [handed] : []
+      )
+      .catch(() => {})
+  }, [frame.loads, frame.moved, mode, editing, send])
 
   const point = useCallback(
     (at: { readonly x: number; readonly y: number } | undefined, rect: FrameEditTarget["rect"]) => {
@@ -237,52 +280,59 @@ export function BoardStage({
 
   const onEvent = useCallback(
     (event: FrameEvent) => {
-      switch (event.event) {
-        case "ready":
-          frame.ready()
-          return
-        case "press":
-          onPress(event.params.text)
-          return
-        case "edit.select": {
-          const { target, at } = event.params
-          if (mode === "comment") {
-            if (!target) return
-            const element = target.address ?? target.within ?? undefined
-            onPick({
-              ...(element ? { element } : {}),
-              ...(target.address && target.label ? { label: target.label } : {}),
-              point: point(at, target.rect),
-            })
-            return
-          }
-          if (!editing) return
-          picked.current = target
-          setSelected(target)
-          return
-        }
-        case "edit.text": {
-          // The board's scripts can post this too: only the words of the element the reader
-          // picked, a text, are taken.
-          const chosen = picked.current
-          const { address, base, text } = event.params
-          if (!canvas || chosen?.kind !== "text" || chosen.address !== address) return
-
-          try {
-            canvas.editBoard(board.file, (source) => mergeBoardText(source, address, base, text))
-          } catch {
-            // The element is no longer text there: the board changed under the reader.
-            setSelected(null)
-            frame.resync()
-          }
-          return
-        }
-        default:
-          return
+      if (event.event === "ready") {
+        // A page loaded again has nothing picked.
+        picked.current = null
+        setSelected(null)
+        frame.ready()
+      } else if (event.event === "press") {
+        onPress(event.params.text)
       }
     },
-    [frame, mode, editing, canvas, board.file, onPress, onPick, point]
+    [frame, onPress]
   )
+
+  onEditRef.current = (event: FrameEvent) => {
+    if (moved.current) return
+
+    switch (event.event) {
+      case "edit.select": {
+        const { target, at } = event.params
+        if (mode === "comment") {
+          if (!target) return
+          const element = target.address ?? target.within ?? undefined
+          onPick({
+            ...(element ? { element } : {}),
+            ...(target.address && target.label ? { label: target.label } : {}),
+            point: point(at, target.rect),
+          })
+          return
+        }
+        if (!editing) return
+        picked.current = target
+        setSelected(target)
+        return
+      }
+      case "edit.text": {
+        // Only the words of the element the reader picked, a text, are taken.
+        const chosen = picked.current
+        const { address, base, text } = event.params
+        if (!canvas || chosen?.kind !== "text" || chosen.address !== address) return
+
+        try {
+          canvas.editBoard(board.file, (source) => mergeBoardText(source, address, base, text))
+        } catch {
+          // The element is no longer text there: the board changed under the reader.
+          picked.current = null
+          setSelected(null)
+          frame.resync()
+        }
+        return
+      }
+      default:
+        return
+    }
+  }
 
   return (
     <div className="relative size-full">
@@ -406,12 +456,21 @@ function ElementTools({
 }) {
   const messages = useArtifactMessages().canvas
   const rect = target.rect
-  const left = Math.max(0, rect.x * scale)
+
+  // Over the element's left edge, kept on the stage: on a phone, an element on the right would
+  // push the toolbar past it.
+  const toolbar = useRef<HTMLDivElement | null>(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    setWidth(toolbar.current?.offsetWidth ?? 0)
+  })
+  const left = Math.max(4, Math.min(rect.x * scale, board.w * scale - width - 4))
   const above = rect.y * scale >= 44
   const top = above ? rect.y * scale - 40 : (rect.y + rect.height) * scale + 8
 
   return (
     <div
+      ref={toolbar}
       role="toolbar"
       aria-label={messages.edit.tools}
       data-board-tools=""
@@ -532,6 +591,8 @@ function ImageTool({
   readonly previews: Map<string, string>
 }) {
   const messages = useArtifactMessages().canvas.edit
+  const locale = useLocale()
+  const files = useArtifactMessages()
   const stored = useLiveStoredFiles(live)
   const [uploading, setUploading] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
@@ -557,19 +618,27 @@ function ImageTool({
     return [...listed.values()]
   }, [version, stored, previews])
 
-  const show = (path: string, files: Readonly<Record<string, FileRef>>) => {
-    canvas.stopCapturing()
-    canvas.editBoard(
-      board.file,
-      (page) => setBoardImage(page, address, { src: boardFilePath(board.file, path) }),
-      files
-    )
-    canvas.stopCapturing()
+  /** Makes an image change; false, saying so, when the element is no longer an image. */
+  const change = (image: { readonly src?: string; readonly alt?: string }, files = {}) => {
+    try {
+      canvas.stopCapturing()
+      canvas.editBoard(board.file, (page) => setBoardImage(page, address, image), files)
+      canvas.stopCapturing()
+      return true
+    } catch {
+      setFailure(messages.notImage)
+      return false
+    }
   }
+
+  const show = (path: string, files: Readonly<Record<string, FileRef>> = {}) =>
+    change({ src: boardFilePath(board.file, path) }, files)
 
   const upload = async (file: File) => {
     if (file.size > ARTIFACT_LIMITS.maxFileBytes) {
-      setFailure(messages.tooLarge)
+      setFailure(
+        messages.tooLarge(formatFileSize(ARTIFACT_LIMITS.maxFileBytes, locale, files.files))
+      )
       return
     }
     setUploading(true)
@@ -610,10 +679,11 @@ function ImageTool({
           uploading={uploading}
           failure={failure}
           onUpload={(file) => void upload(file)}
-          onPick={(path) => show(path, {})}
+          onPick={(path) => {
+            show(path)
+          }}
           onAlt={(text) => {
-            canvas.stopCapturing()
-            canvas.editBoard(board.file, (page) => setBoardImage(page, address, { alt: text }))
+            change({ alt: text })
           }}
         />
       </PopoverContent>

@@ -291,9 +291,9 @@ export const en = {
       inherited: "From the page",
       invalid: "That value can’t be used here.",
       uploadFailed: "The image couldn’t be uploaded.",
-      tooLarge: "Pick an image of 25 MB at most.",
+      tooLarge: (size: string) => `Pick an image of ${size} at most.`,
+      notImage: "This element is no longer an image: pick it again.",
       updating: "Updating the board…",
-      resynced: "The board changed: it was loaded again.",
     },
     comments: {
       title: "Comments",
@@ -874,9 +874,9 @@ export const fr: Translation<ArtifactMessages> = {
       inherited: "Celui de la page",
       invalid: "Cette valeur n’est pas possible ici.",
       uploadFailed: "L’image n’a pas pu être importée.",
-      tooLarge: "Choisissez une image de 25 Mo au plus.",
+      tooLarge: (size) => `Choisissez une image de ${size} au plus.`,
+      notImage: "Cet élément n’est plus une image : sélectionnez-le à nouveau.",
       updating: "Mise à jour de la planche…",
-      resynced: "La planche a changé : elle a été rechargée.",
     },
     comments: {
       title: "Commentaires",

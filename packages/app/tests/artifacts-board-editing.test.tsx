@@ -12,6 +12,7 @@ import { LiveCanvas } from "../src/artifacts/live/canvas"
 import { LiveArtifact } from "../src/artifacts/live/session"
 import { fileTextQueryKey, versionFileSource } from "../src/artifacts/queries"
 import {
+  type BoardEditor,
   BoardStage,
   type CommentPick,
   type StageMode,
@@ -110,20 +111,28 @@ const VERSION = {
 } satisfies GetArtifactVersionResponse
 
 /** A canvas held live, its board's page in its document, and what edits it under undo. */
-function liveCanvas() {
+function liveCanvas(page = SOURCE) {
   const live = new LiveArtifact(ARTIFACT_ID, () => false, {
     list: () => [],
     write: () => {},
     remove: () => {},
   })
   Y.applyUpdate(live.doc, Y.encodeStateAsUpdate(storedDocument(canvasOf({ items: [BOARD] }))))
-  live.doc.getMap<unknown>(LIVE_FILES).set(FILE, new Y.Text(SOURCE))
+  live.doc.getMap<unknown>(LIVE_FILES).set(FILE, new Y.Text(page))
   const canvas = new LiveCanvas(live.doc)
   return { live, canvas, source: () => liveBoardSource(live.doc, FILE) ?? "" }
 }
 
-function stage(mode: StageMode, options: { readonly onPick?: (pick: CommentPick) => void } = {}) {
-  const { live, canvas, source } = liveCanvas()
+function stage(
+  mode: StageMode,
+  options: {
+    readonly onPick?: (pick: CommentPick) => void
+    readonly source?: string
+    /** What edits the board, in place of the live canvas. */
+    readonly editor?: BoardEditor
+  } = {}
+) {
+  const { live, canvas, source } = liveCanvas(options.source)
   const queries = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
   })
@@ -131,7 +140,7 @@ function stage(mode: StageMode, options: { readonly onPick?: (pick: CommentPick)
     path: "/api/artifact-frames/token/",
     expiresAt: "2026-11-08T10:00:00.000Z",
   })
-  queries.setQueryData(fileTextQueryKey(versionFileSource(VERSION, FILE)), SOURCE)
+  queries.setQueryData(fileTextQueryKey(versionFileSource(VERSION, FILE)), options.source ?? SOURCE)
 
   const view = render(
     <QueryClientProvider client={queries}>
@@ -141,7 +150,7 @@ function stage(mode: StageMode, options: { readonly onPick?: (pick: CommentPick)
         title="Home"
         scale={1}
         live={live}
-        canvas={canvas}
+        canvas={options.editor ?? canvas}
         mode={mode}
         pins={[]}
         activePin={null}
@@ -157,14 +166,21 @@ function stage(mode: StageMode, options: { readonly onPick?: (pick: CommentPick)
 
   const frame = view.container.querySelector("iframe")?.contentWindow
   if (!frame) throw new Error("Expected the board's frame.")
-  // What the stage asks of the frame.
+  // What the stage asks of the frame, and the port its `edit` request hands over, which the
+  // frame's runtime reports editing through.
   const asked: { method: string; params: Record<string, unknown> }[] = []
-  frame.postMessage = ((message: { method: string; params: Record<string, unknown> }) => {
+  let port: MessagePort | null = null
+  frame.postMessage = ((
+    message: { method: string; params: Record<string, unknown> },
+    _origin: string,
+    transfer: readonly MessagePort[] = []
+  ) => {
     asked.push(message)
+    if (message.method === "edit" && transfer[0]) port = transfer[0]
   }) as typeof frame.postMessage
 
-  /** The frame says something, as its runtime posts it. */
-  const post = async (event: string, params: Record<string, unknown>) => {
+  /** The frame says something through the window, as anything in the page can. */
+  const postToWindow = async (event: string, params: Record<string, unknown>) => {
     await act(async () => {
       browser.dispatchEvent(
         new browser.MessageEvent("message", {
@@ -174,13 +190,22 @@ function stage(mode: StageMode, options: { readonly onPick?: (pick: CommentPick)
       )
     })
   }
+  /** The frame says something as its runtime does: editing through its port, the rest as above. */
+  const post = async (event: string, params: Record<string, unknown>) => {
+    if (!event.startsWith("edit.")) return postToWindow(event, params)
+    await act(async () => {
+      if (!port) throw new Error("Expected the frame's port.")
+      port.postMessage({ protocol: FRAME_PROTOCOL, event, params })
+      await new Promise((done) => setTimeout(done, 5))
+    })
+  }
   const target = (address: string, kind: "text" | "image", label: string): FrameEditTarget => ({
     address,
     kind,
     label,
     rect: { x: 40, y: 120, width: 320, height: 48 },
   })
-  return { view, live, canvas, source, post, target, asked }
+  return { view, live, canvas, source, post, postToWindow, target, asked }
 }
 
 describe("an opened board, edited in place", () => {
@@ -260,8 +285,9 @@ describe("an opened board, edited in place", () => {
   })
 
   // Guard proof: drop the `files` argument from ImageTool's `show`; the page points at a picture
-  // the canvas does not hold.
-  test("replaces an image with an upload: the file joins the canvas, the page points at it, and undo takes both back", async () => {
+  // the canvas does not hold. Add the file in the edit's own transaction again; undo deletes a
+  // file others may show since.
+  test("replaces an image with an upload: the file joins the canvas for good, and undo puts the page back", async () => {
     const uploads: string[] = []
     client.setConfig({
       fetch: Object.assign(
@@ -300,7 +326,7 @@ describe("an opened board, edited in place", () => {
 
     canvas.undo()
     expect(source()).toContain('src="hero.png"')
-    expect(files.has(path)).toBe(false)
+    expect(files.get(path)).toMatchObject({ blobId: "blob_new" })
   })
 
   // Guard proof: send `typing: true` in comment mode from BoardStage; the frame lets the reader
@@ -321,5 +347,69 @@ describe("an opened board, edited in place", () => {
     // Nothing is typed in while commenting.
     await post("edit.text", { address: HEADING, base: "Welcome", text: "Typed" })
     expect(source()).toContain("<h1>Welcome</h1>")
+  })
+
+  // Guard proof: hand BoardStage's window events to its port's handler, `onEditRef.current`, and
+  // drop ArtifactFrame's refusal of `edit.` events; the words a board's script posts to the
+  // window land in the page.
+  test("takes nothing of editing through the window, where the board's scripts post", async () => {
+    const { source, post, postToWindow, target } = stage("edit")
+    await post("ready", {})
+    await post("edit.select", { target: target(HEADING, "text", "Welcome") })
+
+    await postToWindow("edit.text", { address: HEADING, base: "Welcome", text: "Forged" })
+    expect(source()).toContain("<h1>Welcome</h1>")
+  })
+
+  // Guard proof: drop both `if (moved.current) return` from the port's handler and
+  // `|| frame.moved` from the effect that drops the pick; the words typed in "Two" land in "One",
+  // which the frame's address now names in the document. Either one alone holds.
+  test("takes no words once the board's elements moved under the frame, and drops what was picked", async () => {
+    const page = `<!doctype html><html><head></head><body><main><h1>Title</h1><p>One</p><p>Two</p></main></body></html>`
+    const { view, live, source, post, target, asked } = stage("edit", { source: page })
+    await post("ready", {})
+    await post("edit.select", { target: target("body>main:0>p:1", "text", "Two") })
+    expect(view.queryByRole("toolbar", { name: "Element tools" })).not.toBeNull()
+
+    // Someone adds a paragraph after the title: the frame's p:1 is the document's p:2 now.
+    const text = live.doc.getMap<unknown>(LIVE_FILES).get(FILE)
+    if (!(text instanceof Y.Text)) throw new Error("Expected the board's page.")
+    await act(async () => {
+      text.insert(source().indexOf("<p>One"), "<p>New</p>")
+    })
+
+    await post("edit.text", { address: "body>main:0>p:1", base: "Two", text: "Two!" })
+    expect(source()).toContain("<p>New</p><p>One</p><p>Two</p>")
+    expect(view.queryByRole("toolbar", { name: "Element tools" })).toBeNull()
+    // The frame stops editing until it loads a version with the new elements.
+    expect(asked.at(-1)).toMatchObject({ method: "edit", params: { on: false } })
+  })
+
+  // Guard proof: let ImageTool's `change` throw; the panel then fails without a word when the
+  // element stopped being an image between the reader's pick and their change.
+  test("says so when the image picked is no longer one", async () => {
+    const editor: BoardEditor = {
+      stopCapturing: () => {},
+      editBoard: () => {
+        throw new Error("[Sixb] The element at 'body>main:0>img:0' is text.")
+      },
+    }
+    const { view, post, target } = stage("edit", { editor })
+    await post("ready", {})
+    await post("edit.select", { target: target(IMAGE, "image", "Hero") })
+    await act(async () => {
+      fireEvent.click(view.getByRole("button", { name: "Replace image" }))
+    })
+
+    const input = await waitFor(() => view.getByRole("textbox", { name: "Description" }))
+    fireEvent.focusIn(input)
+    fireEvent.input(input, { target: { value: "New description" } })
+    fireEvent.keyUp(input, { key: "n" })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    expect(view.getByRole("alert").textContent).toBe(
+      "This element is no longer an image: pick it again."
+    )
   })
 })

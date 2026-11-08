@@ -27,9 +27,11 @@ import { type ArtifactVersion, useArtifactTheme } from "./queries"
 
 /** Asks the deck in the frame to do something; resolves when it has. */
 export interface ArtifactFrameHandle {
+  /** `transfer` hands objects over with the request, as `edit` hands over its port. */
   send<Method extends FrameRequest["method"]>(
     method: Method,
-    params: Extract<FrameRequest, { method: Method }>["params"]
+    params: Extract<FrameRequest, { method: Method }>["params"],
+    transfer?: Transferable[]
   ): Promise<void>
 }
 
@@ -155,7 +157,7 @@ export function ArtifactFrame({
 
   const readNames = read.source === source ? read.names : NO_QUERIES
 
-  const send = useCallback<ArtifactFrameHandle["send"]>((method, params) => {
+  const send = useCallback<ArtifactFrameHandle["send"]>((method, params, transfer = []) => {
     const target = iframe.current?.contentWindow
     if (!target) return Promise.reject(new Error("[SixbApp] The frame is not loaded."))
     nextId.current += 1
@@ -163,7 +165,7 @@ export function ArtifactFrame({
     return new Promise<void>((resolve, reject) => {
       pending.current.set(id, { resolve, reject })
       // The frame's origin is opaque, so a target origin cannot name it.
-      target.postMessage({ protocol: FRAME_PROTOCOL, id, method, params }, "*")
+      target.postMessage({ protocol: FRAME_PROTOCOL, id, method, params }, "*", transfer)
     })
   }, [])
   useImperativeHandle(handle, () => ({ send }), [send])
@@ -246,7 +248,8 @@ export function ArtifactFrame({
           return
         }
         const event = parseFrameEvent(data)
-        if (!event) return
+        // Editing reports only through the port it was handed: the page's scripts post here too.
+        if (!event || event.event.startsWith("edit.")) return
         if (event.event === "link") {
           openWebLink(iframe.current, event.params.url)
           return
