@@ -338,9 +338,10 @@ function usePagesVersion(version: ArtifactVersion | null): ArtifactVersion | nul
 
 /**
  * A board's page, running, when the view shows it large enough, over its tile: the tile stays
- * under the frame, which fades in once its page is ready, so a board never flashes blank as it
- * starts or stops. On the board a frame takes no clicks, so dragging across it pans; it is a
- * picture until the reader opens it.
+ * under the frame while it fades in, once its page is ready, so a board never flashes blank as it
+ * starts or stops; then the tile goes, so nothing of it shows through a page drawn on the board's
+ * own surface. On the board a frame takes no clicks, so dragging across it pans; it is a picture
+ * until the reader opens it.
  */
 export function LiveBoard({
   id,
@@ -356,9 +357,16 @@ export function LiveBoard({
   const { version } = useContext(LiveBoardsContext)
   const live = useLive(id)
   const pages = usePagesVersion(version)
+  // The pages whose frame said it is ready: a frame that runs other pages, or stops, shows the
+  // tile again until it is.
+  const [ready, setReady] = useState<ArtifactVersion | null>(null)
+  const running = live && pages !== null && ready === pages
   return (
-    <div className="relative size-full">
-      {tile}
+    <div className="group/board relative size-full" data-running={running ? "" : undefined}>
+      {/* Gone once the frame has faded in over it: as long as the fade, then not drawn at all. */}
+      <div className="size-full transition-[visibility] delay-300 group-data-[running]/board:invisible">
+        {tile}
+      </div>
       {pages && live ? (
         <ArtifactFrame
           version={pages}
@@ -366,6 +374,9 @@ export function LiveBoard({
           title={title}
           decorative
           className="absolute inset-0 overflow-hidden rounded-[10px]"
+          onEvent={(event) => {
+            if (event.event === "ready") setReady(pages)
+          }}
         />
       ) : null}
     </div>
