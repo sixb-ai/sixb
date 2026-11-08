@@ -219,7 +219,9 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
   live.
 - An artifact holds at most 1,000 comments, each up to 4,000 characters.
 - `quoteArtifactComment(comment)` from `@sixb/core/artifacts` writes a comment as the Agent reads
-  it, with where it is, for a message that asks the Agent to act on it.
+  it, with where it is and its id, for a message that asks the Agent to act on it. The Agent then
+  resolves each comment it addressed, and replies to the ones it can't, with
+  `sixb artifacts comments`.
 
 ## Write a document
 
