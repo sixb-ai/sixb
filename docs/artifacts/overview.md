@@ -417,14 +417,15 @@ shows the preview as soon as it is ready.
   boards were resized in the app, is pictured by the agent worker in a blank sandbox of the
   project, which reaches only the CDNs a board may load from; without sandboxes, boards have no
   preview.
-- A preview is named by what the board shows: its HTML, the files it can load, its size, and who
-  published it. Moving a board keeps its preview; resizing it or changing what it loads renders a
-  new one. A board kept as it was keeps the picture it was first given.
+- A preview is named by what the board shows: its HTML, the files it can load, and its size, in
+  its canvas. Moving a board keeps its preview, whoever saves the canvas; resizing it or changing
+  what it loads renders a new one. A board kept as it was keeps the picture it was first given.
 - A board whose page does not load whole, a file or a font that fails, gets no preview and shows
   its outline: a broken picture would stay.
 - A board that reads a query is pictured with the data its publisher could read when they
   published it, which everyone who can open the canvas then sees in its preview; publishing warns
-  of it. A copy of the canvas, such as a forked conversation's, gets none of those pictures.
+  of it. In a canvas with queries, a version someone else publishes renders the previews again,
+  with their data, and a copy of the canvas, such as a forked conversation's, gets none of them.
 - `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark&size=small`
   serves one to whoever reads the version, and reading or publishing a version says which boards'
   previews are `ready`, `pending`, or `none`.
