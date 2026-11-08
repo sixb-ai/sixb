@@ -1,3 +1,4 @@
+import type { QuickBooksLinkedTransaction } from "./types/transactions"
 import type {
   QuickBooksAllocationLine,
   QuickBooksBillPaymentCreate,
@@ -34,6 +35,15 @@ export function expenseLines(lines: readonly QuickBooksExpenseWriteLine[]) {
       nonEmpty(line.AccountBasedExpenseLineDetail?.AccountRef?.value, "Line.AccountRef.value")
     else if (line.DetailType === "ItemBasedExpenseLineDetail")
       nonEmpty(line.ItemBasedExpenseLineDetail?.ItemRef?.value, "Line.ItemRef.value")
+  }
+}
+
+export function linkedTransactions(links: readonly QuickBooksLinkedTransaction[] | undefined) {
+  if (links === undefined) return
+  if (!Array.isArray(links)) throw new Error("[SixbQuickBooks] LinkedTxn must be an array.")
+  for (const link of links) {
+    nonEmpty(link?.TxnId, "LinkedTxn.TxnId")
+    nonEmpty(link.TxnType, "LinkedTxn.TxnType")
   }
 }
 

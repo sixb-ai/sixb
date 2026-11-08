@@ -124,7 +124,11 @@ type InvoiceFields = Pick<
   | "DepositToAccountRef"
   | "AllowOnlineCreditCardPayment"
   | "AllowOnlineACHPayment"
->
+  | "ProjectRef"
+> & {
+  /** Link an accepted estimate (`TxnType: "Estimate"`) or other source transaction. */
+  readonly LinkedTxn?: readonly QuickBooksLinkedTransaction[]
+}
 
 export type QuickBooksInvoiceCreate = InvoiceFields & {
   readonly CustomerRef: QuickBooksReference

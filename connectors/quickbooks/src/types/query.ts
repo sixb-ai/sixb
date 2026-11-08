@@ -83,7 +83,15 @@ export interface QuickBooksVendorTransactionListOptions extends QuickBooksTransa
   readonly vendorIds?: readonly string[]
 }
 
-export type QuickBooksInvoiceListOptions = QuickBooksCustomerTransactionListOptions
+/** `include=invoiceLink` asks QuickBooks for the customer-facing `InvoiceLink`. */
+export interface QuickBooksInvoiceLinkOptions {
+  /** QuickBooks returns `InvoiceLink` only for eligible invoices (see the package README). */
+  readonly includeInvoiceLink?: boolean
+}
+
+export interface QuickBooksInvoiceListOptions
+  extends QuickBooksCustomerTransactionListOptions,
+    QuickBooksInvoiceLinkOptions {}
 export type QuickBooksEstimateListOptions = QuickBooksCustomerTransactionListOptions
 export type QuickBooksSalesReceiptListOptions = QuickBooksCustomerTransactionListOptions
 export type QuickBooksRefundReceiptListOptions = QuickBooksCustomerTransactionListOptions
