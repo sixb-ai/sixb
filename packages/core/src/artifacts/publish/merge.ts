@@ -1,6 +1,7 @@
 import * as Y from "yjs"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import { ArtifactStorageError } from "../../storage/artifacts/errors"
+import { turnUndoable } from "../../storage/artifacts/record"
 import type { ArtifactFile, ArtifactStorage } from "../../storage/artifacts/types"
 import { ArtifactRequestError } from "../errors"
 import type { ArtifactKind } from "../kinds"
@@ -197,9 +198,9 @@ export async function withDocumentHolding<T>(
 }
 
 /**
- * The documents of the canvases a retry of a turn puts back, by id: each one nobody changed since
- * the turn's last write, as the turn's restore point holds it. Made before the undo, at the
- * revision the undo requires, so the undo can store them.
+ * The documents of the canvases a retry of a turn puts back, by id: each one the undo will put
+ * back, as the turn's restore point holds it. Made before the undo, at the revision it requires,
+ * so the undo can store them: one written meanwhile is not undone, and its document goes unused.
  */
 export async function undoneTurnDocuments(
   context: MergeContext,
@@ -211,12 +212,24 @@ export async function undoneTurnDocuments(
   for (const write of await storage.listTurnWrites({ projectId, turnRunId })) {
     if (write.created) continue
     const artifact = await storage.get({ projectId, id: write.artifactId })
-    if (!artifact || artifact.revision !== write.revision || !keepsDocument(artifact.kind)) continue
+    if (!artifact || !keepsDocument(artifact.kind)) continue
 
+    // Undone by the rule the undo applies, at the revision it will find.
     const points = await storage.listRestorePoints({ projectId, id: artifact.id })
     const point = points.find((each) => each.turnRunId === turnRunId)
-    const held = point && (await documentHolding(context, artifact.id, point.files))
-    if (held?.baseRevision === write.revision) documents[artifact.id] = held.document
+    const target =
+      point &&
+      (await storage.getVersion({ projectId, artifactId: artifact.id, version: point.version }))
+    const undoable = turnUndoable({
+      write,
+      revision: artifact.revision,
+      ...(point ? { point } : {}),
+      ...(target ? { target: { frozen: target.frozenAt !== undefined } } : {}),
+    })
+    if (!point || !undoable) continue
+
+    const held = await documentHolding(context, artifact.id, point.files)
+    if (held?.baseRevision === artifact.revision) documents[artifact.id] = held.document
   }
   return documents
 }
