@@ -3,5 +3,11 @@
  * version, merges what others wrote into it, and writes it back.
  */
 
-export { createArtifactDocument, mergeIntoDocument } from "./document"
+export { createArtifactDocument } from "./document"
 export { readLiveFiles, sameArtifactFiles, storeLiveFiles } from "./files"
+export {
+  AGENT_PRESENCE_MS,
+  appendArtifactLive,
+  artifactLiveStream,
+  parseArtifactLiveRecord,
+} from "./presence"
