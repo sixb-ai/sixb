@@ -350,6 +350,17 @@ describe("live boards", () => {
     height: 1000,
   })
 
+  test("start a board with a picture only once it shows at half its size", () => {
+    // Its picture shows as much as its page smaller than that: a laptop's board, 1280 wide, waits
+    // for 50% when it has one, and starts at 30%, 384 wide, when it has none. Reproduce by
+    // dropping `pictured` from liveBoards' rule: the pictured board runs at 30%.
+    const laptop = { id: "laptop", x: 0, y: 0, w: 1280, h: 800 }
+    const pictured = { ...laptop, pictured: true }
+    expect(liveBoards([laptop], view(0, 0.3)).size).toBe(1)
+    expect(liveBoards([pictured], view(0, 0.3)).size).toBe(0)
+    expect(liveBoards([pictured], view(0, 0.5)).size).toBe(1)
+  })
+
   test("start a board once it shows at half its size, or 360 pixels wide", () => {
     // A phone screen, 390 wide, starts at 50%; a laptop's, 1280 wide, once it is 360 pixels
     // wide, at 28%. Smaller, a page's text can't be read, and its tile shows as much. Reproduce
