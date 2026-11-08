@@ -422,6 +422,10 @@ export const ArtifactCommentSchema = z.object({
     .describe(
       "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
     ),
+  origin: z
+    .object({ threadId: z.string(), runId: z.string() })
+    .optional()
+    .describe("The Agent's run that wrote it for its author, and that run's conversation"),
   createdAt: z.string(),
   resolvedAt: z.string().optional().describe("When someone marked it resolved"),
   resolvedBy: PrincipalSchema.optional().describe("Who marked it resolved"),

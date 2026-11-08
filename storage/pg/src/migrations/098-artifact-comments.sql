@@ -18,6 +18,9 @@ CREATE TABLE artifact_comments (
   resolved_by_principal_type TEXT
     CHECK (resolved_by_principal_type IN ('user', 'serviceAccount', 'system')),
   resolved_by_principal_id TEXT CHECK (length(resolved_by_principal_id) > 0),
+  -- The Agent's run that wrote it for its author, and that run's conversation.
+  origin_thread_id TEXT,
+  origin_run_id TEXT,
   PRIMARY KEY (project_id, artifact_id, id),
   FOREIGN KEY (project_id, artifact_id) REFERENCES artifacts (project_id, id) ON DELETE CASCADE,
   FOREIGN KEY (project_id, artifact_id, parent_id)
@@ -25,7 +28,8 @@ CREATE TABLE artifact_comments (
   CHECK (
     (resolved_at IS NULL) = (resolved_by_principal_type IS NULL)
     AND (resolved_by_principal_type IS NULL) = (resolved_by_principal_id IS NULL)
-  )
+  ),
+  CHECK ((origin_thread_id IS NULL) = (origin_run_id IS NULL))
 );
 
 CREATE INDEX idx_artifact_comments_created

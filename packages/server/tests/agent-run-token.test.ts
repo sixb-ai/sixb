@@ -546,7 +546,7 @@ describe("run tokens", () => {
   // Guard proof: set the comment routes' `agentApi` back to false in api-routes.ts; the sandbox
   // CLI's list, reply and resolve are then refused.
   test("answers the comments on its conversation's artifact with the sandbox CLI", async () => {
-    const { app, apiBaseUrl, sixb, storage } = await createRunTokenRuntime()
+    const { app, apiBaseUrl, sixb, storage, runId } = await createRunTokenRuntime()
     const file = await sixb.blobStorage.put({
       body: new TextEncoder().encode("# Plan\n"),
       fileName: "document.md",
@@ -596,24 +596,34 @@ describe("run tokens", () => {
       listener.stop(true)
     }
 
-    // As the person the run answers, the conversation's artifact being theirs to change.
+    // As the person the run answers, the conversation's artifact being theirs to change; the
+    // reply says the Agent's run wrote it. Guard proof: drop `origin` from the comments route;
+    // the reply reads as the requester's own.
     const comments = await storage.artifacts.listComments({
       projectId: PROJECT_ID,
       id: artifact.id,
     })
     expect(
-      comments.map(({ id, parentId, author, resolvedBy }) => ({ id, parentId, author, resolvedBy }))
+      comments.map(({ id, parentId, author, origin, resolvedBy }) => ({
+        id,
+        parentId,
+        author,
+        origin,
+        resolvedBy,
+      }))
     ).toEqual([
       {
         id: "cmt_title",
         parentId: undefined,
         author: { type: "user", id: "usr_requester" },
+        origin: undefined,
         resolvedBy: { type: "user", id: "usr_requester" },
       },
       {
         id: expect.any(String),
         parentId: "cmt_title",
         author: { type: "user", id: "usr_requester" },
+        origin: { threadId: "thread-1", runId },
         resolvedBy: undefined,
       },
     ])

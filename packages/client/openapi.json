@@ -57355,6 +57355,20 @@
                             "nullable": true,
                             "description": "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
                           },
+                          "origin": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string"
+                              },
+                              "runId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["threadId", "runId"],
+                            "additionalProperties": false,
+                            "description": "The Agent's run that wrote it for its author, and that run's conversation"
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -57917,6 +57931,20 @@
                       "nullable": true,
                       "description": "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
                     },
+                    "origin": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "runId"],
+                      "additionalProperties": false,
+                      "description": "The Agent's run that wrote it for its author, and that run's conversation"
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -58452,6 +58480,20 @@
                       "type": "string",
                       "nullable": true,
                       "description": "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
+                    },
+                    "origin": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "runId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "runId"],
+                      "additionalProperties": false,
+                      "description": "The Agent's run that wrote it for its author, and that run's conversation"
                     },
                     "createdAt": {
                       "type": "string"

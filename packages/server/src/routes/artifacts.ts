@@ -136,6 +136,7 @@ async function commentBody(
 ) {
   return {
     authorName: await nameOf(comment),
+    ...(comment.origin ? { origin: comment.origin } : {}),
     artifactId: comment.artifactId,
     id: comment.id,
     ...(comment.parentId === undefined ? {} : { parentId: comment.parentId }),
@@ -248,6 +249,25 @@ async function runTokenArtifacts(
     executionToken,
     () => Promise.resolve(sixb)
   )
+}
+
+/**
+ * The Agent's run a request with a run token comes from, and its conversation: a comment it writes
+ * says so. Undefined for anyone else, who writes as themselves.
+ */
+async function runTokenOrigin(
+  host: SixbHostView,
+  context: unknown
+): Promise<{ readonly threadId: string; readonly runId: string } | undefined> {
+  const { agentExecution } = requestAuthState(context)
+  // A workflow's node has no conversation: its run token reaches no comment.
+  if (!agentExecution || agentExecution.kind === "workflow") return undefined
+
+  const run = await host.storage.agents?.runs.getById({
+    projectId: host.id,
+    id: agentExecution.runId,
+  })
+  return run?.threadId ? { threadId: run.threadId, runId: run.id } : undefined
 }
 
 function versionParam(value: string): number | "latest" {
@@ -925,12 +945,14 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         try {
           const body = AddArtifactCommentBodySchema.parse(context.body)
+          const origin = await runTokenOrigin(host, context)
           const comment = await requireRequestSixb(context).artifacts.addComment(
             context.params.artifactId,
             {
               body: body.body,
               ...(body.anchor ? { anchor: body.anchor } : {}),
               ...(body.parentId ? { parentId: body.parentId } : {}),
+              ...(origin ? { origin } : {}),
             }
           )
           context.set.status = 201

@@ -19929,6 +19929,13 @@ export type ListArtifactCommentsResponses = {
        * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
        */
       authorName: string | null
+      /**
+       * The Agent's run that wrote it for its author, and that run's conversation
+       */
+      origin?: {
+        threadId: string
+        runId: string
+      }
       createdAt: string
       /**
        * When someone marked it resolved
@@ -20172,6 +20179,13 @@ export type AddArtifactCommentResponses = {
      * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
      */
     authorName: string | null
+    /**
+     * The Agent's run that wrote it for its author, and that run's conversation
+     */
+    origin?: {
+      threadId: string
+      runId: string
+    }
     createdAt: string
     /**
      * When someone marked it resolved
@@ -20359,6 +20373,13 @@ export type ResolveArtifactCommentResponses = {
      * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
      */
     authorName: string | null
+    /**
+     * The Agent's run that wrote it for its author, and that run's conversation
+     */
+    origin?: {
+      threadId: string
+      runId: string
+    }
     createdAt: string
     /**
      * When someone marked it resolved

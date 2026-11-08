@@ -104,7 +104,8 @@ const COMMENT_COLUMNS = `
   body, author_principal_type AS "authorPrincipalType", author_principal_id AS "authorPrincipalId",
   created_at AS "createdAt", resolved_at AS "resolvedAt",
   resolved_by_principal_type AS "resolvedByPrincipalType",
-  resolved_by_principal_id AS "resolvedByPrincipalId"
+  resolved_by_principal_id AS "resolvedByPrincipalId",
+  origin_thread_id AS "originThreadId", origin_run_id AS "originRunId"
 `
 
 const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "updatedAt"`
@@ -726,11 +727,12 @@ export class PgArtifactStorage implements ArtifactStorage {
       const [row] = await tx<PgRow[]>`
         INSERT INTO artifact_comments (
           project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
-          author_principal_id, created_at
+          author_principal_id, created_at, origin_thread_id, origin_run_id
         ) VALUES (
           ${input.projectId}, ${input.artifactId}, ${input.id}, ${input.parentId ?? null},
           ${JSON.stringify(commentAnchor(input.anchor))}::text::jsonb, ${input.body},
-          ${input.author.type}, ${input.author.id}, ${input.createdAt}
+          ${input.author.type}, ${input.author.id}, ${input.createdAt},
+          ${input.origin?.threadId ?? null}, ${input.origin?.runId ?? null}
         )
         RETURNING ${tx.unsafe(COMMENT_COLUMNS)}
       `

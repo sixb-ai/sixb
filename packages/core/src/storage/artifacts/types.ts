@@ -435,6 +435,8 @@ export interface ArtifactCommentRecord {
   /** Plain text. */
   readonly body: string
   readonly author: Principal
+  /** The Agent's run that wrote it for its author, and that run's conversation. */
+  readonly origin?: ArtifactOrigin
   readonly createdAt: Date
   /** When someone marked it resolved, and who; a reply is resolved with what it replies to. */
   readonly resolvedAt?: Date

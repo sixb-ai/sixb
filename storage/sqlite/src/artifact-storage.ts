@@ -99,7 +99,8 @@ const COMMENT_COLUMNS = `
   author_principal_type AS authorPrincipalType, author_principal_id AS authorPrincipalId,
   created_at AS createdAt, resolved_at AS resolvedAt,
   resolved_by_principal_type AS resolvedByPrincipalType,
-  resolved_by_principal_id AS resolvedByPrincipalId
+  resolved_by_principal_id AS resolvedByPrincipalId,
+  origin_thread_id AS originThreadId, origin_run_id AS originRunId
 `
 
 const BOARD_PREVIEW_COLUMNS =
@@ -743,8 +744,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifact_comments (
             project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
-            author_principal_id, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            author_principal_id, created_at, origin_thread_id, origin_run_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           RETURNING ${COMMENT_COLUMNS}`
         )
         .get(
@@ -756,7 +757,9 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.body,
           input.author.type,
           input.author.id,
-          input.createdAt.toISOString()
+          input.createdAt.toISOString(),
+          input.origin?.threadId ?? null,
+          input.origin?.runId ?? null
         ) as Row
       return parseArtifactCommentRow(row)
     })

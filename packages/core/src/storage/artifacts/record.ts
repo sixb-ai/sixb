@@ -331,6 +331,14 @@ export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
       revision: Number(anchor.revision),
     },
     body: text(row.body, "body", where),
+    ...(row.originThreadId == null || row.originRunId == null
+      ? {}
+      : {
+          origin: {
+            threadId: text(row.originThreadId, "originThreadId", where),
+            runId: text(row.originRunId, "originRunId", where),
+          },
+        }),
     author: principal(row.authorPrincipalType, row.authorPrincipalId, "author", where),
     createdAt: date(row.createdAt, "createdAt", where),
     ...(row.resolvedAt == null
