@@ -229,43 +229,66 @@ describe("a run's artifacts", () => {
   })
 
   // Guard proof: drop the origin check from storePreviews; Alice's version, which shows what she
-  // can see, takes the pictures Bob's turn took with his rights. Drop the revision check, and the
-  // pictures of what Bob's turn wrote are kept under the boards of whatever replaced it.
+  // can see, takes the pictures Bob's turn took with his rights. Drop the content check, and the
+  // pictures of what Bob's turn first wrote are kept under the boards of what it wrote next.
+  // Compare revisions instead, and the pictures taken while Alice created the version are refused.
   test("keeps the pictures of what it wrote, while the version holds it", async () => {
     const { storage, artifacts, as, canvas, png } = await setup()
-    const published = await artifacts.publish({
-      kind: "canvas",
-      title: "Onboarding",
-      files: await canvas(),
-      rendersPreviews: true,
-    })
-    const { id } = published.artifact
     const previews = [
       { board: "welcome", theme: "light" as const, size: "full" as const, file: await png() },
     ]
+    const store = (at: { artifactId: string; version: number; updatedAt: Date }) =>
+      artifacts.storePreviews({ ...at, previews }).catch((error: unknown) => error)
 
-    const written = { artifactId: id, version: 1, revision: published.version.revision }
-    await artifacts.storePreviews({ ...written, previews })
-    const outline = published.version.outline
-    const renderKey =
-      outline.kind === "canvas" && outline.items[0]?.type === "board"
-        ? outline.items[0].renderKey
-        : undefined
-    expect(
-      await storage.artifacts.listBoardPreviews({ projectId, renderKeys: [renderKey ?? ""] })
-    ).toMatchObject([{ theme: "light", size: "full", file: previews[0]?.file }])
+    jest.setSystemTime(new Date("2026-11-08T10:00:00.000Z"))
+    try {
+      const first = await artifacts.publish({
+        kind: "canvas",
+        title: "Onboarding",
+        files: await canvas(),
+        rendersPreviews: true,
+      })
+      const { id } = first.artifact
+      const writtenFirst = { artifactId: id, version: 1, updatedAt: first.version.updatedAt }
 
-    // Alice, the conversation's owner, edits it in the app.
-    const edited = await as(alice).artifacts.publish(id, {
-      kind: "canvas",
-      title: "Onboarding",
-      files: await canvas(),
-    })
-    for (const at of [written, { artifactId: id, version: 1, revision: edited.version.revision }]) {
-      const refused = await artifacts
-        .storePreviews({ ...at, previews })
-        .catch((error: unknown) => error)
-      expect(refused).toMatchObject({ code: "not_allowed" })
+      // The turn writes the open version again: what it pictured first is no longer there.
+      jest.setSystemTime(new Date("2026-11-08T10:01:00.000Z"))
+      const second = await artifacts.publish({
+        artifactId: id,
+        title: "Onboarding",
+        files: await canvas({ "welcome.html": "<main><h1>Welcome aboard</h1></main>" }),
+        rendersPreviews: true,
+      })
+      const written = { artifactId: id, version: 1, updatedAt: second.version.updatedAt }
+      expect(await store(writtenFirst)).toMatchObject({ code: "not_allowed" })
+      expect(await store(written)).toEqual([])
+      const outline = second.version.outline
+      const renderKey =
+        outline.kind === "canvas" && outline.items[0]?.type === "board"
+          ? outline.items[0].renderKey
+          : undefined
+      expect(
+        await storage.artifacts.listBoardPreviews({ projectId, renderKeys: [renderKey ?? ""] })
+      ).toMatchObject([{ theme: "light", size: "full", file: previews[0]?.file }])
+
+      // Alice creates the version while the check pictures it: it still holds what the turn
+      // wrote, so the pictures are still kept.
+      await as(alice).artifacts.freeze(id, { baseRevision: second.version.revision })
+      expect(await store(written)).toEqual([])
+
+      // Alice, the conversation's owner, writes it in the app: her version 2 is hers to picture.
+      jest.setSystemTime(new Date("2026-11-08T10:02:00.000Z"))
+      const edited = await as(alice).artifacts.publish(id, {
+        kind: "canvas",
+        title: "Onboarding",
+        files: await canvas(),
+      })
+      const atEdited = { artifactId: id, version: 2, updatedAt: edited.version.updatedAt }
+      for (const at of [{ ...written, version: 2 }, atEdited]) {
+        expect(await store(at)).toMatchObject({ code: "not_allowed" })
+      }
+    } finally {
+      jest.setSystemTime()
     }
   })
 
@@ -309,7 +332,7 @@ describe("a run's artifacts", () => {
       payload: {
         artifactId: commanded.artifact.id,
         version: 1,
-        revision: 1,
+        updatedAt: commanded.version.updatedAt.toISOString(),
         queries: { blobId: expect.any(String) },
       },
     })
@@ -322,7 +345,7 @@ describe("a run's artifacts", () => {
     expect(waited?.payload).toEqual({
       artifactId: checked.artifact.id,
       version: 1,
-      revision: 1,
+      updatedAt: checked.version.updatedAt.toISOString(),
     })
   })
 
@@ -436,8 +459,8 @@ describe("a run's artifacts", () => {
     expect(await child.turnWrites()).toEqual(await artifacts.turnWrites())
     expect(await artifacts.turnWrites()).toEqual(
       [
-        { artifactId: plan.artifact.id, created: false, revision: 4 },
-        { artifactId: created.artifact.id, created: true, revision: 1 },
+        { artifactId: plan.artifact.id, created: false, revision: 4, writes: 2 },
+        { artifactId: created.artifact.id, created: true, revision: 1, writes: 1 },
       ].sort((left, right) => (left.artifactId < right.artifactId ? -1 : 1))
     )
   })

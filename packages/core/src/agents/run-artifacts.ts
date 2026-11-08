@@ -73,7 +73,7 @@ export interface AgentRunArtifacts {
    * Keeps the pictures the run took of the boards of a version it wrote, as their previews: its
    * requester authored the content, and the pictures show what they can see. Refuses any other
    * version, and one written again since. Each picture stands alone: those not kept are
-   * returned, with why.
+   * returned, with why. Creating the version since leaves its content, and its pictures.
    */
   storePreviews(input: AgentRunBoardPreviews): Promise<readonly RefusedBoardPreview[]>
   /**
@@ -84,11 +84,12 @@ export interface AgentRunArtifacts {
   missingPreviews(input: AgentRunVersion): Promise<readonly AgentRunMissingPreview[]>
 }
 
-/** A version of an artifact, as one revision left it. */
+/** A version of an artifact, as one of the run's writes left its content. */
 export interface AgentRunVersion {
   readonly artifactId: string
   readonly version: number
-  readonly revision: number
+  /** The version's `updatedAt` after the write: a content written again since has another. */
+  readonly updatedAt: Date
 }
 
 /** The pictures a run took of a version's boards. */
@@ -276,6 +277,7 @@ export function agentRunArtifacts(
   /**
    * Only the run that wrote a version's content pictures its boards with its author's rights, and
    * only while the version holds that content: the pictures are kept under its boards' render keys.
+   * A change that leaves the content, such as creating the version, changes nothing here.
    */
   async function publishedVersion(at: AgentRunVersion): Promise<ArtifactVersionRecord> {
     const version = await requireArtifacts(storage).getVersion({
@@ -283,10 +285,11 @@ export function agentRunArtifacts(
       artifactId: at.artifactId,
       version: at.version,
     })
-    if (!version || version.origin?.runId !== run.id || version.revision !== at.revision) {
+    const written = at.updatedAt.getTime()
+    if (!version || version.origin?.runId !== run.id || version.updatedAt.getTime() !== written) {
       throw new ArtifactRequestError(
         "not_allowed",
-        `[Sixb] Version ${at.version} of artifact '${at.artifactId}' does not hold what this run wrote at revision ${at.revision}.`
+        `[Sixb] Version ${at.version} of artifact '${at.artifactId}' does not hold what this run wrote at ${at.updatedAt.toISOString()}.`
       )
     }
     return version

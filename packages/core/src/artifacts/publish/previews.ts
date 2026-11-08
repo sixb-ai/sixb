@@ -431,7 +431,7 @@ export async function requestBoardPreviews(
           payload: {
             artifactId: version.artifactId,
             version: version.version,
-            revision: version.revision,
+            updatedAt: version.updatedAt.toISOString(),
             ...(queries ? { queries } : {}),
           },
           ...(options.delayMs

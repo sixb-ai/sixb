@@ -10193,7 +10193,7 @@ describe("AgentWorker", () => {
       installed,
       artifacts: {
         list: async () => [artifact],
-        turnWrites: async () => [{ artifactId: "art_q3", created: true, revision: 3 }],
+        turnWrites: async () => [{ artifactId: "art_q3", created: true, revision: 3, writes: 2 }],
         getVersion: async () => latest,
       },
       blobStorage: sixb.blobStorage,
