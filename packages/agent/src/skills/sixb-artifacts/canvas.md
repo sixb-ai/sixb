@@ -94,7 +94,9 @@ holds at most 500 files, boards and images included.
   that wraps reads on from the start of the next row, with no arrow crossing back over the notes.
 - Notes and captions beside or below a board, never on it: a note over a board covers its page.
 - Size boards as their screens are: 390 by 844 for a phone, 1280 by 800 for a laptop, 1440 by 900
-  for a wide screen, 1280 by 720 for a video or presentation frame.
+  for a wide screen, 1280 by 720 for a video or presentation frame. A board's `w` and `h` are its
+  page's size, never smaller to fit the layout: the canvas zooms out to show it small, and a page
+  larger than its board is cut off.
 
 ## Boards are pages
 
