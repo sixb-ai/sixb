@@ -13,9 +13,16 @@ const at = Date.parse("2026-11-08T09:00:00.000Z")
 
 describe("words kept for the Agent", () => {
   test("are taken once, by the same person in the same project", () => {
-    keepAgentDraft({ ...ava, artifactId: "art_1", text: "Warmer title" }, at)
+    const context = {
+      kind: "app-state" as const,
+      id: "artifact-comments:art_1",
+      label: "1 comment · Summer sale",
+      description: "Comments the person chose.",
+      value: { artifactId: "art_1", comments: [] },
+    }
+    keepAgentDraft({ ...ava, artifactId: "art_1", text: "Warmer title", context }, at)
 
-    expect(takeAgentDraft(ava, at + 1_000)).toBe("Warmer title")
+    expect(takeAgentDraft(ava, at + 1_000)).toEqual({ text: "Warmer title", context })
     expect(takeAgentDraft(ava, at + 2_000)).toBeNull()
   })
 
