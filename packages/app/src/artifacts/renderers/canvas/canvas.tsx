@@ -1,10 +1,11 @@
 // Loaded only when a canvas opens, so React Flow's code stays out of every other artifact's bundle.
 // Its stylesheet, canvas.css, is part of the framework's.
-import type {
-  Canvas,
-  CanvasArrow,
-  CanvasBoard as CanvasBoardItem,
-  CanvasEmbed,
+import {
+  CANVAS_FIT_PADDING,
+  type Canvas,
+  type CanvasArrow,
+  type CanvasBoard as CanvasBoardItem,
+  type CanvasEmbed,
 } from "@sixb/core/artifacts"
 import {
   Background,
@@ -26,9 +27,6 @@ import { type CanvasEditor, useBoardEditing } from "./edit-mode"
 import { CanvasEditingProvider } from "./editing"
 import { BoardFocus } from "./focus"
 import { CANVAS_NODE_TYPES, NAME_SCALE, nameScale } from "./items"
-
-/** Room around what the board fits to, as a share of the view. */
-const PADDING = 0.12
 
 /**
  * A canvas on an endless board: drag or scroll to pan, pinch or ⌘-scroll to zoom, the zoom
@@ -118,7 +116,9 @@ function Board({
   const close = useCallback(() => {
     const id = opened
     setOpened(null)
-    if (id) void fitView({ nodes: [{ id }], padding: PADDING, maxZoom: 1, duration: 220 })
+    if (!id) return
+
+    void fitView({ nodes: [{ id }], padding: CANVAS_FIT_PADDING, maxZoom: 1, duration: 220 })
   }, [opened, fitView])
   const live = useMemo(
     () => ({ version: version ?? null, live: running, ...(version ? { open: setOpened } : {}) }),
@@ -146,7 +146,11 @@ function Board({
     const item = focus ? canvas.items.find((candidate) => candidate.id === focus) : undefined
     // An item with a box opens filling the view; an arrow or a text opens the whole canvas.
     const framed = item && item.type !== "arrow" && item.type !== "text"
-    return { padding: PADDING, maxZoom: 1, ...(framed ? { nodes: [{ id: item.id }] } : {}) }
+    return {
+      padding: CANVAS_FIT_PADDING,
+      maxZoom: 1,
+      ...(framed ? { nodes: [{ id: item.id }] } : {}),
+    }
   }, [canvas, focus])
   return (
     <div
@@ -198,7 +202,7 @@ function Board({
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.3} />
-            <CanvasControls padding={PADDING} />
+            <CanvasControls padding={CANVAS_FIT_PADDING} />
             {board.editing ? board.toolbar : null}
           </ReactFlow>
         </CanvasEditingProvider>

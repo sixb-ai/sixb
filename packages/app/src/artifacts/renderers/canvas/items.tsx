@@ -1,10 +1,13 @@
-import type {
-  CanvasBoard,
-  CanvasEmbed,
-  CanvasNote,
-  CanvasSection,
-  CanvasShapeItem,
-  CanvasText,
+import {
+  CANVAS_TEXT_PIXELS,
+  type CanvasBoard,
+  type CanvasEmbed,
+  type CanvasNote,
+  type CanvasSection,
+  type CanvasShapeItem,
+  type CanvasText,
+  canvasNoteFontSize,
+  canvasShapeFontSize,
 } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
@@ -15,7 +18,7 @@ import { ArtifactEmbed, ArtifactLink } from "../../references/references"
 import { TONE_COLORS } from "../../tones"
 import { ItemTile, LiveBoard, useLive, useLiveBoards } from "./board"
 import { EditChrome, InPlaceText, useCanvasEditing } from "./editing"
-import { type CanvasFlowNode, TEXT_SIZES } from "./layout"
+import type { CanvasFlowNode } from "./layout"
 
 /**
  * Every item's look on the board. Boards and embeds are pages and artifacts under their names,
@@ -224,9 +227,7 @@ function NoteNode(props: NodeProps<CanvasFlowNode>) {
         width: "100%",
         // As tall as its box while it is resized, and never shorter than its height.
         minHeight: `max(${note.h ?? Math.min(note.w, 112)}px, 100%)`,
-        // A wide note is read from further out, so its text is a little larger: never so large
-        // that a few words fill it.
-        fontSize: Math.round(Math.min(22, Math.max(15, note.w / 13))),
+        fontSize: canvasNoteFontSize(note.w),
         ...(tone === "neutral"
           ? {}
           : { backgroundColor: `color-mix(in oklab, ${TONE_COLORS[tone]} 20%, var(--card))` }),
@@ -251,7 +252,7 @@ function NoteNode(props: NodeProps<CanvasFlowNode>) {
 /** A label or a heading on the canvas itself. */
 function TextNode(props: NodeProps<CanvasFlowNode>) {
   const text = itemOf<CanvasText>(props)
-  const size = TEXT_SIZES[text.size]
+  const size = CANVAS_TEXT_PIXELS[text.size]
   const editing = useCanvasEditing()
   return (
     <div
@@ -286,7 +287,7 @@ function ShapeNode(props: NodeProps<CanvasFlowNode>) {
     : "var(--card)"
   const stroke = "color-mix(in oklab, var(--foreground) 32%, transparent)"
   const editing = useCanvasEditing()
-  const fontSize = Math.round(Math.min(22, Math.max(15, Math.min(shape.w, shape.h * 2) / 12)))
+  const fontSize = canvasShapeFontSize(shape.w, shape.h)
   const textBox = cn(
     "relative text-center leading-snug font-medium text-foreground",
     // A diamond's middle is narrower than its box.
