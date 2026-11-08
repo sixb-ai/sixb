@@ -191,6 +191,8 @@ function Board({
             zoomOnScroll={false}
             zoomOnPinch
             zoomActivationKeyCode={["Meta", "Control"]}
+            // A double-click opens a board, or types into an item while editing: it never zooms.
+            zoomOnDoubleClick={false}
             panOnDrag
             {...(board.editing ? board.flow : reading)}
             proOptions={{ hideAttribution: true }}
