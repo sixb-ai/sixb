@@ -55,13 +55,18 @@ async function readRecurring(
   return wrapper as QuickBooksRecurringTransaction
 }
 
-/** Validates a `{ EntityName: template }` wrapper and returns the template. */
-export function recurringTemplate(value: unknown): Record<string, unknown> & { Id: string } {
+/** The single template inside a `{ EntityName: template }` wrapper, if there is exactly one. */
+export function templateOf(value: unknown): Record<string, unknown> | undefined {
   const templates = isRecord(value)
     ? Object.entries(value).filter(([key, entry]) => /^[A-Z]/.test(key) && isRecord(entry))
     : []
   const template = templates.length === 1 ? templates[0]?.[1] : undefined
-  if (!isRecord(template) || typeof template.Id !== "string" || !template.Id.trim())
+  return isRecord(template) ? template : undefined
+}
+
+function recurringTemplate(value: unknown): Record<string, unknown> & { Id: string } {
+  const template = templateOf(value)
+  if (!template || typeof template.Id !== "string" || !template.Id.trim())
     throw new Error("[SixbQuickBooks] Invalid RecurringTransaction response.")
   return template as Record<string, unknown> & { Id: string }
 }

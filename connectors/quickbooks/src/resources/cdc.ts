@@ -1,19 +1,45 @@
 import type { QuickBooksReadHttp } from "../query"
 import type { QuickBooksCdcOptions, QuickBooksCdcResponse } from "../types/cdc"
 import { isRecord } from "../validation"
+import { templateOf } from "./recurring-transactions"
 
-const ENTITIES = new Set([
+// Accepted by QuickBooks CDC in the sandbox. Excluded: TaxAgency and TaxClassification (the
+// provider fails with 4001), TaxPayment (5030 in US companies), Exchangerate (no entity IDs),
+// and CompanyInfo/Preferences (read directly).
+const ENTITIES = new Set<string>([
   "Account",
+  "Attachable",
+  "Budget",
+  "Class",
+  "CompanyCurrency",
   "Customer",
+  "CustomerType",
+  "Department",
+  "Employee",
   "Item",
+  "PaymentMethod",
+  "TaxCode",
+  "TaxRate",
   "Term",
   "Vendor",
-  "Estimate",
-  "Invoice",
-  "Payment",
-  "CreditMemo",
   "Bill",
   "BillPayment",
+  "CreditCardPayment",
+  "CreditMemo",
+  "Deposit",
+  "Estimate",
+  "InventoryAdjustment",
+  "Invoice",
+  "JournalEntry",
+  "Payment",
+  "Purchase",
+  "PurchaseOrder",
+  "RecurringTransaction",
+  "RefundReceipt",
+  "ReimburseCharge",
+  "SalesReceipt",
+  "TimeActivity",
+  "Transfer",
   "VendorCredit",
 ])
 const LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000
@@ -78,11 +104,13 @@ export function createCdcResource(http: QuickBooksReadHttp): QuickBooksCdcResour
             if (!entities.some((entity) => entity === key) || !Array.isArray(records))
               throw new Error("[SixbQuickBooks] CDC returned an unexpected entity or fault.")
             for (const record of records) {
+              // Recurring changes are wrapped under their template entity name.
+              const target = key === "RecurringTransaction" ? templateOf(record) : record
               if (
-                !isRecord(record) ||
-                typeof record.Id !== "string" ||
-                !record.Id.trim() ||
-                (record.status !== undefined && record.status !== "Deleted")
+                !isRecord(target) ||
+                typeof target.Id !== "string" ||
+                !target.Id.trim() ||
+                (target.status !== undefined && target.status !== "Deleted")
               )
                 throw new Error("[SixbQuickBooks] Invalid CDC record.")
             }

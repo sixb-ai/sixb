@@ -30,6 +30,29 @@ async function cdcRecord(
   throw new Error(`[QuickBooksLive] ${entity} CDC change not observed within bounded wait`)
 }
 
+/** Bounded wait until every expected entity/ID pair appears in one multi-entity CDC response. */
+async function cdcChanges(
+  qb: QuickBooksClient,
+  changedSince: Date,
+  expected: readonly (readonly [QuickBooksCdcEntity, string])[]
+) {
+  const entities = [...new Set(expected.map(([entity]) => entity))]
+  let missing = expected
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const result = await qb.cdc.get({ entities, changedSince })
+    const seen = new Set<string>()
+    for (const batch of result.CDCResponse)
+      for (const group of batch.QueryResponse)
+        for (const entity of entities)
+          for (const record of (group[entity] ?? []) as { Id: string }[])
+            seen.add(`${entity}:${record.Id}`)
+    missing = expected.filter(([entity, id]) => !seen.has(`${entity}:${id}`))
+    if (!missing.length) return
+    if (attempt < 7) await Bun.sleep(3000)
+  }
+  throw new Error(`[QuickBooksLive] CDC did not report ${JSON.stringify(missing)}`)
+}
+
 async function serviceItem(qb: QuickBooksClient) {
   for await (const item of qb.items.listAll())
     if (item.Type === "Service" && item.IncomeAccountRef) return item
@@ -201,6 +224,7 @@ live(
   "employee, class, department and payment method maintenance with activation",
   async () => {
     await withJournal("references", async ({ qb, tag, write, defer }) => {
+      const started = new Date(Date.now() - 5000)
       const employeeInput = {
         GivenName: "Sixb",
         FamilyName: tag,
@@ -318,6 +342,12 @@ live(
         qb.paymentMethods.reactivate(input, o)
       )
       expect(method.Active).toBe(true)
+      await cdcChanges(qb, started, [
+        ["Employee", employeeId],
+        ["Class", classId],
+        ["Department", departmentId],
+        ["PaymentMethod", methodId],
+      ])
     })
   },
   5 * 60_000
@@ -338,6 +368,7 @@ live(
   "sales receipt and refund receipt lifecycles",
   async () => {
     await withJournal("receipts", async ({ qb, tag, write, defer }) => {
+      const started = new Date(Date.now() - 5000)
       const customerInput = {
         DisplayName: `${tag}-customer`,
         PrimaryEmailAddr: { Address: sendTo },
@@ -441,6 +472,10 @@ live(
       )
       expect(refund.TotalAmt).toBe(0)
       expect((await qb.refundReceipts.get(refundId)).TotalAmt).toBe(0)
+      await cdcChanges(qb, started, [
+        ["SalesReceipt", receiptId],
+        ["RefundReceipt", refundId],
+      ])
     })
   },
   5 * 60_000
@@ -450,6 +485,8 @@ live(
   "purchase (cash, check, card) and purchase order lifecycles",
   async () => {
     await withJournal("purchases", async ({ qb, tag, write, defer }) => {
+      const started = new Date(Date.now() - 5000)
+      const purchaseIds: string[] = []
       const vendorInput = { DisplayName: `${tag}-vendor` }
       const vendor = await write("Vendor.create", vendorInput, (o) =>
         qb.vendors.create(vendorInput, o)
@@ -485,6 +522,7 @@ live(
           qb.purchases.create(input, o)
         )
         const id = purchase.Id
+        purchaseIds.push(id)
         defer(`Purchase.${PaymentType}.delete`, async () => {
           const current = revision(await qb.purchases.get(id))
           expect(
@@ -544,6 +582,10 @@ live(
       expect(order.EmailStatus).toBe("EmailSent")
       const pdf = await qb.purchaseOrders.downloadPdf(orderId)
       expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-")
+      await cdcChanges(qb, started, [
+        ...purchaseIds.map((id) => ["Purchase", id] as const),
+        ["PurchaseOrder", orderId],
+      ])
     })
   },
   5 * 60_000
@@ -553,6 +595,7 @@ live(
   "time activity lifecycle for an employee and a customer",
   async () => {
     await withJournal("time", async ({ qb, tag, write, defer }) => {
+      const started = new Date(Date.now() - 5000)
       const employeeInput = { GivenName: "Sixb", FamilyName: tag, DisplayName: `${tag}-crew` }
       const employee = await write("Employee.create", employeeInput, (o) =>
         qb.employees.create(employeeInput, o)
@@ -569,6 +612,17 @@ live(
         const input = revision(await qb.customers.get(customer.Id))
         await write("Customer.deactivate", input, (o) => qb.customers.deactivate(input, o))
       })
+      // A just-created name can briefly fail as a reference (live error 2500 "Names element id
+      // not found"); wait until both names are queryable before referencing them.
+      for (let attempt = 0; ; attempt++) {
+        const [employees, customers] = await Promise.all([
+          qb.employees.list({ ids: [employee.Id] }),
+          qb.customers.list({ ids: [customer.Id] }),
+        ])
+        if (employees.items.length && customers.items.length) break
+        if (attempt === 9) throw new Error("[QuickBooksLive] New names did not become queryable")
+        await Bun.sleep(1000)
+      }
       const item = await serviceItem(qb)
       const date = today()
       const durationInput = {
@@ -626,6 +680,10 @@ live(
       })
       expect(ranged.StartTime).toBeTruthy()
       expect(ranged.EndTime).toBeTruthy()
+      await cdcChanges(qb, started, [
+        ["TimeActivity", entryId],
+        ["TimeActivity", ranged.Id],
+      ])
     })
   },
   5 * 60_000
@@ -635,6 +693,7 @@ live(
   "deposit (direct and linked payment), transfer and journal entry lifecycles",
   async () => {
     await withJournal("banking", async ({ qb, tag, write, defer }) => {
+      const started = new Date(Date.now() - 5000)
       const { bank, expense, accounts } = await accountsByType(qb)
       const income = accounts.find((row) => row.AccountType === "Income")
       const undeposited = accounts.find((row) => row.AccountSubType === "UndepositedFunds")
@@ -808,6 +867,12 @@ live(
         return row
       }).catch((error: unknown) => error)
       expect(rejected).toBeInstanceOf(QuickBooksApiError)
+      await cdcChanges(qb, started, [
+        ["Deposit", depositId],
+        ["Deposit", linked.Id],
+        ["Transfer", transferId],
+        ["JournalEntry", journalId],
+      ])
     })
   },
   5 * 60_000
