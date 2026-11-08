@@ -410,6 +410,38 @@ describe("a live canvas", () => {
     expect(node(next.nodes, "ask")).not.toBe(node(graph.nodes, "ask"))
   })
 
+  test("takes in what others change once a frame, however fast it comes, and its own at once", () => {
+    // Reproduce by announcing each change as it comes in LiveCanvas.taken: a remote drag sent
+    // twenty times a second draws the board twenty times a second, in every view of it.
+    jest.useFakeTimers()
+    try {
+      const { alice, bob } = pair()
+      // Alice has a step to undo already: what follows tells of the canvas alone.
+      alice.apply(moveItems(new Map([["pay", { x: 600, y: 0 }]])))
+      jest.advanceTimersByTime(20)
+      let drawn = 0
+      alice.subscribe(() => {
+        drawn += 1
+      })
+
+      for (const x of [100, 200, 300, 400]) bob.apply(moveItems(new Map([["ask", { x, y: 560 }]])))
+      expect(drawn).toBe(0)
+      jest.advanceTimersByTime(20)
+      expect(drawn).toBe(1)
+      expect(item(alice.getCanvas(), "ask")).toMatchObject({ x: 400, y: 560 })
+
+      // Read before the frame, it is never behind; and Alice's own change shows at once.
+      bob.apply(moveItems(new Map([["home", { x: -300, y: 0 }]])))
+      expect(item(alice.getCanvas(), "home")).toMatchObject({ x: -300, y: 0 })
+      alice.apply(moveItems(new Map([["ask", { x: 0, y: 900 }]])))
+      expect(drawn).toBe(2)
+      jest.advanceTimersByTime(20)
+      expect(drawn).toBe(2)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   test("undoes only this reader's own changes, a drag as one step", () => {
     // Reproduce by tracking every origin in LiveCanvas's undo manager: Alice's undo takes back
     // Bob's move.

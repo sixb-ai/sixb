@@ -13,9 +13,11 @@ import type { LiveArtifact } from "./session"
 // A canvas as its live document holds it, read as the board draws it and changed as the board
 // edits it.
 //
-// Reading: the canvas is kept as one `Canvas`, rebuilt at each change of the document, in which
-// an item nobody changed is the same object as before. The board draws an item again only when
-// its object changes, so a change someone makes to one note draws that note, not the canvas.
+// Reading: the canvas is kept as one `Canvas`, rebuilt as the document changes, in which an item
+// nobody changed is the same object as before. The board draws an item again only when its object
+// changes, so a change someone makes to one note draws that note, not the canvas. What others
+// change is taken in at most once a frame, however fast it comes: the board draws once for all of
+// it. This reader's own changes are taken in at once, with whatever waits.
 //
 // Writing: an edit stays a `CanvasChange`, one function from a canvas to the next, as the draft
 // had it. What it changed is written into the document, key by key and word by word, in one
@@ -35,6 +37,16 @@ const ITEM_TYPES: ReadonlySet<string> = new Set<CanvasItem["type"]>([
 /** How long changes made one after the other are one step for undo, as typing a word is. */
 const UNDO_CAPTURE_MS = 400
 
+/** Runs `run` before the next frame is drawn; a timer standing for one where there are none. */
+function requestFrame(run: () => void): () => void {
+  if (typeof requestAnimationFrame === "function") {
+    const frame = requestAnimationFrame(run)
+    return () => cancelAnimationFrame(frame)
+  }
+  const timer = setTimeout(run, 16)
+  return () => clearTimeout(timer)
+}
+
 type ItemMap = Y.Map<unknown>
 
 const EMPTY: Canvas = { items: [] }
@@ -48,6 +60,11 @@ export class LiveCanvas {
   private history = { undo: false, redo: false }
   /** A drag is under way: everything it changes is one step, however long it pauses. */
   private dragging = false
+  /** The items others changed that wait for the next frame to be read again. */
+  private pending: Set<string> | null = null
+  private cancelFrame: (() => void) | null = null
+  /** The canvas the board was last told of. */
+  private announced: Canvas | null = null
   /** The origin of this reader's own changes: the only ones its undo takes back. */
   readonly origin = Symbol("sixb-live-canvas")
 
@@ -56,8 +73,14 @@ export class LiveCanvas {
     this.bind()
   }
 
-  /** The canvas now, or null while the document holds none: not synced yet, or not a canvas. */
-  getCanvas = (): Canvas | null => (this.structure ? this.canvas : null)
+  /**
+   * The canvas now, or null while the document holds none: not synced yet, or not a canvas. What
+   * waits for the next frame is read in first, so whoever reads it never reads behind.
+   */
+  getCanvas = (): Canvas | null => {
+    this.readPending()
+    return this.structure ? this.canvas : null
+  }
 
   getHistory = (): { readonly undo: boolean; readonly redo: boolean } => this.history
 
@@ -70,6 +93,7 @@ export class LiveCanvas {
   apply(change: CanvasChange): void {
     if (!this.structure) return
 
+    this.readPending()
     const before = this.canvas
     const after = change(before)
     if (after === before) return
@@ -106,6 +130,9 @@ export class LiveCanvas {
   }
 
   destroy(): void {
+    this.cancelFrame?.()
+    this.cancelFrame = null
+    this.pending = null
     this.doc.getMap<unknown>(LIVE_FILES).unobserve(this.onFiles)
     this.unbind()
     this.listeners.clear()
@@ -119,6 +146,9 @@ export class LiveCanvas {
   }
 
   private bind(): void {
+    this.cancelFrame?.()
+    this.cancelFrame = null
+    this.pending = null
     this.unbind()
     this.structure = documentCanvas(this.doc)
     this.cache.clear()
@@ -134,6 +164,7 @@ export class LiveCanvas {
       this.undoManager.on("stack-cleared", this.onHistory)
     }
     this.rebuild(null)
+    this.announce()
   }
 
   private unbind(): void {
@@ -146,7 +177,10 @@ export class LiveCanvas {
     this.onHistory()
   }
 
-  private onItems = (events: Y.YEvent<Y.AbstractType<unknown>>[]): void => {
+  private onItems = (
+    events: Y.YEvent<Y.AbstractType<unknown>>[],
+    transaction: Y.Transaction
+  ): void => {
     const changed = new Set<string>()
     for (const event of events) {
       // The items map itself: items added or deleted; else a change inside one item, its path
@@ -158,10 +192,51 @@ export class LiveCanvas {
         if (typeof id === "string") changed.add(id)
       }
     }
-    this.rebuild(changed)
+    this.taken(changed, transaction)
   }
 
-  private onOrder = (): void => this.rebuild(new Set())
+  private onOrder = (_event: Y.YEvent<Y.Array<string>>, transaction: Y.Transaction): void =>
+    this.taken(new Set(), transaction)
+
+  /**
+   * Reads again what a change touched, and tells the board: at once for this reader's own, with
+   * whatever waits; at the next frame for the others', all of a frame's changes at once.
+   */
+  private taken(changed: ReadonlySet<string>, transaction: Y.Transaction): void {
+    const pending = this.pending ?? new Set<string>()
+    for (const id of changed) pending.add(id)
+    this.pending = pending
+
+    const own = transaction.origin === this.origin || transaction.origin === this.undoManager
+    if (own) {
+      this.cancelFrame?.()
+      this.cancelFrame = null
+      this.readPending()
+      this.announce()
+      return
+    }
+    this.cancelFrame ??= requestFrame(() => {
+      this.cancelFrame = null
+      this.readPending()
+      this.announce()
+    })
+  }
+
+  /** Reads again the items that wait, without telling anyone: a read can come while React draws. */
+  private readPending(): void {
+    const pending = this.pending
+    if (!pending) return
+
+    this.pending = null
+    this.rebuild(pending)
+  }
+
+  /** Tells the board of the canvas, once it is another. */
+  private announce(): void {
+    if (this.announced === this.canvas) return
+    this.announced = this.canvas
+    this.notify()
+  }
 
   private onHistory = (): void => {
     const next = {
@@ -182,7 +257,6 @@ export class LiveCanvas {
     const structure = this.structure
     if (!structure) {
       this.canvas = EMPTY
-      this.notify()
       return
     }
 
@@ -221,7 +295,6 @@ export class LiveCanvas {
     if (same && this.canvas !== EMPTY) return
 
     this.canvas = { items: kept }
-    this.notify()
   }
 
   private notify(): void {
