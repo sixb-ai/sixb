@@ -212,6 +212,7 @@ const shippedMigrationIds = [
   "090-webhook-and-projection-leases",
   "091-artifact-board-previews",
   "092-artifact-open-versions",
+  "093-artifact-documents",
 ]
 
 afterEach(async () => {
@@ -2801,8 +2802,10 @@ describe("SQLite storage migrations", () => {
         `)
       }
 
-      const applied = migration("092-artifact-open-versions").up(db)
-      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+      for (const id of ["092-artifact-open-versions", "093-artifact-documents"]) {
+        const applied = migration(id).up(db)
+        if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+      }
 
       const artifacts = new SqliteArtifactStorage({ db, ownsConnection: false })
       const at = { projectId: "project-a", artifactId: "art_0000000001" }

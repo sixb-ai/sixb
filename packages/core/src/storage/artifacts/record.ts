@@ -3,7 +3,7 @@ import { ARTIFACT_STATE_LIMITS } from "../../artifacts/limits"
 import type { ArtifactOutline } from "../../artifacts/outline"
 import type { ArtifactReference } from "../../artifacts/references"
 import type { Principal } from "../../auth"
-import { isFileRef } from "../../blob-storage"
+import { type FileRef, isFileRef } from "../../blob-storage"
 import { type ArtifactLatestVersion, ArtifactStorageError } from "./errors"
 import type {
   ArtifactBoardPreviewRecord,
@@ -39,7 +39,16 @@ export function parseArtifactRow(row: Row): ArtifactRecord {
     revision: positiveInteger(row.revision, "revision", where),
     createdAt: date(row.createdAt, "createdAt", where),
     updatedAt: date(row.updatedAt, "updatedAt", where),
+    ...document(row.document, where),
   }
+}
+
+/** The artifact's Yjs document, when it keeps one. */
+function document(value: unknown, where: string): { readonly document?: FileRef } {
+  if (value == null) return {}
+  const file = json(value, "document", where)
+  if (!isFileRef(file)) throw corrupt(where, "document is not a file reference")
+  return { document: file }
 }
 
 export function parseArtifactVersionRow(row: Row): ArtifactVersionRecord {

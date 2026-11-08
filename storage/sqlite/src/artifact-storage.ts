@@ -1,4 +1,5 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite"
+import type { FileRef } from "@sixb/core"
 import {
   ARTIFACT_RESTORE_POINTS,
   artifactStateBytes,
@@ -47,6 +48,7 @@ import type {
   PutArtifactBoardPreviewsInput,
   RestoreArtifactInput,
   SetArtifactStateInput,
+  UndoArtifactTurnInput,
   UndoneArtifactTurn,
 } from "@sixb/core/storage"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
@@ -54,7 +56,8 @@ import { runImmediateTransaction, type SqliteStoreConnection } from "./transacti
 const ARTIFACT_COLUMNS = `
   project_id AS projectId, id, kind, title,
   owner_principal_type AS ownerPrincipalType, owner_principal_id AS ownerPrincipalId,
-  latest_version AS latestVersion, revision, created_at AS createdAt, updated_at AS updatedAt
+  latest_version AS latestVersion, revision, created_at AS createdAt, updated_at AS updatedAt,
+  document
 `
 
 /** What a version and a restore point both hold, and who last wrote it from where. */
@@ -112,8 +115,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifacts (
             project_id, id, kind, title, owner_principal_type, owner_principal_id,
-            latest_version, next_version, revision, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, 1, ?, ?)
+            latest_version, next_version, revision, created_at, updated_at, document
+          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, 1, ?, ?, ?)
           ON CONFLICT (project_id, id) DO NOTHING
           RETURNING ${ARTIFACT_COLUMNS}`
         )
@@ -125,7 +128,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.owner.type,
           input.owner.id,
           createdAt,
-          createdAt
+          createdAt,
+          documentJson(input.document)
         ) as Row | null
       if (!artifact) throw artifactStorageErrors.exists(input.id)
 
@@ -174,7 +178,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         })
       }
 
-      const written = this.writeLatest(current, latest, input.version)
+      const written = this.writeLatest(current, latest, input.version, input.document)
       this.shareIn(input.projectId, input.artifactId, input.version, turnRunId)
       if (turnRunId) {
         this.recordTurnWrite({
@@ -258,15 +262,20 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
       // What the restore replaces is kept first, so the restore can be undone.
       this.keepRestorePoint(latest, { reason: "restore", createdAt: input.restoredAt })
-      return this.writeLatest(current, latest, {
-        title: point.title,
-        entry: point.entry,
-        files: point.files,
-        outline: point.outline,
-        references: point.references,
-        author: input.author,
-        updatedAt: input.restoredAt,
-      })
+      return this.writeLatest(
+        current,
+        latest,
+        {
+          title: point.title,
+          entry: point.entry,
+          files: point.files,
+          outline: point.outline,
+          references: point.references,
+          author: input.author,
+          updatedAt: input.restoredAt,
+        },
+        input.document
+      )
     })
   }
 
@@ -280,7 +289,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     return rows.map(parseArtifactTurnWriteRow)
   }
 
-  async undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn> {
+  async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
     return runImmediateTransaction(this.db, () => {
       const { projectId, turnRunId } = input
 
@@ -312,7 +321,12 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           continue
         }
 
-        const undone = this.undoTurn(projectId, write, turnRunId)
+        const undone = this.undoTurn(
+          projectId,
+          write,
+          turnRunId,
+          input.documents?.[write.artifactId]
+        )
         if (!undone) continue
 
         restored.push(undone)
@@ -459,10 +473,10 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifacts (
             project_id, id, kind, title, owner_principal_type, owner_principal_id,
-            latest_version, next_version, revision, created_at, updated_at
+            latest_version, next_version, revision, created_at, updated_at, document
           )
           SELECT project_id, ?, kind, title, ?, ?, latest_version, next_version, revision,
-                 created_at, updated_at
+                 created_at, updated_at, document
           FROM artifacts WHERE project_id = ? AND id = ?
           ON CONFLICT (project_id, id) DO NOTHING
           RETURNING ${ARTIFACT_COLUMNS}`
@@ -719,11 +733,13 @@ export class SqliteArtifactStorage implements ArtifactStorage {
   private writeLatest(
     { artifact, nextVersion }: { readonly artifact: ArtifactRecord; readonly nextVersion: number },
     latest: ArtifactVersionRecord,
-    content: ArtifactVersionInput
+    content: ArtifactVersionInput,
+    document: FileRef | undefined
   ): PublishedArtifactVersion {
     const { projectId, id: artifactId } = artifact
     const revision = artifact.revision + 1
     const updatedAt = content.updatedAt.toISOString()
+    const state = documentJson(document)
 
     if (latest.frozenAt) {
       const version = this.insertVersion({
@@ -736,7 +752,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       const row = this.db
         .query(
           `UPDATE artifacts
-           SET title = ?, latest_version = ?, next_version = ?, revision = ?, updated_at = ?
+           SET title = ?, latest_version = ?, next_version = ?, revision = ?, updated_at = ?,
+               document = ?
            WHERE project_id = ? AND id = ?
            RETURNING ${ARTIFACT_COLUMNS}`
         )
@@ -746,6 +763,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           version.version + 1,
           revision,
           updatedAt,
+          state,
           projectId,
           artifactId
         ) as Row
@@ -761,11 +779,11 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     })
     const row = this.db
       .query(
-        `UPDATE artifacts SET title = ?, revision = ?, updated_at = ?
+        `UPDATE artifacts SET title = ?, revision = ?, updated_at = ?, document = ?
          WHERE project_id = ? AND id = ?
          RETURNING ${ARTIFACT_COLUMNS}`
       )
-      .get(content.title, revision, updatedAt, projectId, artifactId) as Row
+      .get(content.title, revision, updatedAt, state, projectId, artifactId) as Row
     return { artifact: parseArtifactRow(row), version }
   }
 
@@ -937,7 +955,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
   private undoTurn(
     projectId: string,
     write: ArtifactTurnWriteRecord,
-    turnRunId: string
+    turnRunId: string,
+    document: FileRef | undefined
   ): PublishedArtifactVersion | null {
     const { artifactId } = write
     const row = this.db
@@ -1003,7 +1022,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
     const artifact = this.db
       .query(
-        `UPDATE artifacts SET title = ?, latest_version = ?, revision = ?, updated_at = ?
+        `UPDATE artifacts
+         SET title = ?, latest_version = ?, revision = ?, updated_at = ?, document = ?
          WHERE project_id = ? AND id = ?
          RETURNING ${ARTIFACT_COLUMNS}`
       )
@@ -1012,6 +1032,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         undone.version,
         revision,
         updatedAt.toISOString(),
+        documentJson(document),
         projectId,
         artifactId
       ) as Row
@@ -1057,4 +1078,9 @@ function assertBase(
     author: latest.author,
     ...(latest.frozenBy ? { frozenBy: latest.frozenBy } : {}),
   })
+}
+
+/** A Yjs document's reference as its column holds it: null clears it. */
+function documentJson(document: FileRef | undefined): string | null {
+  return document ? JSON.stringify(document) : null
 }

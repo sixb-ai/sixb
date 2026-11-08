@@ -466,6 +466,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("093-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
     pgSql("094-artifact-board-previews", artifactBoardPreviewsSql),
     pgSql("095-artifact-open-versions", artifactOpenVersionsSql),
+    pgSql("096-artifact-documents", artifactDocumentsSql),
   ],
 })
 
@@ -557,3 +558,4 @@ import artifactBoardPreviewsSql from "./migrations/094-artifact-board-previews.s
 import artifactOpenVersionsSql from "./migrations/095-artifact-open-versions.sql" with {
   type: "text",
 }
+import artifactDocumentsSql from "./migrations/096-artifact-documents.sql" with { type: "text" }

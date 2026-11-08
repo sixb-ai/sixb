@@ -1139,6 +1139,83 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    // Regression proof: drop `document` from a provider's write of the latest content; the
+    // artifact then keeps the document of content it no longer holds.
+    test("keeps the document each content write stores, through a freeze and a copy", async () => {
+      await withStorage(async (artifacts) => {
+        const first = fileRef("1", "application/octet-stream")
+        const second = fileRef("2", "application/octet-stream")
+        const restored = fileRef("3", "application/octet-stream")
+        const undone = fileRef("4", "application/octet-stream")
+        const get = async (id = "art_report") => artifacts.get({ projectId, id })
+
+        const created = await artifacts.create({ ...createInput(), document: first })
+        expect(created.artifact.document).toEqual(first)
+        expect((await get())?.document).toEqual(first)
+
+        // A freeze changes no content; the next write opens a version and replaces the document.
+        await artifacts.freeze({
+          projectId,
+          artifactId: "art_report",
+          frozenAt: at(1),
+          frozenBy: owner,
+        })
+        expect((await get())?.document).toEqual(first)
+        const published = await artifacts.publish({
+          ...publishInput({ updatedAt: at(2) }),
+          turnRunId: "run_turn",
+          document: second,
+        })
+        expect(published.artifact).toMatchObject({ latestVersion: 2, document: second })
+
+        // A copy shares the document; a write without one clears it.
+        await artifacts.copy({
+          projectId,
+          sourceId: "art_report",
+          id: "art_copy",
+          owner,
+          threadId: "thr_fork",
+        })
+        expect((await get("art_copy"))?.document).toEqual(second)
+        await artifacts.publish(publishInput({ updatedAt: at(3) }, "art_copy"))
+        expect(await get("art_copy")).not.toHaveProperty("document")
+
+        // A restore and an undo store the document given for what they put back, or clear it.
+        const [point] = await artifacts.listRestorePoints({ projectId, id: "art_report" })
+        const back = await artifacts.restoreTo({
+          projectId,
+          artifactId: "art_report",
+          revision: point?.revision ?? 0,
+          author: owner,
+          restoredAt: at(4),
+          document: restored,
+        })
+        expect(back.artifact.document).toEqual(restored)
+        await artifacts.restoreTo({
+          projectId,
+          artifactId: "art_report",
+          revision: back.artifact.revision - 1,
+          author: owner,
+          restoredAt: at(5),
+        })
+        expect(await get()).not.toHaveProperty("document")
+
+        await artifacts.create(createInput({ id: "art_turn" }))
+        await artifacts.publish({
+          ...publishInput({ updatedAt: at(6) }, "art_turn"),
+          turnRunId: "run_undo",
+          document: second,
+        })
+        const result = await artifacts.undoTurnWrites({
+          projectId,
+          turnRunId: "run_undo",
+          documents: { art_turn: undone },
+        })
+        expect(result.restored.map(({ artifact }) => artifact.document)).toEqual([undone])
+        expect((await get("art_turn"))?.document).toEqual(undone)
+      })
+    })
+
     test("lists versions newest first, a page at a time", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())

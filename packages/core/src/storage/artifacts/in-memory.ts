@@ -1,5 +1,6 @@
 import { ARTIFACT_RESTORE_POINTS } from "../../artifacts/limits"
 import { type Principal, principalsEqual } from "../../auth"
+import type { FileRef } from "../../blob-storage"
 import { paginate } from "../pagination"
 import {
   artifactStateBytes,
@@ -41,6 +42,7 @@ import type {
   PutArtifactBoardPreviewsInput,
   RestoreArtifactInput,
   SetArtifactStateInput,
+  UndoArtifactTurnInput,
   UndoneArtifactTurn,
 } from "./types"
 
@@ -103,6 +105,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       revision: 1,
       createdAt: new Date(content.updatedAt),
       updatedAt: new Date(content.updatedAt),
+      ...(input.document ? { document: structuredClone(input.document) } : {}),
     }
 
     const stored = turnWrote(
@@ -146,7 +149,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       : stored
 
     const next = turnWrote(
-      sharedIn(written(kept, input.version), input.version, turnRunId),
+      sharedIn(written(kept, input.version, input.document), input.version, turnRunId),
       turnRunId,
       { created: false }
     )
@@ -203,15 +206,19 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
 
     // What the restore replaces is kept first, so the restore can be undone.
     const kept = withRestorePoint(stored, { reason: "restore", createdAt: input.restoredAt })
-    const next = written(kept, {
-      title: point.title,
-      entry: point.entry,
-      files: point.files,
-      outline: point.outline,
-      references: point.references,
-      author: input.author,
-      updatedAt: input.restoredAt,
-    })
+    const next = written(
+      kept,
+      {
+        title: point.title,
+        entry: point.entry,
+        files: point.files,
+        outline: point.outline,
+        references: point.references,
+        author: input.author,
+        updatedAt: input.restoredAt,
+      },
+      input.document
+    )
     this.artifacts.set(key, next)
     return published(next)
   }
@@ -229,7 +236,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return writes.sort((left, right) => (left.artifactId < right.artifactId ? -1 : 1))
   }
 
-  async undoTurnWrites(input: ArtifactTurnInput): Promise<UndoneArtifactTurn> {
+  async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
     const { turnRunId } = input
     const restored: PublishedArtifactVersion[] = []
     const deleted: string[] = []
@@ -257,7 +264,8 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
           ...(point ? { point } : {}),
           ...(target ? { target: { frozen: target.frozenAt !== undefined } } : {}),
         })
-      const undone = untouched && point ? undo(stored, point) : null
+      const undone =
+        untouched && point ? undo(stored, point, input.documents?.[stored.record.id]) : null
 
       // Undone, the turn's restore point is what the artifact holds again, and the threads it
       // alone shared the artifact in no longer do. Kept, the artifact stays where it was made.
@@ -533,8 +541,12 @@ function versionRecord(
  * The artifact once content is written to its latest version: in place while it is open, as the
  * next version when it is frozen.
  */
-function written(stored: StoredArtifact, content: ArtifactVersionInput): StoredArtifact {
-  const { record } = stored
+function written(
+  stored: StoredArtifact,
+  content: ArtifactVersionInput,
+  document: FileRef | undefined
+): StoredArtifact {
+  const { document: _replaced, ...record } = stored.record
   const latest = latestOf(stored)
   const revision = record.revision + 1
 
@@ -554,6 +566,7 @@ function written(stored: StoredArtifact, content: ArtifactVersionInput): StoredA
       latestVersion: version.version,
       revision,
       updatedAt: new Date(content.updatedAt),
+      ...(document ? { document: structuredClone(document) } : {}),
     },
     versions: opens ? [...stored.versions, version] : [...stored.versions.slice(0, -1), version],
     nextVersion: opens ? stored.nextVersion + 1 : stored.nextVersion,
@@ -601,7 +614,11 @@ function withRestorePoint(
  * The artifact as a turn's restore point holds it, at a new revision: an open version takes its
  * content back, and a version the turn opened past a frozen one is dropped.
  */
-function undo(stored: StoredArtifact, point: ArtifactRestorePointRecord): StoredArtifact | null {
+function undo(
+  stored: StoredArtifact,
+  point: ArtifactRestorePointRecord,
+  document: FileRef | undefined
+): StoredArtifact | null {
   const versions = stored.versions.filter((version) => version.version <= point.version)
   const target = versions.at(-1)
   if (target?.version !== point.version) return null
@@ -625,14 +642,16 @@ function undo(stored: StoredArtifact, point: ArtifactRestorePointRecord): Stored
         createdAt: target.createdAt,
       })
 
+  const { document: _replaced, ...record } = stored.record
   return {
     ...stored,
     record: {
-      ...stored.record,
+      ...record,
       title: version.title,
       latestVersion: version.version,
       revision,
       updatedAt: new Date(Math.max(point.updatedAt.getTime(), target.frozenAt?.getTime() ?? 0)),
+      ...(document ? { document: structuredClone(document) } : {}),
     },
     versions: [...versions.slice(0, -1), version],
   }

@@ -324,6 +324,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("090-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
     sqliteSql("091-artifact-board-previews", artifactBoardPreviewsSql),
     sqliteSql("092-artifact-open-versions", artifactOpenVersionsSql),
+    sqliteSql("093-artifact-documents", artifactDocumentsSql),
   ],
 })
 
@@ -749,3 +750,4 @@ import artifactBoardPreviewsSql from "./migrations/091-artifact-board-previews.s
 import artifactOpenVersionsSql from "./migrations/092-artifact-open-versions.sql" with {
   type: "text",
 }
+import artifactDocumentsSql from "./migrations/093-artifact-documents.sql" with { type: "text" }

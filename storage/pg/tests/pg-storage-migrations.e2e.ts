@@ -134,6 +134,7 @@ const SHIPPED_MIGRATIONS = [
   "093-webhook-and-projection-leases",
   "094-artifact-board-previews",
   "095-artifact-open-versions",
+  "096-artifact-documents",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -724,7 +725,8 @@ describe("Postgres storage migrations", () => {
           `)
       }
 
-      await migrateThrough(index + 1)
+      // Through 091 too, whose column the storage reads.
+      await migrateThrough(index + 2)
       const at = { projectId: "project-a", artifactId: "art_0000000001" }
       expect(
         await storage.artifacts.get({ projectId: "project-a", id: at.artifactId })
