@@ -527,4 +527,15 @@ describe("comments on a canvas", () => {
     expect(within(thread(panel, "cmt_1")).getByText("Agent, for Alice Martin")).toBeTruthy()
     ui.unmount()
   })
+
+  // Guard proof: drop the `resolved.length > 0` branch in the panel; it then invites the first
+  // comment of a canvas whose comments are all resolved.
+  test("say none is open once all are resolved, rather than inviting the first", async () => {
+    serveComments([comment("cmt_1", alice, "Warmer colors", { resolvedAt: at, resolvedBy: bob })])
+    const { ui } = await open()
+    const panel = await openPanel(ui)
+    await waitFor(() => expect(within(panel).getByText("No open comments")).toBeTruthy())
+    expect(within(panel).queryByText("No comments yet")).toBeNull()
+    ui.unmount()
+  })
 })

@@ -214,7 +214,11 @@ export function CommentsPanel({
           </div>
         ) : shown.length === 0 ? (
           filter === "open" ? (
-            <Empty title={messages.empty} hint={messages.emptyHint} />
+            resolved.length > 0 ? (
+              <Empty title={messages.emptyOpen} />
+            ) : (
+              <Empty title={messages.empty} hint={messages.emptyHint} />
+            )
           ) : (
             <Empty title={messages.emptyResolved} />
           )
