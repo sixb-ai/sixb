@@ -244,16 +244,21 @@ export class LiveRooms {
     return room
   }
 
-  /** Every write to an artifact a room holds reaches it, whichever server or worker made it. */
+  /**
+   * Every write to an artifact a room holds reaches it, whichever server or worker made it, and
+   * every change to its comments.
+   */
   private followEvents(): void {
     if (this.events || this.closed) return
     const following = this.host.events.subscribe(
-      { from: "latest", types: ["artifact.updated"] },
+      { from: "latest", types: ["artifact.updated", "artifact.commented"] },
       async (events) => {
         for (const event of events) {
-          if (event.type !== "artifact.updated") continue
+          if (event.type !== "artifact.updated" && event.type !== "artifact.commented") continue
           const room = await this.rooms.get(event.payload.artifactId)
-          if (room instanceof LiveRoom) room.written(event.payload.revision)
+          if (!(room instanceof LiveRoom)) continue
+          if (event.type === "artifact.updated") room.written(event.payload.revision)
+          else room.commented(event.payload)
         }
       }
     )

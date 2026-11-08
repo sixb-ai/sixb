@@ -12,6 +12,7 @@ import { client } from "../client.gen"
 import {
   abortFileUpload,
   addAgentThreadParticipants,
+  addArtifactComment,
   addConnectorConnection,
   cancelAgentRun,
   cancelAgentRunById,
@@ -35,6 +36,7 @@ import {
   deleteAgentMemory,
   deleteAiLimitPolicy,
   deleteArtifact,
+  deleteArtifactComment,
   deleteArtifactStateValue,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
@@ -132,6 +134,7 @@ import {
   listAiLimitPolicies,
   listAiModelCallGroups,
   listAiModelCalls,
+  listArtifactComments,
   listArtifactRestorePoints,
   listArtifacts,
   listAuthAccessTokens,
@@ -184,6 +187,7 @@ import {
   requestPipelineRun,
   requestSyncRun,
   requestWorkflowRun,
+  resolveArtifactComment,
   restoreArtifact,
   retryAgentRun,
   revokeAuthAccessToken,
@@ -221,6 +225,9 @@ import type {
   AddAgentThreadParticipantsData,
   AddAgentThreadParticipantsError,
   AddAgentThreadParticipantsResponse,
+  AddArtifactCommentData,
+  AddArtifactCommentError,
+  AddArtifactCommentResponse,
   AddConnectorConnectionData,
   AddConnectorConnectionError,
   AddConnectorConnectionResponse,
@@ -287,6 +294,9 @@ import type {
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyError,
   DeleteAiLimitPolicyResponse,
+  DeleteArtifactCommentData,
+  DeleteArtifactCommentError,
+  DeleteArtifactCommentResponse,
   DeleteArtifactData,
   DeleteArtifactError,
   DeleteArtifactResponse,
@@ -576,6 +586,9 @@ import type {
   ListAiModelCallsData,
   ListAiModelCallsError,
   ListAiModelCallsResponse,
+  ListArtifactCommentsData,
+  ListArtifactCommentsError,
+  ListArtifactCommentsResponse,
   ListArtifactRestorePointsData,
   ListArtifactRestorePointsError,
   ListArtifactRestorePointsResponse,
@@ -719,6 +732,9 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunError,
   RequestWorkflowRunResponse,
+  ResolveArtifactCommentData,
+  ResolveArtifactCommentError,
+  ResolveArtifactCommentResponse,
   RestoreArtifactData,
   RestoreArtifactError,
   RestoreArtifactResponse,
@@ -6357,6 +6373,120 @@ export const freezeArtifactVersionMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await freezeArtifactVersion({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listArtifactCommentsQueryKey = (options: Options<ListArtifactCommentsData>) =>
+  createQueryKey("listArtifactComments", options)
+
+/**
+ * List an artifact's comments
+ *
+ * Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.
+ */
+export const listArtifactCommentsOptions = (options: Options<ListArtifactCommentsData>) =>
+  queryOptions<
+    ListArtifactCommentsResponse,
+    ListArtifactCommentsError,
+    ListArtifactCommentsResponse,
+    ReturnType<typeof listArtifactCommentsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listArtifactComments({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listArtifactCommentsQueryKey(options),
+  })
+
+/**
+ * Comment on an artifact
+ *
+ * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
+ */
+export const addArtifactCommentMutation = (
+  options?: Partial<Options<AddArtifactCommentData>>
+): UseMutationOptions<
+  AddArtifactCommentResponse,
+  AddArtifactCommentError,
+  Options<AddArtifactCommentData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    AddArtifactCommentResponse,
+    AddArtifactCommentError,
+    Options<AddArtifactCommentData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await addArtifactComment({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Resolve an artifact's comment
+ *
+ * Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.
+ */
+export const resolveArtifactCommentMutation = (
+  options?: Partial<Options<ResolveArtifactCommentData>>
+): UseMutationOptions<
+  ResolveArtifactCommentResponse,
+  ResolveArtifactCommentError,
+  Options<ResolveArtifactCommentData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ResolveArtifactCommentResponse,
+    ResolveArtifactCommentError,
+    Options<ResolveArtifactCommentData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await resolveArtifactComment({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Delete an artifact's comment
+ *
+ * Deletes the comment and its replies. Its author, or whoever may update the artifact, may.
+ */
+export const deleteArtifactCommentMutation = (
+  options?: Partial<Options<DeleteArtifactCommentData>>
+): UseMutationOptions<
+  DeleteArtifactCommentResponse,
+  DeleteArtifactCommentError,
+  Options<DeleteArtifactCommentData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteArtifactCommentResponse,
+    DeleteArtifactCommentError,
+    Options<DeleteArtifactCommentData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteArtifactComment({
         ...options,
         ...fnOptions,
         throwOnError: true,
