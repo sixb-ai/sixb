@@ -95,13 +95,43 @@ function sharedArtifact(kind: Kind, access: Access): QueryClient {
       title: "Regions",
       owner: alice,
       latestVersion: 3,
+      revision: 3,
       createdAt: at,
       updatedAt: at,
     },
     versions: [
-      { version: 3, title: "Regions", author: bob, createdAt: "2026-10-21T11:00:00.000Z" },
-      { version: 2, title: "Regions", author: alice, createdAt: "2026-10-21T10:00:00.000Z" },
-      { version: 1, title: "Regions", author: { type: "system", id: "system" }, createdAt: at },
+      // The current version, which Bob last wrote; Alice created version 2, the system version 1.
+      {
+        version: 3,
+        revision: 3,
+        frozen: false,
+        title: "Regions",
+        author: bob,
+        createdAt: "2026-10-21T10:30:00.000Z",
+        updatedAt: "2026-10-21T11:00:00.000Z",
+      },
+      {
+        version: 2,
+        revision: 2,
+        frozen: true,
+        title: "Regions",
+        author: bob,
+        createdAt: "2026-10-21T09:00:00.000Z",
+        updatedAt: "2026-10-21T10:00:00.000Z",
+        frozenAt: "2026-10-21T10:30:00.000Z",
+        frozenBy: alice,
+      },
+      {
+        version: 1,
+        revision: 1,
+        frozen: true,
+        title: "Regions",
+        author: { type: "system", id: "system" },
+        createdAt: at,
+        updatedAt: at,
+        frozenAt: at,
+        frozenBy: { type: "system", id: "system" },
+      },
     ],
     access,
   } satisfies GetArtifactResponse)
@@ -138,7 +168,10 @@ function sharedArtifact(kind: Kind, access: Access): QueryClient {
           : { kind: "page", title: "Planner" },
       references: [],
       author: bob,
-      createdAt: "2026-10-21T11:00:00.000Z",
+      createdAt: "2026-10-21T10:30:00.000Z",
+      updatedAt: "2026-10-21T11:00:00.000Z",
+      revision: 3,
+      frozen: false,
     } satisfies GetArtifactVersionResponse
   )
   for (const file of files) {
@@ -283,18 +316,18 @@ describe("an artifact shared in a conversation", () => {
     expect(requests).toEqual([`DELETE /api/artifacts/${ARTIFACT_ID}`])
   })
 
-  test("names who published each version: the reader as You, the conversation's people by name", async () => {
-    // Reproduce by dropping VersionAuthor from the version picker: no version names anyone.
+  test("names who wrote the current version and who created each other: the reader as you, the conversation's people by name", async () => {
+    // Reproduce by naming each version's last writer: version 2 reads Bob, who wrote it, not
+    // Alice, who created it.
     const ui = viewer(sharedArtifact("sheet", "update"))
-    await openMenu(ui.getByRole("button", { name: "Version 3 · Versions" }))
+    await openMenu(ui.getByRole("button", { name: "Current · Versions" }))
 
-    const items = await ui.findAllByRole("menuitemradio")
-    expect(items.map((item) => item.textContent)).toEqual([
-      "Version 3BDYou·Oct 21, 2026Latest",
-      "Version 2AMAlice Martin·Oct 21, 2026",
-      // The system is nobody the reader knows: its version says only when.
-      "Version 1Oct 21, 2026",
-    ])
+    const items = (await ui.findAllByRole("menuitemradio")).map((item) => item.textContent ?? "")
+    expect(items).toHaveLength(3)
+    expect(items[0]).toStartWith("CurrentBDEdited by you · Oct 21")
+    expect(items[1]).toStartWith("Version 2AMCreated by Alice Martin · Oct 21")
+    // The system is nobody the reader knows: its version says only when.
+    expect(items[2]).toStartWith("Version 1Created Oct 21")
   })
 
   test("keeps no data for an observer, who has nothing to reset", () => {
@@ -320,7 +353,23 @@ describe("an artifact shared in a conversation", () => {
       stubApi((url) =>
         url.pathname === `/api/artifacts/${ARTIFACT_ID}/versions`
           ? Response.json(
-              { artifact: {}, version: { artifactId: ARTIFACT_ID, version: 4, files: [] } },
+              {
+                artifact: {},
+                version: {
+                  artifactId: ARTIFACT_ID,
+                  version: 3,
+                  revision: 4,
+                  frozen: false,
+                  title: "Regions",
+                  entry: "workbook.json",
+                  files: [],
+                  outline: { kind: "sheet", sheets: [], charts: [] },
+                  references: [],
+                  author: bob,
+                  createdAt: "2026-10-21T10:30:00.000Z",
+                  updatedAt: "2026-10-21T12:00:00.000Z",
+                },
+              },
               { status: 201 }
             )
           : undefined
@@ -340,12 +389,10 @@ describe("an artifact shared in a conversation", () => {
         fireEvent.keyDown(input, { key: "Enter" })
       })
       await act(async () => {
-        fireEvent.click(ui.getByRole("button", { name: "Save as version 4" }))
+        fireEvent.click(ui.getByRole("button", { name: "Save" }))
       })
 
-      await waitFor(() =>
-        expect(ui.queryByRole("button", { name: "Save as version 4" })).toBeNull()
-      )
+      await waitFor(() => expect(ui.queryByRole("button", { name: "Save" })).toBeNull())
       const status = ui.queryByText("Saved — everyone in this conversation sees it.")
       expect(status !== null).toBe(says)
       ui.unmount()
@@ -436,5 +483,156 @@ describe("a conversation's artifacts menu", () => {
     expect(requests).toEqual(["GET /api/artifacts?thread=thr_1"])
     // An observer's gallery holds none of these: no way to it.
     expect(ui.queryByRole("menuitem", { name: "All artifacts" })).toBeNull()
+  })
+})
+
+describe("the version menu", () => {
+  /** What the API was asked, with each request's body, and what it answers. */
+  function recordApi(answer: (url: URL, method: string) => Response | undefined) {
+    const requests: { readonly call: string; readonly body: unknown }[] = []
+    client.setConfig({
+      fetch: Object.assign(
+        async (input: Request) => {
+          const url = new URL(input.url)
+          const body = input.method === "GET" ? undefined : await input.json().catch(() => null)
+          requests.push({ call: `${input.method} ${url.pathname}`, body })
+          return answer(url, input.method) ?? Response.json({ error: "Not found" }, { status: 404 })
+        },
+        { preconnect: globalThis.fetch.preconnect }
+      ) as unknown as typeof fetch,
+    })
+    return requests
+  }
+
+  const turn = {
+    artifactId: ARTIFACT_ID,
+    revision: 2,
+    version: 3,
+    frozen: false,
+    title: "Regions",
+    author: bob,
+    origin: { threadId: "thr_1", runId: "run_1" },
+    updatedAt: "2026-10-21T10:45:00.000Z",
+    reason: "turn" as const,
+    turnRunId: "run_1",
+    createdAt: "2026-10-21T10:50:00.000Z",
+  }
+
+  test("creates a version from the current one, from the revision the reader saw", async () => {
+    // Reproduce by freezing without baseRevision: a change made meanwhile would be frozen unseen.
+    const requests = recordApi((url) =>
+      url.pathname === `/api/artifacts/${ARTIFACT_ID}/freeze`
+        ? Response.json({ artifact: {}, version: { version: 3 } })
+        : undefined
+    )
+    const ui = viewer(sharedArtifact("sheet", "update"))
+    await openMenu(ui.getByRole("button", { name: "Current · Versions" }))
+
+    const create = await ui.findByRole("menuitem", { name: /Create version/ })
+    expect(create.textContent).toContain("Keep what it holds now as version 3.")
+    await act(async () => {
+      fireEvent.click(create)
+    })
+
+    await waitFor(() => expect(ui.getByRole("status").textContent).toBe("Version 3 created"))
+    expect(requests).toContainEqual({
+      call: `POST /api/artifacts/${ARTIFACT_ID}/freeze`,
+      body: { baseRevision: 3 },
+    })
+  })
+
+  test("creates nothing when the latest version is already created, and nothing for an observer", async () => {
+    // Reproduce by enabling Create version whatever the latest: it would freeze nothing new.
+    const created = sharedArtifact("sheet", "update")
+    const detail = created.getQueryData<GetArtifactResponse>(
+      getArtifactQueryKey({ path: { artifactId: ARTIFACT_ID } })
+    ) as GetArtifactResponse
+    created.setQueryData(getArtifactQueryKey({ path: { artifactId: ARTIFACT_ID } }), {
+      ...detail,
+      versions: detail.versions.map((entry) =>
+        entry.version === 3
+          ? { ...entry, frozen: true, frozenAt: entry.updatedAt, frozenBy: bob }
+          : entry
+      ),
+    })
+    const ui = viewer(created)
+    await openMenu(ui.getByRole("button", { name: "Current · Versions" }))
+    const create = await ui.findByRole("menuitem", { name: /Create version/ })
+    expect(create.getAttribute("aria-disabled")).toBe("true")
+    expect(create.textContent).toContain("Nothing changed since version 3.")
+    ui.unmount()
+
+    const observer = viewer(sharedArtifact("sheet", "read"))
+    await openMenu(observer.getByRole("button", { name: "Current · Versions" }))
+    await observer.findAllByRole("menuitemradio")
+    expect(observer.queryByRole("menuitem", { name: /Create version/ })).toBeNull()
+    expect(observer.queryByRole("menuitem", { name: "Restore" })).toBeNull()
+  })
+
+  test("restores a point after asking, from the revision the reader saw, and says when it changed", async () => {
+    // Reproduce by restoring without baseRevision: a change made meanwhile would be replaced unseen.
+    let moved = false
+    const requests = recordApi((url, method) => {
+      const points = `/api/artifacts/${ARTIFACT_ID}/restore-points`
+      if (url.pathname === points) return Response.json({ restorePoints: [turn] })
+      if (url.pathname === `${points}/2` && method === "GET") {
+        return Response.json({
+          ...turn,
+          entry: "workbook.json",
+          files: [],
+          outline: { kind: "sheet", sheets: [], charts: [] },
+          references: [],
+        })
+      }
+      if (url.pathname === `${points}/2/restore`) {
+        return moved
+          ? Response.json(
+              {
+                error: "moved",
+                code: "artifact_moved",
+                latest: { version: 3, revision: 5, author: alice },
+              },
+              { status: 409 }
+            )
+          : Response.json({ artifact: {}, version: { version: 3 } })
+      }
+      return undefined
+    })
+
+    const restore = async () => {
+      const ui = viewer(sharedArtifact("sheet", "update"))
+      await openMenu(ui.getByRole("button", { name: "Current · Versions" }))
+      await act(async () => {
+        fireEvent.click(await ui.findByRole("menuitem", { name: "Restore" }))
+      })
+      const point = await ui.findByRole("menuitem", { name: /Before the agent's turn/ })
+      await act(async () => {
+        fireEvent.click(point)
+      })
+      const dialog = await ui.findByRole("alertdialog")
+      expect(dialog.textContent).toContain("Restore “Before the agent's turn”")
+      expect(dialog.textContent).toContain("It held “Regions”, as the agent left it.")
+      await act(async () => {
+        fireEvent.click(within(dialog).getByRole("button", { name: "Restore" }))
+      })
+      return ui
+    }
+
+    const ui = await restore()
+    await waitFor(() => expect(ui.queryByRole("alertdialog")).toBeNull())
+    expect(requests).toContainEqual({
+      call: `POST /api/artifacts/${ARTIFACT_ID}/restore-points/2/restore`,
+      body: { baseRevision: 3 },
+    })
+    ui.unmount()
+
+    // Someone changed it while the dialog was open: it stays, and says so.
+    moved = true
+    const again = await restore()
+    await waitFor(() =>
+      expect(again.getByRole("alert").textContent).toBe(
+        "It changed while this was open. Look at it again, then restore."
+      )
+    )
   })
 })

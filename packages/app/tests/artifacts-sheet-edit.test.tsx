@@ -767,6 +767,7 @@ describe("saving an edited sheet", () => {
         title: "Regions",
         owner: { type: "user", id: "user-1" },
         latestVersion: 1,
+        revision: 1,
         createdAt: "2026-10-01T12:00:00.000Z",
         updatedAt: "2026-10-01T12:00:00.000Z",
       },
@@ -776,6 +777,9 @@ describe("saving an edited sheet", () => {
           title: "Regions",
           author: { type: "user", id: "user-1" },
           createdAt: "2026-10-01T12:00:00.000Z",
+          updatedAt: "2026-10-01T12:00:00.000Z",
+          revision: 1,
+          frozen: false,
         },
       ],
       access: "owner",
@@ -790,6 +794,9 @@ describe("saving an edited sheet", () => {
       references: [],
       author: { type: "user", id: "user-1" },
       createdAt: "2026-10-01T12:00:00.000Z",
+      updatedAt: "2026-10-01T12:00:00.000Z",
+      revision: 1,
+      frozen: false,
     } satisfies GetArtifactVersionResponse)
     for (const file of files) {
       const source = artifactFileSource({ artifactId, version: 1, ...file, fileRef: file.file })
@@ -797,6 +804,26 @@ describe("saving an edited sheet", () => {
     }
     return queries
   }
+
+  /** What a save answers: the open version, as the API serves it at `revision`. */
+  const saved = (revision: number) => ({
+    artifact: {},
+    version: {
+      artifactId,
+      version: 1,
+      revision,
+      frozen: false,
+      title: "Regions",
+      entry: "workbook.json",
+      files: [],
+      outline: { kind: "sheet", sheets: [], charts: [] },
+      references: [],
+      author: { type: "user", id: "user-1" },
+      createdAt: "2026-10-01T12:00:00.000Z",
+      updatedAt: "2026-10-01T13:00:00.000Z",
+    },
+    warnings: [],
+  })
 
   async function editNorth(queries: QueryClient) {
     const ui = render(
@@ -821,15 +848,11 @@ describe("saving an edited sheet", () => {
     return ui
   }
 
-  test("uploads only the sheet that changed, and publishes from the version edited", async () => {
+  test("uploads only the sheet that changed, and saves from the revision edited", async () => {
     requests.length = 0
-    answer = () =>
-      Response.json(
-        { artifact: {}, version: { artifactId, version: 2, files: [] }, warnings: [] },
-        { status: 201 }
-      )
+    answer = () => Response.json(saved(2), { status: 201 })
     const ui = await editNorth(cache())
-    const save = ui.getByRole("button", { name: "Save as version 2" })
+    const save = ui.getByRole("button", { name: "Save" })
     await act(async () => {
       fireEvent.click(save)
     })
@@ -840,7 +863,7 @@ describe("saving an edited sheet", () => {
         url: `/api/artifacts/${artifactId}/versions`,
         body: expect.objectContaining({
           kind: "sheet",
-          baseVersion: 1,
+          baseRevision: 1,
           files: expect.arrayContaining([
             expect.objectContaining({
               path: "sheets/Targets.csv",
@@ -851,7 +874,7 @@ describe("saving an edited sheet", () => {
       },
     ])
     // Saved, the viewer leaves editing.
-    expect(ui.queryByRole("button", { name: "Save as version 2" })).toBeNull()
+    expect(ui.queryByRole("button", { name: "Save" })).toBeNull()
     ui.unmount()
   })
 
@@ -868,7 +891,7 @@ describe("saving an edited sheet", () => {
       )
     const ui = await editNorth(cache())
     await act(async () => {
-      fireEvent.click(ui.getByRole("button", { name: "Save as version 2" }))
+      fireEvent.click(ui.getByRole("button", { name: "Save" }))
     })
     await waitFor(() => expect(ui.getByRole("alert")).toBeTruthy())
     expect(ui.getByRole("alert").textContent).toBe(
@@ -877,45 +900,72 @@ describe("saving an edited sheet", () => {
     ui.unmount()
   })
 
-  test("says when the artifact moved on, and saves over it only when asked", async () => {
+  test("says when the artifact changed, and saves over that revision only when asked", async () => {
     requests.length = 0
     answer = () =>
       Response.json(
         {
           error: "moved",
           code: "artifact_moved",
-          latest: { version: 2, author: { type: "user", id: "user-2" } },
+          latest: { version: 1, revision: 3, author: { type: "user", id: "user-2" } },
         },
         { status: 409 }
       )
     const ui = await editNorth(cache())
     await act(async () => {
-      fireEvent.click(ui.getByRole("button", { name: "Save as version 2" }))
+      fireEvent.click(ui.getByRole("button", { name: "Save" }))
     })
     expect(ui.getByRole("alert").textContent).toContain(
-      "Version 2 was published while you were editing."
+      "Someone saved a change while you were editing."
+    )
+    expect(ui.getByRole("alert").textContent).toContain(
+      "Saving anyway replaces their change with yours."
     )
     // The draft stays: its change is still there to save.
     expect(
       ui.container.querySelector('[role="grid"] [data-row="1"][data-column="1"]')?.textContent
     ).toBe("1,300")
-    answer = () =>
-      Response.json(
-        { artifact: {}, version: { artifactId, version: 3, files: [] }, warnings: [] },
-        { status: 201 }
-      )
-    // The header's Save follows: it saves over version 2 too.
-    expect(ui.getByRole("button", { name: "Save as version 3" })).toBeTruthy()
+    answer = () => Response.json(saved(4), { status: 201 })
     await act(async () => {
-      fireEvent.click(ui.getByRole("button", { name: "Save as version 3 anyway" }))
+      fireEvent.click(ui.getByRole("button", { name: "Save anyway" }))
     })
-    expect(requests.at(-1)?.body).toMatchObject({ baseVersion: 2 })
+    expect(requests.at(-1)?.body).toMatchObject({ baseRevision: 3 })
     ui.unmount()
   })
 
-  test("keeps the draft when a version arrives while editing, and says so at once", async () => {
-    // Reproduce by following the latest version while editing: the sheet opens version 2 under
-    // the draft, North reads 1,284 again, and nothing says why.
+  test("names the version someone created while the reader edited", async () => {
+    // A created version stays as it is: saving puts the edit in the current version after it.
+    requests.length = 0
+    answer = () =>
+      Response.json(
+        {
+          error: "moved",
+          code: "artifact_moved",
+          latest: {
+            version: 1,
+            revision: 2,
+            author: { type: "user", id: "user-1" },
+            frozenBy: { type: "user", id: "user-2" },
+          },
+        },
+        { status: 409 }
+      )
+    const ui = await editNorth(cache())
+    await act(async () => {
+      fireEvent.click(ui.getByRole("button", { name: "Save" }))
+    })
+    expect(ui.getByRole("alert").textContent).toContain(
+      "Someone created version 1 while you were editing."
+    )
+    expect(ui.getByRole("alert").textContent).toContain(
+      "Saving anyway puts your edit in the current version; version 1 stays as it is."
+    )
+    ui.unmount()
+  })
+
+  test("keeps the draft when the artifact changes while editing, and says so at once", async () => {
+    // Reproduce by showing the version as it is read while editing: the Agent's write replaces
+    // the sheet under the draft, North reads 999, and nothing says why.
     const queries = cache()
     const ui = await editNorth(queries)
     const v1 = queries.getQueryData<GetArtifactVersionResponse>(
@@ -925,45 +975,66 @@ describe("saving an edited sheet", () => {
       getArtifactQueryKey({ path: { artifactId } })
     ) as GetArtifactResponse
 
-    // The Agent publishes version 2, ready in the cache, and the artifact is read again.
+    // The Agent writes the open version, ready in the cache, and the artifact is read again.
     await act(async () => {
-      queries.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "2" } }), {
+      const regions = v1.files.map((file) =>
+        file.path === "sheets/Regions.csv"
+          ? { ...file, file: { ...file.file, digest: `sha256:${"2".repeat(64)}` } }
+          : file
+      )
+      queries.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
         ...v1,
-        version: 2,
+        revision: 2,
+        files: regions,
       })
-      for (const file of v1.files) {
-        const at = (version: number) =>
-          artifactFileSource({ artifactId, version, ...file, fileRef: file.file }).queryKey
-        queries.setQueryData([...at(2), "text"], queries.getQueryData([...at(1), "text"]))
+      for (const file of regions) {
+        const source = artifactFileSource({ artifactId, version: 1, ...file, fileRef: file.file })
+        const before = v1.files.find((each) => each.path === file.path)
+        queries.setQueryData(
+          [...source.queryKey, "text"],
+          file.path === "sheets/Regions.csv"
+            ? "Region,Visits\nNorth,999\nSouth,1107\n"
+            : queries.getQueryData([
+                ...artifactFileSource({
+                  artifactId,
+                  version: 1,
+                  ...file,
+                  fileRef: before?.file ?? file.file,
+                }).queryKey,
+                "text",
+              ])
+        )
       }
       queries.setQueryData(getArtifactQueryKey({ path: { artifactId } }), {
-        artifact: { ...detail.artifact, latestVersion: 2 },
+        artifact: { ...detail.artifact, revision: 2 },
         versions: [
           {
-            version: 2,
+            version: 1,
             title: "Regions",
             author: { type: "user", id: "user-2" },
-            createdAt: "2026-10-01T13:00:00.000Z",
+            createdAt: "2026-10-01T12:00:00.000Z",
+            updatedAt: "2026-10-01T13:00:00.000Z",
+            revision: 2,
+            frozen: false,
           },
-          ...detail.versions,
         ],
         access: "owner",
       } satisfies GetArtifactResponse)
     })
 
-    // The header counts from version 2 once the viewer has it, with the fix or without.
-    await waitFor(() => expect(ui.getByRole("button", { name: "Save as version 3" })).toBeTruthy())
-
-    // The draft is still there, and the reader is told before saving, with the same choices.
+    // The reader is told before saving, with the same choices.
+    await waitFor(() =>
+      expect(ui.getByRole("alert").textContent).toContain(
+        "Someone saved a change while you were editing."
+      )
+    )
+    // The draft is still there.
     expect(
       ui.container.querySelector('[role="grid"] [data-row="1"][data-column="1"]')?.textContent
     ).toBe("1,300")
     expect(ui.getByText("Unsaved changes")).toBeTruthy()
-    expect(ui.getByRole("alert").textContent).toContain(
-      "Version 2 was published while you were editing."
-    )
-    expect(ui.getByRole("button", { name: "Open version 2" })).toBeTruthy()
-    expect(ui.getByRole("button", { name: "Save as version 3 anyway" })).toBeTruthy()
+    expect(ui.getByRole("button", { name: "Open the latest" })).toBeTruthy()
+    expect(ui.getByRole("button", { name: "Save anyway" })).toBeTruthy()
     ui.unmount()
   })
 })

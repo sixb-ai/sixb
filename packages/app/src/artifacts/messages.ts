@@ -61,28 +61,67 @@ export const en = {
   },
   edit: {
     edit: "Edit",
-    editing: (version: number) => `Editing version ${number(version)}`,
+    editing: "Editing",
     unsaved: "Unsaved changes",
     discard: "Discard",
     undo: "Undo",
     redo: "Redo",
-    save: (version: number) => `Save as version ${number(version)}`,
-    saveShort: "Save",
+    save: "Save",
     saving: "Saving…",
     saveFailed: "Your changes could not be saved. Try again.",
     saveRefused: "This version can't be published as it is. Undo the change it names, then save.",
     discardTitle: "Discard your changes?",
     discardDescription: "What you changed since you started editing will be lost.",
     keepEditing: "Keep editing",
-    moved: (version: number, byYou: boolean) =>
+    /** Someone saved a change while the reader edited: `who` is null when they can't be named. */
+    changed: (who: string | null, byYou: boolean) =>
       byYou
-        ? `You published version ${number(version)} somewhere else while editing this one.`
-        : `Version ${number(version)} was published while you were editing.`,
-    movedDescription:
-      "Saving anyway publishes your edit over it; it stays in the artifact's versions.",
-    openLatest: (version: number) => `Open version ${number(version)}`,
-    saveAnyway: (version: number) => `Save as version ${number(version)} anyway`,
+        ? "You saved a change somewhere else while editing this."
+        : `${who ?? "Someone"} saved a change while you were editing.`,
+    changedDescription: "Saving anyway replaces their change with yours.",
+    /** Someone created a version of what the reader edits. */
+    created: (version: number, who: string | null, byYou: boolean) =>
+      byYou
+        ? `You created version ${number(version)} somewhere else while editing this.`
+        : `${who ?? "Someone"} created version ${number(version)} while you were editing.`,
+    createdDescription: (version: number) =>
+      `Saving anyway puts your edit in the current version; version ${number(version)} stays as it is.`,
+    openLatest: "Open the latest",
+    saveAnyway: "Save anyway",
     savedShared: "Saved — everyone in this conversation sees it.",
+  },
+  versions: {
+    current: "Current",
+    /** The latest version, frozen: nothing changed since someone created it. */
+    latest: "Latest",
+    /** Who last wrote the current version, and when: `who` is null when they can't be named. */
+    edited: (who: string | null, when: string) =>
+      who ? `Edited by ${who} · ${when}` : `Edited ${when}`,
+    createdBy: (who: string | null, when: string) =>
+      who ? `Created by ${who} · ${when}` : `Created ${when}`,
+    you: "you",
+    agent: "the agent",
+    create: "Create version",
+    createDetail: (version: number) => `Keep what it holds now as version ${number(version)}.`,
+    unchanged: (version: number) => `Nothing changed since version ${number(version)}.`,
+    createdStatus: (version: number) => `Version ${number(version)} created`,
+    createFailed: "The version could not be created. Try again.",
+    restore: "Restore",
+    noRestorePoints: "Nothing to restore yet",
+    restorePointsLoading: "Loading…",
+    /** A restore point, by what it was kept before. */
+    restorePoint: (reason: "turn" | "restore"): string =>
+      reason === "turn" ? "Before the agent's turn" : "Before restoring",
+    restoreTitle: (point: string, when: string) => `Restore “${point}” · ${when}?`,
+    restoreHeld: (title: string, who: string | null) =>
+      who ? `It held “${title}”, as ${who} left it.` : `It held “${title}”.`,
+    restoreChanges: "Restoring it:",
+    restoreUndo: "What it holds now is kept as a restore point, so restoring can be undone.",
+    restoreConfirm: "Restore",
+    restoring: "Restoring…",
+    restoreFailed: "It could not be restored. Try again.",
+    restoreMoved: "It changed while this was open. Look at it again, then restore.",
+    cancel: "Cancel",
   },
   document: {
     outline: "On this page",
@@ -500,13 +539,12 @@ export const fr: Translation<ArtifactMessages> = {
   },
   edit: {
     edit: "Modifier",
-    editing: (version) => `Modification de la version ${numberFr(version)}`,
+    editing: "Modification",
     unsaved: "Modifications non enregistrées",
     discard: "Abandonner",
     undo: "Annuler",
     redo: "Rétablir",
-    save: (version) => `Enregistrer la version ${numberFr(version)}`,
-    saveShort: "Enregistrer",
+    save: "Enregistrer",
     saving: "Enregistrement…",
     saveFailed: "Impossible d’enregistrer vos modifications. Réessayez.",
     saveRefused:
@@ -514,15 +552,50 @@ export const fr: Translation<ArtifactMessages> = {
     discardTitle: "Abandonner vos modifications ?",
     discardDescription: "Ce que vous avez modifié depuis le début sera perdu.",
     keepEditing: "Continuer",
-    moved: (version, byYou) =>
+    changed: (who, byYou) =>
       byYou
-        ? `Vous avez publié la version ${numberFr(version)} ailleurs pendant cette modification.`
-        : `La version ${numberFr(version)} a été publiée pendant votre modification.`,
-    movedDescription:
-      "Enregistrer quand même publie votre version par-dessus ; elle reste dans les versions.",
-    openLatest: (version) => `Ouvrir la version ${numberFr(version)}`,
-    saveAnyway: (version) => `Enregistrer la version ${numberFr(version)} quand même`,
+        ? "Vous avez enregistré une modification ailleurs pendant cette modification."
+        : `${who ?? "Quelqu’un"} a enregistré une modification pendant la vôtre.`,
+    changedDescription: "Enregistrer quand même remplace sa modification par la vôtre.",
+    created: (version, who, byYou) =>
+      byYou
+        ? `Vous avez créé la version ${numberFr(version)} ailleurs pendant cette modification.`
+        : `${who ?? "Quelqu’un"} a créé la version ${numberFr(version)} pendant votre modification.`,
+    createdDescription: (version) =>
+      `Enregistrer quand même place votre modification dans la version actuelle ; la version ${numberFr(version)} reste telle quelle.`,
+    openLatest: "Ouvrir la dernière",
+    saveAnyway: "Enregistrer quand même",
     savedShared: "Enregistré — toutes les personnes de cette conversation le voient.",
+  },
+  versions: {
+    current: "Actuelle",
+    latest: "Dernière",
+    edited: (who, when) => (who ? `Modifiée par ${who} · ${when}` : `Modifiée ${when}`),
+    createdBy: (who, when) => (who ? `Créée par ${who} · ${when}` : `Créée ${when}`),
+    you: "vous",
+    agent: "l’agent",
+    create: "Créer une version",
+    createDetail: (version) => `Garder son contenu actuel comme version ${numberFr(version)}.`,
+    unchanged: (version) => `Rien n’a changé depuis la version ${numberFr(version)}.`,
+    createdStatus: (version) => `Version ${numberFr(version)} créée`,
+    createFailed: "Impossible de créer la version. Réessayez.",
+    restore: "Restaurer",
+    noRestorePoints: "Rien à restaurer pour l’instant",
+    restorePointsLoading: "Chargement…",
+    restorePoint: (reason) =>
+      reason === "turn" ? "Avant le tour de l’agent" : "Avant la restauration",
+    restoreTitle: (point, when) => `Restaurer « ${point} » · ${when} ?`,
+    restoreHeld: (title, who) =>
+      who ? `Il contenait « ${title} », tel que ${who} l’a laissé.` : `Il contenait « ${title} ».`,
+    restoreChanges: "La restauration :",
+    restoreUndo:
+      "Son contenu actuel est gardé comme point de restauration : la restauration peut être annulée.",
+    restoreConfirm: "Restaurer",
+    restoring: "Restauration…",
+    restoreFailed: "Impossible de restaurer. Réessayez.",
+    restoreMoved:
+      "Il a changé pendant que cette fenêtre était ouverte. Regardez-le à nouveau, puis restaurez.",
+    cancel: "Annuler",
   },
   document: {
     outline: "Sur cette page",
