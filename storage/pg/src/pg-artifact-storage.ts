@@ -238,6 +238,23 @@ export class PgArtifactStorage implements ArtifactStorage {
         FROM artifact_versions
         WHERE project_id = ${input.projectId} AND artifact_id = ${input.sourceId}
       `
+
+      if (input.outlineOf) {
+        const copied = await tx<PgRow[]>`
+          SELECT ${tx.unsafe(VERSION_COLUMNS)} FROM artifact_versions
+          WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
+        `
+        for (const version of copied.map(parseArtifactVersionRow)) {
+          const outline = input.outlineOf(version)
+          if (!outline) continue
+
+          await tx`
+            UPDATE artifact_versions SET outline = ${JSON.stringify(outline)}::text::jsonb
+            WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
+              AND version = ${version.version}
+          `
+        }
+      }
       await tx`
         INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at, copied)
         VALUES (

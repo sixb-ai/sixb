@@ -311,6 +311,24 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           FROM artifact_versions WHERE project_id = ? AND artifact_id = ?`
         )
         .run(input.id, input.projectId, input.sourceId)
+
+      if (input.outlineOf) {
+        const copied = this.db
+          .query(
+            `SELECT ${VERSION_COLUMNS} FROM artifact_versions WHERE project_id = ? AND artifact_id = ?`
+          )
+          .all(input.projectId, input.id) as Row[]
+        for (const version of copied.map(parseArtifactVersionRow)) {
+          const outline = input.outlineOf(version)
+          if (!outline) continue
+
+          this.db
+            .query(
+              "UPDATE artifact_versions SET outline = ? WHERE project_id = ? AND artifact_id = ? AND version = ?"
+            )
+            .run(JSON.stringify(outline), input.projectId, input.id, version.version)
+        }
+      }
       this.db
         .query(
           `INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at, copied)

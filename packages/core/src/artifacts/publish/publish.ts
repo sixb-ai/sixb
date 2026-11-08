@@ -29,7 +29,7 @@ import {
   invalidArtifact,
   readArtifactText,
 } from "./files"
-import { canvasPreviewOutline } from "./previews"
+import { canvasPreviewOutline, withBoardRenderKeys } from "./previews"
 import { type ArtifactQueryChecker, checkArtifactQueries } from "./queries"
 import {
   brokenDependents,
@@ -168,14 +168,11 @@ export async function prepareArtifactVersion(
       title,
       entry: validated.entry,
       files: input.files.map(({ path, file }) => ({ path, file: { ...file } })),
-      // A canvas's boards are shown as pictures until they are read: each names what it shows.
+      // A canvas's boards are shown as pictures until they are read, in the modes a reader sees;
+      // each is named by what it shows once the version has its artifact.
       outline:
         validated.outline.kind === "canvas"
-          ? canvasPreviewOutline(validated.outline, {
-              files: input.files,
-              author: input.author,
-              themes: artifactThemeModes(theme),
-            })
+          ? canvasPreviewOutline(validated.outline, artifactThemeModes(theme))
           : validated.outline,
       references,
       author: input.author,
@@ -316,7 +313,7 @@ async function publishVersion(
       projectId: context.projectId,
       artifactId,
       kind: prepared.kind,
-      version: prepared.version,
+      version: withBoardRenderKeys(prepared.version, artifactId),
       ...(prepared.baseVersion === undefined ? {} : { baseVersion: prepared.baseVersion }),
     })
   } catch (error) {
@@ -347,13 +344,14 @@ async function createArtifact(
   version: ArtifactVersionInput
 ): Promise<PublishedArtifactVersion> {
   for (let attempt = 1; ; attempt += 1) {
+    const id = createArtifactId()
     try {
       return await context.storage.create({
         projectId: context.projectId,
-        id: createArtifactId(),
+        id,
         kind,
         owner,
-        version,
+        version: withBoardRenderKeys(version, id),
       })
     } catch (error) {
       const collided = error instanceof ArtifactStorageError && error.code === "artifact_exists"

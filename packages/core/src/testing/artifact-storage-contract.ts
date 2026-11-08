@@ -442,6 +442,35 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
 
     // Regression proof: copy only the latest version in a provider's `copy`; the copy then has no
     // version 1, and its next version is 2.
+    test("gives a copied version the outline the copy asks for, and the source keeps its own", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        await artifacts.publish(publishInput({ title: "Second", createdAt: at(1) }))
+        const renamed = { kind: "document" as const, headings: [] }
+        const seen: string[] = []
+
+        await artifacts.copy({
+          projectId,
+          sourceId: "art_report",
+          id: "art_copy",
+          owner: otherOwner,
+          threadId: "thr_fork",
+          // Asked of each version as the copy holds it: under the copy's id.
+          outlineOf: (version) => {
+            seen.push(`${version.artifactId}@${version.version}`)
+            return version.version === 2 ? renamed : undefined
+          },
+        })
+
+        expect(seen.sort()).toEqual(["art_copy@1", "art_copy@2"])
+        const outline = async (artifactId: string, version: number) =>
+          (await artifacts.getVersion({ projectId, artifactId, version }))?.outline
+        expect(await outline("art_copy", 2)).toEqual(renamed)
+        expect(await outline("art_copy", 1)).toEqual(versionInput().outline)
+        expect(await outline("art_report", 2)).toEqual(versionInput().outline)
+      })
+    })
+
     test("copies an artifact with every version under its number, shared in one thread", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())

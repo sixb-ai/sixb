@@ -173,9 +173,11 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     if (this.artifacts.has(key)) throw artifactStorageErrors.exists(input.id)
 
     const record: ArtifactRecord = { ...source.record, id: input.id, owner: { ...input.owner } }
-    const versions = source.versions.map(({ origin: _origin, ...version }) =>
-      structuredClone({ ...version, artifactId: input.id })
-    )
+    const versions = source.versions.map(({ origin: _origin, ...version }) => {
+      const copied = structuredClone({ ...version, artifactId: input.id })
+      const outline = input.outlineOf?.(copied)
+      return outline ? { ...copied, outline: structuredClone(outline) } : copied
+    })
     const sharedAt = new Date(input.copiedAt ?? new Date())
     this.artifacts.set(key, {
       record,
