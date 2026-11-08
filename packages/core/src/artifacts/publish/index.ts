@@ -13,7 +13,6 @@ export {
   type BoardPreviewStatus,
   boardPreviewStatuses,
   boardPreviews,
-  boardsReadLiveData,
   MAX_BOARD_PREVIEW_BYTES,
   type MissingBoardPreview,
   missingBoardPreviews,
@@ -28,3 +27,9 @@ export {
   publishArtifact,
   storeArtifactVersion,
 } from "./publish"
+export {
+  type ArtifactQueryAnswer,
+  type ArtifactQueryAnswers,
+  answerArtifactQueries,
+  parseArtifactQueryAnswers,
+} from "./query-answers"

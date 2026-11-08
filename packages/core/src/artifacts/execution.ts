@@ -286,7 +286,17 @@ export function createArtifactsRuntime(
     const storage = runtime.storage.artifacts
     if (!options.rendersBoardPreviews || !storage) return
 
-    await requestBoardPreviews({ storage, queue: runtime.queues.agents }, version, requestOptions)
+    // Its queries are answered as whoever published it, who is this runtime's caller.
+    await requestBoardPreviews(
+      {
+        storage,
+        queue: runtime.queues.agents,
+        blobStorage,
+        query: (name) => artifacts.query(version.artifactId, name, { version: version.version }),
+      },
+      version,
+      requestOptions
+    )
   }
 
   /** The artifact with what the caller may do with it; `null` when there is none. */

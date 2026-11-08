@@ -15,8 +15,9 @@ import { ArtifactRequestError } from "../errors"
 import { FRAME_ASSETS } from "../frames/assets"
 import { FRAME_DEFAULT_THEMES } from "../frames/kit"
 import type { CanvasOutline, CanvasOutlineItem } from "../outline"
-import { artifactQueryName } from "../queries"
+import { type ArtifactQueryResult, artifactQueryName } from "../queries"
 import type { ArtifactThemeMode } from "../theme"
+import { answerArtifactQueries } from "./query-answers"
 
 // A canvas's boards are pages, and a hundred pages cannot all run at once: the app shows each as
 // a picture until it is read. The picture is derived data, kept apart from the version by what it
@@ -272,14 +273,22 @@ export function boardPreviewsJobId(artifactId: string, version: number): string 
 
 /**
  * Asks the agent worker to render what a stored version's boards still miss, after `delayMs` when
- * its publisher renders them itself. Nothing is asked when nothing is missing. The version exists
- * by now and its pictures are derived from it, so a request that fails is reported, not thrown:
- * the publish succeeded, and the viewer shows the boards' outlines instead.
+ * its publisher renders them itself. Nothing is asked when nothing is missing.
+ *
+ * Boards that read queries show their author's data, so the version's queries are answered now,
+ * by `query`, as whoever just published it, and the job carries the answers: kept as a blob only
+ * the job names. A query that fails is answered as its rejection.
+ *
+ * The version exists by now and its pictures are derived from it, so a request that fails is
+ * reported, not thrown: the publish succeeded, and the viewer shows the boards' outlines instead.
  */
 export async function requestBoardPreviews(
   input: {
     readonly storage: Pick<ArtifactStorage, "listBoardPreviews">
     readonly queue: Pick<Queue<AgentQueueJob>, "enqueue">
+    readonly blobStorage: Pick<BlobStorage, "put">
+    /** Runs one of the version's queries as its publisher. */
+    readonly query: (name: string) => Promise<ArtifactQueryResult | null>
   },
   version: ArtifactVersionRecord,
   options: { readonly delayMs?: number } = {}
@@ -289,13 +298,21 @@ export async function requestBoardPreviews(
   try {
     if ((await missingBoardPreviews(input.storage, version)).length === 0) return
 
+    const queries = boardsReadLiveData(version)
+      ? await storeQueryAnswers(input, version)
+      : undefined
+
     await input.queue.enqueue({
       projectId: version.projectId,
       jobs: [
         {
           id: boardPreviewsJobId(version.artifactId, version.version),
           type: "agent.artifact-previews.requested",
-          payload: { artifactId: version.artifactId, version: version.version },
+          payload: {
+            artifactId: version.artifactId,
+            version: version.version,
+            ...(queries ? { queries } : {}),
+          },
           ...(options.delayMs
             ? { availableAt: new Date(Date.now() + options.delayMs).toISOString() }
             : {}),
@@ -308,6 +325,25 @@ export async function requestBoardPreviews(
       error
     )
   }
+}
+
+/** The version's query answers, as its publisher reads them, as a JSON blob. */
+async function storeQueryAnswers(
+  input: {
+    readonly blobStorage: Pick<BlobStorage, "put">
+    readonly query: (name: string) => Promise<ArtifactQueryResult | null>
+  },
+  version: ArtifactVersionRecord
+): Promise<FileRef> {
+  const answers = await answerArtifactQueries(version, input.query)
+  const body = new TextEncoder().encode(JSON.stringify(answers))
+
+  return input.blobStorage.put({
+    body,
+    expectedSizeBytes: body.byteLength,
+    fileName: `${version.artifactId}-v${version.version}-queries.json`,
+    mediaType: "application/json",
+  })
 }
 
 let kitDigest: string | undefined

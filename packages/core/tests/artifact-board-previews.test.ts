@@ -90,6 +90,18 @@ const BOARDS = {
   "boards/shared.css": "h1 { letter-spacing: -0.02em }",
 }
 
+/** What asks for a static canvas's previews: it has no query to answer. */
+function requester(deps: ReturnType<typeof setup>["deps"]) {
+  return {
+    storage: deps.storage.artifacts,
+    queue: deps.queues.agents,
+    blobStorage: deps.blobStorage,
+    query: async (): Promise<never> => {
+      throw new Error("A static canvas has no query.")
+    },
+  }
+}
+
 function keys(version: ArtifactVersionRecord): Record<string, string | undefined> {
   const outline = version.outline as CanvasOutline
   return Object.fromEntries(
@@ -203,10 +215,7 @@ describe("publishing a canvas", () => {
     expect(await claimable()).toEqual([job])
 
     // Asking again for the same version is the same job.
-    await requestBoardPreviews(
-      { storage: deps.storage.artifacts, queue: deps.queues.agents },
-      first.version
-    )
+    await requestBoardPreviews(requester(deps), first.version)
     expect(await claimable()).toEqual([])
 
     // The worker rendered each board in both modes: moving one renders nothing.
@@ -257,11 +266,7 @@ describe("publishing a canvas", () => {
       files: await put({ "canvas.json": CANVAS, ...BOARDS }),
     })
 
-    await requestBoardPreviews(
-      { storage: deps.storage.artifacts, queue: deps.queues.agents },
-      version,
-      { delayMs: BOARD_PREVIEW_GRACE_MS }
-    )
+    await requestBoardPreviews(requester(deps), version, { delayMs: BOARD_PREVIEW_GRACE_MS })
     expect(await claimable()).toEqual([])
 
     jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_GRACE_MS))
