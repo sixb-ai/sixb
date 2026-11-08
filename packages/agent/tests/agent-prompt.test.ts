@@ -531,7 +531,7 @@ describe("agent system prompt", () => {
       "An image on its own: the command displays the output to the user, so do not call publish_artifact for it, and make one image unless the user asks for options."
     )
     expect(prompt).toContain(
-      "Images for an artifact: write them into the artifact's folder, as many as it shows (one per board or frame), and publish them with it."
+      "Images for an artifact: write them into the artifact's folder, one image per picture it shows (one per board, frame, or shot, never several combined into a grid or contact sheet), and publish them with it."
     )
     expect(prompt).toContain(
       "`sixb models transcribe <audio-file> --model <id>`.\n- openai/gpt-4o-transcribe\n"

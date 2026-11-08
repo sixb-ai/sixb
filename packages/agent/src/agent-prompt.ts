@@ -409,7 +409,7 @@ const MEDIA_MODEL_KINDS = ["image", "speech", "transcription"] as const
 
 const MODEL_COMMANDS: Readonly<Record<(typeof MEDIA_MODEL_KINDS)[number], string>> = {
   image:
-    'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. Look at the result with view_file before you use it. An image on its own: the command displays the output to the user, so do not call publish_artifact for it, and make one image unless the user asks for options. Images for an artifact: write them into the artifact\'s folder, as many as it shows (one per board or frame), and publish them with it.',
+    'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. Look at the result with view_file before you use it. An image on its own: the command displays the output to the user, so do not call publish_artifact for it, and make one image unless the user asks for options. Images for an artifact: write them into the artifact\'s folder, one image per picture it shows (one per board, frame, or shot, never several combined into a grid or contact sheet), and publish them with it.',
   speech: 'Make speech: `sixb models speech "<text>" --model <id> --output out/speech.mp3`.',
   transcription: "Transcribe audio: `sixb models transcribe <audio-file> --model <id>`.",
 }

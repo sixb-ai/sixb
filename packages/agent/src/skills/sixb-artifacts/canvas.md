@@ -49,7 +49,9 @@ work/onboarding-flow/
   user attached or the workspace holds, copied into the folder (a copy costs nothing: files are
   stored by their content). Reference it relatively, `<img src="images/03.png">`. Without one, fill
   the frame's area in a neutral tone with one line saying what it shows. Never draw people,
-  products, or scenes as hand-made SVG shapes.
+  products, or scenes as hand-made SVG shapes. Make one image per picture, each on its own board,
+  never a grid or contact sheet of several in one image: the reader opens each, and its notes sit
+  beside it.
 - **One visual direction.** For creative work (a storyboard, a poster, a landing page, a
   moodboard), choose one direction you can name: a type pairing (Google Fonts load in boards), a
   ground, and no more than two accents, in `shared.css`. Screens of the project's own app keep the
