@@ -28,8 +28,9 @@ import { ArtifactRequestError } from "./errors"
 import { announceArtifactUpdates } from "./events"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+import { firstArtifactDocument } from "./live/state"
 import { invalidArtifact, readArtifactText } from "./publish/files"
-import { withMergedWrite } from "./publish/merge"
+import { withDocumentHolding, withMergedWrite } from "./publish/merge"
 import {
   type BoardPreviewRequester,
   boardsReadLiveData,
@@ -92,6 +93,11 @@ export interface UpdateArtifactRuntimeInput extends ArtifactContentInput {
    * none holds them.
    */
   readonly baseFiles?: readonly ArtifactFile[]
+  /**
+   * A canvas's Yjs document as a live editor holds it, encoded with `Y.encodeStateAsUpdate`:
+   * merged into the artifact's own, and the version then holds what the merged document holds.
+   */
+  readonly document?: Uint8Array
 }
 
 /** A change made from what the caller saw: past `baseRevision`, it fails with `artifact_moved`. */
@@ -453,13 +459,16 @@ export function createArtifactsRuntime(
   const artifacts: ArtifactsRuntime = {
     async create(input) {
       const author = requireCaller()
+      const files = await contentFiles(input)
+      const document = await firstArtifactDocument(blobStorage, input.kind, files)
 
       const published = await publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
         {
           kind: input.kind,
           title: input.title,
-          files: await contentFiles(input),
+          files,
+          ...(document ? { document } : {}),
           author,
           readable: readableBy(rule()),
           checkQuery,
@@ -483,6 +492,7 @@ export function createArtifactsRuntime(
         files,
         ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
         ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
+        ...(input.document === undefined ? {} : { update: input.document }),
       }
 
       // A canvas written since the base is merged into, not refused: the merge is what is checked.
@@ -493,6 +503,7 @@ export function createArtifactsRuntime(
           title: input.title,
           files: merged.files,
           ...(merged.baseRevision === undefined ? {} : { baseRevision: merged.baseRevision }),
+          ...(merged.document ? { document: merged.document } : {}),
           author,
           readable: readableBy(rule()),
           checkQuery,
@@ -543,15 +554,29 @@ export function createArtifactsRuntime(
     },
 
     async restore(artifactId, revision, input = {}) {
-      const restored = await change(artifactId, (storage, author) =>
-        storage.restoreTo({
-          projectId: runtime.projectId,
-          artifactId,
-          revision,
-          ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
-          author,
-          restoredAt: new Date(),
-        })
+      // A canvas's document takes the restored content as a change, so editors keep theirs.
+      const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
+      const point = await context.storage.getRestorePoint({
+        projectId: runtime.projectId,
+        artifactId,
+        revision,
+      })
+      const restored = await withDocumentHolding(
+        context,
+        artifactId,
+        point?.files ?? null,
+        input.baseRevision,
+        (held) =>
+          change(artifactId, (storage, author) =>
+            storage.restoreTo({
+              projectId: runtime.projectId,
+              artifactId,
+              revision,
+              ...held,
+              author,
+              restoredAt: new Date(),
+            })
+          )
       )
       await announceArtifactUpdates(runtime.events, [restored.version])
 

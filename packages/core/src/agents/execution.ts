@@ -1,5 +1,6 @@
 import { principalsEqual, type UserPrincipal } from "../auth"
 import { AuthorizationError, assertAuthorized, isRuntimeAllowed } from "../authorization"
+import type { BlobStorage } from "../blob-storage/types"
 import { isSixbError } from "../errors/internal"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { canInheritAgentRequestAuthorization } from "../execution/agent"
@@ -358,7 +359,8 @@ export function createAgentRuntime<
   models: ModelCatalog | undefined,
   decision: DecisionModelsRuntime,
   sandbox: SixbDependencies["sandbox"] | undefined,
-  security: SecurityDefinitionCatalog
+  security: SecurityDefinitionCatalog,
+  blobStorage?: BlobStorage
 ): AgentRuntime<TParams> {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const turnModels = {
@@ -986,7 +988,13 @@ export function createAgentRuntime<
         if (!agent) {
           throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
         }
-        const result = await retryAgentRun(runtime, execution, models?.language, failedRun)
+        const result = await retryAgentRun(
+          runtime,
+          execution,
+          models?.language,
+          failedRun,
+          blobStorage
+        )
         return { ...result, run: await attachRunView(runtime, result.run) }
       },
       cancel: async (runId) => {

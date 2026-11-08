@@ -1,17 +1,18 @@
-import type { BlobStorage } from "../../blob-storage/types"
+import * as Y from "yjs"
+import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import { ArtifactStorageError } from "../../storage/artifacts/errors"
 import type { ArtifactFile, ArtifactStorage } from "../../storage/artifacts/types"
 import { ArtifactRequestError } from "../errors"
 import type { ArtifactKind } from "../kinds"
-import { createArtifactDocument, documentFiles, mergeIntoDocument } from "../live/document"
+import { documentFiles, type LiveFiles, mergeIntoDocument } from "../live/document"
 import { readLiveFiles, sameArtifactFiles, storeLiveFiles } from "../live/files"
+import { keepsDocument, loadArtifactDocument, storeArtifactDocument } from "../live/state"
 
-// A canvas is edited by many at once: a write made from an earlier revision is not refused but
-// merged into what the latest version holds now, as a diff against the files it was made from,
-// so whatever was written meanwhile stays. Any other kind keeps the conflict check.
-
-/** The kinds whose writes merge rather than conflict. */
-const MERGED_KINDS: ReadonlySet<ArtifactKind> = new Set(["canvas"])
+// A canvas is edited by many at once, and keeps its content as a Yjs document (see
+// ../live/state.ts). Every write to one is made into that document: a live editor's as the Yjs
+// update it holds, any other as the changes from the files it was made from to its own. A write
+// made from an earlier revision is so merged, not refused, and whatever was written meanwhile
+// stays. Any other kind keeps the conflict check.
 
 /** How many times a merged write starts over when another lands between its merge and its store. */
 const MERGE_ATTEMPTS = 3
@@ -24,6 +25,11 @@ export interface ArtifactWrite {
   readonly baseRevision?: number
   /** The files of `baseRevision`, when the writer holds them; otherwise looked up. */
   readonly baseFiles?: readonly ArtifactFile[]
+  /**
+   * The artifact's document as a live editor holds it, encoded as a Yjs update: merged into the
+   * stored one, whose files the write then holds.
+   */
+  readonly update?: Uint8Array
 }
 
 /** A write as it is stored: merged when the artifact moved past its base. */
@@ -32,12 +38,15 @@ export interface MergedArtifactWrite {
   readonly baseRevision?: number
   /** It was merged with what others wrote since its base. */
   readonly merged: boolean
+  /** The document that holds the write's content, for a kind that keeps one. */
+  readonly document?: FileRef
 }
 
 /**
- * The write to store: as it is unless it is to a canvas that moved past its base revision, then
- * merged into the latest version's files, based on the latest revision. One whose base files are
- * not known is left as it is, for the conflict check to refuse.
+ * The write to store. One to a canvas is made into the artifact's document, which is stored with
+ * it, and is based on the latest revision; one that moved past its base is merged into what the
+ * latest version holds now. A write whose base files are not known is left as it is, for the
+ * conflict check to refuse.
  */
 export async function mergeArtifactWrite(
   context: {
@@ -52,40 +61,56 @@ export async function mergeArtifactWrite(
     ...(write.baseRevision === undefined ? {} : { baseRevision: write.baseRevision }),
     merged: false,
   }
-  if (!MERGED_KINDS.has(write.kind) || write.baseRevision === undefined) return unmerged
+  if (!keepsDocument(write.kind)) return unmerged
 
-  const { projectId, storage } = context
+  const { projectId, storage, blobStorage } = context
   const artifact = await storage.get({ projectId, id: write.artifactId })
-  if (!artifact || artifact.kind !== write.kind || artifact.revision === write.baseRevision) {
-    return unmerged
+  const latest =
+    artifact &&
+    (await storage.getVersion({
+      projectId,
+      artifactId: artifact.id,
+      version: artifact.latestVersion,
+    }))
+  if (!artifact || !latest || artifact.kind !== write.kind) return unmerged
+
+  const moved = write.baseRevision !== undefined && write.baseRevision !== artifact.revision
+  const doc = await loadArtifactDocument(blobStorage, artifact, latest.files)
+  try {
+    let merged = moved
+    if (write.update) {
+      Y.applyUpdate(doc, write.update)
+    } else {
+      // The changes from the files it was made from: the latest's, unless it moved past them.
+      let base: LiveFiles = documentFiles(doc)
+      if (moved) {
+        const files =
+          write.baseFiles ??
+          (await filesAtRevision(storage, projectId, artifact.id, write.baseRevision ?? 0))
+        if (!files) return unmerged
+
+        // Moved without changing its files, as a freeze moves it: nothing to merge with.
+        if (sameArtifactFiles(files, latest.files)) merged = false
+        else base = await readLiveFiles(blobStorage, files)
+      }
+      mergeIntoDocument(doc, base, await readLiveFiles(blobStorage, write.files))
+    }
+
+    // Merged, the write holds what the document holds; otherwise it is stored as it was made.
+    // What the write and the latest version both hold keeps its reference, the write's first.
+    const files =
+      merged || write.update
+        ? await storeLiveFiles(blobStorage, documentFiles(doc), [...latest.files, ...write.files])
+        : write.files
+    return {
+      files,
+      baseRevision: artifact.revision,
+      merged,
+      document: await storeArtifactDocument(blobStorage, doc),
+    }
+  } finally {
+    doc.destroy()
   }
-
-  const latest = await storage.getVersion({
-    projectId,
-    artifactId: artifact.id,
-    version: artifact.latestVersion,
-  })
-  const base =
-    write.baseFiles ?? (await filesAtRevision(storage, projectId, artifact.id, write.baseRevision))
-  if (!latest || !base) return unmerged
-
-  // Moved without changing its files, as a freeze moves it: nothing to merge with.
-  if (sameArtifactFiles(base, latest.files)) {
-    return { files: write.files, baseRevision: artifact.revision, merged: false }
-  }
-
-  const [baseFiles, currentFiles, nextFiles] = await Promise.all(
-    [base, latest.files, write.files].map((files) => readLiveFiles(context.blobStorage, files))
-  )
-  const doc = createArtifactDocument(write.kind, currentFiles)
-  mergeIntoDocument(doc, baseFiles, nextFiles)
-
-  // What the write and the latest version both hold keeps its reference, the write's first.
-  const files = await storeLiveFiles(context.blobStorage, documentFiles(doc), [
-    ...latest.files,
-    ...write.files,
-  ])
-  return { files, baseRevision: artifact.revision, merged: true }
 }
 
 /**
@@ -94,7 +119,7 @@ export async function mergeArtifactWrite(
  * kind never shows its writer.
  */
 export async function withMergedWrite<T>(
-  context: Parameters<typeof mergeArtifactWrite>[0],
+  context: MergeContext,
   write: ArtifactWrite,
   store: (merged: MergedArtifactWrite) => Promise<T>
 ): Promise<T> {
@@ -103,12 +128,104 @@ export async function withMergedWrite<T>(
     try {
       return await store(merged)
     } catch (error) {
-      const moved =
-        (error instanceof ArtifactRequestError || error instanceof ArtifactStorageError) &&
-        error.code === "artifact_moved"
-      if (!moved || !MERGED_KINDS.has(write.kind) || attempt === MERGE_ATTEMPTS) throw error
+      if (!isMoved(error) || !keepsDocument(write.kind) || attempt === MERGE_ATTEMPTS) throw error
     }
   }
+}
+
+type MergeContext = Parameters<typeof mergeArtifactWrite>[0]
+
+/**
+ * The artifact's document once it holds `files` again, as a restore or an undo puts them back:
+ * the change to them, made into its stored document, and the revision that is based on. Null for
+ * a kind that keeps no document, or without the artifact.
+ */
+export async function documentHolding(
+  context: MergeContext,
+  artifactId: string,
+  files: readonly ArtifactFile[]
+): Promise<{ readonly document: FileRef; readonly baseRevision: number } | null> {
+  const { projectId, storage, blobStorage } = context
+  const artifact = await storage.get({ projectId, id: artifactId })
+  if (!artifact || !keepsDocument(artifact.kind)) return null
+  const latest = await storage.getVersion({
+    projectId,
+    artifactId,
+    version: artifact.latestVersion,
+  })
+  if (!latest) return null
+
+  const doc = await loadArtifactDocument(blobStorage, artifact, latest.files)
+  try {
+    mergeIntoDocument(doc, documentFiles(doc), await readLiveFiles(blobStorage, files))
+    return {
+      document: await storeArtifactDocument(blobStorage, doc),
+      baseRevision: artifact.revision,
+    }
+  } finally {
+    doc.destroy()
+  }
+}
+
+/**
+ * Runs a write that puts `files` back, with the document that holds them, based on the revision
+ * it was made at; it starts over when another write lands first. A caller's own `baseRevision`
+ * is kept, and the write then refused past it, as it would be without a document.
+ */
+export async function withDocumentHolding<T>(
+  context: MergeContext,
+  artifactId: string,
+  files: readonly ArtifactFile[] | null,
+  baseRevision: number | undefined,
+  store: (held: { readonly document?: FileRef; readonly baseRevision?: number }) => Promise<T>
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    const held = files ? await documentHolding(context, artifactId, files) : null
+    const base = baseRevision ?? held?.baseRevision
+    const fits = held && (baseRevision === undefined || baseRevision === held.baseRevision)
+    try {
+      return await store({
+        ...(fits ? { document: held.document } : {}),
+        ...(base === undefined ? {} : { baseRevision: base }),
+      })
+    } catch (error) {
+      if (!isMoved(error) || baseRevision !== undefined || !held || attempt === MERGE_ATTEMPTS) {
+        throw error
+      }
+    }
+  }
+}
+
+/**
+ * The documents of the canvases a retry of a turn puts back, by id: each one nobody changed since
+ * the turn's last write, as the turn's restore point holds it. Made before the undo, at the
+ * revision the undo requires, so the undo can store them.
+ */
+export async function undoneTurnDocuments(
+  context: MergeContext,
+  turnRunId: string
+): Promise<Record<string, FileRef>> {
+  const { projectId, storage } = context
+  const documents: Record<string, FileRef> = {}
+
+  for (const write of await storage.listTurnWrites({ projectId, turnRunId })) {
+    if (write.created) continue
+    const artifact = await storage.get({ projectId, id: write.artifactId })
+    if (!artifact || artifact.revision !== write.revision || !keepsDocument(artifact.kind)) continue
+
+    const points = await storage.listRestorePoints({ projectId, id: artifact.id })
+    const point = points.find((each) => each.turnRunId === turnRunId)
+    const held = point && (await documentHolding(context, artifact.id, point.files))
+    if (held?.baseRevision === write.revision) documents[artifact.id] = held.document
+  }
+  return documents
+}
+
+function isMoved(error: unknown): boolean {
+  return (
+    (error instanceof ArtifactRequestError || error instanceof ArtifactStorageError) &&
+    error.code === "artifact_moved"
+  )
 }
 
 /**

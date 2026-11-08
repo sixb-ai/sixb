@@ -9,6 +9,7 @@ import {
 } from "../artifacts/execution"
 import type { ArtifactKind } from "../artifacts/kinds"
 import { appendArtifactLive, changedBoards } from "../artifacts/live/presence"
+import { firstArtifactDocument } from "../artifacts/live/state"
 import { withMergedWrite } from "../artifacts/publish/merge"
 import {
   type BoardPreviewInput,
@@ -24,6 +25,7 @@ import {
 } from "../artifacts/publish/publish"
 import type { ArtifactThemeMode } from "../artifacts/theme"
 import { type Principal, principalsEqual } from "../auth/types"
+import type { FileRef } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events/service"
 import type { Sixb } from "../runtime/sixb"
@@ -214,7 +216,11 @@ export function agentRunArtifacts(
       // checks again that the run holds its conversation and the requester may still publish.
       const context = { projectId, storage: requireArtifacts(storage), blobStorage: blobs }
       const reading = artifactAccessRule(reader, storage)
-      const write = async (files: readonly ArtifactFile[], baseRevision?: number) => {
+      const write = async (
+        files: readonly ArtifactFile[],
+        baseRevision?: number,
+        document?: FileRef
+      ) => {
         const prepared = await prepareArtifactVersion(context, {
           ...("artifactId" in input
             ? {
@@ -232,6 +238,7 @@ export function agentRunArtifacts(
           checkQuery: artifactQueryChecker(reader),
           origin: { threadId, runId: run.id },
           turnRunId,
+          ...(document ? { document } : {}),
         })
         const stored = await storage.transaction(async (tx) => {
           await assertAgentRunOwned(requireAgents(tx), fence)
@@ -272,11 +279,18 @@ export function agentRunArtifacts(
                 ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
               },
               async (each) => ({
-                ...(await write(each.files, each.baseRevision)),
+                ...(await write(each.files, each.baseRevision, each.document)),
                 merged: each.merged,
               })
             )
-          : { ...(await write(input.files)), merged: false }
+          : {
+              ...(await write(
+                input.files,
+                undefined,
+                await firstArtifactDocument(blobs, kind, input.files)
+              )),
+              merged: false,
+            }
       if ("artifactId" in input) await announceArtifactUpdates(host.domainEvents, [stored.version])
       if (kind === "canvas") await announceAgentBoards(host, turnRunId, before, stored.version)
 

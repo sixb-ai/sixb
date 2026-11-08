@@ -1,4 +1,5 @@
 import type { Principal } from "../../auth"
+import type { FileRef } from "../../blob-storage"
 import { ArtifactStorageError } from "../../storage/artifacts/errors"
 import type {
   ArtifactFile,
@@ -81,6 +82,8 @@ export interface PublishArtifactInput {
    * retry of the turn undoes what it wrote.
    */
   readonly turnRunId?: string
+  /** The content as the artifact's Yjs document, stored with it, for a kind edited live. */
+  readonly document?: FileRef
 }
 
 /**
@@ -112,6 +115,7 @@ export interface PreparedArtifactVersion {
   readonly artifactId?: string
   readonly baseRevision?: number
   readonly turnRunId?: string
+  readonly document?: FileRef
   readonly kind: ArtifactKind
   /** Owns the artifact when this version creates it. */
   readonly owner: Principal
@@ -169,6 +173,7 @@ export async function prepareArtifactVersion(
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
     ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
     ...(input.turnRunId === undefined ? {} : { turnRunId: input.turnRunId }),
+    ...(input.document ? { document: input.document } : {}),
     kind: input.kind,
     owner: input.owner ?? input.author,
     readable,
@@ -327,6 +332,7 @@ async function publishVersion(
       version: withBoardRenderKeys(prepared.version, artifactId),
       ...(prepared.baseRevision === undefined ? {} : { baseRevision: prepared.baseRevision }),
       ...(prepared.turnRunId === undefined ? {} : { turnRunId: prepared.turnRunId }),
+      ...(prepared.document ? { document: prepared.document } : {}),
     })
   } catch (error) {
     throw artifactRequestError(error)
@@ -373,6 +379,7 @@ async function createArtifact(
         owner: prepared.owner,
         version: withBoardRenderKeys(prepared.version, id),
         ...(prepared.turnRunId === undefined ? {} : { turnRunId: prepared.turnRunId }),
+        ...(prepared.document ? { document: prepared.document } : {}),
       })
     } catch (error) {
       const collided = error instanceof ArtifactStorageError && error.code === "artifact_exists"
