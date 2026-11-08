@@ -167,3 +167,22 @@ describe("Composer attachments", () => {
     expect(document.activeElement).toBe(view.input())
   })
 })
+
+// Guard proof: set the inserted words in place of the input's (`setValue(insertion.text)`); what
+// the reader had written is lost.
+test("words handed to the input join what the reader is writing, and are not sent", async () => {
+  const view = renderComposer()
+  fireEvent.focusIn(view.input())
+  fireEvent.input(view.input(), { target: { value: "Also:" } })
+  fireEvent.keyUp(view.input(), { key: ":" })
+
+  view.rerender({ insertion: { text: "- [home · revision 3] Warmer colors", nonce: 1 } })
+  await waitFor(() =>
+    expect(view.input().value).toBe("Also:\n\n- [home · revision 3] Warmer colors")
+  )
+  expect(view.onSend).not.toHaveBeenCalled()
+
+  // More words, handed later, join after them.
+  view.rerender({ insertion: { text: "Done.", nonce: 2 } })
+  await waitFor(() => expect(view.input().value).toEndWith("Warmer colors\n\nDone."))
+})

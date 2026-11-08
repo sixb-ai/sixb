@@ -120,6 +120,11 @@ export interface ComposerProps {
   /** Exact context snapshot to restore after a failed send. */
   readonly draftContext?: readonly AgentContextEntryInput[]
   readonly draftNonce?: number
+  /**
+   * Words to add to what the reader is writing, such as comments an artifact asks the Agent to act
+   * on: appended to the input, never sent, each time `nonce` changes to a non-zero value.
+   */
+  readonly insertion?: { readonly text: string; readonly nonce: number }
   /** Ambient context offered for the next turn. Explicit @ selections remain composer-local. */
   readonly ambientContext?: readonly AgentContextInput[]
   /** Scope drag/drop and overlays to an embedded panel instead of the whole viewport. */
@@ -223,6 +228,7 @@ export function Composer({
   draftAttachments,
   draftContext,
   draftNonce,
+  insertion,
   ambientContext = [],
   compact = false,
   approvalMode,
@@ -375,6 +381,21 @@ export function Composer({
     setMention(null)
     textareaRef.current?.focus()
   }, [draftNonce])
+
+  // Words handed to the input join what is there, after a blank line, the caret after them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: added only when the nonce changes
+  useEffect(() => {
+    if (!insertion?.nonce) return
+    setValue((current) =>
+      current.trim() ? `${current.trimEnd()}\n\n${insertion.text}` : insertion.text
+    )
+    requestAnimationFrame(() => {
+      const input = textareaRef.current
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+  }, [insertion?.nonce])
 
   // However a dictation ends, the focus returns to the input, the caret after any transcript.
   useEffect(() => {

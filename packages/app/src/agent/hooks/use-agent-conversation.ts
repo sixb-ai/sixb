@@ -160,6 +160,7 @@ export type ConversationComposerProps = Pick<
   | "draftAttachments"
   | "draftContext"
   | "draftNonce"
+  | "insertion"
   | "approvalMode"
   | "onApprovalModeChange"
   | "awaitingApproval"
