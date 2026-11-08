@@ -57350,6 +57350,11 @@
                             "required": ["type", "id"],
                             "additionalProperties": false
                           },
+                          "authorName": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -57374,7 +57379,15 @@
                             "description": "Who marked it resolved"
                           }
                         },
-                        "required": ["artifactId", "id", "anchor", "body", "author", "createdAt"],
+                        "required": [
+                          "artifactId",
+                          "id",
+                          "anchor",
+                          "body",
+                          "author",
+                          "authorName",
+                          "createdAt"
+                        ],
                         "additionalProperties": false
                       },
                       "description": "Comments and replies, oldest first"
@@ -57899,6 +57912,11 @@
                       "required": ["type", "id"],
                       "additionalProperties": false
                     },
+                    "authorName": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -57923,7 +57941,15 @@
                       "description": "Who marked it resolved"
                     }
                   },
-                  "required": ["artifactId", "id", "anchor", "body", "author", "createdAt"],
+                  "required": [
+                    "artifactId",
+                    "id",
+                    "anchor",
+                    "body",
+                    "author",
+                    "authorName",
+                    "createdAt"
+                  ],
                   "additionalProperties": false
                 }
               }
@@ -58422,6 +58448,11 @@
                       "required": ["type", "id"],
                       "additionalProperties": false
                     },
+                    "authorName": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -58446,7 +58477,15 @@
                       "description": "Who marked it resolved"
                     }
                   },
-                  "required": ["artifactId", "id", "anchor", "body", "author", "createdAt"],
+                  "required": [
+                    "artifactId",
+                    "id",
+                    "anchor",
+                    "body",
+                    "author",
+                    "authorName",
+                    "createdAt"
+                  ],
                   "additionalProperties": false
                 }
               }

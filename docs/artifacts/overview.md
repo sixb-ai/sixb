@@ -213,6 +213,8 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 - An anchor records the revision its author saw, and the element's first words. These still name
   the element once it is gone. Its `point` places the comment's pin on the board, as fractions of
   the board's width and height.
+- Each comment names its author in `authorName`, as their profile does, or `null` for someone the
+  project no longer knows.
 - Each change sends `artifact.commented` to whoever reads the artifact, and to everyone editing it
   live.
 - An artifact holds at most 1,000 comments, each up to 4,000 characters.

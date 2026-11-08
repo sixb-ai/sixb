@@ -36,6 +36,7 @@ import {
   fileContentGetResponses,
   fileContentHeadResponses,
 } from "../files/content"
+import { principalName } from "../live/awareness"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AddArtifactCommentBodySchema,
@@ -113,8 +114,28 @@ function versionBody(version: ArtifactVersionRecord) {
   }
 }
 
-function commentBody(comment: ArtifactCommentRecord) {
+/**
+ * Names the authors of these comments, each read once, as the live canvas names who is on it.
+ */
+function commentAuthors(host: SixbHostView) {
+  const names = new Map<string, Promise<string | null>>()
+  return (comment: ArtifactCommentRecord) => {
+    const key = `${comment.author.type}:${comment.author.id}`
+    let name = names.get(key)
+    if (!name) {
+      name = principalName(host.storage, host.projectId, comment.author)
+      names.set(key, name)
+    }
+    return name
+  }
+}
+
+async function commentBody(
+  comment: ArtifactCommentRecord,
+  nameOf: (comment: ArtifactCommentRecord) => Promise<string | null>
+) {
   return {
+    authorName: await nameOf(comment),
     artifactId: comment.artifactId,
     id: comment.id,
     ...(comment.parentId === undefined ? {} : { parentId: comment.parentId }),
@@ -873,7 +894,10 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const comments = await requireRequestSixb(context).artifacts.listComments(artifactId)
           if (!comments) return await refusal(context, artifactId, context.set)
 
-          return ArtifactCommentListResponseSchema.parse({ comments: comments.map(commentBody) })
+          const nameOf = commentAuthors(host)
+          return ArtifactCommentListResponseSchema.parse({
+            comments: await Promise.all(comments.map((comment) => commentBody(comment, nameOf))),
+          })
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -910,7 +934,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             }
           )
           context.set.status = 201
-          return ArtifactCommentSchema.parse(commentBody(comment))
+          return ArtifactCommentSchema.parse(await commentBody(comment, commentAuthors(host)))
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -946,7 +970,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             context.params.commentId,
             body.resolved
           )
-          return ArtifactCommentSchema.parse(commentBody(comment))
+          return ArtifactCommentSchema.parse(await commentBody(comment, commentAuthors(host)))
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }

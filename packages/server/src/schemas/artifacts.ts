@@ -416,6 +416,12 @@ export const ArtifactCommentSchema = z.object({
   anchor: ArtifactCommentAnchorSchema,
   body: z.string().describe("Plain text"),
   author: PrincipalSchema,
+  authorName: z
+    .string()
+    .nullable()
+    .describe(
+      "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
+    ),
   createdAt: z.string(),
   resolvedAt: z.string().optional().describe("When someone marked it resolved"),
   resolvedBy: PrincipalSchema.optional().describe("Who marked it resolved"),

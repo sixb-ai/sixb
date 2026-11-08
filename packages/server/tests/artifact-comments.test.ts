@@ -120,6 +120,7 @@ describe("an artifact's comments over HTTP", () => {
       anchor: { board: "welcome", element: "body>main:0>h1:0", label: "Welcome", revision: 1 },
       body: "Warmer, please",
       author: { type: "user", id: "alice" },
+      authorName: "alice@acme.com",
     })
     const replied = await send(base, "POST", { body: "Done", parentId: comment.id })
     expect(await replied.json()).toMatchObject({ parentId: comment.id, anchor: comment.anchor })
@@ -151,6 +152,31 @@ describe("an artifact's comments over HTTP", () => {
       anchor: { board: "welcome", element: `body${">div:0".repeat(200)}` },
     })
     expect(long.status).toBe(422)
+
+    // Who wrote each is named as the project knows them: the project's own code by its name, and
+    // nobody for an author it no longer knows. Guard proof: name every author by its principal's
+    // id in principalName; the ghost then gets a name.
+    for (const [id, author] of [
+      ["cmt_project", { type: "system", id: "system" }],
+      ["cmt_ghost", { type: "user", id: "ghost" }],
+    ] as const) {
+      await storage.artifacts.createComment({
+        projectId: PROJECT_ID,
+        artifactId: artifact.id,
+        id,
+        anchor: { revision: 1 },
+        body: id,
+        author,
+        createdAt: new Date("2026-10-17T11:00:00.000Z"),
+      })
+    }
+    const named = (await (await send(base, "GET")).json()) as {
+      comments: { body: string; authorName: string | null }[]
+    }
+    expect(named.comments.map(({ body, authorName }) => [body, authorName])).toEqual([
+      ["cmt_project", "Project"],
+      ["cmt_ghost", null],
+    ])
 
     // Someone it is not shared with reads none.
     const bob = await session(storage, "bob")
