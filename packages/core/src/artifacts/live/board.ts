@@ -505,11 +505,28 @@ function labelOf(node: Element, kind: BoardElementKind): string {
   const words =
     kind === "image"
       ? (node.attrs.find((attribute) => attribute.name === "alt")?.value ?? "")
-      : textNodes(node)
-          .map((each) => each.value)
-          .join(kind === "text" ? "" : " ")
+      : kind === "text"
+        ? spokenWords(node)
+        : textNodes(node)
+            .map((each) => each.value)
+            .join(" ")
   const label = words.replace(/\s+/g, " ").trim()
   return label.length > MAX_LABEL_LENGTH ? `${label.slice(0, MAX_LABEL_LENGTH - 1)}…` : label
+}
+
+/** A text's words as they read: a line break between two words parts them. */
+function spokenWords(node: Element): string {
+  let words = ""
+  const visit = (each: Node) => {
+    if (isText(each)) {
+      words += each.value
+    } else if (isElement(each)) {
+      if (each.tagName === "br") words += " "
+      else if (!UNADDRESSED.has(each.tagName)) for (const child of each.childNodes) visit(child)
+    }
+  }
+  for (const child of node.childNodes) visit(child)
+  return words
 }
 
 function textOf(node: Element): string {

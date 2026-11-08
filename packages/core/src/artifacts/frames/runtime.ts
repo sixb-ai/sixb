@@ -236,6 +236,14 @@ export function frameRuntime(): void {
     return hash.toString(16)
   }
 
+  /** A text's words as they read: a line break between two words parts them. */
+  const spokenWords = (element: Element): string => {
+    const copy = element.cloneNode(true)
+    if (!(copy instanceof Element)) return element.textContent ?? ""
+    for (const lineBreak of Array.from(copy.querySelectorAll("br"))) lineBreak.replaceWith(" ")
+    return copy.textContent ?? ""
+  }
+
   /** The element the reader means by `node`, as the app is told of it. */
   const editTarget = (node: EventTarget | null) => {
     const start = node instanceof Element ? node : null
@@ -267,7 +275,7 @@ export function frameRuntime(): void {
     }
 
     const own = element.getBoundingClientRect()
-    const label = (kind === "image" ? (element.getAttribute("alt") ?? "") : words)
+    const label = (kind === "image" ? (element.getAttribute("alt") ?? "") : spokenWords(element))
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, MAX_EDIT_LABEL)

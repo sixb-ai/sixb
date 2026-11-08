@@ -63,6 +63,14 @@ describe("a board's elements", () => {
     expect(heading && BOARD.slice(heading.start, heading.end)).toBe("<h1>Welcome</h1>")
   })
 
+  test("are named by their words as they read, a line break parting two of them", () => {
+    // Reproduce by joining a text's words with nothing between them in `labelOf`: the label
+    // reads "Now hiring inNorth and East".
+    expect(boardElements("<h1>Now hiring in<br>North and East</h1>")[0]?.label).toBe(
+      "Now hiring in North and East"
+    )
+  })
+
   test("are addressed the same in a board with no body tag, and nowhere in its head", () => {
     // An implied body is no element of the source: its children are.
     expect(boardElements("<h1>Hi</h1><p>There</p>").map(({ address }) => address)).toEqual([
