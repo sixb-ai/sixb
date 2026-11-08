@@ -269,14 +269,14 @@ describe("artifact ownership", () => {
     expect(await as("bob").artifacts.listVersions(artifact.id)).toBeNull()
     expect((await as("bob").artifacts.list()).total).toBe(0)
     await expectRequestError(
-      as("bob").artifacts.publish(artifact.id, { kind: "document", title: "Mine now", files }),
+      as("bob").artifacts.update(artifact.id, { kind: "document", title: "Mine now", files }),
       "not_shared"
     )
     expect(await as("bob").artifacts.access(artifact.id)).toBe("none")
     expect(await as("bob").artifacts.delete(artifact.id)).toBe(false)
     expect((await createTestSixb(host).artifacts.get(artifact.id))?.id).toBe(artifact.id)
 
-    const second = await as("alice").artifacts.publish(artifact.id, {
+    const second = await as("alice").artifacts.update(artifact.id, {
       kind: "document",
       title: "Report, revised",
       files,
@@ -286,7 +286,7 @@ describe("artifact ownership", () => {
       "Report, revised"
     )
     await expectRequestError(
-      as("alice").artifacts.publish(artifact.id, { kind: "file", title: "Report", files }),
+      as("alice").artifacts.update(artifact.id, { kind: "file", title: "Report", files }),
       "artifact_kind_mismatch"
     )
     expect((await as("alice").artifacts.list()).artifacts.map((item) => item.id)).toEqual([

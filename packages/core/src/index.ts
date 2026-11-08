@@ -977,7 +977,7 @@ export type {
   ArtifactStateValue,
   ArtifactsRuntime,
   ListArtifactsRuntimeInput,
-  PublishArtifactRuntimeInput,
+  UpdateArtifactRuntimeInput,
 } from "./artifacts/execution"
 export type { ArtifactKind } from "./artifacts/kinds"
 export type { ArtifactOutline } from "./artifacts/outline"

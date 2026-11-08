@@ -154,7 +154,7 @@ describe("an observer and artifacts", () => {
       },
     })
     await owner.artifacts.freeze(artifact.id)
-    await owner.artifacts.publish(artifact.id, { ...content, title: "Edited from code" })
+    await owner.artifacts.update(artifact.id, { ...content, title: "Edited from code" })
 
     expect(await observer.artifacts.access(artifact.id)).toBe("read")
     expect(await observer.artifacts.get(artifact.id)).toMatchObject({
@@ -164,7 +164,7 @@ describe("an observer and artifacts", () => {
     expect(await observer.artifacts.getVersion(artifact.id, 1)).toMatchObject({ version: 1 })
     expect((await observer.artifacts.listVersions(artifact.id))?.total).toBe(3)
 
-    await expect(observer.artifacts.publish(artifact.id, content)).rejects.toMatchObject({
+    await expect(observer.artifacts.update(artifact.id, content)).rejects.toMatchObject({
       code: "read_only",
     })
     // Nor does an observer create a version or restore one.
