@@ -126,13 +126,13 @@ export function BoardFocus({
         <span className="h-5 w-px bg-border" aria-hidden="true" />
         <span className="min-w-0 truncate px-1 text-sm font-semibold">{title}</span>
         {mode === "edit" ? (
-          <span className="hidden min-w-0 truncate text-xs text-muted-foreground lg:inline">
+          <span className="hidden min-w-0 truncate text-xs text-muted-foreground @5xl/canvas:inline">
             {messages.edit.hint}
           </span>
         ) : null}
         {tools ? <div className="ml-auto flex shrink-0 items-center">{tools}</div> : null}
         <span
-          className={`${tools ? "" : "ml-auto "}text-xs text-muted-foreground tabular-nums max-sm:hidden`}
+          className={`${tools ? "" : "ml-auto "}shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden`}
         >
           {messages.position(index + 1, boards.length)}
         </span>
