@@ -117,10 +117,16 @@ export function useCanvasCommenting({
     [threads, filter, messages, nameOf]
   )
 
+  // What a new comment is about, as its card says it: the words it points at, else its board.
   const pick = useCallback(
     (board: string, place: CommentPick, where: CommentDraft["where"]) =>
-      setDraft({ board, ...place, where }),
-    []
+      setDraft({
+        board,
+        ...place,
+        anchor: place.label ? `“${place.label}”` : (titles.get(board) ?? board),
+        where,
+      }),
+    [titles]
   )
 
   const submitDraft = useCallback(
@@ -289,22 +295,24 @@ export function CommentTools({
   )
 }
 
-/** Says, while the reader is placing a comment, where a click puts it. */
+/** Says, while the reader is placing a comment, that a click places it, and how to stop. */
 export function CommentModeHint({ onExit }: { readonly onExit: () => void }) {
   const messages = useArtifactMessages().canvas.comments
   return (
     <div
       role="status"
-      className="pointer-events-auto flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full bg-foreground py-1 pr-1 pl-3 text-xs text-background shadow-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1"
+      className="pointer-events-auto flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border bg-background/95 py-1 pr-1 pl-3 text-xs text-muted-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06),0_8px_24px_-12px_rgb(0_0_0/0.25)] backdrop-blur motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
     >
-      <MessageSquarePlus className="size-3.5 shrink-0" aria-hidden="true" />
+      <MessageSquarePlus className="size-3.5 shrink-0 text-foreground" aria-hidden="true" />
       <span className="min-w-0 truncate">{messages.modeHint}</span>
       <button
         type="button"
         onClick={onExit}
-        className="shrink-0 rounded-full bg-background/15 px-2 py-0.5 font-medium outline-none hover:bg-background/25 focus-visible:ring-2 focus-visible:ring-background"
+        aria-label={messages.exit}
+        title={messages.exit}
+        className="shrink-0 rounded-full border border-border bg-muted px-1.5 font-mono text-[10px] leading-4 font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {messages.exit}
+        Esc
       </button>
     </div>
   )

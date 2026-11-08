@@ -65,6 +65,20 @@ export function frameRuntime(): void {
   const KIND = "data-sixb-edit"
   const WORDS = "data-sixb-text"
   const MAX_EDIT_LABEL = 80
+  /** A comment's bubble, its tip where the pin goes, as the canvas draws it. */
+  const COMMENT_CURSOR =
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 21V11a8 8 0 1 1 8 8H3z' fill='%23111' stroke='white' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E\") 3 21, crosshair"
+  /**
+   * How picking shows: editing, a dashed line around what the pointer is over and a solid one
+   * around what is picked; commenting, both solid in the app's accent, under a bubble pointer.
+   */
+  const EDITING_CSS = [
+    "[data-sixb-editing] [data-sixb-hover] { outline: 1px dashed var(--sixb-accent, #0090ff); outline-offset: 2px; }",
+    "[data-sixb-editing] [data-sixb-picked] { outline: 2px solid var(--sixb-accent, #0090ff); outline-offset: 2px; }",
+    "[data-sixb-editing] [contenteditable] { cursor: text; }",
+    `[data-sixb-commenting], [data-sixb-commenting] * { cursor: ${COMMENT_CURSOR} !important; }`,
+    "[data-sixb-commenting] :is([data-sixb-hover], [data-sixb-picked]) { outline: 2px solid var(--sixb-accent, #0090ff); outline-offset: 3px; }",
+  ].join(" ")
   const root = document.documentElement
   // Only set while the runtime itself runs, so kept for what reads it later.
   const script = document.currentScript as HTMLScriptElement | null
@@ -328,11 +342,13 @@ export function frameRuntime(): void {
     typable = typingAllowed
     if (!typable) stopTyping()
     root.toggleAttribute("data-sixb-editing", on)
+    // Picking what to comment on: the pointer is a comment's bubble, and what it would comment on
+    // is drawn as the pin will be, in the app's color.
+    root.toggleAttribute("data-sixb-commenting", on && !typable)
     if (on && !document.getElementById("sixb-editing")) {
       const style = document.createElement("style")
       style.id = "sixb-editing"
-      style.textContent =
-        "[data-sixb-editing] [data-sixb-hover] { outline: 1px dashed #0090ff; outline-offset: 2px; } [data-sixb-editing] [data-sixb-picked] { outline: 2px solid #0090ff; outline-offset: 2px; } [data-sixb-editing] [contenteditable] { cursor: text; }"
+      style.textContent = EDITING_CSS
       document.head.append(style)
     }
     if (!on) {
@@ -373,6 +389,12 @@ export function frameRuntime(): void {
     if (element === pointed && element !== null) return
     pointed = mark("data-sixb-hover", pointed, element)
     postEdit({ event: "edit.hover", params: { target } })
+  })
+  // The pointer gone from the page, nothing is under it.
+  document.documentElement.addEventListener("mouseleave", () => {
+    if (!editing || pointed === null) return
+    pointed = mark("data-sixb-hover", pointed, null)
+    postEdit({ event: "edit.hover", params: { target: null } })
   })
   document.addEventListener("input", (event) => {
     if (!editing || !event.isTrusted || !typing || !typing.contains(event.target as Node | null)) {
@@ -418,6 +440,7 @@ export function frameRuntime(): void {
           ["--sixb-stage", "--muted"],
           ["--sixb-stage-border", "--border"],
           ["--sixb-stage-foreground", "--foreground"],
+          ["--sixb-accent", "--primary"],
         ]) {
           const value = declarations.find((declaration) => declaration.startsWith(`${token}:`))
           if (value) declarations.push(`${stage}${value.slice(token.length)}`)

@@ -339,3 +339,10 @@
       3 21,
     crosshair;
 }
+
+/* The board a click would comment on, outlined as the pin will be colored. */
+.sixb-artboard[data-commenting] .react-flow__node-board:hover {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+  border-radius: 10px;
+}
