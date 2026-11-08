@@ -120,7 +120,7 @@ function restorePointSummary(point: ArtifactRestorePointRecord) {
 }
 
 /**
- * A version as one is answered alone, or just published: a canvas's boards say whether their
+ * A version as one is answered alone, or just written: a canvas's boards say whether their
  * previews are worth waiting for, so a viewer seeded from either asks for them alike.
  */
 async function versionResponse(host: SixbHostView, version: ArtifactVersionRecord) {
@@ -762,7 +762,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const run = await runTokenArtifacts(host, context)
           const published = run
             ? await run.publish({ ...content, artifactId })
-            : await requireRequestSixb(context).artifacts.publish(artifactId, content)
+            : await requireRequestSixb(context).artifacts.update(artifactId, content)
           context.set.status = 201
           return await serializePublished(host, published)
         } catch (error) {

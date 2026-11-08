@@ -278,7 +278,7 @@ describe("a run's artifacts", () => {
 
       // Alice, the conversation's owner, writes it in the app: her version 2 is hers to picture.
       jest.setSystemTime(new Date("2026-11-08T10:02:00.000Z"))
-      const edited = await as(alice).artifacts.publish(id, {
+      const edited = await as(alice).artifacts.update(id, {
         kind: "canvas",
         title: "Onboarding",
         files: await canvas(),

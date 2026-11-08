@@ -78,10 +78,10 @@ export type ArtifactQueryInput =
       readonly facets: readonly { readonly property: PropertyToken; readonly limit: number }[]
     }
 
-export interface PublishArtifactRuntimeInput extends ArtifactContentInput {
+export interface UpdateArtifactRuntimeInput extends ArtifactContentInput {
   /**
    * The revision this content was made from, such as the one a person edited. When the artifact
-   * changed since, publishing fails with `artifact_moved`, naming its revision and who wrote it.
+   * changed since, the update fails with `artifact_moved`, naming its revision and who wrote it.
    */
   readonly baseRevision?: number
 }
@@ -116,11 +116,11 @@ export interface ArtifactsRuntime {
    * the next version opens when it is frozen. The artifact keeps its owner, and the kind must be
    * its. Throws `not_shared` or `read_only` when the caller may not update it.
    */
-  publish(artifactId: string, input: PublishArtifactRuntimeInput): Promise<PublishedArtifact>
+  update(artifactId: string, input: UpdateArtifactRuntimeInput): Promise<PublishedArtifact>
   /**
    * Creates a version: the open latest version is frozen, so it never changes again and the next
    * write opens the next one. A latest version already frozen is returned as it is. Who may
-   * publish may freeze; throws as `publish` does.
+   * update may freeze; throws as `update` does.
    */
   freeze(artifactId: string, input?: ArtifactRevisionInput): Promise<PublishedArtifactVersion>
   /**
@@ -132,8 +132,8 @@ export interface ArtifactsRuntime {
   getRestorePoint(artifactId: string, revision: number): Promise<ArtifactRestorePointRecord | null>
   /**
    * Puts a restore point's content back in the latest version, authored by the caller, as
-   * `publish` writes it. What it replaces becomes a restore point, so the restore can be undone.
-   * Throws as `publish` does, and `restore_point_not_found`.
+   * `update` writes it. What it replaces becomes a restore point, so the restore can be undone.
+   * Throws as `update` does, and `restore_point_not_found`.
    */
   restore(
     artifactId: string,
@@ -463,7 +463,7 @@ export function createArtifactsRuntime(
       return published
     },
 
-    async publish(artifactId, input) {
+    async update(artifactId, input) {
       const author = requireCaller()
       await requireUpdatable(artifactId)
 

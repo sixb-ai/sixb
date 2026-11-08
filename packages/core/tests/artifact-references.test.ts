@@ -294,7 +294,7 @@ describe("publishing references", () => {
     const id = first.artifact.id
     const files = await put({ "document.md": `# R\n\nSee [the start](artifact:${id}#r).\n` })
     expect(
-      await refusal(as("alice").artifacts.publish(id, { kind: "document", title: "R", files }))
+      await refusal(as("alice").artifacts.update(id, { kind: "document", title: "R", files }))
     ).toContain("names the artifact being published")
   })
 })
@@ -306,7 +306,7 @@ describe("a new version that breaks another artifact", () => {
     const follows = await report(`# Q3 report\n\n![Revenue](artifact:${id}#chart=revenue)\n`)
     await report(`# Pinned\n\n![Revenue](artifact:${id}@1#chart=revenue)\n`)
 
-    const renamed = await as("alice").artifacts.publish(id, {
+    const renamed = await as("alice").artifacts.update(id, {
       kind: "sheet",
       title: "Q3 numbers",
       files: await put({
@@ -336,7 +336,7 @@ describe("a new version that breaks another artifact", () => {
         "document.md": `# Board pack\n\n![Revenue](artifact:${id}#chart=revenue)\n`,
       }),
     })
-    const renamed = await as("alice").artifacts.publish(id, {
+    const renamed = await as("alice").artifacts.update(id, {
       kind: "sheet",
       title: "Q3 numbers",
       files: await put({ "workbook.json": workbook([]), "sheets/Summary.csv": SUMMARY }),
@@ -357,7 +357,7 @@ describe("a new version that breaks another artifact", () => {
     const warn = console.warn
     console.warn = () => {}
     try {
-      const next = await as("alice").artifacts.publish(id, {
+      const next = await as("alice").artifacts.update(id, {
         kind: "sheet",
         title: "Q3 numbers",
         files: await put({ "workbook.json": workbook(), "sheets/Summary.csv": SUMMARY }),

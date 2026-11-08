@@ -449,7 +449,7 @@ preview when it changed, and the viewer shows the new one as soon as it is ready
   its outline: a broken picture would stay.
 - A board that reads a query is pictured with the data its publisher could read when they
   published it, which everyone who can open the canvas then sees in its preview; publishing warns
-  of it. In a canvas with queries, a version someone else publishes renders the previews again,
+  of it. In a canvas with queries, a change someone else saves renders the previews again,
   with their data, and a copy of the canvas, such as a forked conversation's, gets none of them.
 - `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark&size=small`
   serves one to whoever reads the version, and reading or publishing a version says which boards'

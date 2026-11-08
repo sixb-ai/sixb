@@ -206,7 +206,7 @@ describe("publishing a canvas", () => {
     expect(first.version.outline).toMatchObject({ themes: ["light", "dark"] })
 
     // A person moves a board and rewrites the other one in the app.
-    const second = await as(alice).artifacts.publish(first.artifact.id, {
+    const second = await as(alice).artifacts.update(first.artifact.id, {
       kind: "canvas",
       title: "Onboarding",
       files: await put({
@@ -259,7 +259,7 @@ describe("publishing a canvas", () => {
         ...(await pictures("region", ["light", "dark"])),
       ]
     )
-    await as(alice).artifacts.publish(first.artifact.id, {
+    await as(alice).artifacts.update(first.artifact.id, {
       kind: "canvas",
       title: "Onboarding",
       files: await put({
@@ -271,7 +271,7 @@ describe("publishing a canvas", () => {
 
     // Writing the open version again with one board changed asks for that board's pictures, in a
     // job of the new revision's. Reproduce by keying the job by version: it is the first job.
-    const changed = await as(alice).artifacts.publish(first.artifact.id, {
+    const changed = await as(alice).artifacts.update(first.artifact.id, {
       kind: "canvas",
       title: "Onboarding",
       files: await put({
