@@ -2,8 +2,10 @@ import type { SixbHostView } from "@sixb/core"
 import {
   type ArtifactLiveClientMessage,
   type ArtifactLiveServerMessage,
+  type ArtifactLiveUser,
   decodeLiveData,
 } from "@sixb/core/artifacts/live"
+import { liveUserOf } from "./awareness"
 import { type LiveConnection, LiveRoom, type LiveRoomHost } from "./room"
 
 /** How many artifacts one connection may hold live at once. */
@@ -13,13 +15,15 @@ export const MAX_LIVE_SYNC_BYTES = 8 * 1024 * 1024
 
 /**
  * The artifacts this server holds live, one room each, opened by the first connection that joins
- * and closed a while after the last leaves, once its changes are written back. Every room learns of the
+ * and closed once the last leaves and its changes are written back. Every room learns of the
  * artifact's writes from the project's events, wherever they were made.
  */
 export class LiveRooms {
   private readonly rooms = new Map<string, Promise<LiveRoom | "not_found" | "not_live">>()
   /** The artifacts each connection joined. */
   private readonly joined = new Map<string, Set<string>>()
+  /** Who each connection is, read once. */
+  private readonly users = new Map<string, Promise<ArtifactLiveUser>>()
   /** The parts of a sync message a connection is sending, by connection and artifact. */
   private readonly parts = new Map<string, { chunks: Uint8Array[]; bytes: number }>()
   private events: Promise<() => void> | undefined
@@ -54,6 +58,7 @@ export class LiveRooms {
       await this.leave(connection, artifactId)
     }
     this.joined.delete(connection.id)
+    this.users.delete(connection.id)
   }
 
   /**
@@ -113,7 +118,20 @@ export class LiveRooms {
 
     held.add(artifactId)
     this.joined.set(connection.id, held)
-    room.join(connection, access === "read" ? "watch" : "edit")
+    room.join(connection, access === "read" ? "watch" : "edit", await this.userOf(connection))
+  }
+
+  private userOf(connection: LiveConnection): Promise<ArtifactLiveUser> {
+    const known = this.users.get(connection.id)
+    if (known) return known
+
+    const user = liveUserOf(
+      this.host.storage,
+      this.host.projectId,
+      connection.sixb.execution.requestedBy
+    )
+    this.users.set(connection.id, user)
+    return user
   }
 
   private async leave(connection: LiveConnection, artifactId: string): Promise<void> {

@@ -142,8 +142,8 @@ as they make them, and who else is there.
   change, by the last person who edited, and sends `artifact.updated`.
 - What the Agent or anyone else publishes meanwhile is merged into what people are editing, and
   their unsaved changes stay. While an Agent turn changes boards, everyone sees which ones.
-- People connected to different servers see each other's presence at once, and each other's
-  changes after the next write, so after a pause of about 1.5 seconds.
+- Everyone sees the others' changes and presence at once, whichever server they are connected
+  to. Someone who reconnects after editing offline gets their changes merged in.
 - A write that fails is reported and tried again; the changes stay meanwhile.
 
 `@sixb/core/artifacts/live` holds the document and the socket's messages for a client to build

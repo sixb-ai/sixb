@@ -18,7 +18,6 @@ import {
   encodeLiveData,
   LIVE_SYNC_PART_BYTES,
   liveSync,
-  mergeIntoDocument,
   patchText,
 } from "@sixb/core/artifacts/live"
 import { appendArtifactLive } from "@sixb/core/internal/artifacts/live"
@@ -29,13 +28,7 @@ import * as encoding from "lib0/encoding"
 import * as awarenessProtocol from "y-protocols/awareness"
 import * as syncProtocol from "y-protocols/sync"
 import * as Y from "yjs"
-import {
-  ACCESS_RECHECK_MS,
-  type LiveConnection,
-  ROOM_LINGER_MS,
-  SAVE_IDLE_MS,
-  SAVE_MAX_MS,
-} from "../src/live/room"
+import { ACCESS_RECHECK_MS, type LiveConnection, SAVE_IDLE_MS, SAVE_MAX_MS } from "../src/live/room"
 import { LiveRooms } from "../src/live/rooms"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -128,6 +121,7 @@ async function setup() {
     artifactId,
     kind: "canvas",
     version: { ...created.version, origin: { threadId: "thr_marie", runId: "run_marie" } },
+    ...(created.artifact.document ? { document: created.artifact.document } : {}),
   })
 
   const rooms = (instance = "server-a") =>
@@ -285,12 +279,6 @@ interface AwarenessChanges {
   readonly removed: number[]
 }
 
-/** The copy of the document a client joined. */
-function joinedCopy(client: Client): string | undefined {
-  const joined = client.messages.find((message) => message.type === "joined")
-  return joined?.type === "joined" ? joined.document : undefined
-}
-
 /** Every awareness state a client sees but its own. */
 function others(client: Client): Record<string, unknown>[] {
   return [...client.awareness.getStates()]
@@ -315,7 +303,7 @@ describe("an artifact edited live", () => {
       artifactId: context.artifactId,
       access: "edit",
       revision: context.revision,
-      document: expect.any(String),
+      user: { id: "user:marie", name: "marie", color: expect.stringMatching(/^#[0-9a-f]{6}$/) },
     })
     expect(documentFiles(bob.doc).get("boards/welcome.html")).toEqual({ text: WELCOME })
 
@@ -464,9 +452,9 @@ describe("an artifact edited live", () => {
     expect(await context.read((await context.latest()).files, "boards/welcome.html")).toBe(merged)
   })
 
-  // Guard proof: drop the broker appends in LiveRoom.presenceChanged; Bob on the other server
-  // never sees Marie.
-  test("keeps editors on two servers in step through storage, and their presence through the broker", async () => {
+  // Guard proof: drop `this.share("update", ...)` from LiveRoom's update handler; Bob on the other
+  // server sees Marie's move only once her server writes it back.
+  test("keeps editors on two servers in step at once, through the broker", async () => {
     jest.useFakeTimers()
     const context = await setup()
     const [a, b] = [context.rooms("server-a"), context.rooms("server-b")]
@@ -481,30 +469,73 @@ describe("an artifact edited live", () => {
     await bob.join()
     await settle()
 
-    marie.awareness.setLocalStateField("user", { name: "Marie" })
+    marie.awareness.setLocalStateField("cursor", { x: 10, y: 20 })
     await settle()
-    expect(others(bob)).toContainEqual({ user: { name: "Marie" } })
+    expect(others(bob)).toContainEqual({
+      cursor: { x: 10, y: 20 },
+      user: expect.objectContaining({ id: "user:marie" }),
+    })
 
-    // Marie's change reaches Bob once her server writes it back, and Bob's goes the other way.
+    // Both edit the note at once: each sees the other's change before anything is written.
     marie.canvas.items.get("hi")?.set("x", 320)
     ;(bob.canvas.items.get("hi")?.get("text") as Y.Text).insert(5, ", team")
+    ;(marie.canvas.items.get("hi")?.get("text") as Y.Text).insert(0, "Oh. ")
     await settle()
-    jest.advanceTimersByTime(SAVE_IDLE_MS)
-    await settle()
-    jest.advanceTimersByTime(SAVE_IDLE_MS)
-    await settle()
-
+    expect((await context.latest()).revision).toBe(context.revision)
     for (const client of [marie, bob]) {
       expect(client.canvas.items.get("hi")?.get("x")).toBe(320)
-      expect(client.canvas.items.get("hi")?.get("text")?.toString()).toBe("Hello, team")
+      expect(client.canvas.items.get("hi")?.get("text")?.toString()).toBe("Oh. Hello, team")
     }
+
+    // Each server writes back what its editor changed; storage holds it all, once.
+    jest.advanceTimersByTime(SAVE_IDLE_MS)
+    await settle()
     expect((await context.items()).find((item) => item.id === "hi")).toMatchObject({
       x: 320,
-      text: "Hello, team",
+      text: "Oh. Hello, team",
     })
+    expect(documentFiles(marie.doc)).toEqual(documentFiles(bob.doc))
   })
 
-  // Guard proof: drop `showAgents` from LiveRoom.heard; nothing says the Agent is at work.
+  // Guard proof: in vouchedAwareness, keep a client's own `user` and `sixbAgent`; Bob then sees
+  // Marie as Bob, and an Agent at work.
+  test("names each person as the server knows them, and lets nobody speak for another or the Agent", async () => {
+    jest.useFakeTimers()
+    const context = await setup()
+    const rooms = context.rooms()
+    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
+    const bob = new Client(rooms, context.bob, context.artifactId, "bob-1")
+    await marie.join()
+    await bob.join()
+    bob.awareness.setLocalStateField("cursor", { x: 1, y: 1 })
+    await marie.settle()
+
+    // Marie claims to be Bob, and the Agent at work on a board.
+    marie.awareness.setLocalState({
+      cursor: { x: 5, y: 5 },
+      user: { id: "user:bob", name: "Bob", color: "#000000" },
+      [AGENT_AWARENESS_FIELD]: [{ runId: "run_forged", boards: ["welcome"] }],
+    })
+    // And she sends a state for Bob's own client.
+    const forged = encoding.createEncoder()
+    encoding.writeVarUint(forged, 1)
+    encoding.writeVarUint(forged, bob.doc.clientID)
+    encoding.writeVarUint(forged, 99)
+    encoding.writeVarString(forged, JSON.stringify({ cursor: { x: 0, y: 0 }, forged: true }))
+    await rooms.receive(marie.connection, {
+      type: "awareness",
+      artifactId: context.artifactId,
+      data: encodeLiveData(encoding.toUint8Array(forged)),
+    })
+    await marie.settle()
+
+    const marieUser = { id: "user:marie", name: "marie", color: expect.any(String) }
+    expect(others(bob)).toEqual([{ cursor: { x: 5, y: 5 }, user: marieUser }])
+    expect(others(marie)).toEqual([
+      { cursor: { x: 1, y: 1 }, user: { id: "user:bob", name: "bob", color: expect.any(String) } },
+    ])
+  })
+
   test("shows the boards an Agent turn is changing until the turn ends", async () => {
     jest.useFakeTimers()
     const context = await setup()
@@ -637,61 +668,37 @@ describe("an artifact edited live", () => {
     )
   })
 
-  // Guard proof: close the room as soon as the last connection leaves, with no linger. Marie then
-  // rejoins another copy, whose `canvas.json` collides with hers: her move lands only when her
-  // client id wins.
-  test("is resynced on reconnect, keeping what the client edited while away", async () => {
+  // Guard proof: build the room's document from the version's files in LiveRoom.open instead of
+  // loading the stored one; the new room's `canvas.json` then collides with Marie's, and her move
+  // lands only when her client id wins.
+  test("syncs what a client changed while away, once the room was dropped and loaded again", async () => {
     jest.useFakeTimers()
     const context = await setup()
     const rooms = context.rooms()
     const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
     await marie.join()
     await marie.settle()
+    marie.canvas.items.get("hi")?.set("x", 40)
+    await marie.settle()
     await marie.leave()
     await marie.settle()
 
-    // Offline, she moves the board; reconnected to the same copy, her document syncs it.
+    // Written back as she left: the room closes with her.
+    expect((await context.latest()).revision).toBe(context.revision + 1)
+
+    // Offline, she moves the board; reconnected, her document syncs it as it is.
     marie.canvas.items.get("welcome")?.set("x", 80)
     const again = new Client(rooms, context.marie, context.artifactId, "marie-2")
     Y.applyUpdate(again.doc, Y.encodeStateAsUpdate(marie.doc))
     await again.join()
     await again.settle()
-    expect(joinedCopy(again)).toBe(joinedCopy(marie))
     jest.advanceTimersByTime(SAVE_IDLE_MS)
     await again.settle()
 
-    expect((await context.items()).find((item) => item.id === "welcome")).toMatchObject({ x: 80 })
-  })
-
-  // Guard proof: apply Marie's old document to the new copy instead of merging her changes; the
-  // two copies' `canvas.json` collide and her move lands only when her client id wins.
-  test("drops a room nobody holds, and a client from the dropped copy merges what it changed", async () => {
-    jest.useFakeTimers()
-    const context = await setup()
-    const rooms = context.rooms()
-    const marie = new Client(rooms, context.marie, context.artifactId, "marie-1")
-    await marie.join()
-    await marie.settle()
-    await marie.leave()
-    await marie.settle()
-    jest.advanceTimersByTime(ROOM_LINGER_MS)
-    await marie.settle()
-
-    // Away past the linger, she moves the board; her document is of a copy the server dropped.
-    const base = documentFiles(marie.doc)
-    marie.canvas.items.get("welcome")?.set("x", 80)
-    const again = new Client(rooms, context.marie, context.artifactId, "marie-2")
-    await again.join()
-    await again.settle()
-    expect(joinedCopy(again)).not.toBe(joinedCopy(marie))
-
-    mergeIntoDocument(again.doc, base, documentFiles(marie.doc))
-    await again.settle()
-    jest.advanceTimersByTime(SAVE_IDLE_MS)
-    await again.settle()
-
-    expect((await context.items()).find((item) => item.id === "welcome")).toMatchObject({ x: 80 })
-    expect((await context.latest()).revision).toBe(context.revision + 1)
+    const items = await context.items()
+    expect(items.find((item) => item.id === "welcome")).toMatchObject({ x: 80 })
+    expect(items.find((item) => item.id === "hi")).toMatchObject({ x: 40 })
+    expect(items).toHaveLength(2)
   })
 })
 
@@ -754,7 +761,7 @@ describe("/ws/artifacts", () => {
         artifactId: artifact.id,
         access: "edit",
         revision: 1,
-        document: expect.any(String),
+        user: { id: "system", name: "Project", color: expect.any(String) },
       })
       expect(await next()).toMatchObject({ type: "sync", artifactId: artifact.id })
 
