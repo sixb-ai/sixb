@@ -53,7 +53,7 @@ across versions) and sits at `x`, `y` in pixels from the canvas's origin, y grow
 one is amber, as a note pad's, and a `neutral` one is plain paper. Items draw in the order listed.
 A canvas opens fitted to everything, so lay it out to read whole.
 
-A canvas holds at most 500 items and 40 boards; sizes run from 40 to 8,000 pixels.
+A canvas holds at most 1,000 items and 100 boards; sizes run from 40 to 8,000 pixels.
 
 ## Lay it out
 

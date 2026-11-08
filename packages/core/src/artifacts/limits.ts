@@ -26,8 +26,8 @@ export const ARTIFACT_LIMITS = {
   maxSlides: 100,
   /** A canvas's items, its live boards, and where they may sit, in pixels. */
   maxCanvasBytes: 512 * 1024,
-  maxCanvasItems: 500,
-  maxCanvasBoards: 40,
+  maxCanvasItems: 1000,
+  maxCanvasBoards: 100,
   minCanvasItemSize: 40,
   maxCanvasItemSize: 8000,
   maxCanvasPosition: 100_000,

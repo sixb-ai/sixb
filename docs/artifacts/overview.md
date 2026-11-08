@@ -391,8 +391,8 @@ brainstorm or a retro, a diagram, a mood board.
 - Boards are pages: Sixb adds the page kit and runtime to each, and boards may share CSS and
   images beside them (`boards/shared.css`).
 - `artifact:…#welcome` opens the canvas with that board open, or on that section; a document
-  embeds a board with `![Welcome](artifact:…#welcome)`. A canvas holds at most 500 items and 40
-  boards; sizes run from 40 to 8,000 pixels and positions within ±100,000.
+  embeds a board with `![Welcome](artifact:…#welcome)`. A canvas holds at most 1,000 items and
+  100 boards; sizes run from 40 to 8,000 pixels and positions within ±100,000.
 
 Readers drag or scroll to pan, pinch or ⌘-scroll to zoom, fit everything with the controls, and
 press the zoom to go to 100%. Boards run live once they're on screen, up to 12 at once, and keep
