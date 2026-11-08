@@ -26,6 +26,9 @@ export interface ArtifactWrite {
   readonly baseRevision?: number
   /** The files of `baseRevision`, when the writer holds them; otherwise looked up. */
   readonly baseFiles?: readonly ArtifactFile[]
+  /** The title it writes, and the one of `baseRevision`: a title given since stays unless it changes it. */
+  readonly title?: string
+  readonly baseTitle?: string
   /**
    * The artifact's document as a live editor holds it, encoded as a Yjs update: merged into the
    * stored one, whose files the write then holds.
@@ -41,6 +44,8 @@ export interface MergedArtifactWrite {
   readonly merged: boolean
   /** The document that holds the write's content, for a kind that keeps one. */
   readonly document?: FileRef
+  /** The title to keep instead of the write's: one given since its base, which it did not change. */
+  readonly title?: string
 }
 
 /**
@@ -103,11 +108,17 @@ export async function mergeArtifactWrite(
       merged || write.update
         ? await storeLiveFiles(blobStorage, documentFiles(doc), [...latest.files, ...write.files])
         : write.files
+    const renamed =
+      moved &&
+      write.baseTitle !== undefined &&
+      write.title === write.baseTitle &&
+      artifact.title !== write.title
     return {
       files,
       baseRevision: artifact.revision,
       merged,
       document: await storeArtifactDocument(blobStorage, doc),
+      ...(renamed ? { title: artifact.title } : {}),
     }
   } finally {
     doc.destroy()

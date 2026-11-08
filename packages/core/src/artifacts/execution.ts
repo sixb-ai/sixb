@@ -94,6 +94,11 @@ export interface UpdateArtifactRuntimeInput extends ArtifactContentInput {
    */
   readonly baseFiles?: readonly ArtifactFile[]
   /**
+   * The title of `baseRevision`. A canvas merged past it keeps a title someone gave it since,
+   * unless this write changes the title itself.
+   */
+  readonly baseTitle?: string
+  /**
    * A canvas's Yjs document as a live editor holds it, encoded with `Y.encodeStateAsUpdate`:
    * merged into the artifact's own, and the version then holds what the merged document holds.
    */
@@ -493,6 +498,8 @@ export function createArtifactsRuntime(
         ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
         ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
         ...(input.document === undefined ? {} : { update: input.document }),
+        title: input.title,
+        ...(input.baseTitle === undefined ? {} : { baseTitle: input.baseTitle }),
       }
 
       // A canvas written since the base is merged into, not refused: the merge is what is checked.
@@ -500,7 +507,7 @@ export function createArtifactsRuntime(
         const prepared = await prepareArtifactVersion(context, {
           artifactId,
           kind: input.kind,
-          title: input.title,
+          title: merged.title ?? input.title,
           files: merged.files,
           ...(merged.baseRevision === undefined ? {} : { baseRevision: merged.baseRevision }),
           ...(merged.document ? { document: merged.document } : {}),

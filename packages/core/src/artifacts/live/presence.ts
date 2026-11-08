@@ -3,8 +3,9 @@ import type { JsonObject } from "../../json"
 import type { ArtifactVersionRecord } from "../../storage/artifacts/types"
 
 // What servers holding an artifact live tell each other, on one broker stream per artifact: the
-// document's updates and awareness updates, so editors on two servers edit as one, and the
-// Agent's presence, so a board it is changing says so wherever it is open. Short-lived by nature:
+// document's updates, so editors on two servers edit as one, and the Agent's presence, so a board
+// it is changing says so wherever it is open. Awareness, who is there and what they point at, has
+// a stream of its own. Short-lived by nature:
 // what is written back is in storage, so retention only has to outlast a write-back.
 
 /** Minutes of records a server opening an artifact can still read; presence is renewed sooner. */
@@ -15,6 +16,17 @@ export const AGENT_PRESENCE_MS = 10 * 60_000
 
 export function artifactLiveStream(artifactId: string): BrokerStreamDefinition {
   return { id: `artifacts.live.${artifactId}`, retention: ARTIFACT_LIVE_RETENTION }
+}
+
+/**
+ * Where servers holding an artifact share who is there and what they point at: apart from the
+ * document's updates, so that cursors moving never push an update out of the replay window. Only
+ * what is recent matters, so it keeps a minute.
+ */
+const ARTIFACT_PRESENCE_RETENTION: BrokerRetention = { maxAgeMs: 60_000, maxRecords: 1_000 }
+
+export function artifactPresenceStream(artifactId: string): BrokerStreamDefinition {
+  return { id: `artifacts.presence.${artifactId}`, retention: ARTIFACT_PRESENCE_RETENTION }
 }
 
 /** One record of an artifact's live stream. */
