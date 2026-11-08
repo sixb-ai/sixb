@@ -50,8 +50,18 @@ export type CanvasOutlineBoard = Extract<CanvasOutlineItem, { readonly type: "bo
 /** Asks for what is missing of a stored version's pictures; see {@link requestBoardPreviews}. */
 export type BoardPreviewRequester = (
   version: ArtifactVersionRecord,
-  options?: { readonly delayMs?: number }
+  options?: BoardPreviewRequestOptions
 ) => Promise<void>
+
+export interface BoardPreviewRequestOptions {
+  /** The publisher renders the pictures itself: the worker waits this long for them. */
+  readonly delayMs?: number
+  /**
+   * Leaves the version's queries unanswered: the worker then pictures only the boards that read
+   * none, and a board that reads one keeps its outline.
+   */
+  readonly withoutAnswers?: boolean
+}
 
 /** The largest picture of a board kept: a board of 8000 by 4000 pixels fits many times over. */
 export const MAX_BOARD_PREVIEW_BYTES = 8 * 1024 * 1024
@@ -291,16 +301,17 @@ export async function requestBoardPreviews(
     readonly query: (name: string) => Promise<ArtifactQueryResult | null>
   },
   version: ArtifactVersionRecord,
-  options: { readonly delayMs?: number } = {}
+  options: BoardPreviewRequestOptions = {}
 ): Promise<void> {
   if (version.outline.kind !== "canvas") return
 
   try {
     if ((await missingBoardPreviews(input.storage, version)).length === 0) return
 
-    const queries = boardsReadLiveData(version)
-      ? await storeQueryAnswers(input, version)
-      : undefined
+    const queries =
+      boardsReadLiveData(version) && !options.withoutAnswers
+        ? await storeQueryAnswers(input, version)
+        : undefined
 
     await input.queue.enqueue({
       projectId: version.projectId,
