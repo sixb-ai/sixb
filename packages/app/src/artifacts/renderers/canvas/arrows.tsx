@@ -1,3 +1,4 @@
+import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
 import {
   EdgeLabelRenderer,
   type EdgeProps,
@@ -15,10 +16,10 @@ const GAP = 10
 const HEAD_LENGTH = 13
 const HEAD_WIDTH = 11
 /**
- * Where labels stack: over the arrows, which sit over every item, of which a canvas holds at most
- * 500. React Flow draws the labels in a layer of their own, under the arrows unless raised.
+ * Where labels stack: over the arrows, which sit over every item a canvas can hold. React Flow
+ * draws the labels in a layer of their own, under the arrows unless raised.
  */
-const LABEL_LAYER = 1000
+const LABEL_LAYER = ARTIFACT_LIMITS.maxCanvasItems + 1
 /** The most of its arrow a label covers, so the line still shows on both sides of it. */
 const LABEL_SHARE = 0.7
 

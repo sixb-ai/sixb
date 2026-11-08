@@ -126,8 +126,21 @@ describe("parseCanvas", () => {
       "the canvas has 'start'; it takes \"items\"",
     ],
     [
-      withItems(...Array.from({ length: 41 }, (_, index) => board(`b${index}`))),
-      "at most 40 boards",
+      withItems(...Array.from({ length: 101 }, (_, index) => board(`b${index}`))),
+      "at most 100 boards",
+    ],
+    [
+      withItems(
+        ...Array.from({ length: 1001 }, (_, index) => ({
+          id: `n${index}`,
+          type: "note",
+          x: 0,
+          y: index * 200,
+          w: 200,
+          text: "A",
+        }))
+      ),
+      "at most 1000 items",
     ],
   ])("refuses %s", (text, message) => {
     const parsed = parseCanvas(text)
