@@ -1,9 +1,6 @@
 import type { AgentRunWebPlan, AgentToolSpec } from "@sixb/core/internal/agents"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
-import {
-  PUBLISH_ARTIFACT_TOOL_SPEC,
-  PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
-} from "../artifacts/publish-tool"
+import { PUBLISH_ARTIFACT_TOOL_SPEC, UPDATE_ARTIFACT_TOOL_SPEC } from "../artifacts/publish-tool"
 import { BASH_OUTPUT_TOOL_SPEC, BASH_STOP_TOOL_SPEC } from "./background"
 import { BASH_TOOL_SPEC } from "./bash"
 import { READ_TOOL_SPEC } from "./read"
@@ -34,9 +31,7 @@ export function agentModelToolSpecs(
     BASH_STOP_TOOL_SPEC,
     ...(options.web?.search ? [WEB_SEARCH_TOOL_SPEC] : []),
     ...(fetchesWeb(options.web, options.networkPolicy) ? [WEB_FETCH_TOOL_SPEC] : []),
-    ...(options.publishes === false
-      ? []
-      : [PUBLISH_ARTIFACT_TOOL_SPEC, PUBLISH_ARTIFACT_VERSION_TOOL_SPEC]),
+    ...(options.publishes === false ? [] : [PUBLISH_ARTIFACT_TOOL_SPEC, UPDATE_ARTIFACT_TOOL_SPEC]),
   ]
 }
 

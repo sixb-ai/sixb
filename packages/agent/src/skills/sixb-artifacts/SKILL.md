@@ -1,12 +1,13 @@
 ---
 name: sixb-artifacts
-description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, or a file they asked for, as an artifact, and revise it as a new version.
+description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, or a file they asked for, as an artifact, and revise it with update_artifact.
 ---
 
 # Artifacts
 
 An artifact is a deliverable the user opens beside the conversation. It has a kind, a title, and
-versions that stay readable. Publish one when the user asks for a report, a document, a table, or
+versions: the current one, which your changes go to, and those the user created, which stay
+readable as they were. Publish one when the user asks for a report, a document, a table, or
 a file, or when the answer is long-form work or data they will read, reuse, or share. When a few sentences answer
 the question, answer in the chat.
 
@@ -25,7 +26,7 @@ To show or link to another artifact, such as a sheet's chart in a report, read `
 Data from the project's objects goes in a query, so the artifact stays live: read `queries.md`.
 
 Prefer a `document` to a DOCX or PDF, a `sheet` to an XLSX or CSV file, and `slides` to a PPTX,
-unless the user asked for that format: they render in the app, and their versions stay readable side by side. A report
+unless the user asked for that format: they render in the app, and the versions the user creates stay readable side by side. A report
 with a table of a dozen rows is a document; data the reader works with is a sheet. Work made of
 pictures, such as screens, shots, or posters, is a canvas even when notes come with it: the notes
 go beside each picture.
@@ -37,54 +38,56 @@ go beside each picture.
 
    ```text
    publish_artifact({ path: "work/q3-review", kind: "document", title: "Q3 operations review" })
-   → Published "Q3 operations review" as artifact art_k3m9q2x7tp, version 1.
+   → Published "Q3 operations review" as artifact art_k3m9q2x7tp, version 1 at revision 1.
    ```
 
 3. If it refuses, nothing was published. Fix what the message names and publish again. If you
    cannot, tell the user the deliverable could not be published; never describe it as ready.
-4. Fix what each warning names and publish its next version when it matters to the reader. A
+4. Fix what each warning names and update the artifact when it matters to the reader. A
    deck also comes back with a screenshot of each slide, a page with one at a laptop's width and
    one at a phone's, and a canvas with one of each board: look at them (`slides.md`, `page.md`,
    `canvas.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
    its content, a path, or its id as text: the user sees the artifact. To show a chart or a range
    of it in place, use its address (`references.md`). A figure you cite from live data is the one
-   you read, and what the artifact shows moves on as the objects change, even at a pinned version:
+   you read, and what the artifact shows moves on as the objects change, even at a created version:
    date it with when you read it, in the user's time zone ("As of Oct 23, 10:42, three invoices
    are overdue.").
 
 ## Revise
 
-The artifacts this conversation published are listed in `$SIXB_ARTIFACTS`, each with its latest
+Your changes go to the artifact's current version, which stays open: each `update_artifact`
+replaces it. Only the user creates a version, which freezes it; your next update then opens a new
+one, and the created version stays as it was.
+
+The artifacts this conversation shares are listed in `$SIXB_ARTIFACTS`, each with its current
 version installed under `$SIXB_ARTIFACTS_DIR/<id>/`, including one you published moments ago. To
-change one, start from that version, not from an older working copy:
+change one, start from that copy, not from an older working copy:
 
 ```bash
 rm -rf work/q3-review && cp -r "$SIXB_ARTIFACTS_DIR/art_k3m9q2x7tp" work/q3-review
 ```
 
-Edit the copy, then publish it as the artifact's next version:
+Edit the copy, then update the artifact from it:
 
 ```text
-publish_artifact_version({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: "Q3 operations review" })
-→ Published "Q3 operations review" as artifact art_k3m9q2x7tp, version 2.
+update_artifact({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: "Q3 operations review" })
+→ Updated "Q3 operations review": artifact art_k3m9q2x7tp, version 1 at revision 2.
 ```
 
-An entry with `"edited": true` has a latest version published outside this conversation after you
-last published it: most often a person's edit in the app, such as a sheet's cells or columns or a
-canvas's notes and layout, but also another conversation or the project's code. Start from that
-version as it is, and keep its changes in yours unless the user asks you to undo them; say what you
-built on when you reply.
+An entry with `"edited": true` was last written outside this conversation: most often a person's
+edit in the app, such as a sheet's cells or columns or a canvas's notes and layout, but also
+another conversation or the project's code. Start from it as it is, and keep its changes in yours
+unless the user asks you to undo them; say what you built on when you reply.
 
-If the artifact moves on while you work, `publish_artifact_version` refuses rather than publish
-over the newer version, says who published it, and installs it in place of your copy. Start again
-from that copy, keep its changes, make yours again, and publish.
+If the artifact changes while you work, `update_artifact` refuses rather than write over what it
+never saw, says who changed it, and installs it in place of your copy. Start again from that copy,
+keep its changes, make yours again, and update it.
 
 An entry without a `directory` is not installed: the conversation's artifacts were too large to
 install together, or its files could not be read. Rebuild it in a working directory with the paths
-in its `files`, then publish its next version. A new version keeps the earlier ones and the
-artifact's kind; the title may change. Call `publish_artifact` again only for a different
-deliverable.
+in its `files`, then update it. An update keeps the artifact's kind; the title may change. Call
+`publish_artifact` again only for a different deliverable.
 
 ## Rules
 

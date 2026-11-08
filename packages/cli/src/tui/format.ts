@@ -112,9 +112,11 @@ export function toolLine(
         ...(failed ? fetchFailure(part.error) : {}),
       }
     case "publish_artifact":
+    case "update_artifact":
+    // What `update_artifact` was called: earlier threads hold calls to it.
     case "publish_artifact_version":
       return {
-        verb: "publish",
+        verb: part.name === "publish_artifact" ? "publish" : "update",
         detail: text(input?.title) || text(input?.path) || text(input?.artifactId),
         ...(output?.artifactId ? { note: `artifact:${text(output.artifactId)}` } : {}),
         ...error,

@@ -129,6 +129,8 @@ export async function runTurnInSession(
       recoverAiModelCall,
       events,
       security: EMPTY_SECURITY,
+      // A turn run directly writes no artifact.
+      domainEvents: { emit: async () => {} },
       // A turn run directly has no environment, so nothing it does binds the run's SDK.
       sdk: {
         id: turn.context.id,

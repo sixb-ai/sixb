@@ -82,6 +82,8 @@ async function seed(stop: () => Promise<void>) {
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
     security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
+    // A turn run directly writes no artifact.
+    domainEvents: { emit: async () => {} },
     // A turn run directly has no environment, so nothing it does binds the run's SDK.
     sdk: {
       id: projectId,
