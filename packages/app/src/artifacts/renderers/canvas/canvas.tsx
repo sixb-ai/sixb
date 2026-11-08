@@ -5,7 +5,6 @@ import {
   type Canvas,
   type CanvasArrow,
   type CanvasBoard as CanvasBoardItem,
-  type CanvasEmbed,
 } from "@sixb/core/artifacts"
 import {
   Background,
@@ -101,14 +100,16 @@ function Board({
   const previews = useBoardPreviews(version)
 
   // The boards and embeds to run, as the view comes to them: each knows whether it is one, so a
-  // pan draws nothing again. Those running keep running while they are on screen.
+  // pan draws nothing again. Those running keep running while they are on screen, and a board
+  // whose picture is ready waits to be larger: its picture shows as much until then.
   const places = useMemo(
     () =>
-      canvas.items.filter(
-        (item): item is CanvasBoardItem | CanvasEmbed =>
-          item.type === "board" || item.type === "embed"
+      canvas.items.flatMap((item) =>
+        item.type === "board" || item.type === "embed"
+          ? [{ ...item, pictured: previews[item.id] === "ready" }]
+          : []
       ),
-    [canvas]
+    [canvas, previews]
   )
   const running = useLiveSet(places)
 

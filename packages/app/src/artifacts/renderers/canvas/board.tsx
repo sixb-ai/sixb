@@ -17,10 +17,13 @@ import type { BoardPreviews } from "./previews"
 export const MAX_LIVE_BOARDS = 8
 /**
  * A board starts running once the view shows it at half its size, where its page's text still
- * reads. Smaller, a picture of it shows as much, so it is its tile.
+ * reads. Smaller, its picture shows as much, so it is its tile.
  */
 export const LIVE_FROM_SCALE = 0.5
-/** Or once it is this wide on screen, a phone's width, where a wide board's layout reads. */
+/**
+ * Or, while it has no picture, once it is this wide on screen, a phone's width, where a wide
+ * board's layout reads: its outline shows nothing of it.
+ */
 export const LIVE_FROM_WIDTH = 360
 
 /** A board's or an embed's place on the canvas. */
@@ -30,6 +33,8 @@ export interface BoardPlace {
   readonly y: number
   readonly w: number
   readonly h: number
+  /** Whether its tile is a picture of it: a board's ready preview. */
+  readonly pictured?: boolean
 }
 
 /** Where the board view is: React Flow's transform, the pan then the zoom, and its size. */
@@ -61,7 +66,8 @@ export function liveBoards(
     const width = board.w * zoom
     const height = board.h * zoom
     const onScreen = left < view.width && left + width > 0 && top < view.height && top + height > 0
-    const large = width >= Math.min(board.w * LIVE_FROM_SCALE, LIVE_FROM_WIDTH)
+    const half = board.w * LIVE_FROM_SCALE
+    const large = width >= (board.pictured ? half : Math.min(half, LIVE_FROM_WIDTH))
     const kept = running.has(board.id)
     if (!onScreen || (!large && !kept)) return []
 
