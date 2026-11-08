@@ -1,9 +1,13 @@
 import type { QuickBooksCompanyInfo } from "../types"
 import type {
   QuickBooksAccount,
+  QuickBooksClass,
   QuickBooksCustomer,
+  QuickBooksDepartment,
   QuickBooksEmailMessage,
+  QuickBooksEmployee,
   QuickBooksItem,
+  QuickBooksPaymentMethod,
   QuickBooksReference,
   QuickBooksTerm,
   QuickBooksVendor,
@@ -460,3 +464,55 @@ export interface QuickBooksPreferencesUpdate extends QuickBooksRevision {
     readonly BillCustomers?: boolean
   }
 }
+
+export type QuickBooksEmployeeCreate = Pick<
+  QuickBooksEmployee,
+  | "DisplayName"
+  | "Active"
+  | "Title"
+  | "GivenName"
+  | "MiddleName"
+  | "FamilyName"
+  | "Suffix"
+  | "PrintOnCheckName"
+  | "PrimaryPhone"
+  | "Mobile"
+  | "PrimaryEmailAddr"
+  | "PrimaryAddr"
+  | "EmployeeNumber"
+  | "BillableTime"
+  | "BillRate"
+  | "CostRate"
+  | "BirthDate"
+  | "Gender"
+  | "HiredDate"
+  | "ReleasedDate"
+>
+/** Always a sparse update. Employees are deactivated, not deleted. */
+export type QuickBooksEmployeeUpdate = QuickBooksRevision & Partial<QuickBooksEmployeeCreate>
+
+export type QuickBooksClassCreate = Pick<
+  QuickBooksClass,
+  "Name" | "Active" | "SubClass" | "ParentRef"
+>
+/** QuickBooks requires Name on every Class update, including sparse ones (error 2020). */
+export type QuickBooksClassUpdate = QuickBooksRevision &
+  Partial<QuickBooksClassCreate> & { readonly Name: string }
+/** Class activation changes also require the current Name. */
+export type QuickBooksClassRevision = QuickBooksRevision & { readonly Name: string }
+
+export type QuickBooksDepartmentCreate = Pick<
+  QuickBooksDepartment,
+  "Name" | "Active" | "SubDepartment" | "ParentRef"
+>
+/** QuickBooks requires Name on every Department update, including sparse ones (error 2020). */
+export type QuickBooksDepartmentUpdate = QuickBooksRevision &
+  Partial<QuickBooksDepartmentCreate> & { readonly Name: string }
+/** Department activation changes also require the current Name. */
+export type QuickBooksDepartmentRevision = QuickBooksRevision & { readonly Name: string }
+
+export type QuickBooksPaymentMethodCreate = Pick<QuickBooksPaymentMethod, "Name" | "Active"> & {
+  readonly Type?: "CREDIT_CARD" | "NON_CREDIT_CARD"
+}
+export type QuickBooksPaymentMethodUpdate = QuickBooksRevision &
+  Partial<QuickBooksPaymentMethodCreate>

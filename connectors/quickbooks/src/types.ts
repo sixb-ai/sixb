@@ -5,14 +5,18 @@ import type { QuickBooksBillPaymentsResource } from "./resources/bill-payments"
 import type { QuickBooksBillsResource } from "./resources/bills"
 import type { QuickBooksBudgetsResource } from "./resources/budgets"
 import type { QuickBooksCdcResource } from "./resources/cdc"
+import type { QuickBooksClassesResource } from "./resources/classes"
 import type { QuickBooksCompanyCurrenciesResource } from "./resources/company-currencies"
 import type { QuickBooksCreditMemosResource } from "./resources/credit-memos"
 import type { QuickBooksCustomerTypesResource } from "./resources/customer-types"
 import type { QuickBooksCustomersResource } from "./resources/customers"
+import type { QuickBooksDepartmentsResource } from "./resources/departments"
+import type { QuickBooksEmployeesResource } from "./resources/employees"
 import type { QuickBooksEstimatesResource } from "./resources/estimates"
 import type { QuickBooksExchangeRatesResource } from "./resources/exchange-rates"
 import type { QuickBooksInvoicesResource } from "./resources/invoices"
 import type { QuickBooksItemsResource } from "./resources/items"
+import type { QuickBooksPaymentMethodsResource } from "./resources/payment-methods"
 import type { QuickBooksPaymentsResource } from "./resources/payments"
 import type { QuickBooksPreferencesResource } from "./resources/preferences"
 import type { QuickBooksReportsResource } from "./resources/reports"
@@ -91,6 +95,10 @@ export interface QuickBooksClient {
   readonly items: QuickBooksItemsResource
   readonly terms: QuickBooksTermsResource
   readonly preferences: QuickBooksPreferencesResource
+  readonly paymentMethods: QuickBooksPaymentMethodsResource
+  readonly departments: QuickBooksDepartmentsResource
+  readonly classes: QuickBooksClassesResource
+  readonly employees: QuickBooksEmployeesResource
   readonly exchangeRates: QuickBooksExchangeRatesResource
   readonly companyCurrencies: QuickBooksCompanyCurrenciesResource
   readonly budgets: QuickBooksBudgetsResource

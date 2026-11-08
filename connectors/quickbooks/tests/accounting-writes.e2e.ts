@@ -190,3 +190,129 @@ live(
   },
   5 * 60_000
 )
+
+live(
+  "employee, class, department and payment method maintenance with activation",
+  async () => {
+    await withJournal("references", async ({ qb, tag, write, defer }) => {
+      const employeeInput = {
+        GivenName: "Sixb",
+        FamilyName: tag,
+        DisplayName: `${tag}-employee`,
+        BillableTime: true,
+        BillRate: 45,
+      }
+      let employee = await write("Employee.create", employeeInput, (o) =>
+        qb.employees.create(employeeInput, o)
+      )
+      const employeeId = employee.Id
+      defer("Employee.deactivate", async () => {
+        const input = revision(await qb.employees.get(employeeId))
+        await write("Employee.deactivate", input, (o) => qb.employees.deactivate(input, o))
+        expect((await qb.employees.get(employeeId)).Active).toBe(false)
+      })
+      const employeeUpdate = { ...revision(employee), HiredDate: today(-30) }
+      employee = await write("Employee.update", employeeUpdate, (o) =>
+        qb.employees.update(employeeUpdate, o)
+      )
+      expect(employee.HiredDate).toBe(employeeUpdate.HiredDate)
+      expect(employee.DisplayName).toBe(employeeInput.DisplayName)
+      expect(
+        (await qb.employees.list({ name: employeeInput.DisplayName })).items.map((row) => row.Id)
+      ).toEqual([employeeId])
+      let input = revision(employee)
+      employee = await write("Employee.deactivate", input, (o) => qb.employees.deactivate(input, o))
+      expect(employee.Active).toBe(false)
+      expect(
+        (await qb.employees.list({ active: false, ids: [employeeId] })).items.map((row) => row.Id)
+      ).toEqual([employeeId])
+      input = revision(employee)
+      employee = await write("Employee.reactivate", input, (o) => qb.employees.reactivate(input, o))
+      expect(employee.Active).toBe(true)
+
+      // Class and Department updates require Name even when sparse (live error 2020).
+      const classInput = { Name: `${tag}-class` }
+      let klass = await write("Class.create", classInput, (o) => qb.classes.create(classInput, o))
+      const classId = klass.Id
+      defer("Class.deactivate", async () => {
+        const current = await qb.classes.get(classId)
+        const input = { ...revision(current), Name: current.Name }
+        await write("Class.deactivate", input, (o) => qb.classes.deactivate(input, o))
+        expect((await qb.classes.get(classId)).Active).toBe(false)
+      })
+      const classUpdate = { ...revision(klass), Name: `${classInput.Name}-u` }
+      klass = await write("Class.update", classUpdate, (o) => qb.classes.update(classUpdate, o))
+      expect((await qb.classes.list({ name: classUpdate.Name })).items.map((r) => r.Id)).toEqual([
+        classId,
+      ])
+      let classState = { ...revision(klass), Name: klass.Name }
+      klass = await write("Class.deactivate", classState, (o) =>
+        qb.classes.deactivate(classState, o)
+      )
+      expect(klass.Active).toBe(false)
+      classState = { ...revision(klass), Name: klass.Name }
+      klass = await write("Class.reactivate", classState, (o) =>
+        qb.classes.reactivate(classState, o)
+      )
+      expect(klass.Active).toBe(true)
+
+      const departmentInput = { Name: `${tag}-department` }
+      let department = await write("Department.create", departmentInput, (o) =>
+        qb.departments.create(departmentInput, o)
+      )
+      const departmentId = department.Id
+      defer("Department.deactivate", async () => {
+        const current = await qb.departments.get(departmentId)
+        const input = { ...revision(current), Name: current.Name }
+        await write("Department.deactivate", input, (o) => qb.departments.deactivate(input, o))
+        expect((await qb.departments.get(departmentId)).Active).toBe(false)
+      })
+      const departmentUpdate = { ...revision(department), Name: `${departmentInput.Name}-u` }
+      department = await write("Department.update", departmentUpdate, (o) =>
+        qb.departments.update(departmentUpdate, o)
+      )
+      expect(
+        (await qb.departments.list({ name: departmentUpdate.Name })).items.map((r) => r.Id)
+      ).toEqual([departmentId])
+      let departmentState = { ...revision(department), Name: department.Name }
+      department = await write("Department.deactivate", departmentState, (o) =>
+        qb.departments.deactivate(departmentState, o)
+      )
+      expect(department.Active).toBe(false)
+      departmentState = { ...revision(department), Name: department.Name }
+      department = await write("Department.reactivate", departmentState, (o) =>
+        qb.departments.reactivate(departmentState, o)
+      )
+      expect(department.Active).toBe(true)
+
+      const methodInput = { Name: `${tag}-method`.slice(0, 31), Type: "NON_CREDIT_CARD" as const }
+      let method = await write("PaymentMethod.create", methodInput, (o) =>
+        qb.paymentMethods.create(methodInput, o)
+      )
+      const methodId = method.Id
+      defer("PaymentMethod.deactivate", async () => {
+        const input = revision(await qb.paymentMethods.get(methodId))
+        await write("PaymentMethod.deactivate", input, (o) =>
+          qb.paymentMethods.deactivate(input, o)
+        )
+        expect((await qb.paymentMethods.get(methodId)).Active).toBe(false)
+      })
+      const methodUpdate = { ...revision(method), Type: "CREDIT_CARD" as const }
+      method = await write("PaymentMethod.update", methodUpdate, (o) =>
+        qb.paymentMethods.update(methodUpdate, o)
+      )
+      expect(method.Type).toBe("CREDIT_CARD")
+      input = revision(method)
+      method = await write("PaymentMethod.deactivate", input, (o) =>
+        qb.paymentMethods.deactivate(input, o)
+      )
+      expect(method.Active).toBe(false)
+      input = revision(method)
+      method = await write("PaymentMethod.reactivate", input, (o) =>
+        qb.paymentMethods.reactivate(input, o)
+      )
+      expect(method.Active).toBe(true)
+    })
+  },
+  5 * 60_000
+)

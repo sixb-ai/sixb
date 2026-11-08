@@ -282,3 +282,53 @@ export interface QuickBooksExchangeRate {
   readonly domain?: string
   readonly sparse?: boolean
 }
+
+export interface QuickBooksEmployee extends QuickBooksEntity {
+  readonly DisplayName?: string
+  readonly Active?: boolean
+  readonly Title?: string
+  readonly GivenName?: string
+  readonly MiddleName?: string
+  readonly FamilyName?: string
+  readonly Suffix?: string
+  readonly PrintOnCheckName?: string
+  readonly PrimaryPhone?: { readonly FreeFormNumber?: string }
+  readonly Mobile?: { readonly FreeFormNumber?: string }
+  readonly PrimaryEmailAddr?: { readonly Address?: string }
+  readonly PrimaryAddr?: QuickBooksAddress
+  readonly EmployeeNumber?: string
+  /** Masked by QuickBooks on read. */
+  readonly SSN?: string
+  readonly BillableTime?: boolean
+  readonly BillRate?: number
+  readonly CostRate?: number
+  readonly BirthDate?: string
+  readonly Gender?: "Male" | "Female" | (string & {})
+  readonly HiredDate?: string
+  readonly ReleasedDate?: string
+  readonly Organization?: boolean
+  readonly V4IDPseudonym?: string
+}
+
+export interface QuickBooksClass extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly FullyQualifiedName?: string
+  readonly SubClass?: boolean
+  readonly ParentRef?: QuickBooksReference
+}
+
+/** Called Location (or Division, Territory, ...) in the QuickBooks UI. */
+export interface QuickBooksDepartment extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly FullyQualifiedName?: string
+  readonly SubDepartment?: boolean
+  readonly ParentRef?: QuickBooksReference
+}
+
+export interface QuickBooksPaymentMethod extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly Type?: "CREDIT_CARD" | "NON_CREDIT_CARD" | (string & {})
+}

@@ -7,14 +7,18 @@ import { createBillPaymentsResource } from "./resources/bill-payments"
 import { createBillsResource } from "./resources/bills"
 import { createBudgetsResource } from "./resources/budgets"
 import { createCdcResource } from "./resources/cdc"
+import { createClassesResource } from "./resources/classes"
 import { createCompanyCurrenciesResource } from "./resources/company-currencies"
 import { createCreditMemosResource } from "./resources/credit-memos"
 import { createCustomerTypesResource } from "./resources/customer-types"
 import { createCustomersResource } from "./resources/customers"
+import { createDepartmentsResource } from "./resources/departments"
+import { createEmployeesResource } from "./resources/employees"
 import { createEstimatesResource } from "./resources/estimates"
 import { createExchangeRatesResource } from "./resources/exchange-rates"
 import { createInvoicesResource } from "./resources/invoices"
 import { createItemsResource } from "./resources/items"
+import { createPaymentMethodsResource } from "./resources/payment-methods"
 import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
 import { createReportsResource } from "./resources/reports"
@@ -95,6 +99,10 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
         bills: createBillsResource(http),
         billPayments: createBillPaymentsResource(http),
         vendorCredits: createVendorCreditsResource(http),
+        paymentMethods: createPaymentMethodsResource(http),
+        departments: createDepartmentsResource(http),
+        classes: createClassesResource(http),
+        employees: createEmployeesResource(http),
         exchangeRates: createExchangeRatesResource(http),
         companyCurrencies: createCompanyCurrenciesResource(http),
         budgets: createBudgetsResource(http),
