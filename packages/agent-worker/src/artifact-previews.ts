@@ -1,8 +1,9 @@
 import { renderBoardPreviews } from "@sixb/agent"
-import type { BlobStorage, SandboxFactory, Storage } from "@sixb/core"
+import type { BlobStorage, FileRef, SandboxFactory, Storage } from "@sixb/core"
 import {
-  boardsReadLiveData,
+  type ArtifactQueryAnswers,
   missingBoardPreviews,
+  parseArtifactQueryAnswers,
   storeBoardPreviews,
 } from "@sixb/core/internal/artifacts/publish"
 import type { AgentArtifactPreviewsRequestedQueueJob } from "@sixb/core/queues"
@@ -10,7 +11,8 @@ import type { AgentArtifactPreviewsRequestedQueueJob } from "@sixb/core/queues"
 // The pictures of a canvas version's boards that nobody rendered: a version a person edited in
 // the app, or one whose layout check could not take them. The worker opens a blank sandbox of the
 // project, with nothing on its network, renders what is missing there as the Agent's check does,
-// and destroys it.
+// and destroys it. Boards that read queries read the answers the job carries: what the version's
+// publisher could read when they published it.
 
 /** The sandbox's start, the version's files, and the check's 120 seconds, with room to spare. */
 const PREVIEW_JOB_TIMEOUT_MS = 5 * 60_000
@@ -47,14 +49,10 @@ export async function renderArtifactPreviews(input: {
   const missing = await missingBoardPreviews(artifacts, version)
   if (missing.length === 0) return
 
-  // A board must show its author's rows, and the worker holds no way to read as them: their boards
-  // show their outlines until the Agent renders a version of them.
-  if (boardsReadLiveData(version)) {
-    console.warn(
-      `[SixbAgentWorker] The boards of version ${number} of '${artifactId}' read live data, which only their author's own render can show; they keep their outlines.`
-    )
-    return
-  }
+  // What the boards' queries return, as the version's publisher read them when publishing.
+  const queries = job.payload.queries
+    ? await queryAnswers(host.blobStorage, job.payload.queries)
+    : undefined
 
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(PREVIEW_JOB_TIMEOUT_MS)])
   const sandbox = await host.sandboxes.create({
@@ -68,6 +66,7 @@ export async function renderArtifactPreviews(input: {
       version,
       missing,
       blobStorage: host.blobStorage,
+      ...(queries ? { queries } : {}),
       signal,
     })
     await storeBoardPreviews(
@@ -83,4 +82,19 @@ export async function renderArtifactPreviews(input: {
       )
     })
   }
+}
+
+/**
+ * The answers the job carries. Ones that cannot be read leave every query rejecting, as a reader
+ * whose queries fail sees the boards.
+ */
+async function queryAnswers(
+  blobStorage: Pick<BlobStorage, "open">,
+  file: FileRef
+): Promise<ArtifactQueryAnswers | undefined> {
+  const text = await new Response(await blobStorage.open(file.blobId)).text()
+  const answers = parseArtifactQueryAnswers(text)
+  if (!answers)
+    console.warn(`[SixbAgentWorker] The query answers in '${file.blobId}' are not answers.`)
+  return answers ?? undefined
 }

@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
@@ -30,6 +30,8 @@ const alice = { type: "user", id: "alice" } as const
 class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsRequestCredentials"> {
   readonly supportsRequestCredentials = true
   readonly created: CreateSandboxOptions[] = []
+  /** What each check served the boards' queries with: each status, and each answer by name. */
+  readonly served: Record<string, unknown>[] = []
   destroyed = 0
   /** Resolves each time a sandbox is destroyed, which ends a job's render. */
   private onDestroy: (() => void) | undefined
@@ -51,7 +53,12 @@ class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsReq
         const output = runOptions?.env?.SIXB_CHECK_OUT
         return output === undefined
           ? run(command, args, runOptions)
-          : { exitCode: 0, stdout: `${JSON.stringify(check(output))}\n`, stderr: "", durationMs: 0 }
+          : {
+              exitCode: 0,
+              stdout: `${JSON.stringify(check(output, this.served))}\n`,
+              stderr: "",
+              durationMs: 0,
+            }
       },
       destroy: async () => {
         await destroy()
@@ -62,7 +69,21 @@ class PicturingSandboxes implements Pick<SandboxFactory, "create" | "supportsReq
   }
 }
 
-function check(output: string) {
+function check(output: string, served: Record<string, unknown>[]) {
+  const statuses = JSON.parse(readFileSync(join(output, "queries.json"), "utf8")) as Record<
+    string,
+    number
+  >
+  served.push({
+    statuses,
+    ...Object.fromEntries(
+      Object.keys(statuses).map((name) => [
+        name,
+        JSON.parse(readFileSync(join(output, "queries", `${name}.json`), "utf8")),
+      ])
+    ),
+  })
+
   const boards = JSON.parse(readFileSync(join(output, "boards.json"), "utf8")) as {
     readonly id: string
     readonly pictured: boolean
@@ -193,8 +214,7 @@ describe("a canvas version's previews", () => {
     expect(sandboxes.created).toHaveLength(1)
   })
 
-  test("are left to the outlines without sandboxes, and for boards that read live data", async () => {
-    const sandboxes = new PicturingSandboxes()
+  test("are left to the outlines in a project without sandboxes", async () => {
     const { host, canvas, pictures, job } = setup()
     const { version } = await canvas()
 
@@ -203,30 +223,46 @@ describe("a canvas version's previews", () => {
       job: job(version),
       signal: new AbortController().signal,
     })
-    expect(await pictures(version)).toEqual([])
 
-    // The worker cannot read the rows the author sees: a picture of the board would not show them.
+    expect(await pictures(version)).toEqual([])
+  })
+
+  test("serve its boards the query answers the job carries, as the check serves them", async () => {
+    // Reproduce by leaving the job's answers unread: the boards are opened with every query
+    // rejecting, as a reader the query fails for sees them.
+    const sandboxes = new PicturingSandboxes()
+    const { host, canvas, job } = setup()
+    const { version } = await canvas()
+
+    // A version whose boards read a query, and its answer as its publisher read it.
     const query = { ...version.files[0], path: "queries/open.json" } as ArtifactFile
-    const live = { ...version, files: [...version.files, query] }
-    await host.storage.artifacts?.publish({
+    const live = await host.storage.artifacts?.publish({
       projectId,
       artifactId: version.artifactId,
       kind: "canvas",
-      version: { ...live, createdAt: new Date() },
+      version: { ...version, files: [...version.files, query], createdAt: new Date() },
     })
-    const warnings: unknown[] = []
-    const warn = spyOn(console, "warn").mockImplementation((message) => warnings.push(message))
-    try {
-      await renderArtifactPreviews({
-        host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
-        job: { ...job(version), payload: { artifactId: version.artifactId, version: 2 } },
-        signal: new AbortController().signal,
-      })
-    } finally {
-      warn.mockRestore()
+    if (!live) throw new Error("Expected artifact storage.")
+    const answers = {
+      open: { result: { kind: "objects", objects: [{ primaryId: "inv_1" }], total: 1 } },
+      overdue: { error: "Principal 'alice' is not allowed to view object type 'Invoice'." },
     }
-    expect(sandboxes.created).toEqual([])
-    expect(String(warnings[0])).toContain("read live data")
+    const body = new TextEncoder().encode(JSON.stringify(answers))
+    const queries = await host.blobStorage.put({ body, mediaType: "application/json" })
+
+    await renderArtifactPreviews({
+      host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
+      job: { ...job(live.version), payload: { ...job(live.version).payload, queries } },
+      signal: new AbortController().signal,
+    })
+
+    expect(sandboxes.served).toEqual([
+      {
+        statuses: { open: 200, overdue: 409 },
+        open: answers.open.result,
+        overdue: { error: answers.overdue.error },
+      },
+    ])
   })
 
   test("are rendered by the agent worker for a version a person saved in the app", async () => {
