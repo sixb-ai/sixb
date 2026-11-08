@@ -135,4 +135,21 @@ describe("a page's frame", () => {
       expect(FRAME_PAGE_CSS).toContain(selector)
     }
   })
+
+  // Reproduce by colouring headings with the theme's foreground again: a board that paints its
+  // own light background and colours its body dark shows its h1 in the dark mode's light text.
+  test("colours text only on the body and on the controls it paints, so a page's own colours reach the rest", () => {
+    const rules = [...FRAME_PAGE_CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    const coloured = rules
+      .filter(([, , declarations]) =>
+        /(^|[;\s])color: var\(--(card-)?foreground\)/.test(declarations ?? "")
+      )
+      .map(([, selector]) => selector?.trim())
+
+    expect(coloured).toEqual([
+      "body",
+      ':is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), select, textarea)',
+      ":is(button, .button).secondary",
+    ])
+  })
 })
