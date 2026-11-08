@@ -1,6 +1,7 @@
 import type { ApiClient } from "../api-client"
 import { fail } from "../output"
 import { actions } from "./actions"
+import { artifacts } from "./artifacts"
 import { datasets, runnables } from "./data"
 import { files } from "./files"
 import { models } from "./models"
@@ -23,6 +24,7 @@ export const INSTANCE_COMMANDS = [
   "workflows",
   "workflow-runs",
   "users",
+  "artifacts",
   "models",
   "datasets",
   "syncs",
@@ -61,6 +63,8 @@ export async function dispatch(
       return workflows(api, args)
     case "workflow-runs":
       return runs(api, "workflow", args)
+    case "artifacts":
+      return artifacts(api, args)
     case "users":
       return users(api, args)
     case "models":

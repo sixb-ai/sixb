@@ -31,7 +31,7 @@ export interface SixbApiRoute {
 /**
  * `read` changes nothing (a read sent as POST); `memory` writes the Agent's own notes; `file` stores
  * a blob nothing points at yet; `model` costs what AI limits already bound; `artifact` publishes
- * into the run's conversation.
+ * into the run's conversation, or answers a comment on one of its artifacts.
  */
 export type AgentApiEffect =
   | "read"
@@ -614,21 +614,23 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/artifacts/:artifactId/comments",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "addArtifactComment",
     method: "POST",
     path: "/api/artifacts/:artifactId/comments",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
+    agentEffect: "artifact",
   },
   {
     operationId: "resolveArtifactComment",
     method: "POST",
     path: "/api/artifacts/:artifactId/comments/:commentId/resolve",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
+    agentEffect: "artifact",
   },
   {
     operationId: "deleteArtifactComment",

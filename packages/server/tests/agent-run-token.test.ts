@@ -543,6 +543,82 @@ describe("run tokens", () => {
     }
   })
 
+  // Guard proof: set the comment routes' `agentApi` back to false in api-routes.ts; the sandbox
+  // CLI's list, reply and resolve are then refused.
+  test("answers the comments on its conversation's artifact with the sandbox CLI", async () => {
+    const { app, apiBaseUrl, sixb, storage } = await createRunTokenRuntime()
+    const file = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("# Plan\n"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    const created = await app.fetch(
+      jsonRequest("POST", "/api/artifacts", {
+        kind: "document",
+        title: "Plan",
+        files: [{ path: "document.md", file: fileRefJson(file) }],
+      })
+    )
+    const { artifact } = (await created.json()) as { artifact: { id: string } }
+    await storage.artifacts.createComment({
+      projectId: PROJECT_ID,
+      artifactId: artifact.id,
+      id: "cmt_title",
+      anchor: { revision: 1 },
+      body: "A warmer title",
+      author: { type: "user", id: "usr_requester" },
+      createdAt: NOW,
+    })
+
+    const listener = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => app.fetch(request),
+    })
+    const baseUrl = new URL(apiBaseUrl)
+    baseUrl.hostname = "127.0.0.1"
+    baseUrl.port = String(listener.port)
+    const cli = (args: readonly string[]) =>
+      runSandboxCli(baseUrl.href, ["artifacts", "comments", ...args])
+
+    try {
+      const listed = await cli(["list", artifact.id])
+      expect(listed.exitCode, listed.stderr).toBe(0)
+      expect(JSON.parse(listed.stdout)).toMatchObject({
+        threads: [{ id: "cmt_title", body: "A warmer title", replies: [] }],
+      })
+
+      const replied = await cli(["reply", artifact.id, "cmt_title", "Done: it reads Hello now."])
+      expect(replied.exitCode, replied.stderr).toBe(0)
+      const resolved = await cli(["resolve", artifact.id, "cmt_title"])
+      expect(resolved.exitCode, resolved.stderr).toBe(0)
+    } finally {
+      listener.stop(true)
+    }
+
+    // As the person the run answers, the conversation's artifact being theirs to change.
+    const comments = await storage.artifacts.listComments({
+      projectId: PROJECT_ID,
+      id: artifact.id,
+    })
+    expect(
+      comments.map(({ id, parentId, author, resolvedBy }) => ({ id, parentId, author, resolvedBy }))
+    ).toEqual([
+      {
+        id: "cmt_title",
+        parentId: undefined,
+        author: { type: "user", id: "usr_requester" },
+        resolvedBy: { type: "user", id: "usr_requester" },
+      },
+      {
+        id: expect.any(String),
+        parentId: "cmt_title",
+        author: { type: "user", id: "usr_requester" },
+        resolvedBy: undefined,
+      },
+    ])
+  })
+
   test("gives a shared conversation the project's memory alone", async () => {
     // Reproduce by dropping the shared-conversation check in resolveRunTokenRequest: the
     // run then reads and saves its requester's own memory.
@@ -674,6 +750,12 @@ describe("run tokens", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Workflow agent nodes publish no artifacts: they have no conversation.",
     })
+
+    // Nor answer a comment on one.
+    const resolved = await app.fetch(
+      jsonRequest("POST", "/api/artifacts/art_1/comments/cmt_1/resolve", {})
+    )
+    expect(resolved.status).toBe(403)
   })
 
   test("can fetch file attachments from the active run thread", async () => {
