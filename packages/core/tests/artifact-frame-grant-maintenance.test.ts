@@ -45,7 +45,7 @@ describe("expired frame grants", () => {
         tokenHash: tokenHash(seed),
         artifactId: "art_deck",
         version: 1,
-        revision: 1,
+        filesDigest: "f".repeat(64),
         targets: [],
         createdAt: new Date(expiresAt.getTime() - 60 * minute),
         expiresAt,

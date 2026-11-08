@@ -89,7 +89,7 @@ const TURN_WRITE_COLUMNS = `artifact_id AS "artifactId", created, revision, writ
 
 const FRAME_GRANT_COLUMNS = `
   project_id AS "projectId", token_hash AS "tokenHash", artifact_id AS "artifactId", version,
-  revision, targets, created_at AS "createdAt", expires_at AS "expiresAt"
+  files_digest AS "filesDigest", targets, created_at AS "createdAt", expires_at AS "expiresAt"
 `
 
 const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "updatedAt"`
@@ -529,9 +529,10 @@ export class PgArtifactStorage implements ArtifactStorage {
   async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
     const rows = await this.sql`
       INSERT INTO artifact_frame_grants
-        (project_id, token_hash, artifact_id, version, revision, targets, created_at, expires_at)
+        (project_id, token_hash, artifact_id, version, files_digest, targets, created_at,
+         expires_at)
       SELECT ${record.projectId}, ${record.tokenHash}, ${record.artifactId}, ${record.version},
-             ${record.revision}, ${JSON.stringify(record.targets)}::text::jsonb,
+             ${record.filesDigest}, ${JSON.stringify(record.targets)}::text::jsonb,
              ${record.createdAt}, ${record.expiresAt}
       WHERE EXISTS (
         SELECT 1 FROM artifacts WHERE project_id = ${record.projectId} AND id = ${record.artifactId}

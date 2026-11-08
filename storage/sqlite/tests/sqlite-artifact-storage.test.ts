@@ -33,11 +33,12 @@ describe("SqliteArtifactStorage frame grants", () => {
       const db = (storage as unknown as { connection: { db: Database } }).connection.db
       db.query(
         `INSERT INTO artifact_frame_grants
-           (project_id, token_hash, artifact_id, version, revision, targets, created_at,
+           (project_id, token_hash, artifact_id, version, files_digest, targets, created_at,
             expires_at)
-         VALUES ('project', ?, 'art_deck', 1, 1, ?, ?, ?)`
+         VALUES ('project', ?, 'art_deck', 1, ?, ?, ?, ?)`
       ).run(
         "a".repeat(64),
+        "f".repeat(64),
         JSON.stringify([
           { address: "artifact:art_chart", artifactId: "art_chart", version: "newest" },
         ]),

@@ -278,6 +278,50 @@ describe("a deck's frame", () => {
     expect(await css.text()).toBe("body { margin: 0 }")
   })
 
+  test("keeps serving a canvas's boards while only its items move, and stops once a board changes", async () => {
+    // Reproduce by keeping canvas.json in frameFilesDigest: each save of a canvas edited live
+    // ends the link its boards run under, and they go blank.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const files = (x: number, welcome: string) =>
+      Promise.all([
+        fixture.put(
+          "canvas.json",
+          JSON.stringify({
+            items: [
+              {
+                id: "welcome",
+                type: "board",
+                file: "boards/welcome.html",
+                x,
+                y: 0,
+                w: 390,
+                h: 844,
+              },
+            ],
+          }),
+          "application/json"
+        ),
+        fixture.put(
+          "boards/welcome.html",
+          `<html><head></head><body>${welcome}</body></html>`,
+          "text/html"
+        ),
+      ])
+    const canvas = await publish(fixture, alice, "canvas", await files(0, "Welcome"))
+    const id = canvas.artifact.id
+    const { path } = (await (await mint(fixture, alice, id)).json()) as { path: string }
+    const board = () => fixture.app.fetch(new Request(url(`${path}boards/welcome.html`)))
+
+    await rewrite(fixture, alice, id, "canvas", await files(200, "Welcome"))
+    const moved = await board()
+    expect(moved.status).toBe(200)
+    expect(await moved.text()).toContain("Welcome")
+
+    await rewrite(fixture, alice, id, "canvas", await files(200, "Hello"))
+    expect((await board()).status).toBe(404)
+  })
+
   test("serves the version's files, and nothing else, under its policy", async () => {
     const { app, frame } = await deck()
     const base = `http://api.localhost${frame.path}`
@@ -477,7 +521,7 @@ describe("a frame for anything but a deck", () => {
       tokenHash: createHash("sha256").update(token).digest("hex"),
       artifactId: notes.artifact.id,
       version: 1,
-      revision: 1,
+      filesDigest: "f".repeat(64),
       targets: [],
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),

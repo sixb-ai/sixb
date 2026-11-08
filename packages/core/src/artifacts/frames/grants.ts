@@ -5,6 +5,7 @@ import type {
   ArtifactVersionRecord,
 } from "../../storage/artifacts/types"
 import { parseArtifactAddress } from "../address"
+import { CANVAS_FILE } from "../canvas"
 import { ArtifactRequestError } from "../errors"
 import { frameLayout } from "./entries"
 
@@ -28,7 +29,7 @@ type ReadArtifactVersion = (
 ) => Promise<ArtifactVersionRecord | null>
 
 /**
- * Issues a link that serves a version, at its revision, to a sandboxed frame, with the files it
+ * Issues a link that serves a version, as its files are now, to a sandboxed frame, with the files it
  * embeds from other artifacts that `read` finds. The token in the link is the credential: only its
  * hash is stored. Whoever asks must already have been allowed to read the version, and `read`
  * reads as them. Only a kind with a frame layout opens in one, since the frame serves its entry as
@@ -56,7 +57,7 @@ export async function createArtifactFrame(input: {
     tokenHash: hashToken(token),
     artifactId: version.artifactId,
     version: version.version,
-    revision: version.revision,
+    filesDigest: frameFilesDigest(version),
     targets: input.read ? await frameTargets(version, input.read) : [],
     createdAt,
     expiresAt,
@@ -98,8 +99,9 @@ async function frameTargets(
 
 /**
  * What a frame link serves: its version, and what it may show from other artifacts; `null` once
- * the link is unknown, expired, or its version gone or changed since, so a frame never mixes two
- * contents, and for a kind that does not open in a frame.
+ * the link is unknown, expired, or its version gone or its files changed since, so a frame never
+ * mixes two contents, and for a kind that does not open in a frame. A canvas written again with
+ * only its items moved serves the same files, so its boards keep running.
  */
 export async function resolveArtifactFrame(input: {
   readonly projectId: string
@@ -121,9 +123,22 @@ export async function resolveArtifactFrame(input: {
     artifactId: grant.artifactId,
     version: grant.version,
   })
-  if (!version || version.revision !== grant.revision) return null
+  if (!version || frameFilesDigest(version) !== grant.filesDigest) return null
 
   return frameLayout(version.outline.kind) ? { version, targets: grant.targets } : null
+}
+
+/**
+ * The files a version's frame serves, as a SHA-256 hex of their paths and digests. A canvas's
+ * `canvas.json` is left out: no board loads it, and a canvas edited live writes it every few
+ * seconds.
+ */
+function frameFilesDigest(version: ArtifactVersionRecord): string {
+  const served = version.files
+    .filter((entry) => version.outline.kind !== "canvas" || entry.path !== CANVAS_FILE)
+    .map((entry) => [entry.path, entry.file.digest] as const)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+  return createHash("sha256").update(JSON.stringify(served)).digest("hex")
 }
 
 function hashToken(token: string): string {
