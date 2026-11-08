@@ -53,6 +53,12 @@ export type ArtifactLiveServerMessage =
       readonly artifactId: string
       readonly state: ArtifactLiveSaveState
       readonly revision: number
+      /**
+       * The state vector of what is written back, in base64: a client forgets the changes it
+       * kept once this covers them, and keeps those it does not, as one sent while this was
+       * being written.
+       */
+      readonly stateVector: string
       readonly error?: string
     }
   /** The connection may now only watch: the person lost the right to change the artifact. */
