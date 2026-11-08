@@ -1,6 +1,6 @@
 import { cn } from "@sixb/ui/lib/utils"
 import { type InternalNode, useStore, ViewportPortal } from "@xyflow/react"
-import { ArrowUp, LoaderCircle } from "lucide-react"
+import { ArrowUp, LoaderCircle, X } from "lucide-react"
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -33,6 +33,10 @@ export interface DraftPlace {
   readonly element?: string
   readonly label?: string
   readonly point: { readonly x: number; readonly y: number }
+  /** Where the element it is about ends, as a share of the board's height: its card sits under. */
+  readonly under?: number
+  /** What it is about, as its card says it: the element's words, or the board. */
+  readonly anchor?: string
 }
 
 /** Where a pin without a point sits on its board, the `index`th of those, from its top right. */
@@ -101,8 +105,8 @@ export function CommentPin({
 }
 
 /**
- * Where a new comment is written: its words, posted with ⌘↩ or the arrow, given up with Esc or
- * Cancel. A failure says why, and keeps the words.
+ * Where a comment is written: its words, posted with ↩ or the arrow, a new line with ⇧↩, given
+ * up with Esc. A failure says why, and keeps the words.
  */
 export function CommentComposer({
   placeholder,
@@ -143,7 +147,7 @@ export function CommentComposer({
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     // The canvas's keys stay out of the words.
     event.stopPropagation()
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey || compact) && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void submit()
     }
@@ -159,13 +163,14 @@ export function CommentComposer({
         <textarea
           autoFocus={autoFocus}
           value={body}
-          rows={compact ? 1 : 2}
+          rows={1}
           maxLength={4000}
           aria-label={placeholder}
           placeholder={placeholder}
           onChange={(event) => setBody(event.target.value)}
           onKeyDown={onKeyDown}
-          className="max-h-40 min-h-6 flex-1 resize-none bg-transparent py-0.5 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+          // One line that grows with the words, as a message's does.
+          className="max-h-40 min-h-6 flex-1 resize-none bg-transparent py-0.5 text-sm leading-5 outline-none [field-sizing:content] placeholder:text-muted-foreground"
         />
         <button
           type="button"
@@ -187,26 +192,17 @@ export function CommentComposer({
           {messages.failures[failure]}
         </p>
       ) : null}
-      {onCancel && !compact ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md px-2 py-0.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {messages.cancel}
-          </button>
-        </div>
-      ) : null}
     </div>
   )
 }
 
-/** The card a new comment is written in, beside its pin. */
+/** The card a new comment is written in, by its pin: what it is about, then its words. */
 export function DraftCard({
+  anchor,
   onSubmit,
   onCancel,
 }: {
+  readonly anchor?: string
   readonly onSubmit: (body: string) => Promise<void>
   readonly onCancel: () => void
 }) {
@@ -215,9 +211,23 @@ export function DraftCard({
     <div
       role="dialog"
       aria-label={messages.newPin}
-      className="nodrag nopan nowheel pointer-events-auto w-full min-w-56 rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-[0_2px_4px_rgb(0_0_0/0.06),0_18px_40px_-16px_rgb(0_0_0/0.35)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95"
+      className="nodrag nopan nowheel pointer-events-auto w-full min-w-56 rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-[0_2px_4px_rgb(0_0_0/0.06),0_18px_40px_-16px_rgb(0_0_0/0.35)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:slide-in-from-top-1"
       onPointerDown={(event) => event.stopPropagation()}
     >
+      <div className="flex h-7 items-center gap-1 pr-0.5 pl-2">
+        <p className="m-0 min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {anchor ? messages.about(anchor) : messages.newPin}
+        </p>
+        <button
+          type="button"
+          aria-label={messages.cancel}
+          title={messages.cancel}
+          onClick={onCancel}
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5"
+        >
+          <X aria-hidden="true" />
+        </button>
+      </div>
       <CommentComposer placeholder={messages.placeholder} onSubmit={onSubmit} onCancel={onCancel} />
     </div>
   )
@@ -294,7 +304,11 @@ export const CanvasCommentPins = memo(function CanvasCommentPins({
             className="absolute top-0"
             style={cardPlace(view.x + (draftBox.x + draft.point.x * draftBox.w) * zoom, view.width)}
           >
-            <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
+            <DraftCard
+              {...(draft.anchor ? { anchor: draft.anchor } : {})}
+              onSubmit={onSubmitDraft}
+              onCancel={onCancelDraft}
+            />
           </div>
         </DraftAt>
       ) : null}

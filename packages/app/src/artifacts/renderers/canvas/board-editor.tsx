@@ -213,6 +213,9 @@ export function BoardStage({
   const frame = useBoardFrame({ version, board, live })
   const editing = mode === "edit" && canvas !== null
   const [selected, setSelected] = useState<FrameEditTarget | null>(null)
+  /** What the pointer is over while the reader picks what to comment on. */
+  const [hovered, setHovered] = useState<FrameEditTarget | null>(null)
+  const commenting = mode === "comment"
   // The element picked, as the event handler reads it: what the frame says the reader typed in is
   // taken only for it, and nothing while the frame's elements are not the document's.
   const picked = useRef<FrameEditTarget | null>(null)
@@ -233,6 +236,10 @@ export function BoardStage({
       setSelected(null)
     }
   }, [editing, frame.moved])
+
+  useEffect(() => {
+    if (!commenting || frame.moved) setHovered(null)
+  }, [commenting, frame.moved])
 
   // Each load of the frame, a port of its own, handed over with its first `edit` request: what
   // editing reports comes through it alone, never through the window, where the board's scripts
@@ -281,9 +288,10 @@ export function BoardStage({
   const onEvent = useCallback(
     (event: FrameEvent) => {
       if (event.event === "ready") {
-        // A page loaded again has nothing picked.
+        // A page loaded again has nothing picked, and nothing under the pointer.
         picked.current = null
         setSelected(null)
+        setHovered(null)
         frame.ready()
       } else if (event.event === "press") {
         onPress(event.params.text)
@@ -296,15 +304,20 @@ export function BoardStage({
     if (moved.current) return
 
     switch (event.event) {
+      case "edit.hover": {
+        if (commenting) setHovered(event.params.target)
+        return
+      }
       case "edit.select": {
         const { target, at } = event.params
-        if (mode === "comment") {
+        if (commenting) {
           if (!target) return
           const element = target.address ?? target.within ?? undefined
           onPick({
             ...(element ? { element } : {}),
             ...(target.address && target.label ? { label: target.label } : {}),
             point: point(at, target.rect),
+            under: Math.min(1, (target.rect.y + target.rect.height) / board.h),
           })
           return
         }
@@ -376,6 +389,8 @@ export function BoardStage({
           )
         })}
 
+        {commenting && hovered && !draft ? <HoverTag target={hovered} scale={scale} /> : null}
+
         {draft ? (
           <div
             className="absolute"
@@ -383,10 +398,26 @@ export function BoardStage({
           >
             <CommentPin label={messages.comments.newPin} active resolved={false} draft />
             <div
-              className={cn("absolute", draft.point.y > 0.6 ? "bottom-8" : "top-0")}
-              style={cardPlace(draft.point.x * board.w * scale, board.w * scale)}
+              className={cn("absolute", draftAbove(draft) ? "bottom-9" : null)}
+              style={{
+                ...cardPlace(draft.point.x * board.w * scale, board.w * scale),
+                // Under what it is about, so the words it points at stay in view.
+                ...(draftAbove(draft)
+                  ? {}
+                  : {
+                      top:
+                        Math.max(
+                          0,
+                          ((draft.under ?? draft.point.y) - draft.point.y) * board.h * scale
+                        ) + 10,
+                    }),
+              }}
             >
-              <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
+              <DraftCard
+                {...(draft.anchor ? { anchor: draft.anchor } : {})}
+                onSubmit={onSubmitDraft}
+                onCancel={onCancelDraft}
+              />
             </div>
           </div>
         ) : null}
@@ -425,6 +456,39 @@ export function BoardStage({
           {messages.edit.updating}
         </span>
       ) : null}
+    </div>
+  )
+}
+
+/** Whether a new comment's card sits above its pin: what it is about runs to the board's foot. */
+function draftAbove(draft: DraftPlace): boolean {
+  return (draft.under ?? draft.point.y) > 0.7
+}
+
+/**
+ * What the reader would comment on, named over it as the pointer moves: its words, or what kind
+ * of thing it is. The frame draws its outline.
+ */
+function HoverTag({ target, scale }: { readonly target: FrameEditTarget; readonly scale: number }) {
+  const messages = useArtifactMessages().canvas
+  const name =
+    target.address === null
+      ? messages.comments.elsewhere
+      : target.label
+        ? `“${target.label}”`
+        : messages.edit.kinds[target.kind]
+  const top = target.rect.y * scale
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        "absolute max-w-64 truncate rounded-md bg-primary px-1.5 py-0.5 text-[11px] leading-4 font-medium text-primary-foreground shadow-sm",
+        // Above the element, or inside its top when it starts at the board's top.
+        top < 24 ? "translate-y-1" : "-translate-y-[calc(100%+5px)]"
+      )}
+      style={{ left: target.rect.x * scale - 3, top }}
+    >
+      {name}
     </div>
   )
 }

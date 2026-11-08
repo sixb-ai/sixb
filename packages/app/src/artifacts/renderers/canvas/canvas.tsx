@@ -374,16 +374,17 @@ function Board({
                   <Panel position="top-right" className="!m-3">
                     <CommentTools commenting={commenting} />
                   </Panel>
-                  {commenting.commenting ? (
-                    <Panel position="top-center" className={board.editing ? "!mt-16" : "!mt-3"}>
-                      <CommentModeHint onExit={() => setCommenting(false)} />
-                    </Panel>
-                  ) : null}
                 </>
               ) : null}
             </ReactFlow>
           </CanvasEditingProvider>
         </LiveBoardsProvider>
+        {commenting.enabled && commenting.commenting && !draft ? (
+          // Over the canvas and an opened board alike, out of the way of what is commented on.
+          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 max-sm:bottom-20">
+            <CommentModeHint onExit={() => setCommenting(false)} />
+          </div>
+        ) : null}
         {opened && version ? (
           <BoardFocus
             version={version}

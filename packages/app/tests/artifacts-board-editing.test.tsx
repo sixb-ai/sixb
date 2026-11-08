@@ -17,6 +17,7 @@ import {
   type CommentPick,
   type StageMode,
 } from "../src/artifacts/renderers/canvas/board-editor"
+import type { DraftPlace } from "../src/artifacts/renderers/canvas/comment-pins"
 import { installDom } from "./helpers/dom"
 import { canvasOf, storedDocument } from "./helpers/live-server"
 
@@ -168,6 +169,8 @@ function stage(
   mode: StageMode,
   options: {
     readonly onPick?: (pick: CommentPick) => void
+    readonly draft?: DraftPlace
+    readonly onSubmitDraft?: (body: string) => Promise<void>
     readonly source?: string
     /** What edits the board, in place of the live canvas. */
     readonly editor?: BoardEditor
@@ -195,11 +198,11 @@ function stage(
         mode={mode}
         pins={[]}
         activePin={null}
-        draft={null}
+        draft={options.draft ?? null}
         onPress={() => {}}
         onPick={options.onPick ?? (() => {})}
         onOpenPin={() => {}}
-        onSubmitDraft={async () => {}}
+        onSubmitDraft={options.onSubmitDraft ?? (async () => {})}
         onCancelDraft={() => {}}
       />
     </QueryClientProvider>
@@ -400,11 +403,53 @@ describe("an opened board, edited in place", () => {
       target: target(HEADING, "text", "Welcome"),
       at: { x: 100, y: 200 },
     })
-    expect(picks).toEqual([{ element: HEADING, label: "Welcome", point: { x: 0.25, y: 0.25 } }])
+    expect(picks).toEqual([
+      { element: HEADING, label: "Welcome", point: { x: 0.25, y: 0.25 }, under: 0.21 },
+    ])
 
     // Nothing is typed in while commenting.
     await post("edit.text", { address: HEADING, base: "Welcome", text: "Typed" })
     expect(source()).toContain("<h1>Welcome</h1>")
+  })
+
+  test("picking what to comment on, names what the pointer is over, and nothing while editing", async () => {
+    // Reproduce by dropping the `edit.hover` case in BoardStage: the reader sees no name over
+    // what a click would comment on.
+    const commenting = stage("comment")
+    await commenting.post("ready", {})
+    await commenting.post("edit.hover", { target: commenting.target(HEADING, "text", "Welcome") })
+    expect(commenting.view.container.textContent).toContain("“Welcome”")
+
+    await commenting.post("edit.hover", { target: null })
+    expect(commenting.view.container.textContent).not.toContain("“Welcome”")
+    commenting.view.unmount()
+
+    const editing = stage("edit")
+    await editing.post("ready", {})
+    await editing.post("edit.hover", { target: editing.target(HEADING, "text", "Welcome") })
+    expect(editing.view.container.textContent).not.toContain("“Welcome”")
+  })
+
+  test("writes a new comment in a card that says what it is about, posted with Enter", async () => {
+    // Reproduce by asking for ⌘ with Enter in CommentComposer again: Enter alone posts nothing.
+    const posted: string[] = []
+    const { view } = stage("comment", {
+      draft: { board: BOARD.id, point: { x: 0.25, y: 0.25 }, under: 0.21, anchor: "“Welcome”" },
+      onSubmitDraft: async (body) => {
+        posted.push(body)
+      },
+    })
+    expect(view.getByRole("dialog", { name: "New comment" }).textContent).toContain("On “Welcome”")
+
+    const input = view.getByRole("textbox", { name: "Add a comment" })
+    fireEvent.change(input, { target: { value: "Warmer, please" } })
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true })
+    expect(posted).toEqual([])
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+    expect(posted).toEqual(["Warmer, please"])
   })
 
   // Guard proof: hand BoardStage's window events to its port's handler, `onEditRef.current`, and
