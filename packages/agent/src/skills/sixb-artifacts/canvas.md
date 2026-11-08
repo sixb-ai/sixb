@@ -177,6 +177,26 @@ readers see until they open it, so a board that looks wrong there looks wrong on
 2. Fix what the warnings name and what you see, in the boards' files or `canvas.json`.
 3. Update the artifact with `update_artifact`, and check again.
 
+## Comments
+
+People edit boards in place and leave comments on them. They send you the comments to act on as
+part of their message, each with where it is:
+
+```
+[welcome · body>main:0>h1:0 · "Welcome back" · revision 12] Make the title warmer.
+```
+
+The board's id, the element's address, its first words, and the revision they saw; a comment on a
+whole board has no address, and one on the canvas no board. The address is the element's path in
+the board's HTML: each step is a tag and its index among its siblings with that tag, from the
+`body` down, so `body>main:0>h1:0` is the first `<h1>` of the first `<main>` in the `<body>`.
+`<script>`, `<style>` and `<template>` count for nothing, and nothing inside a block of text, an
+`<svg>` or an `<img>` has an address of its own.
+
+Find the element by walking the board's file in your working copy, and check that its words match
+the quoted ones: the board may have changed since. When they don't, find the element by its
+words. Change what the comment asks, then say in your reply which comments you acted on.
+
 ## Examples
 
 `examples/canvas/` holds two finished canvases: `onboarding-flow`, three phone screens of an app
