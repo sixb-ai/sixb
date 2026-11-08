@@ -22,7 +22,7 @@ import {
   withAgentActivityStream,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
-import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/canvas"
+import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import {

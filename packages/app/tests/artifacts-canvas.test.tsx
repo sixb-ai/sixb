@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
 import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import {
+  BOARD_PREVIEW_WAIT_MS,
   type Canvas,
   type CanvasArrow,
   type CanvasBoard,
   FRAME_PROTOCOL,
   parseCanvas,
 } from "@sixb/core/artifacts"
-import { BOARD_PREVIEW_WAIT_MS } from "@sixb/core/internal/artifacts/canvas"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { AppWindow } from "lucide-react"

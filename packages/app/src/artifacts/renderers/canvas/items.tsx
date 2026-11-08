@@ -6,11 +6,7 @@ import type {
   CanvasShapeItem,
   CanvasText,
 } from "@sixb/core/artifacts"
-import {
-  CANVAS_TEXT_PIXELS,
-  canvasNoteFontSize,
-  canvasShapeFontSize,
-} from "@sixb/core/internal/artifacts/canvas"
+import { CANVAS_TEXT_PIXELS, canvasNoteFontSize, canvasShapeFontSize } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
 import { AppWindow, ArrowUpRight, Link2, Maximize2 } from "lucide-react"

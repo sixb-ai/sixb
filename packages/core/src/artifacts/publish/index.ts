@@ -3,6 +3,7 @@
  * the pictures of a canvas's boards are kept beside what it publishes.
  */
 
+export { BOARD_PREVIEW_JOB } from "../canvas-display"
 export { artifactAccessRule, artifactQueryChecker } from "../execution"
 export { isArtifactId } from "../ids"
 export { ARTIFACT_LIMITS } from "../limits"
