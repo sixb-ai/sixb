@@ -342,6 +342,12 @@ describe("an opened board, edited in place", () => {
     const path = `boards/${/src="(images\/[^"]+)"/.exec(source())?.[1]}`
     expect(uploads).toEqual(["POST /api/files"])
     expect(files.get(path)).toMatchObject({ blobId: "blob_new" })
+
+    // Guard proof: drop `alt: ""` from ImageTool's `show`, or the focus from ImagePanel's
+    // `replaced`; the new picture keeps "Hero", or the reader is not asked for its description.
+    expect(source()).toMatch(/<img src="images\/[^"]+" alt="">/)
+    const description = view.getByRole("textbox", { name: "Description" })
+    await waitFor(() => expect(document.activeElement).toBe(description))
     await closePopovers(view)
 
     canvas.undo()

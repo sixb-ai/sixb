@@ -358,7 +358,8 @@ export interface CanvasImage {
 
 /**
  * An image's picture and description: upload a new picture, or pick one the canvas holds; the
- * description is set as it is left.
+ * description is set as it is left. A new picture leaves the description empty, and the field
+ * takes the focus so the reader writes its own.
  */
 export function ImagePanel({
   current,
@@ -376,16 +377,23 @@ export function ImagePanel({
   readonly images: readonly CanvasImage[]
   readonly uploading: boolean
   readonly failure: string | null
-  readonly onUpload: (file: File) => void
-  readonly onPick: (path: string) => void
+  /** Whether the picture uploaded is shown now. */
+  readonly onUpload: (file: File) => Promise<boolean>
+  /** Whether the picture picked is shown now. */
+  readonly onPick: (path: string) => boolean
   readonly onAlt: (alt: string) => void
 }) {
   const messages = useArtifactMessages().canvas.edit
   const input = useRef<HTMLInputElement | null>(null)
   const altId = useId()
+  const description = useRef<HTMLInputElement | null>(null)
   const [text, setText] = useState(alt)
   useEffect(() => setText(alt), [alt])
   const others = images.filter((image) => image.path !== current)
+
+  const replaced = (shown: boolean) => {
+    if (shown) description.current?.focus()
+  }
 
   return (
     <div className="flex w-[17rem] flex-col gap-3" data-board-tools="">
@@ -399,7 +407,7 @@ export function ImagePanel({
         onChange={(event) => {
           const file = event.target.files?.[0]
           event.target.value = ""
-          if (file) onUpload(file)
+          if (file) void onUpload(file).then(replaced)
         }}
       />
       <button
@@ -433,7 +441,7 @@ export function ImagePanel({
                 type="button"
                 title={image.path}
                 aria-label={image.path}
-                onClick={() => onPick(image.path)}
+                onClick={() => replaced(onPick(image.path))}
                 className="flex aspect-square items-center justify-center overflow-hidden rounded-md bg-muted outline-none ring-1 ring-border transition-shadow hover:ring-2 hover:ring-primary focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {image.url ? (
@@ -460,6 +468,7 @@ export function ImagePanel({
           {messages.description}
         </label>
         <input
+          ref={description}
           id={altId}
           value={text}
           placeholder={messages.descriptionPlaceholder}
