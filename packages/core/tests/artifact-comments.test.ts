@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile } from "../src"
 import { SixbHost } from "../src"
+import { quoteArtifactComment } from "../src/artifacts"
 import { CANVAS_FILE } from "../src/artifacts/canvas"
 import { emptyGrantIndex, type GrantIndex } from "../src/authorization/types"
 import { bindRequestExecution } from "../src/execution/request"
@@ -183,5 +184,23 @@ describe("comments on an artifact", () => {
       { artifactId, commentId: comment.id, action: "deleted" },
     ])
     expect(await announced(paul)).toEqual([])
+  })
+
+  test("are quoted for the Agent with where they are, as its skill reads them", () => {
+    const anchor = {
+      board: "welcome",
+      element: "body>main:0>h1:0",
+      label: "Welcome back",
+      revision: 12,
+    }
+    expect(quoteArtifactComment({ anchor, body: "Make the title\nwarmer." })).toBe(
+      '[welcome · body>main:0>h1:0 · "Welcome back" · revision 12] Make the title warmer.'
+    )
+    expect(quoteArtifactComment({ anchor: { board: "welcome", revision: 3 }, body: "Busy" })).toBe(
+      "[welcome · revision 3] Busy"
+    )
+    expect(quoteArtifactComment({ anchor: { revision: 3 }, body: "Good" })).toBe(
+      "[revision 3] Good"
+    )
   })
 })
