@@ -11,12 +11,15 @@ import { SandboxRecovery } from "./components/sandbox-recovery"
 import { SharedThreadNotice } from "./components/shared-thread-notice"
 import { ThreadArtifactsMenu } from "./components/thread-artifacts-menu"
 import { ThreadPeople } from "./components/thread-people"
-import { useAgentConversation } from "./hooks/use-agent-conversation"
+import {
+  type UseAgentConversationInput,
+  useAgentConversation,
+} from "./hooks/use-agent-conversation"
 import { useThreadSharing } from "./hooks/use-thread-sharing"
 import { useAgentMessages } from "./i18n"
 import { knownName, MessageAuthorsContext, useConversationAuthors } from "./message-authors"
 import { personName, threadOwner } from "./sharing"
-import type { AgentContextInput } from "./types"
+import type { AgentContextInput, AgentThreadSandboxParams } from "./types"
 
 export interface AgentChatProps {
   readonly threadId?: string | null
@@ -43,6 +46,13 @@ export interface AgentChatProps {
    * may call it. False hides it.
    */
   readonly dictation?: boolean
+  /**
+   * The sandbox the conversation the next message creates works in, as the project's sandbox
+   * declares its params. See {@link UseAgentConversationInput.newThreadSandbox}.
+   */
+  readonly newThreadSandbox?: AgentThreadSandboxParams
+  /** Under the input of a new conversation, on the right: the page's choices for it. */
+  readonly newThreadControls?: ReactNode
 }
 
 /** Route-independent conversation view; routing and embedded panels only adapt its callbacks. */
@@ -62,12 +72,15 @@ export function AgentChat({
   conversationHeaderActions: hostHeaderActions,
   composerPlaceholder,
   dictation = true,
+  newThreadSandbox,
+  newThreadControls,
 }: AgentChatProps) {
   const messages = useAgentMessages()
   const threadId = threadIdInput ?? null
   const conversation = useAgentConversation({
     threadId,
     onThreadCreated: onNavigateThread,
+    newThreadSandbox,
   })
   // Each chat has its own toaster, so a toast shows once however many chats are mounted.
   const toasterId = useId()
@@ -149,11 +162,11 @@ export function AgentChat({
       <ConversationPanel
         agent={conversation.currentAgent}
         transcript={conversation.transcriptProps}
-        composer={
-          dictation
-            ? conversation.composerProps
-            : { ...conversation.composerProps, dictation: undefined }
-        }
+        composer={{
+          ...conversation.composerProps,
+          ...(dictation ? {} : { dictation: undefined }),
+          ...(threadId === null && newThreadControls ? { newThreadControls } : {}),
+        }}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
         currentThread={conversation.currentThread}

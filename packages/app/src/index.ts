@@ -95,6 +95,7 @@ export type {
   AgentRun,
   AgentThread,
   AgentThreadContext,
+  AgentThreadSandboxParams,
   LanguageModel,
 } from "./agent/types"
 export type { ArtifactTarget } from "./artifacts/target"
