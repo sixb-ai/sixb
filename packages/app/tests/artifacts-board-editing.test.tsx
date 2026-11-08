@@ -221,7 +221,8 @@ function stage(
 
 describe("an opened board, edited in place", () => {
   // Guard proof: drop the `chosen.address !== address` check in BoardStage's edit.text handler;
-  // the words posted for the heading, picked or not, land in the page.
+  // the words posted for the heading while the paragraph is picked land in the heading. The
+  // image case alone passes without it: the kind check refuses an image by itself.
   test("takes typed words only for the text element the reader picked", async () => {
     const { source, post, target } = stage("edit")
     await post("ready", {})
@@ -230,10 +231,16 @@ describe("an opened board, edited in place", () => {
     await post("edit.text", { address: HEADING, base: "Welcome", text: "Hacked" })
     expect(source()).toContain("<h1>Welcome</h1>")
 
-    // Another element picked: still nothing.
+    // An image picked: still nothing.
     await post("edit.select", { target: target(IMAGE, "image", "Hero") })
     await post("edit.text", { address: HEADING, base: "Welcome", text: "Hacked" })
     expect(source()).toContain("<h1>Welcome</h1>")
+
+    // Another text picked, the paragraph: its words, never the heading's.
+    await post("edit.select", { target: target(TOTAL, "text", "Total: 0") })
+    await post("edit.text", { address: HEADING, base: "Welcome", text: "Hacked" })
+    expect(source()).toContain("<h1>Welcome</h1>")
+    expect(source()).toContain("<p>Total: 0</p>")
 
     await post("edit.select", { target: target(HEADING, "text", "Welcome") })
     await post("edit.text", { address: HEADING, base: "Welcome", text: "Welcome back" })
