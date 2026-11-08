@@ -216,10 +216,13 @@ export function agentRunArtifacts(
           (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
         )
       })
-      await artifactPreviewRequester(reader)(
-        stored.version,
-        input.rendersPreviews ? { delayMs: BOARD_PREVIEW_GRACE_MS } : {}
-      )
+      // A run's layout check reads the version's query answers itself, and normally pictures every
+      // board: answering them here too would run each query twice. So the job carries none, and a
+      // board that reads one and that the check missed keeps its outline.
+      await artifactPreviewRequester(reader)(stored.version, {
+        withoutAnswers: true,
+        ...(input.rendersPreviews ? { delayMs: BOARD_PREVIEW_GRACE_MS } : {}),
+      })
 
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
     },

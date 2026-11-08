@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { SixbHost } from "../src"
+import { describe, expect, spyOn, test } from "bun:test"
+import { defineObjectType, prop, type SandboxFactory, SixbHost } from "../src"
 import { AgentExecutionLostError, agentRunArtifacts } from "../src/agents"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { bindDurableAgentExecution } from "../src/execution/agent"
@@ -14,9 +14,24 @@ const projectId = "agent-run-artifacts"
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
 
+/** What a live canvas's boards read. */
+const Task = defineObjectType({
+  id: "Task",
+  name: "Task",
+  properties: [prop("id", "string", { primary: true, required: true })],
+})
+
+/** The project's sandboxes, which only the agent worker opens. */
+const sandboxes: SandboxFactory = {
+  supportsRequestCredentials: true,
+  create: async () => {
+    throw new Error("Must not create a sandbox")
+  },
+}
+
 async function setup() {
   const deps = createTestRuntimeDeps()
-  const host = new SixbHost({ id: projectId, ontology: [], ...deps })
+  const host = new SixbHost({ id: projectId, ontology: [Task], ...deps, sandboxes })
   const { storage } = deps
 
   // Alice's conversation, with Bob taking part, and a turn Bob asked for running in it.
@@ -81,7 +96,11 @@ async function setup() {
         sessionId: "session-usr_bob",
         groupIds: [],
         roleIds: [],
-        grants: { ...emptyGrantIndex(), "run:agent": true },
+        grants: {
+          ...emptyGrantIndex(),
+          "run:agent": true,
+          "view:object": new Set([Task.id]),
+        },
       },
     },
   })
@@ -102,7 +121,7 @@ async function setup() {
       }),
     },
   ]
-  const canvas = async () =>
+  const canvas = async (extra: Record<string, string> = {}) =>
     Promise.all(
       Object.entries({
         "canvas.json": JSON.stringify({
@@ -111,6 +130,7 @@ async function setup() {
           ],
         }),
         "welcome.html": "<main><h1>Welcome</h1></main>",
+        ...extra,
       }).map(async ([path, body]) => ({
         path,
         file: await deps.blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
@@ -122,7 +142,7 @@ async function setup() {
       fileName: "welcome.png",
       mediaType: "image/png",
     })
-  return { storage, runSdk, started, artifacts, as, document, canvas, png }
+  return { deps, storage, runSdk, started, artifacts, as, document, canvas, png }
 }
 
 describe("a run's artifacts", () => {
@@ -228,6 +248,29 @@ describe("a run's artifacts", () => {
       .storePreviews({ artifactId: id, version: edited.version.version, previews })
       .catch((error: unknown) => error)
     expect(refused).toMatchObject({ code: "not_allowed" })
+  })
+
+  // Guard proof: answer the queries of a run's publish as an app save's are; the run's queries
+  // run once more than its layout check runs them, and the job carries their answers.
+  test("asks for the previews its check may miss without reading its queries again", async () => {
+    const { deps, runSdk, artifacts, canvas } = await setup()
+    const query = spyOn(runSdk.artifacts, "query")
+
+    const published = await artifacts.publish({
+      kind: "canvas",
+      title: "Tasks",
+      files: await canvas({
+        "queries/tasks.json": JSON.stringify({ kind: "start", objectTypeId: Task.id }),
+      }),
+    })
+
+    expect(query).not.toHaveBeenCalled()
+    const [claimed] = await deps.queues.agents.claim({ projectId, workerId: "test", limit: 10 })
+    expect(claimed?.job).toMatchObject({
+      type: "agent.artifact-previews.requested",
+      payload: { artifactId: published.artifact.id, version: 1 },
+    })
+    expect(claimed?.job.payload).not.toHaveProperty("queries")
   })
 
   // Guard proof: drop assertAgentRunOwned from the publish transaction; the run that ended while
