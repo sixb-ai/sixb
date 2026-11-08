@@ -39,24 +39,25 @@ const { artifact } = await sixb.artifacts.create({
 })
 ```
 
-`sixb.artifacts.publish(artifact.id, input)` replaces the current version's content. Publishing
+`sixb.artifacts.update(artifact.id, input)` replaces the current version's content. An update
 checks the whole version first: a document's images must be files in that version or another
 artifact's address, so it reads the same wherever it opens.
 
 Pass `baseRevision`, the revision your change was made from, when someone else may change it in
-between. If it changed since, the publish fails with `artifact_moved` (409 over HTTP), naming the
+between. If it changed since, the update fails with `artifact_moved` (409 over HTTP), naming the
 revision and who last wrote it, rather than replace changes you never saw:
 
 ```ts
-await sixb.artifacts.publish(artifact.id, { ...input, baseRevision: artifact.revision })
+await sixb.artifacts.update(artifact.id, { ...input, baseRevision: artifact.revision })
 ```
 
-From outside the server, use `POST /api/artifacts` and
-`POST /api/artifacts/{artifactId}/versions` with files uploaded through `POST /api/files`.
+From outside the server, use `POST /api/artifacts` and `PUT /api/artifacts/{artifactId}/content`
+with files uploaded through `POST /api/files`.
 
 ## Versions and restore points
 
-- The latest version is **open**: each publish, Agent update, or save in the app replaces it.
+- The latest version is **open**: each update, from your code, the Agent, or a save in the app,
+  replaces it.
 - **Creating a version** freezes it: it never changes again, and the next change opens the next
   one. Creating it twice changes nothing.
 - Every change counts in the artifact's `revision`, which only grows. Content read at one revision
