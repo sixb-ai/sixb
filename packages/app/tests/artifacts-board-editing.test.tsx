@@ -444,6 +444,10 @@ describe("an opened board, edited in place", () => {
     const input = view.getByRole("textbox", { name: "Add a comment" })
     fireEvent.change(input, { target: { value: "Warmer, please" } })
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true })
+    // The Enter that ends a word typed through an input method, as browsers and Safari send it.
+    // Reproduce by dropping the `composing` check in CommentComposer.
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
     expect(posted).toEqual([])
 
     await act(async () => {

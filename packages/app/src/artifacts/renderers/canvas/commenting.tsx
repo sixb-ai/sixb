@@ -123,7 +123,7 @@ export function useCanvasCommenting({
       setDraft({
         board,
         ...place,
-        anchor: place.label ? `“${place.label}”` : (titles.get(board) ?? board),
+        anchor: place.anchor ?? (place.label ? `“${place.label}”` : (titles.get(board) ?? board)),
         where,
       }),
     [titles]
