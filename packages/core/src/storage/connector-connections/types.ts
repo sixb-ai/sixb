@@ -7,6 +7,7 @@ export type {
   ConnectorConnectionOwner,
   ConnectorConnectionSelector,
   ProjectConnectorConnectionOwner,
+  UserConnectorConnectionOwner,
 } from "../../connectors"
 
 export const CONNECTOR_CONNECTION_RUN_FAILURE_CODES = [

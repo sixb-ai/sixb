@@ -471,6 +471,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("098-artifact-comments", artifactCommentsSql),
     pgSql("099-object-artifact-refs", objectArtifactRefsSql),
     pgSql("100-shared-link-guests", sharedLinkGuestsSql),
+    pgSql("101-connector-connection-owners", connectorConnectionOwnersSql),
   ],
 })
 
@@ -567,3 +568,6 @@ import artifactFrameFilesSql from "./migrations/097-artifact-frame-files.sql" wi
 import artifactCommentsSql from "./migrations/098-artifact-comments.sql" with { type: "text" }
 import objectArtifactRefsSql from "./migrations/099-object-artifact-refs.sql" with { type: "text" }
 import sharedLinkGuestsSql from "./migrations/100-shared-link-guests.sql" with { type: "text" }
+import connectorConnectionOwnersSql from "./migrations/101-connector-connection-owners.sql" with {
+  type: "text",
+}

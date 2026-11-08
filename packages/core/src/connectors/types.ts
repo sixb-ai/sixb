@@ -51,12 +51,31 @@ export interface ConnectorAccountCandidate {
   readonly avatarUrl?: string
 }
 
-/** V1 intentionally supports project-owned connector connections only. */
+/** A connection the project shares. Managing it requires `can.manage(connector)`. */
 export interface ProjectConnectorConnectionOwner {
   readonly type: "project"
 }
 
-export type ConnectorConnectionOwner = ProjectConnectorConnectionOwner
+/**
+ * A connection one person made with their own account. Only they manage it, and only syncs and
+ * webhooks read it; `sixb.connector()` refuses it.
+ */
+export interface UserConnectorConnectionOwner {
+  readonly type: "user"
+  readonly id: string
+}
+
+export type ConnectorConnectionOwner =
+  | ProjectConnectorConnectionOwner
+  | UserConnectorConnectionOwner
+
+export function sameConnectorConnectionOwner(
+  left: ConnectorConnectionOwner,
+  right: ConnectorConnectionOwner
+): boolean {
+  if (left.type === "project" || right.type === "project") return left.type === right.type
+  return left.id === right.id
+}
 
 /** Stable application-defined lookup key for one connector connection. */
 export interface ConnectorConnectionSelector {

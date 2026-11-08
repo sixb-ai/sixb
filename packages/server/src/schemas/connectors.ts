@@ -84,10 +84,16 @@ export const ConnectorAccountSchema = z.object({
   avatarUrl: z.string().url().optional(),
 })
 
+/** The project, or the one person whose own account the connection is. */
+const ConnectorConnectionOwnerSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("project") }),
+  z.object({ type: z.literal("user"), id: z.string() }),
+])
+
 export const ConnectorConnectionSchema = z.object({
   id: z.string(),
   connectorId: z.string(),
-  owner: z.object({ type: z.literal("project") }),
+  owner: ConnectorConnectionOwnerSchema,
   slot: z.string(),
   account: ConnectorAccountSchema,
   status: z.enum(["connected", "needs_reauthorization", "disconnected"]),
@@ -100,7 +106,7 @@ const ConnectorConnectionRunBaseSchema = z.object({
   id: z.string(),
   connectorId: z.string(),
   kind: z.enum(["connect", "reauthorize"]),
-  owner: z.object({ type: z.literal("project") }),
+  owner: ConnectorConnectionOwnerSchema,
   slot: z.string(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

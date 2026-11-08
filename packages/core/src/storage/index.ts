@@ -468,6 +468,7 @@ export type {
   RenewConnectorCredentialMutationInput,
   StageConnectorCredentialMutationCredentialsInput,
   StageConnectorCredentialMutationRevocationInput,
+  UserConnectorConnectionOwner,
   WaitForConnectorConnectionRunSelectionInput,
 } from "./connector-connections"
 export {

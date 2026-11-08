@@ -5,6 +5,7 @@ import type {
   ClaimConnectorCredentialMutationInput,
   ConnectorAuthorizationAttemptRecord,
   ConnectorAuthorizationRecord,
+  ConnectorConnectionOwner,
   ConnectorConnectionRecord,
   ConnectorConnectionRunProcessingRecord,
   ConnectorConnectionRunRecord,
@@ -12,6 +13,35 @@ import type {
   GetConnectorConnectionInput,
 } from "../types"
 import { CONNECTOR_CONNECTION_RUN_FAILURE_CODES } from "../types"
+
+/**
+ * How a SQL provider stores an owner: `owner_id` is empty for the project, so a unique key over
+ * `(owner_type, owner_id, slot)` never meets a NULL.
+ */
+export interface ConnectorConnectionOwnerColumns {
+  readonly ownerType: ConnectorConnectionOwner["type"]
+  readonly ownerId: string
+}
+
+export function connectorConnectionOwnerColumns(
+  owner: ConnectorConnectionOwner
+): ConnectorConnectionOwnerColumns {
+  return owner.type === "project"
+    ? { ownerType: "project", ownerId: "" }
+    : { ownerType: "user", ownerId: owner.id }
+}
+
+export function connectorConnectionOwnerFromColumns(
+  ownerType: string,
+  ownerId: string
+): ConnectorConnectionOwner {
+  if (ownerType === "project" && ownerId === "") return { type: "project" }
+  if (ownerType === "user" && ownerId !== "") return { type: "user", id: ownerId }
+  throw createSixbError(
+    "internal.unexpected",
+    `[Sixb] Connector connection owner '${ownerType}' with id '${ownerId}' is invalid.`
+  )
+}
 
 export interface ConnectorConnectionPersistenceScope {
   readonly projectId: string

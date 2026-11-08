@@ -697,6 +697,7 @@ export type {
   OAuthConnectorCodeExchangeInput,
   ProjectConnectorConnectionOwner,
   StaticConnectorDefinition,
+  UserConnectorConnectionOwner,
 } from "./connectors"
 export { ConnectorOAuthError, defineConnector } from "./connectors"
 

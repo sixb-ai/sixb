@@ -2,13 +2,16 @@ import {
   type ConnectorConnectionPersistence,
   type ConnectorConnectionPersistenceBackend,
   type ConnectorConnectionPersistenceScope,
+  connectorConnectionOwnerFromColumns,
   DurableConnectorConnectionStorage,
+  connectorConnectionOwnerColumns as ownerColumns,
 } from "@sixb/core/internal/connector-connection-storage-provider"
 import type {
   ConnectorAuthorizationAttemptRecord,
   ConnectorAuthorizationRecord,
   ConnectorConnectionRecord,
   ConnectorConnectionRunRecord,
+  ConnectorConnectionSelector,
   ConnectorCredentialMutation,
   ConnectorStagedCredentials,
 } from "@sixb/core/storage"
@@ -76,15 +79,17 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
   }
 
   async insertAuthorizationAttempt(record: ConnectorAuthorizationAttemptRecord): Promise<boolean> {
+    const owner = ownerColumns(record.owner)
     try {
       await this.sql`
         INSERT INTO connector_authorization_attempts (
-          project_id, connector_id, id, slot, initiated_by_execution_id,
+          project_id, connector_id, id, owner_type, owner_id, slot, initiated_by_execution_id,
           state_hash, code_verifier, redirect_uri, connection_run_id, return_to,
           callback_binding_hash, reauthorization_id, reauthorization_revision,
           reauthorization_connection_ids, created_at, expires_at
         ) VALUES (
-          ${record.projectId}, ${record.connectorId}, ${record.id}, ${record.slot},
+          ${record.projectId}, ${record.connectorId}, ${record.id},
+          ${owner.ownerType}, ${owner.ownerId}, ${record.slot},
           ${record.initiatedByExecutionId}, ${record.stateHash},
           ${record.codeVerifier === undefined ? null : jsonParameter(this.sql, record.codeVerifier)}, ${record.redirectUri},
           ${record.connectionRunId ?? null}, ${record.returnTo ?? null},
@@ -158,13 +163,14 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
       const values = runValues(record)
       await this.sql`
         INSERT INTO connector_connection_runs (
-          project_id, connector_id, id, kind, slot, initiated_by_execution_id,
+          project_id, connector_id, id, kind, owner_type, owner_id, slot, initiated_by_execution_id,
           status, waiting_for, processing_id, callback_started_at,
           expires_at, authorization_id, cleanup_authorization_id, connections, error,
           created_at, updated_at, finished_at
         ) VALUES (
           ${record.projectId}, ${record.connectorId}, ${record.id}, ${values.kind},
-          ${values.slot}, ${values.initiatedByExecutionId}, ${values.status},
+          ${values.ownerType}, ${values.ownerId}, ${values.slot},
+          ${values.initiatedByExecutionId}, ${values.status},
           ${values.waitingFor}, ${values.processingId},
           ${values.callbackStartedAt}, ${values.expiresAt}, ${values.authorizationId},
           ${values.cleanupAuthorizationId},
@@ -199,8 +205,8 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
     const values = runValues(record)
     const rows = await this.sql<{ readonly id: string }[]>`
       UPDATE connector_connection_runs
-      SET kind = ${values.kind}, slot = ${values.slot},
-          initiated_by_execution_id = ${values.initiatedByExecutionId}, status = ${values.status},
+      SET kind = ${values.kind}, owner_type = ${values.ownerType}, owner_id = ${values.ownerId},
+          slot = ${values.slot}, initiated_by_execution_id = ${values.initiatedByExecutionId}, status = ${values.status},
           waiting_for = ${values.waitingFor},
           processing_id = ${values.processingId}, callback_started_at = ${values.callbackStartedAt},
           expires_at = ${values.expiresAt}, authorization_id = ${values.authorizationId},
@@ -292,14 +298,15 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
   }
 
   async insertConnection(record: ConnectorConnectionRecord): Promise<boolean> {
+    const owner = ownerColumns(record.owner)
     try {
       await this.sql`
         INSERT INTO connector_connections (
-          project_id, connector_id, id, authorization_id, slot, account,
+          project_id, connector_id, id, authorization_id, owner_type, owner_id, slot, account,
           account_id, status, disconnected_at, created_at, updated_at
         ) VALUES (
           ${record.projectId}, ${record.connectorId}, ${record.id}, ${record.authorizationId},
-          ${record.slot}, ${jsonParameter(this.sql, record.account)},
+          ${owner.ownerType}, ${owner.ownerId}, ${record.slot}, ${jsonParameter(this.sql, record.account)},
           ${record.account.id}, ${record.status}, ${record.disconnectedAt ?? null},
           ${record.createdAt}, ${record.updatedAt}
         )
@@ -316,14 +323,15 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
     return rows[0] ? connectionFromRow(rows[0]) : null
   }
 
-  async getConnectionBySelector(input: {
-    readonly owner: { readonly type: "project" }
-    readonly slot: string
-  }): Promise<ConnectorConnectionRecord | null> {
+  async getConnectionBySelector(
+    input: ConnectorConnectionSelector
+  ): Promise<ConnectorConnectionRecord | null> {
     if (!this.scope.connectorId) return null
+    const owner = ownerColumns(input.owner)
     const rows = await this.sql<PgConnectionRow[]>`
       SELECT * FROM connector_connections
       WHERE project_id = ${this.scope.projectId} AND connector_id = ${this.scope.connectorId}
+        AND owner_type = ${owner.ownerType} AND owner_id = ${owner.ownerId}
         AND slot = ${input.slot}
       ${this.lockClause()}
     `
@@ -365,9 +373,11 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
   }
 
   async updateConnection(record: ConnectorConnectionRecord): Promise<void> {
+    const owner = ownerColumns(record.owner)
     const rows = await this.sql<{ readonly id: string }[]>`
       UPDATE connector_connections
-      SET authorization_id = ${record.authorizationId}, slot = ${record.slot},
+      SET authorization_id = ${record.authorizationId}, owner_type = ${owner.ownerType},
+          owner_id = ${owner.ownerId}, slot = ${record.slot},
           account = ${jsonParameter(this.sql, record.account)},
           account_id = ${record.account.id}, status = ${record.status},
           disconnected_at = ${record.disconnectedAt ?? null}, updated_at = ${record.updatedAt}
@@ -435,7 +445,7 @@ function authorizationAttemptFromRow(
     id: row.id,
     projectId: row.project_id,
     connectorId: row.connector_id,
-    owner: { type: "project" },
+    owner: connectorConnectionOwnerFromColumns(row.owner_type, row.owner_id),
     slot: row.slot,
     initiatedByExecutionId: row.initiated_by_execution_id,
     stateHash: row.state_hash,
@@ -461,6 +471,7 @@ function authorizationAttemptFromRow(
 function runValues(record: ConnectorConnectionRunRecord) {
   return {
     kind: record.kind,
+    ...ownerColumns(record.owner),
     slot: record.slot,
     initiatedByExecutionId: record.initiatedByExecutionId,
     status: record.status,
@@ -489,7 +500,7 @@ function connectionRunFromRow(row: PgConnectionRunRow): ConnectorConnectionRunRe
     projectId: row.project_id,
     connectorId: row.connector_id,
     kind: row.kind,
-    owner: { type: "project" as const },
+    owner: connectorConnectionOwnerFromColumns(row.owner_type, row.owner_id),
     slot: row.slot,
     initiatedByExecutionId: row.initiated_by_execution_id,
     createdAt: date(row.created_at),
@@ -635,7 +646,7 @@ function connectionFromRow(row: PgConnectionRow): ConnectorConnectionRecord {
     projectId: row.project_id,
     connectorId: row.connector_id,
     authorizationId: row.authorization_id,
-    owner: { type: "project" },
+    owner: connectorConnectionOwnerFromColumns(row.owner_type, row.owner_id),
     slot: row.slot,
     account: row.account,
     status: row.status,
@@ -694,6 +705,8 @@ interface PgAuthorizationAttemptRow {
   readonly project_id: string
   readonly connector_id: string
   readonly id: string
+  readonly owner_type: string
+  readonly owner_id: string
   readonly slot: string
   readonly initiated_by_execution_id: string
   readonly state_hash: string
@@ -714,6 +727,8 @@ interface PgConnectionRunRow {
   readonly connector_id: string
   readonly id: string
   readonly kind: ConnectorConnectionRunRecord["kind"]
+  readonly owner_type: string
+  readonly owner_id: string
   readonly slot: string
   readonly initiated_by_execution_id: string
   readonly status: ConnectorConnectionRunRecord["status"]
@@ -761,6 +776,8 @@ interface PgConnectionRow {
   readonly connector_id: string
   readonly id: string
   readonly authorization_id: string
+  readonly owner_type: string
+  readonly owner_id: string
   readonly slot: string
   readonly account: ConnectorConnectionRecord["account"]
   readonly status: ConnectorConnectionRecord["status"]
