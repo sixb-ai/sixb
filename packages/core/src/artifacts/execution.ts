@@ -10,10 +10,12 @@ import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
   ArtifactFile,
   ArtifactRecord,
+  ArtifactRestorePointRecord,
   ArtifactStorage,
   ArtifactVersionRecord,
   ListArtifactsResult,
   ListArtifactVersionsResult,
+  PublishedArtifactVersion,
 } from "../storage/artifacts/types"
 import type { Storage } from "../storage/types"
 import {
@@ -23,11 +25,17 @@ import {
   createArtifactAccessRule,
 } from "./access"
 import { ArtifactRequestError } from "./errors"
+import { announceArtifactUpdates } from "./events"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { invalidArtifact, readArtifactText } from "./publish/files"
-import { type BoardPreviewRequester, requestBoardPreviews } from "./publish/previews"
 import {
+  type BoardPreviewRequester,
+  boardsReadLiveData,
+  requestBoardPreviews,
+} from "./publish/previews"
+import {
+  artifactRequestError,
   artifactVersionWarnings,
   type PreparedArtifactVersion,
   type PublishedArtifact,
@@ -72,10 +80,15 @@ export type ArtifactQueryInput =
 
 export interface PublishArtifactRuntimeInput extends ArtifactContentInput {
   /**
-   * The version this one was made from, such as the one a person edited. When another version was
-   * published since, publishing fails with `artifact_moved`, naming the latest and its author.
+   * The revision this content was made from, such as the one a person edited. When the artifact
+   * changed since, publishing fails with `artifact_moved`, naming its revision and who wrote it.
    */
-  readonly baseVersion?: number
+  readonly baseRevision?: number
+}
+
+/** A change made from what the caller saw: past `baseRevision`, it fails with `artifact_moved`. */
+export interface ArtifactRevisionInput {
+  readonly baseRevision?: number
 }
 
 export interface ListArtifactsRuntimeInput {
@@ -99,10 +112,34 @@ export interface ArtifactsRuntime {
   /** Creates an artifact owned by the caller, with its first version. */
   create(input: ArtifactContentInput): Promise<PublishedArtifact>
   /**
-   * Publishes the next version, authored by the caller; the artifact keeps its owner. The kind must
-   * be the artifact's. Throws `not_shared` or `read_only` when the caller may not update it.
+   * Writes the latest version, authored by the caller: its open version's content is replaced, or
+   * the next version opens when it is frozen. The artifact keeps its owner, and the kind must be
+   * its. Throws `not_shared` or `read_only` when the caller may not update it.
    */
   publish(artifactId: string, input: PublishArtifactRuntimeInput): Promise<PublishedArtifact>
+  /**
+   * Creates a version: the open latest version is frozen, so it never changes again and the next
+   * write opens the next one. A latest version already frozen is returned as it is. Who may
+   * publish may freeze; throws as `publish` does.
+   */
+  freeze(artifactId: string, input?: ArtifactRevisionInput): Promise<PublishedArtifactVersion>
+  /**
+   * What the artifact's latest version held before each Agent turn's first write to it, and
+   * before each restore, newest first; `null` when the caller cannot read the artifact.
+   */
+  listRestorePoints(artifactId: string): Promise<ArtifactRestorePointRecord[] | null>
+  /** `null` when the caller cannot read the artifact, or it keeps no such restore point. */
+  getRestorePoint(artifactId: string, revision: number): Promise<ArtifactRestorePointRecord | null>
+  /**
+   * Puts a restore point's content back in the latest version, authored by the caller, as
+   * `publish` writes it. What it replaces becomes a restore point, so the restore can be undone.
+   * Throws as `publish` does, and `restore_point_not_found`.
+   */
+  restore(
+    artifactId: string,
+    revision: number,
+    input?: ArtifactRevisionInput
+  ): Promise<PublishedArtifactVersion>
   /** What the caller may do with the artifact; `null` when there is no such artifact. */
   access(artifactId: string): Promise<ArtifactAccess | null>
   /** `null` when the caller cannot read it. */
@@ -353,6 +390,33 @@ export function createArtifactsRuntime(
     })
 
   /**
+   * Changes an artifact the caller may update, in one transaction that decides it there, so a
+   * participant removed meanwhile changes nothing.
+   */
+  const change = (
+    artifactId: string,
+    write: (storage: ArtifactStorage, author: Principal) => Promise<PublishedArtifactVersion>
+  ) => {
+    const author = requireCaller()
+    requireStorage()
+
+    return runtime.storage.transaction(async (tx) => {
+      const storage = tx.artifacts
+      if (!storage) throw new Error("[Sixb] Storage transactions hold no artifacts.")
+
+      const artifact = await storage.get({ projectId: runtime.projectId, id: artifactId })
+      if (!artifact) throw notFound(artifactId)
+      assertUpdatable(artifactId, await rule(tx).publishAccess(artifact))
+
+      try {
+        return await write(storage, author)
+      } catch (error) {
+        throw artifactRequestError(error)
+      }
+    })
+  }
+
+  /**
    * The version's files with its `queries` stored among them. Publishing then checks each one as
    * it checks a query file.
    */
@@ -409,15 +473,70 @@ export function createArtifactsRuntime(
         kind: input.kind,
         title: input.title,
         files: await contentFiles(input),
-        ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
+        ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
         author,
         readable: readableBy(rule()),
         checkQuery,
       })
       const stored = await store(prepared)
+      await announceArtifactUpdates(runtime.events, [stored.version])
       await requestPreviews(stored.version)
 
       return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+    },
+
+    async freeze(artifactId, input = {}) {
+      const frozenAt = new Date()
+      const frozen = await change(artifactId, (storage) =>
+        storage.freeze({
+          projectId: runtime.projectId,
+          artifactId,
+          ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+          frozenAt,
+        })
+      )
+
+      // A version frozen before changed nothing to announce.
+      if (frozen.version.frozenAt?.getTime() === frozenAt.getTime()) {
+        await announceArtifactUpdates(runtime.events, [frozen.version])
+      }
+      return frozen
+    },
+
+    async listRestorePoints(artifactId) {
+      if (!(await getReadable(artifactId))) return null
+      return requireStorage().listRestorePoints({ projectId: runtime.projectId, id: artifactId })
+    },
+
+    async getRestorePoint(artifactId, revision) {
+      if (!(await getReadable(artifactId))) return null
+      return requireStorage().getRestorePoint({
+        projectId: runtime.projectId,
+        artifactId,
+        revision,
+      })
+    },
+
+    async restore(artifactId, revision, input = {}) {
+      const restored = await change(artifactId, (storage, author) =>
+        storage.restoreTo({
+          projectId: runtime.projectId,
+          artifactId,
+          revision,
+          ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+          author,
+          restoredAt: new Date(),
+        })
+      )
+      await announceArtifactUpdates(runtime.events, [restored.version])
+
+      // Pictures of live boards show their author's data: a restore by someone else leaves the
+      // ones it misses to the boards that read none.
+      await requestPreviews(
+        restored.version,
+        boardsReadLiveData(restored.version) ? { withoutAnswers: true } : {}
+      )
+      return restored
     },
 
     async access(artifactId) {

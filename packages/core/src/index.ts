@@ -229,6 +229,8 @@ export type {
 
 export type {
   ActionEventOrigin,
+  ArtifactEvent,
+  ArtifactUpdatedEvent,
   DatasetEvent,
   DatasetEventSelectorBuilder,
   DatasetEventSelectorContext,

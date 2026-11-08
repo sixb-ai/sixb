@@ -110,7 +110,7 @@ async function setup() {
     },
   })
   const artifacts = agentRunArtifacts(
-    { projectId, storage },
+    { projectId, storage, domainEvents: host.events },
     started,
     "exec_bob",
     async () => runSdk
@@ -147,7 +147,7 @@ async function setup() {
       fileName: "welcome.png",
       mediaType: "image/png",
     })
-  return { deps, storage, runSdk, started, artifacts, as, document, canvas, png }
+  return { deps, host, storage, runSdk, started, artifacts, as, document, canvas, png }
 }
 
 describe("a run's artifacts", () => {
@@ -184,12 +184,20 @@ describe("a run's artifacts", () => {
       files: await document("# Notes\n"),
     })
 
+    // The turn's writes replace the open version, and open the next one after Alice creates it.
     const next = await artifacts.publish({
       artifactId: shared.artifact.id,
       title: "Plan",
       files: await document("# Plan, revised\n"),
     })
-    expect(next.version.version).toBe(2)
+    expect(next.version).toMatchObject({ version: 1, revision: 2 })
+    await as(alice).artifacts.freeze(shared.artifact.id)
+    const opened = await artifacts.publish({
+      artifactId: shared.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, third\n"),
+    })
+    expect(opened.version).toMatchObject({ version: 2, revision: 4 })
 
     expect(await artifacts.updatable(elsewhere.artifact.id)).toBeNull()
     const refused = await artifacts
@@ -221,8 +229,9 @@ describe("a run's artifacts", () => {
   })
 
   // Guard proof: drop the origin check from storePreviews; Alice's version, which shows what she
-  // can see, takes the pictures Bob's turn took with his rights.
-  test("keeps the pictures of a version it published, and of no other", async () => {
+  // can see, takes the pictures Bob's turn took with his rights. Drop the revision check, and the
+  // pictures of what Bob's turn wrote are kept under the boards of whatever replaced it.
+  test("keeps the pictures of what it wrote, while the version holds it", async () => {
     const { storage, artifacts, as, canvas, png } = await setup()
     const published = await artifacts.publish({
       kind: "canvas",
@@ -235,7 +244,8 @@ describe("a run's artifacts", () => {
       { board: "welcome", theme: "light" as const, size: "full" as const, file: await png() },
     ]
 
-    await artifacts.storePreviews({ artifactId: id, version: 1, previews })
+    const written = { artifactId: id, version: 1, revision: published.version.revision }
+    await artifacts.storePreviews({ ...written, previews })
     const outline = published.version.outline
     const renderKey =
       outline.kind === "canvas" && outline.items[0]?.type === "board"
@@ -251,10 +261,12 @@ describe("a run's artifacts", () => {
       title: "Onboarding",
       files: await canvas(),
     })
-    const refused = await artifacts
-      .storePreviews({ artifactId: id, version: edited.version.version, previews })
-      .catch((error: unknown) => error)
-    expect(refused).toMatchObject({ code: "not_allowed" })
+    for (const at of [written, { artifactId: id, version: 1, revision: edited.version.revision }]) {
+      const refused = await artifacts
+        .storePreviews({ ...at, previews })
+        .catch((error: unknown) => error)
+      expect(refused).toMatchObject({ code: "not_allowed" })
+    }
   })
 
   // Guard proof: answer the queries of every run's publish, or of none. A publisher that renders
@@ -297,6 +309,7 @@ describe("a run's artifacts", () => {
       payload: {
         artifactId: commanded.artifact.id,
         version: 1,
+        revision: 1,
         queries: { blobId: expect.any(String) },
       },
     })
@@ -306,7 +319,11 @@ describe("a run's artifacts", () => {
     jest.useFakeTimers()
     jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
     const waited = await claim()
-    expect(waited?.payload).toEqual({ artifactId: checked.artifact.id, version: 1 })
+    expect(waited?.payload).toEqual({
+      artifactId: checked.artifact.id,
+      version: 1,
+      revision: 1,
+    })
   })
 
   // Guard proof: drop assertAgentRunOwned from the publish transaction; the run that ended while
@@ -330,11 +347,16 @@ describe("a run's artifacts", () => {
         return runSdk.blobs.stat(blobId)
       },
     }
-    const artifacts = agentRunArtifacts({ projectId, storage }, started, "exec_bob", async () => ({
-      artifacts: runSdk.artifacts,
-      execution: runSdk.execution,
-      blobs,
-    }))
+    const artifacts = agentRunArtifacts(
+      { projectId, storage, domainEvents: { emit: async () => {} } },
+      started,
+      "exec_bob",
+      async () => ({
+        artifacts: runSdk.artifacts,
+        execution: runSdk.execution,
+        blobs,
+      })
+    )
 
     const refused = await artifacts
       .publish({ kind: "document", title: "Plan", files: await document("# Plan\n") })
@@ -343,5 +365,111 @@ describe("a run's artifacts", () => {
     expect(ended).toBe(true)
     expect(refused).toBeInstanceOf(AgentExecutionLostError)
     expect((await storage.artifacts.list({ projectId })).total).toBe(0)
+  })
+  // Guard proof: write every artifact under the run itself rather than its turn in
+  // `agentRunArtifacts`; the child's write then keeps a second restore point.
+  test("keeps one restore point per turn, before its first write to an existing artifact", async () => {
+    const { storage, started, runSdk, artifacts, as, document } = await setup()
+    const plan = await as(alice).artifacts.create({
+      kind: "document",
+      title: "Plan",
+      files: await document("# Plan\n"),
+    })
+    // Alice's artifact, shared in her conversation by an earlier turn of hers.
+    await storage.artifacts.publish({
+      projectId,
+      artifactId: plan.artifact.id,
+      kind: "document",
+      version: { ...plan.version, origin: { threadId: "thr_alice", runId: "run_alice" } },
+    })
+
+    await artifacts.publish({
+      artifactId: plan.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, Bob\n"),
+    })
+    // A child of Bob's turn, writing into the same conversation.
+    const childExecution = await createTestAgentExecution(storage, {
+      projectId,
+      runId: "run_bob_child",
+      sourceExecutionId: started.executionId,
+    })
+    await storage.agents.runs.createSubagent({
+      id: "run_bob_child",
+      projectId,
+      executionId: childExecution,
+      parentRunId: started.id,
+      parentExecutionToken: "exec_bob",
+      spawnKey: "plan",
+      spec: { model: { provider: "test", modelId: "test-model" }, task: "Plan", toolNames: [] },
+      thread: { id: "thr_bob_child", create: true },
+      trigger: { id: "msg_bob_child", parts: [{ type: "text", text: "Plan" }] },
+      maxActiveChildren: 4,
+    })
+    const startedChild = await storage.agents.runs.start({
+      projectId,
+      id: "run_bob_child",
+      execution: { token: "exec_child", queueLeaseExpiresAt: new Date("2099-01-01") },
+    })
+    const child = agentRunArtifacts(
+      { projectId, storage, domainEvents: { emit: async () => {} } },
+      startedChild,
+      "exec_child",
+      async () => runSdk
+    )
+    await child.publish({
+      artifactId: plan.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, Bob's child\n"),
+    })
+
+    const created = await artifacts.publish({
+      kind: "document",
+      title: "Notes",
+      files: await document("# Notes\n"),
+    })
+
+    const points = await storage.artifacts.listRestorePoints({ projectId, id: plan.artifact.id })
+    expect(
+      points.map(({ revision, reason, turnRunId }) => ({ revision, reason, turnRunId }))
+    ).toEqual([{ revision: 2, reason: "turn", turnRunId: "run_bob" }])
+    expect(await child.turnWrites()).toEqual(await artifacts.turnWrites())
+    expect(await artifacts.turnWrites()).toEqual(
+      [
+        { artifactId: plan.artifact.id, created: false, revision: 4 },
+        { artifactId: created.artifact.id, created: true, revision: 1 },
+      ].sort((left, right) => (left.artifactId < right.artifactId ? -1 : 1))
+    )
+  })
+
+  // Guard proof: drop the announcement from AgentRunArtifacts.publish; a reader outside the
+  // conversation never learns that the artifact changed.
+  test("tells whoever reads an artifact it writes that it changed", async () => {
+    const { host, artifacts, document } = await setup()
+    const created = await artifacts.publish({
+      kind: "document",
+      title: "Plan",
+      files: await document("# Plan\n"),
+    })
+    const cursor = await host.events.latestCursor()
+
+    const written = await artifacts.publish({
+      artifactId: created.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, revised\n"),
+    })
+
+    const events = await host.events.read({
+      ...(cursor === undefined ? {} : { afterCursor: cursor }),
+      types: ["artifact.updated"],
+    })
+    expect(events.map((event) => event.payload)).toEqual([
+      {
+        artifactId: created.artifact.id,
+        version: 1,
+        revision: written.version.revision,
+        frozen: false,
+      },
+    ])
   })
 })

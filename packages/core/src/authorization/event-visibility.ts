@@ -81,6 +81,10 @@ export function canViewEvent(
     case "users":
       // Member events carry profiles and invitee emails: the member directory's grant.
       return isAllowed(authorization, { kind: "users.view" })
+    case "artifacts":
+      // No grant reads an artifact: its owner and the conversations that share it decide, which
+      // the events runtime asks per artifact. Grants alone show none.
+      return false
     default:
       // Fail closed: an unmodeled topic may carry a subject we don't yet gate.
       return false

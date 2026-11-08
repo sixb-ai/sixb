@@ -181,7 +181,11 @@ function setup(options: { readonly sandboxes?: PicturingSandboxes } = {}) {
     availableAt: new Date().toISOString(),
     attempt: 1,
     type: "agent.artifact-previews.requested" as const,
-    payload: { artifactId: version.artifactId, version: version.version },
+    payload: {
+      artifactId: version.artifactId,
+      version: version.version,
+      revision: version.revision,
+    },
   })
 
   return { host, storage, blobStorage, queues, canvas, pictures, job }
@@ -232,6 +236,30 @@ describe("a canvas version's previews", () => {
     expect(sandboxes.created).toHaveLength(1)
   })
 
+  test("are left to the job of the version's next revision once it is written again", async () => {
+    // Reproduce by dropping the revision check in `renderArtifactPreviews`: the job then pictures
+    // what the version holds now, with the query answers of the content it was asked for.
+    const sandboxes = new PicturingSandboxes()
+    const { host, canvas, pictures, job } = setup()
+    const { version } = await canvas()
+    const asked = job(version)
+
+    await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: version.artifactId,
+      kind: "canvas",
+      version: { ...version, title: "Written again", updatedAt: new Date() },
+    })
+    await renderArtifactPreviews({
+      host: { id: projectId, storage: host.storage, blobStorage: host.blobStorage, sandboxes },
+      job: asked,
+      signal: new AbortController().signal,
+    })
+
+    expect(sandboxes.created).toEqual([])
+    expect(await pictures(version)).toEqual([])
+  })
+
   test("are left to the outlines in a project without sandboxes", async () => {
     const { host, canvas, pictures, job } = setup()
     const { version } = await canvas()
@@ -258,7 +286,7 @@ describe("a canvas version's previews", () => {
       projectId,
       artifactId: version.artifactId,
       kind: "canvas",
-      version: { ...version, files: [...version.files, query], createdAt: new Date() },
+      version: { ...version, files: [...version.files, query], updatedAt: new Date() },
     })
     if (!live) throw new Error("Expected artifact storage.")
     const answers = {
@@ -311,7 +339,7 @@ describe("a canvas version's previews", () => {
         projectId,
         artifactId: version.artifactId,
         kind: "canvas",
-        version: { ...version, files, createdAt: new Date() },
+        version: { ...version, files, updatedAt: new Date() },
       })
       if (!published) throw new Error("Expected artifact storage.")
       return published.version

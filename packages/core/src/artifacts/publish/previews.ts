@@ -302,7 +302,7 @@ export async function missingBoardPreviews(
 /**
  * Each board's picture as a reader asks for it: `ready` in every mode, `pending` while one may
  * still come, `none` when nothing will render it: a project without sandboxes, a version from
- * before pictures, or one past the wait.
+ * before pictures, or one written longer ago than the wait.
  */
 export async function boardPreviewStatuses(
   storage: Pick<ArtifactStorage, "listBoardPreviews">,
@@ -312,7 +312,7 @@ export async function boardPreviewStatuses(
   const { boards, themes } = previewedBoards(version)
   const stored = await boardPreviews(storage, version)
   const waiting =
-    input.renders && input.now.getTime() - version.createdAt.getTime() < BOARD_PREVIEW_WAIT_MS
+    input.renders && input.now.getTime() - version.updatedAt.getTime() < BOARD_PREVIEW_WAIT_MS
 
   return new Map(
     boards.map((board) => {
@@ -382,9 +382,12 @@ export async function storeBoardPreviews(
   return checked.flatMap((each) => ("refused" in each ? [each.refused] : []))
 }
 
-/** One job per version: asking again for the same version is the same job. */
-export function boardPreviewsJobId(artifactId: string, version: number): string {
-  return `art_previews_${artifactId}_v${version}`
+/**
+ * One job per revision: asking again for the same content is the same job, and a version written
+ * again since gets a job of its own for the boards it changed.
+ */
+export function boardPreviewsJobId(artifactId: string, revision: number): string {
+  return `art_previews_${artifactId}_r${revision}`
 }
 
 /**
@@ -423,11 +426,12 @@ export async function requestBoardPreviews(
       projectId: version.projectId,
       jobs: [
         {
-          id: boardPreviewsJobId(version.artifactId, version.version),
+          id: boardPreviewsJobId(version.artifactId, version.revision),
           type: "agent.artifact-previews.requested",
           payload: {
             artifactId: version.artifactId,
             version: version.version,
+            revision: version.revision,
             ...(queries ? { queries } : {}),
           },
           ...(options.delayMs
@@ -458,7 +462,7 @@ async function storeQueryAnswers(
   return input.blobStorage.put({
     body,
     expectedSizeBytes: body.byteLength,
-    fileName: `${version.artifactId}-v${version.version}-queries.json`,
+    fileName: `${version.artifactId}-r${version.revision}-queries.json`,
     mediaType: "application/json",
   })
 }

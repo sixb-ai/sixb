@@ -1,6 +1,7 @@
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { createSixbError } from "../errors/internal"
+import type { DomainEventLog } from "../events/service"
 import type { AuthorizationRef } from "../execution"
 import {
   type AgentExecutionHost,
@@ -277,6 +278,8 @@ export interface AgentRunSessionHost extends AgentRunChildrenHost {
   readonly recoverAiModelCall: RecoverAiModelCall
   /** Where live records go; the host keeps them best effort (see isolateStreamSink). */
   readonly events: StreamSink
+  /** The project's domain events: what the run changes in artifacts is told there. */
+  readonly domainEvents: Pick<DomainEventLog, "emit">
   /** The project's security definitions, which decide a run's authority. */
   readonly security: SecurityDefinitionCatalog
   /** Where a project tool's logs go; the project's logging service when absent. */

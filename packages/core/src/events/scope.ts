@@ -52,6 +52,8 @@ export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
       return { datasetId: event.payload.datasetId }
     case "users":
       return {}
+    case "artifacts":
+      return {}
     default: {
       // Exhaustiveness guard: a new topic must extend the switch above.
       const _exhaustive: never = event

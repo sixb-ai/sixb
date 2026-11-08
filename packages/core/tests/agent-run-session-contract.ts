@@ -144,7 +144,7 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
     lakeStorage: new InMemoryLakeStorage(),
     queues: new InMemoryQueues(),
   })
-  return { session: { sdk, definitions: sdk.definitions }, blobs }
+  return { session: { sdk, definitions: sdk.definitions, domainEvents: sdk.events }, blobs }
 }
 
 /** A queued turn in a fresh storage, with the host a session works against. */
