@@ -696,7 +696,8 @@ export type QuickBooksDepositUpdate = QuickBooksRevision &
   Partial<QuickBooksDepositCreate> &
   Pick<QuickBooksDepositCreate, "DepositToAccountRef">
 
-export type QuickBooksTransferCreate = Pick<QuickBooksTransfer, TransactionFields | "DocNumber"> & {
+/** QuickBooks does not store DocNumber on transfers, so it is not writable here. */
+export type QuickBooksTransferCreate = Pick<QuickBooksTransfer, TransactionFields | "ClassRef"> & {
   readonly FromAccountRef: QuickBooksReference
   readonly ToAccountRef: QuickBooksReference
   readonly Amount: number

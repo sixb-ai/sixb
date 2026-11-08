@@ -382,6 +382,7 @@ export interface QuickBooksDeposit extends QuickBooksTransaction {
 }
 
 export interface QuickBooksTransfer extends QuickBooksTransaction {
+  readonly ClassRef?: QuickBooksReference
   readonly FromAccountRef?: QuickBooksReference
   readonly ToAccountRef?: QuickBooksReference
   readonly Amount?: number

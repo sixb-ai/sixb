@@ -3,6 +3,8 @@ import {
   type QuickBooksBillListOptions,
   type QuickBooksCustomerListOptions,
   type QuickBooksInvoiceListOptions,
+  type QuickBooksPaymentListOptions,
+  type QuickBooksTransferListOptions,
   quickbooks,
 } from "../src"
 
@@ -50,7 +52,6 @@ const since = new Date("2026-09-01T12:30:00.000Z")
 // unsupported properties return 4001 "Property X not found", so they are rejected locally instead.
 for (const [resource, entity, party, partyField] of [
   ["invoices", "Invoice", "customerIds", "CustomerRef"],
-  ["payments", "Payment", "customerIds", "CustomerRef"],
   ["creditMemos", "CreditMemo", "customerIds", "CustomerRef"],
   ["bills", "Bill", "vendorIds", "VendorRef"],
   ["billPayments", "BillPayment", "vendorIds", "VendorRef"],
@@ -65,10 +66,10 @@ for (const [resource, entity, party, partyField] of [
       docNumber: "INV-'7",
       [party]: ["9", "1'0"],
       updatedSince: since,
-      orderBy: { field: "MetaData.LastUpdatedTime", direction: "DESC" },
+      orderBy: { field: "TxnDate", direction: "DESC" },
     })
     expect(queries).toEqual([
-      `SELECT * FROM ${entity} WHERE Id IN ('1') AND TxnDate >= '2026-09-01' AND DocNumber = 'INV-\\'7' AND ${partyField} IN ('9', '1\\'0') AND MetaData.LastUpdatedTime >= '2026-09-01T12:30:00.000Z' ORDERBY MetaData.LastUpdatedTime DESC STARTPOSITION 1 MAXRESULTS 100`,
+      `SELECT * FROM ${entity} WHERE Id IN ('1') AND TxnDate >= '2026-09-01' AND DocNumber = 'INV-\\'7' AND ${partyField} IN ('9', '1\\'0') AND MetaData.LastUpdatedTime >= '2026-09-01T12:30:00.000Z' ORDERBY TxnDate DESC STARTPOSITION 1 MAXRESULTS 100`,
     ])
   })
 }
@@ -96,17 +97,19 @@ test("customer-linked transactions reject vendor filters and vice versa before f
   expect(queries).toEqual([])
 })
 
-test("name lists add an inclusive modification bound, timestamp sort and strict options", async () => {
+test("name lists add a modification bound and reject unknown options and timestamp sorts", async () => {
   const queries = capture("Customer")
   const qb = await client()
-  await qb.customers.list({
-    active: "all",
-    updatedSince: since,
-    orderBy: { field: "MetaData.LastUpdatedTime" },
-  })
+  await qb.customers.list({ active: "all", updatedSince: since })
   expect(queries).toEqual([
-    "SELECT * FROM Customer WHERE Active IN (true, false) AND MetaData.LastUpdatedTime >= '2026-09-01T12:30:00.000Z' ORDERBY MetaData.LastUpdatedTime ASC STARTPOSITION 1 MAXRESULTS 100",
+    "SELECT * FROM Customer WHERE Active IN (true, false) AND MetaData.LastUpdatedTime >= '2026-09-01T12:30:00.000Z' ORDERBY Id ASC STARTPOSITION 1 MAXRESULTS 100",
   ])
+  // Offset pages over a timestamp sort skip rows that move when updated mid-sync.
+  await expect(
+    qb.customers.list({
+      orderBy: { field: "MetaData.LastUpdatedTime" },
+    } as unknown as QuickBooksCustomerListOptions)
+  ).rejects.toThrow("Unsupported query sort")
   // Removal proof: remove allowedOptions from listEntities; the typo is silently ignored.
   await expect(
     qb.customers.list({ activ: false } as unknown as QuickBooksCustomerListOptions)
@@ -139,4 +142,24 @@ test("listAll carries every new filter to each page", async () => {
     expect(query).toContain(
       "DocNumber = 'B-1' AND VendorRef IN ('7') AND MetaData.LastUpdatedTime >= '2026-09-01T12:30:00.000Z'"
     )
+})
+
+test("payments filter by PaymentRefNum; payments and transfers have no DocNumber filter", async () => {
+  // Live sandbox: creating a payment or transfer with DocNumber did not store it, while a
+  // PaymentRefNum filter returned the payment. Removal proof: drop docNumber: false from
+  // payments.list; the docNumber case below then reaches fetch.
+  const queries = capture("Payment")
+  const qb = await client()
+  await qb.payments.list({ paymentRefNum: "CHK-1'2", customerIds: ["9"] })
+  expect(queries).toEqual([
+    "SELECT * FROM Payment WHERE CustomerRef IN ('9') AND PaymentRefNum = 'CHK-1\\'2' ORDERBY Id ASC STARTPOSITION 1 MAXRESULTS 100",
+  ])
+  await expect(
+    qb.payments.list({ docNumber: "1" } as unknown as QuickBooksPaymentListOptions)
+  ).rejects.toThrow("Unsupported transaction list option: docNumber")
+  await expect(
+    qb.transfers.list({ docNumber: "1" } as unknown as QuickBooksTransferListOptions)
+  ).rejects.toThrow("Unsupported transaction list option: docNumber")
+  await expect(qb.payments.list({ paymentRefNum: "" })).rejects.toThrow("query value")
+  expect(queries).toHaveLength(1)
 })

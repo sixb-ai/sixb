@@ -58,7 +58,7 @@ export function createTransfersResource(http: QuickBooksWriteHttp): QuickBooksTr
     },
     delete: async (input, options) => deleteEntity(http, "Transfer", input, options),
     get: (id) => readEntity(http, "Transfer", `transfer/${pathId(id)}`, id),
-    list: (options) => listTransactions(http, "Transfer", options),
+    list: (options) => listTransactions(http, "Transfer", options, { docNumber: false }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource

@@ -17,9 +17,6 @@ export interface QuickBooksPaginationOptions {
 /** Sort direction for query `ORDERBY`. */
 export type QuickBooksSortDirection = "ASC" | "DESC"
 
-/** The provider modification timestamp, sortable on every queryable entity except TaxClassification. */
-export type QuickBooksUpdatedField = "MetaData.LastUpdatedTime"
-
 /** Name-list query subset without an Active predicate or name field. */
 export interface QuickBooksReferenceListOptions<TSort extends string = "Id">
   extends QuickBooksPaginationOptions {
@@ -27,7 +24,7 @@ export interface QuickBooksReferenceListOptions<TSort extends string = "Id">
   /** `MetaData.LastUpdatedTime >=` bound; rows at exactly the bound second can be omitted. */
   readonly updatedSince?: Date
   readonly orderBy?: {
-    readonly field: "Id" | QuickBooksUpdatedField | TSort
+    readonly field: "Id" | TSort
     readonly direction?: QuickBooksSortDirection
   }
 }
@@ -68,7 +65,7 @@ export interface QuickBooksTransactionListOptions extends QuickBooksPaginationOp
   /** Exact `DocNumber` match. */
   readonly docNumber?: string
   readonly orderBy?: {
-    readonly field: "Id" | "TxnDate" | QuickBooksUpdatedField
+    readonly field: "Id" | "TxnDate"
     readonly direction?: QuickBooksSortDirection
   }
 }
@@ -90,7 +87,12 @@ export interface QuickBooksInvoiceListOptions extends QuickBooksCustomerTransact
 export type QuickBooksEstimateListOptions = QuickBooksCustomerTransactionListOptions
 export type QuickBooksSalesReceiptListOptions = QuickBooksCustomerTransactionListOptions
 export type QuickBooksRefundReceiptListOptions = QuickBooksCustomerTransactionListOptions
-export type QuickBooksPaymentListOptions = QuickBooksCustomerTransactionListOptions
+/** Payments do not store DocNumber; their reference number is PaymentRefNum. */
+export interface QuickBooksPaymentListOptions
+  extends Omit<QuickBooksCustomerTransactionListOptions, "docNumber"> {
+  /** Exact `PaymentRefNum`, e.g. a check number. */
+  readonly paymentRefNum?: string
+}
 export type QuickBooksCreditMemoListOptions = QuickBooksCustomerTransactionListOptions
 export type QuickBooksBillListOptions = QuickBooksVendorTransactionListOptions
 export type QuickBooksBillPaymentListOptions = QuickBooksVendorTransactionListOptions
@@ -99,7 +101,8 @@ export type QuickBooksPurchaseOrderListOptions = QuickBooksVendorTransactionList
 /** Purchase `EntityRef` is not queryable, so purchases have no party filter. */
 export type QuickBooksPurchaseListOptions = QuickBooksTransactionListOptions
 export type QuickBooksDepositListOptions = QuickBooksTransactionListOptions
-export type QuickBooksTransferListOptions = QuickBooksTransactionListOptions
+/** QuickBooks does not store DocNumber on transfers. */
+export type QuickBooksTransferListOptions = Omit<QuickBooksTransactionListOptions, "docNumber">
 export type QuickBooksJournalEntryListOptions = QuickBooksTransactionListOptions
 /** QuickBooks does not store DocNumber on card payments. */
 export type QuickBooksCreditCardPaymentListOptions = Omit<

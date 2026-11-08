@@ -28,6 +28,8 @@ type ReadCase =
       party?: "CustomerRef" | "VendorRef"
       txnDate: boolean
       docNumber: boolean
+      /** An extra exact-match filter and its field, e.g. payments' PaymentRefNum. */
+      reference?: readonly [option: string, field: string]
     }
 
 // Every paged list resource with the predicates QuickBooks accepted for it.
@@ -48,7 +50,13 @@ const readCases: Record<string, ReadCase> = {
   taxAgencies: { kind: "name", name: "DisplayName", active: false },
   companyCurrencies: { kind: "name", active: true },
   invoices: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
-  payments: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
+  payments: {
+    kind: "transaction",
+    party: "CustomerRef",
+    txnDate: true,
+    docNumber: false,
+    reference: ["paymentRefNum", "PaymentRefNum"],
+  },
   creditMemos: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
   estimates: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
   salesReceipts: { kind: "transaction", party: "CustomerRef", txnDate: true, docNumber: true },
@@ -61,7 +69,7 @@ const readCases: Record<string, ReadCase> = {
   purchaseOrders: { kind: "transaction", party: "VendorRef", txnDate: true, docNumber: true },
   purchases: { kind: "transaction", txnDate: true, docNumber: true },
   deposits: { kind: "transaction", txnDate: true, docNumber: true },
-  transfers: { kind: "transaction", txnDate: true, docNumber: true },
+  transfers: { kind: "transaction", txnDate: true, docNumber: false },
   journalEntries: { kind: "transaction", txnDate: true, docNumber: true },
   creditCardPayments: { kind: "transaction", txnDate: true, docNumber: false },
   inventoryAdjustments: { kind: "transaction", txnDate: true, docNumber: true },
@@ -118,7 +126,7 @@ test.skipIf(mode !== "read")(
         sameIds(manual, rows)
         // updatedSince never returns older rows and always returns strictly newer ones. Rows
         // displayed at exactly the bound second may be excluded: QuickBooks dropped two system
-        // accounts there while including the oldest invoice. Timestamp ordering is ascending.
+        // accounts there while including the oldest invoice.
         const stamps = [...new Set(rows.map(updated).filter(Number.isFinite))].sort((a, b) => a - b)
         for (const stamp of new Set([
           stamps[0],
@@ -130,7 +138,6 @@ test.skipIf(mode !== "read")(
           for await (const row of resource.listAll({
             ...options,
             updatedSince: new Date(stamp),
-            orderBy: { field: "MetaData.LastUpdatedTime" },
             maxResults: 7,
           }))
             filtered.push(row)
@@ -143,13 +150,6 @@ test.skipIf(mode !== "read")(
             console.log(
               `[QuickBooksLive] ${name}: updatedSince excluded ${boundary.length} row(s) at the bound second`
             )
-          // Account ordering is provider-nonmonotonic for both Id and timestamp sorts.
-          const order = filtered.map(updated)
-          if (name === "accounts")
-            console.log(
-              `[QuickBooksLive] accounts: timestamp order ${order.every((t, i) => !i || t >= (order[i - 1] ?? t)) ? "monotonic" : "nonmonotonic"}`
-            )
-          else expect(order).toEqual([...order].sort((a, b) => a - b))
         }
         if (config.kind === "name") {
           if (config.active)
@@ -228,6 +228,22 @@ test.skipIf(mode !== "read")(
               sameIds(
                 filtered,
                 rows.filter((r) => r.DocNumber === docNumber)
+              )
+            }
+          }
+          if (config.reference) {
+            const [option, field] = config.reference
+            const references = [
+              ...new Set(rows.flatMap((r) => (typeof r[field] === "string" ? [r[field]] : []))),
+            ].slice(0, 10)
+            if (!references.length) console.log(`[QuickBooksLive] ${name}: ${option} unexercised`)
+            for (const value of references) {
+              const filtered = []
+              for await (const row of resource.listAll({ [option]: value, maxResults: 7 }))
+                filtered.push(row)
+              sameIds(
+                filtered,
+                rows.filter((r) => r[field] === value)
               )
             }
           }

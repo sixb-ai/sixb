@@ -65,12 +65,12 @@ test("purchases: reads have no party filter because EntityRef is not queryable",
     if (url.pathname.endsWith("/purchase/42"))
       return Response.json({ Purchase: { ...identity, ...purchase } })
     expect(url.searchParams.get("query")).toBe(
-      "SELECT * FROM Purchase WHERE DocNumber = 'CHK-1' ORDERBY MetaData.LastUpdatedTime ASC STARTPOSITION 1 MAXRESULTS 100"
+      "SELECT * FROM Purchase WHERE DocNumber = 'CHK-1' ORDERBY TxnDate ASC STARTPOSITION 1 MAXRESULTS 100"
     )
     return Response.json({ QueryResponse: {} })
   })
   expect(await qb.purchases.get("42")).toEqual({ ...identity, ...purchase })
-  await qb.purchases.list({ docNumber: "CHK-1", orderBy: { field: "MetaData.LastUpdatedTime" } })
+  await qb.purchases.list({ docNumber: "CHK-1", orderBy: { field: "TxnDate" } })
   for (const option of ["vendorIds", "customerIds"])
     await expect(
       qb.purchases.list({ [option]: ["17"] } as unknown as QuickBooksPurchaseListOptions)

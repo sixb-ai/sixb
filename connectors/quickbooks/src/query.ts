@@ -76,7 +76,7 @@ export async function listEntities<T>(
   if (options.ids !== undefined) clauses.push(inList("Id", options.ids, "ids"))
   if (options.name !== undefined) clauses.push(`${nameField} = ${quoted(options.name)}`)
   if (options.updatedSince !== undefined) clauses.push(updatedSince(options.updatedSince))
-  const orderBy = sort(options.orderBy, ["Id", UPDATED, ...(nameField ? [nameField] : [])])
+  const orderBy = sort(options.orderBy, nameField ? ["Id", nameField] : ["Id"])
   return readQueryPage(
     http,
     entity,
@@ -148,11 +148,7 @@ export async function listTransactions<T>(
     clauses.push(inList("VendorRef", options.vendorIds, "vendorIds"))
   if (options.updatedSince !== undefined) clauses.push(updatedSince(options.updatedSince))
   clauses.push(...(extras.clauses ?? []))
-  const orderBy = sort(
-    options.orderBy,
-    txnDate ? ["Id", "TxnDate", UPDATED] : ["Id", UPDATED],
-    "transaction"
-  )
+  const orderBy = sort(options.orderBy, txnDate ? ["Id", "TxnDate"] : ["Id"], "transaction")
   return readQueryPage(
     http,
     entity,
@@ -163,7 +159,6 @@ export async function listTransactions<T>(
   )
 }
 
-const UPDATED = "MetaData.LastUpdatedTime"
 const PAGE_OPTIONS = ["startPosition", "maxResults"]
 
 export function allowedOptions(options: object, kind: string, allowed: readonly string[]) {
@@ -191,7 +186,7 @@ export function inList(field: string, values: readonly string[] | undefined, nam
 export function updatedSince(value: Date): string {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime()))
     throw new Error("[SixbQuickBooks] updatedSince must be a valid Date.")
-  return `${UPDATED} >= '${value.toISOString()}'`
+  return `MetaData.LastUpdatedTime >= '${value.toISOString()}'`
 }
 
 export function where(clauses: readonly string[]) {

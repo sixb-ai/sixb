@@ -1,5 +1,5 @@
 import type { createQuickBooksHttp } from "../http"
-import { listAll, listTransactions, pathId, readEntity } from "../query"
+import { listAll, listTransactions, pathId, quoted, readEntity } from "../query"
 import type { QuickBooksPage, QuickBooksPaymentListOptions } from "../types/query"
 import type { QuickBooksPayment } from "../types/transactions"
 import type {
@@ -74,7 +74,16 @@ export function createPaymentsResource(
     },
     get: (id) => readEntity(http, "Payment", `payment/${pathId(id)}`, id),
     downloadPdf: (id) => http.getPdf(`payment/${pathId(id)}/pdf`),
-    list: (options) => listTransactions(http, "Payment", options, { party: "customer" }),
+    async list(options = {}) {
+      const { paymentRefNum, ...query } = options
+      return listTransactions(
+        http,
+        "Payment",
+        query,
+        { party: "customer", docNumber: false },
+        { clauses: paymentRefNum === undefined ? [] : [`PaymentRefNum = ${quoted(paymentRefNum)}`] }
+      )
+    },
     listAll: (options) => listAll(resource.list, options),
   }
   return resource
