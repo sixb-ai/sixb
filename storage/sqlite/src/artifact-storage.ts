@@ -82,8 +82,8 @@ const RESTORE_POINT_COLUMNS = `
 const TURN_WRITE_COLUMNS = "artifact_id AS artifactId, created, revision, writes"
 
 const FRAME_GRANT_COLUMNS = `
-  project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId, version, revision,
-  targets, created_at AS createdAt, expires_at AS expiresAt
+  project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId, version,
+  files_digest AS filesDigest, targets, created_at AS createdAt, expires_at AS expiresAt
 `
 
 const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS updatedAt"
@@ -559,7 +559,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       this.db
         .query(
           `INSERT INTO artifact_frame_grants
-             (project_id, token_hash, artifact_id, version, revision, targets, created_at,
+             (project_id, token_hash, artifact_id, version, files_digest, targets, created_at,
               expires_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
@@ -568,7 +568,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           record.tokenHash,
           record.artifactId,
           record.version,
-          record.revision,
+          record.filesDigest,
           JSON.stringify(record.targets),
           record.createdAt.toISOString(),
           record.expiresAt.toISOString()

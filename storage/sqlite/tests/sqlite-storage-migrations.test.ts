@@ -213,6 +213,7 @@ const shippedMigrationIds = [
   "091-artifact-board-previews",
   "092-artifact-open-versions",
   "093-artifact-documents",
+  "094-artifact-frame-files",
 ]
 
 afterEach(async () => {

@@ -307,9 +307,9 @@ export interface ListReferencingVersionsInput {
 }
 
 /**
- * A short-lived link to one version at one revision, which a sandboxed frame loads a deck's files
- * through: once the version changes, the link serves nothing, so a frame never mixes two contents.
- * Only the SHA-256 of the link's token is stored; the token is the credential.
+ * A short-lived link to one version, which a sandboxed frame loads its files through: once the
+ * files it serves change, the link serves nothing, so a frame never mixes two contents. Only the
+ * SHA-256 of the link's token is stored; the token is the credential.
  */
 export interface ArtifactFrameGrantRecord {
   readonly projectId: string
@@ -317,7 +317,11 @@ export interface ArtifactFrameGrantRecord {
   readonly tokenHash: string
   readonly artifactId: string
   readonly version: number
-  readonly revision: number
+  /**
+   * The files the frame serves, as a SHA-256 hex of their paths and digests: every file but a
+   * canvas's `canvas.json`, so moving a canvas's items keeps its boards' links.
+   */
+  readonly filesDigest: string
   /** What the frame may show from other artifacts, decided for its reader when it was issued. */
   readonly targets: readonly ArtifactFrameTarget[]
   readonly createdAt: Date

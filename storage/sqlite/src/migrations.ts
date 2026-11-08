@@ -325,6 +325,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("091-artifact-board-previews", artifactBoardPreviewsSql),
     sqliteSql("092-artifact-open-versions", artifactOpenVersionsSql),
     sqliteSql("093-artifact-documents", artifactDocumentsSql),
+    sqliteSql("094-artifact-frame-files", artifactFrameFilesSql),
   ],
 })
 
@@ -751,3 +752,4 @@ import artifactOpenVersionsSql from "./migrations/092-artifact-open-versions.sql
   type: "text",
 }
 import artifactDocumentsSql from "./migrations/093-artifact-documents.sql" with { type: "text" }
+import artifactFrameFilesSql from "./migrations/094-artifact-frame-files.sql" with { type: "text" }

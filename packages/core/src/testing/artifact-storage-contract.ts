@@ -1600,7 +1600,7 @@ function frameGrant(
     tokenHash: seed.repeat(64).slice(0, 64),
     artifactId: "art_report",
     version: 1,
-    revision: 1,
+    filesDigest: "f".repeat(64),
     targets: [
       { address: "artifact:art_other@3/figures/revenue.svg", artifactId: "art_other", version: 3 },
       {

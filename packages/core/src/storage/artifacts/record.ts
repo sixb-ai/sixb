@@ -183,7 +183,7 @@ export function parseArtifactFrameGrantRow(row: Row): ArtifactFrameGrantRecord {
     tokenHash: text(row.tokenHash, "tokenHash", where),
     artifactId,
     version: positiveInteger(row.version, "version", where),
-    revision: positiveInteger(row.revision, "revision", where),
+    filesDigest: text(row.filesDigest, "filesDigest", where),
     targets: frameTargets(json(row.targets, "targets", where), where),
     createdAt: date(row.createdAt, "createdAt", where),
     expiresAt: date(row.expiresAt, "expiresAt", where),

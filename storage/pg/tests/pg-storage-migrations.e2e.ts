@@ -135,6 +135,7 @@ const SHIPPED_MIGRATIONS = [
   "094-artifact-board-previews",
   "095-artifact-open-versions",
   "096-artifact-documents",
+  "097-artifact-frame-files",
 ]
 
 const steps = postgresStorageMigrations.steps
