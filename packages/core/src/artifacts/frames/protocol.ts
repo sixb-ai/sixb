@@ -55,6 +55,8 @@ export type FrameRequest =
    * Starts or stops editing a canvas's board, served for editing (`?sixb-edit`): the frame then
    * reports what the reader points at and picks, by address, and lets them type into text. With
    * `typing: false`, a text the reader picks takes no typing, as when they pick what to comment on.
+   * The first request after the frame loads transfers a `MessagePort`: the frame reports editing
+   * (`edit.hover`, `edit.select`, `edit.text`) through it alone, never through the window.
    */
   | FrameRequestOf<"edit", { readonly on: boolean; readonly typing?: boolean }>
   /**
@@ -118,9 +120,11 @@ export type FrameEvent =
    * its words as the frame last posted them, or as they were when the reader started typing. The
    * app makes it with `mergeBoardText`, so what others changed in the element since stays.
    *
-   * The board's own scripts run in the frame and can post this too: the runtime acts only on the
-   * reader's own clicks and keys, and the app takes `edit.text` only for the element the reader
-   * picked, the last `edit.select` it heard.
+   * The runtime takes the port before the board's scripts run, and stops the request that hands
+   * it over before they hear it, so they cannot post on it; it reports only the reader's own
+   * clicks and keys. What it posts is what the element holds, which the board's scripts can still
+   * rewrite. The app takes `edit.text` only for the element the reader picked, the last
+   * `edit.select` it heard, and nothing once the board's elements changed under the frame.
    */
   | FrameEventOf<
       "edit.text",

@@ -34,7 +34,8 @@
  * the reader's typing, each change posted as its words. What a script built, or a text whose words
  * a script rewrote, is reported as scripted and takes nothing. What others change arrives as
  * patches, element by element; the one the reader is typing in takes its own once they leave it,
- * so their caret stays.
+ * so their caret stays. What editing reports goes through the port the app hands over with its
+ * first `edit` request, taken before the page's scripts run: they cannot post on it.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -204,6 +205,16 @@ export function frameRuntime(): void {
 
   // ── Editing a board ─────────────────────────────────────────────────
 
+  // What editing reports goes to the app through the port its first `edit` request hands over,
+  // never through the window, where the page's own scripts post too. The port, and the way to
+  // post on it, are taken before any of the page's scripts run, which cannot reach either.
+  const portPost = typeof MessagePort === "function" ? MessagePort.prototype.postMessage : undefined
+  const apply = Reflect.apply
+  let editPort: MessagePort | null = null
+  const postEdit = (message: Record<string, unknown>) => {
+    if (editPort && portPost) apply(portPost, editPort, [{ protocol: PROTOCOL, ...message }])
+  }
+
   let editing = false
   /** Whether a text the reader picks takes their typing: not while they pick what to comment on. */
   let typable = true
@@ -338,7 +349,7 @@ export function frameRuntime(): void {
       picked = mark("data-sixb-picked", picked, element)
       // Where the reader clicked, for a comment's pin.
       const at = { x: event.clientX, y: event.clientY }
-      post({ event: "edit.select", params: { target, at } })
+      postEdit({ event: "edit.select", params: { target, at } })
       if (typable && element instanceof HTMLElement && target.kind === "text") {
         typing = element
         typedFrom = element.textContent ?? ""
@@ -353,7 +364,7 @@ export function frameRuntime(): void {
     const { element, target } = editTarget(event.target)
     if (element === pointed && element !== null) return
     pointed = mark("data-sixb-hover", pointed, element)
-    post({ event: "edit.hover", params: { target } })
+    postEdit({ event: "edit.hover", params: { target } })
   })
   document.addEventListener("input", (event) => {
     if (!editing || !event.isTrusted || !typing || !typing.contains(event.target as Node | null)) {
@@ -362,7 +373,7 @@ export function frameRuntime(): void {
     const text = typing.textContent ?? ""
     // Its words are the reader's now: still theirs to type in.
     typing.setAttribute(WORDS, wordsHash(text))
-    post({
+    postEdit({
       event: "edit.text",
       params: { address: typing.getAttribute(AT), base: typedFrom, text },
     })
@@ -569,28 +580,37 @@ export function frameRuntime(): void {
     enumerable: true,
   })
 
-  window.addEventListener("message", (event) => {
-    if (event.source !== window.parent) return
-    const data = event.data as Record<string, unknown> | null
-    // The app's answer to a call.
-    if (data && data.protocol === PROTOCOL && typeof data.result === "number") {
-      const pending = calls.get(data.result)
-      calls.delete(data.result)
-      if (typeof data.error === "string") pending?.reject(new Error(data.error))
-      else pending?.resolve(data.value)
-      return
-    }
-    // Requests only: at the top level, as in the layout check, the frame's own answers come back
-    // to it, and answering an answer would trade error messages with itself for good.
-    if (!data || data.protocol !== PROTOCOL || typeof data.id !== "number") return
-    if (typeof data.method !== "string") return
-    try {
-      handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
-      post({ id: data.id })
-    } catch (error) {
-      post({ id: data.id, error: error instanceof Error ? error.message : String(error) })
-    }
-  })
+  // First of all the page's listeners, and the only one to hear the app's requests: a request
+  // stops here, so the page's scripts never see the port an `edit` request hands over.
+  window.addEventListener(
+    "message",
+    (event) => {
+      if (event.source !== window.parent) return
+      const data = event.data as Record<string, unknown> | null
+      // The app's answer to a call.
+      if (data && data.protocol === PROTOCOL && typeof data.result === "number") {
+        const pending = calls.get(data.result)
+        calls.delete(data.result)
+        if (typeof data.error === "string") pending?.reject(new Error(data.error))
+        else pending?.resolve(data.value)
+        return
+      }
+      // Requests only: at the top level, as in the layout check, the frame's own answers come back
+      // to it, and answering an answer would trade error messages with itself for good.
+      if (!data || data.protocol !== PROTOCOL || typeof data.id !== "number") return
+      if (typeof data.method !== "string") return
+      event.stopImmediatePropagation()
+      const port = event.ports?.[0]
+      if (data.method === "edit" && port) editPort = port
+      try {
+        handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
+        post({ id: data.id })
+      } catch (error) {
+        post({ id: data.id, error: error instanceof Error ? error.message : String(error) })
+      }
+    },
+    true
+  )
 
   // A deck's keys move it wherever focus is; a page's keys are its own.
   window.addEventListener("keydown", (event) => {
