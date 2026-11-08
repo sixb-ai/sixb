@@ -177,17 +177,17 @@ function drawItem(
       const title = item.title ?? (item.type === "board" ? item.id : "")
       const name =
         title && named(box.width)
-          ? `<div class="name" style="width: ${box.width / (context.nameScale ?? 1)}px; transform: scale(${context.nameScale})">${escape(title)}</div>`
+          ? `<div class="name" style="width: ${box.width / (context.nameScale ?? 1)}px; transform: scale(${context.nameScale})">${escapeHtml(title)}</div>`
           : ""
       const inside =
         item.type === "board"
-          ? `<img src="${escape(context.image(item.id))}" alt="">`
-          : `<div style="height: 100%; display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 14px">${escape(item.src)}</div>`
+          ? `<img src="${escapeHtml(context.image(item.id))}" alt="">`
+          : `<div style="height: 100%; display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 14px">${escapeHtml(item.src)}</div>`
       return `<div class="item" style="${place}">${name}<div class="surface" style="width: 100%; height: 100%">${inside}</div></div>`
     }
     case "section":
       return item.title && context.nameScale !== null
-        ? `<div class="item" style="${place}"><h3 class="heading" style="max-width: ${box.width / context.nameScale}px; transform: scale(${context.nameScale})">${escape(item.title)}</h3></div>`
+        ? `<div class="item" style="${place}"><h3 class="heading" style="max-width: ${box.width / context.nameScale}px; transform: scale(${context.nameScale})">${escapeHtml(item.title)}</h3></div>`
         : ""
     case "note": {
       const tone = item.tone ?? "warning"
@@ -195,13 +195,13 @@ function drawItem(
         tone === "neutral"
           ? "var(--card)"
           : `color-mix(in oklab, ${toneColor(tone)} 20%, var(--card))`
-      return `<div class="item note" style="${place} font-size: ${canvasNoteFontSize(item.w)}px; background: ${background}">${escape(item.text)}</div>`
+      return `<div class="item note" style="${place} font-size: ${canvasNoteFontSize(item.w)}px; background: ${background}">${escapeHtml(item.text)}</div>`
     }
     case "text": {
       const weight = item.size === "xl" ? 700 : item.size === "l" ? 600 : 400
       const color = item.size === "s" ? "var(--muted-foreground)" : "var(--foreground)"
       const lineHeight = item.size === "xl" || item.size === "l" ? 1.15 : 1.45
-      return `<div class="item text" style="${place} font-size: ${CANVAS_TEXT_PIXELS[item.size]}px; font-weight: ${weight}; line-height: ${lineHeight}; color: ${color}">${escape(item.text)}</div>`
+      return `<div class="item text" style="${place} font-size: ${CANVAS_TEXT_PIXELS[item.size]}px; font-weight: ${weight}; line-height: ${lineHeight}; color: ${color}">${escapeHtml(item.text)}</div>`
     }
     case "shape": {
       const fill = item.tone
@@ -217,7 +217,7 @@ function drawItem(
             ? `<polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" ${paint} stroke-linejoin="round"/>`
             : `<rect width="${w}" height="${h}" rx="10" ${paint}/>`
       const words = item.text
-        ? `<span style="font-size: ${canvasShapeFontSize(w, h)}px; max-width: ${item.shape === "diamond" ? 60 : 80}%">${escape(item.text)}</span>`
+        ? `<span style="font-size: ${canvasShapeFontSize(w, h)}px; max-width: ${item.shape === "diamond" ? 60 : 80}%">${escapeHtml(item.text)}</span>`
         : ""
       return `<div class="item shape" style="${place}"><svg viewBox="0 0 ${w} ${h}">${outline}</svg>${words}</div>`
     }
@@ -245,7 +245,7 @@ function drawArrows(canvas: Canvas, boxes: ReadonlyMap<string, Box>): string {
     )
     if (item.label) {
       labels.push(
-        `<div class="label" style="left: ${(start.x + end.x) / 2}px; top: ${(start.y + end.y) / 2}px">${escape(item.label)}</div>`
+        `<div class="label" style="left: ${(start.x + end.x) / 2}px; top: ${(start.y + end.y) / 2}px">${escapeHtml(item.label)}</div>`
       )
     }
   }
@@ -302,7 +302,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-function escape(text: string): string {
+function escapeHtml(text: string): string {
   return text
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

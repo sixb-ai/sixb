@@ -580,6 +580,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
   },
   {
+    operationId: "getArtifactBoardPreview",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/versions/:version/boards/:board/preview",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "getArtifactQuery",
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/queries/:name",
