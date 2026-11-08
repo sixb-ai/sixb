@@ -8,7 +8,7 @@ import {
   ARTIFACT_LIVE_ROUTE,
   type ArtifactLiveClientMessage,
   type ArtifactLiveServerMessage,
-} from "@sixb/core/artifacts/live"
+} from "@sixb/core/artifacts/live/protocol"
 import type { Client } from "./generated/client"
 import {
   createReconnectingSocket,

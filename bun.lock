@@ -738,7 +738,7 @@
         "recharts": "^3.8.0",
         "tailwindcss": "^4.1.18",
         "y-protocols": "1.0.7",
-        "yjs": "13.6.33",
+        "yjs": "^13.6.33",
       },
       "devDependencies": {
         "@testing-library/react": "^16.3.2",

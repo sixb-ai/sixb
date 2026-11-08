@@ -4,11 +4,6 @@ export type { ActionRunDetail } from "./actions"
 export { ActionRunFailedError } from "./actions"
 export * from "./agent-streams"
 export * from "./api"
-export {
-  type ArtifactLiveSocket,
-  type ArtifactLiveSocketOptions,
-  createArtifactLiveSocket,
-} from "./artifact-live"
 export type {
   SixbBrowserClientController,
   SixbBrowserRuntimeConfig,

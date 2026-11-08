@@ -1,4 +1,4 @@
-import type { ArtifactLiveSocket } from "@sixb/client"
+import type { ArtifactLiveSocket } from "@sixb/client/artifact-live"
 import { type Canvas, parseCanvas } from "@sixb/core/artifacts"
 import {
   type ArtifactLiveAccess,
