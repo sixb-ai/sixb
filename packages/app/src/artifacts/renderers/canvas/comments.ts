@@ -11,10 +11,7 @@ import { quoteArtifactComment } from "@sixb/core/artifacts"
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo } from "react"
 import { useCurrentUser } from "../../../session"
-import { useLivePresence } from "../../live/presence"
 import type { LiveArtifact } from "../../live/session"
-import { useArtifactMessages } from "../../messages"
-import { useArtifactPeople } from "../../people"
 
 // The comments on a canvas: read once, kept in step as anyone adds, resolves or deletes one, over
 // the live socket while the canvas is held live and over the events socket otherwise, and changed
@@ -197,30 +194,26 @@ export function canManageComment(
   return comment.author.type === "user" && comment.author.id === userId
 }
 
+/** Who wrote a comment, as the panel says it. */
+export interface CommentAuthor {
+  readonly name: string
+  readonly you: boolean
+}
+
 /**
- * Who wrote a comment, as the reader can tell: themselves, someone of the conversation the canvas
- * opens in, or someone on the canvas now. Null for someone the reader cannot name.
+ * Who wrote a comment: the reader themselves, else the name the API gives its author. Null for an
+ * author the project cannot name.
  */
-export function useCommentAuthors(
-  live: LiveArtifact | null
-): (author: ArtifactComment["author"]) => { readonly name: string; readonly you: boolean } | null {
+export function useCommentAuthors(): (
+  comment: Pick<ArtifactComment, "author" | "authorName">
+) => CommentAuthor | null {
   const user = useCurrentUser()
-  const nameOf = useArtifactPeople()
-  const { peers } = useLivePresence(live)
-  const project = useArtifactMessages().canvas.comments.project
 
-  return (author) => {
+  return ({ author, authorName }) => {
     if (author.type === "user" && author.id === user?.id) {
-      return { name: user.displayName ?? user.email ?? "", you: true }
+      return { name: user.displayName ?? user.email ?? authorName ?? "", you: true }
     }
-    const known = nameOf(author)
-    if (known) return { name: known, you: false }
-
-    const peer = peers.find((each) => each.user.id === `${author.type}:${author.id}`)
-    if (peer) return { name: peer.user.name, you: false }
-
-    // The project's own code, or everyone where nobody signs in, as the live canvas names it.
-    return author.type === "system" ? { name: project, you: false } : null
+    return authorName ? { name: authorName, you: false } : null
   }
 }
 

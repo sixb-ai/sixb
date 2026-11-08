@@ -50,7 +50,7 @@ export function useCanvasCommenting({
   const user = useCurrentUser()
   const agentDraft = useAgentDraft()
   const { threads, loading, failed } = useArtifactComments(artifactId, live)
-  const nameOf = useCommentAuthors(live)
+  const nameOf = useCommentAuthors()
 
   const [commenting, setCommenting] = useState(false)
   const [panel, setPanel] = useState(false)
@@ -110,7 +110,7 @@ export function useCanvasCommenting({
             board: comment.anchor.board,
             ...(comment.anchor.point ? { point: comment.anchor.point } : {}),
             resolved,
-            label: messages.pin(thread.number, nameOf(comment.author)?.name ?? messages.someone),
+            label: messages.pin(thread.number, nameOf(comment)?.name ?? messages.someone),
           },
         ]
       }),
