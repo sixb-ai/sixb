@@ -73,6 +73,23 @@ function setup(options: { readonly sandboxes?: boolean } = {}) {
       fileName: `${seed}.png`,
       mediaType: "image/png",
     })
+  const webp = (seed: string) =>
+    deps.blobStorage.put({
+      body: new TextEncoder().encode(`webp ${seed}`),
+      fileName: `${seed}.webp`,
+      mediaType: "image/webp",
+    })
+
+  /** A board's pictures in these modes, at both sizes, as its renderer hands them over. */
+  const pictures = async (board: string, themes: readonly ("light" | "dark")[]) =>
+    (
+      await Promise.all(
+        themes.map(async (theme) => [
+          { board, theme, size: "full" as const, file: await png(`${board}-${theme}`) },
+          { board, theme, size: "small" as const, file: await webp(`${board}-${theme}`) },
+        ])
+      )
+    ).flat()
 
   /** The jobs the agent worker would claim now. */
   const claimable = async () =>
@@ -80,7 +97,7 @@ function setup(options: { readonly sandboxes?: boolean } = {}) {
       ({ job }) => ({ id: job.id, type: job.type, payload: job.payload })
     )
 
-  return { deps, host, as, put, png, claimable }
+  return { deps, host, as, put, png, webp, pictures, claimable }
 }
 
 const CANVAS = JSON.stringify({ items: [board("welcome"), board("region", 480)] })
@@ -200,7 +217,7 @@ describe("publishing a canvas", () => {
   })
 
   test("asks the agent worker for its missing pictures, and for none it already has", async () => {
-    const { deps, as, put, png, claimable } = setup()
+    const { deps, as, put, pictures, claimable } = setup()
     const first = await as(alice).artifacts.create({
       kind: "canvas",
       title: "Onboarding",
@@ -222,15 +239,10 @@ describe("publishing a canvas", () => {
     await storeBoardPreviews(
       { storage: deps.storage.artifacts, blobStorage: deps.blobStorage },
       first.version,
-      await Promise.all(
-        ["welcome", "region"].flatMap((id) =>
-          (["light", "dark"] as const).map(async (theme) => ({
-            board: id,
-            theme,
-            file: await png(`${id}-${theme}`),
-          }))
-        )
-      )
+      [
+        ...(await pictures("welcome", ["light", "dark"])),
+        ...(await pictures("region", ["light", "dark"])),
+      ]
     )
     await as(alice).artifacts.publish(first.artifact.id, {
       kind: "canvas",
@@ -299,9 +311,11 @@ describe("a board's pictures", () => {
     return (error as Error).message
   }
 
-  test("are kept under each board's key, and are what is missing no more", async () => {
-    const { deps, version, store, png } = await published()
-    await store([{ board: "welcome", theme: "light", file: await png("welcome-light") }])
+  test("are kept under each board's key, and are missing no more once both sizes are", async () => {
+    const { deps, version, store, pictures, png } = await published()
+    await store(await pictures("welcome", ["light"]))
+    // A full picture without its small one is still missing: the renderer takes both.
+    await store([{ board: "region", theme: "light", size: "full", file: await png("region") }])
 
     expect(
       (await missingBoardPreviews(deps.storage.artifacts, version)).map(
@@ -310,37 +324,37 @@ describe("a board's pictures", () => {
     ).toEqual(["welcome: dark", "region: light, dark"])
   })
 
-  test("are refused for a board or a mode the version has none of, and for anything but a PNG", async () => {
-    const { deps, store, png } = await published()
+  test("are refused for a board or a mode the version has none of, and in another format", async () => {
+    const { deps, store, png, webp } = await published()
     const picture = await png("welcome")
+    const small = await webp("welcome")
+    const welcome = { board: "welcome", theme: "light" } as const
 
-    expect(await refusal(store([{ board: "pricing", theme: "light", file: picture }]))).toContain(
-      "has no board 'pricing' to picture in light mode"
-    )
+    expect(
+      await refusal(store([{ ...welcome, board: "pricing", size: "full", file: picture }]))
+    ).toContain("has no board 'pricing' to picture in light mode")
     const svg = await deps.blobStorage.put({
       body: new TextEncoder().encode("<svg/>"),
       mediaType: "image/svg+xml",
     })
-    expect(await refusal(store([{ board: "welcome", theme: "light", file: svg }]))).toContain(
-      "must be a PNG"
+    expect(await refusal(store([{ ...welcome, size: "full", file: svg }]))).toContain(
+      "The full picture of board 'welcome' must be image/png"
+    )
+    expect(await refusal(store([{ ...welcome, size: "full", file: small }]))).toContain(
+      "must be image/png"
+    )
+    expect(await refusal(store([{ ...welcome, size: "small", file: picture }]))).toContain(
+      "The small picture of board 'welcome' must be image/webp"
     )
     const unstored: FileRef = { ...picture, sizeBytes: picture.sizeBytes + 1 }
-    expect(await refusal(store([{ board: "welcome", theme: "dark", file: unstored }]))).toContain(
+    expect(await refusal(store([{ ...welcome, size: "full", file: unstored }]))).toContain(
       "is not stored"
     )
   })
 
   test("read as ready, pending while one may still come, and none past the wait", async () => {
-    const { deps, version, store, png } = await published()
-    await store(
-      await Promise.all(
-        (["light", "dark"] as const).map(async (theme) => ({
-          board: "welcome",
-          theme,
-          file: await png(`welcome-${theme}`),
-        }))
-      )
-    )
+    const { deps, version, store, pictures } = await published()
+    await store(await pictures("welcome", ["light", "dark"]))
     const statuses = async (renders: boolean, now: Date) =>
       Object.fromEntries(
         await boardPreviewStatuses(deps.storage.artifacts, version, { renders, now })

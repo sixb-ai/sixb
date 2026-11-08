@@ -60,7 +60,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   private frameGrants = new Map<string, ArtifactFrameGrantRecord>()
   /** By artifact and reader, then by key. */
   private state = new Map<string, Map<string, ArtifactStateEntry>>()
-  /** By project, render key, and mode; no artifact owns one. */
+  /** By project, render key, mode, and size; no artifact owns one. */
   private boardPreviews = new Map<string, ArtifactBoardPreviewRecord>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
@@ -282,14 +282,15 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       (preview) => preview.projectId === input.projectId && keys.has(preview.renderKey)
     )
 
-    // By key then mode, in code-unit order, as SQLite compares text.
-    const order = (preview: ArtifactBoardPreviewRecord) => `${preview.renderKey}\0${preview.theme}`
+    // By key, mode, then size, in code-unit order, as SQLite compares text.
+    const order = (preview: ArtifactBoardPreviewRecord) =>
+      `${preview.renderKey}\0${preview.theme}\0${preview.size}`
     return structuredClone(kept.sort((left, right) => (order(left) < order(right) ? -1 : 1)))
   }
 
   async putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void> {
     for (const preview of input.previews) {
-      const key = `${input.projectId}\0${preview.renderKey}\0${preview.theme}`
+      const key = `${input.projectId}\0${preview.renderKey}\0${preview.theme}\0${preview.size}`
       if (this.boardPreviews.has(key)) continue
 
       this.boardPreviews.set(key, structuredClone({ projectId: input.projectId, ...preview }))

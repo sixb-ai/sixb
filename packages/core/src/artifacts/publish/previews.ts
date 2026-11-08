@@ -6,6 +6,7 @@ import { isValidFileRef } from "../../blob-storage/validation"
 import type { AgentQueueJob, Queue } from "../../queues"
 import type {
   ArtifactBoardPreviewRecord,
+  ArtifactBoardPreviewSize,
   ArtifactFile,
   ArtifactStorage,
   ArtifactVersionRecord,
@@ -27,15 +28,28 @@ import { answerArtifactQueries } from "./query-answers"
 // still missing is rendered by the agent worker in a blank sandbox. Either way the board runs with
 // the data its version's author can see: never more.
 
-/** A board's picture in one mode, as its renderer hands it over: a PNG. */
+/** A board's picture in one mode and size, as its renderer hands it over. */
 export interface BoardPreviewInput {
   /** The board's id in the version. */
   readonly board: string
   readonly theme: ArtifactThemeMode
+  readonly size: ArtifactBoardPreviewSize
+  /** A PNG at full size, a WebP when small. */
   readonly file: FileRef
 }
 
-/** A board of a version whose picture is missing in some of its modes. */
+/** What each size of picture is stored as. */
+export const BOARD_PREVIEW_MEDIA_TYPES: Readonly<Record<ArtifactBoardPreviewSize, string>> = {
+  full: "image/png",
+  small: "image/webp",
+}
+
+/** The widest a small picture is, in pixels: a board drawn small on a phone's canvas. */
+export const SMALL_BOARD_PREVIEW_WIDTH = 480
+
+const SIZES: readonly ArtifactBoardPreviewSize[] = ["full", "small"]
+
+/** A board of a version whose picture is missing, in either size, in some of its modes. */
 export interface MissingBoardPreview {
   readonly board: CanvasOutlineBoard
   readonly renderKey: string
@@ -168,11 +182,11 @@ export function boardsReadLiveData(version: Pick<ArtifactVersionRecord, "files">
   return version.files.some((file) => artifactQueryName(file.path) !== undefined)
 }
 
-/** The pictures a version's boards have, by board id and mode. */
+/** The pictures a version's boards have, by board id: each in its modes and sizes. */
 export async function boardPreviews(
   storage: Pick<ArtifactStorage, "listBoardPreviews">,
   version: ArtifactVersionRecord
-): Promise<ReadonlyMap<string, ReadonlyMap<ArtifactThemeMode, ArtifactBoardPreviewRecord>>> {
+): Promise<ReadonlyMap<string, readonly ArtifactBoardPreviewRecord[]>> {
   const { boards } = previewedBoards(version)
   if (boards.length === 0) return new Map()
 
@@ -180,14 +194,30 @@ export async function boardPreviews(
     projectId: version.projectId,
     renderKeys: [...new Set(boards.map((board) => board.renderKey))],
   })
-  const byKey = new Map<string, Map<ArtifactThemeMode, ArtifactBoardPreviewRecord>>()
-  for (const preview of stored) {
-    const themes = byKey.get(preview.renderKey) ?? new Map()
-    themes.set(preview.theme, preview)
-    byKey.set(preview.renderKey, themes)
-  }
 
-  return new Map(boards.map((board) => [board.id, byKey.get(board.renderKey) ?? new Map()]))
+  return new Map(
+    boards.map((board) => [
+      board.id,
+      stored.filter((preview) => preview.renderKey === board.renderKey),
+    ])
+  )
+}
+
+/** A board's picture in one mode and size, among its pictures. */
+export function boardPreview(
+  pictures: readonly ArtifactBoardPreviewRecord[] | undefined,
+  theme: ArtifactThemeMode,
+  size: ArtifactBoardPreviewSize
+): ArtifactBoardPreviewRecord | undefined {
+  return pictures?.find((picture) => picture.theme === theme && picture.size === size)
+}
+
+/** Whether a board has its pictures in a mode: both sizes, which its renderer takes together. */
+function pictured(
+  pictures: readonly ArtifactBoardPreviewRecord[] | undefined,
+  theme: ArtifactThemeMode
+): boolean {
+  return SIZES.every((size) => boardPreview(pictures, theme, size))
 }
 
 /** The boards of a version still without a picture in one of its modes, in the canvas's order. */
@@ -199,7 +229,7 @@ export async function missingBoardPreviews(
   const stored = await boardPreviews(storage, version)
 
   return boards.flatMap((board) => {
-    const missing = themes.filter((theme) => !stored.get(board.id)?.has(theme))
+    const missing = themes.filter((theme) => !pictured(stored.get(board.id), theme))
     return missing.length === 0 ? [] : [{ board, renderKey: board.renderKey, themes: missing }]
   })
 }
@@ -221,7 +251,7 @@ export async function boardPreviewStatuses(
 
   return new Map(
     boards.map((board) => {
-      const ready = themes.every((theme) => stored.get(board.id)?.has(theme))
+      const ready = themes.every((theme) => pictured(stored.get(board.id), theme))
       return [board.id, ready ? "ready" : waiting ? "pending" : "none"] as const
     })
   )
@@ -230,7 +260,8 @@ export async function boardPreviewStatuses(
 /**
  * Keeps pictures of a stored version's boards, each under its board's render key. Who may hand
  * them over is the caller's decision: only whoever rendered them with the author's data. Refuses
- * a board or a mode the version has no picture for, and anything but a stored PNG.
+ * a board or a mode the version has no picture for, and anything but a stored PNG at full size or
+ * WebP when small.
  */
 export async function storeBoardPreviews(
   context: {
@@ -255,21 +286,23 @@ export async function storeBoardPreviews(
         )
       }
 
-      const { file } = preview
+      const { file, size } = preview
+      const mediaType = SIZES.includes(size) ? BOARD_PREVIEW_MEDIA_TYPES[size] : undefined
       if (
+        !mediaType ||
         !isValidFileRef(file) ||
-        file.mediaType !== "image/png" ||
+        file.mediaType !== mediaType ||
         file.sizeBytes > MAX_BOARD_PREVIEW_BYTES
       ) {
         throw invalidPreview(
-          `The picture of board '${preview.board}' must be a PNG of at most ${MAX_BOARD_PREVIEW_BYTES} bytes.`
+          `The ${size} picture of board '${preview.board}' must be ${mediaType ?? "full or small"} of at most ${MAX_BOARD_PREVIEW_BYTES} bytes.`
         )
       }
       if (!(await statFileRef(context.blobStorage, file))) {
         throw invalidPreview(`The picture of board '${preview.board}' is not stored.`)
       }
 
-      return { renderKey, theme: preview.theme, file: { ...file }, createdAt }
+      return { renderKey, theme: preview.theme, size, file: { ...file }, createdAt }
     })
   )
 
