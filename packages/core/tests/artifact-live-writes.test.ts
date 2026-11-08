@@ -193,6 +193,74 @@ describe("a write to a canvas made from an earlier revision", () => {
     )
   })
 
+  // Reproduce by throwing at once in withMergedWrite instead of merging again: the save is refused
+  // with artifact_moved, which a canvas's writer is never to see.
+  test("is merged again when another write is stored between its merge and its store", async () => {
+    const context = setup()
+    const { files, published } = await canvas(context)
+    const { id } = published.artifact
+
+    // A save from revision 1 types in the note, while someone else's save, from revision 1 too,
+    // moves it: the other one is stored as the first save's merge stores its files.
+    const typed = await context.put({
+      [CANVAS_FILE]: JSON.stringify({
+        items: [
+          board("welcome"),
+          { id: "hi", type: "note", x: 0, y: 900, w: 200, text: "Hello, team" },
+        ],
+      }),
+      "boards/welcome.html": WELCOME,
+    })
+    const moved = await context.put({
+      [CANVAS_FILE]: JSON.stringify({
+        items: [
+          board("welcome"),
+          { id: "hi", type: "note", x: 400, y: 900, w: 200, text: "Hello" },
+        ],
+      }),
+      "boards/welcome.html": WELCOME,
+    })
+
+    const { blobStorage } = context.deps
+    const put = blobStorage.put.bind(blobStorage)
+    let other: Promise<unknown> | undefined
+    blobStorage.put = async (input) => {
+      if (!other) {
+        other = context.sixb.artifacts.update(id, {
+          kind: "canvas",
+          title: "Flow",
+          files: moved,
+          baseRevision: 1,
+          baseFiles: files,
+        })
+        await other
+      }
+      return put(input)
+    }
+    const written = await context.sixb.artifacts
+      .update(id, {
+        kind: "canvas",
+        title: "Flow",
+        files: typed,
+        baseRevision: 1,
+        baseFiles: files,
+      })
+      .finally(() => {
+        blobStorage.put = put
+      })
+
+    expect(await other).toMatchObject({ version: { revision: 2 } })
+    expect(written).toMatchObject({ merged: true, version: { revision: 3 } })
+    expect(await context.items(written.version.files)).toContainEqual({
+      id: "hi",
+      type: "note",
+      x: 400,
+      y: 900,
+      w: 200,
+      text: "Hello, team",
+    })
+  })
+
   test("finds the files of its base among the artifact's versions and restore points", async () => {
     const context = setup()
     const { published } = await canvas(context)
