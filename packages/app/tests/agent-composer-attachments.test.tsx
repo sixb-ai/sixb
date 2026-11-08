@@ -1,8 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
 import { client } from "@sixb/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { Composer, type ComposerProps } from "../src/agent/components/composer"
+import { useComposerInsertion } from "../src/agent/composer-insertion"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -185,4 +186,42 @@ test("words handed to the input join what the reader is writing, and are not sen
   // More words, handed later, join after them.
   view.rerender({ insertion: { text: "Done.", nonce: 2 } })
   await waitFor(() => expect(view.input().value).toEndWith("Warmer colors\n\nDone."))
+})
+
+// Guard proof: keep the insertion once the composer took it (`inserted` changing nothing); the
+// composer drawn again, as the first message replaces the welcome, adds the words a second time.
+test("words handed to the input join it once, however often the composer is drawn again", async () => {
+  let insert: (text: string) => void = () => {}
+  function Conversation({ drawing }: { readonly drawing: number }) {
+    const insertion = useComposerInsertion()
+    insert = insertion.insert
+    return (
+      <Composer
+        key={drawing}
+        onSend={() => {}}
+        {...(insertion.insertion ? { insertion: insertion.insertion } : {})}
+        onInserted={insertion.inserted}
+      />
+    )
+  }
+  const queryClient = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <Conversation drawing={1} />
+    </QueryClientProvider>
+  )
+  const input = () => view.getByLabelText("Message") as HTMLTextAreaElement
+
+  await act(async () => insert("- [home · revision 3] Warmer colors"))
+  await waitFor(() => expect(input().value).toBe("- [home · revision 3] Warmer colors"))
+
+  view.rerender(
+    <QueryClientProvider client={queryClient}>
+      <Conversation drawing={2} />
+    </QueryClientProvider>
+  )
+  await act(async () => {
+    await new Promise((done) => setTimeout(done, 20))
+  })
+  expect(input().value).toBe("")
 })

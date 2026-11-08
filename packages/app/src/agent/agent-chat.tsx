@@ -1,7 +1,7 @@
 import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useId, useState } from "react"
+import { type ReactNode, useEffect, useId } from "react"
 import { ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
 import { takeAgentDraft } from "../artifacts/view-context"
@@ -12,6 +12,7 @@ import { SandboxRecovery } from "./components/sandbox-recovery"
 import { SharedThreadNotice } from "./components/shared-thread-notice"
 import { ThreadArtifactsMenu } from "./components/thread-artifacts-menu"
 import { ThreadPeople } from "./components/thread-people"
+import { useComposerInsertion } from "./composer-insertion"
 import {
   type UseAgentConversationInput,
   useAgentConversation,
@@ -84,11 +85,7 @@ export function AgentChat({
     newThreadSandbox,
   })
   // Words an artifact puts in the input, as comments it asks the Agent to act on.
-  const [insertion, setInsertion] = useState({ text: "", nonce: 0 })
-  const insert = useCallback(
-    (text: string) => setInsertion((current) => ({ text, nonce: current.nonce + 1 })),
-    []
-  )
+  const { insertion, insert, inserted } = useComposerInsertion()
 
   // What an artifact on its own page asked the Agent before coming here starts the input.
   useEffect(() => {
@@ -180,7 +177,8 @@ export function AgentChat({
           ...conversation.composerProps,
           ...(dictation ? {} : { dictation: undefined }),
           ...(threadId === null && newThreadControls ? { newThreadControls } : {}),
-          insertion,
+          ...(insertion ? { insertion } : {}),
+          onInserted: inserted,
         }}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
