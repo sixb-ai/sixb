@@ -1,4 +1,5 @@
 import type { DomainEventLog } from "../../events"
+import { PendingTasks } from "../../pending-tasks"
 import { nextCronOccurrence } from "../../schedules/next-occurrence"
 import type { CronScheduleDefinition, ScheduleDefinition } from "../../schedules/types"
 import { rejectOnAbort } from "../../shared/backoff"
@@ -60,7 +61,7 @@ export function cronPass(input: CronPassInput): MaintenancePass {
 
 class CronOccurrences {
   private occurrences: Map<string, NextOccurrence> | null = null
-  private readonly pendingAppends = new Set<Promise<void>>()
+  private readonly pendingAppends = new PendingTasks()
 
   constructor(private readonly options: CronOccurrencesInput) {}
 
@@ -96,24 +97,11 @@ class CronOccurrences {
   async stop(): Promise<void> {
     this.occurrences = null
 
-    if (this.pendingAppends.size === 0) return
+    if (await this.pendingAppends.drain(APPEND_BUDGET_MS)) return
 
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timedOut = new Promise<false>((resolve) => {
-      timer = setTimeout(() => resolve(false), APPEND_BUDGET_MS)
-    })
-
-    const drained = await Promise.race([
-      Promise.all(this.pendingAppends).then(() => true),
-      timedOut,
-    ])
-    clearTimeout(timer)
-
-    if (!drained) {
-      console.error(
-        `[Sixb] Timed out after ${APPEND_BUDGET_MS}ms waiting for ${this.pendingAppends.size} schedule append(s) to settle.`
-      )
-    }
+    console.error(
+      `[Sixb] Timed out after ${APPEND_BUDGET_MS}ms waiting for ${this.pendingAppends.size} schedule append(s) to settle.`
+    )
   }
 
   private firstOccurrences(now: Date): Map<string, NextOccurrence> {
@@ -176,12 +164,7 @@ class CronOccurrences {
       ],
     })
 
-    const settled = append.then(
-      () => {},
-      () => {}
-    )
-    const tracked = settled.finally(() => this.pendingAppends.delete(tracked))
-    this.pendingAppends.add(tracked)
+    this.pendingAppends.track(append)
 
     await Promise.race([append, rejectOnAbort(signal)])
   }
