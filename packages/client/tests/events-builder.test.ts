@@ -304,6 +304,21 @@ describe("builder subscribe over the transport", () => {
     unsubscribe()
   })
 
+  // Guard proof: refuse every topic under shared authority in createWsSubscribeExecutor, as
+  // before; a shared link's guest then follows none of its artifacts.
+  test("follows artifacts under shared authority, naming the grant", () => {
+    const sharedClient = createSixbClient({
+      baseUrl: "https://api.example.test",
+      auth: { kind: "shared", grantId: "shr_1" },
+      fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
+    })
+
+    const unsubscribe = events.artifacts({ client: sharedClient }).subscribe(() => undefined)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(new URL(FakeWebSocket.instances[0]!.url).searchParams.get("shareGrant")).toBe("shr_1")
+    unsubscribe()
+  })
+
   test("sends a scoped subscribe message and delivers only matching events", () => {
     const received: SixbEvent[] = []
     const unsubscribe = events

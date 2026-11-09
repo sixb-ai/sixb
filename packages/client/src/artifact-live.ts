@@ -46,6 +46,8 @@ export function createArtifactLiveSocket(options: ArtifactLiveSocketOptions): Ar
   const socket = createReconnectingSocket({
     url: createSixbWebSocketUrl(ARTIFACT_LIVE_ROUTE, options.client?.getConfig().baseUrl),
     client: options.client,
+    // A shared link's guest watches the artifacts its objects hold.
+    sharedAccess: true,
     reconnectDelayMs: options.reconnectDelayMs ?? RECONNECT_DELAY_MS,
     maxReconnectDelayMs: options.maxReconnectDelayMs ?? MAX_RECONNECT_DELAY_MS,
     readyWhen: (data) => parseArtifactLiveMessage(data)?.type === "connected",

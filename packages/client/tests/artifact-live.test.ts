@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import type { ArtifactLiveServerMessage } from "@sixb/core/artifacts/live/protocol"
+import { createSixbClient } from "../src/api"
 import { type ArtifactLiveSocket, createArtifactLiveSocket } from "../src/artifact-live"
+import { SHARED_ACCESS_ENDED, SHARED_ACCESS_ENDED_CLOSE_CODE } from "../src/client-authority"
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -82,6 +84,32 @@ describe("the live artifacts socket", () => {
     latest().onmessage?.({ data: "not json" })
     latest().onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
     expect(received).toEqual([{ type: "access", artifactId: "art_1", access: "watch" }])
+  })
+
+  // Guard proof: drop `sharedAccess` from createArtifactLiveSocket; a guest then opens no socket.
+  // Drop the close code's check in ws-socket.ts; a guest whose link ended then reconnects forever.
+  test("lets a shared link's guest watch, until its link ends", () => {
+    const client = createSixbClient({
+      baseUrl: "https://api.example.test",
+      auth: { kind: "shared", grantId: "shr_1" },
+    })
+    const errors: string[] = []
+    socket = createArtifactLiveSocket({
+      client,
+      onConnected: () => {},
+      onMessage: () => {},
+      onError: (error) => errors.push(error),
+    })
+
+    // The grant is named in the URL; its session cookie is the credential.
+    expect(new URL(latest().url).searchParams.get("shareGrant")).toBe("shr_1")
+    latest().accept()
+
+    const close = latest().onclose as ((event: { code: number }) => void) | null
+    close?.({ code: SHARED_ACCESS_ENDED_CLOSE_CODE })
+    jest.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(errors).toEqual([SHARED_ACCESS_ENDED])
   })
 
   test("reconnects with a wait that doubles until a connection is ready again", () => {

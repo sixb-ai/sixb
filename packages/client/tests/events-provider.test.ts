@@ -87,7 +87,9 @@ describe("createEventsRegistry", () => {
     jest.useRealTimers()
   })
 
-  test("does not construct the provider socket under singleton shared authority", () => {
+  // Guard proof: drop the topic check from the registry's `register`; the shared session's object
+  // hooks then open a socket that never delivers them anything.
+  test("opens the provider socket under shared authority for artifacts alone", () => {
     sharedController = configureSixbSharedBrowserClient(
       {
         api: { baseUrl: "https://api.example.test" },
@@ -114,6 +116,10 @@ describe("createEventsRegistry", () => {
       reconnecting: false,
       error: "Live updates are unavailable during shared access.",
     })
+
+    // Its artifacts are followed live: the server sends a shared session nothing else.
+    registry.register(events.artifacts().ir, () => undefined)
+    expect(FakeWebSocket.instances).toHaveLength(1)
     registry.close()
   })
 
