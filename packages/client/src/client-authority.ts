@@ -7,6 +7,15 @@ const sessionAuthorityClients = new WeakMap<Client, SixbSessionOptions>()
 export const SHARED_ACCESS_REALTIME_UNAVAILABLE =
   "Live updates are unavailable during shared access."
 
+/** Why a shared link's live socket closed for good: the link was revoked, or its session ended. */
+export const SHARED_ACCESS_ENDED = "This shared link has ended."
+
+/**
+ * The code the server closes a shared link's socket with once its session ended. Reconnecting
+ * would be refused, so the socket stops.
+ */
+export const SHARED_ACCESS_ENDED_CLOSE_CODE = 4401
+
 export function assertSharedAccessGrantId(grantId: unknown): asserts grantId is string {
   if (
     typeof grantId !== "string" ||

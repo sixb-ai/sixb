@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "@sixb/core"
-import { createSixbClient, objectFileContentUrl } from "../src"
+import { createSixbClient, objectFileContentUrl, withSharedAccess } from "../src"
 
 const fileRef: FileRef = {
   blobId: `blob_${"a".repeat(64)}`,
@@ -70,5 +70,29 @@ describe("objectFileContentUrl", () => {
     for (const invalid of [{ objectId: "" }, { objectTypeId: "" }, { pathSegments: [] }]) {
       expect(() => objectFileContentUrl({ ...input, ...invalid })).toThrow("[SixbClient]")
     }
+  })
+})
+
+describe("withSharedAccess", () => {
+  // Guard proof: return the URL unchanged from withSharedAccess; a shared client's previews and
+  // inline files then go out without the selector, and the API refuses them.
+  test("names the Share in any API URL a browser loads, only for a shared client", () => {
+    const shared = createSixbClient({
+      baseUrl: "https://api.example.com",
+      auth: { kind: "shared", grantId: "shr_1" },
+    })
+    const preview =
+      "https://api.example.com/api/artifacts/art_1/versions/2/boards/home/preview?theme=dark&key=k"
+
+    const named = new URL(withSharedAccess(preview, shared))
+    expect(named.searchParams.getAll("shareGrant")).toEqual(["shr_1"])
+    expect(named.searchParams.get("theme")).toBe("dark")
+    // A path stays a path.
+    expect(withSharedAccess("/api/artifacts/art_1/versions/2/content?path=a.png", shared)).toBe(
+      "/api/artifacts/art_1/versions/2/content?path=a.png&shareGrant=shr_1"
+    )
+
+    const member = createSixbClient({ baseUrl: "https://api.example.com" })
+    expect(withSharedAccess(preview, member)).toBe(preview)
   })
 })

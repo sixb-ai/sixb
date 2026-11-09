@@ -9,7 +9,9 @@
  */
 import {
   getClientSessionAuthority,
-  hasClientSharedAuthority,
+  getClientSharedGrantId,
+  SHARED_ACCESS_ENDED,
+  SHARED_ACCESS_ENDED_CLOSE_CODE,
   SHARED_ACCESS_REALTIME_UNAVAILABLE,
 } from "./client-authority"
 import type { Client } from "./generated/client"
@@ -35,6 +37,11 @@ export interface ReconnectingSocketOptions {
   readonly url: string
   /** The client whose credential the socket presents. Defaults to the package's shared client. */
   readonly client?: Client
+  /**
+   * The stream also serves a shared link's session: a shared client names its grant in the URL,
+   * as file links do, and its session cookie is the credential. Any other stream refuses one.
+   */
+  readonly sharedAccess?: boolean
   /** Built before every connection; useful for one-shot WebSocket tickets. */
   readonly protocols?: () => readonly string[] | Promise<readonly string[]>
   /** Decide whether a failed async connection setup should be retried. */
@@ -85,7 +92,8 @@ const INITIAL_STATE: ReconnectingSocketState = {
 
 export function createReconnectingSocket(options: ReconnectingSocketOptions): ReconnectingSocket {
   const client = options.client ?? generatedClient
-  if (hasClientSharedAuthority(client)) {
+  const sharedGrantId = getClientSharedGrantId(client)
+  if (sharedGrantId !== null && !options.sharedAccess) {
     options.onError?.(SHARED_ACCESS_REALTIME_UNAVAILABLE)
     options.onStateChange?.({
       connected: false,
@@ -163,7 +171,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     }
     if (stopped || generation !== connectionGeneration) return
 
-    const ws = openWebSocket(options.url, protocols, accessToken)
+    const ws = openWebSocket(withSharedGrant(options.url, sharedGrantId), protocols, accessToken)
     socket = ws
     let subscribed = false
     let readyTimer: ReturnType<typeof setTimeout> | null = null
@@ -219,12 +227,21 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       sink.reportError(options.connectionErrorMessage)
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event?: { readonly code?: number }) => {
       clearReadyTimer()
       if (socket === ws) {
         socket = null
       }
       if (stopped) return
+
+      // The shared link ended: the server would refuse every reconnect.
+      if (event?.code === SHARED_ACCESS_ENDED_CLOSE_CODE) {
+        stopped = true
+        sink.reportError(SHARED_ACCESS_ENDED)
+        setState({ connected: false, reconnecting: false, error: SHARED_ACCESS_ENDED })
+        return
+      }
+
       setState({ connected: false, reconnecting: reconnect, error: state.error })
       scheduleReconnect()
     }
@@ -250,6 +267,15 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       socket = null
     },
   }
+}
+
+/** The socket's URL naming the shared link's grant, for a shared client; as it is otherwise. */
+function withSharedGrant(url: string, grantId: string | null): string {
+  if (grantId === null) return url
+
+  const shared = new URL(url)
+  shared.searchParams.set("shareGrant", grantId)
+  return shared.toString()
 }
 
 function servesSocket(apiBaseUrl: string, socketUrl: string): boolean {

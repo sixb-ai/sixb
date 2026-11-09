@@ -315,9 +315,11 @@ export interface EventSubscribeExecutor {
  */
 export function createWsSubscribeExecutor(options?: { client?: Client }): EventSubscribeExecutor {
   const transportClient = options?.client ?? generatedClient
-  if (hasClientSharedAuthority(transportClient)) {
-    return {
-      subscribe(_filter, _handler, subscribeOptions) {
+
+  return {
+    subscribe(filter, handler, subscribeOptions) {
+      // A shared link's session follows its artifacts live, and nothing else.
+      if (hasClientSharedAuthority(transportClient) && filter.topic !== "artifacts") {
         subscribeOptions?.onError?.(SHARED_ACCESS_REALTIME_UNAVAILABLE)
         subscribeOptions?.onStateChange?.({
           connected: false,
@@ -325,12 +327,8 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
           error: SHARED_ACCESS_REALTIME_UNAVAILABLE,
         })
         return () => undefined
-      },
-    }
-  }
+      }
 
-  return {
-    subscribe(filter, handler, subscribeOptions) {
       const matches = buildEventPredicate(filter)
       const socket = createEventSocket({
         topic: filter.topic,
