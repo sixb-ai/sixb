@@ -293,7 +293,9 @@ describe("Share definitions", () => {
         target: objectRef(Proposal, "proposal-1"),
         ...runtimeFor(undefined, [nestedFileAction]),
       })
-    ).toThrow("Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1")
+    ).toThrow(
+      "Shared Action parameters cannot contain objectRef, fileRef, userRef, or artifactRef in V1"
+    )
 
     const nestedObjectRefShare = defineShare("share-nested-object-ref", {
       target: Proposal,
@@ -305,7 +307,9 @@ describe("Share definitions", () => {
         target: objectRef(Proposal, "proposal-1"),
         ...runtimeFor(undefined, [nestedObjectRefAction]),
       })
-    ).toThrow("Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1")
+    ).toThrow(
+      "Shared Action parameters cannot contain objectRef, fileRef, userRef, or artifactRef in V1"
+    )
   })
 
   test("rejects user references in shared Action params, even nested", () => {
@@ -325,8 +329,27 @@ describe("Share definitions", () => {
         ...runtimeFor(undefined, [assignAction]),
       })
     ).toThrow(
-      "parameter 'reviewers[]' uses userRef. Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1."
+      "parameter 'reviewers[]' uses userRef. Shared Action parameters cannot contain objectRef, fileRef, userRef, or artifactRef in V1."
     )
+  })
+
+  test("rejects artifact references in shared Action params", () => {
+    const attachAction = defineAction("attach-brief")
+      .on(Proposal)
+      .params({ brief: param(ref.artifact()) })
+      .writeback(async () => {})
+    const share = defineShare("share-attach-brief", {
+      target: Proposal,
+      grants: ({ target }) => [can.view(target), can.apply(attachAction).on(target)],
+    })
+
+    expect(() =>
+      compileShareAccessPlan({
+        share,
+        target: objectRef(Proposal, "proposal-1"),
+        ...runtimeFor(undefined, [attachAction]),
+      })
+    ).toThrow("parameter 'brief' uses artifactRef.")
   })
 
   test("follows ValueType refs with a cycle guard when validating shared Action params", () => {
@@ -400,7 +423,9 @@ describe("Share definitions", () => {
         target: objectRef(Proposal, "proposal-1"),
         ...runtimeFor(undefined, [action]),
       })
-    ).toThrow("Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1")
+    ).toThrow(
+      "Shared Action parameters cannot contain objectRef, fileRef, userRef, or artifactRef in V1"
+    )
   })
 
   test("reports malformed discovered grants as nominal Share errors", () => {

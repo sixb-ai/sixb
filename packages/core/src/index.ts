@@ -2,6 +2,7 @@
 
 export type {
   ArraySchema,
+  ArtifactRef,
   ComplexSchema,
   CurrentUserRef,
   DirectLinkResult,
@@ -51,6 +52,7 @@ export type {
   ValueTypeRefSchema,
 } from "./ontology"
 export {
+  artifactRef,
   currentUser,
   defineInterface,
   defineObjectType,

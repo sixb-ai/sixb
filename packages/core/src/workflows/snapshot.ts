@@ -246,6 +246,7 @@ function snapshotSchemaValue(params: {
       case "boolean":
       case "fileRef":
       case "userRef":
+      case "artifactRef":
         return snapshotJsonValue(value, path)
       default:
         schema satisfies never

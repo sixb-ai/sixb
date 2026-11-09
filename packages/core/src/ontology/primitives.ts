@@ -88,6 +88,20 @@ const PRIMITIVE_TRAITS = {
     shareableParam: false,
     unique: "userRef",
   },
+  // Artifact references match by identity alone. An artifact is reached through the object that
+  // holds it, so a reference stays out of telemetry, shared sessions, facets and unique values.
+  artifactRef: {
+    queryScalarKind: "artifactRef",
+    exact: true,
+    exactSearch: false,
+    sortable: false,
+    text: false,
+    contains: false,
+    facet: false,
+    telemetry: false,
+    shareableParam: false,
+    unique: undefined,
+  },
 } as const satisfies Record<PrimitiveSchema, PrimitiveTraits>
 
 export function isPrimitiveSchema(schema: unknown): schema is PrimitiveSchema {

@@ -34,7 +34,8 @@ export function compareQueryScalarValues(
     case "timestamp":
       return compareTemporalValues(left, right)
     case "userRef":
-      // Identity only: user references have no order.
+    case "artifactRef":
+      // Identity only: references have no order.
       return Number.NaN
   }
 }
@@ -55,12 +56,13 @@ export function queryScalarValuesEqual(
     return !Number.isNaN(comparison) && comparison === 0
   }
 
-  if (scalarKind === "userRef") return userRefsEqual(left, right)
+  if (scalarKind === "userRef" || scalarKind === "artifactRef") return refsEqual(left, right)
   if (scalarKind !== undefined) return Object.is(left, right)
   return runtimeValuesEqual(left, right)
 }
 
-function userRefsEqual(left: unknown, right: unknown): boolean {
+/** References are equal when they point at the same kind of thing with the same id. */
+function refsEqual(left: unknown, right: unknown): boolean {
   if (left === null || right === null) return left === right
   return (
     isRecord(left) &&

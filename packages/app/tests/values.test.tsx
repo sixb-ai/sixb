@@ -104,6 +104,16 @@ describe("a recorded value", () => {
     expect(markup).toContain("room-1")
   })
 
+  // The artifact card arrives with the object page's artifacts; until then the value reads as the
+  // record it is.
+  test("draws an artifact reference as its record", () => {
+    const schema = fieldRecordSchema({ kickoffDoc: "artifactRef" })
+    const markup = render({ kickoffDoc: { type: "artifact", id: "art_k3m9q2x7tp" } }, schema)
+    expect(markup).toContain("art_k3m9q2x7tp")
+    expect(markup).not.toContain(userMarker)
+    expect(markup).not.toContain(objectMarker)
+  })
+
   test("names a user from the member directory, and shows the id until it can", () => {
     const schema = valueSchema(fieldRecordSchema({ assignee: "userRef", reviewer: "userRef" }))
     const value = {

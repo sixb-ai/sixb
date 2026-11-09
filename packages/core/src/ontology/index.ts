@@ -11,6 +11,8 @@
 // ── Types ───────────────────────────────────────────────────
 
 export type { EmbeddingModelDefinition, EmbeddingModelRef } from "../models/embedding-model"
+export type { ArtifactRef } from "./artifact-ref"
+export { artifactRef } from "./artifact-ref"
 export type { DecimalValue } from "./decimal"
 export {
   compareDecimalValues,

@@ -24,6 +24,8 @@ export type QueryScalarKind =
   | "timestamp"
   /** A `{ type: "user", id }` value, equal when both fields are. */
   | "userRef"
+  /** A `{ type: "artifact", id }` value, equal when both fields are. */
+  | "artifactRef"
 
 export type ObjectQuery =
   | ObjectQueryStart

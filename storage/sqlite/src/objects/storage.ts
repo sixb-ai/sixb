@@ -98,6 +98,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     date: { equality: true, ordering: true },
     timestamp: { equality: true, ordering: true },
     userRef: { equality: true },
+    artifactRef: { equality: true },
   },
   limits: {
     totalCount: true,
