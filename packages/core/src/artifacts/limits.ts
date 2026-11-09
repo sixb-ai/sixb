@@ -70,6 +70,11 @@ export const ARTIFACT_HOLDERS_LIMIT = 20
 export const ARTIFACT_COMMENT_LIMITS = {
   /** Comments and replies, together. */
   maxComments: 1_000,
+  /**
+   * Those of them shared links' guests wrote, together: a visitor opens as many sessions as they
+   * like, so only a cap on all guests keeps room for the members.
+   */
+  maxGuestComments: 200,
   /** A comment's words, in characters. */
   maxBodyLength: 4_000,
   /** The words that name the element it is about. */

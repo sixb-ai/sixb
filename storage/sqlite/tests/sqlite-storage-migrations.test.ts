@@ -216,6 +216,7 @@ const shippedMigrationIds = [
   "094-artifact-frame-files",
   "095-artifact-comments",
   "096-object-artifact-refs",
+  "097-shared-link-guests",
 ]
 
 afterEach(async () => {
@@ -692,6 +693,74 @@ describe("SQLite storage migrations", () => {
       db.run("DELETE FROM artifacts WHERE id = 'art_deck000001'")
       expect(db.query("SELECT COUNT(*) AS n FROM artifact_versions").get()).toEqual({ n: 0 })
       expect(db.query("SELECT COUNT(*) AS n FROM artifact_frame_grants").get()).toEqual({ n: 0 })
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proof: drop 097's INSERT and the comments are gone; drop the RENAME and replies no
+  // longer follow their comment.
+  test("rebuilds comments for guests, keeping each one, its order, and its replies", () => {
+    const db = replayedDatabase("097-shared-link-guests")
+    try {
+      const at = "2026-01-01T00:00:00.000Z"
+      db.run(
+        `INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id, latest_version,
+          next_version, created_at, updated_at
+        ) VALUES ('p', 'art_canvas01', 'canvas', 'Plan', 'user', 'u', 1, 2, ?, ?)`,
+        [at, at]
+      )
+      const comment = (id: string, parentId: string | null) =>
+        db.run(
+          `INSERT INTO artifact_comments (
+            project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
+            author_principal_id, created_at
+          ) VALUES ('p', 'art_canvas01', ?, ?, '{"revision":1}', 'Hm', 'user', 'u', ?)`,
+          [id, parentId, at]
+        )
+      // Inserted out of id order, in one instant: the rowid says which came first.
+      comment("cmt_b", null)
+      comment("cmt_a", null)
+      comment("cmt_reply", "cmt_b")
+
+      migration("097-shared-link-guests").up(db)
+
+      const order = "SELECT id FROM artifact_comments ORDER BY created_at, rowid"
+      expect(db.query(order).all()).toEqual([{ id: "cmt_b" }, { id: "cmt_a" }, { id: "cmt_reply" }])
+
+      db.run(
+        `INSERT INTO artifact_comments (
+          project_id, artifact_id, id, anchor, body, author_principal_type, author_principal_id,
+          author_name, created_at
+        ) VALUES ('p', 'art_canvas01', 'cmt_guest', '{"revision":1}', 'Hi', 'guest', 'shs_1', 'Ava', ?)`,
+        [at]
+      )
+      // A guest's comment keeps a name, and nobody else's does.
+      expect(() =>
+        db.run(
+          `INSERT INTO artifact_comments (
+            project_id, artifact_id, id, anchor, body, author_principal_type, author_principal_id,
+            created_at
+          ) VALUES ('p', 'art_canvas01', 'cmt_nameless', '{"revision":1}', 'Hi', 'guest', 'shs_2', ?)`,
+          [at]
+        )
+      ).toThrow()
+      expect(() =>
+        db.run(
+          `INSERT INTO artifact_comments (
+            project_id, artifact_id, id, anchor, body, author_principal_type, author_principal_id,
+            author_name, created_at
+          ) VALUES ('p', 'art_canvas01', 'cmt_named', '{"revision":1}', 'Hi', 'user', 'u', 'Ava', ?)`,
+          [at]
+        )
+      ).toThrow()
+
+      // Replies still belong to the rebuilt table: deleting their comment takes them.
+      db.run("PRAGMA foreign_keys = ON")
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
+      db.run("DELETE FROM artifact_comments WHERE id = 'cmt_b'")
+      expect(db.query(order).all()).toEqual([{ id: "cmt_a" }, { id: "cmt_guest" }])
     } finally {
       db.close()
     }

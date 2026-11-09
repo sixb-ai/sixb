@@ -493,6 +493,11 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       throw artifactStorageErrors.commentsFull(input.artifactId)
     }
 
+    const guests = stored.comments.filter((each) => each.author.type === "guest").length
+    if (input.author.type === "guest" && guests >= ARTIFACT_COMMENT_LIMITS.maxGuestComments) {
+      throw artifactStorageErrors.guestCommentsFull(input.artifactId)
+    }
+
     // Field by field, as the SQL providers store it.
     const comment: ArtifactCommentRecord = structuredClone({
       projectId: input.projectId,
@@ -509,7 +514,10 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
         revision: input.anchor.revision,
       },
       body: input.body,
-      author: input.author,
+      author:
+        input.author.type === "guest"
+          ? { type: "guest", id: input.author.id, name: input.author.name }
+          : { type: input.author.type, id: input.author.id },
       ...(input.origin
         ? { origin: { threadId: input.origin.threadId, runId: input.origin.runId } }
         : {}),

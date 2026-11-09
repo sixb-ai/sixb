@@ -6,6 +6,7 @@ export type {
   GetShareSessionByIdInput,
   RenewShareSessionIfValidInput,
   RevokeShareSessionInput,
+  SetShareSessionGuestNameInput,
   ShareSessionRecord,
   ShareSessionStorage,
 } from "./types"

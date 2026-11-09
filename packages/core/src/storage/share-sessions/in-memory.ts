@@ -5,6 +5,7 @@ import {
   normalizeGetShareSessionByIdInput,
   normalizeRenewShareSessionIfValidInput,
   normalizeRevokeShareSessionInput,
+  normalizeSetShareSessionGuestNameInput,
   normalizeShareSessionCreate,
   parseShareSessionRecord,
 } from "./record"
@@ -13,6 +14,7 @@ import type {
   GetShareSessionByIdInput,
   RenewShareSessionIfValidInput,
   RevokeShareSessionInput,
+  SetShareSessionGuestNameInput,
   ShareSessionRecord,
   ShareSessionStorage,
 } from "./types"
@@ -72,6 +74,25 @@ export class InMemoryShareSessionStorage implements ShareSessionStorage {
       Math.max(current.expiresAt.getTime(), normalized.expiresAt.getTime())
     )
     const updated = { ...current, expiresAt: new Date(nextExpiry) }
+    this.rows.set(key, updated)
+    return cloneShareSessionRecord(updated)
+  }
+
+  async setGuestName(input: SetShareSessionGuestNameInput): Promise<ShareSessionRecord | null> {
+    const normalized = normalizeSetShareSessionGuestNameInput(input)
+    const key = rowKey(normalized.projectId, normalized.id)
+    const current = this.rows.get(key)
+    if (
+      !current ||
+      current.grantId !== normalized.grantId ||
+      current.revokedAt !== undefined ||
+      current.expiresAt.getTime() <= normalized.now.getTime() ||
+      current.absoluteExpiresAt.getTime() <= normalized.now.getTime()
+    ) {
+      return null
+    }
+
+    const updated = { ...current, guestName: normalized.name }
     this.rows.set(key, updated)
     return cloneShareSessionRecord(updated)
   }
