@@ -4,6 +4,16 @@ import type { AgentRunFailureCode } from "../agents"
 import { AGENT_RUN_FAILURE_CODES } from "../agents"
 import type { ExecutionStorage } from "../executions"
 import {
+  type ClaimRunInput,
+  holdsRun,
+  type ListLostRunsInput,
+  mayFinishRun,
+  planRunClaim,
+  type ReleaseRunExecutionInput,
+  type RunClaim,
+  selectLostRuns,
+} from "../run-claim"
+import {
   cloneRecord,
   compareStartedAt,
   hasEmptyStatuses,
@@ -33,11 +43,9 @@ import type {
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
   ReclaimWorkflowAgentNodeRunInput,
-  ReclaimWorkflowRunInput,
   ResumeWorkflowRunInput,
   StartWorkflowAgentNodeRunInput,
   StartWorkflowNodeRunInput,
-  StartWorkflowRunInput,
   WaitWorkflowNodeRunInput,
   WaitWorkflowRunInput,
   WorkflowAgentNodeRunRecord,
@@ -148,34 +156,49 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     return cloneRecord(record)
   }
 
-  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
-    const key = storageKey(input.projectId, input.id)
-    const existing = this.runs.get(key)
-    if (!existing || existing.status !== "queued") {
-      throw new WorkflowRunError(
-        existing
-          ? `[Sixb] Workflow run '${input.id}' cannot start from status '${existing.status}'.`
-          : `[Sixb] Workflow run '${input.id}' not found for project '${input.projectId}'.`
-      )
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<WorkflowRunRecord>> {
+    const existing = this.requireExistingWorkflowRun(input.projectId, input.id)
+
+    const plan = planRunClaim(cloneRecord(existing), input)
+    if (!plan.take) return plan.claim
+
+    const { outcome, startedAt, attempt, execution } = plan
+    const run: WorkflowRunRecord = {
+      ...existing,
+      status: "running",
+      startedAt,
+      finishedAt: undefined,
+      attempt,
+      execution: cloneRecord(execution),
+      error: undefined,
     }
+
+    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(run))
+    return { outcome, run: cloneRecord(run) }
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly WorkflowRunRecord[]> {
+    return selectLostRuns(this.runs.values(), input).map((run) => cloneRecord(run))
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    const existing = this.runs.get(storageKey(input.projectId, input.id))
+    if (existing?.status !== "running" || existing.execution?.token !== input.executionToken) return
 
     const next: WorkflowRunRecord = {
       ...existing,
-      status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
-      finishedAt: undefined,
-      error: undefined,
-      attempt: existing.attempt + 1,
-      execution: input.execution ? cloneRecord(input.execution) : undefined,
+      execution: {
+        token: input.executionToken,
+        queueLeaseExpiresAt: new Date(input.releasedAt ?? new Date()),
+      },
+      attempt: input.spentAttempt ? existing.attempt : existing.attempt - 1,
     }
-
-    this.runs.set(key, cloneRecord(next))
-    return cloneRecord(next)
+    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
   }
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
     const existing = this.requireFinishableWorkflowRun(input)
-    this.assertRecordExecutionOwnership(existing, input.executionToken)
+    if (!mayFinishRun(existing, input)) throw this.staleExecution(existing.id)
     const base: WorkflowRunRecord = {
       ...existing,
       status: input.status,
@@ -222,21 +245,10 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       status: "running",
       finishedAt: undefined,
       error: undefined,
-      attempt: existing.attempt + 1,
+      attempt: 1,
       execution: input.execution ? cloneRecord(input.execution) : undefined,
     }
 
-    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
-    return cloneRecord(next)
-  }
-
-  async reclaim(input: ReclaimWorkflowRunInput): Promise<WorkflowRunRecord> {
-    const existing = this.requireRunningWorkflowRun(input.projectId, input.id)
-    const next: WorkflowRunRecord = {
-      ...existing,
-      attempt: existing.attempt + 1,
-      execution: cloneRecord(input.execution),
-    }
     this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
     return cloneRecord(next)
   }
@@ -399,11 +411,13 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   private assertRecordExecutionOwnership(record: WorkflowRunRecord, token?: string): void {
-    if (record.execution?.token !== token) {
-      throw new WorkflowRunError(
-        `[Sixb] Execution token is no longer current on workflow run '${record.id}'.`
-      )
-    }
+    if (!holdsRun(record, token)) throw this.staleExecution(record.id)
+  }
+
+  private staleExecution(id: string): WorkflowRunError {
+    return new WorkflowRunError(
+      `[Sixb] Execution token is no longer current on workflow run '${id}'.`
+    )
   }
 }
 

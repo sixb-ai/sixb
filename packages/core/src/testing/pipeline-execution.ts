@@ -1,6 +1,7 @@
 import type { TrustedPrimitiveRef } from "../execution"
 import type { PipelineRunRecord, QueuePipelineRunInput, Storage } from "../storage"
 import type { ExecutionStorage } from "../storage/executions"
+import { startTestRun } from "./run-claim"
 
 /** Create the durable execution required by a Pipeline-run storage fixture. */
 export async function createTestPipelineExecution(
@@ -56,7 +57,8 @@ export async function startTestPipelineRun(
 ): Promise<PipelineRunRecord> {
   const { startedAt, ...queuedRun } = input
   await queueTestPipelineRun(storage, { ...queuedRun, queuedAt: startedAt })
-  return storage.pipelineRuns!.start({
+
+  return startTestRun(storage.pipelineRuns!, {
     id: input.id,
     projectId: input.projectId,
     startedAt,

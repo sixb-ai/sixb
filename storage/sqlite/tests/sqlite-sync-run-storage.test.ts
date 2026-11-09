@@ -216,6 +216,7 @@ describe("SqliteSyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
+    await storage.finish({ id: "run-orders-a", projectId: "my-app", status: "cancelled" })
     await startTestSyncRun(database, {
       id: "run-orders-z",
       projectId: "my-app",
@@ -257,13 +258,6 @@ describe("SqliteSyncRunStorage", () => {
       datasetId: "raw.erp.orders",
       mode: "snapshot",
     })
-
-    await expect(
-      storage.start({
-        id: "run-1",
-        projectId: "my-app",
-      })
-    ).rejects.toBeInstanceOf(SyncRunError)
 
     await expect(
       storage.finish({

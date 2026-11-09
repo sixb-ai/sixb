@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path"
 import { getLakeRetentionRuntime, ingestStalledSince } from "@sixb/core/internal/runtime"
+import { countLostRuns } from "@sixb/core/internal/workers"
 import { assertDeclaredEnv } from "../lib/env-config"
 import { errorMessage } from "../lib/errors"
 import { checkRuntimeHealth } from "../lib/health"
@@ -64,6 +65,7 @@ export async function runCheck(options: CheckOptions = {}) {
           ...health.warnings,
           ...markings.warnings,
           ...(await lakeWorkerWarnings(sixb, health.storage.ok)),
+          ...(await lostRunWarnings(sixb, health.storage.ok)),
         ],
       })
     )
@@ -131,6 +133,32 @@ async function stalledIngestDatasets(sixb: LoadedSixbHost): Promise<readonly str
       (summary) => summary.pendingDeliveries > 0 && ingestStalledSince(summary, Date.now()) !== null
     )
     .map((summary) => summary.datasetId)
+}
+
+/**
+ * What the orchestrator's `runs` pass will do once it starts: runs that lost their job go on, with
+ * their side effects, so whoever is upgrading can look at them first.
+ */
+async function lostRunWarnings(
+  sixb: LoadedSixbHost,
+  storageOk: boolean
+): Promise<readonly string[]> {
+  if (!storageOk) return []
+
+  const counts = await countLostRuns({
+    projectId: sixb.id,
+    storage: sixb.storage,
+    queues: sixb.queues,
+    events: sixb.events,
+    now: new Date(),
+  }).catch(() => [])
+
+  return counts.flatMap(({ primitive, goOn, end }) => [
+    ...(goOn > 0
+      ? [`${goOn} ${primitive} run(s) lost their job and will go on when the orchestrator starts.`]
+      : []),
+    ...(end > 0 ? [`${end} ${primitive} run(s) are too old to go on and will end cancelled.`] : []),
+  ])
 }
 
 interface MarkingsCheck {

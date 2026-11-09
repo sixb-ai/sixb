@@ -4,14 +4,19 @@ import { assertPipelineRunExecution } from "@sixb/core/internal/pipeline-run-sto
 import {
   canFinishPipelineRun,
   canRequeuePipelineRunAfterEnqueueFailure,
+  holdsRun,
+  mayFinishRun,
 } from "@sixb/core/internal/storage"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
+  ClaimRunInput,
+  ConfirmRunExecutionInput,
   ExecutionStorage,
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
   ListLatestPipelineRunsInput,
   ListLatestPipelineRunsResult,
+  ListLostRunsInput,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
@@ -20,11 +25,22 @@ import type {
   PipelineRunStorage,
   PipelineStepRunRecord,
   QueuePipelineRunInput,
-  StartPipelineRunInput,
+  ReleaseRunExecutionInput,
+  RunClaim,
   StartPipelineStepRunInput,
 } from "@sixb/core/storage"
 import { PIPELINE_RUN_FAILURE_CODES, PipelineRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
+import {
+  claimSqliteRun,
+  confirmSqliteRunExecution,
+  listLostSqliteRuns,
+  releaseSqliteRun,
+  requireSqliteRun,
+  type SqliteRunExecutionColumns,
+  type SqliteRunTable,
+  sqliteRunExecutionFields,
+} from "./run-claim-sql"
 import {
   appendRunListFilters,
   hasEmptyStatuses,
@@ -45,6 +61,14 @@ export interface SqlitePipelineRunStorageOptions {
   path?: string
   /** Internal shared connection used by bundled SqliteStorage. */
   connection?: SqliteStoreConnection
+}
+
+const PIPELINE_RUNS: SqliteRunTable<PipelineRunDatabaseRow, PipelineRunRecord> = {
+  name: "pipeline_runs",
+  toRun: rowToPipelineRunRecord,
+  notFound: (projectId, id) =>
+    new PipelineRunError(`[SixbSqlite] Pipeline run '${id}' not found for project '${projectId}'.`),
+  staleExecution,
 }
 
 export class SqlitePipelineRunStorage implements PipelineRunStorage {
@@ -130,7 +154,8 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         .query(
           `
           UPDATE pipeline_runs
-          SET status = ?, queued_at = ?, started_at = NULL, finished_at = NULL,
+          SET status = ?, queued_at = ?, attempt = 0, execution_token = NULL,
+              execution_queue_lease_expires_at = NULL, started_at = NULL, finished_at = NULL,
               output_dataset_id = NULL, output_version_id = NULL, error = NULL
           WHERE project_id = ? AND id = ?
         `
@@ -144,49 +169,25 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
     })()
   }
 
-  async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
-    const result = this.db
-      .query(
-        `
-        UPDATE pipeline_runs
-        SET status = ?, started_at = ?, error = NULL
-        WHERE project_id = ? AND id = ? AND status = ?
-      `
-      )
-      .run(
-        "running",
-        (input.startedAt ?? new Date()).toISOString(),
-        input.projectId,
-        input.id,
-        "queued"
-      )
-    if (result.changes > 0) {
-      const record = await this.getById({ projectId: input.projectId, id: input.id })
-      if (record) return record
-    }
+  async startOrReclaim(input: ClaimRunInput): Promise<RunClaim<PipelineRunRecord>> {
+    return this.db.transaction(() => claimSqliteRun(this.db, PIPELINE_RUNS, input))()
+  }
 
-    const existing = await this.getById({ projectId: input.projectId, id: input.id })
-    if (!existing) {
-      throw new PipelineRunError(
-        `[SixbSqlite] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
-    throw new PipelineRunError(
-      `[SixbSqlite] Pipeline run '${input.id}' cannot start from status '${existing.status}'.`
-    )
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<PipelineRunRecord> {
+    return this.db.transaction(() => confirmSqliteRunExecution(this.db, PIPELINE_RUNS, input))()
+  }
+
+  async listLost(input: ListLostRunsInput): Promise<readonly PipelineRunRecord[]> {
+    return listLostSqliteRuns(this.db, PIPELINE_RUNS, input)
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    releaseSqliteRun(this.db, PIPELINE_RUNS, input)
   }
 
   async finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
     return this.db.transaction(() => {
-      const existing = this.db
-        .query("SELECT * FROM pipeline_runs WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.id) as PipelineRunDatabaseRow | null
-
-      if (!existing) {
-        throw new PipelineRunError(
-          `[SixbSqlite] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
-        )
-      }
+      const existing = requireSqliteRun(this.db, PIPELINE_RUNS, input.projectId, input.id)
 
       if (!canFinishPipelineRun(existing.status, input)) {
         throw new PipelineRunError(
@@ -194,12 +195,16 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         )
       }
 
+      if (!mayFinishRun(existing, input)) throw staleExecution(input.id)
+
       this.db
         .query(
           `
           UPDATE pipeline_runs
           SET
             status = ?,
+            execution_token = NULL,
+            execution_queue_lease_expires_at = NULL,
             finished_at = ?,
             output_dataset_id = ?,
             output_version_id = ?,
@@ -219,25 +224,18 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
           input.id
         )
 
-      const updated = this.db
-        .query("SELECT * FROM pipeline_runs WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.id) as PipelineRunDatabaseRow
-
-      return rowToPipelineRunRecord(updated)
+      return requireSqliteRun(this.db, PIPELINE_RUNS, input.projectId, input.id)
     })()
   }
 
   async startStep(input: StartPipelineStepRunInput): Promise<PipelineStepRunRecord> {
     return this.db.transaction(() => {
-      const pipelineRun = this.db
-        .query("SELECT * FROM pipeline_runs WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.pipelineRunId) as PipelineRunDatabaseRow | null
-
-      if (!pipelineRun) {
-        throw new PipelineRunError(
-          `[SixbSqlite] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
-        )
-      }
+      const pipelineRun = requireSqliteRun(
+        this.db,
+        PIPELINE_RUNS,
+        input.projectId,
+        input.pipelineRunId
+      )
 
       if (pipelineRun.status !== "running") {
         throw new PipelineRunError(
@@ -245,44 +243,27 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         )
       }
 
-      if (pipelineRun.pipeline_id !== input.pipelineId) {
+      if (!holdsRun(pipelineRun, input.executionToken)) throw staleExecution(input.pipelineRunId)
+
+      if (pipelineRun.pipelineId !== input.pipelineId) {
         throw new PipelineRunError(
-          `[SixbSqlite] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
+          `[SixbSqlite] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipelineId}'.`
         )
       }
 
       const startedAt = input.startedAt ?? new Date()
 
-      try {
-        this.db
-          .query(
-            `
-            INSERT INTO pipeline_step_runs (
-              project_id,
-              id,
-              pipeline_run_id,
-              pipeline_id,
-              step_id,
-              dataset_id,
-              mode,
-              status,
-              started_at,
-              inputs
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      const restarted = this.db
+        .query(
           `
-          )
-          .run(
-            input.projectId,
-            input.id,
-            input.pipelineRunId,
-            input.pipelineId,
-            input.stepId,
-            input.datasetId,
-            input.mode,
-            "running",
-            startedAt.toISOString(),
-            serializeDatasetVersionRefs(input.inputs)
-          )
+          UPDATE pipeline_step_runs SET inputs = ?
+          WHERE project_id = ? AND id = ? AND status = ?
+        `
+        )
+        .run(serializeDatasetVersionRefs(input.inputs), input.projectId, input.id, "running")
+
+      try {
+        if (restarted.changes === 0) this.insertStep(input, startedAt)
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           throw new PipelineRunError(
@@ -307,6 +288,38 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
     })()
   }
 
+  private insertStep(input: StartPipelineStepRunInput, startedAt: Date): void {
+    this.db
+      .query(
+        `
+            INSERT INTO pipeline_step_runs (
+              project_id,
+              id,
+              pipeline_run_id,
+              pipeline_id,
+              step_id,
+              dataset_id,
+              mode,
+              status,
+              started_at,
+              inputs
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `
+      )
+      .run(
+        input.projectId,
+        input.id,
+        input.pipelineRunId,
+        input.pipelineId,
+        input.stepId,
+        input.datasetId,
+        input.mode,
+        "running",
+        startedAt.toISOString(),
+        serializeDatasetVersionRefs(input.inputs)
+      )
+  }
+
   async finishStep(input: FinishPipelineStepRunInput): Promise<PipelineStepRunRecord> {
     assertOptionalNonNegativeInteger(input.rowsWritten, "rowsWritten")
 
@@ -325,6 +338,16 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
         throw new PipelineRunError(
           `[SixbSqlite] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
+      }
+
+      const pipelineRun = requireSqliteRun(
+        this.db,
+        PIPELINE_RUNS,
+        input.projectId,
+        existing.pipeline_run_id
+      )
+      if (!holdsRun(pipelineRun, input.executionToken)) {
+        throw staleExecution(existing.pipeline_run_id)
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
@@ -503,6 +526,12 @@ function parseDatasetVersionRefs(value: string): readonly DatasetVersionRef[] {
   return JSON.parse(value) as readonly DatasetVersionRef[]
 }
 
+function staleExecution(id: string): PipelineRunError {
+  return new PipelineRunError(
+    `[SixbSqlite] Execution token is no longer current on pipeline run '${id}'.`
+  )
+}
+
 function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord {
   return {
     id: row.id,
@@ -510,6 +539,7 @@ function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord 
     executionId: row.execution_id,
     pipelineId: row.pipeline_id,
     status: row.status,
+    ...sqliteRunExecutionFields(row),
     queuedAt: new Date(row.queued_at),
     startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
@@ -556,7 +586,7 @@ function assertOptionalNonNegativeInteger(value: number | undefined, fieldName: 
   }
 }
 
-interface PipelineRunDatabaseRow {
+interface PipelineRunDatabaseRow extends SqliteRunExecutionColumns {
   project_id: string
   id: string
   execution_id: string

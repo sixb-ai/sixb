@@ -139,7 +139,7 @@ class TriggerRecovery {
     // Its event is most likely on its way: firing now would start a second run beside its own.
     if (this.now() - change.version.createdAt.getTime() < RECOVERY_INTERVAL_MS) return false
 
-    // Unsettled still: the next pass sees this run, and a stop can cancel it.
+    // Unsettled still: the next pass sees this run, which may yet be cancelled.
     await this.dispatch(trigger, change.version, latest)
     return false
   }

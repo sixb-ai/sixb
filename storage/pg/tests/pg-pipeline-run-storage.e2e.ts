@@ -324,13 +324,6 @@ describe("PgPipelineRunStorage", () => {
     })
 
     await expect(
-      storage.pipelineRuns.start({
-        id: "piperun_1",
-        projectId: "my-app",
-      })
-    ).rejects.toBeInstanceOf(PipelineRunError)
-
-    await expect(
       storage.pipelineRuns.finish({
         id: "missing",
         projectId: "my-app",

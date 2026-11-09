@@ -212,6 +212,7 @@ describe("PgSyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
+    await storage.syncRuns.finish({ id: "run-orders-a", projectId: "my-app", status: "cancelled" })
     await startTestSyncRun(storage, {
       id: "run-orders-z",
       projectId: "my-app",
@@ -253,13 +254,6 @@ describe("PgSyncRunStorage", () => {
       datasetId: "raw.erp.orders",
       mode: "snapshot",
     })
-
-    await expect(
-      storage.syncRuns.start({
-        id: "run-1",
-        projectId: "my-app",
-      })
-    ).rejects.toBeInstanceOf(SyncRunError)
 
     await expect(
       storage.syncRuns.finish({

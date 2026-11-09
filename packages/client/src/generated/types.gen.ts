@@ -6834,6 +6834,7 @@ export type ListSyncsResponses = {
       datasetId: string
       mode: "snapshot" | "append" | "merge"
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
       queuedAt: string
       startedAt?: string
       finishedAt?: string
@@ -6943,6 +6944,7 @@ export type GetSyncResponses = {
       datasetId: string
       mode: "snapshot" | "append" | "merge"
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
       queuedAt: string
       startedAt?: string
       finishedAt?: string
@@ -7029,6 +7031,7 @@ export type ListSyncRunsResponses = {
       datasetId: string
       mode: "snapshot" | "append" | "merge"
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
       queuedAt: string
       startedAt?: string
       finishedAt?: string
@@ -7210,6 +7213,7 @@ export type ListPipelinesResponses = {
       projectId: string
       pipelineId: string
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
       queuedAt: string
       startedAt?: string
       finishedAt?: string
@@ -7350,6 +7354,7 @@ export type GetPipelineResponses = {
       projectId: string
       pipelineId: string
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
       queuedAt: string
       startedAt?: string
       finishedAt?: string
@@ -7430,6 +7435,7 @@ export type ListPipelineRunsResponses = {
       projectId: string
       pipelineId: string
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
       queuedAt: string
       startedAt?: string
       finishedAt?: string
@@ -7512,6 +7518,7 @@ export type GetPipelineRunResponses = {
       projectId: string
       pipelineId: string
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      attempt: number
       queuedAt: string
       startedAt?: string
       finishedAt?: string

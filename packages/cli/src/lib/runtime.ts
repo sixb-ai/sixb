@@ -209,6 +209,9 @@ export async function startOrchestratorRuntime(
       ...(datasetIngest && getDatasetIngestRuntime(sixb).enabled
         ? { ingest: { inbox: datasetIngest, queue: sixb.queues.lake, reporter: sixb } }
         : {}),
+      ...(hasRecoverableRuns(sixb)
+        ? { runs: { storage: sixb.storage, queues: sixb.queues, events: sixb.events } }
+        : {}),
     })
   )
 
@@ -220,6 +223,13 @@ export async function startOrchestratorRuntime(
       await stopQuietly(() => orchestratorWorker?.stop() ?? Promise.resolve())
     },
   }
+}
+
+/** A project with none of these has no run a worker can lose, and pays for no look at them. */
+function hasRecoverableRuns({ definitions }: LoadedSixbHost): boolean {
+  return [definitions.syncs, definitions.pipelines, definitions.workflows].some(
+    (registry) => registry.list().length > 0
+  )
 }
 
 /**

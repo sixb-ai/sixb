@@ -39,6 +39,10 @@ replacement stores only the rows that changed, so projections of it apply only t
 Add more steps with `.then(nextStep)`. They run in order, so each can read the previous step's
 output. If a step fails, outputs from earlier steps remain available.
 
+A run outlives its worker. After a crash or a deploy it resumes at the first step that did not
+commit, so a step that committed is not run again, and a step that did not may run its code twice.
+A run that loses its worker five times ends `failed`.
+
 ## Run automatically
 
 Create a [schedule](../schedules/overview.md) to run the pipeline when its source dataset changes.

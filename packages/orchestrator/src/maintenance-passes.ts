@@ -20,6 +20,8 @@ export interface MaintenancePassesInput {
   readonly pipelineRuns?: NonNullable<RecoveryPassesInput["triggers"]>["pipelineRuns"]
   /** When the project can ingest. */
   readonly ingest?: RecoveryPassesInput["ingest"]
+  /** When the project has runs a worker can lose. */
+  readonly runs?: RecoveryPassesInput["runs"]
 }
 
 /** The passes the routes call for, for the orchestrator's maintenance loop. */
@@ -32,6 +34,7 @@ export function createMaintenancePasses(input: MaintenancePassesInput): readonly
     projections: projectionsOf(input),
     triggers: triggersOf(input),
     ingest: input.ingest,
+    runs: input.runs,
   })
 }
 

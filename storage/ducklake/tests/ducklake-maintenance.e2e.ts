@@ -10,7 +10,11 @@ import {
   defineDataset,
   defineMarking,
 } from "@sixb/core"
+import { findProducedVersion } from "@sixb/core/internal/datasets"
 import type { BeginDatasetWriteInput, DatasetVersion } from "@sixb/core/lake-storage"
+import { InMemoryStorage } from "@sixb/core/storage"
+import { queueTestSyncRun } from "@sixb/core/testing"
+import { LakeRetention } from "../../../packages/core/src/maintenance/lake-retention"
 import { createDatasetVersionMarkings } from "../../../packages/core/src/security/dataset-version-markings"
 import { DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
@@ -277,6 +281,68 @@ describe("DuckLakeStorage retention", () => {
       revision: "3",
       name: "revision 3",
     })
+  })
+
+  // A sync that lost its worker asks the lake whether its commit landed, and writes its rows again
+  // if it finds nothing. Regression proof: give `applyRetention` the configured `keepVersionsForMs`
+  // in LakeRetention. The run's version expires, and the lookup comes back empty.
+  test("keeps a version a running sync may still look for", async () => {
+    const orders = defineDataset("raw.resumed.orders", { schema: [col("id", "string")] })
+    await storage.createDataset(orders)
+
+    const session = await storage.beginWrite({
+      dataset: orders,
+      mode: "append",
+      producer: { kind: "sync", id: "orders-sync", runId: "sync-run" },
+    })
+    await session.writeRows([{ id: "o1" }])
+    const landed = await session.commit()
+
+    await write(orders, "snapshot", [{ id: "o2" }])
+    await write(orders, "snapshot", [{ id: "o3" }])
+    await backdateHistory("3 hours")
+
+    const preparedAt = new Date(Date.now() - 3 * HOUR_MS - 60_000)
+    const runs = new InMemoryStorage()
+    await queueTestSyncRun(runs, {
+      id: "sync-run",
+      projectId: "project",
+      syncId: "orders-sync",
+      datasetId: orders.id,
+      mode: "append",
+      queuedAt: preparedAt,
+    })
+    await runs.syncRuns.startOrReclaim({
+      projectId: "project",
+      id: "sync-run",
+      execution: { token: "token", queueLeaseExpiresAt: preparedAt },
+      claimedAt: preparedAt,
+    })
+    await runs.syncRuns.prepareCommit({
+      projectId: "project",
+      id: "sync-run",
+      executionToken: "token",
+      rowsRead: 1,
+      preparedAt,
+    })
+
+    await new LakeRetention({
+      projectId: "project",
+      options: undefined,
+      lakeStorage: storage,
+      storage: runs,
+      sources: { listActive: async () => [] },
+      datasetCount: 1,
+    }).apply(ONE_HOUR)
+
+    const found = await findProducedVersion({
+      lakeStorage: storage,
+      datasetId: orders.id,
+      producer: { kind: "sync", runId: "sync-run" },
+      since: preparedAt,
+    })
+
+    expect(found?.versionId).toBe(landed.versionId)
   })
 
   // Regression proof: in DuckLakeMaintenance.planExpiry, ignore `limit`. The first pass then

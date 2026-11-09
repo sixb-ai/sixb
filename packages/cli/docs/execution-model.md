@@ -64,7 +64,7 @@ run moves through the same lifecycle across primitives:
 | `running`   | claimed by a worker                             |
 | `succeeded` | completed and committed                         |
 | `failed`    | errored; recorded with the failure name/message |
-| `cancelled` | aborted (by shutdown or an explicit request)    |
+| `cancelled` | ended by a decision, never by a worker stopping |
 
 An action run has no lifecycle in storage: the request that runs it is its only state while it
 executes, and its record is written once, `succeeded` or `failed`, when it ends. Only the outcome
@@ -75,13 +75,15 @@ any error, so a run stays auditable after the fact.
 
 ### Durability under failure
 
-Workers claim jobs with a **lease** (default 15 minutes). On each outcome:
+Workers claim jobs with a **lease** of one minute, renewed while the job runs, so a worker that
+dies gives its job back within about a minute. On each outcome:
 
 - **success** — the job is completed and removed from the queue.
-- **execution error** — the job is failed (the default) or retried with an
-  optional delay.
-- **abort** (shutdown mid-job) — the job is released by default so another
-  process can reclaim it.
+- **execution error** — the run records its failure and the job fails. An error
+  that kept the run from recording its outcome retries instead, up to five
+  attempts.
+- **abort** (shutdown mid-job) — the job goes back to the queue, the run stays
+  `running`, and the next delivery resumes it at once.
 
 The orchestrator owns upkeep: immediate post-commit publication still runs in the process that
 committed, while its maintenance loop performs durable outbox catch-up and retention every 60
@@ -91,6 +93,20 @@ per project, or none of that runs. An API embedded with `createSixbServer` runs 
 and retention itself.
 
 Because jobs and run records live in durable, shared providers, a crashed worker
-loses no work: the unfinished job's lease expires and another worker reclaims it.
+loses no work: the unfinished job's lease expires and another worker claims the run
+under a new execution token, so the old one can no longer write to it. What it
+picks up depends on the primitive:
+
+| Primitive | After a crash or a shutdown |
+| --- | --- |
+| Sync | Records a commit that landed, otherwise reads again from the last checkpoint |
+| Pipeline | Runs the steps that did not commit; nothing is written twice |
+| Projection, workflow | Resumes where its records say it stopped |
+| Run of an older version | Left to its old worker for 24 h, then ends `cancelled` |
+| Agent turn | Ends as interrupted: running it again would repeat its tools |
+| Webhook | Runs again on the provider's next retry, if it failed |
+
 Actions are the exception: with no job to reclaim, an action whose process crashes
 mid-run leaves no record, and requesting its `runId` again runs it again.
+
+How this works is in [`packages/core/src/workers/README.md`](../../core/src/workers/README.md).

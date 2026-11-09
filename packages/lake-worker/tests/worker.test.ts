@@ -166,6 +166,13 @@ async function eventually(predicate: () => boolean, turns = 500): Promise<void> 
   throw new Error("Condition not reached.")
 }
 
+/** A few event-loop turns, for the promises a timer started. */
+async function settle(turns = 20): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+}
+
 /** As `eventually`, for a condition read from storage. */
 async function eventuallyAsync(predicate: () => Promise<boolean>, turns = 500): Promise<void> {
   for (let turn = 0; turn < turns; turn += 1) {
@@ -448,7 +455,12 @@ describe("LakeWorker", () => {
     await enqueueRetention(queues, new Date().toISOString())
     await eventually(() => lakeStorage.passes.length === 1)
 
-    jest.advanceTimersByTime(3 * MINUTE)
+    // In steps, as a clock moves: the job's one-minute lease renews on the way.
+    for (let elapsed = 0; elapsed < 3 * MINUTE; elapsed += 20_000) {
+      jest.advanceTimersByTime(20_000)
+      await settle()
+    }
+
     lakeStorage.passes[0]!.reject(new Error("catalog unreachable"))
     await eventually(() => errors.length === 1)
 

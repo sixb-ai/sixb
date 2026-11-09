@@ -35,6 +35,7 @@ import {
   createTestWorkflowExecution,
   recordTestActionRun,
   startTestPipelineRun,
+  startTestRun,
   startTestSyncRun,
   startTestWebhookRun,
 } from "@sixb/core/testing"
@@ -213,7 +214,7 @@ async function seedPendingReviewIntervention(sixb: SixbHost, suffix: string) {
     input: { deviceId: "fan-1" },
     queuedAt: new Date("2026-02-18T09:19:59.000Z"),
   })
-  await workflowRuns.start({
+  await startTestRun(workflowRuns, {
     id: runId,
     projectId: sixb.id,
     startedAt: new Date("2026-02-18T09:20:00.000Z"),
@@ -434,7 +435,7 @@ describe("SixbServer HTTP contract", () => {
       input: { deviceId: "fan-1" },
       queuedAt: new Date("2026-02-18T09:06:59.000Z"),
     })
-    await sixb.storage.workflowRuns!.start({
+    await startTestRun(sixb.storage.workflowRuns!, {
       id: "workflow-run-previous",
       projectId: "contract-project",
       startedAt: new Date("2026-02-18T09:07:00.000Z"),
@@ -2023,7 +2024,7 @@ describe("SixbServer HTTP contract", () => {
         workflowId: "review-device-health-workflow",
         input: { deviceId: "fan-1" },
       })
-      await runs.start({ id: runId, projectId: sixb.id })
+      await startTestRun(runs, { id: runId, projectId: sixb.id })
 
       const executionIds: string[] = []
       for (const index of [0, 1]) {
@@ -2116,7 +2117,7 @@ describe("SixbServer HTTP contract", () => {
         workflowId: "review-device-health-workflow",
         input: { deviceId: "fan-1" },
       })
-      await runs.start({ id: runId, projectId: sixb.id })
+      await startTestRun(runs, { id: runId, projectId: sixb.id })
       await runs.nodes.start({
         id: nodeRunId,
         projectId: sixb.id,
@@ -2271,7 +2272,7 @@ describe("SixbServer HTTP contract", () => {
         workflowId: "review-device-health-workflow",
         input: { deviceId: "fan-1" },
       })
-      await runs.start({ id: runId, projectId: sixb.id })
+      await startTestRun(runs, { id: runId, projectId: sixb.id })
       await runs.nodes.start({
         id: nodeRunId,
         projectId: sixb.id,

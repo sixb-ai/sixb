@@ -6,6 +6,7 @@ These notes describe implementation contracts. Application developers should sta
 - [Runtime lifecycle](runtime-lifecycle.md)
 - [Storage protocols](storage-protocols.md)
 - [Materializer](../src/materializer/README.md)
+- [Run recovery](../src/workers/README.md)
 - [Failure reporting](error-reporting.md)
 - [Sandbox contract](sandbox-contract.md)
 - [Framework testing](testing-contributors.md)

@@ -35,6 +35,9 @@ export const importInvoices = defineSync("import-invoices")
   .intoDataset(invoices)
 ```
 
+One run of a sync runs at a time: a new run waits for the one in progress, and triggers that arrive
+meanwhile join it.
+
 ## Choose a sync mode
 
 Set `mode` in `defineSync("import-invoices", { mode: "append" })` to control how rows are written:

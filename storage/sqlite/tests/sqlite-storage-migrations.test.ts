@@ -207,6 +207,7 @@ const shippedMigrationIds = [
   "086-maintenance-heartbeats",
   "087-lake-retention-runs",
   "088-dataset-ingest-inbox",
+  "089-run-recovery",
 ]
 
 afterEach(async () => {

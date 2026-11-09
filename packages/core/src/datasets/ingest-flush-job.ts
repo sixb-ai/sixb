@@ -3,6 +3,7 @@ import type { JsonValue } from "../json"
 import { stableJsonStringify } from "../json"
 import type { Queues } from "../queues/types"
 import type { DatasetIngestSummary } from "../storage/dataset-ingest"
+import { ingestFlushJobId } from "../workers/job-ids"
 import type { DatasetDefinition } from "./types"
 import { lakeDatasetDefinition } from "./write"
 
@@ -48,7 +49,7 @@ export async function enqueueIngestFlush(
     projectId,
     jobs: [
       {
-        id: `ingest-flush:${flush.datasetId}:${flush.request}`,
+        id: ingestFlushJobId(flush.datasetId, flush.request),
         type: "dataset.ingest.flush.requested",
         payload: { datasetId: flush.datasetId },
         metadata,

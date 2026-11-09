@@ -143,6 +143,7 @@ import {
   createTestAgentExecution,
   createTestSixb,
   createTestWorkflowExecution,
+  startTestRun,
 } from "@sixb/core/testing"
 import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
 import { renderAgentSystemPrompt, renderCurrentTime } from "../../agent/src/agent-prompt"
@@ -2046,7 +2047,7 @@ async function queueWorkflowAgentNode(input: {
     workflowId: workflow.id,
     input: { query: "alpha" },
   })
-  await runs.start({ id: input.runId, projectId: PROJECT_ID })
+  await startTestRun(runs, { id: input.runId, projectId: PROJECT_ID })
   await runs.nodes.start({
     id: nodeRunId,
     projectId: PROJECT_ID,
@@ -6213,7 +6214,7 @@ describe("AgentWorker", () => {
       workflowId: workflow.id,
       input: { query: "alpha" },
     })
-    await runs.start({
+    await startTestRun(runs, {
       id: runId,
       projectId: PROJECT_ID,
     })
@@ -7888,7 +7889,7 @@ describe("AgentWorker", () => {
       workflowId: workflow.id,
       input: { query: "alpha" },
     })
-    await runs.start({ id: runId, projectId: PROJECT_ID })
+    await startTestRun(runs, { id: runId, projectId: PROJECT_ID })
     await runs.nodes.start({
       id: nodeRunId,
       projectId: PROJECT_ID,
@@ -8040,7 +8041,7 @@ describe("AgentWorker", () => {
       workflowId: workflow.id,
       input: { query: "alpha" },
     })
-    await runs.start({ id: runId, projectId: PROJECT_ID })
+    await startTestRun(runs, { id: runId, projectId: PROJECT_ID })
     await runs.nodes.start({
       id: nodeRunId,
       projectId: PROJECT_ID,

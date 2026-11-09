@@ -361,12 +361,38 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
             pendingDeliveries: 0,
             pendingChanges: 0,
             oldestReceivedAt: null,
+            flushStartedAt: null,
             request: 1,
             leaseExpiresAt: last.expiresAt,
             failureStreak: 0,
             rejectedDeliveries: 1,
             lastFlushedAt: expect.any(Date),
           },
+        ])
+      }))
+
+    test("summarizes when a flush took its batch, until it completes, across a resume", () =>
+      withStorage(async (storage) => {
+        await append(storage, [upsert("1")])
+
+        const lease = await acquire(storage, "owner-a", 0)
+        const batch = await storage.takeBatch({ lease, flushId: "flush-1", maxChanges: 10 })
+        const startedAt = batch?.startedAt ?? null
+
+        expect(startedAt).toBeInstanceOf(Date)
+        expect(await storage.summarize({ projectId })).toMatchObject([
+          { datasetId, flushStartedAt: startedAt },
+        ])
+
+        const resumed = await acquire(storage, "owner-b")
+        expect(resumed.inFlight?.startedAt).toEqual(startedAt as Date)
+        expect(await storage.summarize({ projectId })).toMatchObject([
+          { datasetId, flushStartedAt: startedAt },
+        ])
+
+        await storage.complete({ lease: resumed, flushId: "flush-1" })
+        expect(await storage.summarize({ projectId })).toMatchObject([
+          { datasetId, flushStartedAt: null },
         ])
       }))
 
@@ -383,6 +409,7 @@ export function runDatasetIngestStorageContractSuite<TStorage extends DatasetIng
             pendingDeliveries: 2,
             pendingChanges: 3,
             oldestReceivedAt: oldest.receivedAt,
+            flushStartedAt: null,
             request: 0,
             leaseExpiresAt: null,
             failureStreak: 0,

@@ -56,6 +56,12 @@ const PASS_PAUSE_MS = 1_000
 // A requested run never holds a worker for longer: the next interval's run continues.
 const MAX_RUN_BUDGET_MS = 10 * 60_000
 
+// How far the clock of a process that committed may disagree with this one's.
+const WRITER_CLOCK_SKEW_MS = 60_000
+
+// Running runs a project has at once are few: these are the oldest of them.
+const OPEN_RUNS_LOOKED_AT = 500
+
 export function resolveLakeMaintenanceSettings(
   options: LakeMaintenanceOptions | undefined
 ): LakeMaintenanceSettings {
@@ -88,7 +94,10 @@ interface LakeRetentionInput {
   readonly projectId: string
   readonly options: LakeMaintenanceOptions | undefined
   readonly lakeStorage: Pick<LakeStorage, "maintenance">
-  readonly storage: Pick<Storage, "lakeRetentionRuns" | "maintenanceHeartbeats">
+  readonly storage: Pick<
+    Storage,
+    "lakeRetentionRuns" | "maintenanceHeartbeats" | "syncRuns" | "pipelineRuns" | "datasetIngest"
+  >
   readonly sources: Pick<OntologySourceStorage, "listActive">
   readonly datasetCount: number
 }
@@ -129,6 +138,7 @@ export class LakeRetention {
     return runRetentionPasses({
       maintenance: this.maintenance,
       protect: () => this.protect(),
+      keepVersionsForMs: () => this.keepVersionsForMs(options.keepVersionsForMs),
       options,
     })
   }
@@ -203,6 +213,19 @@ export class LakeRetention {
     }))
   }
 
+  /**
+   * A run or a flush that dies between its commit and the record of it finds that commit in the
+   * lake when it takes up again (`findProducedVersion`), and writes the same rows again if it is
+   * gone. Retention must not take it first, and nothing names that version: so while anything may
+   * still have to look, retention keeps every version back to the earliest such commit.
+   */
+  private async keepVersionsForMs(configuredMs: number): Promise<number> {
+    const earliest = await oldestUnrecordedCommit(this.input.projectId, this.input.storage)
+    if (earliest === null) return configuredMs
+
+    return Math.max(configuredMs, Date.now() - earliest.getTime() + WRITER_CLOCK_SKEW_MS)
+  }
+
   /** The run happened whatever this says, so a failed write costs the Console its account. */
   private async recordRun(run: Omit<LakeRetentionRunRecord, "projectId">): Promise<void> {
     const { projectId, storage } = this.input
@@ -229,12 +252,40 @@ export function getLakeRetentionRuntime(host: object): LakeRetention {
   return runtime
 }
 
+/**
+ * The earliest time a commit nobody has recorded yet can date from: what running syncs prepared,
+ * when running pipelines started, and when a flush in flight took its batch, which it may have
+ * committed before it died. A sync that never prepared a commit has none to lose, and neither has
+ * a change no flush took, so a delivery nothing can write holds no retention back.
+ */
+async function oldestUnrecordedCommit(
+  projectId: string,
+  storage: LakeRetentionInput["storage"]
+): Promise<Date | null> {
+  const open = { projectId, statuses: ["running" as const], order: "asc" as const }
+
+  const [syncs, pipelines, inbox] = await Promise.all([
+    storage.syncRuns?.list({ ...open, limit: OPEN_RUNS_LOOKED_AT }),
+    storage.pipelineRuns?.list({ ...open, limit: OPEN_RUNS_LOOKED_AT }),
+    storage.datasetIngest?.summarize({ projectId }),
+  ])
+
+  const times = [
+    ...(syncs?.runs ?? []).map((run) => run.commitPreparedAt),
+    ...(pipelines?.runs ?? []).map((run) => run.startedAt),
+    ...(inbox ?? []).map((summary) => summary.flushStartedAt),
+  ].flatMap((time) => (time ? [time.getTime()] : []))
+
+  return times.length > 0 ? new Date(Math.min(...times)) : null
+}
+
 async function runRetentionPasses(input: {
   readonly maintenance: LakeMaintenance
   readonly protect: () => Promise<readonly DatasetVersionRef[]>
+  readonly keepVersionsForMs: () => Promise<number>
   readonly options: LakeRetentionPassOptions
 }): Promise<LakeRetentionReport> {
-  const { maintenance, protect, options } = input
+  const { maintenance, protect, keepVersionsForMs, options } = input
   const startedAt = Date.now()
   let total: LakeRetentionReport | undefined
 
@@ -242,7 +293,7 @@ async function runRetentionPasses(input: {
     options.signal?.throwIfAborted()
 
     const report = await maintenance.applyRetention({
-      keepVersionsForMs: options.keepVersionsForMs,
+      keepVersionsForMs: await keepVersionsForMs(),
       deleteFilesAfterMs: options.deleteFilesAfterMs,
       dryRun: options.dryRun ?? false,
       protect: await protect(),

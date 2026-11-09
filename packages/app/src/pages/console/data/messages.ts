@@ -13,6 +13,7 @@ export const en = {
     loadFailed: "This list could not be loaded.",
     writes: (dataset: string) => `Writes ${dataset}`,
     lastRunFailed: "The last run failed",
+    attempt: (count: number) => `Attempt ${count}`,
     schedule: "Schedule",
     schedules: "Schedules",
     details: "Details",
@@ -234,7 +235,6 @@ export const en = {
     rowsRead: "Rows read",
     rowsSkipped: (_count: number, formatted: string) => `${formatted} skipped`,
     runWhat: "Projection runs",
-    attempt: (count: number) => `Attempt ${count}`,
   },
 } satisfies MessageTree
 
@@ -252,6 +252,7 @@ export const fr: Translation<DataMessages> = {
     loadFailed: "Impossible de charger cette liste.",
     writes: (dataset: string) => `Écrit ${dataset}`,
     lastRunFailed: "La dernière exécution a échoué",
+    attempt: (count: number) => `Tentative ${count}`,
     schedule: "Planification",
     schedules: "Planifications",
     details: "Détails",
@@ -492,7 +493,6 @@ export const fr: Translation<DataMessages> = {
     rowsSkipped: (count: number, formatted: string) =>
       plural("fr", count, { one: `${formatted} ignorée`, other: `${formatted} ignorées` }),
     runWhat: "Les exécutions de la projection",
-    attempt: (count: number) => `Tentative ${count}`,
   },
 }
 

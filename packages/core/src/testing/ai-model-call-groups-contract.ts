@@ -3,6 +3,7 @@ import type { Storage } from "../storage/types"
 import { workflowAgentStepActorId } from "../workflows/agent-step-identity"
 import { createTestAgentExecution } from "./agent-execution"
 import type { AiStorageContractSuiteOptions } from "./ai-cost-storage-contract"
+import { startTestRun } from "./run-claim"
 import { createTestWorkflowExecution } from "./workflow-execution"
 
 export type AiModelCallGroupsContractStorage = Required<
@@ -560,7 +561,7 @@ async function seedWorkflowCall(
     executionId: sourceExecutionId,
     input: {},
   })
-  await storage.workflowRuns.start({ projectId, id: runId })
+  await startTestRun(storage.workflowRuns, { projectId, id: runId })
   const nodeRunId = `${runId}:node:0`
   await storage.workflowRuns.nodes.start({
     projectId,
