@@ -50,6 +50,7 @@ import { type ArtifactDraft, EditSessionProvider, saveDraft } from "./edit-sessi
 import { formatFileSize } from "./file-size"
 import { useFileName } from "./file-source"
 import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
+import { ArtifactHolders } from "./holders"
 import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
 import { LiveAvatars, LiveNotice, LiveSaveStatus } from "./live/header"
 import { LiveArtifactProvider } from "./live/hooks"
@@ -723,6 +724,7 @@ function ArtifactHeader({
             onVersionChange={onVersionChange}
             onRestored={() => onVersionChange(artifact.latestVersion)}
           />
+          <ArtifactHolders artifactId={artifact.id} />
           {live ? <LiveStatus version={version} /> : null}
           {heldLive && liveView.state.connection === "offline" ? (
             <LiveSaveStatus state={liveView.state} />
