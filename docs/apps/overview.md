@@ -322,7 +322,19 @@ const plan = contract.properties.onboardingPlan
 | `className` | none | Sizes the frame, which is `34rem` tall otherwise |
 
 On a phone it shows as the artifact's card, which opens its page. A person who cannot open the
-artifact sees why in its place.
+artifact sees why in its place. Through a
+[shared link](../auth/shared-access.md#share-an-objects-artifacts), the visitor follows it live and
+comments as a guest, with nothing to edit.
+
+`useSharedGuest()` returns the visitor of a shared link, `{ grantId, destinationPath, id, name? }`,
+or `null` for anyone else. Use it to leave out what a visitor cannot open, such as your navigation:
+
+```tsx
+import { useSharedGuest } from "@sixb/app"
+
+const guest = useSharedGuest()
+if (guest) return <main>{children}</main>
+```
 
 ## Choose who sees the Console
 

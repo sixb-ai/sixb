@@ -83,12 +83,22 @@ function readPresence(artifact: LiveArtifact): LivePresence {
   return { peers, people: [...people.values()], agents }
 }
 
+/**
+ * What a person on the artifact is called: the name the server gives them, else "Guest" for a
+ * shared link's visitor who gave none, and "Team member" for a member without a profile name.
+ */
+export function livePersonName(
+  user: ArtifactLiveUser,
+  labels: { readonly guest: string; readonly teamMember: string }
+): string {
+  return user.name || (user.guest ? labels.guest : labels.teamMember)
+}
+
 function userOf(value: unknown): ArtifactLiveUser | null {
   if (typeof value !== "object" || value === null) return null
-  const { id, name, color } = value as Record<string, unknown>
-  return typeof id === "string" && typeof name === "string" && typeof color === "string"
-    ? { id, name, color }
-    : null
+  const { id, name, color, guest } = value as Record<string, unknown>
+  if (typeof id !== "string" || typeof name !== "string" || typeof color !== "string") return null
+  return { id, name, color, ...(guest === true ? { guest } : {}) }
 }
 
 function agentsOf(value: unknown): ArtifactAgentPresence[] {

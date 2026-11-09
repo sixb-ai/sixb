@@ -1148,6 +1148,12 @@ function sharedHtmlResponse(
   })
 }
 
+/** The origin of an API's WebSockets: `wss:` beside `https:`, `ws:` beside `http:`. */
+function socketOrigin(apiOrigin: string): string {
+  const url = new URL(apiOrigin)
+  return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`
+}
+
 function secureSharedHtml(
   html: string,
   request: Request,
@@ -1157,7 +1163,8 @@ function secureSharedHtml(
   const { requestOrigin, apiOrigin } = resolveOrigins(request, options.apiBaseUrl)
 
   const apiSources = apiOrigin === requestOrigin ? [] : [apiOrigin]
-  const connectSources = ["'self'", ...apiSources]
+  // The artifacts a link reaches are followed live, over the API's sockets.
+  const connectSources = ["'self'", ...apiSources, socketOrigin(apiOrigin)]
   // Files are fetched or embedded from the API, which a split deployment serves from its own
   // origin; `https:` alone misses it in plain-HTTP development.
   const fileSources = ["'self'", ...apiSources, "data:", "blob:", "https:"]

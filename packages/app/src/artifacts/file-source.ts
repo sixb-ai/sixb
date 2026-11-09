@@ -6,6 +6,7 @@ import {
   getArtifactFileContent,
   getObservedAgentChildFileContent,
   getObservedAgentMessageFileContent,
+  withSharedAccess,
 } from "@sixb/client"
 import { useArtifactMessages } from "./messages"
 
@@ -191,11 +192,15 @@ export function useFileName(source: FileSource): string {
   return source.name || messages.file
 }
 
+/**
+ * A file's address, as an `<img>`, a `<video>` or a download link loads it, without the client: a
+ * shared link's session names its grant in it, since such a request cannot send the header.
+ */
 function contentUrl(routePath: string, query: Record<string, string>, baseUrl?: string): string {
   const params = new URLSearchParams(query)
   const base = baseUrl ?? client.getConfig().baseUrl
-  if (!base && typeof window === "undefined") return `${routePath}?${params}`
+  if (!base && typeof window === "undefined") return withSharedAccess(`${routePath}?${params}`)
   const url = new URL(routePath, base ?? window.location.origin)
   url.search = params.toString()
-  return url.toString()
+  return withSharedAccess(url.toString())
 }

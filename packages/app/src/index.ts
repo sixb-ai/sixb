@@ -111,6 +111,7 @@ export {
   useSections,
 } from "./sections/sections"
 export { type CurrentUser, useCurrentUser, useSignOut } from "./session"
+export { type SharedGuest, useSharedGuest } from "./shared-session"
 export type { SharedUnavailableProps } from "./shared-unavailable"
 export { AgentDock } from "./shell/agent-dock"
 export {

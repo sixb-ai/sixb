@@ -44,6 +44,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { useCurrentUser } from "../session"
+import { useSharedGuest } from "../shared-session"
 import { useCopyFeedback } from "./copy-feedback"
 import { DownloadMenu } from "./downloads"
 import { type ArtifactDraft, EditSessionProvider, saveDraft } from "./edit-session"
@@ -623,6 +624,8 @@ function ArtifactHeader({
   readonly onVersionChange: (version: number) => void
 }) {
   const messages = useArtifactMessages()
+  // A shared link's guest has no link to pass on: the artifact's page opens nothing for anyone else.
+  const guest = useSharedGuest() !== null
   const { artifact } = detail
   const live = holdsQueries(version)
   // A canvas held live is edited live, not as a draft the header saves: until its document holds
@@ -768,7 +771,7 @@ function ArtifactHeader({
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
       <ArtifactMenu detail={detail} chrome={chrome} />
-      {chrome.withoutPageLink ? null : (
+      {chrome.withoutPageLink || guest ? null : (
         <CopyLinkButton
           link={() => artifactLink(target, artifact.latestVersion, location.origin)}
         />

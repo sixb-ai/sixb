@@ -2,7 +2,7 @@ import type { ArtifactLiveUser } from "@sixb/core/artifacts/live"
 import { type InternalNode, useStore, ViewportPortal } from "@xyflow/react"
 import { Sparkles } from "lucide-react"
 import { memo, useCallback } from "react"
-import { useLivePresence } from "../../live/presence"
+import { livePersonName, useLivePresence } from "../../live/presence"
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 import { NAME_SCALE_VALUE } from "./items"
@@ -40,6 +40,9 @@ export const PresenceLayer = memo(function PresenceLayer({
   readonly live: LiveArtifact
 }) {
   const messages = useArtifactMessages().canvas.live
+  const all = useArtifactMessages()
+  const guestLabel = all.canvas.comments.guest
+  const labels = { guest: guestLabel, teamMember: all.live.teamMember }
   const { peers, agents } = useLivePresence(live)
 
   // One outline per item someone selected: the first person who did names it.
@@ -118,7 +121,8 @@ export const PresenceLayer = memo(function PresenceLayer({
               className="absolute left-0 rounded-[4px] px-1.5 py-px text-[11px] leading-4 font-medium whitespace-nowrap text-white data-[name=above]:bottom-full data-[name=above]:mb-1 data-[name=above]:origin-bottom-left data-[name=below]:top-1 data-[name=below]:left-1 data-[name=below]:origin-top-left"
               style={{ backgroundColor: user.color, transform: `scale(${NAME_SCALE_VALUE})` }}
             >
-              {user.name}
+              {livePersonName(user, labels)}
+              {user.guest && user.name ? <span className="opacity-75"> · {guestLabel}</span> : null}
             </span>
           </div>
         ) : null
