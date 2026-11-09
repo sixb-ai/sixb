@@ -6,6 +6,7 @@ import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import { createTestActionExecution, createTestAutomaticWorkflowExecution } from "../src/testing"
 import {
   callbackUrl,
+  connectAccount,
   createHarness,
   encryptionKey,
   expectSixbError,
@@ -307,5 +308,59 @@ describe("personal connections in actions and workflows", () => {
       "connector.not_found"
     )
     expect(missing.message).toContain("user 'user-a' in slot 'work'")
+  })
+
+  // Removal proof: return the connected records from `listExecutionConnections` unfiltered.
+  test("syncs never read a suspended person's connections", async () => {
+    const harness = createHarness({ owners: ["user"] })
+    await connectOwn(harness, "user-a")
+    const ben = await connectOwn(harness, "user-b")
+    // Suspended in storage alone, as if the revocation that follows a suspension never ran.
+    await harness.storage.auth.suspendUserAndRevokeSessions({
+      projectId: "project",
+      userId: "user-a",
+      suspendedAt: harness.now(),
+    })
+
+    const read = await harness.service.listExecutionConnections(harness.connector)
+    expect(read.map(({ id }) => id)).toEqual([ben.id])
+  })
+
+  test("a suspension revokes the person's own grants and nobody else's", async () => {
+    const harness = createHarness({ owners: ["project", "user"] })
+    const ada = await connectOwn(harness, "user-a")
+    const ben = await connectOwn(harness, "user-b")
+    // user-a authorized the project's connection too; it stays, since the project owns it.
+    const { connection: project } = await connectAccount(harness)
+
+    await harness.service.revokeUserConnections("user-a")
+    // Again, as a retried suspension would: an already revoked grant is not revoked twice.
+    await harness.service.revokeUserConnections("user-a")
+
+    expect(harness.counts().revokeCount).toBe(1)
+    const statuses = Object.fromEntries(
+      (await harness.process.listConnections(manager(), connectorId)).map((connection) => [
+        connection.id,
+        connection.status,
+      ])
+    )
+    expect(statuses[ben.id]).toBe("connected")
+    expect(statuses[project.id]).toBe("connected")
+    expect(statuses[ada.id]).not.toBe("connected")
+    expect(
+      (await harness.service.listExecutionConnections(harness.connector)).map(({ id }) => id)
+    ).toEqual([ben.id, project.id].sort())
+  })
+
+  test("a grant the provider won't revoke fails the call, for the suspension to log", async () => {
+    const harness = createHarness({ owners: ["user"] })
+    await connectOwn(harness, "user-a")
+    harness.setRevokeError(new Error("provider unreachable"))
+
+    const error = await rejectionOf(harness.service.revokeUserConnections("user-a"))
+    expect(error).toBeInstanceOf(AggregateError)
+    expect((error as AggregateError).message).toBe(
+      "[Sixb] 1 connector grants of user 'user-a' could not be revoked."
+    )
   })
 })

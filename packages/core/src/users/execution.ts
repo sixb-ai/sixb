@@ -1,4 +1,4 @@
-import { assertAuthorized } from "../authorization"
+import { assertAuthorized, assertPrivileged } from "../authorization"
 import { isUserRef, type UserRef } from "../ontology/user-ref"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { UserRecord, UserStatus } from "../storage"
@@ -46,10 +46,47 @@ export interface UsersRuntime {
   /** The member's profile, suspended or not, or `null` when no member has this id or email. */
   get(user: UserLookup): Promise<UserProfile | null>
   list(input?: ListUsersInput): Promise<UsersPage>
+  /**
+   * Suspends a member: they can no longer sign in, their sessions end, and the connector
+   * connections they made with their own accounts are revoked. A member the identity provider's
+   * directory suspended stays suspended, and the directory no longer lifts it. Only trusted code,
+   * such as actions and workflows, may call it.
+   */
+  suspend(user: UserLookup): Promise<UserProfile>
+  /**
+   * Reactivates a member, whoever suspended them. Their sessions stay ended, so they sign in
+   * again. Only trusted code, such as actions and workflows, may call it.
+   */
+  reactivate(user: UserLookup): Promise<UserProfile>
 }
 
-export function createUsersRuntime(runtime: SixbRuntimeContext): UsersRuntime {
+/** What `suspend` and `reactivate` change, from the project's auth. */
+export interface MemberStatusRuntime {
+  suspendUser(userId: string): Promise<UserRecord>
+  reactivateUser(userId: string): Promise<UserRecord>
+}
+
+export function createUsersRuntime(
+  runtime: SixbRuntimeContext,
+  members: MemberStatusRuntime
+): UsersRuntime {
   const assertReadable = () => assertAuthorized(runtime, { kind: "users.view" })
+
+  const requireMember = async (operation: string, user: UserLookup): Promise<UserRecord> => {
+    assertPrivileged(runtime, `users.${operation}`)
+    const lookup = userLookup(user)
+    const users = runtime.storage.auth?.users
+    const record = !users
+      ? null
+      : "email" in lookup
+        ? await users.getByEmail({ projectId: runtime.projectId, email: lookup.email })
+        : await users.getById({ projectId: runtime.projectId, id: lookup.id })
+    if (record) return record
+
+    throw new Error(
+      `[Sixb] users.${operation} found no member ${"email" in lookup ? `with email '${lookup.email}'` : `'${lookup.id}'`}.`
+    )
+  }
 
   return {
     get: async (user) => {
@@ -90,6 +127,17 @@ export function createUsersRuntime(runtime: SixbRuntimeContext): UsersRuntime {
         hasMore: page.hasMore,
         total: page.total,
       }
+    },
+
+    suspend: async (user) => {
+      const member = await requireMember("suspend", user)
+      return toUserProfile(await members.suspendUser(member.id))
+    },
+
+    reactivate: async (user) => {
+      const member = await requireMember("reactivate", user)
+      if (member.status === "active") return toUserProfile(member)
+      return toUserProfile(await members.reactivateUser(member.id))
     },
   }
 }

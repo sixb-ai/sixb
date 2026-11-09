@@ -1,5 +1,6 @@
 export type {
   ListUsersInput,
+  MemberStatusRuntime,
   UserLookup,
   UserProfile,
   UsersPage,

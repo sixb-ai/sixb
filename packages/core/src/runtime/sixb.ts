@@ -39,7 +39,7 @@ import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/exec
 import type { DatasetVersionMarkings } from "../security/dataset-version-markings"
 import { createSharesRuntime, type SharesRuntime } from "../shares/execution"
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
-import { createUsersRuntime, type UsersRuntime } from "../users"
+import { createUsersRuntime, type MemberStatusRuntime, type UsersRuntime } from "../users"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
 import type { SixbDefinitions } from "./definitions"
 import { shareOntologyMutationRuntime } from "./ontology-mutations"
@@ -84,6 +84,7 @@ export interface SixbDependencies {
   readonly activity: ActivityService
   readonly connectorService: ConnectorService
   readonly connectorConnections?: ConnectorConnectionProcess
+  readonly members: MemberStatusRuntime
   readonly blobStorage: BlobStorage
   readonly apiPublicOrigin: () => string | undefined
   readonly lakeStorage: LakeStorage
@@ -195,7 +196,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     activity: createActivityRuntime(runtime, dependencies.activity),
     schedules: createSchedulesRuntime(runtime, dependencies.definitions.schedules),
     shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares),
-    users: createUsersRuntime(runtime),
+    users: createUsersRuntime(runtime, dependencies.members),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),
     blobs: createBlobsRuntime(
       runtime,

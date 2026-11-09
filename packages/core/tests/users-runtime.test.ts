@@ -175,4 +175,78 @@ describe("sixb.users", () => {
     await expect(shared.users.list()).rejects.toBeInstanceOf(AuthorizationError)
     await expect(shared.users.get(userRef("usr_ava"))).rejects.toBeInstanceOf(AuthorizationError)
   })
+
+  test("trusted code suspends and reactivates a member, by reference or email", async () => {
+    const host = await createHost()
+    const sixb = createTestSixb(host)
+    await host.storage.auth?.sessions.create({
+      id: "ses_ava",
+      projectId: PROJECT_ID,
+      userId: "usr_ava",
+      strategyId: "magic-link",
+      tokenHash: "hash",
+      createdAt: new Date("2026-05-14T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-14T10:00:00.000Z"),
+    })
+
+    expect(await sixb.users.suspend(userRef("usr_ava"))).toMatchObject({ status: "suspended" })
+    expect(await sixb.users.suspend({ email: "AVA@acme.com" })).toMatchObject({
+      status: "suspended",
+    })
+    await expect(
+      host.storage.auth?.sessions.getById({ projectId: PROJECT_ID, id: "ses_ava" })
+    ).resolves.toMatchObject({ revokedAt: expect.any(Date) })
+    await expect(
+      host.storage.auth?.users.getById({ projectId: PROJECT_ID, id: "usr_ava" })
+    ).resolves.toMatchObject({ suspensionSource: "manual" })
+
+    expect(await sixb.users.reactivate(userRef("usr_ava"))).toMatchObject({ status: "active" })
+    expect(await sixb.users.reactivate(userRef("usr_ava"))).toMatchObject({ status: "active" })
+
+    // Nobody asked, so neither event says who did, and repeating a change announces nothing.
+    const events = await host.events.read({ topics: ["users"] })
+    expect(events.map(({ type, payload }) => [type, payload])).toEqual([
+      ["user.suspended", { user: expect.objectContaining({ id: "usr_ava" }) }],
+      ["user.reactivated", { user: expect.objectContaining({ id: "usr_ava" }) }],
+    ])
+
+    await expect(sixb.users.suspend(userRef("usr_missing"))).rejects.toThrow(
+      "[Sixb] users.suspend found no member 'usr_missing'."
+    )
+  })
+
+  // Removal proof: drop `assertPrivileged` from `requireMember`; the member then suspends Ben.
+  test("no grant lets a person, or the agent acting for one, suspend a member", async () => {
+    const host = await createHost()
+    const member = createTestSixb(host, { authorization: memberContext({ users: true }) })
+
+    await expect(member.users.suspend(userRef("usr_ben"))).rejects.toBeInstanceOf(
+      AuthorizationError
+    )
+    await expect(member.users.reactivate(userRef("usr_cleo"))).rejects.toBeInstanceOf(
+      AuthorizationError
+    )
+    await expect(
+      host.storage.auth?.users.getById({ projectId: PROJECT_ID, id: "usr_ben" })
+    ).resolves.toMatchObject({ status: "active" })
+  })
+
+  // Removal proof: return early from `users.suspend` for a suspended member; Ben then stays the
+  // directory's to lift.
+  test("suspending someone the directory suspended keeps them suspended", async () => {
+    const host = await createHost()
+    await host.storage.auth?.applyDirectoryVerdict({
+      projectId: PROJECT_ID,
+      userId: "usr_ben",
+      verdict: { status: "inactive" },
+      appliedAt: new Date(),
+    })
+
+    await createTestSixb(host).users.suspend(userRef("usr_ben"))
+
+    await expect(
+      host.storage.auth?.users.getById({ projectId: PROJECT_ID, id: "usr_ben" })
+    ).resolves.toMatchObject({ status: "suspended", suspensionSource: "manual" })
+    expect(await host.events.read({ topics: ["users"] })).toEqual([])
+  })
 })
