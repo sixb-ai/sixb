@@ -1,0 +1,18 @@
+{
+  "mode": "light",
+  "tokens": {
+    "--background": "#f7f9f8",
+    "--foreground": "#10243b",
+    "--card": "#ffffff",
+    "--card-foreground": "#10243b",
+    "--muted": "#edf3f5",
+    "--muted-foreground": "#526477",
+    "--primary": "#0d6d6b",
+    "--primary-foreground": "#ffffff",
+    "--accent": "#dcefed",
+    "--accent-foreground": "#0d6d6b",
+    "--border": "#cdd8df",
+    "--font-sans": "\"DM Sans\", Arial, sans-serif",
+    "--radius": "8px"
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "items": [
+    {
+      "id": "canvas-title",
+      "type": "text",
+      "x": 0,
+      "y": -430,
+      "w": 2900,
+      "text": "Cold Chain Priority onboarding plan",
+      "size": "xxl"
+    },
+    {
+      "id": "canvas-subtitle",
+      "type": "text",
+      "x": 0,
+      "y": -230,
+      "w": 3600,
+      "text": "Camden Cold Storage \u2022 A joint path from kick-off agreements to a measured first month",
+      "size": "xl"
+    },
+    {
+      "id": "contract",
+      "type": "board",
+      "file": "boards/contract.html",
+      "x": 0,
+      "y": 0,
+      "w": 4080,
+      "h": 560,
+      "title": "Contract at a glance"
+    },
+    {
+      "id": "kickoff",
+      "type": "board",
+      "file": "boards/kickoff.html",
+      "x": 0,
+      "y": 760,
+      "w": 1200,
+      "h": 1360,
+      "title": "01  Kick-off agreements"
+    },
+    {
+      "id": "readiness",
+      "type": "board",
+      "file": "boards/readiness.html",
+      "x": 1440,
+      "y": 760,
+      "w": 1200,
+      "h": 1360,
+      "title": "02  Campus readiness"
+    },
+    {
+      "id": "review",
+      "type": "board",
+      "file": "boards/review.html",
+      "x": 2880,
+      "y": 760,
+      "w": 1200,
+      "h": 1360,
+      "title": "03  First 30-day review"
+    },
+    {
+      "id": "to-readiness",
+      "type": "arrow",
+      "from": "kickoff",
+      "to": "readiness",
+      "label": "Agreements set"
+    },
+    {
+      "id": "to-review",
+      "type": "arrow",
+      "from": "readiness",
+      "to": "review",
+      "label": "30 days after go-live"
+    },
+    {
+      "id": "footer",
+      "type": "text",
+      "x": 0,
+      "y": 2240,
+      "w": 4080,
+      "text": "Prepared for live review with Owen Reed \u2022 Northline Mechanical + Camden Cold Storage",
+      "size": "m"
+    }
+  ]
+}

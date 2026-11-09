@@ -167,7 +167,7 @@ export default function ContractsPage() {
 function ContractListRow({ contract }: { contract: ContractRow }) {
   const { properties } = contract
   const customer = contract.links.customer
-  const href = customer ? `/customers/${encodeURIComponent(customer.primaryId)}` : undefined
+  const href = `/contracts/${encodeURIComponent(contract.primaryId)}`
   const rowClass = cn("grid items-center gap-4 px-6 py-3.5", columns)
   const content = (
     <>
@@ -207,10 +207,7 @@ function ContractListRow({ contract }: { contract: ContractRow }) {
         <StatusBadge value={properties.status} />
       </span>
       <ChevronRight
-        className={cn(
-          "size-4",
-          href ? "text-muted-foreground/50 group-hover:text-muted-foreground" : "opacity-0"
-        )}
+        className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground"
         aria-hidden="true"
       />
     </>
@@ -218,19 +215,15 @@ function ContractListRow({ contract }: { contract: ContractRow }) {
 
   return (
     <li className="border-t border-border/70">
-      {href ? (
-        <Link
-          to={href}
-          className={cn(
-            rowClass,
-            "group transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none dark:hover:bg-white/[0.03]"
-          )}
-        >
-          {content}
-        </Link>
-      ) : (
-        <div className={rowClass}>{content}</div>
-      )}
+      <Link
+        to={href}
+        className={cn(
+          rowClass,
+          "group transition-colors hover:bg-black/[0.02] focus-visible:bg-black/[0.03] focus-visible:outline-none dark:hover:bg-white/[0.03]"
+        )}
+      >
+        {content}
+      </Link>
     </li>
   )
 }
