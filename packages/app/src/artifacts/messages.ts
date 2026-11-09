@@ -609,6 +609,26 @@ export const en = {
     loadFailed: "Couldn't load this artifact",
     retry: "Try again",
   },
+  /** Choosing an artifact for a form's field. */
+  picker: {
+    title: "Choose an artifact",
+    choose: "Choose an artifact…",
+    search: "Search, or paste a link",
+    clear: "Clear",
+    chosen: "Chosen",
+    recent: "Recently updated",
+    fromLink: "From the link",
+    loading: "Loading…",
+    noMatch: "No artifacts match.",
+    none: "No artifacts yet",
+    noneDescription: "Paste a link to one, or ask the agent for a document, a sheet or a canvas.",
+    linkUnavailable: "This link doesn't open an artifact you can read.",
+    readOnly: "You can read this one, not change it.",
+    readOnlyHint: "Ask its owner to share it with you, or choose one you can change.",
+    loadFailed: "Artifacts couldn't be loaded.",
+    retry: "Try again",
+    updated: (when: string) => `Updated ${when}`,
+  },
 } satisfies MessageTree
 
 export type ArtifactMessages = typeof en
@@ -1222,6 +1242,27 @@ export const fr: Translation<ArtifactMessages> = {
     notSharedDescription: "Demandez à la personne qui l’a créé de le partager avec vous.",
     loadFailed: "Impossible de charger cet artefact",
     retry: "Réessayer",
+  },
+  picker: {
+    title: "Choisir un artefact",
+    choose: "Choisir un artefact…",
+    search: "Rechercher, ou coller un lien",
+    clear: "Effacer",
+    chosen: "Choisi",
+    recent: "Modifiés récemment",
+    fromLink: "Depuis le lien",
+    loading: "Chargement…",
+    noMatch: "Aucun artefact ne correspond.",
+    none: "Aucun artefact pour l’instant",
+    noneDescription:
+      "Collez le lien d’un artefact, ou demandez à l’agent un document, une feuille ou un canevas.",
+    linkUnavailable: "Ce lien n’ouvre aucun artefact que vous pouvez lire.",
+    readOnly: "Vous pouvez le lire, mais pas le modifier.",
+    readOnlyHint:
+      "Demandez à son propriétaire de vous le partager, ou choisissez-en un que vous pouvez modifier.",
+    loadFailed: "Impossible de charger les artefacts.",
+    retry: "Réessayer",
+    updated: (when) => `Modifié ${when}`,
   },
 }
 
