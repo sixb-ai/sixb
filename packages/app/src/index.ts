@@ -98,6 +98,7 @@ export type {
   AgentThreadSandboxParams,
   LanguageModel,
 } from "./agent/types"
+export { ArtifactViewer, type ArtifactViewerProps } from "./artifacts/artifact-viewer"
 export type { ArtifactTarget } from "./artifacts/target"
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
