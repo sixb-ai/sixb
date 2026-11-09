@@ -3,6 +3,7 @@
  */
 
 import type { ObjectRow } from "../../storage"
+import { unchangeableArtifactIds } from "../artifact-refs"
 import {
   assertCanEditType,
   expectSeen,
@@ -35,6 +36,8 @@ export async function upsertObject(
     valueTypesById: ontology.getValueTypesById(),
   })
   checkUniqueValues(normalized.properties)
+  const unchangeable = await unchangeableArtifactIds(ctx, [normalized.properties])
+
   const ref = { objectTypeId: objectType.id, primaryId: normalized.primaryId }
   const write = { id: runtimeOperationId(0), ref, properties: normalized.properties }
 
@@ -45,13 +48,19 @@ export async function upsertObject(
     const commit = await commitRuntimeOperations(
       ctx,
       [writeFoundObject({ ...write, primaryPropertyId, found: found.get(ref.primaryId) })],
-      expectSeen(found.values())
+      expectSeen(found.values()),
+      unchangeable
     )
     return redact(toObjectRow(ctx.projectId, requireEffectiveObject(commit.outcomes[0])))
   }
 
   // The Materializer classifies this as an independent create, a patch over source authority, or a
   // restore plus patch inside its own transaction.
-  const commit = await commitRuntimeOperations(ctx, [objectUpsertOperation(write)])
+  const commit = await commitRuntimeOperations(
+    ctx,
+    [objectUpsertOperation(write)],
+    [],
+    unchangeable
+  )
   return redact(toObjectRow(ctx.projectId, requireEffectiveObject(commit.outcomes[0])))
 }

@@ -330,6 +330,33 @@ export function createRuntimeArtifactAccessRule(
   })
 }
 
+/**
+ * The artifacts among `artifactIds` that the runtime's caller may change, as its owner or with
+ * `update`, as its access rule decides now. One that does not exist is not among them, and
+ * without artifact storage none is.
+ */
+export async function updatableArtifactIds(
+  runtime: SixbRuntimeContext,
+  artifactIds: Iterable<string>
+): Promise<ReadonlySet<string>> {
+  const ids = [...new Set(artifactIds)]
+  const storage = runtime.storage.artifacts
+  if (ids.length === 0 || !storage) return new Set()
+
+  const rule = createRuntimeArtifactAccessRule(runtime)
+  const updatable = await Promise.all(
+    ids.map(async (id) => {
+      const artifact = await storage.get({ projectId: runtime.projectId, id })
+      if (!artifact) return []
+
+      const access = await rule.accessTo(artifact)
+      return access === "owner" || access === "update" ? [id] : []
+    })
+  )
+
+  return new Set(updatable.flat())
+}
+
 export function createArtifactsRuntime(
   runtime: SixbRuntimeContext,
   blobStorage: BlobStorage,
