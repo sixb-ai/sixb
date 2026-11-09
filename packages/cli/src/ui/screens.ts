@@ -1,3 +1,4 @@
+import type { LakeRetentionReport } from "@sixb/core/lake-storage"
 import {
   CLI_EXAMPLES,
   type CliHelp,
@@ -430,39 +431,35 @@ export function lakeCheckView({
   return screen(headline("ok", "Lake definitions compatible", projectId), warningLines(warnings))
 }
 
-export interface LakeCleanupReport {
-  readonly dryRun: boolean
-  readonly expireOlderThan: string
-  readonly deleteOlderThan: string
-  readonly snapshots: number
-  readonly keptSnapshots?: number
-  readonly oldFiles: number
-  readonly orphanedFiles: number
-}
-
 export function lakeCleanupView({
   projectId,
+  keepVersionsFor,
+  deleteFilesAfter,
   report,
 }: {
   projectId: string
-  report: LakeCleanupReport
+  keepVersionsFor: string
+  deleteFilesAfter: string
+  report: LakeRetentionReport
 }): string {
   return screen(
     header(report.dryRun ? "lake cleanup --dry-run" : "lake cleanup", projectId),
     rows([
-      { label: "Expire older than", value: report.expireOlderThan },
-      { label: "Delete older than", value: report.deleteOlderThan },
-      { label: "Snapshots", value: String(report.snapshots) },
-      ...(report.keptSnapshots === undefined
-        ? []
-        : [{ label: "Kept snapshots", value: String(report.keptSnapshots) }]),
-      { label: "Old files", value: String(report.oldFiles) },
+      { label: "Keep versions for", value: keepVersionsFor },
+      { label: "Delete files after", value: deleteFilesAfter },
+      { label: "Expired versions", value: String(report.expiredVersions) },
+      { label: "Kept versions", value: String(report.keptVersions) },
+      { label: "Deleted files", value: String(report.deletedFiles) },
       { label: "Orphaned files", value: String(report.orphanedFiles) },
     ]),
     headline(
       "ok",
       report.dryRun ? "Lake cleanup dry run complete" : "Lake cleanup complete",
-      report.dryRun ? "nothing was deleted" : undefined
+      report.dryRun
+        ? "nothing was deleted"
+        : report.hasMore
+          ? "more is due: run it again"
+          : undefined
     )
   )
 }

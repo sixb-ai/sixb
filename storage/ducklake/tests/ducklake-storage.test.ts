@@ -66,7 +66,7 @@ describe("DuckLakeStorage", () => {
     await expect(rejected).rejects.toThrow("Invalid DuckLake version id")
   })
 
-  test("rejects non-dry-run maintenance in read-only mode", async () => {
+  test("rejects non-dry-run retention in read-only mode", async () => {
     const storage = new DuckLakeStorage({
       catalog: {
         type: "duckdb",
@@ -76,7 +76,7 @@ describe("DuckLakeStorage", () => {
     })
 
     try {
-      await expect(storage.runMaintenance()).rejects.toThrow("read-only")
+      await expect(storage.maintenance.applyRetention()).rejects.toThrow("read-only")
     } finally {
       await storage.close()
     }

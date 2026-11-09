@@ -2,7 +2,8 @@ import { LakeConcurrencyError, LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeCatalogOptions, DuckLakeStorageOptions } from "../types"
 import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
-import { duckLakeAlias, quoteIdentifier } from "./sql"
+import { encodeDatasetTableName } from "./names"
+import { buildDatasetLockSql, duckLakeAlias, quoteIdentifier } from "./sql"
 
 /**
  * How a version transaction reruns after other writers moved the catalog under it. Of concurrent
@@ -42,6 +43,39 @@ export interface BeginVersionTransactionInput<T> {
 }
 
 /**
+ * Begins a transaction that writes a dataset. On a PostgreSQL catalog its first statement takes
+ * the dataset's lock, shared with other writes and exclusive of compaction, in any process.
+ *
+ * DuckLake keeps the deletes of a small write in the catalog, pointing at rows of a data file. If
+ * another process's compaction rewrites or merges that file while the write is open, the write
+ * still commits without conflict, and its deletes are lost: the rows they deleted read again
+ * (duckdb/ducklake#1484). In one process, the commit slot already keeps writes and compaction
+ * apart, and a local catalog has no other process. A PostgreSQL catalog needs this lock.
+ *
+ * It is a transaction lock: the PostgreSQL extension's pool resets every connection it gets back
+ * with DISCARD ALL, which drops a session lock. And it comes first, before the transaction reads
+ * the lake: DuckDB commits a transaction's databases in the reverse order of their first use, so
+ * DuckLake commits before the lock's transaction ends. Taken after a read, the lock would be
+ * released before DuckLake commits.
+ *
+ * If the lock's connection dies during the transaction, COMMIT fails although DuckLake may have
+ * committed the version.
+ */
+export async function beginDatasetTransaction(
+  options: DuckLakeStorageOptions,
+  runtime: DuckDbQueryRuntime,
+  datasetId: string
+): Promise<void> {
+  await runtime.run("BEGIN TRANSACTION")
+
+  if (options.catalog.type === "postgres") {
+    await runtime.run(
+      buildDatasetLockSql(options, encodeDatasetTableName(datasetId), { mode: "shared" })
+    )
+  }
+}
+
+/**
  * Begins the transaction of a new dataset version together with a read of the latest version, so
  * what the new version derives from its parent, such as its row count or its lineage, describes
  * the parent it commits on top of, provided every version it must not build on unseen claims its
@@ -51,7 +85,7 @@ export async function beginTransactionOnLatestVersion<T>(
   input: BeginVersionTransactionInput<T>
 ): Promise<T | null> {
   if (!isSqliteCatalog(input.options.catalog)) {
-    await input.runtime.run("BEGIN TRANSACTION")
+    await beginDatasetTransaction(input.options, input.runtime, input.datasetId)
 
     // DuckLake fixes a transaction's snapshot on its first read of the lake, not at BEGIN: the
     // read fixes it before it reads the latest version, so a version that claimed the table and

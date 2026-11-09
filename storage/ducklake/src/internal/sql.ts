@@ -98,6 +98,30 @@ export function buildDuckLakeMetadataQuery(
   return `SELECT * FROM postgres_query(${quoteSqlString(duckLakeMetadataCatalog(options))}, ${quoteSqlString(sql)})`
 }
 
+/**
+ * Render the statement that takes a dataset's PostgreSQL advisory lock until the transaction ends
+ * (see `beginDatasetTransaction`). It runs through DuckLake's own metadata attachment, in the
+ * PostgreSQL transaction the DuckDB transaction holds there.
+ *
+ * The key names the metadata schema, so two lakes in one database never share a lock. A lock
+ * timeout only applies to that PostgreSQL transaction: DuckLake commits on its own connection.
+ */
+export function buildDatasetLockSql(
+  options: Pick<DuckLakeStorageOptions, "alias" | "catalog">,
+  tableName: string,
+  lock: { readonly mode: "shared" } | { readonly mode: "exclusive"; readonly timeout: string }
+): string {
+  const name = `sixb:${duckLakeMetadataSchema(options)}:${tableName}`
+  const key = `hashtextextended(${quoteSqlString(name)}, 0)`
+
+  const sql =
+    lock.mode === "shared"
+      ? `SELECT pg_advisory_xact_lock_shared(${key})`
+      : `SET LOCAL lock_timeout = ${quoteSqlString(lock.timeout)}; SELECT pg_advisory_xact_lock(${key})`
+
+  return `CALL postgres_execute(${quoteSqlString(duckLakeMetadataCatalog(options))}, ${quoteSqlString(sql)})`
+}
+
 function duckLakeMetadataSchema(options: Pick<DuckLakeStorageOptions, "catalog">): string {
   if (options.catalog.type !== "postgres") return "main"
   // Without a metadata schema DuckLake writes to PostgreSQL's default schema.
