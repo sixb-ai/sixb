@@ -135,6 +135,7 @@ import {
   listAiModelCallGroups,
   listAiModelCalls,
   listArtifactComments,
+  listArtifactHolders,
   listArtifactRestorePoints,
   listArtifacts,
   listAuthAccessTokens,
@@ -589,6 +590,9 @@ import type {
   ListArtifactCommentsData,
   ListArtifactCommentsError,
   ListArtifactCommentsResponse,
+  ListArtifactHoldersData,
+  ListArtifactHoldersError,
+  ListArtifactHoldersResponse,
   ListArtifactRestorePointsData,
   ListArtifactRestorePointsError,
   ListArtifactRestorePointsResponse,
@@ -6217,6 +6221,33 @@ export const getArtifactOptions = (options: Options<GetArtifactData>) =>
     queryKey: getArtifactQueryKey(options),
   })
 
+export const listArtifactHoldersQueryKey = (options: Options<ListArtifactHoldersData>) =>
+  createQueryKey("listArtifactHolders", options)
+
+/**
+ * List the objects that hold an artifact
+ *
+ * The objects whose property holds the artifact, among those you read with that property, in a stable order. Whoever reads such an object reads the artifact.
+ */
+export const listArtifactHoldersOptions = (options: Options<ListArtifactHoldersData>) =>
+  queryOptions<
+    ListArtifactHoldersResponse,
+    ListArtifactHoldersError,
+    ListArtifactHoldersResponse,
+    ReturnType<typeof listArtifactHoldersQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listArtifactHolders({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listArtifactHoldersQueryKey(options),
+  })
+
 /**
  * Reset what a page keeps
  *
@@ -6332,7 +6363,7 @@ export const setArtifactStateMutation = (
 /**
  * Update an artifact
  *
- * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
+ * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares, its requester owns, or an object its requester edits holds; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
  */
 export const updateArtifactMutation = (
   options?: Partial<Options<UpdateArtifactData>>

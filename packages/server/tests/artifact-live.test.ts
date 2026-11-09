@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import {
   type ArtifactFile,
+  artifactRef,
+  defineObjectType,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  prop,
+  ref,
   type SandboxFactory,
   type SixbErrorContext,
   SixbHost,
@@ -25,6 +29,7 @@ import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { createTestSixb } from "@sixb/core/testing"
 import * as decoding from "lib0/decoding"
 import * as encoding from "lib0/encoding"
 import * as awarenessProtocol from "y-protocols/awareness"
@@ -45,6 +50,16 @@ import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "artifact-live"
+
+/** A meeting holds the canvas it is planned on. */
+const Meeting = defineObjectType({
+  id: "Meeting",
+  name: "Meeting",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("board", ref.artifact(), { nullable: true }),
+  ],
+})
 
 afterEach(() => {
   jest.useRealTimers()
@@ -74,7 +89,7 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
   const reported: SixbErrorContext[] = []
   const host = new SixbHost({
     id: projectId,
-    ontology: [],
+    ontology: [Meeting],
     storage,
     blobStorage,
     broker,
@@ -194,6 +209,7 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
     marie,
     bob: as("bob"),
     olivia: as("olivia", { "observe:agentThreads": true }),
+    as,
     rooms,
     put,
     read,
@@ -554,6 +570,33 @@ describe("an artifact edited live", () => {
     marie.canvas.items.get("hi")?.set("x", 640)
     await olivia.settle()
     expect(olivia.canvas.items.get("hi")?.get("x")).toBe(640)
+  })
+
+  test("lets whoever reads an object that holds it watch, and whoever edits one edit", async () => {
+    const context = await setup()
+    await createTestSixb(context.host)
+      .objects(Meeting)
+      .upsert({ properties: { id: "m1", board: artifactRef(context.artifactId) } })
+    const rooms = context.rooms()
+
+    const reader = context.as("rita", { "view:object": new Set([Meeting.id]) })
+    const editor = context.as("ed", {
+      "view:object": new Set([Meeting.id]),
+      "edit:object": new Set([Meeting.id]),
+    })
+    const rita = new Client(rooms, reader, context.artifactId, "rita-1")
+    const ed = new Client(rooms, editor, context.artifactId, "ed-1")
+    const stranger = new Client(rooms, context.as("sam"), context.artifactId, "sam-1")
+    await rita.join()
+    await ed.join()
+    await stranger.join()
+    await rita.settle()
+
+    expect(rita.messages[0]).toMatchObject({ type: "joined", access: "watch" })
+    expect(ed.messages[0]).toMatchObject({ type: "joined", access: "edit" })
+    expect(stranger.messages).toEqual([
+      { type: "left", artifactId: context.artifactId, reason: "not_shared" },
+    ])
   })
 
   test("refuses whoever may not read the artifact, and an artifact that is not a canvas", async () => {

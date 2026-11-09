@@ -402,6 +402,9 @@ import type {
   ListArtifactCommentsData,
   ListArtifactCommentsErrors,
   ListArtifactCommentsResponses,
+  ListArtifactHoldersData,
+  ListArtifactHoldersErrors,
+  ListArtifactHoldersResponses,
   ListArtifactRestorePointsData,
   ListArtifactRestorePointsErrors,
   ListArtifactRestorePointsResponses,
@@ -3839,6 +3842,27 @@ export const getArtifact = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * List the objects that hold an artifact
+ *
+ * The objects whose property holds the artifact, among those you read with that property, in a stable order. Whoever reads such an object reads the artifact.
+ */
+export const listArtifactHolders = <ThrowOnError extends boolean = false>(
+  options: Options<ListArtifactHoldersData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListArtifactHoldersResponses,
+    ListArtifactHoldersErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/holders",
+    ...options,
+  })
+
+/**
  * Reset what a page keeps
  *
  * Deletes every value the artifact keeps for the caller.
@@ -3922,7 +3946,7 @@ export const setArtifactState = <ThrowOnError extends boolean = false>(
 /**
  * Update an artifact
  *
- * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
+ * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares, its requester owns, or an object its requester edits holds; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
  */
 export const updateArtifact = <ThrowOnError extends boolean = false>(
   options: Options<UpdateArtifactData, ThrowOnError>

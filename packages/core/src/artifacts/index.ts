@@ -79,7 +79,12 @@ export {
   parseFrameEvent,
 } from "./frames/protocol"
 export { ARTIFACT_KINDS, type ArtifactKind } from "./kinds"
-export { ARTIFACT_COMMENT_LIMITS, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+export {
+  ARTIFACT_COMMENT_LIMITS,
+  ARTIFACT_HOLDERS_LIMIT,
+  ARTIFACT_LIMITS,
+  ARTIFACT_STATE_LIMITS,
+} from "./limits"
 export {
   type LiveSheetColumn,
   type LiveSheetLayout,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  artifactRef,
   can,
   defineGroup,
   defineObjectType,
@@ -10,6 +11,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
+  ref,
   SixbHost,
 } from "@sixb/core"
 import { FRAME_PROTOCOL, parseFrameCall } from "@sixb/core/artifacts"
@@ -34,14 +36,35 @@ const invoiceReader = defineRole("invoice-reader", {
   grants: [can.view(Invoice)],
 })
 
+/** A meeting holds the document it was kicked off with. */
+const Meeting = defineObjectType({
+  id: "Meeting",
+  name: "Meeting",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("title", "string"),
+    prop("kickoffDoc", ref.artifact(), { nullable: true }),
+  ],
+  search: { title: "title" },
+})
+const meetingReaders = defineGroup("meeting-readers")
+const meetingEditors = defineGroup("meeting-editors")
+const meetingRoles = [
+  defineRole("meeting-reader", { grantedTo: [meetingReaders], grants: [can.view(Meeting)] }),
+  defineRole("meeting-editor", {
+    grantedTo: [meetingEditors],
+    grants: [can.view(Meeting), can.edit(Meeting)],
+  }),
+]
+
 function createApp() {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
   const host = new SixbHost({
     id: PROJECT_ID,
-    ontology: [Invoice],
-    groups: [readers],
-    roles: [invoiceReader],
+    ontology: [Invoice, Meeting],
+    groups: [readers, meetingReaders, meetingEditors],
+    roles: [invoiceReader, ...meetingRoles],
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -653,5 +676,89 @@ describe("an artifact's queries", () => {
     const refused = await app.fetch(new Request(url(`${base}/1/queries/open`), bob))
     expect(refused.status).toBe(403)
     expect(await refused.json()).toMatchObject({ code: "not_shared" })
+  })
+})
+
+describe("an artifact an object holds", () => {
+  // The access rule is core's and proven there; these prove each route answers as it decides.
+  test("is read by the object's readers and changed by its editors, over every route", async () => {
+    const { app, host, storage, put } = createApp()
+    const [alice, bob, carol, dave] = await Promise.all(
+      ["alice", "bob", "carol", "dave"].map((userId) => seedSession(storage, userId))
+    )
+    for (const [userId, groupId] of [
+      ["bob", meetingReaders.id],
+      ["carol", meetingEditors.id],
+    ] as const) {
+      await storage.auth.groupMemberships.upsert({
+        projectId: PROJECT_ID,
+        userId,
+        groupId,
+        source: "manual",
+      })
+    }
+
+    const files = [await put("document.md", "# Kick-off", "text/markdown")]
+    const created = await app.fetch(
+      new Request(url("/api/artifacts"), {
+        method: "POST",
+        headers: alice.mutationHeaders,
+        body: JSON.stringify({ kind: "document", title: "Kick-off", files }),
+      })
+    )
+    const { artifact } = await created.json()
+    const base = `/api/artifacts/${artifact.id}`
+    await createTestSixb(host)
+      .objects(Meeting)
+      .upsert({ properties: { id: "m1", title: "Launch", kickoffDoc: artifactRef(artifact.id) } })
+
+    const send = (
+      as: Awaited<ReturnType<typeof seedSession>>,
+      path: string,
+      method = "GET",
+      body?: unknown
+    ) =>
+      app.fetch(
+        new Request(url(path), {
+          method,
+          headers: method === "GET" ? as.headers : as.mutationHeaders,
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        })
+      )
+
+    // Bob reads it whole, and comments on it.
+    expect(await (await send(bob, base)).json()).toMatchObject({ access: "read" })
+    expect((await send(bob, `${base}/versions/latest`)).status).toBe(200)
+    expect((await send(bob, `${base}/versions/1/content?path=document.md`)).status).toBe(200)
+    expect((await send(bob, `${base}/comments`, "POST", { body: "Agenda?" })).status).toBe(201)
+    expect((await (await send(bob, `${base}/comments`)).json()).comments).toHaveLength(1)
+    expect(await (await send(bob, `${base}/holders`)).json()).toEqual({
+      holders: [
+        { objectTypeId: "Meeting", primaryId: "m1", propertyId: "kickoffDoc", title: "Launch" },
+      ],
+      hasMore: false,
+    })
+
+    // Only Carol changes it, and only Alice deletes it.
+    const content = { kind: "document", title: "Kick-off", files }
+    for (const [path, method, body] of [
+      [`${base}/content`, "PUT", content],
+      [`${base}/freeze`, "POST", {}],
+    ] as const) {
+      const refused = await send(bob, path, method, body)
+      expect(refused.status, path).toBe(403)
+      expect(await refused.json()).toMatchObject({ code: "read_only" })
+      expect((await send(carol, path, method, body)).status, path).toBe(200)
+    }
+    expect(await (await send(carol, base)).json()).toMatchObject({ access: "update" })
+    expect((await send(carol, base, "DELETE")).status).toBe(403)
+
+    // Dave reads no meeting: refused everywhere, the list of holders included.
+    for (const path of [base, `${base}/versions/latest`, `${base}/comments`, `${base}/holders`]) {
+      const refused = await send(dave, path)
+      expect(refused.status, path).toBe(403)
+      expect(await refused.json()).toMatchObject({ code: "not_shared" })
+    }
+    expect((await send(dave, "/api/artifacts/art_missing/holders")).status).toBe(404)
   })
 })
