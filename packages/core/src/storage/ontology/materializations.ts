@@ -83,6 +83,18 @@ export interface ExactUniqueValueClaim extends ExactUniqueValueWrite {
   readonly keyVersion: number
 }
 
+/** An object property whose value holds an artifact, nested anywhere in it. */
+export interface ArtifactHolder {
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly propertyId: string
+}
+
+/** One artifact an object holds under one of its properties: a row of the holder index. */
+export interface ExactArtifactHolderWrite extends ArtifactHolder {
+  readonly artifactId: string
+}
+
 export interface MaterializationObjectState {
   readonly ref: OntologyObjectRef
   readonly source: StoredSourceObjectAssertion | null
@@ -358,6 +370,10 @@ export type MaterializationPlanWorkItem =
   | { readonly kind: "unique-value-release"; readonly value: ExactUniqueValueWrite }
   /** Rejects a value another object holds once every release of the commit has applied. */
   | { readonly kind: "unique-value-claim"; readonly value: ExactUniqueValueClaim }
+  /** Drops the row; a missing one is no conflict. */
+  | { readonly kind: "artifact-holder-delete"; readonly value: ExactArtifactHolderWrite }
+  /** Adds the row; one already there is no conflict. */
+  | { readonly kind: "artifact-holder-insert"; readonly value: ExactArtifactHolderWrite }
 
 /**
  * Safe physical phases shared by the core planner and provider validation through
@@ -389,6 +405,7 @@ export function materializationApplyPhase(
     case "link-slot-override-upsert":
     case "link-slot-override-delete":
     case "unique-value-release":
+    case "artifact-holder-delete":
       return 0
     case "point-upsert":
       return 1
@@ -402,6 +419,7 @@ export function materializationApplyPhase(
       return 5
     // Last, after every release of the commit in any chunk: values can move between objects.
     case "unique-value-claim":
+    case "artifact-holder-insert":
       return 6
   }
 }

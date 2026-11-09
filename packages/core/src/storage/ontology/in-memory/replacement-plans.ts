@@ -140,9 +140,12 @@ export function touchPlanItem(touches: InMemoryCommitTouches, item: Materializat
     case "link-slot-override-delete":
       touches.scopes.add(linkScopeKey(item.value.ref.source, item.value.ref.linkId))
       return
-    // A plan reads no unique value: its claims are checked when they apply.
+    // A plan reads no unique value: its claims are checked when they apply. Nor does it read
+    // which objects hold an artifact.
     case "unique-value-release":
     case "unique-value-claim":
+    case "artifact-holder-delete":
+    case "artifact-holder-insert":
       return
   }
 }

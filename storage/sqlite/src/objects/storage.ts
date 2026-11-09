@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import { hasVectorProfile } from "@sixb/core/internal/query"
 import type {
+  ArtifactHolder,
   CompiledConditionalObjectReadScope,
   CompiledSelectedObjectReadScope,
   CountObjectsInput,
@@ -284,6 +285,33 @@ export class SqliteObjectStorage implements ObjectStorage {
     }
   }
 
+  async listArtifactHolders(params: {
+    projectId: string
+    artifactId: string
+    after?: ArtifactHolder
+    limit: number
+  }): Promise<{ holders: readonly ArtifactHolder[]; next?: ArtifactHolder }> {
+    assertArtifactHolderPageLimit(params.limit)
+
+    const { after } = params
+    const cursor = after ? [after.objectTypeId, after.primaryId, after.propertyId] : []
+    const rows = this.db
+      .query(
+        `
+          SELECT object_type_id, primary_id, property_id FROM object_artifact_refs
+          WHERE project_id = ? AND artifact_id = ?
+            ${cursor.length > 0 ? "AND (object_type_id, primary_id, property_id) > (?, ?, ?)" : ""}
+          ORDER BY object_type_id, primary_id, property_id
+          LIMIT ?
+        `
+      )
+      .all(params.projectId, params.artifactId, ...cursor, params.limit + 1) as ArtifactHolderRow[]
+
+    const holders = rows.slice(0, params.limit).map(artifactHolderFromRow)
+    const last = holders.at(-1)
+    return { holders, ...(rows.length > params.limit && last ? { next: last } : {}) }
+  }
+
   async list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]
@@ -310,5 +338,25 @@ export class SqliteObjectStorage implements ObjectStorage {
 function assertReconciliationPageLimit(limit: number): void {
   if (!Number.isSafeInteger(limit) || limit <= 0) {
     throw new Error("Object reconciliation page limit must be a positive safe integer.")
+  }
+}
+
+interface ArtifactHolderRow {
+  readonly object_type_id: string
+  readonly primary_id: string
+  readonly property_id: string
+}
+
+function artifactHolderFromRow(row: ArtifactHolderRow): ArtifactHolder {
+  return {
+    objectTypeId: row.object_type_id,
+    primaryId: row.primary_id,
+    propertyId: row.property_id,
+  }
+}
+
+function assertArtifactHolderPageLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Artifact holder page limit must be a positive safe integer.")
   }
 }

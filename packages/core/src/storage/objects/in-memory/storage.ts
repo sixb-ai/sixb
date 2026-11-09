@@ -2,6 +2,8 @@ import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../../ma
 import { hasVectorProfile } from "../../../objects/vectors/query"
 import { uniqueValueKey } from "../../../ontology/unique-values"
 import type {
+  ArtifactHolder,
+  ExactArtifactHolderWrite,
   ExactUniqueValueClaim,
   ExactUniqueValueWrite,
   UniqueValueRef,
@@ -56,6 +58,7 @@ export interface InMemoryObjectStorageSnapshot {
   readonly links: Map<string, Map<string, ObjectLinkRow>>
   readonly uniqueValues: Map<string, Map<string, string>>
   readonly uniqueProperties: Map<string, InMemoryPreparedUniqueProperty>
+  readonly artifactHolders: Map<string, Map<string, ArtifactHolder>>
 }
 
 interface InMemoryPreparedUniqueProperty extends PreparedUniqueProperty {
@@ -114,6 +117,8 @@ interface InMemoryObjectMaterializerAdapter {
     entries: readonly UniqueValueEntry[]
   ): void
   markUniquePropertyPrepared(input: InMemoryPreparedUniqueProperty): void
+  deleteArtifactHolder(projectId: string, value: ExactArtifactHolderWrite): void
+  insertArtifactHolder(projectId: string, value: ExactArtifactHolderWrite): void
 }
 
 const materializerAdapters = new WeakMap<InMemoryObjectStorage, InMemoryObjectMaterializerAdapter>()
@@ -133,6 +138,8 @@ export class InMemoryObjectStorage implements ObjectStorage {
   /** Holder primary ids by value key, for each unique property of a project. */
   private readonly uniqueValues = new Map<string, Map<string, string>>()
   private readonly uniqueProperties = new Map<string, InMemoryPreparedUniqueProperty>()
+  /** The properties holding each artifact of a project, by holder key. */
+  private readonly artifactHolders = new Map<string, Map<string, ArtifactHolder>>()
 
   private vectorReader?: VectorReader
 
@@ -191,6 +198,20 @@ export class InMemoryObjectStorage implements ObjectStorage {
           { ...input }
         )
       },
+      deleteArtifactHolder: (projectId, value) => {
+        const key = artifactHoldersKey(projectId, value.artifactId)
+        const holders = this.artifactHolders.get(key)
+        holders?.delete(artifactHolderKey(value))
+        if (holders?.size === 0) this.artifactHolders.delete(key)
+      },
+      insertArtifactHolder: (projectId, value) => {
+        const key = artifactHoldersKey(projectId, value.artifactId)
+        const holders = this.artifactHolders.get(key) ?? new Map<string, ArtifactHolder>()
+        this.artifactHolders.set(key, holders)
+
+        const { objectTypeId, primaryId, propertyId } = value
+        holders.set(artifactHolderKey(value), { objectTypeId, primaryId, propertyId })
+      },
     })
   }
 
@@ -200,6 +221,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
       links: cloneLinkBuckets(this.links),
       uniqueValues: cloneUniqueValues(this.uniqueValues),
       uniqueProperties: new Map(this.uniqueProperties),
+      artifactHolders: cloneArtifactHolders(this.artifactHolders),
     }
   }
 
@@ -222,6 +244,11 @@ export class InMemoryObjectStorage implements ObjectStorage {
     this.uniqueProperties.clear()
     for (const [key, prepared] of snapshot.uniqueProperties) {
       this.uniqueProperties.set(key, prepared)
+    }
+
+    this.artifactHolders.clear()
+    for (const [key, holders] of cloneArtifactHolders(snapshot.artifactHolders)) {
+      this.artifactHolders.set(key, holders)
     }
   }
 
@@ -610,6 +637,32 @@ export class InMemoryObjectStorage implements ObjectStorage {
     }
   }
 
+  async listArtifactHolders(params: {
+    projectId: string
+    artifactId: string
+    after?: ArtifactHolder
+    limit: number
+  }): Promise<{ holders: readonly ArtifactHolder[]; next?: ArtifactHolder }> {
+    assertArtifactHolderPageLimit(params.limit)
+
+    const { after } = params
+    const holders = [
+      ...(this.artifactHolders
+        .get(artifactHoldersKey(params.projectId, params.artifactId))
+        ?.values() ?? []),
+    ]
+      .filter((holder) => !after || compareArtifactHolders(holder, after) > 0)
+      .sort(compareArtifactHolders)
+      .slice(0, params.limit + 1)
+
+    const page = holders.slice(0, params.limit).map((holder) => ({ ...holder }))
+    const last = page.at(-1)
+    return {
+      holders: page,
+      ...(holders.length > params.limit && last ? { next: { ...last } } : {}),
+    }
+  }
+
   async list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]
@@ -741,6 +794,34 @@ function cloneObjectBuckets(
 
 function uniquePropertyKey(projectId: string, objectTypeId: string, propertyId: string): string {
   return JSON.stringify([projectId, objectTypeId, propertyId])
+}
+
+function artifactHoldersKey(projectId: string, artifactId: string): string {
+  return JSON.stringify([projectId, artifactId])
+}
+
+function artifactHolderKey(holder: ArtifactHolder): string {
+  return JSON.stringify([holder.objectTypeId, holder.primaryId, holder.propertyId])
+}
+
+function compareArtifactHolders(left: ArtifactHolder, right: ArtifactHolder): number {
+  return (
+    compareStrings(left.objectTypeId, right.objectTypeId) ||
+    compareStrings(left.primaryId, right.primaryId) ||
+    compareStrings(left.propertyId, right.propertyId)
+  )
+}
+
+function assertArtifactHolderPageLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Artifact holder page limit must be a positive safe integer.")
+  }
+}
+
+function cloneArtifactHolders(
+  holders: Map<string, Map<string, ArtifactHolder>>
+): Map<string, Map<string, ArtifactHolder>> {
+  return new Map([...holders].map(([key, rows]) => [key, new Map(rows)]))
 }
 
 function cloneUniqueValues(

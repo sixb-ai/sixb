@@ -30,6 +30,7 @@ import { loadState, oneStateRequest } from "../effective/load-state"
 import { validateEffectiveObject } from "../effective/validate"
 import { stageWorkBounded } from "../execution/work-executor"
 import {
+  appendArtifactHolderWork,
   appendEffectiveObjectWork,
   appendUniqueValueWork,
   classificationWork,
@@ -321,6 +322,7 @@ async function stageTelemetryObjectPlan(
     appendEffectiveObjectWork(items, change)
     work.push(...items.map((item) => planWork(item, sortKey)))
     appendUniqueValueWork(work, change, context.ontology)
+    appendArtifactHolderWork(work, change, context.ontology)
     work.push(eventWork(buildObjectMaterializationEventDraft(change)))
   }
   await stageWorkBounded(context, storage, session, work)

@@ -33,6 +33,7 @@ import {
 } from "../effective/resolve"
 import { validateEffectiveObject } from "../effective/validate"
 import {
+  appendArtifactHolderWork,
   appendEffectiveLinkWork,
   appendEffectiveObjectWork,
   appendUniqueValueWork,
@@ -158,6 +159,7 @@ function appendObjectChangeWork(
   appendEffectiveObjectWork(items, change)
   for (const item of items) work.push(planWork(item, sortKey))
   appendUniqueValueWork(work, change, context.ontology)
+  appendArtifactHolderWork(work, change, context.ontology)
   work.push(eventWork(buildObjectMaterializationEventDraft(change)))
 }
 

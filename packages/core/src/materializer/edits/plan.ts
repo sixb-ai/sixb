@@ -24,6 +24,7 @@ import { diffEffectiveLink, diffEffectiveLinkSlot, diffEffectiveObject } from ".
 import { validateEffectiveObject } from "../effective/validate"
 import { stageWorkBounded } from "../execution/work-executor"
 import {
+  appendArtifactHolderWork,
   appendEffectiveLinkWork,
   appendEffectiveObjectWork,
   appendLinkEdgeOverrideWork,
@@ -160,6 +161,7 @@ async function stageObject(
   ]
   if (change) {
     appendUniqueValueWork(work, change, context.ontology)
+    appendArtifactHolderWork(work, change, context.ontology)
     work.push(eventWork(buildObjectMaterializationEventDraft(change)))
   }
   await stageWorkBounded(context, storage, session, work)

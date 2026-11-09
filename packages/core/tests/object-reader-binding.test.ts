@@ -1021,6 +1021,9 @@ function createReadStorage(options?: {
     async listByPrimaryIdPage() {
       return { objects: [] }
     },
+    async listArtifactHolders() {
+      return { holders: [] }
+    },
   }
 
   return {
