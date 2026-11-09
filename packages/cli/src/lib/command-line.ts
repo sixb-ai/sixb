@@ -489,10 +489,10 @@ const commandTree: readonly CommandNode[] = [
       },
     ],
   },
-  command("scheduler", "Start the production scheduler", {
+  command("scheduler", "Removed: the orchestrator runs cron schedules", {
     options: ["entry", "no-migrate"],
   }),
-  command("orchestrator", "Start the production orchestrator, which queues work for events", {
+  command("orchestrator", "Start the production orchestrator: cron, event dispatch and upkeep", {
     options: ["entry", "no-migrate"],
   }),
   command("rules", "Start the production rules runtime", { options: ["entry", "no-migrate"] }),
@@ -743,8 +743,9 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
   { title: "Deploy", names: ["deploy", "desktop"] },
   {
     title: "Run in production",
-    names: ["api", "app", "scheduler", "orchestrator", "rules", "worker", "worker-group"],
+    names: ["api", "app", "orchestrator", "rules", "worker", "worker-group"],
   },
+  { title: "Removed", names: ["scheduler"] },
   { title: "Storage", names: ["db", "lake"] },
   {
     title: "Connect to an instance",

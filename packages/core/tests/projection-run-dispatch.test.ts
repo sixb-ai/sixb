@@ -349,6 +349,44 @@ describe("ProjectionRunDispatcher", () => {
     ).toHaveLength(2)
   })
 
+  // Reproduce: leave `datasetVersion` out of `requireProducerExecution`; the projection is refused
+  // for a version the `triggers` pass made happen.
+  test("admits a version written by a pipeline run a lost trigger recovered", async () => {
+    const { host, lakeStorage, storage } = createDependencies()
+    const runId = "recovered-run"
+    const primitive = { kind: "pipeline", id: "clean-devices", runId } as const
+    await storage.executions.create({
+      id: "recovered-execution",
+      projectId: host.id,
+      executor: { type: "primitive", kind: "pipeline", runId },
+      source: { type: "datasetVersion", datasetId: "raw.upstream", versionId: "v1" },
+      correlationId: runId,
+      authorizationRef: { type: "trustedPrimitive", primitive },
+    })
+    await storage.pipelineRuns.queue({
+      id: runId,
+      projectId: host.id,
+      executionId: "recovered-execution",
+      pipelineId: primitive.id,
+    })
+    const version = await commitDevicesVersion(lakeStorage, {
+      kind: "pipeline",
+      id: primitive.id,
+      runId,
+    })
+
+    const result = await new ProjectionRunDispatcher(host).dispatch({
+      projectionId: deviceProjection.id,
+      datasetVersion: {
+        datasetId: version.datasetId,
+        versionId: version.versionId,
+        createdAt: version.createdAt.toISOString(),
+      },
+    })
+
+    expect(result.created).toBe(true)
+  })
+
   test("rejects producer metadata that points at a different durable Sync", async () => {
     const { host, lakeStorage, storage } = createDependencies()
     await storage.executions.create({

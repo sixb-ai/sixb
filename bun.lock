@@ -1140,6 +1140,7 @@
       },
       "devDependencies": {
         "@sixb/core": "workspace:*",
+        "@sixb/orchestrator": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
       },

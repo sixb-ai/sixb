@@ -93,43 +93,6 @@ describe("RedisBroker", () => {
     }
   })
 
-  test("deduplicates records by idempotencyKey within the configured retry window", async () => {
-    const { broker, projectId, cleanup } = createTestBroker()
-    const stream = { id: "__events" }
-    try {
-      await broker.ensureStream({ projectId, stream })
-      const [first] = await broker.append({
-        projectId,
-        streamId: stream.id,
-        records: [
-          {
-            name: "test.record",
-            payload: { id: "room-1" },
-            idempotencyKey: "dedupe-room-1",
-          },
-        ],
-      })
-      const [second] = await broker.append({
-        projectId,
-        streamId: stream.id,
-        records: [
-          {
-            name: "test.record",
-            payload: { id: "room-2" },
-            idempotencyKey: "dedupe-room-1",
-          },
-        ],
-      })
-
-      expect(first).toBeDefined()
-      expect(second?.cursor).toBe(first?.cursor)
-      expect(second?.payload).toEqual({ id: "room-1" })
-      expect((await broker.read({ projectId, streamId: stream.id })).records).toEqual([first])
-    } finally {
-      await cleanup()
-    }
-  })
-
   test("handles concurrent appends and retained reads on the shared command client", async () => {
     const { broker, projectId, cleanup } = createTestBroker()
     const stream = { id: "__concurrent_events" }

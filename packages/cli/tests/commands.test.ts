@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { runScheduler } from "../src/commands/scheduler"
 import {
   type CliHelp,
   CliUsageError,
@@ -257,5 +258,15 @@ describe("production asset paths", () => {
     expect(paths.projectRoot).toBe(outdir)
     expect(paths.buildOutdir).toBe(outdir)
     expect(builtAppOutdir(paths.buildOutdir)).toBe(join(outdir, "app"))
+  })
+})
+
+describe("sixb scheduler", () => {
+  // Reproduce: have `runScheduler` return without exiting; a process manager reads it as running.
+  test("refuses to start, and names what runs cron now", async () => {
+    const result = await runInProcess(() => runScheduler())
+
+    expect(result.exitCode).toBe(1)
+    expect(result.output.replace(/\s+/g, " ")).toContain("`sixb orchestrator` runs cron")
   })
 })

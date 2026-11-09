@@ -317,6 +317,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("083-agent-computer-sessions", agentComputerSessionsSql),
     sqliteSql("084-agent-computer-background-commands", agentComputerBackgroundCommandsSql),
     sqliteSql("085-web-search-model-kind", webSearchModelKindSql),
+    sqliteSql("086-maintenance-heartbeats", maintenanceHeartbeatsSql),
   ],
 })
 
@@ -727,3 +728,6 @@ import agentComputerBackgroundCommandsSql from "./migrations/084-agent-computer-
   type: "text",
 }
 import webSearchModelKindSql from "./migrations/085-web-search-model-kind.sql" with { type: "text" }
+import maintenanceHeartbeatsSql from "./migrations/086-maintenance-heartbeats.sql" with {
+  type: "text",
+}

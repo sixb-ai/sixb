@@ -136,6 +136,62 @@ export function runBrokerContractSuite<TBroker extends Broker>(
         })
       })
 
+      test("stores a record once per idempotency key, and answers with the first", async () => {
+        await withBroker(async (broker) => {
+          const [first] = await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [{ name: "test.record", payload: { id: 1 }, idempotencyKey: "same" }],
+          })
+          const [second] = await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [{ name: "test.record", payload: { id: 2 }, idempotencyKey: "same" }],
+          })
+
+          expect(second?.cursor).toBe(first?.cursor)
+          expect(second?.payload).toEqual({ id: 1 })
+          expect(
+            await readRecords(broker, { projectId: "project-a", stream: eventsStream })
+          ).toEqual([first!])
+        })
+      })
+
+      test("keeps an idempotency key to its project", async () => {
+        await withBroker(async (broker) => {
+          for (const projectId of ["project-a", "project-b"]) {
+            await appendRecords(broker, {
+              projectId,
+              stream: eventsStream,
+              records: [{ payload: { projectId }, idempotencyKey: "same" }],
+            })
+          }
+
+          const records = await readRecords(broker, {
+            projectId: "project-b",
+            stream: eventsStream,
+          })
+          expect(records.map((record) => record.payload)).toEqual([{ projectId: "project-b" }])
+        })
+      })
+
+      test("stores every record of an append with different keys or none", async () => {
+        await withBroker(async (broker) => {
+          const records = await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [
+              { payload: { id: 1 }, idempotencyKey: "one" },
+              { payload: { id: 2 }, idempotencyKey: "two" },
+              { payload: { id: 3 } },
+              { payload: { id: 4 } },
+            ],
+          })
+
+          expect(new Set(records.map((record) => record.cursor)).size).toBe(4)
+        })
+      })
+
       test("returns empty array for empty appends", async () => {
         await withBroker(async (broker) => {
           const records = await appendRecords(broker, {

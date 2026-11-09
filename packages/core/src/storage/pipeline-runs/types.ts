@@ -132,6 +132,8 @@ export interface ListPipelineRunsResult {
 export interface ListLatestPipelineRunsInput {
   readonly projectId: string
   readonly pipelineIds: readonly string[]
+  /** A status that never counts as the latest run. */
+  readonly excludedStatus?: PipelineRunStatus
 }
 
 export interface ListLatestPipelineRunsResult {
@@ -141,6 +143,8 @@ export interface ListLatestPipelineRunsResult {
 export interface ListPipelineStepRunsInput {
   readonly projectId: string
   readonly pipelineRunId?: string
+  /** The steps of these runs, in one read. Empty matches nothing. */
+  readonly pipelineRunIds?: readonly string[]
   readonly pipelineId?: string
   readonly stepId?: string
   readonly datasetId?: string

@@ -11,6 +11,9 @@ import type {
   BrokerStreamRetention,
 } from "./types"
 
+/** As long as Redis and NATS remember a key by default. */
+const DEDUPE_WINDOW_MS = 120_000
+
 // Payloads are validated by assertBrokerPayload above the call site, so we can
 // skip the redundant validity walk that cloneJsonValue performs.
 function cloneValidatedPayload(value: JsonValue): JsonValue {
@@ -30,6 +33,8 @@ interface StoredStream {
   nextSequence: bigint
   records: StoredRecord[]
   retainedBytes: number
+  /** The record each recent idempotency key stored, oldest first. */
+  readonly deduped: Map<string, StoredRecord>
 }
 
 interface Subscription {
@@ -80,9 +85,18 @@ export class InMemoryBroker implements Broker {
     }
 
     const storedStream = this.getEnsuredStream(params.projectId, params.streamId)
+    forgetExpiredKeys(storedStream)
+
     const stored: StoredRecord[] = []
+    const appended: StoredRecord[] = []
 
     for (const record of params.records) {
+      const duplicate = storedStream.deduped.get(record.idempotencyKey ?? "")
+      if (duplicate) {
+        appended.push(duplicate)
+        continue
+      }
+
       const cursor = storedStream.nextSequence.toString()
       storedStream.nextSequence += 1n
       const publishedAtMs = Date.now()
@@ -95,17 +109,20 @@ export class InMemoryBroker implements Broker {
         publishedAt: new Date(publishedAtMs).toISOString(),
         publishedAtMs,
       }
-      stored.push({
-        ...storedRecord,
-        byteSize: utf8Bytes(JSON.stringify(storedRecord)),
-      })
+      const sized = { ...storedRecord, byteSize: utf8Bytes(JSON.stringify(storedRecord)) }
+
+      stored.push(sized)
+      appended.push(sized)
+      if (record.idempotencyKey !== undefined) {
+        storedStream.deduped.set(record.idempotencyKey, sized)
+      }
     }
 
     storedStream.records.push(...stored)
     storedStream.retainedBytes += stored.reduce((total, record) => total + record.byteSize, 0)
     this.applyRetention(storedStream)
-    const records = stored.map(toBrokerRecord)
-    this.notify(params.projectId, params.streamId)
+    const records = appended.map(toBrokerRecord)
+    if (stored.length > 0) this.notify(params.projectId, params.streamId)
     return records
   }
 
@@ -240,6 +257,7 @@ export class InMemoryBroker implements Broker {
         nextSequence: 1n,
         records: [],
         retainedBytes: 0,
+        deduped: new Map(),
       }
       this.streams.set(key, storedStream)
     }
@@ -492,6 +510,15 @@ function matchesFilters(
 
 function streamKey(projectId: string, streamId: string): string {
   return `${projectId}\0${streamId}`
+}
+
+function forgetExpiredKeys(stream: StoredStream): void {
+  const expiredBefore = Date.now() - DEDUPE_WINDOW_MS
+
+  for (const [key, record] of stream.deduped) {
+    if (record.publishedAtMs > expiredBefore) return
+    stream.deduped.delete(key)
+  }
 }
 
 function toBrokerRecord(record: StoredRecord): BrokerRecord {

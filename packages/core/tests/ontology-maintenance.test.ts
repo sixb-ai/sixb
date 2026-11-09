@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
 import { InMemoryBroker, InMemoryStorage } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
-import { OntologyMaintenance } from "../src/maintenance"
+import { OntologyMaintenance } from "../src/maintenance/ontology-maintenance"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import {
   claimProjectionExecution,
@@ -48,7 +48,7 @@ describe("OntologyMaintenance", () => {
       dispatcher.release()
       await stopping
     }
-    expect(maintenance.getSnapshot().running).toBe(false)
+    expect(stopped).toBe(true)
   })
 
   test("does not start timers from construction and drains once when hosted", async () => {
@@ -70,12 +70,14 @@ describe("OntologyMaintenance", () => {
     expect(await events.read()).toHaveLength(0)
 
     const handle = await maintenance.start()
-    await waitFor(() => maintenance.getSnapshot().lastCompletedAt !== null)
+    await waitFor(async () => (await heartbeatOf(storage))?.passes[0]?.lastSucceededAt != null)
     expect(await events.read()).toHaveLength(1)
-    expect(maintenance.getSnapshot()).toMatchObject({
-      running: false,
-      consecutiveFailures: 0,
-      outbox: { pendingCount: 0, retryingCount: 0 },
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
+      maintenance: {
+        owner: "embedded",
+        passes: [{ consecutiveFailures: 0 }],
+        outbox: { pendingCount: 0, retryingCount: 0 },
+      },
     })
     expect(jest.getTimerCount()).toBe(1)
     await handle.stop()
@@ -95,9 +97,9 @@ describe("OntologyMaintenance", () => {
     const handle = await maintenance.start()
     await dispatcher.started
 
-    expect(maintenance.getSnapshot().running).toBe(true)
+    expect(dispatcher.concurrent).toBe(1)
     dispatcher.release()
-    await waitFor(() => maintenance.getSnapshot().running === false)
+    await waitFor(() => dispatcher.concurrent === 0)
     await handle.stop()
   })
 
@@ -183,9 +185,9 @@ describe("OntologyMaintenance", () => {
     })
 
     const handle = await maintenance.start()
-    await waitFor(() => maintenance.getSnapshot().outbox?.maxAttempts === 1)
+    await waitFor(async () => (await heartbeatOf(storage))?.passes[0]?.lastSucceededAt != null)
 
-    expect(maintenance.getOperationalStatus()).toMatchObject({
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
       status: "ok",
       maintenance: { outbox: { pendingCount: 1, retryingCount: 1, maxAttempts: 1 } },
     })
@@ -195,11 +197,97 @@ describe("OntologyMaintenance", () => {
     nowMs += 2
     await maintenance.runNow()
 
-    expect(maintenance.getOperationalStatus()).toMatchObject({
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
       status: "degraded",
       maintenance: { outbox: { pendingCount: 1, maxAttempts: 3 } },
     })
     await handle.stop()
+  })
+
+  // Reproduce: leave the outbox read out of `getOperationalStatus`; with no pass in this process,
+  // the status never sees the event waiting.
+  test("reports the outbox from storage in a process that runs no pass", async () => {
+    const storage = new InMemoryStorage()
+    const { materializer } = createMaterializerFixture({ storage })
+    await seedObject(materializer)
+    let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
+    const maintenance = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher: new CountingDispatcher(storage),
+      now: () => new Date(nowMs),
+      options: { intervalMs: 60_000 },
+    })
+
+    expect(await maintenance.getOperationalStatus()).toMatchObject({
+      status: "unknown",
+      maintenance: { beatAt: null, outbox: { pendingCount: 1 } },
+    })
+
+    // Nothing delivers it: two intervals later, the event shows that no process recovers it.
+    nowMs += 120_001
+    expect(await maintenance.getOperationalStatus()).toMatchObject({ status: "degraded" })
+  })
+
+  // Reproduce: leave the heartbeat read out of `getOperationalStatus`; the second maintenance sees
+  // no beat and stays `unknown` whatever the first one does.
+  test("tells another process when passes fail, and when they stop", async () => {
+    const storage = new InMemoryStorage()
+    const cleanupTerminal = storage.ontology.sources.cleanupTerminal
+    let failing = false
+    storage.ontology.sources.cleanupTerminal = async (input) => {
+      if (failing) throw new Error("connection to postgres://admin:hunter2@db failed")
+      return cleanupTerminal.call(storage.ontology.sources, input)
+    }
+    let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
+    const now = () => new Date(nowMs)
+    const reported: unknown[] = []
+    const running = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher: new CountingDispatcher(storage),
+      now,
+      onError: (error) => reported.push(error),
+    })
+    const reader = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher: new CountingDispatcher(storage),
+      now,
+    })
+    expect((await reader.getOperationalStatus()).status).toBe("unknown")
+
+    await running.runNow()
+    expect(await reader.getOperationalStatus()).toMatchObject({
+      status: "ok",
+      maintenance: { passes: [{ id: "ontology", consecutiveFailures: 0 }] },
+    })
+
+    failing = true
+    await running.runNow()
+    await running.runNow()
+    const degraded = await reader.getOperationalStatus()
+    expect(degraded).toMatchObject({
+      status: "degraded",
+      maintenance: { stale: false, passes: [{ consecutiveFailures: 2 }] },
+    })
+
+    // Reproduce: put the error's message back in `passHealth`; the password reaches the row, and
+    // whoever can read `/api/status`. What failed goes to `onError`, and only there.
+    expect((reported[0] as AggregateError).errors[0].message).toContain("hunter2")
+    const row = await storage.maintenanceHeartbeats.list({ projectId: "project" })
+    expect(JSON.stringify([degraded, row])).not.toContain("hunter2")
+
+    failing = false
+    await running.runNow()
+    expect((await reader.getOperationalStatus()).status).toBe("ok")
+
+    // Nothing runs a pass any more: no failure, no pending event, and still not `ok`.
+    nowMs += 60_001
+    expect(await reader.getOperationalStatus()).toMatchObject({
+      status: "degraded",
+      maintenance: { stale: true },
+    })
   })
 
   test("purges published rows only once they are older than the retention", async () => {
@@ -229,12 +317,10 @@ describe("OntologyMaintenance", () => {
     })
     await maintenance.runNow()
     expect(outboxRows(storage)).toHaveLength(1)
-    expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(0)
 
     nowMs += 1
     await maintenance.runNow()
     expect(outboxRows(storage)).toHaveLength(0)
-    expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(1)
   })
 
   test("deletes an abandoned candidate on the next pass, whatever the retention", async () => {
@@ -281,12 +367,13 @@ describe("OntologyMaintenance", () => {
     await maintenance.runNow()
 
     expect(sourceVersions(storage)).toHaveLength(0)
-    expect(maintenance.getSnapshot().cleanup).toMatchObject({
-      terminalSourceRowsDeleted: 2,
-      terminalSourceMaterializationsDeleted: 1,
-    })
   })
 })
+
+async function heartbeatOf(storage: InMemoryStorage) {
+  const [heartbeat] = await storage.maintenanceHeartbeats.list({ projectId: "project" })
+  return heartbeat
+}
 
 class DelayedDispatcher extends OntologyOutboxDispatcher {
   private resolveStarted!: () => void
@@ -383,9 +470,9 @@ function flush(): Promise<void> {
 }
 
 /** Waits for a pass that needs no timer: every step of it is a promise the loop can drain. */
-async function waitFor(predicate: () => boolean): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
   for (let turn = 0; turn < 100; turn++) {
-    if (predicate()) return
+    if (await predicate()) return
     await flush()
   }
   throw new Error("Timed out waiting for maintenance condition.")

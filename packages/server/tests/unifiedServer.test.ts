@@ -55,6 +55,40 @@ describe("SixbServer start", () => {
     }
   })
 
+  // Reproduce: start `startOntologyMaintenance()` only when the option is true; the embedded server
+  // recovers nothing. Then always start it; the second case fails.
+  test.each([
+    { name: "by default, for an embedded server", option: undefined, calls: 1 },
+    { name: "not when an orchestrator owns it", option: false, calls: 0 },
+  ])("hosts ontology maintenance $name", async ({ option, calls }) => {
+    const host = new SixbHost({
+      id: "test-project",
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+    const maintenance = spyOn(host, "startOntologyMaintenance")
+    const server = new SixbServer({
+      host,
+      hostname: "127.0.0.1",
+      port: 0,
+      quiet: true,
+      browser: createTestBrowserPolicy(),
+      ...(option === undefined ? {} : { ontologyMaintenance: option }),
+    })
+
+    await server.start()
+
+    try {
+      expect(maintenance).toHaveBeenCalledTimes(calls)
+    } finally {
+      await server.stop()
+    }
+  })
+
   // Reproduce: remove `checkPipelineMarkings` from `SixbServer.start()`; the server listens.
   test("refuses to start when a SQL step gives a projected column undeclared markings", async () => {
     const financial = defineMarking("financial")

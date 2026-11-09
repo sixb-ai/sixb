@@ -1,9 +1,11 @@
-export { OntologyMaintenance } from "./ontology-maintenance"
+export type { MaintenancePass } from "./loop"
+export { type RecoveryPassesInput, recoveryPasses } from "./passes/recovery-passes"
+export type { DatasetTrigger } from "./passes/triggers-pass"
 export type {
-  OntologyMaintenanceCleanupSnapshot,
+  MaintenancePassStatus,
   OntologyMaintenanceHandle,
   OntologyMaintenanceOptions,
-  OntologyMaintenanceSnapshot,
   OntologyOperationalStatus,
+  OutboxSummary,
   SixbReadiness,
 } from "./types"

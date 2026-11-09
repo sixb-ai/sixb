@@ -49,8 +49,8 @@ consumer. `vectorConcurrency` bounds its concurrent calls (default 4), independe
 
 The Materializer records coalesced intent with each effective source change. The process that
 commits it enqueues the projection group id (or individual generation id) right after the commit;
-API maintenance re-dispatches whatever a crash left behind. This worker only consumes the queue.
-See the [internal indexing contract](../core/src/objects/vectors/README.md).
+the orchestrator's maintenance pass re-dispatches whatever a crash left behind. This worker only
+consumes the queue. See the [internal indexing contract](../core/src/objects/vectors/README.md).
 
 ## Development
 

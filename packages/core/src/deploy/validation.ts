@@ -57,6 +57,7 @@ function services(value: unknown): void {
   const config = record(value, "services")
   knownKeys(config, DEPLOY_SERVICES, "services", {
     atlas: "Atlas's pages are part of the app now; remove the setting and configure `app`.",
+    scheduler: "The orchestrator runs cron schedules now; remove the setting.",
   })
 
   for (const service of DEPLOY_SERVICES) {

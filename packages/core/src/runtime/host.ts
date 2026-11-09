@@ -33,7 +33,10 @@ import {
 } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
-import { reportEventDeliveryFailure } from "../error-reporting/reports"
+import {
+  reportEventDeliveryFailure,
+  reportMaintenancePassFailure,
+} from "../error-reporting/reports"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import {
   createDomainEventService,
@@ -50,13 +53,17 @@ import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider } from "../logging"
 import { LoggingService, type ObservabilityOptions } from "../logging/service"
-import {
-  OntologyMaintenance,
-  type OntologyMaintenanceHandle,
-  type OntologyMaintenanceOptions,
-  type OntologyOperationalStatus,
-  type SixbReadiness,
+import type {
+  OntologyMaintenanceHandle,
+  OntologyMaintenanceOptions,
+  OntologyOperationalStatus,
+  SixbReadiness,
 } from "../maintenance"
+import { storageHeartbeat } from "../maintenance/heartbeat"
+import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
+import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
+import { cronPass } from "../maintenance/passes/cron-pass"
+import { ontologyPass } from "../maintenance/passes/ontology-pass"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { ModelCatalogInput } from "../models"
 import { bindEmbeddingModels } from "../models/execution/embedding"
@@ -78,7 +85,6 @@ import {
   sandboxCredentialIssue,
 } from "../sandboxes/configuration"
 import { SandboxError } from "../sandboxes/errors"
-import { type SchedulerController, SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
 import type {
   GroupDefinition,
@@ -184,6 +190,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   private readonly vectorIndexing?: VectorIndexingDispatcher
   private readonly eventService: DomainEventService
   private readonly ontologyMaintenance: OntologyMaintenance
+  private readonly onMaintenanceFailure: (error: unknown, failure: MaintenanceFailure) => void
   private readonly storageReadiness: StorageReadiness
   private readonly connectorService: ConnectorService
   private readonly materializer: OntologyMaterializerContract
@@ -201,7 +208,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly queues: Queues
   readonly sandboxes?: Pick<SandboxFactory, "create" | "resume">
   readonly projectRoot: string
-  readonly scheduler: SchedulerController
+  private readonly cron: MaintenancePass
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TParams>) {
@@ -321,6 +328,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         this.queues.vectorIndexing
       )
     }
+    this.onMaintenanceFailure = (error, failure) =>
+      reportMaintenancePassFailure(errorReporter, error, { projectId: this.projectId, ...failure })
     this.ontologyMaintenance = new OntologyMaintenance({
       projectId: this.projectId,
       storage: this.storage,
@@ -328,6 +337,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       vectorIndexing: this.vectorIndexing,
       blobStorage: this.blobStorage,
       options: options.ontologyMaintenance,
+      onError: this.onMaintenanceFailure,
     })
 
     this.hostContext = {
@@ -355,7 +365,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       this,
       createVectorIndexingRuntime(this.hostContext, this.materializer)
     )
-    this.scheduler = new SchedulerRuntime({
+    this.cron = cronPass({
       schedules: definitions.schedules.list(),
       events: this.eventService,
       timeZone: this.timeZone,
@@ -428,14 +438,36 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     return this.webhookRegistry.getById(connectorId, webhookId)
   }
 
-  /** Start the API-owned recovery and retention loop. Embedded runtimes opt in explicitly. */
+  /**
+   * Run the project's upkeep on one loop: ontology maintenance, cron schedules, and `passes`. The
+   * orchestrator is what hosts it.
+   */
+  startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
+    const loop = new MaintenanceLoop({
+      passes: [ontologyPass(this.ontologyMaintenance), this.cron, ...passes],
+      heartbeat: storageHeartbeat(this.projectId, "orchestrator", this.storage),
+      onError: this.onMaintenanceFailure,
+    })
+    loop.start()
+
+    return { stop: () => loop.stop() }
+  }
+
+  /**
+   * Start ontology maintenance alone, for an embedded runtime with no orchestrator. `createSixbServer`
+   * calls it unless told not to.
+   */
   startOntologyMaintenance(): Promise<OntologyMaintenanceHandle> {
-    this.storageReadiness.startSchemaValidation()
     return this.ontologyMaintenance.start()
   }
 
-  getOntologyOperationalStatus(): OntologyOperationalStatus {
+  getOntologyOperationalStatus(): Promise<OntologyOperationalStatus> {
     return this.ontologyMaintenance.getOperationalStatus()
+  }
+
+  /** Start the schema check behind `checkReadiness()`, so the first probe need not wait for it. */
+  prepareReadiness(): void {
+    this.storageReadiness.startSchemaValidation()
   }
 
   async checkReadiness(): Promise<SixbReadiness> {

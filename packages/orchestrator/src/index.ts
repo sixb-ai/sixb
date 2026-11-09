@@ -1,4 +1,5 @@
 export { compileRoutesWithDiagnostics } from "./compile-routes"
+export { createMaintenancePasses } from "./maintenance-passes"
 export type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,

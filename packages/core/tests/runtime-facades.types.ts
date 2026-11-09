@@ -18,7 +18,6 @@ void host.definitions.connectors.list()
 void host.definitions.ontology.listObjectTypes()
 void host.blobStorage.stat("blob-id")
 void host.logging.startExecution({ kind: "action", id: "run-id" })
-void host.scheduler.start()
 void host.closeConnectors()
 void host.closeBlobs()
 // @ts-expect-error Bind an execution before requesting an action.
@@ -61,8 +60,6 @@ void sixb.disconnectConnectors()
 void sixb.blobStorage
 // @ts-expect-error Use sixb.schedules.list().
 void sixb.listSchedules()
-// @ts-expect-error Scheduler lifecycle belongs to host.scheduler.start().
-void sixb.startScheduler()
 // @ts-expect-error Use sixb.rules.list().
 void sixb.listRules()
 // @ts-expect-error Use sixb.projections.list().

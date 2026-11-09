@@ -166,7 +166,6 @@ const backgroundRoles: Array<{
   expectProviderClose?: boolean
 }> = [
   { name: "orchestrator", command: ["orchestrator"] },
-  { name: "scheduler", command: ["scheduler"] },
   { name: "rules", command: ["rules"] },
   { name: "worker sync", command: ["worker", "sync"], expectProviderClose: true },
 ]
