@@ -44,6 +44,13 @@ const objectType: ObjectTypeDefinition = {
           required: false,
           nullable: false,
         },
+        {
+          id: "kickoffDoc",
+          name: "kickoffDoc",
+          schema: "artifactRef",
+          required: false,
+          nullable: false,
+        },
       ],
     },
   ],
@@ -55,8 +62,9 @@ describe("client object models", () => {
 
     expect(params?.category).toMatchObject({ required: false, nullable: true })
     expect(params?.amount).toMatchObject({ type: "string", required: true })
-    // User references stay distinct from strings.
+    // User and artifact references stay distinct from strings.
     expect(params?.owner?.type).toBe("userRef")
+    expect(params?.kickoffDoc?.type).toBe("artifactRef")
   })
 
   // Regression proof: drop the title property from toObjectSummary and the deal reads as its id.
