@@ -187,6 +187,12 @@ describe("RedisBroker idle stream expiry", () => {
       expect(await pttl(redis, keys.streamKey)).toBeGreaterThan(TWO_HOURS_MS - 1_000)
       expect(await pttl(redis, keys.metaKey)).toBeGreaterThan(TWO_HOURS_MS - 1_000)
 
+      // An older broker's append made the stream key after this one dated the metadata. To see
+      // this fail, check only the metadata's PTTL in ENFORCE_AGE_RETENTION_SCRIPT.
+      await redis.persist(keys.streamKey)
+      await broker.read({ projectId, streamId: run.id })
+      expect(await pttl(redis, keys.streamKey)).toBeGreaterThan(TWO_HOURS_MS - 1_000)
+
       // A run that finished long ago: every record and the grace period are behind it.
       const stale = { ...run, id: "agents.runs.run_stale" }
       const staleKeys = streamKeysFor(prefix, projectId, stale.id)

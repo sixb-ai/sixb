@@ -161,8 +161,10 @@ end
 advance_boundary(last_trimmed_id)
 
 -- A stream appended to before its keys expired has no expiry yet: date it from
--- its newest record.
-if redis.call("PTTL", meta_key) == -1 then
+-- its newest record. So does a stream key an older broker created after this
+-- one gave the metadata its expiry; left alone, it would outlive the metadata
+-- with nothing left to expire it. PTTL answers -2 for a missing key.
+if redis.call("PTTL", meta_key) == -1 or redis.call("PTTL", stream_key) == -1 then
   local newest = now
   if last_id then
     newest = tonumber(string.match(last_id, "^(%d+)%-"))
