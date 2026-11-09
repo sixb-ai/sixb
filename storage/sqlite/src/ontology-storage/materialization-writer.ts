@@ -36,7 +36,30 @@ export class SqliteMaterializationWriter {
     this.applyEffective(projectId, chunk)
     this.applyTimeseries(projectId, chunk)
     this.applyUniqueValues(projectId, chunk)
+    this.applyArtifactHolders(projectId, chunk)
     this.applyOutbox(projectId, commitId, chunk)
+  }
+
+  /** The index only follows what objects hold: a row already gone, or already there, is fine. */
+  private applyArtifactHolders(projectId: string, chunk: MaterializationPlanChunk): void {
+    const deleted = this.db.query(
+      `DELETE FROM object_artifact_refs
+       WHERE project_id = ? AND artifact_id = ? AND object_type_id = ? AND primary_id = ?
+         AND property_id = ?`
+    )
+    for (const row of chunk.artifactHolders.deletes) {
+      deleted.run(projectId, row.artifactId, row.objectTypeId, row.primaryId, row.propertyId)
+    }
+
+    const inserted = this.db.query(
+      `INSERT INTO object_artifact_refs (
+         project_id, artifact_id, object_type_id, primary_id, property_id
+       ) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT DO NOTHING`
+    )
+    for (const row of chunk.artifactHolders.inserts) {
+      inserted.run(projectId, row.artifactId, row.objectTypeId, row.primaryId, row.propertyId)
+    }
   }
 
   /** A chunk holds one phase: the commit's releases all apply before its first claim. */

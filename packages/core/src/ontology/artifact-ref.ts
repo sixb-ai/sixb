@@ -1,6 +1,7 @@
 import { isArtifactId } from "../artifacts/ids"
 import { OntologyValidationError } from "./errors"
-import type { Schema } from "./types"
+import { visitPrimitiveValues } from "./reference-values"
+import type { Schema, ValueType } from "./types"
 
 /**
  * Value of a `ref.artifact()` (`"artifactRef"`) schema: one artifact, followed at its latest
@@ -45,4 +46,25 @@ export function isArtifactRef(value: unknown): value is ArtifactRef {
 export function isArtifactRefPropertySchema(schema: Schema): boolean {
   if (schema === "artifactRef") return true
   return typeof schema === "object" && schema.type === "array" && schema.items === "artifactRef"
+}
+
+/**
+ * Collect the artifact ids a value holds at `artifactRef` positions of its schema, however deeply
+ * nested.
+ *
+ * Positions whose value does not match the schema are skipped: shape validation reports them.
+ */
+export function collectArtifactRefIds(
+  schema: Schema,
+  value: unknown,
+  valueTypesById: ReadonlyMap<string, ValueType>,
+  into: Set<string>,
+  seenValueTypeIds: ReadonlySet<string> = new Set()
+): Set<string> {
+  const collect = (held: unknown) => {
+    if (isArtifactRef(held)) into.add(held.id)
+  }
+
+  visitPrimitiveValues(schema, "artifactRef", value, valueTypesById, collect, seenValueTypeIds)
+  return into
 }

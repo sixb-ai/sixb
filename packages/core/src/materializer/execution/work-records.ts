@@ -2,8 +2,10 @@ import { stableJsonStringify } from "../../json"
 import type { EffectiveLinkChange, EffectiveObjectChange } from "../../materialization/model"
 import { canonicalIdentitySortKey } from "../../materialization/refs"
 import type { OntologyRegistry } from "../../ontology"
+import { collectArtifactRefIds } from "../../ontology/artifact-ref"
 import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../../ontology/unique-values"
 import type {
+  ExactArtifactHolderWrite,
   ExactUniqueValueWrite,
   MaterializationClassificationWorkRecord,
   MaterializationEventWorkRecord,
@@ -175,6 +177,65 @@ export function appendUniqueValueWork(
     if (claimed !== null) {
       const claim = { ...value(claimed), keyKind: kind, keyVersion: UNIQUE_VALUE_KEY_VERSION }
       work.push(planWork({ kind: "unique-value-claim", value: claim }, sortKey))
+    }
+  }
+}
+
+/**
+ * Drops the artifacts an object change gives up from the holder index and adds those it takes, per
+ * top-level property, wherever they sit in its value. A delete gives up all of them, and a restore
+ * takes them back.
+ */
+export function appendArtifactHolderWork(
+  records: MaterializationWorkRecord[],
+  change: EffectiveObjectChange,
+  ontology: OntologyRegistry
+): void {
+  const properties = ontology.listArtifactRefProperties(change.ref.objectTypeId)
+  if (properties.length === 0) return
+
+  const valueTypesById = ontology.getValueTypesById()
+  const before = change.before?.properties
+  const after = change.kind === "deleted" ? undefined : change.after.properties
+
+  for (const property of properties) {
+    const heldBefore = collectArtifactRefIds(
+      property.schema,
+      before?.[property.id],
+      valueTypesById,
+      new Set()
+    )
+    const heldAfter = collectArtifactRefIds(
+      property.schema,
+      after?.[property.id],
+      valueTypesById,
+      new Set()
+    )
+
+    const work = (
+      kind: "artifact-holder-delete" | "artifact-holder-insert",
+      artifactId: string
+    ) => {
+      const value: ExactArtifactHolderWrite = {
+        artifactId,
+        objectTypeId: change.ref.objectTypeId,
+        primaryId: change.ref.primaryId,
+        propertyId: property.id,
+      }
+      const sortKey = canonicalIdentitySortKey([
+        change.ref.objectTypeId,
+        change.ref.primaryId,
+        property.id,
+        artifactId,
+      ])
+      return planWork({ kind, value }, sortKey)
+    }
+
+    for (const artifactId of heldBefore) {
+      if (!heldAfter.has(artifactId)) records.push(work("artifact-holder-delete", artifactId))
+    }
+    for (const artifactId of heldAfter) {
+      if (!heldBefore.has(artifactId)) records.push(work("artifact-holder-insert", artifactId))
     }
   }
 }

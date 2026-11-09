@@ -109,6 +109,8 @@ function plan(item: MaterializationPlanWorkItem, sortKey = "61"): Materializatio
     "link-upsert": 5,
     "unique-value-release": 0,
     "unique-value-claim": 6,
+    "artifact-holder-delete": 0,
+    "artifact-holder-insert": 6,
   }
   return {
     kind: "plan",

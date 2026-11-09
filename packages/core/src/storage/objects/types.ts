@@ -9,7 +9,7 @@ import type {
 import type { UserRef } from "../../ontology/user-ref"
 import type { Redactions } from "../../security/types"
 import type { UserProfile } from "../../users"
-import type { UniqueValueRef } from "../ontology/materializations"
+import type { ArtifactHolder, UniqueValueRef } from "../ontology/materializations"
 import type { ObjectReadExecutionLimits } from "./execution-limits"
 import type { LinkBatchKey, ObjectBatchKey } from "./keys"
 
@@ -494,4 +494,19 @@ export interface ObjectStorage extends ObjectReadStorage, ObjectReadScopeFactory
     afterPrimaryId?: string
     limit: number
   }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }>
+
+  /**
+   * The object properties whose value holds this artifact, nested anywhere in it: a keyset page in
+   * `(objectTypeId, primaryId, propertyId)` order, by code point, after `after` when given. Every
+   * object write keeps them current in its own transaction, and a deleted object holds nothing.
+   *
+   * Unscoped like {@link listIncidentLinksBatch}: whoever reaches an artifact through the objects
+   * that hold it reads each of them through its own reader.
+   */
+  listArtifactHolders(params: {
+    projectId: string
+    artifactId: string
+    after?: ArtifactHolder
+    limit: number
+  }): Promise<{ holders: readonly ArtifactHolder[]; next?: ArtifactHolder }>
 }

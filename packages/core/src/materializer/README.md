@@ -164,6 +164,12 @@ the last, so a commit can move values between objects. Storage refuses a claim o
 object holds. A `continue` batch checks the same rule first, on the holders it loads with its
 state (`edits/unique-values.ts`), so only the colliding item fails.
 
+The artifacts objects hold are indexed the same way, so the objects that hold an artifact can be
+found from it: one row per artifact and top-level property, wherever the artifact sits in the
+value. An object change drops the rows its properties give up and adds those they take, so a
+delete drops every row and an object a projection brings back takes its rows again. No row ever
+conflicts, and the index is no plan input.
+
 Action-backed edits carry the run's terminal record. The commit validates the trusted Action
 execution and the record's `executionId`, then inserts the record in its own transaction before new
 work, so edits never land without the run that made them and a run id commits once: a second insert

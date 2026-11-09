@@ -1,6 +1,7 @@
 import type { Principal } from "../auth/types"
 import type { UserStatus } from "../storage/auth/types"
 import { OntologyValidationError } from "./errors"
+import { visitPrimitiveValues } from "./reference-values"
 import type { Schema, ValueType } from "./types"
 
 /**
@@ -120,48 +121,12 @@ export function collectUserRefIds(
   into: Set<string>,
   seenValueTypeIds: ReadonlySet<string> = new Set()
 ): Set<string> {
-  if (value === null || value === undefined) return into
-  if (typeof schema === "string") {
-    if (schema === "userRef" && isUserRef(value)) into.add(value.id)
-    return into
+  const collect = (held: unknown) => {
+    if (isUserRef(held)) into.add(held.id)
   }
-  switch (schema.type) {
-    case "array":
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          collectUserRefIds(schema.items, item, valueTypesById, into, seenValueTypeIds)
-        }
-      }
-      return into
-    case "map":
-      if (isRecord(value)) {
-        for (const item of Object.values(value)) {
-          collectUserRefIds(schema.valueSchema, item, valueTypesById, into, seenValueTypeIds)
-        }
-      }
-      return into
-    case "object":
-      if (isRecord(value)) {
-        for (const [fieldId, field] of Object.entries(schema.properties)) {
-          collectUserRefIds(field.schema, value[fieldId], valueTypesById, into, seenValueTypeIds)
-        }
-      }
-      return into
-    case "valueTypeRef": {
-      if (seenValueTypeIds.has(schema.valueTypeId)) return into
-      const resolved = schema._resolved ?? valueTypesById.get(schema.valueTypeId)?.schema
-      if (!resolved) return into
-      return collectUserRefIds(
-        resolved,
-        value,
-        valueTypesById,
-        into,
-        new Set([...seenValueTypeIds, schema.valueTypeId])
-      )
-    }
-    case "enum":
-      return into
-  }
+
+  visitPrimitiveValues(schema, "userRef", value, valueTypesById, collect, seenValueTypeIds)
+  return into
 }
 
 /**
@@ -186,8 +151,4 @@ export function userReferenceProblem(
     default:
       return `[Sixb] ${path} references user '${id}', who is ${status}. Only active users can be newly referenced; existing references are kept.`
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

@@ -215,6 +215,7 @@ const shippedMigrationIds = [
   "093-artifact-documents",
   "094-artifact-frame-files",
   "095-artifact-comments",
+  "096-object-artifact-refs",
 ]
 
 afterEach(async () => {
