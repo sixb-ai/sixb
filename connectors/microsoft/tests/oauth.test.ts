@@ -7,7 +7,7 @@ import {
   defineConnector,
 } from "@sixb/core"
 import { MicrosoftConfigurationError, type MicrosoftOAuthOptions, microsoft } from "../src"
-import { CLIENT_ID, CONTEXT, GRAPH, json, mockFetch, restoreFetch, TENANT } from "./helpers"
+import { CLIENT_ID, CONTEXT, json, mockFetch, restoreFetch, TENANT } from "./helpers"
 
 afterEach(restoreFetch)
 
@@ -24,6 +24,15 @@ const AUTHORIZATION_CONTEXT = {
 }
 const connector = (oauth: Partial<MicrosoftOAuthOptions> = {}) =>
   microsoft({ auth: { oauth: { ...OAUTH, ...oauth } } })
+const SCOPE = "Mail.Read Calendars.Read openid profile offline_access"
+/** An ID token as the token endpoint returns it; only the claims matter here. */
+const idToken = (claims: Record<string, unknown>) =>
+  `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`
+const ADA = idToken({
+  oid: "oid-ada",
+  preferred_username: "ada@example.com",
+  name: "Ada Lovelace",
+})
 
 function tokenEndpoint(respond: (form: URLSearchParams) => Response) {
   const forms: URLSearchParams[] = []
@@ -88,7 +97,7 @@ describe("Microsoft delegated OAuth — authorization", () => {
       response_type: "code",
       response_mode: "query",
       redirect_uri: AUTHORIZATION_CONTEXT.redirectUri,
-      scope: "Mail.Read Calendars.Read openid profile offline_access User.Read",
+      scope: SCOPE,
       state: "state-1",
       prompt: "select_account",
       code_challenge: "challenge-1",
@@ -101,8 +110,9 @@ describe("Microsoft delegated OAuth — authorization", () => {
       json({
         access_token: "access-1",
         refresh_token: "refresh-1",
+        id_token: ADA,
         expires_in: 3600,
-        scope: "https://graph.microsoft.com/Mail.Read calendars.read User.Read profile openid",
+        scope: "https://graph.microsoft.com/Mail.Read calendars.read profile openid",
       })
     )
     const credentials = await connector().authentication.exchangeCode(AUTHORIZATION_CONTEXT, {
@@ -115,15 +125,25 @@ describe("Microsoft delegated OAuth — authorization", () => {
       grant_type: "authorization_code",
       code: "code-1",
       redirect_uri: AUTHORIZATION_CONTEXT.redirectUri,
-      scope: "Mail.Read Calendars.Read openid profile offline_access User.Read",
+      scope: SCOPE,
       code_verifier: "verifier-1",
     })
-    expect(credentials).toMatchObject({ accessToken: "access-1", refreshToken: "refresh-1" })
+    expect(credentials).toMatchObject({
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      authorizationContext: {
+        oid: "oid-ada",
+        preferredUsername: "ada@example.com",
+        name: "Ada Lovelace",
+      },
+    })
     expect(credentials.expiresAt).toBeInstanceOf(Date)
   })
 
   test("refuses a grant without a refresh token or without a requested permission", async () => {
-    tokenEndpoint(() => json({ access_token: "access-1", scope: "Mail.Read Calendars.Read" }))
+    tokenEndpoint(() =>
+      json({ access_token: "access-1", id_token: ADA, scope: "Mail.Read Calendars.Read" })
+    )
     expect(
       await kindOf(
         connector().authentication.exchangeCode(AUTHORIZATION_CONTEXT, { code: "code-1" })
@@ -131,7 +151,12 @@ describe("Microsoft delegated OAuth — authorization", () => {
     ).toBe("terminal")
 
     tokenEndpoint(() =>
-      json({ access_token: "access-1", refresh_token: "refresh-1", scope: "Mail.Read User.Read" })
+      json({
+        access_token: "access-1",
+        refresh_token: "refresh-1",
+        id_token: ADA,
+        scope: "Mail.Read",
+      })
     )
     const missing = await failure(
       connector().authentication.exchangeCode(AUTHORIZATION_CONTEXT, { code: "code-1" })
@@ -197,26 +222,29 @@ describe("Microsoft delegated OAuth — refresh", () => {
 })
 
 describe("Microsoft delegated OAuth — account and client", () => {
-  test("discovers the account people sign in with", async () => {
-    const requests = mockFetch(() =>
+  test("names the account the way Entra sign-in names the member", async () => {
+    // A guest's userPrincipalName is like ada_example.com#EXT#@tenant.onmicrosoft.com; the ID
+    // token's preferred_username is what Entra sign-in matches Sixb members by.
+    tokenEndpoint(() =>
       json({
-        id: "oid-ada",
-        userPrincipalName: "ada@example.com",
-        mail: "ada.lovelace@example.com",
-        displayName: "Ada Lovelace",
+        access_token: "access-1",
+        refresh_token: "refresh-1",
+        id_token: idToken({ oid: "oid-guest", preferred_username: "ada@example.com" }),
       })
     )
-    const accounts = await connector().discoverAccounts(CONTEXT, { accessToken: "access-1" })
-    expect(accounts).toEqual([
-      { id: "oid-ada", label: "ada@example.com", description: "Ada Lovelace" },
+    const credentials = await connector().authentication.exchangeCode(AUTHORIZATION_CONTEXT, {
+      code: "code-1",
+    })
+    expect(connector().discoverAccounts(CONTEXT, credentials)).toEqual([
+      { id: "oid-guest", label: "ada@example.com" },
     ])
-    expect(requests[0]!.url).toStartWith(`${GRAPH}me?`)
-    expect(requests[0]!.headers.get("authorization")).toBe("Bearer access-1")
 
-    mockFetch(() => json({ error: { code: "InvalidAuthenticationToken" } }, 401))
-    expect(await kindOf(connector().discoverAccounts(CONTEXT, { accessToken: "x" }))).toBe(
-      "terminal"
-    )
+    tokenEndpoint(() => json({ access_token: "access-1", refresh_token: "refresh-1" }))
+    expect(
+      await kindOf(
+        connector().authentication.exchangeCode(AUTHORIZATION_CONTEXT, { code: "code-1" })
+      )
+    ).toBe("ambiguous")
   })
 
   test("sends the connection's token and invalidates exactly the one Graph rejects", async () => {

@@ -109,8 +109,8 @@ export const outlook = defineConnector(
 )
 ```
 
-`scopes` lists delegated Graph permissions by name. Sign-in, `offline_access` (for the refresh
-token) and `User.Read` (to identify the account) are always requested. A sync reads each person's
+`scopes` lists delegated Graph permissions by name. Sign-in (`openid profile`, which names the
+account) and `offline_access` (for the refresh token) are always requested. A sync reads each person's
 data through their own connection; pass the account's id where a method takes a mailbox or user:
 
 ```ts
@@ -137,7 +137,7 @@ What to expect:
 
 | | |
 | --- | --- |
-| Account | `id` is the person's Entra object id; `label` is the name they sign in with (`userPrincipalName`), which is what Entra sign-in matches Sixb members by |
+| Account | `id` is the person's Entra object id; `label` is the name they sign in with (`preferred_username`), the same claim Entra sign-in matches Sixb members by |
 | Refresh | Entra issues a new refresh token on every refresh; the connector stores it |
 | Reconnect | Needed when the grant is revoked, expires after 90 days unused, or a sign-in policy requires the person (`invalid_grant`, `interaction_required`). A configuration error such as a wrong secret never disconnects anyone |
 | Disconnect | Deletes the stored grant. Entra has no endpoint for an app to revoke one person's refresh token |

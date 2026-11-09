@@ -8,12 +8,14 @@ import {
 } from "@sixb/core"
 import { MicrosoftConfigurationError } from "../errors"
 import { isRecord } from "../guards"
-import { GRAPH_BASE, nonEmpty, segment } from "../validation"
+import { nonEmpty, segment } from "../validation"
 import { assertSpecificTenant } from "./tenant"
 import type { MicrosoftOAuthOptions } from "./types"
 
-/** `offline_access` makes Entra issue a refresh token; `User.Read` lets discovery read `/me`. */
-const IDENTITY_SCOPES = ["openid", "profile", "offline_access", "User.Read"]
+/**
+ * `openid profile` return an ID token naming the person; `offline_access` returns a refresh token.
+ */
+const IDENTITY_SCOPES = ["openid", "profile", "offline_access"]
 const GRAPH_RESOURCE = "https://graph.microsoft.com/"
 
 type TokenOperation = "authorization code" | "refresh token"
@@ -23,7 +25,7 @@ export interface MicrosoftOAuth {
   discoverAccounts(
     context: ConnectorContext,
     credentials: ConnectorOAuthCredentials
-  ): Promise<readonly ConnectorAccountCandidate[]>
+  ): readonly ConnectorAccountCandidate[]
 }
 
 /**
@@ -118,7 +120,10 @@ export function createMicrosoftOAuth(
           context,
           "authorization code"
         )
-        const credentials = tokenCredentials(body, "authorization code")
+        const credentials = {
+          ...tokenCredentials(body, "authorization code"),
+          authorizationContext: signedInAccount(body.id_token),
+        }
         if (!credentials.refreshToken) {
           throw new ConnectorOAuthError(
             "terminal",
@@ -159,35 +164,8 @@ export function createMicrosoftOAuth(
       },
     },
 
-    async discoverAccounts(context, credentials) {
-      let response: Response
-      let body: unknown
-      try {
-        response = await fetch(`${GRAPH_BASE}me?$select=id,displayName,userPrincipalName,mail`, {
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${credentials.accessToken}`,
-          },
-          redirect: "error",
-          signal: signalFor(context),
-        })
-        body = await readJson(response)
-      } catch (error) {
-        throw new ConnectorOAuthError(
-          "retryable",
-          "[SixbMicrosoft] Microsoft account lookup failed.",
-          {
-            cause: error,
-          }
-        )
-      }
-      if (!response.ok) {
-        throw new ConnectorOAuthError(
-          response.status === 429 || response.status >= 500 ? "retryable" : "terminal",
-          `[SixbMicrosoft] Microsoft Graph rejected the account lookup (${response.status}).`
-        )
-      }
-      return [microsoftAccount(body)]
+    discoverAccounts(_context, credentials) {
+      return [microsoftAccount(credentials.authorizationContext)]
     },
   }
 }
@@ -234,22 +212,50 @@ function tokenCredentials(
   }
 }
 
-function microsoftAccount(body: unknown): ConnectorAccountCandidate {
-  const id = isRecord(body) ? optionalString(body.id) : undefined
-  if (!isRecord(body) || id === undefined) {
+/**
+ * The person who signed in, from the ID token the code exchange returned. It came straight from
+ * the tenant's token endpoint over TLS, which OpenID Connect accepts in place of a signature check.
+ */
+function signedInAccount(idToken: unknown): {
+  oid: string
+  preferredUsername: string
+  name?: string
+} {
+  const claims = typeof idToken === "string" ? jwtClaims(idToken) : undefined
+  const oid = optionalString(claims?.oid)
+  const preferredUsername = optionalString(claims?.preferred_username)
+  if (oid === undefined || preferredUsername === undefined) {
     throw new ConnectorOAuthError(
-      "terminal",
-      "[SixbMicrosoft] Microsoft Graph returned a profile without an id."
+      "ambiguous",
+      "[SixbMicrosoft] Microsoft did not return an ID token naming the account."
     )
   }
-  // The name people sign in with, which is also what Entra sign-in matches Sixb members by.
-  const userPrincipalName = optionalString(body.userPrincipalName)
-  const displayName = optionalString(body.displayName)
-  const label = userPrincipalName ?? optionalString(body.mail) ?? displayName ?? id
-  return {
-    id,
-    label,
-    ...(displayName === undefined || displayName === label ? {} : { description: displayName }),
+  const name = optionalString(claims?.name)
+  return { oid, preferredUsername, ...(name === undefined ? {} : { name }) }
+}
+
+/** The account is the person's Entra object id, labelled with the name they sign in with. */
+function microsoftAccount(context: unknown): ConnectorAccountCandidate {
+  const oid = isRecord(context) ? optionalString(context.oid) : undefined
+  const label = isRecord(context) ? optionalString(context.preferredUsername) : undefined
+  if (!isRecord(context) || oid === undefined || label === undefined) {
+    throw new ConnectorOAuthError(
+      "terminal",
+      "[SixbMicrosoft] The grant does not name its account."
+    )
+  }
+  const name = optionalString(context.name)
+  return { id: oid, label, ...(name === undefined || name === label ? {} : { description: name }) }
+}
+
+function jwtClaims(token: string): Record<string, unknown> | undefined {
+  try {
+    const claims: unknown = JSON.parse(
+      Buffer.from(token.split(".")[1] ?? "", "base64url").toString()
+    )
+    return isRecord(claims) ? claims : undefined
+  } catch {
+    return undefined
   }
 }
 

@@ -44,8 +44,8 @@ export interface MicrosoftOAuthOptions {
   readonly clientId: string
   readonly clientSecret: string
   /**
-   * Delegated Microsoft Graph permissions, such as `Mail.Read` or `Files.Read.All`. Sign-in,
-   * `offline_access` and `User.Read` are always requested.
+   * Delegated Microsoft Graph permissions, such as `Mail.Read` or `Files.Read.All`. Sign-in
+   * (`openid profile`) and `offline_access` are always requested.
    */
   readonly scopes: readonly string[]
 }
