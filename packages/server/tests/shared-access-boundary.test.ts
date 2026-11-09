@@ -19,6 +19,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { SIXB_API_ROUTES } from "@sixb/core/internal/http"
 import { createTestSixb } from "@sixb/core/testing"
 import { SHARED_ACCESS_GRANT_HEADER_NAME, sharedAccessCookieNames } from "../src/auth/shared-access"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -152,6 +153,7 @@ describe("shared-access request boundary", () => {
       expiresAt: expect.any(String),
       absoluteExpiresAt: invitation.grant.expiresAt.toISOString(),
       csrfToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      guestId: expect.stringMatching(/^shs_/),
     })
     expect(Object.keys(body).sort()).toEqual([
       "absoluteExpiresAt",
@@ -159,6 +161,7 @@ describe("shared-access request boundary", () => {
       "destinationPath",
       "expiresAt",
       "grantId",
+      "guestId",
     ])
     expect(exchanged.headers.get("x-sixb-csrf-token")).toBe(body.csrfToken)
 
@@ -169,7 +172,9 @@ describe("shared-access request boundary", () => {
       expect.stringContaining(`${names.session}=`),
       expect.stringContaining(`${names.csrf}=`),
     ])
-    expect(setCookies[0]).toContain("Path=/api")
+    // The session reaches the sockets too; the CSRF token only the API.
+    expect(setCookies[0]).toContain("Path=/;")
+    expect(setCookies[1]).toContain("Path=/api;")
     expect(setCookies[0]).toContain("SameSite=Strict")
     expect(setCookies[0]).toContain("HttpOnly")
     expect(setCookies[0]).not.toContain("Domain=")
@@ -279,12 +284,75 @@ describe("shared-access request boundary", () => {
       ["GET", "/api/ai/limits"],
       ["POST", "/api/ai/limits"],
       ["GET", "/api/ai/limits/subjects"],
-      ["GET", "/ws/events"],
+      ["GET", "/ws/logs"],
+      ["GET", "/ws/agents"],
     ] as const) {
       const denied = await fixture.app.fetch(
         new Request(`http://api.localhost${path}`, { method, headers: selectedHeaders })
       )
       expect(denied.status, `${method} ${path}`).toBe(403)
+    }
+  })
+
+  // One owner for what a shared link's session reaches: a route opted in by mistake, or a socket
+  // added to the boundary, fails here before it ships.
+  test("opens exactly these routes and sockets to a shared session", async () => {
+    const routes = SIXB_API_ROUTES.filter((route) => route.sharedSession).map(
+      (route) => `${route.method} ${route.path}`
+    )
+    expect(routes).toEqual([
+      "GET /api/object-types",
+      "GET /api/object-types/:objectTypeId",
+      "GET /api/objects",
+      "POST /api/objects/query",
+      "POST /api/objects/query/links",
+      "POST /api/objects/query/count",
+      "POST /api/objects/query/exists",
+      "POST /api/objects/query/facets",
+      "GET /api/objects/:objectTypeId/:objectId",
+      "POST /api/objects/:objectTypeId/by/:propertyId",
+      "POST /api/telemetry/history",
+      "GET /api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history",
+      "GET /api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest",
+      "GET /api/objects/:objectTypeId/:objectId/files/content",
+      "HEAD /api/objects/:objectTypeId/:objectId/files/content",
+      "GET /api/actions",
+      "GET /api/actions/:actionId",
+      "POST /api/actions/:actionId",
+      "GET /api/action-runs/:runId",
+      // The artifacts its objects hold: read, framed, commented on, never written.
+      "GET /api/artifacts/:artifactId",
+      "GET /api/artifacts/:artifactId/holders",
+      "GET /api/artifacts/:artifactId/comments",
+      "POST /api/artifacts/:artifactId/comments",
+      "GET /api/artifacts/:artifactId/versions/:version",
+      "GET /api/artifacts/:artifactId/versions/:version/boards/:board/preview",
+      "GET /api/artifacts/:artifactId/versions/:version/queries/:name",
+      "POST /api/artifacts/:artifactId/versions/:version/frame",
+      "GET /api/artifacts/:artifactId/versions/:version/content",
+      "HEAD /api/artifacts/:artifactId/versions/:version/content",
+      "GET /api/objects/search",
+      "GET /api/activity/capture-config",
+      "POST /api/activity/events",
+    ])
+
+    const fixture = await createFixture()
+    const invitation = await issueGrant(fixture, "report-1")
+    const cookies = requestCookieHeader(getSetCookies(await exchange(fixture, invitation)))
+    const socket = (path: string, headers: Record<string, string> = {}) =>
+      fixture.app.fetch(
+        new Request(`http://api.localhost${path}?shareGrant=${invitation.grant.id}`, { headers })
+      )
+
+    // The query selects the grant of these two: without its cookie, the boundary refuses them.
+    // With it, a plain GET is no upgrade, and Elysia answers 404 past the boundary.
+    for (const path of ["/ws/artifacts", "/ws/events"]) {
+      expect((await socket(path)).status, path).toBe(401)
+      expect((await socket(path, { cookie: cookies })).status, path).toBe(404)
+    }
+    // It selects nothing for any other socket: the request is no shared session's.
+    for (const path of ["/ws/logs", "/ws/agents"]) {
+      expect((await socket(path)).status, path).toBe(404)
     }
   })
 
@@ -360,7 +428,7 @@ describe("shared-access request boundary", () => {
   // <img>, <video>, and download links cannot send the selector header. Regression proof: make
   // selectSharedAccessGrant ignore the query; the media requests then fall through to ambient auth
   // and return 401.
-  test("accepts the grant selector in the query for file content only", async () => {
+  test("accepts the grant selector in the query only for what a browser loads by itself", async () => {
     const fixture = await createFixture()
     const invitation = await issueGrant(fixture, "report-1")
     const grantId = invitation.grant.id
@@ -408,7 +476,8 @@ describe("shared-access request boundary", () => {
       expect(denied.status, label).toBe(403)
     }
 
-    // Elsewhere the query selects nothing, so the request is not shared.
+    // Elsewhere the query selects nothing, so the request is not shared; an artifact's files and
+    // board pictures take it too (shared-access-artifacts.test.ts).
     const object = await fetchFile(
       `http://api.localhost/api/objects/${Report.id}/report-1?shareGrant=${grantId}`,
       { cookie: sharedCookies }
@@ -510,7 +579,12 @@ describe("shared-access request boundary", () => {
     expect(signedOut.status).toBe(200)
     expect(await signedOut.json()).toEqual({ signedOut: true })
     expect(getSetCookies(signedOut).every((cookie) => cookie.includes("Max-Age=0"))).toBe(true)
-    expect(getSetCookies(signedOut).every((cookie) => cookie.includes("Path=/api"))).toBe(true)
+    // The session cookie a link set before it reached the sockets goes too.
+    expect(getSetCookies(signedOut).map((cookie) => cookie.match(/Path=[^;]+/)?.[0])).toEqual([
+      "Path=/",
+      "Path=/api",
+      "Path=/api",
+    ])
 
     const afterSignOut = await getObject(fixture, "report-1", invitation.grant.id, sharedCookies)
     expect(afterSignOut.status).toBe(401)
@@ -715,6 +789,7 @@ async function sharedSessionBody(response: Response): Promise<{
   readonly expiresAt: string
   readonly absoluteExpiresAt: string
   readonly csrfToken: string
+  readonly guestId: string
 }> {
   return (await response.json()) as {
     grantId: string
@@ -722,5 +797,6 @@ async function sharedSessionBody(response: Response): Promise<{
     expiresAt: string
     absoluteExpiresAt: string
     csrfToken: string
+    guestId: string
   }
 }

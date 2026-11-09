@@ -9,6 +9,7 @@ import {
   decodeLiveData,
   documentFiles,
   encodeLiveData,
+  USER_AWARENESS_FIELD,
 } from "@sixb/core/artifacts/live"
 import type { Broker, BrokerRecord } from "@sixb/core/broker"
 import {
@@ -64,6 +65,8 @@ export interface LiveConnection {
   readonly id: string
   /** The connection's SDK, as the person who opened it: every write goes through it. */
   readonly sixb: Sixb
+  /** Who the connection is when its SDK names nobody: a shared link's guest. */
+  readonly user?: () => Promise<ArtifactLiveUser>
   send(message: ArtifactLiveServerMessage): void
 }
 
@@ -81,7 +84,7 @@ export interface LiveRoomHost {
 interface Member {
   readonly connection: LiveConnection
   /** Who the connection is, in every awareness state it sets. */
-  readonly user: ArtifactLiveUser
+  user: ArtifactLiveUser
   access: ArtifactLiveAccess
   /** When the right to edit was last read. */
   checkedAt: number
@@ -326,6 +329,33 @@ export class LiveRoom {
       mayUse: (client) => this.mayUse(member, client),
     })
     if (vouched) awarenessProtocol.applyAwarenessUpdate(this.awareness, vouched, member)
+  }
+
+  /**
+   * The connection is someone else now, as the server read it: each awareness state it set takes
+   * the new `user`, shared as its own updates are.
+   */
+  rename(connectionId: string, user: ArtifactLiveUser): void {
+    const member = this.members.get(connectionId)
+    if (!member) return
+    member.user = user
+
+    const states = this.awareness.getStates()
+    const clients = [...member.clients].filter((client) => states.get(client))
+    if (clients.length === 0) return
+
+    const encoder = encoding.createEncoder()
+    encoding.writeVarUint(encoder, clients.length)
+    for (const client of clients) {
+      const clock = this.awareness.meta.get(client)?.clock ?? 0
+      encoding.writeVarUint(encoder, client)
+      encoding.writeVarUint(encoder, clock + 1)
+      encoding.writeVarString(
+        encoder,
+        JSON.stringify({ ...states.get(client), [USER_AWARENESS_FIELD]: user })
+      )
+    }
+    awarenessProtocol.applyAwarenessUpdate(this.awareness, encoding.toUint8Array(encoder), member)
   }
 
   /**

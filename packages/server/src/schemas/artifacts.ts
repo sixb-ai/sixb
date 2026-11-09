@@ -2,7 +2,7 @@ import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_KINDS, ARTIFACT_STATE_LIMITS } from "@
 import { ARTIFACT_RESTORE_POINTS } from "@sixb/core/internal/storage"
 import { z } from "zod"
 import { ErrorResponseSchema, PrincipalSchema } from "./common"
-import { FileRefSchema } from "./files"
+import { FileRefSchema, ShareGrantQuerySchema } from "./files"
 
 const ArtifactKindSchema = z.enum(ARTIFACT_KINDS)
 
@@ -201,6 +201,7 @@ export const ArtifactBoardPreviewQuerySchema = z
         "The board's render key the picture is of, as the version's outline names it, in place of revision: the picture stays the same while the board shows the same, however often the canvas around it changes. Another than the board's current one is 404 preview_not_found. One that matches is cached for good"
       ),
   })
+  .extend(ShareGrantQuerySchema.shape)
   .strict()
 
 export const ArtifactQueryParamsSchema = ArtifactVersionParamsSchema.extend({
@@ -390,7 +391,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({
@@ -426,18 +427,27 @@ const ArtifactCommentAnchorSchema = z.object({
   revision: RevisionSchema.describe("The artifact's revision its author saw"),
 })
 
+const ArtifactCommentAuthorSchema = z
+  .object({
+    type: z.enum(["user", "serviceAccount", "system", "guest"]),
+    id: z.string().min(1),
+  })
+  .describe(
+    "Who wrote it: a principal, or a guest, someone without an account who opened a shared link, whose id is their link's session"
+  )
+
 export const ArtifactCommentSchema = z.object({
   artifactId: z.string(),
   id: z.string(),
   parentId: z.string().optional().describe("The comment it replies to, for a reply"),
   anchor: ArtifactCommentAnchorSchema,
   body: z.string().describe("Plain text"),
-  author: PrincipalSchema,
+  author: ArtifactCommentAuthorSchema,
   authorName: z
     .string()
     .nullable()
     .describe(
-      "Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name"
+      "Its author's name: a member's profile name or email, the project's for its own code, or the name a guest gave; null for anyone the project cannot name. A guest reading it never gets a member's email"
     ),
   origin: z
     .object({ threadId: z.string(), runId: z.string() })

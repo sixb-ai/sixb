@@ -147,6 +147,9 @@ export class LiveRooms {
   }
 
   private userOf(connection: LiveConnection): Promise<ArtifactLiveUser> {
+    // A guest is read at each join: the name they give after joining shows from their next one.
+    if (connection.user) return connection.user()
+
     const known = this.users.get(connection.id)
     if (known) return known
 
@@ -157,6 +160,20 @@ export class LiveRooms {
     )
     this.users.set(connection.id, user)
     return user
+  }
+
+  /**
+   * Reads again who a connection is, and shows it so in every artifact it holds: a shared link's
+   * guest gave their name, which the server reads from their session, never from the client.
+   */
+  async refreshUser(connection: LiveConnection): Promise<void> {
+    this.users.delete(connection.id)
+    const user = await this.userOf(connection)
+
+    for (const artifactId of this.joined.get(connection.id)?.keys() ?? []) {
+      const room = await this.rooms.get(artifactId)
+      if (room instanceof LiveRoom) room.rename(connection.id, user)
+    }
   }
 
   /** Leaves an artifact, as asked: the connection is told it left, once it did. */

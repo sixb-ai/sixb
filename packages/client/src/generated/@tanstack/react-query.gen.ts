@@ -202,6 +202,7 @@ import {
   selectConnectorConnectionRunAccount,
   setAgentThreadApprovalMode,
   setArtifactState,
+  setSharedAccessGuestName,
   signFileUploadPart,
   signOut,
   signOutAll,
@@ -778,6 +779,9 @@ import type {
   SetArtifactStateData,
   SetArtifactStateError,
   SetArtifactStateResponse,
+  SetSharedAccessGuestNameData,
+  SetSharedAccessGuestNameError,
+  SetSharedAccessGuestNameResponse,
   SignFileUploadPartData,
   SignFileUploadPartError,
   SignFileUploadPartResponse,
@@ -3807,6 +3811,35 @@ export const getSharedAccessSessionOptions = (options: Options<GetSharedAccessSe
   })
 
 /**
+ * Name a shared-access session's visitor
+ *
+ * The visitor of a shared link has no account: they give their name once, and their comments and live presence carry it, marked as a guest's. Giving it again replaces it for what comes next; comments keep the name they were written under.
+ */
+export const setSharedAccessGuestNameMutation = (
+  options?: Partial<Options<SetSharedAccessGuestNameData>>
+): UseMutationOptions<
+  SetSharedAccessGuestNameResponse,
+  SetSharedAccessGuestNameError,
+  Options<SetSharedAccessGuestNameData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SetSharedAccessGuestNameResponse,
+    SetSharedAccessGuestNameError,
+    Options<SetSharedAccessGuestNameData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await setSharedAccessGuestName({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
  * Sign out a shared-access session
  */
 export const signOutSharedAccessMutation = (
@@ -6444,7 +6477,7 @@ export const listArtifactCommentsOptions = (options: Options<ListArtifactComment
 /**
  * Comment on an artifact
  *
- * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
+ * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
  */
 export const addArtifactCommentMutation = (
   options?: Partial<Options<AddArtifactCommentData>>
@@ -6473,7 +6506,7 @@ export const addArtifactCommentMutation = (
 /**
  * Resolve an artifact's comment
  *
- * Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.
+ * Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed. A guest's comment is resolved only by whoever may update the artifact.
  */
 export const resolveArtifactCommentMutation = (
   options?: Partial<Options<ResolveArtifactCommentData>>

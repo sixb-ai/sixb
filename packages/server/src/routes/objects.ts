@@ -21,7 +21,7 @@ import {
 } from "../files/content"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
-import { FileContentQuerySchema } from "../schemas/files"
+import { FileContentQuerySchema, ShareGrantQuerySchema } from "../schemas/files"
 import { ObjectLineageSchema } from "../schemas/lineage"
 import {
   GetObjectByUniquePropertyBodySchema,
@@ -42,14 +42,8 @@ import {
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 import { noteRequestSubject } from "../utils/request-timing"
 
-// Only object files are served to shared sessions. The boundary reads `shareGrant` before routing;
-// declaring it here keeps it in the OpenAPI contract and through query validation.
-const ObjectFileContentRouteQuerySchema = FileContentQuerySchema.extend({
-  shareGrant: z
-    .string()
-    .optional()
-    .describe("Share grant selector for elements that cannot send the x-sixb-share-grant header"),
-})
+// Object files are served to shared sessions, which name their grant in the query.
+const ObjectFileContentRouteQuerySchema = FileContentQuerySchema.extend(ShareGrantQuerySchema.shape)
 
 const ObjectFileContentQuerySchema = ObjectFileContentRouteQuerySchema.extend({
   path: z

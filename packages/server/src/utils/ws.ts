@@ -1,4 +1,5 @@
 import type { Sixb } from "@sixb/core/internal/request-execution"
+import type { SharedSessionContext } from "@sixb/core/internal/shares"
 
 export function safeSend(target: { send: (message: string) => void }, payload: unknown): void {
   try {
@@ -22,6 +23,12 @@ export function wsRequestSixb(ws: object): Sixb | null {
     }
   ).data
   return data?.sixb ?? null
+}
+
+/** The shared link's session the WebSocket request was opened under, if one was. */
+export function wsSharedSession(ws: object): SharedSessionContext | null {
+  const data = (ws as { data?: { sharedSession?: SharedSessionContext | null } }).data
+  return data?.sharedSession ?? null
 }
 
 function parseJson(text: string): unknown {

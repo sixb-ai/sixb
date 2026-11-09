@@ -34,23 +34,31 @@ export const PROJECT_NAME = "Project"
 
 /**
  * The name others see for someone: a member's profile name, else their email, and the project's
- * for its own code. Null for anyone else, or a member the project no longer knows.
+ * for its own code. Null for anyone else, or a member the project no longer knows. Without
+ * `email`, for a reader outside the project such as a shared link's guest, a member who gave no
+ * name stays unnamed.
  */
 export async function principalName(
   storage: Pick<Storage, "auth">,
   projectId: string,
-  principal: { readonly type: string; readonly id: string }
+  principal: { readonly type: string; readonly id: string },
+  options: { readonly email?: boolean } = {}
 ): Promise<string | null> {
   if (principal.type === "system") return PROJECT_NAME
   if (principal.type !== "user") return null
 
   const record = await storage.auth?.users.getById({ projectId, id: principal.id })
+  if (options.email === false) return record?.displayName ?? null
   return record?.displayName ?? record?.email ?? null
 }
 
 /**
  * Who a connection is: the member it signed in as, by their profile's name, or the service
  * account or project code it runs as.
+ *
+ * Everyone in the room sees it, a shared link's guest included, and the server shares one state
+ * with all: so it is never an email, nor an id. Someone without a profile name has none, which the
+ * app names in the reader's language.
  */
 export async function liveUserOf(
   storage: Pick<Storage, "auth">,
@@ -60,8 +68,17 @@ export async function liveUserOf(
   if (!principal) return { id: "system", name: PROJECT_NAME, color: colorOf("system") }
 
   const id = `${principal.type}:${principal.id}`
-  const name = (await principalName(storage, projectId, principal)) ?? principal.id
+  const name = (await principalName(storage, projectId, principal, { email: false })) ?? ""
   return { id, name, color: colorOf(id) }
+}
+
+/**
+ * Who a shared link's guest is: one per session, by the name they gave, or none yet, marked as a
+ * guest so nobody takes them for a member of the same name.
+ */
+export function guestLiveUser(sessionId: string, name: string | undefined): ArtifactLiveUser {
+  const id = `guest:${sessionId}`
+  return { id, name: name ?? "", color: colorOf(id), guest: true }
 }
 
 /**

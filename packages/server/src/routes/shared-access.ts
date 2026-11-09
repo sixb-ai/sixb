@@ -1,4 +1,4 @@
-import type { SharedSessionContext } from "@sixb/core/internal/shares"
+import { GUEST_NAME_MAX_LENGTH, type SharedSessionContext } from "@sixb/core/internal/shares"
 import type { Elysia } from "elysia"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../auth/csrf"
 import {
@@ -7,12 +7,14 @@ import {
   sharedAccessSecurityHeaders,
   sharedAccessUnauthenticatedResponse,
   sharedAccessUnavailableResponse,
+  sharedBoundaryJsonResponse,
 } from "../auth/shared-access"
 import { SIXB_CSRF_SECURITY_SCHEME_ID } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   ExchangeSharedAccessBodySchema,
+  SetSharedAccessGuestNameBodySchema,
   SharedAccessGrantParamsSchema,
   SharedAccessSessionResponseSchema,
   SharedAccessSignOutResponseSchema,
@@ -80,6 +82,54 @@ export function registerSharedAccessRoutes(app: Elysia, boundary: SharedAccessBo
         },
       }
     )
+    .put(
+      "/api/shared-access/:grantId/name",
+      async ({ body, params, request }) => {
+        try {
+          const result = await boundary.setGuestName(request, params.grantId, body.name)
+          switch (result.kind) {
+            case "csrf":
+              return sharedAccessForbiddenResponse()
+            case "invalid":
+              return withSetCookies(sharedAccessUnauthenticatedResponse(), result.setCookies)
+            case "unnamed":
+              return sharedBoundaryJsonResponse(
+                {
+                  error: `A name holds 1 to ${GUEST_NAME_MAX_LENGTH} characters on one line.`,
+                  code: "invalid_name",
+                },
+                400
+              )
+            case "named":
+              return sharedSessionResponse(result.context, result.cookies)
+          }
+        } catch {
+          return sharedAccessUnavailableResponse()
+        }
+      },
+      {
+        params: SharedAccessGrantParamsSchema,
+        body: SetSharedAccessGuestNameBodySchema,
+        response: {
+          200: SharedAccessSessionResponseSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          503: ErrorResponseSchema,
+        },
+        error: sharedAccessRouteError,
+        detail: {
+          summary: "Name a shared-access session's visitor",
+          description:
+            "The visitor of a shared link has no account: they give their name once, and their comments and live presence carry it, marked as a guest's. Giving it again replaces it for what comes next; comments keep the name they were written under.",
+          tags: [OPENAPI_TAGS.sharedAccess.name],
+          operationId: "setSharedAccessGuestName",
+          // Public to the auth guard, as sign-out is: the session cookie the path's grant names,
+          // and its CSRF token, are checked here.
+          security: [{ [SIXB_CSRF_SECURITY_SCHEME_ID]: [] }, {}],
+        },
+      }
+    )
     .post(
       "/api/shared-access/:grantId/sign-out",
       async ({ params, request }) => {
@@ -133,6 +183,8 @@ function sharedSessionResponse(
       expiresAt: context.expiresAt.toISOString(),
       absoluteExpiresAt: context.absoluteExpiresAt.toISOString(),
       csrfToken: cookies.csrfToken,
+      guestId: context.sessionId,
+      ...(context.guestName === undefined ? {} : { guestName: context.guestName }),
     }),
     { status: 200, headers }
   )
