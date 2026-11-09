@@ -14,6 +14,9 @@ Sixb packages are versioned independently. Each release entry names the packages
 - `@sixb/ducklake` runs on DuckDB 1.5.6 (from 1.5.2) and a checked DuckLake build, `ac7595b0`. The
   first process that opens the lake installs that extension over the network, so a host that cannot
   fetch it fails there. Any other build logs a warning and still opens the lake.
+- A pipeline step that replaces a keyed output now stores only the rows that changed, so projections
+  of it apply only those. A version that changes no row is still recorded, and fires no
+  `updated()`.
 - DuckLake compacts a dataset on its own, in the process that wrote, after the commits that need
   it. Compaction never creates a dataset version, and time travel reads the same rows after it.
 

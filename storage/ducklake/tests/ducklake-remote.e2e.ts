@@ -267,6 +267,71 @@ describe("DuckLakeStorage remote catalogs", () => {
     }
   })
 
+  // Regression proof: in readChangeRange, report every range incomplete. The read then compares
+  // the two versions in full instead of reading the feed.
+  test("reads a delta from the change feed of a PostgreSQL catalog", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-feed-"))
+    const storage = new DuckLakeStorage({
+      catalog: postgresCatalog(),
+      dataPath: join(rootDir, "data"),
+    })
+    const accounts = defineDataset(`crm.pg.feed.${randomId()}`, {
+      schema: [col("id", "string"), col("name", "string")],
+      primaryKey: "id",
+    })
+    const seed = Array.from({ length: 50_100 }, (_, i) => ({ id: `a${i}`, name: "seed" }))
+    const snapshot = async (rows: readonly { id: string; name: string }[]) => {
+      const write = await storage.beginWrite({ dataset: accounts, mode: "snapshot" })
+      await write.writeRows(rows)
+      return write.commit()
+    }
+
+    try {
+      await storage.createDataset(accounts)
+      const first = await snapshot(seed)
+      await snapshot([...seed.slice(1), { id: "new", name: "added" }])
+      const merge = await storage.beginMerge({ dataset: accounts })
+      await merge.writeChanges([change.upsert({ id: "a2", name: "merged" })])
+      const last = (await merge.commit()).version!
+
+      const changes = (
+        storage as unknown as { changes: { compareFeed(...args: unknown[]): Promise<boolean> } }
+      ).changes
+      const compareFeed = spyOn(changes, "compareFeed")
+      const delta = await storage.readChanges({
+        datasetId: accounts.id,
+        fromVersionId: first.versionId,
+        toVersionId: last.versionId,
+        keyColumns: ["id"],
+        columns: ["id", "name"],
+      })
+      const read: unknown[] = []
+      try {
+        for await (const change of delta!.changes) read.push(change)
+      } finally {
+        await delta?.close()
+      }
+
+      expect(await compareFeed.mock.results[0]?.value).toBe(true)
+      expect(delta).toMatchObject({ fromRowCount: 50_100, toRowCount: 50_100, changeCount: 3 })
+      const id = (change: unknown) => {
+        const { before, after } = change as {
+          before: { id: string } | null
+          after: { id: string } | null
+        }
+        return (after ?? before)!.id
+      }
+      expect(read.sort((left, right) => id(left).localeCompare(id(right)))).toEqual([
+        { before: { id: "a0", name: "seed" }, after: null },
+        { before: { id: "a2", name: "seed" }, after: { id: "a2", name: "merged" } },
+        { before: null, after: { id: "new", name: "added" } },
+      ])
+    } finally {
+      await storage.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
   // Regression proof: in DuckLakeMaintenance.planExpiry, expire the last version of each dataset,
   // or ignore `protect`. The idle dataset's version, or the protected one, then expires.
   test("keeps needed versions during retention of a PostgreSQL catalog", async () => {
@@ -708,6 +773,104 @@ describe("DuckLakeStorage remote catalogs", () => {
         ])
       }, 60_000)
     }
+
+    /**
+     * A keyed dataset seeded with two files of 200 rows, `f1_*` and `f2_*`. Deleting 15 rows of
+     * one writes a delete file, as more than 10 do, and stays under the share that compaction
+     * rewrites.
+     */
+    async function twoKeyedFiles<T>(
+      run: (input: {
+        readonly storage: DuckLakeStorage
+        readonly other: DuckLakeStorage
+        readonly dataset: DatasetDefinition
+        readonly seed: readonly { id: string; v: string }[]
+        readonly schemaVersion: () => Promise<bigint>
+      }) => Promise<T>
+    ): Promise<T> {
+      const keyed = defineDataset(`raw.pg.keyed.${randomId()}`, {
+        schema: [col("id", "string"), col("v", "string")],
+        primaryKey: "id",
+      })
+      const file = (n: number) =>
+        Array.from({ length: 200 }, (_, i) => ({ id: `f${n}_${i}`, v: "seed" }))
+
+      return twoWriters(async ({ storage, other, dataset, schemaVersion }) => {
+        for (const n of [1, 2]) {
+          await write(storage, dataset, { mode: "append" }, file(n))
+        }
+
+        return run({ storage, other, dataset, seed: [...file(1), ...file(2)], schemaVersion })
+      }, keyed)
+    }
+
+    const sortedRows = async (storage: DuckLakeStorage, dataset: DatasetDefinition) =>
+      (await collectRows(storage.readRows({ datasetId: dataset.id }))).sort((left, right) =>
+        String(left.id).localeCompare(String(right.id))
+      )
+
+    const sortedById = (rows: readonly { id: string; v: string }[]) =>
+      [...rows].sort((left, right) => left.id.localeCompare(right.id))
+
+    // Regression proof: in applyKeyedSnapshot, stop rewriting an unchanged row for a difference
+    // that only inserts or only deletes. Two inserts never conflict, nor deletes from different
+    // files, so both snapshots commit, and the dataset holds a mix of the two.
+    for (const shape of ["adds", "removes"] as const) {
+      test(`two keyed snapshots that only ${shape === "adds" ? "add" : "remove"} rows do not both commit`, async () => {
+        const { rows, mine } = await twoKeyedFiles(async ({ storage, other, dataset, seed }) => {
+          const mine =
+            shape === "adds"
+              ? [...seed, { id: "mine", v: "new" }]
+              : seed.filter((row) => !/^f1_\d$|^f1_1[0-4]$/.test(row.id))
+          const theirs =
+            shape === "adds"
+              ? [...seed, { id: "theirs", v: "new" }]
+              : seed.filter((row) => !/^f2_\d$|^f2_1[0-4]$/.test(row.id))
+
+          const spy = beforeCommitMetadata(storage, async () => {
+            await write(other, dataset, { mode: "snapshot" }, theirs)
+          })
+          try {
+            await write(storage, dataset, { mode: "snapshot" }, mine)
+          } finally {
+            spy.mockRestore()
+          }
+
+          return { rows: await sortedRows(storage, dataset), mine }
+        })
+
+        // The later snapshot reran on the earlier one, and holds exactly its own rows.
+        expect(rows).toEqual(sortedById(mine))
+      }, 60_000)
+    }
+
+    // Regression proof: in mustClaimTable, claim every snapshot. Both snapshots then bump the
+    // catalog's schema version.
+    test("keyed snapshots that update rows of different files conflict without claiming", async () => {
+      const { rows, mine, bumped } = await twoKeyedFiles(
+        async ({ storage, other, dataset, seed, schemaVersion }) => {
+          const update = (id: string) =>
+            seed.map((row) => (row.id === id ? { ...row, v: "changed" } : row))
+          const mine = update("f1_0")
+          const before = await schemaVersion()
+
+          const spy = beforeCommitMetadata(storage, async () => {
+            await write(other, dataset, { mode: "snapshot" }, update("f2_0"))
+          })
+          try {
+            await write(storage, dataset, { mode: "snapshot" }, mine)
+          } finally {
+            spy.mockRestore()
+          }
+
+          const bumped = (await schemaVersion()) !== before
+          return { rows: await sortedRows(storage, dataset), mine, bumped }
+        }
+      )
+
+      expect(bumped).toBe(false)
+      expect(rows).toEqual(sortedById(mine))
+    }, 60_000)
 
     // Regression proof: commit versions that change no rows on top of unseen snapshots. The
     // version of new provenance then lands on the concurrent snapshot, which deleted rows but did
