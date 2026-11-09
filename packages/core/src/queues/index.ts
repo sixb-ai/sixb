@@ -21,6 +21,7 @@ export type {
   AgentRunRequestedQueueJob,
   AgentWorkflowNodeRequestedQueueJob,
   ClaimedQueueJob,
+  DatasetIngestFlushRequestedQueueJob,
   LakeQueueJob,
   LakeRetentionRequestedQueueJob,
   NewQueueJob,

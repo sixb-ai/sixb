@@ -11,6 +11,16 @@ export type {
   StartConnectorAuthorizationResult,
 } from "../connectors/connections/contracts"
 export type { ConnectorConnectionsRuntime } from "../connectors/connections/execution"
+export type {
+  DatasetIngestFlushOutcome,
+  DatasetIngestRuntime,
+} from "../datasets/ingest-flush"
+export {
+  DatasetIngestFlushError,
+  findDatasetIngestRuntime,
+  getDatasetIngestRuntime,
+} from "../datasets/ingest-flush"
+export { ingestStalledSince } from "../datasets/ingest-flush-job"
 export type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
 export type { LakeMaintenanceSettings, LakeRetention } from "../maintenance/lake-retention"
 export { getLakeRetentionRuntime } from "../maintenance/lake-retention"

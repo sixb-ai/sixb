@@ -158,7 +158,7 @@ test("verified webhooks and snapshots feed merged contacts through orchestration
             body.source === "pipedrive" ? pipedrive : pandadoc,
             { changes: [change.upsert(toRow(body.person))] }
           )
-          return { status: 200, body: { outcome: result.outcome } }
+          return { status: 200, body: { changes: result.changes } }
         }),
     ],
   })

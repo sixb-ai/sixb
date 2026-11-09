@@ -110,7 +110,7 @@ describe("checkRuntimeHealth", () => {
     expect(health.warnings).toHaveLength(2)
     expect(health.warnings.join("\n")).toContain("queues is InMemoryQueues")
     expect(health.warnings.join("\n")).toContain("broker is InMemoryBroker")
-    expect(health.warnings.join("\n")).toContain("@sixb/bullmq")
+    expect(health.warnings.join("\n")).toContain("@sixb/queues-bullmq")
   })
 
   test("stays quiet when both process-local slots are shareable", async () => {

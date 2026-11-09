@@ -1,4 +1,5 @@
 import type { AuthorizationContext } from "../authorization"
+import { findDatasetIngestRuntime } from "../datasets/ingest-flush"
 import { createTestingScope } from "../execution/scopes"
 import type { ExecutionScope } from "../execution/types"
 import { bindModelExecutionAttempt } from "../models/execution/binding"
@@ -47,5 +48,27 @@ export function createTestSixb(
     attempt: 1,
     signal: options.signal ?? new AbortController().signal,
   })
+  flushIngestionInline(host, sixb)
   return sixb
+}
+
+/**
+ * `ingest` stores changes for a worker to write. A test reads them right after, so the test SDK
+ * writes them itself, as it runs actions: the call returns once its version is committed. A
+ * worker running beside the test may write them instead.
+ */
+function flushIngestionInline(host: TestExecutionHost, sixb: Sixb): void {
+  const runtime = findDatasetIngestRuntime(host)
+  if (!runtime) return
+
+  const { datasets } = sixb
+  const ingest = datasets.ingest.bind(datasets)
+
+  datasets.ingest = async (dataset, input) => {
+    const result = await ingest(dataset, input)
+    if (result.changes > 0) {
+      await runtime.flush(dataset.id, input.signal ?? new AbortController().signal)
+    }
+    return result
+  }
 }

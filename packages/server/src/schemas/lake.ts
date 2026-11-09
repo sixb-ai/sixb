@@ -17,6 +17,22 @@ export const DatasetStorageHealthSchema = z.object({
   retainedSnapshots: z.number().int().describe("Commits still in the dataset's history"),
   partitionBy: z.array(z.string()),
   warnings: z.array(DatasetStorageWarningSchema),
+  ingest: z
+    .object({
+      pendingDeliveries: z.number().int(),
+      pendingChanges: z.number().int(),
+      oldestReceivedAt: z
+        .string()
+        .datetime()
+        .nullable()
+        .describe("When the oldest waiting delivery arrived"),
+      rejectedDeliveries: z
+        .number()
+        .int()
+        .describe("Deliveries refused when written, kept for a week to read and send again"),
+    })
+    .nullable()
+    .describe("Ingested changes waiting or refused; null when there are none"),
 })
 
 export const LakeHealthResponseSchema = z.object({

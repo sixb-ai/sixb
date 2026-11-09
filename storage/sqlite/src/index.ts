@@ -40,6 +40,7 @@ import { SqliteAiUsageStorage } from "./ai-usage-storage"
 import { SqliteArtifactStorage } from "./artifact-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { SqliteConnectorConnectionStorage } from "./connector-connection-storage"
+import { SqliteDatasetIngestStorage } from "./dataset-ingest-storage"
 import { SqliteExecutionStorage } from "./execution-storage"
 import { SqliteFileDownloadGrantStorage } from "./file-download-grant-storage"
 import { SqliteFileUploadSessionStorage } from "./file-upload-session-storage"
@@ -110,6 +111,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly shareSessions: ShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
+  readonly datasetIngest: SqliteDatasetIngestStorage
   readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
   readonly maintenanceHeartbeats: SqliteMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: SqliteLakeRetentionRunStorage
@@ -178,6 +180,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
+    this.datasetIngest = createOperationScopedFacade(stores.datasetIngest, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
     this.maintenanceHeartbeats = createOperationScopedFacade(stores.maintenanceHeartbeats, scope)
     this.lakeRetentionRuns = createOperationScopedFacade(stores.lakeRetentionRuns, scope)
@@ -346,6 +349,7 @@ function createSqliteStores(
     shareSessions,
     connectorConnections: new SqliteConnectorConnectionStorage(connection),
     fileUploadSessions: new SqliteFileUploadSessionStorage(connection),
+    datasetIngest: new SqliteDatasetIngestStorage(connection),
     fileDownloadGrants: new SqliteFileDownloadGrantStorage(connection),
     maintenanceHeartbeats: new SqliteMaintenanceHeartbeatStorage(connection),
     lakeRetentionRuns: new SqliteLakeRetentionRunStorage(connection),
@@ -376,6 +380,7 @@ interface SqliteStoreSet {
   readonly shareSessions: SqliteShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
+  readonly datasetIngest: SqliteDatasetIngestStorage
   readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
   readonly maintenanceHeartbeats: SqliteMaintenanceHeartbeatStorage
   readonly lakeRetentionRuns: SqliteLakeRetentionRunStorage

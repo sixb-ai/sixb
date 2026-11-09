@@ -33,6 +33,8 @@ const MERGE_CHANGE_BATCH_SIZE = 1000
 
 interface StagedMergeChange {
   readonly sequence: bigint
+  /** Where the change came in what `writeChanges` was handed. */
+  readonly position: number
   readonly change: MergeChange<DatasetRow, DatasetRow>
 }
 
@@ -95,6 +97,7 @@ class DuckLakeMergeSession implements LakeMergeSession {
     this.assertOpen()
 
     let batch: StagedMergeChange[] = []
+    let position = 0
     for await (const change of changes) {
       const validationError = getDatasetMergeChangeValidationError(change, this.input.dataset)
       if (validationError) {
@@ -103,9 +106,11 @@ class DuckLakeMergeSession implements LakeMergeSession {
 
       batch.push({
         sequence: this.nextSequence,
+        position,
         change: cloneDatasetMergeChange(change),
       })
       this.nextSequence += 1n
+      position += 1
 
       if (batch.length >= MERGE_CHANGE_BATCH_SIZE) {
         await this.appendBatchToStagingTable(batch)
@@ -132,7 +137,8 @@ class DuckLakeMergeSession implements LakeMergeSession {
         appendDatasetRow(
           appender,
           this.input.dataset.schema,
-          staged.change.kind === "upsert" ? staged.change.row : staged.change.key
+          staged.change.kind === "upsert" ? staged.change.row : staged.change.key,
+          staged.position
         )
       }
     })

@@ -60,6 +60,7 @@ bun add @sixb/cli
 | `sixb db migrate` | Run adapter-owned database migrations ahead of, or instead of, role startup |
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
 | `sixb lake cleanup` | Expire replaced lake versions and delete the files only they read |
+| `sixb lake rejected` | Print the ingested deliveries refused after `ingest` answered, as JSON |
 | `sixb init [dir]` | Initialize a new sixb project in a directory. In a terminal, asks for the directory when it is left out. |
 | `sixb help` | Show help |
 | `sixb --version` | Show version |

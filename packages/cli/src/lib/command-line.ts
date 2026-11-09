@@ -186,6 +186,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Show what would change without changing it",
     kind: "boolean",
   },
+  dataset: {
+    syntax: "--dataset <id>",
+    summary: "Show one dataset's rejected deliveries (default: every dataset)",
+    kind: "string",
+  },
   "keep-versions-for": {
     syntax: "--keep-versions-for <duration>",
     summary:
@@ -234,6 +239,7 @@ export type LocalCommandId =
   | "db:prepare"
   | "lake:check"
   | "lake:cleanup"
+  | "lake:rejected"
   | "deploy"
   | "deploy:status"
   | "deploy:logs"
@@ -579,6 +585,11 @@ const commandTree: readonly CommandNode[] = [
         path: ["lake", "cleanup"],
         options: ["entry", "dry-run", "keep-versions-for", "delete-files-after"],
         rootHelpLabel: "lake cleanup",
+      }),
+      command("lake:rejected", "Show ingested deliveries refused after they were accepted", {
+        path: ["lake", "rejected"],
+        options: ["entry", "dataset"],
+        rootHelpLabel: "lake rejected",
       }),
     ],
   },

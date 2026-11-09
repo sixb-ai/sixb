@@ -61,6 +61,31 @@ Sixb packages are versioned independently. Each release entry names the packages
 - `sixb lake cleanup` defaults to the project's `lakeMaintenance` instead of 7 days, and runs until
   nothing is left instead of one pass.
 - Storage gains `lake_retention_runs`, and `onError` gains `lake.retention.failed`.
+- `sixb.datasets.ingest` now stores the changes and returns before they are in the dataset; a
+  worker writes what waits as one version. The result is `{ deliveryId, changes }`: `outcome`,
+  `version` and `rowsRead` are gone. Code that read the dataset right after `ingest` must be
+  triggered by the version instead: `defineSchedule("x").on(events.dataset(x).updated())`, attached
+  to the sync, pipeline or workflow. In tests, and in a server embedded with `createSixbServer`,
+  `ingest` still writes before it returns: pass `ingestFlush: false` if a lake worker runs for that
+  server's project. `sixb api` already does, so its changes wait for a lake worker, and `sixb check`
+  and Console › Lake health say so.
+- The `lake` worker writes ingested changes, and starts for any dataset with a primary key. A
+  deployment that lists its worker `types`, or a `sixb worker-group` given a list, must add `lake`:
+  both warn when it is missing, and until then changes wait, shown in Console › Lake health. No
+  orchestrator is needed for webhooks to reach the lake. Keep it on all the same: it reports changes
+  that wait, and asks again for a write the queue lost when no other `ingest` call comes.
+- `ingest` refuses, by throwing, a value the lake cannot hold when it can tell, such as a date
+  DuckDB does not read. One found later sets its call aside for a week: `sixb lake rejected` prints
+  it, and Console › Lake health counts it. Nothing else behind it waits.
+- During a rollout, a lake worker older than the API keeps retrying what it would refuse, until it
+  runs the same code. Finish the rollout: changes wait for it. Rolling back past a definition leaves
+  the same wait, until you roll forward. A rollback to 0.2.1 does not read
+  `dataset_ingest_deliveries` at all, so changes waiting there stay until you roll forward: stop
+  `ingest` traffic and let the inbox drain first.
+- Storage gains `dataset_ingest_deliveries` and `dataset_ingest_state`: migrate before starting the
+  new services. `onError` gains `dataset.ingest.flush.failed` and `dataset.ingest.rejected`, and the
+  error catalog `dataset.change_refused`. `@sixb/core/lake-storage` exports `LakeValueRefusedError`
+  and `DatasetSequenceConflictError`.
 
 ## 2026-11-07 — Sixb 0.2.2
 

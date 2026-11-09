@@ -128,6 +128,7 @@ const SHIPPED_MIGRATIONS = [
   "088-web-search-model-kind",
   "089-maintenance-heartbeats",
   "090-lake-retention-runs",
+  "091-dataset-ingest-inbox",
 ]
 
 const steps = postgresStorageMigrations.steps

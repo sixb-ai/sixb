@@ -66,7 +66,7 @@ Run each needed command as a separate managed process or container:
 | `bun sixb api` | Serve the HTTP API, WebSockets, and API docs. |
 | `bun sixb app` | Serve your app, with its built-in pages. |
 | `bun sixb orchestrator` | Run cron schedules, dispatch event-triggered work, and keep the project healthy. |
-| `bun sixb worker-group` | Run workers for the project's registered work, [lake cleanup](../datasets/overview.md#storage-maintenance) included. |
+| `bun sixb worker-group` | Run workers for the project's registered work, [lake cleanup](../datasets/overview.md#storage-maintenance) and [ingested changes](../datasets/ingestion.md) included. |
 | `bun sixb rules` | Evaluate rules, if used. |
 
 `app` serves the built bundle without loading `sixb.config.ts`, so it needs only the API's public origin, not the project's secrets or database access.

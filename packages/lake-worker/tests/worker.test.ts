@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
+  change,
   col,
   defineDataset,
   defineObjectType,
@@ -14,6 +15,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import type { LakeMaintenance, LakeRetentionReport } from "@sixb/core/lake-storage"
+import { createTestingScope } from "../../core/src/execution/scopes"
 import { LakeWorker, type LakeWorkerOptions } from "../src"
 
 const Room = defineObjectType({
@@ -23,6 +25,11 @@ const Room = defineObjectType({
 })
 
 const rooms = defineDataset("raw.rooms", { schema: [col("id", "string")] })
+
+const people = defineDataset("raw.people", {
+  schema: [col("id", "string"), col("name", "string")],
+  primaryKey: "id",
+})
 
 const PROJECT_ID = "lake-project"
 const MINUTE = 60_000
@@ -65,7 +72,11 @@ afterEach(async () => {
 })
 
 function createHost(
-  input: { lakeMaintenance?: LakeMaintenanceOptions; errors?: SixbErrorContext[] } = {}
+  input: {
+    ingest?: boolean
+    lakeMaintenance?: LakeMaintenanceOptions
+    errors?: SixbErrorContext[]
+  } = {}
 ) {
   const lakeStorage = new ControlledLakeStorage()
   lakes.push(lakeStorage)
@@ -73,7 +84,7 @@ function createHost(
   const sixb = new SixbHost({
     id: PROJECT_ID,
     ontology: [Room],
-    datasets: [rooms],
+    datasets: input.ingest ? [rooms, people] : [rooms],
     broker: new InMemoryBroker(),
     storage: new InMemoryStorage(),
     lakeStorage,
@@ -93,6 +104,44 @@ async function start(sixb: SixbHost, options?: LakeWorkerOptions) {
   workers.push(worker)
   await worker.start()
   return worker
+}
+
+/** Stores a delivery as `ingest` does, leaving its flush to the worker under test. */
+async function ingestPerson(sixb: SixbHost, id: string) {
+  await sixb.storage.datasetIngest?.append({
+    projectId: PROJECT_ID,
+    datasetId: people.id,
+    executionId: `exec-${id}`,
+    correlationId: `corr-${id}`,
+    definitionHash: "definition-1",
+    changes: [change.upsert(person(id))],
+  })
+}
+
+function person(id: string) {
+  return { id, name: `Person ${id}` }
+}
+
+/** Queues a flush for what waits, as the orchestrator's `ingest` pass does. */
+async function askLikeTheIngestPass(sixb: SixbHost, queues: InMemoryQueues) {
+  const summaries = await sixb.storage.datasetIngest!.summarize({ projectId: PROJECT_ID })
+
+  for (const { request, pendingDeliveries, leaseExpiresAt } of summaries) {
+    if (pendingDeliveries > 0 && leaseExpiresAt === null) await enqueueFlush(queues, request)
+  }
+}
+
+async function enqueueFlush(queues: InMemoryQueues, request: number) {
+  await queues.lake.enqueue({
+    projectId: PROJECT_ID,
+    jobs: [
+      {
+        id: `ingest-flush:${people.id}:${request}`,
+        type: "dataset.ingest.flush.requested",
+        payload: { datasetId: people.id },
+      },
+    ],
+  })
 }
 
 async function enqueueRetention(queues: InMemoryQueues, intervalStart: string) {
@@ -117,14 +166,219 @@ async function eventually(predicate: () => boolean, turns = 500): Promise<void> 
   throw new Error("Condition not reached.")
 }
 
+/** As `eventually`, for a condition read from storage. */
+async function eventuallyAsync(predicate: () => Promise<boolean>, turns = 500): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) {
+    if (await predicate()) return
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  throw new Error("Condition not reached.")
+}
+
+async function quietly<T>(run: () => Promise<T>): Promise<T> {
+  const warn = console.warn
+  console.warn = () => {}
+  try {
+    return await run()
+  } finally {
+    console.warn = warn
+  }
+}
+
 describe("LakeWorker", () => {
-  // Retention is its only job, so a second slot would only run two retentions at once. Reproduce:
-  // default `claimLimit` to 2 in worker.ts.
-  test("runs one job at a time unless told otherwise", () => {
+  // Reproduce: drop DEFAULT_CONCURRENCY from `claimLimit` in worker.ts.
+  test("runs four jobs at once unless told otherwise", () => {
     const { sixb } = createHost()
 
-    expect(new LakeWorker(sixb).concurrency).toBe(1)
+    expect(new LakeWorker(sixb).concurrency).toBe(4)
     expect(new LakeWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
+  // Reproduce: set DEFAULT_CONCURRENCY to 1 in worker.ts, and the flush waits behind the run; or
+  // drop the `retentionRunning` check, and each request takes a slot and runs beside the first.
+  test("flushes ingested changes beside a retention run, and runs one retention at a time", async () => {
+    const { sixb, lakeStorage, queues } = createHost({ ingest: true })
+    await start(sixb)
+    const now = Date.now()
+
+    // More requests than slots: one runs, the others find it running and leave it the work.
+    for (let minutes = 4; minutes >= 0; minutes -= 1) {
+      await enqueueRetention(queues, new Date(now - minutes * MINUTE).toISOString())
+    }
+    await eventually(() => lakeStorage.passes.length === 1)
+
+    await ingestPerson(sixb, "1")
+    await enqueueFlush(queues, 0)
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 1)
+
+    lakeStorage.passes[0]!.resolve()
+    await eventually(() => false, 50).catch(() => {})
+    expect(lakeStorage.passes).toHaveLength(1)
+  })
+
+  // Reproduce: read the retention runtime alone, and refuse a host that does not run it.
+  test("flushes a dataset that can be ingested, without retention", async () => {
+    const { sixb, lakeStorage, queues } = createHost({
+      ingest: true,
+      lakeMaintenance: { enabled: false },
+    })
+    await start(sixb)
+
+    await ingestPerson(sixb, "1")
+    await enqueueFlush(queues, 0)
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 1)
+  })
+
+  // Reproduce: return `{ kind: "fail" }` from `retryFlush` in worker.ts.
+  test("retries a failing flush sooner at first, and never fails its job", async () => {
+    jest.useFakeTimers()
+    const errors: SixbErrorContext[] = []
+    const { sixb, lakeStorage, queues } = createHost({ ingest: true, errors })
+    const retried: string[] = []
+    const retry = queues.lake.retry.bind(queues.lake)
+    queues.lake.retry = async (input) => {
+      retried.push(input.availableAt ?? "now")
+      await retry(input)
+    }
+    const fail = queues.lake.fail.bind(queues.lake)
+    let failed = 0
+    queues.lake.fail = async (input) => {
+      failed += 1
+      await fail(input)
+    }
+
+    const beginMerge = lakeStorage.beginMerge.bind(lakeStorage)
+    let offline = true
+    lakeStorage.beginMerge = async (input) => {
+      if (offline) throw new Error("lake offline")
+      return beginMerge(input)
+    }
+
+    await start(sixb)
+    await ingestPerson(sixb, "1")
+
+    await quietly(async () => {
+      await enqueueFlush(queues, 0)
+      await eventually(() => retried.length === 1)
+      expect(Date.parse(retried[0]!) - Date.now()).toBe(1_000)
+
+      jest.advanceTimersByTime(1_000)
+      await eventually(() => retried.length === 2)
+      expect(Date.parse(retried[1]!) - Date.now()).toBe(2_000)
+
+      offline = false
+      jest.advanceTimersByTime(2_000)
+      await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 1)
+    })
+
+    expect(failed).toBe(0)
+    expect(errors).toEqual([])
+  })
+
+  // The job that resumes a dead flush's batch runs under the open request, which only a new batch
+  // moves. Past its budget, asking again under that request names the job itself, and a queue
+  // ignores an id it remembers: the delivery joins the request, the `ingest` pass asks under the
+  // same id, and nothing flushes the dataset until the queue forgets the job.
+  // Reproduce: leave `request` as it is in `handOver` (provider.ts).
+  test("a job that resumes a batch and spends its budget leaves a job for what came after", async () => {
+    jest.useFakeTimers()
+    const { sixb, lakeStorage, queues } = createHost({ ingest: true })
+    const inbox = sixb.storage.datasetIngest!
+
+    await ingestPerson(sixb, "1")
+
+    const dead = await inbox.acquire({
+      projectId: PROJECT_ID,
+      datasetId: people.id,
+      owner: "dead-flush",
+      leaseMs: 0,
+    })
+    if (!dead.acquired) throw new Error("expected the test to hold the lease")
+    await inbox.takeBatch({ lease: dead.lease, flushId: "flush_dead", maxChanges: 10 })
+
+    // The resumed batch takes the whole budget, and a delivery arrives while it does.
+    const handler = sixb.withScope(createTestingScope({ projectId: PROJECT_ID }))
+    const beginMerge = lakeStorage.beginMerge.bind(lakeStorage)
+    lakeStorage.beginMerge = async (input) => {
+      lakeStorage.beginMerge = beginMerge
+      jest.setSystemTime(new Date(Date.now() + 31_000))
+      await handler.datasets.ingest(people, { changes: [change.upsert(person("2"))] })
+      return beginMerge(input)
+    }
+
+    await start(sixb)
+    await askLikeTheIngestPass(sixb, queues)
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length >= 1)
+    await askLikeTheIngestPass(sixb, queues)
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 2)
+    expect(await inbox.summarize({ projectId: PROJECT_ID })).toEqual([])
+  })
+
+  // No orchestrator runs here: the worker and the deliveries are all there is.
+  // Reproduce: join any open request in `requestFlushIn` (provider.ts).
+  test("a later delivery restarts ingestion after the queue lost a request", async () => {
+    jest.useFakeTimers()
+    const { sixb, lakeStorage, queues } = createHost({ ingest: true })
+    const handler = sixb.withScope(createTestingScope({ projectId: PROJECT_ID }))
+    const ingest = (id: string) =>
+      handler.datasets.ingest(people, { changes: [change.upsert(person(id))] })
+
+    await start(sixb)
+
+    const enqueue = queues.lake.enqueue.bind(queues.lake)
+    queues.lake.enqueue = async () => {
+      throw new Error("queue offline")
+    }
+    await quietly(() => ingest("1"))
+    queues.lake.enqueue = enqueue
+
+    jest.advanceTimersByTime(30_000)
+    await ingest("2")
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 1)
+    expect(await sixb.storage.datasetIngest!.summarize({ projectId: PROJECT_ID })).toEqual([])
+  })
+
+  // Reproduce: complete the job when the flush answers "busy", and the delivery waits for a
+  // request no job serves; or retry it when the other lease expires, and it waits up to a minute
+  // after that flush has finished.
+  test("tries again within a second when another flush holds the dataset", async () => {
+    jest.useFakeTimers()
+    const errors: SixbErrorContext[] = []
+    const { sixb, lakeStorage, queues } = createHost({ ingest: true, errors })
+    const retried: string[] = []
+    const retry = queues.lake.retry.bind(queues.lake)
+    queues.lake.retry = async (input) => {
+      retried.push(input.availableAt ?? "now")
+      await retry(input)
+    }
+
+    await ingestPerson(sixb, "1")
+    const inbox = sixb.storage.datasetIngest!
+    const held = await inbox.acquire({
+      projectId: PROJECT_ID,
+      datasetId: people.id,
+      owner: "another-worker",
+      leaseMs: 60_000,
+    })
+    if (!held.acquired) throw new Error("expected the test to hold the lease")
+
+    await start(sixb)
+    await enqueueFlush(queues, 0)
+
+    await eventually(() => retried.length === 1)
+    expect(Date.parse(retried[0]!) - Date.now()).toBe(1_000)
+    expect(await lakeStorage.listVersions(people.id)).toEqual([])
+
+    // The other flush finishes long before its lease would expire.
+    await inbox.release({ lease: held.lease })
+    jest.advanceTimersByTime(1_000)
+
+    await eventuallyAsync(async () => (await lakeStorage.listVersions(people.id)).length === 1)
+    expect(errors).toEqual([])
   })
 
   test("runs a retention request", async () => {

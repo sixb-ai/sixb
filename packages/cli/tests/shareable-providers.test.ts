@@ -60,13 +60,13 @@ describe("assertShareableProviders", () => {
     const queuesFailure = expectSixbCliError(() =>
       assertShareableProviders(sixbWith({ queues: new InMemoryQueues() }), "worker")
     )
-    expect(queuesFailure.remediation).toContain("@sixb/bullmq")
-    expect(queuesFailure.message).not.toContain("@sixb/bullmq")
+    expect(queuesFailure.remediation).toContain("@sixb/queues-bullmq")
+    expect(queuesFailure.message).not.toContain("@sixb/queues-bullmq")
 
     const brokerFailure = expectSixbCliError(() =>
       assertShareableProviders(sixbWith({ broker: new InMemoryBroker() }), "api")
     )
-    expect(brokerFailure.remediation).toContain("@sixb/redis or @sixb/nats")
+    expect(brokerFailure.remediation).toContain("@sixb/broker-redis or @sixb/broker-nats")
   })
 
   test("refuses a third-party provider on its own declaration", () => {

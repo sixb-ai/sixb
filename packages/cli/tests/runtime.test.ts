@@ -1,6 +1,7 @@
 import { describe, expect, jest, spyOn, test } from "bun:test"
 import { AgentWorker } from "@sixb/agent-worker"
 import {
+  change,
   col,
   type DatasetDefinition,
   type DatasetRow,
@@ -33,6 +34,7 @@ import { reportEventDeliveryFailure } from "@sixb/core/internal/error-reporting"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { LakeMaintenance, LakeRetentionOptions } from "@sixb/core/lake-storage"
 import { createTestSixb } from "@sixb/core/testing"
+import { createTestingScope } from "../../core/src/execution/scopes"
 import {
   migrateRuntimeStorage,
   startOrchestratorRuntime,
@@ -532,6 +534,85 @@ describe("startSixbRuntime", () => {
     expect(passes[0]).toMatchObject({ keepVersionsForMs: 7 * 24 * 60 * 60_000, dryRun: false })
 
     await runtime.stop()
+  })
+
+  // Reproduce: leave the LakeWorker out of startSixbRuntime in lib/runtime.ts; the delivery then
+  // waits, stored, for a worker that never comes.
+  test("co-hosts the flush of ingested changes, from ingestion to a dataset version", async () => {
+    const people = defineDataset("raw.crm.people", {
+      schema: [col("id", "string"), col("name", "string")],
+      primaryKey: "id",
+    })
+    const sixb = new SixbHost({
+      id: "cli-with-ingestion",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      datasets: [people],
+      lakeMaintenance: { enabled: false },
+    })
+
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
+    try {
+      expect(runtime.lakeWorker).not.toBeNull()
+
+      const committed = Promise.withResolvers<string>()
+      const unsubscribe = await sixb.events.subscribe(
+        { types: ["dataset.version.committed"] },
+        (events) => {
+          for (const event of events) {
+            if (event.type === "dataset.version.committed")
+              committed.resolve(event.payload.versionId)
+          }
+        }
+      )
+
+      // As a webhook handler ingests: the test SDK would write the changes itself.
+      const handler = sixb.withScope(createTestingScope({ projectId: sixb.id }))
+      await handler.datasets.ingest(people, {
+        changes: [change.upsert({ id: "1", name: "Ada" })],
+      })
+
+      const versionId = await committed.promise
+      unsubscribe()
+      expect((await sixb.lakeStorage.getLatestVersion(people.id))?.versionId).toBe(versionId)
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  // Reproduce: leave `ingest` out of the createReconciliationPasses call in lib/runtime.ts.
+  test("adds the ingest pass for a project that can ingest", async () => {
+    const people = defineDataset("raw.crm.people", {
+      schema: [col("id", "string"), col("name", "string")],
+      primaryKey: "id",
+    })
+    const sixb = new SixbHost({
+      id: "cli-with-ingest-pass",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      datasets: [people],
+      lakeMaintenance: { enabled: false },
+    })
+
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
+    try {
+      const beats = await waitFor(
+        () => sixb.storage.maintenanceHeartbeats!.list({ projectId: sixb.id }),
+        ([beat]) => beat?.passes.some((pass) => pass.lastSucceededAt !== null) ?? false
+      )
+
+      expect(beats[0]?.passes.map((pass) => pass.id)).toContain("ingest")
+    } finally {
+      await runtime.stop()
+    }
   })
 
   test("co-hosts projection routes and enqueues projection jobs from dataset commits", async () => {

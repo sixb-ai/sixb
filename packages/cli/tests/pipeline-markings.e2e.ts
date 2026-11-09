@@ -614,12 +614,42 @@ async function waitFor<T>(what: string, poll: () => Promise<T | null>): Promise<
 
 // ── Data ────────────────────────────────────────────────────
 
+/**
+ * Ingest, then wait for the version. The test SDK writes it before `ingest` returns, unless the
+ * lake worker running beside the test takes the flush first: then `ingest` returns without it.
+ */
+async function ingestAndWait(
+  host: SixbHost,
+  dataset: Parameters<ReturnType<typeof createTestSixb>["datasets"]["ingest"]>[0],
+  changes: Parameters<ReturnType<typeof createTestSixb>["datasets"]["ingest"]>[1]["changes"]
+) {
+  const committed = Promise.withResolvers<void>()
+  const unsubscribe = await host.events.subscribe(
+    { types: ["dataset.version.committed"] },
+    (events) => {
+      const written = events.some(
+        (event) =>
+          event.type === "dataset.version.committed" && event.payload.datasetId === dataset.id
+      )
+      if (written) committed.resolve()
+    }
+  )
+
+  try {
+    await createTestSixb(host).datasets.ingest(dataset, { changes })
+    await committed.promise
+  } finally {
+    unsubscribe()
+  }
+}
+
 async function seedSources(host: SixbHost) {
-  const sixb = createTestSixb(host)
-  const ingest = (dataset: Parameters<typeof sixb.datasets.ingest>[0], rows: object[]) =>
-    sixb.datasets.ingest(dataset, {
-      changes: rows.map((row) => change.upsert(row as Record<string, unknown>)),
-    })
+  const ingest = (dataset: Parameters<typeof ingestAndWait>[1], rows: object[]) =>
+    ingestAndWait(
+      host,
+      dataset,
+      rows.map((row) => change.upsert(row as Record<string, unknown>))
+    )
   const at = (day: string) => `2026-${day}T10:00:00.000Z`
 
   await ingest(rawCustomers, [
@@ -721,21 +751,19 @@ function reading(
 }
 
 async function ingestInvoice(host: SixbHost, invoiceId: string) {
-  await createTestSixb(host).datasets.ingest(rawInvoices, {
-    changes: [
-      change.upsert(
-        invoice(
-          invoiceId,
-          "c2",
-          `Visit ${invoiceId}`,
-          "90",
-          "units",
-          "eur",
-          "2026-08-01T10:00:00.000Z"
-        )
-      ),
-    ],
-  })
+  await ingestAndWait(host, rawInvoices, [
+    change.upsert(
+      invoice(
+        invoiceId,
+        "c2",
+        `Visit ${invoiceId}`,
+        "90",
+        "units",
+        "eur",
+        "2026-08-01T10:00:00.000Z"
+      )
+    ),
+  ])
 }
 
 /** A pipeline version written before Sixb recorded lineage: its producer names no columns. */

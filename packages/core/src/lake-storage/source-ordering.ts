@@ -29,6 +29,29 @@ export function datasetSequenceChange(
   }
 }
 
+/**
+ * Two changes for one key at one source sequence, with different content. The whole merge fails:
+ * no order between them is right. Lake providers throw this class for such a tie, so a caller can
+ * tell exactly which change to refuse: the first one at `key` and `sequence` with `content`.
+ */
+export class DatasetSequenceConflictError extends LakeStorageError {
+  override readonly name = "DatasetSequenceConflictError"
+
+  constructor(
+    readonly datasetId: string,
+    /** The primary key, as `encodeDatasetPrimaryKey` encodes it. */
+    readonly key: string,
+    /** The sequence, as `datasetSequenceChange` normalizes it. */
+    readonly sequence: string,
+    /** The refused change's content digest, as `datasetSequenceChange` gives it; null for a delete. */
+    readonly content: string | null
+  ) {
+    super(
+      `[SixbLake] Dataset '${datasetId}' has conflicting content at source sequence '${sequence}' for key ${key}.`
+    )
+  }
+}
+
 /** Process in submission order against a private copy; conflicts publish no partial state. */
 export function reconcileDatasetSequences(
   dataset: DatasetDefinition,
@@ -44,8 +67,11 @@ export function reconcileDatasetSequences(
       if (difference < 0n) continue
       if (difference === 0n) {
         if (current.content !== change.content) {
-          throw new LakeStorageError(
-            `[SixbLake] Dataset '${dataset.id}' has conflicting content at source sequence '${change.sequence}' for key ${change.key}.`
+          throw new DatasetSequenceConflictError(
+            dataset.id,
+            change.key,
+            change.sequence,
+            change.content
           )
         }
         continue

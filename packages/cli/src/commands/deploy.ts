@@ -10,7 +10,7 @@ import type {
   DeployRelease,
 } from "@sixb/core/deploy"
 import { loadDeployConfig } from "../lib/deploy-config"
-import { buildDeployRelease, lakeRetentionChecks } from "../lib/deploy-release"
+import { buildDeployRelease, lakeWorkChecks } from "../lib/deploy-release"
 import {
   commitHasProjectFile,
   deployer,
@@ -140,7 +140,7 @@ export async function runDeployCheck(options: { readonly json?: boolean; readonl
   const targetChecks = await withTask("deploy check", `Checking ${location(config)}`, () =>
     config.target.check(release, { name: config.name, projectPath })
   )
-  const checks = [...targetChecks, ...lakeRetentionChecks(config)]
+  const checks = [...targetChecks, ...lakeWorkChecks(config)]
   if (options.json) writeJson(checks)
   else
     await renderStatic(deployChecksView({ name: config.name, location: location(config), checks }))
@@ -309,9 +309,7 @@ async function publicKeys(value: string): Promise<string[]> {
 }
 
 function configWarnings(config: DeployConfig): readonly string[] {
-  return lakeRetentionChecks(config).map(
-    (check) => `${check.label}: ${check.detail} ${check.remedy}`
-  )
+  return lakeWorkChecks(config).map((check) => `${check.label}: ${check.detail} ${check.remedy}`)
 }
 
 function blocksDeploy(check: DeployCheck): boolean {

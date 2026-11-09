@@ -40,6 +40,8 @@ export const lakeFixture = {
   retentionPassesWithMore: 0,
   /** A dataset version a projection applied, or "unreadable" when reading them fails. */
   appliedVersion: undefined as string | undefined,
+  /** A row a flush refused, kept with what it would take to send it again. */
+  rejectedRow: undefined as Record<string, unknown> | undefined,
   events: [] as Record<string, unknown>[],
 }
 
@@ -99,9 +101,42 @@ function unansweredBeat() {
   }
 }
 
+/** What a flush that refuses the row's delivery leaves behind. */
+async function refuse(storage: InMemoryStorage, row: Record<string, unknown>): Promise<void> {
+  const inbox = storage.datasetIngest
+  const place = { projectId: "cli-lake-project", datasetId: things.id }
+  const { delivery } = await inbox.append({
+    ...place,
+    executionId: "exec-1",
+    correlationId: "corr-1",
+    definitionHash: "definition-1",
+    changes: [{ kind: "upsert", row }],
+  })
+
+  const held = await inbox.acquire({ ...place, owner: "fixture", leaseMs: 60_000 })
+  if (!held.acquired) throw new Error("[Fixture] Expected to hold the dataset.")
+
+  await inbox.takeBatch({ lease: held.lease, flushId: "flush-1", maxChanges: 10 })
+  await inbox.reject({
+    lease: held.lease,
+    flushId: "flush-1",
+    deliveryId: delivery.id,
+    reason: "Refused by the fixture.",
+  })
+}
+
 function createStorage(): InMemoryStorage {
   const storage = new InMemoryStorage()
   if (lakeFixture.unansweredRequest) void storage.maintenanceHeartbeats.record(unansweredBeat())
+
+  const rejectedRow = lakeFixture.rejectedRow
+  if (rejectedRow) {
+    const listRejected = storage.datasetIngest.listRejected.bind(storage.datasetIngest)
+    storage.datasetIngest.listRejected = async (input) => {
+      await refuse(storage, rejectedRow)
+      return listRejected(input)
+    }
+  }
 
   const versionId = lakeFixture.appliedVersion
   if (!versionId) return storage
