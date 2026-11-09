@@ -48,6 +48,7 @@ import {
   ArtifactCommentSchema,
   ArtifactErrorResponseSchema,
   ArtifactFrameResponseSchema,
+  ArtifactHolderListResponseSchema,
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
@@ -281,7 +282,7 @@ function notFound(set: RouteSet) {
 
 /**
  * Why a read found nothing: 404 when there is no such artifact, 403 `not_shared` when there is one
- * the caller cannot read, so a page can say it is not shared in this conversation.
+ * the caller cannot read, so a page can say it is not shared with them.
  */
 async function refusal(context: unknown, artifactId: string, set: RouteSet) {
   return refusalFor(await requireRequestSixb(context).artifacts.access(artifactId), set)
@@ -302,7 +303,7 @@ function refusalFor(access: ArtifactAccess | null, set: RouteSet) {
 
   set.status = 403
   return {
-    error: "Artifact not shared in a conversation you read",
+    error: "Artifact not shared with you",
     code: "not_shared" as const,
   }
 }
@@ -666,6 +667,37 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
+    .get(
+      "/api/artifacts/:artifactId/holders",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const holders = await requireRequestSixb(context).artifacts.holders(artifactId)
+          if (!holders) return await refusal(context, artifactId, context.set)
+
+          return ArtifactHolderListResponseSchema.parse(holders)
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ArtifactHolderListResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "List the objects that hold an artifact",
+          description:
+            "The objects whose property holds the artifact, among those you read with that property, in a stable order. Whoever reads such an object reads the artifact.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "listArtifactHolders",
+          security: accessTokenSecurityRequirement("listArtifactHolders"),
+        },
+      }
+    )
     .delete(
       "/api/artifacts/:artifactId",
       async (context) => {
@@ -864,7 +896,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Update an artifact",
           description:
-            "Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.",
+            "Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares, its requester owns, or an object its requester edits holds; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "updateArtifact",
           security: accessTokenSecurityRequirement("updateArtifact"),

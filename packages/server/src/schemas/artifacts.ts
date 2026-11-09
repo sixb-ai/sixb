@@ -1,4 +1,4 @@
-import { ARTIFACT_KINDS, ARTIFACT_STATE_LIMITS } from "@sixb/core/artifacts"
+import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_KINDS, ARTIFACT_STATE_LIMITS } from "@sixb/core/artifacts"
 import { ARTIFACT_RESTORE_POINTS } from "@sixb/core/internal/storage"
 import { z } from "zod"
 import { ErrorResponseSchema, PrincipalSchema } from "./common"
@@ -232,7 +232,7 @@ export const ArtifactResponseSchema = z.object({
   access: z
     .enum(["owner", "update", "read"])
     .describe(
-      "What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it, or only read as an observer of one"
+      "What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it or an editor of an object that holds it, or only read as an observer of such a conversation or a reader of such an object"
     ),
 })
 
@@ -311,6 +311,23 @@ export const ArtifactRestorePointListResponseSchema = z.object({
     .describe(`Newest first: an artifact keeps its last ${ARTIFACT_RESTORE_POINTS}`),
 })
 
+export const ArtifactHolderSchema = z.object({
+  objectTypeId: z.string(),
+  primaryId: z.string(),
+  propertyId: z.string().describe("The property whose value holds the artifact"),
+  title: z
+    .string()
+    .optional()
+    .describe("The object's value of its type's search title, when it has one you read"),
+})
+
+export const ArtifactHolderListResponseSchema = z.object({
+  holders: z
+    .array(ArtifactHolderSchema)
+    .describe(`The first ${ARTIFACT_HOLDERS_LIMIT} objects you read that hold the artifact`),
+  hasMore: z.boolean().describe("More objects you read hold it"),
+})
+
 export const ArtifactChangeResponseSchema = z.object({
   artifact: ArtifactSchema,
   version: ArtifactVersionSchema,
@@ -373,7 +390,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({

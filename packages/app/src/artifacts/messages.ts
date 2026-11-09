@@ -38,7 +38,8 @@ export const en = {
     notFound: "This artifact is not available",
     notFoundDescription: "It may have been deleted.",
     notShared: "This artifact isn't shared with you",
-    notSharedDescription: "It belongs to someone else, and no conversation you read shares it.",
+    notSharedDescription:
+      "It belongs to someone else, and no conversation or object you can see shares it.",
     storageUnavailable: "Artifact storage is not available.",
     loadFailed: "This artifact could not be loaded.",
     you: "You",
@@ -630,7 +631,7 @@ export const fr: Translation<ArtifactMessages> = {
     notFoundDescription: "Il a peut-être été supprimé.",
     notShared: "Cet artefact n’est pas partagé avec vous",
     notSharedDescription:
-      "Il appartient à quelqu’un d’autre, et aucune conversation que vous lisez ne le partage.",
+      "Il appartient à quelqu’un d’autre, et aucune conversation ni aucun objet que vous voyez ne le partage.",
     storageUnavailable: "Le stockage des artefacts n’est pas disponible.",
     loadFailed: "Impossible de charger cet artefact.",
     you: "Vous",

@@ -530,6 +530,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
   },
   {
+    operationId: "listArtifactHolders",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/holders",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "deleteArtifact",
     method: "DELETE",
     path: "/api/artifacts/:artifactId",

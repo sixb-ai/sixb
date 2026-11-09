@@ -31,7 +31,7 @@ import { ArtifactRequestError } from "./errors"
 import { announceArtifactUpdates } from "./events"
 import { type ArtifactHolding, readableHoldings } from "./holders"
 import type { ArtifactKind } from "./kinds"
-import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { firstArtifactDocument, keepsDocument } from "./live/state"
 import { invalidArtifact, readArtifactText } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
@@ -255,9 +255,6 @@ export interface ArtifactHolderObject {
   /** The object's value of its type's `search.title`, when it has one the caller reads. */
   readonly title?: string
 }
-
-/** How many of an artifact's holders `holders` returns. */
-export const ARTIFACT_HOLDERS_LIMIT = 20
 
 export interface ArtifactStateValue {
   readonly key: string
