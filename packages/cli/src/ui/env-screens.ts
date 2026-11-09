@@ -27,15 +27,49 @@ export function envSetView(input: {
   )
 }
 
+/** What `init` did with `sixb.env.ts`: wrote names into it, left it to the author, or had none to add. */
+export type EnvInitConfig =
+  | { readonly kind: "written"; readonly names: number }
+  | { readonly kind: "paste"; readonly names: number; readonly lines: readonly string[] }
+  | { readonly kind: "unchanged" }
+
 export function envInitView(input: {
-  readonly uploaded: readonly { readonly env: EnvName; readonly count: number }[]
-  readonly names: number
+  /** Per environment: how many values were sent, and how many it had already. */
+  readonly uploaded: readonly {
+    readonly env: EnvName
+    readonly count: number
+    readonly already: number
+  }[]
+  readonly config: EnvInitConfig
 }): string {
-  const uploaded = input.uploaded.map(({ env, count }) => `${plural(count, "variable")} to ${env}`)
+  const sent = input.uploaded.filter(({ count }) => count > 0)
+  const had = input.uploaded.filter(({ already }) => already > 0)
+  const { config } = input
   return screen(
     stack(
-      headline("ok", `Uploaded ${uploaded.join(" and ")}`),
-      headline("ok", `Wrote sixb.env.ts with ${plural(input.names, "name")}`)
+      sent.length > 0
+        ? headline(
+            "ok",
+            `Uploaded ${sent.map(({ env, count }) => `${plural(count, "variable")} to ${env}`).join(" and ")}`
+          )
+        : headline("ok", "Nothing to upload"),
+      had.length > 0
+        ? tone.muted(
+            `Already there: ${had.map(({ env, already }) => `${already} in ${env}`).join(", ")}`
+          )
+        : null,
+      config.kind === "written"
+        ? headline("ok", `Wrote sixb.env.ts with ${plural(config.names, "name")}`)
+        : null,
+      config.kind === "paste"
+        ? stack(
+            headline("warn", `Add ${plural(config.names, "name")} to \`vars\` in sixb.env.ts`),
+            tone.muted(
+              "It isn't an empty `vars: {}`, so it was left alone. A first guess at each:"
+            ),
+            config.lines.join("\n")
+          )
+        : null
     )
   )
 }
