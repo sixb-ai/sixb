@@ -1,8 +1,8 @@
 /** What one version may hold. Publishing refuses a version over any of these. */
 export const ARTIFACT_LIMITS = {
-  maxFiles: 200,
+  maxFiles: 500,
   maxFileBytes: 25 * 1024 * 1024,
-  maxVersionBytes: 100 * 1024 * 1024,
+  maxVersionBytes: 250 * 1024 * 1024,
   maxPathLength: 512,
   maxTitleLength: 200,
   /** A document's Markdown is parsed whole when it is published. */
@@ -26,8 +26,8 @@ export const ARTIFACT_LIMITS = {
   maxSlides: 100,
   /** A canvas's items, its live boards, and where they may sit, in pixels. */
   maxCanvasBytes: 512 * 1024,
-  maxCanvasItems: 500,
-  maxCanvasBoards: 40,
+  maxCanvasItems: 1000,
+  maxCanvasBoards: 100,
   minCanvasItemSize: 40,
   maxCanvasItemSize: 8000,
   maxCanvasPosition: 100_000,
@@ -55,4 +55,20 @@ export const ARTIFACT_STATE_LIMITS = {
   maxValueBytes: 64 * 1024,
   maxKeys: 100,
   maxBytes: 1024 * 1024,
+} as const
+
+/**
+ * The restore points each artifact keeps: one before each Agent turn's first write to it, and one
+ * before each restore. Taking one more forgets the oldest.
+ */
+export const ARTIFACT_RESTORE_POINTS = 20
+
+/** What an artifact's comments may hold. */
+export const ARTIFACT_COMMENT_LIMITS = {
+  /** Comments and replies, together. */
+  maxComments: 1_000,
+  /** A comment's words, in characters. */
+  maxBodyLength: 4_000,
+  /** The words that name the element it is about. */
+  maxLabelLength: 120,
 } as const

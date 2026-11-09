@@ -9,7 +9,8 @@ import { fileView } from "./file-view"
 import { ArtifactKindIcon, type ArtifactKindName } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "./queries"
-import { useCanvas } from "./renderers/canvas/renderer"
+import { boardPreviewUrl, useBoardPreviews } from "./renderers/canvas/previews"
+import { useCanvas, useCanvasMode } from "./renderers/canvas/renderer"
 import { CanvasThumbnail } from "./renderers/canvas/thumbnail"
 import { PageScreen } from "./renderers/page"
 import { chartData, chartReadsLocked } from "./renderers/sheet/chart-data"
@@ -165,11 +166,24 @@ function VersionPreview({
   )
 }
 
-/** A canvas drawn small, once its `canvas.json` is read. */
+/** A canvas drawn small, once its `canvas.json` is read, its boards as their small pictures. */
 function CanvasPreview({ version }: { readonly version: ArtifactVersion }) {
   const canvas = useCanvas(version)
+  const previews = useBoardPreviews(version)
+  const mode = useCanvasMode(version)
+
+  const pictures = useMemo(
+    () =>
+      new Map(
+        Object.entries(previews).flatMap(([board, status]) =>
+          status === "ready" ? [[board, boardPreviewUrl(version, board, mode, "small")]] : []
+        )
+      ),
+    [previews, version, mode]
+  )
+
   if (canvas === undefined) return <Skeleton pulse />
-  return canvas ? <CanvasThumbnail canvas={canvas} /> : <Skeleton />
+  return canvas ? <CanvasThumbnail canvas={canvas} pictures={pictures} /> : <Skeleton />
 }
 
 function DocumentPreview({ version }: { readonly version: ArtifactVersion }) {

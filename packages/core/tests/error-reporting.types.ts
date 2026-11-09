@@ -43,6 +43,7 @@ type _errorContextIsDiscriminated = Expect<
     | "lake.retention.failed"
     | "dataset.ingest.flush.failed"
     | "dataset.ingest.rejected"
+    | "artifact.live_write.failed"
   >
 >
 type _errorContextAlwaysDeduplicable = Expect<Equal<SixbErrorContext["notificationId"], string>>

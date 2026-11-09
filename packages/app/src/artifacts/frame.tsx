@@ -27,9 +27,11 @@ import { type ArtifactVersion, useArtifactTheme } from "./queries"
 
 /** Asks the deck in the frame to do something; resolves when it has. */
 export interface ArtifactFrameHandle {
+  /** `transfer` hands objects over with the request, as `edit` hands over its port. */
   send<Method extends FrameRequest["method"]>(
     method: Method,
-    params: Extract<FrameRequest, { method: Method }>["params"]
+    params: Extract<FrameRequest, { method: Method }>["params"],
+    transfer?: Transferable[]
   ): Promise<void>
 }
 
@@ -38,6 +40,13 @@ const FRAME_REUSE_MS = 40 * 60 * 1000
 
 /** How long a deck has to say it is ready before a frame that reports failure gives up on it. */
 const READY_TIMEOUT_MS = 20_000
+
+/**
+ * How long a frame that finished loading has left to say it is ready: the runtime says so once the
+ * page is parsed, before it loads, so one that loaded without saying it is not the page, such as
+ * the browser's error page for a frame it blocked.
+ */
+const LOADED_READY_MS = 2_000
 
 /**
  * A version in a sandboxed frame, served from the API under a short-lived link. The frame has an
@@ -67,6 +76,7 @@ export function ArtifactFrame({
   handle,
   start,
   decorative = false,
+  editable = false,
   fallback,
   failure,
   overlay,
@@ -79,6 +89,11 @@ export function ArtifactFrame({
   readonly start?: FrameStart
   /** A picture of the deck, as a thumbnail is: it takes no focus, clicks, or reading. */
   readonly decorative?: boolean
+  /**
+   * A canvas's board served for editing, its elements marked by address: the frame then picks
+   * and types into them once asked to with `edit`.
+   */
+  readonly editable?: boolean
   readonly onEvent?: (event: FrameEvent) => void
   readonly className?: string
   /** What shows where the frame will be while it loads, and under it as it fades in. */
@@ -107,6 +122,7 @@ export function ArtifactFrame({
   const [ready, setReady] = useState<string | null>(null)
   const [shown, setShown] = useState<string | null>(null)
   const [timedOut, setTimedOut] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState<string | null>(null)
   const reportsFailure = failure !== undefined
   const queries = useQueryClient()
   // What the frame shows when it calls: a pinned version runs that version's queries.
@@ -124,14 +140,16 @@ export function ArtifactFrame({
 
   // Each frame keeps the link it loaded until it loads again: every frame of a version shares the
   // query, and a link minted for a later mount would otherwise load every mounted frame again, at
-  // its start.
-  const identity = `${version.artifactId}@${version.version}`
+  // its start. A link serves one revision, so an open version that changed loads the new one.
+  const identity = frameIdentity(version)
   const [kept, setKept] = useState<{ readonly identity: string; readonly path: string } | null>(
     null
   )
   if (frame.data && kept?.identity !== identity) setKept({ identity, path: frame.data.path })
   const path = kept?.identity === identity ? kept.path : undefined
-  const source = path ? `${frameUrl(path, entry)}${frameStartHash(start ?? {})}` : undefined
+  const source = path
+    ? `${frameUrl(path, entry)}${editable ? "?sixb-edit" : ""}${frameStartHash(start ?? {})}`
+    : undefined
   const sourceRef = useRef(source)
   sourceRef.current = source
   const pathRef = useRef(path)
@@ -139,7 +157,7 @@ export function ArtifactFrame({
 
   const readNames = read.source === source ? read.names : NO_QUERIES
 
-  const send = useCallback<ArtifactFrameHandle["send"]>((method, params) => {
+  const send = useCallback<ArtifactFrameHandle["send"]>((method, params, transfer = []) => {
     const target = iframe.current?.contentWindow
     if (!target) return Promise.reject(new Error("[SixbApp] The frame is not loaded."))
     nextId.current += 1
@@ -147,7 +165,7 @@ export function ArtifactFrame({
     return new Promise<void>((resolve, reject) => {
       pending.current.set(id, { resolve, reject })
       // The frame's origin is opaque, so a target origin cannot name it.
-      target.postMessage({ protocol: FRAME_PROTOCOL, id, method, params }, "*")
+      target.postMessage({ protocol: FRAME_PROTOCOL, id, method, params }, "*", transfer)
     })
   }, [])
   useImperativeHandle(handle, () => ({ send }), [send])
@@ -230,7 +248,8 @@ export function ArtifactFrame({
           return
         }
         const event = parseFrameEvent(data)
-        if (!event) return
+        // Editing reports only through the port it was handed: the page's scripts post here too.
+        if (!event || event.event.startsWith("edit.")) return
         if (event.event === "link") {
           openWebLink(iframe.current, event.params.url)
           return
@@ -252,7 +271,7 @@ export function ArtifactFrame({
 
     if (link.path === pathRef.current) return send("reload", {})
 
-    setKept({ identity: `${version.artifactId}@${version.version}`, path: link.path })
+    setKept({ identity: frameIdentity(version), path: link.path })
   }, [queries, send, version])
 
   useQueryChanges(version, readNames, (name) => {
@@ -300,9 +319,12 @@ export function ArtifactFrame({
 
   useEffect(() => {
     if (!reportsFailure || !source || ready === source) return
-    const timer = setTimeout(() => setTimedOut(source), READY_TIMEOUT_MS)
+    const timer = setTimeout(
+      () => setTimedOut(source),
+      loaded === source ? LOADED_READY_MS : READY_TIMEOUT_MS
+    )
     return () => clearTimeout(timer)
-  }, [reportsFailure, source, ready])
+  }, [reportsFailure, source, ready, loaded])
   // A link that fails for a later mount leaves a frame that has one as it is.
   const failed =
     reportsFailure && (source === undefined ? frame.isError : timedOut === source && !isReady)
@@ -317,6 +339,7 @@ export function ArtifactFrame({
           src={source}
           title={title}
           loading={reportsFailure ? "eager" : "lazy"}
+          onLoad={() => setLoaded(source)}
           className={cn(
             "absolute inset-0 size-full border-0 bg-transparent transition-opacity duration-200 ease-out motion-reduce:transition-none",
             shown === source ? "opacity-100" : "opacity-0"
@@ -356,10 +379,18 @@ function openWebLink(frame: HTMLIFrameElement, url: string): void {
 
 const NO_QUERIES: readonly string[] = []
 
-/** A version's frame link, shared by its frames and reused while it has most of its hour left. */
+/** What a frame shows: a version at one revision, which its link serves. */
+function frameIdentity(version: ArtifactVersion): string {
+  return `${version.artifactId}@${version.version}r${version.revision}`
+}
+
+/**
+ * A version's frame link, shared by its frames and reused while it has most of its hour left. A
+ * link serves the revision it was minted at: an open version that changed asks for another.
+ */
 function frameLink(version: ArtifactVersion) {
   return queryOptions({
-    queryKey: ["artifact-frame", version.artifactId, version.version],
+    queryKey: frameLinkKey(version),
     queryFn: async () => {
       const { data } = await createArtifactFrame({
         path: { artifactId: version.artifactId, version: String(version.version) },
@@ -371,6 +402,13 @@ function frameLink(version: ArtifactVersion) {
     gcTime: FRAME_REUSE_MS,
     retry: false,
   })
+}
+
+/** Where a version's frame link is cached, at its revision; a test seeds it there. */
+export function frameLinkKey(
+  version: Pick<ArtifactVersion, "artifactId" | "version" | "revision">
+) {
+  return ["artifact-frame", version.artifactId, version.version, version.revision] as const
 }
 
 /** The frame's entry on the API, which may be another origin than the app's. */

@@ -47,6 +47,18 @@
       "import": "./dist/artifacts/index.js",
       "default": "./dist/artifacts/index.js"
     },
+    "./artifacts/live": {
+      "types": "./dist/artifacts/live/index.d.ts",
+      "bun": "./src/artifacts/live/index.ts",
+      "import": "./dist/artifacts/live/index.js",
+      "default": "./dist/artifacts/live/index.js"
+    },
+    "./artifacts/live/protocol": {
+      "types": "./dist/artifacts/live/protocol.d.ts",
+      "bun": "./src/artifacts/live/protocol.ts",
+      "import": "./dist/artifacts/live/protocol.js",
+      "default": "./dist/artifacts/live/protocol.js"
+    },
     "./auth/strategy": {
       "types": "./dist/auth/strategy.d.ts",
       "bun": "./src/auth/strategy.ts",
@@ -136,6 +148,12 @@
       "bun": "./src/artifacts/frames/index.ts",
       "import": "./dist/artifacts/frames/index.js",
       "default": "./dist/artifacts/frames/index.js"
+    },
+    "./internal/artifacts/live": {
+      "types": "./dist/artifacts/live/server.d.ts",
+      "bun": "./src/artifacts/live/server.ts",
+      "import": "./dist/artifacts/live/server.js",
+      "default": "./dist/artifacts/live/server.js"
     },
     "./internal/artifacts/publish": {
       "types": "./dist/artifacts/publish/index.d.ts",
@@ -525,7 +543,9 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5.7.0"
+    "happy-dom": "^20.11.6",
+    "typescript": "^5.7.0",
+    "yjs": "13.6.33"
   },
   "license": "MIT",
   "engines": {
@@ -539,5 +559,11 @@
     "src",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "parse5": "8.0.1"
+  },
+  "peerDependencies": {
+    "yjs": "^13.6.33"
+  }
 }

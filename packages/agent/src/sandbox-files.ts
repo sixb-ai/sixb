@@ -187,6 +187,58 @@ export async function readSandboxFile(
   return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 }
 
+/** One file of {@link readSandboxFiles}: its bytes, or why it could not be read. */
+export type SandboxFileRead =
+  | { readonly path: string; readonly bytes: Uint8Array }
+  | { readonly path: string; readonly error: SandboxFileErrorReason }
+
+/**
+ * Read many regular files in one command, with the checks {@link readSandboxFile} makes on each.
+ * A file that fails is reported in its place and the others are read: one per path, in order.
+ * Everything comes back on one stdout, so keep the files' total to what a command prints.
+ */
+export async function readSandboxFiles(
+  handle: AgentSandboxHandle,
+  input: SandboxCommandOptions & {
+    /** Absolute paths, as `resolveSandboxPath` returns them. */
+    readonly paths: readonly string[]
+    /** The most each file may hold. */
+    readonly maxBytes: number
+  }
+): Promise<SandboxFileRead[]> {
+  if (input.paths.length === 0) return []
+
+  const result = await runScript(handle, READ_SANDBOX_FILES_SCRIPT, input, {
+    SIXB_READ_PATHS: input.paths
+      .map((path) => Buffer.from(path, "utf-8").toString("base64"))
+      .join("\n"),
+    SIXB_READ_ROOTS: sandboxRoots(handle).join("\n"),
+    SIXB_READ_MAX_BYTES: String(input.maxBytes),
+  })
+  if (result.exitCode !== 0) {
+    throw new SandboxFileError(
+      "failed",
+      `files could not be read (${result.stderr.trim() || `exit ${result.exitCode}`})`
+    )
+  }
+
+  const lines = result.stdout.split("\n")
+  return input.paths.map((path, index) => {
+    const [status = "", size = "", data = ""] = (lines[index] ?? "").split("\t")
+    if (status !== "ok") {
+      return { path, error: isReadError(status) ? status : "failed" }
+    }
+
+    const bytes = Buffer.from(data, "base64")
+    if (bytes.byteLength !== Number(size)) return { path, error: "changed" }
+    return { path, bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) }
+  })
+}
+
+function isReadError(status: string): status is SandboxFileErrorReason {
+  return status === "not_found" || status === "outside_root" || status === "too_large"
+}
+
 /** What a path names once its symbolic links are followed. */
 export type SandboxPathEntry =
   | {
@@ -303,6 +355,40 @@ printf '%s\\n%s\\n' "$kind" "$(printf '%s' "$real" | base64 | tr -d '\\n')"`
 
 // Prints the file's size on the first line and its bytes as base64 on the second, so the caller
 // can tell a file that changed between the two reads.
+// One line per path, in order: `ok<TAB>size<TAB>base64`, or the reason it was not read.
+const READ_SANDBOX_FILES_SCRIPT = `# sixb-read-sandbox-files
+set -uo pipefail
+max_bytes="\${SIXB_READ_MAX_BYTES:?}"
+real_roots=()
+while IFS= read -r root; do
+  real_root="$(cd -P -- "$root" 2>/dev/null && pwd)" && real_roots+=("$real_root")
+done <<< "\${SIXB_READ_ROOTS:?}"
+while IFS= read -r encoded; do
+  requested="$(printf '%s' "$encoded" | base64 -d)"
+  if [ ! -f "$requested" ] || [ -L "$requested" ]; then
+    printf 'not_found\\n'
+    continue
+  fi
+  parent="$(cd -P -- "$(dirname -- "$requested")" && pwd)"
+  resolved="$parent/$(basename -- "$requested")"
+  inside=0
+  for real_root in "\${real_roots[@]}"; do
+    case "$resolved" in "$real_root"/*) inside=1 ;; esac
+  done
+  if [ "$inside" != 1 ]; then
+    printf 'outside_root\\n'
+    continue
+  fi
+  size="$(wc -c < "$resolved" | tr -d ' ')"
+  if [ "$size" -gt "$max_bytes" ]; then
+    printf 'too_large\\n'
+    continue
+  fi
+  printf 'ok\\t%s\\t' "$size"
+  head -c "$max_bytes" "$resolved" | base64 | tr -d '\\n'
+  printf '\\n'
+done <<< "\${SIXB_READ_PATHS:?}"`
+
 const READ_SANDBOX_FILE_SCRIPT = `# sixb-read-sandbox-file
 set -euo pipefail
 requested="$(printf '%s' "\${SIXB_READ_PATH_B64:?}" | base64 -d)"

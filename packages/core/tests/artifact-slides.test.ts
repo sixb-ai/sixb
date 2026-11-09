@@ -11,7 +11,7 @@ import {
   parseFrameEvent,
 } from "../src/artifacts/frames/protocol"
 import { frameRuntime } from "../src/artifacts/frames/runtime"
-import { ARTIFACT_STATE_LIMITS } from "../src/artifacts/limits"
+import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "../src/artifacts/limits"
 import { isArtifactQueryName } from "../src/artifacts/queries"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
@@ -320,6 +320,7 @@ describe("the frame runtime", () => {
       listeners.get("message")?.({
         source: parent,
         data: { protocol: FRAME_PROTOCOL, id, method: "query.changed", params },
+        stopImmediatePropagation: () => {},
       })
     request(1, { name: "overdue" })
     request(2, { name: "../state" })
@@ -484,6 +485,91 @@ describe("the frame runtime", () => {
     // A link within the page, or one the page's own script handled, is the page's.
     expect(follow("#totals")).toEqual({ sent: [], stopped: false })
     expect(follow("https://example.com", true)).toEqual({ sent: [], stopped: false })
+  })
+
+  test("tells the app the words of what the reader presses in the page", () => {
+    // An opened board follows the arrow its canvas labels with them. Reproduce by dropping the
+    // runtime's press: a button posts nothing.
+    let click: ((event: unknown) => void) | undefined
+    const posted: Record<string, unknown>[] = []
+    const window: Record<string, unknown> = {
+      location: { hash: "" },
+      innerWidth: 1280,
+      innerHeight: 720,
+      addEventListener: () => {},
+      postMessage: (message: Record<string, unknown>) => posted.push(message),
+    }
+    window.parent = window
+    const document = {
+      documentElement: { classList: { add: () => {} }, dataset: {}, style: {} },
+      currentScript: { getAttribute: () => "page" },
+      readyState: "complete",
+      baseURI: "https://api.sixb.test/api/artifact-frames/token/boards/home.html",
+      body: null,
+      addEventListener: (name: string, listener: (event: unknown) => void) => {
+        if (name === "click") click = listener
+      },
+      querySelectorAll: () => [],
+    }
+    const ResizeObserver = class {
+      observe() {}
+    }
+    new Function(
+      "window",
+      "document",
+      "ResizeObserver",
+      "requestAnimationFrame",
+      `(${frameRuntime.toString()})()`
+    )(window, document, ResizeObserver, () => 0)
+
+    /** A click on an element, as the runtime hears it: what it posts. */
+    const press = (element: { tag: "button" | "a"; href?: string; text: string }) => {
+      posted.length = 0
+      const node = {
+        innerText: element.text,
+        getAttribute: (name: string) => (name === "href" ? (element.href ?? null) : null),
+      }
+      const matches = (selector: string) =>
+        element.tag === "button"
+          ? selector.includes("button")
+          : element.href !== undefined &&
+            (selector.includes("a[href]") ||
+              (element.href.startsWith("#") && selector.includes('a[href^="#"]')))
+      click?.({
+        target: { closest: (selector: string) => (matches(selector) ? node : null) },
+        defaultPrevented: false,
+        preventDefault() {},
+      })
+      return posted.flatMap((message) => parseFrameEvent(message) ?? [])
+    }
+
+    // Its words as the reader reads them: trimmed, one space between them.
+    expect(press({ tag: "button", text: "  Get\n   started " })).toEqual([
+      { protocol: FRAME_PROTOCOL, event: "press", params: { text: "Get started" } },
+    ])
+    expect(press({ tag: "a", href: "#", text: "Continue" })).toEqual([
+      { protocol: FRAME_PROTOCOL, event: "press", params: { text: "Continue" } },
+    ])
+
+    // A link out of the page is a link, nothing more; a button without words, or with more than
+    // a label holds, says nothing.
+    expect(press({ tag: "a", href: "https://example.com", text: "Docs" })).toEqual([
+      { protocol: FRAME_PROTOCOL, event: "link", params: { url: "https://example.com/" } },
+    ])
+    expect(press({ tag: "button", text: " " })).toEqual([])
+    expect(press({ tag: "button", text: "x".repeat(121) })).toEqual([])
+
+    // The runtime repeats the label's limit, which the app holds it to; its source as served may
+    // have it inlined.
+    const source = frameRuntime.toString()
+    const limit = ARTIFACT_LIMITS.maxCanvasLabelLength
+    expect(source).toMatch(new RegExp(`length <= (MAX_LABEL_LENGTH|${limit})\\b`))
+    const declared = /MAX_LABEL_LENGTH = (\d+)/.exec(source)?.[1]
+    if (declared !== undefined) expect(Number(declared)).toBe(limit)
+    const text = "y".repeat(limit + 1)
+    expect(parseFrameEvent({ protocol: FRAME_PROTOCOL, event: "press", params: { text } })).toBe(
+      null
+    )
   })
 
   test("reads its layout from the tag the frame injects it with", () => {

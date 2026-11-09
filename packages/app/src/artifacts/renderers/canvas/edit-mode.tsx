@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
 } from "react"
+import type { LiveCanvas } from "../../live/canvas"
 import { useArtifactMessages } from "../../messages"
 import {
   addItem,
@@ -42,7 +43,24 @@ export interface CanvasEditor {
   readonly apply: (change: CanvasChange) => void
   readonly undo: () => void
   readonly redo: () => void
+  /**
+   * Edits everyone sees as they are made: a drag moves its items for the others while it goes,
+   * and is one undo step from its start to its end, however long it pauses.
+   */
+  readonly live?: {
+    readonly startDrag: () => void
+    readonly endDrag: () => void
+    /** Ends the undo step being made: a board's edit is one step of its own. */
+    readonly stopCapturing: () => void
+    /** Tells the others what is selected. */
+    readonly select: (ids: readonly string[]) => void
+    /** Edits what a board's page shows, as one step of the same undo. */
+    readonly editBoard: LiveCanvas["editBoard"]
+  }
 }
+
+/** How often a drag tells the others where its items are, at most. */
+const DRAG_SHARE_MS = 50
 
 /** The grid items snap to as they move and resize. */
 const GRID = 8
@@ -68,30 +86,72 @@ export function useBoardEditing(
   const messages = useArtifactMessages().canvas.toolbar
   const store = useStoreApi()
   const graph = useMemo(() => canvasGraph(canvas), [canvas])
+  const read = useReadGraph(graph, store)
   const editing = !!edit
   const [nodes, setNodes] = useState<Node[]>(graph.nodes)
   const [edges, setEdges] = useState<Edge[]>(graph.edges)
+  // Which of the graph's nodes and edges each one drawn now was made from: one whose item did
+  // not change is kept as it is, so React Flow draws again only the items that changed.
+  const [madeFrom] = useState(() => new WeakMap<object, object>())
   const selected = useRef<ReadonlySet<string>>(new Set())
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set())
   const [typing, setTyping] = useState<string | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
 
-  // Drawn from the canvas as it changes, what was selected still selected.
-  useEffect(() => {
-    const chosen = selected.current
-    setNodes(
-      graph.nodes.map((node) =>
-        editing && node.type !== "point"
-          ? { ...node, draggable: true, selectable: true, selected: chosen.has(node.id) }
-          : node
-      )
-    )
-    setEdges(
-      graph.edges.map((edge) =>
-        editing ? { ...edge, selectable: true, selected: chosen.has(edge.id) } : edge
-      )
-    )
-  }, [graph, editing])
+  // Editing, drawn from the canvas as it changes, what was selected still selected, what React
+  // Flow measured kept, and an item being dragged where the drag has it. Brought up to date as
+  // the board draws, not in an effect after it, so a change of the canvas is one commit. Read, the
+  // graph is drawn as it is, and nothing is kept.
+  const [drawnFrom, setDrawnFrom] = useState<{
+    readonly graph: typeof graph | null
+    readonly editing: boolean
+  }>({ graph: null, editing: false })
+  if (drawnFrom.graph !== graph || drawnFrom.editing !== editing) {
+    if (editing || drawnFrom.editing) setDrawnFrom({ graph, editing })
+    if (editing) {
+      const chosen = selected.current
+      setNodes((current) => {
+        const drawn = new Map(current.map((node) => [node.id, node]))
+        const next = graph.nodes.map((node) => {
+          const was = drawn.get(node.id)
+          const choose = node.type !== "point"
+          const isSelected = choose && chosen.has(node.id)
+          const same =
+            was &&
+            madeFrom.get(was) === node &&
+            !!was.draggable === choose &&
+            !!was.selected === isSelected &&
+            !was.dragging
+          if (same) return was
+
+          const next: Node = {
+            ...node,
+            ...(choose ? { draggable: true, selectable: true, selected: isSelected } : {}),
+            ...(was?.measured ? { measured: was.measured } : {}),
+            ...(was?.dragging ? { position: was.position, dragging: true } : {}),
+          }
+          madeFrom.set(next, node)
+          return next
+        })
+        return sameItems(current, next) ? current : next
+      })
+      setEdges((current) => {
+        const drawn = new Map(current.map((edge) => [edge.id, edge]))
+        const next = graph.edges.map((edge) => {
+          const was = drawn.get(edge.id)
+          const isSelected = chosen.has(edge.id)
+          const same =
+            was && madeFrom.get(was) === edge && !!was.selectable && !!was.selected === isSelected
+          if (same) return was
+
+          const next: Edge = { ...edge, selectable: true, selected: isSelected }
+          madeFrom.set(next, edge)
+          return next
+        })
+        return sameItems(current, next) ? current : next
+      })
+    }
+  }
   useEffect(() => {
     if (!editing) {
       selected.current = new Set()
@@ -123,6 +183,16 @@ export function useBoardEditing(
 
   const focusBoard = useCallback(() => root.current?.focus({ preventScroll: true }), [])
 
+  // The others see what this reader selects.
+  const share = edit?.live?.select
+  useEffect(() => {
+    share?.([...selection])
+  }, [share, selection])
+  useEffect(() => () => share?.([]), [share])
+
+  // A drag tells the others where its items are as it goes, a few times a second at most.
+  const dragShared = useRef(0)
+
   const items: CanvasItemEditing | null = useMemo(
     () =>
       edit
@@ -141,7 +211,7 @@ export function useBoardEditing(
   )
 
   if (!edit) {
-    return { nodes: graph.nodes, edges: graph.edges, editing: false as const, root }
+    return { nodes: read.nodes, edges: read.edges, editing: false as const, root }
   }
 
   const chosenItems = canvas.items.filter((item) => selection.has(item.id))
@@ -157,7 +227,7 @@ export function useBoardEditing(
     }
     const text = kind === "text" ? messages.newText : kind === "section" ? messages.newSection : ""
     const added = addItem(kind, at, text)
-    const id = added.id(canvas)
+    const id = added.id
     edit.apply((current) => {
       const next = added.change(current)
       return shape && shape !== "rect" ? styleItems(new Set([id]), { shape })(next) : next
@@ -276,8 +346,18 @@ export function useBoardEditing(
         setEdges((current) => applyEdgeChanges(changes, current))
         if (changes.some((change) => change.type === "select")) chose(changes)
       },
-      onNodeDragStop: (_: unknown, __: Node, dragged: Node[]) =>
-        edit.apply(moveItems(new Map(dragged.map((node) => [node.id, node.position] as const)))),
+      onNodeDragStart: () => edit.live?.startDrag(),
+      onNodeDrag: (_: unknown, __: Node, dragged: Node[]) => {
+        if (!edit.live) return
+        const now = performance.now()
+        if (now - dragShared.current < DRAG_SHARE_MS) return
+        dragShared.current = now
+        edit.apply(moveItems(new Map(dragged.map((node) => [node.id, node.position] as const))))
+      },
+      onNodeDragStop: (_: unknown, __: Node, dragged: Node[]) => {
+        edit.apply(moveItems(new Map(dragged.map((node) => [node.id, node.position] as const))))
+        edit.live?.endDrag()
+      },
       onConnect: (connection: Connection) =>
         edit.apply(connectItems(connection.source, connection.target)),
       onNodeDoubleClick: (_: unknown, node: Node) => {
@@ -298,4 +378,49 @@ export function useBoardEditing(
       },
     },
   }
+}
+
+/** Whether two lists hold the same items, in the same order. */
+function sameItems<T>(left: readonly T[], right: readonly T[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index])
+}
+
+/**
+ * The graph as a read board hands it to React Flow. Its lists stay the ones given before while
+ * they hold the same items: React Flow takes a list in again, and works out every arrow's ends,
+ * whenever it is a new one. A node made again, as for an item someone moved, keeps the size React
+ * Flow measured while its own stays the same: without it, React Flow measures it again, in a
+ * commit of its own that redraws every arrow.
+ */
+function useReadGraph(
+  graph: { readonly nodes: Node[]; readonly edges: Edge[] },
+  store: ReturnType<typeof useStoreApi>
+): { readonly nodes: Node[]; readonly edges: Edge[] } {
+  // Caches of what the graph draws as: one kept from a render that was thrown away is as good.
+  const [measuredFrom] = useState(() => new WeakMap<Node, Node>())
+  const last = useRef<{ readonly nodes: Node[]; readonly edges: Edge[] } | null>(null)
+
+  const { nodeLookup } = store.getState()
+  const measured = graph.nodes.map((node) => {
+    const kept = measuredFrom.get(node)
+    if (kept) return kept
+
+    const drawn = nodeLookup.get(node.id)
+    const same =
+      drawn?.measured.width !== undefined &&
+      drawn.measured.height !== undefined &&
+      drawn.internals.userNode.width === node.width &&
+      drawn.internals.userNode.height === node.height
+    const next = same ? { ...node, measured: { ...drawn.measured } } : node
+    measuredFrom.set(node, next)
+    return next
+  })
+
+  const nodes =
+    last.current && sameItems(last.current.nodes, measured) ? last.current.nodes : measured
+  const edges =
+    last.current && sameItems(last.current.edges, graph.edges) ? last.current.edges : graph.edges
+  if (nodes !== last.current?.nodes || edges !== last.current?.edges)
+    last.current = { nodes, edges }
+  return last.current
 }

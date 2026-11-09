@@ -1,4 +1,8 @@
-import { getArtifactOptions, getArtifactVersionOptions } from "@sixb/client/hooks"
+import {
+  getArtifactOptions,
+  getArtifactRestorePointOptions,
+  listArtifactRestorePointsOptions,
+} from "@sixb/client/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
@@ -7,6 +11,7 @@ import { versionChanges } from "../artifacts/card-details"
 import { ArtifactCardFace, ArtifactLabel } from "../artifacts/card-preview"
 import { ArtifactKindIcon } from "../artifacts/kind-icon"
 import { useArtifactMessages } from "../artifacts/messages"
+import { useArtifactVersion } from "../artifacts/queries"
 import { artifactHref } from "../pages/routes"
 import { useArtifactPanel } from "./artifact-panel"
 import { useAgentMessages } from "./i18n"
@@ -15,8 +20,15 @@ import type { PublishedArtifact, TurnArtifact } from "./publish-artifact/interpr
 /**
  * What one response published, on the answer's reading path: a card for each artifact it created,
  * side by side, and a line for each one it revised, since its card is already in the conversation.
+ * `runId` is the response's run, whose restore points say what it changed.
  */
-export function ArtifactCards({ artifacts }: { readonly artifacts: readonly TurnArtifact[] }) {
+export function ArtifactCards({
+  artifacts,
+  runId,
+}: {
+  readonly artifacts: readonly TurnArtifact[]
+  readonly runId: string | null
+}) {
   const messages = useAgentMessages().artifacts
   if (artifacts.length === 0) return null
   const created = artifacts.filter((artifact) => artifact.created)
@@ -36,7 +48,7 @@ export function ArtifactCards({ artifacts }: { readonly artifacts: readonly Turn
         <ul className="flex flex-col gap-2">
           {revised.map((artifact) => (
             <li key={artifact.artifactId} className="min-w-0">
-              <ArtifactRevision artifact={artifact} />
+              <ArtifactRevision artifact={artifact} runId={runId} />
             </li>
           ))}
         </ul>
@@ -68,15 +80,25 @@ function ArtifactCard({ artifact }: { readonly artifact: PublishedArtifact }) {
   )
 }
 
-/** An artifact this response revised: its new version, and what that version changed. */
-function ArtifactRevision({ artifact }: { readonly artifact: PublishedArtifact }) {
+/**
+ * An artifact this response revised, and what it changed: its structure before the response, as
+ * its restore point keeps it, against its structure after. A response from before restore points
+ * published a version, compared with the one before it.
+ */
+function ArtifactRevision({
+  artifact,
+  runId,
+}: {
+  readonly artifact: PublishedArtifact
+  readonly runId: string | null
+}) {
   const artifactMessages = useArtifactMessages()
+  const messages = useAgentMessages().artifacts
   const selected = useIsOpen(artifact)
-  const current = useVersion(artifact.artifactId, artifact.version)
-  const previous = useVersion(artifact.artifactId, artifact.version - 1)
+  const change = useTurnChange(artifact, runId)
   const changes =
-    current.data && previous.data
-      ? versionChanges(previous.data, current.data, artifactMessages)
+    change.before && change.after
+      ? versionChanges(change.before, change.after, artifactMessages)
       : []
   return (
     <OpenArtifact
@@ -86,10 +108,15 @@ function ArtifactRevision({ artifact }: { readonly artifact: PublishedArtifact }
     >
       <ArtifactLabel
         title={artifact.title}
-        detail={[
-          artifactMessages.viewer.versionLabel(artifact.version),
-          ...changes.slice(0, 2),
-        ].join(" · ")}
+        detail={
+          artifact.open === undefined
+            ? [artifactMessages.viewer.versionLabel(artifact.version), ...changes.slice(0, 2)].join(
+                " · "
+              )
+            : changes.length > 0
+              ? changes.slice(0, 2).join(" · ")
+              : messages.changed
+        }
         icon={
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
             <ArtifactKindIcon kind={artifact.kind} className="size-4" />
@@ -161,11 +188,52 @@ function OpenArtifact({
   )
 }
 
-/** A version of an artifact; a version never changes once published. */
+/** A version of an artifact, read again while it is open and changes. */
 function useVersion(artifactId: string, version: number) {
+  return useArtifactVersion(artifactId, version, { enabled: version >= 1 })
+}
+
+type Outlined = Parameters<typeof versionChanges>[0]
+
+/**
+ * What a response changed in an artifact: `before`, the restore point taken before its first
+ * write, and `after`, the next one taken, before the turn that followed, else the version as it
+ * is now. A response from before restore points published a version: the one before it is
+ * `before`. Either is undefined until read, or when the restore point is gone, as the oldest are,
+ * or the reader may not list them.
+ */
+function useTurnChange(
+  artifact: PublishedArtifact,
+  runId: string | null
+): { readonly before?: Outlined; readonly after?: Outlined } {
+  const { artifactId } = artifact
+  const legacy = artifact.open === undefined
+
+  const points = useQuery({
+    ...listArtifactRestorePointsOptions({ path: { artifactId } }),
+    enabled: !legacy && runId !== null,
+    retry: false,
+  })
+  const list = points.data?.restorePoints ?? []
+  // Newest first: the one after the turn's is the one before it in the list.
+  const index = list.findIndex((point) => point.reason === "turn" && point.turnRunId === runId)
+  const turn = index >= 0 ? list[index] : undefined
+  const next = index > 0 ? list[index - 1] : undefined
+
+  const before = useRestorePoint(artifactId, turn?.revision)
+  const afterPoint = useRestorePoint(artifactId, next?.revision)
+  const current = useVersion(artifactId, legacy || turn ? artifact.version : 0)
+  const previous = useVersion(artifactId, legacy ? artifact.version - 1 : 0)
+
+  if (legacy) return { before: previous.data, after: current.data }
+  return { before: before.data, after: next ? afterPoint.data : current.data }
+}
+
+/** A restore point's content, which never changes; nothing when `revision` is undefined. */
+function useRestorePoint(artifactId: string, revision: number | undefined) {
   return useQuery({
-    ...getArtifactVersionOptions({ path: { artifactId, version: String(version) } }),
-    enabled: version >= 1,
+    ...getArtifactRestorePointOptions({ path: { artifactId, revision: String(revision ?? 0) } }),
+    enabled: revision !== undefined,
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })

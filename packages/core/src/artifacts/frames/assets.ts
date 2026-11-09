@@ -7,6 +7,19 @@ import { FRAME_DECK_CSS, FRAME_PAGE_CSS } from "./kit"
 import { frameRuntime } from "./runtime"
 
 /**
+ * Hosts a frame may load from besides its own files: CSS and script libraries and web fonts, Google
+ * Fonts among them. Each is a public CDN; a frame that uses one contacts it when it opens, and a
+ * sandbox that pictures a canvas's boards reaches them alone.
+ */
+export const FRAME_CDN_ALLOWLIST = [
+  "https://cdn.jsdelivr.net",
+  "https://cdnjs.cloudflare.com",
+  "https://unpkg.com",
+  "https://fonts.googleapis.com",
+  "https://fonts.gstatic.com",
+] as const
+
+/**
  * The files a frame gets besides the version's own, under `__sixb/`, which a version may not use:
  * a kit per layout, and the runtime. The server serves them to the app's frames, and the Agent's
  * layout check serves them to its browser, so both lay a version out the same way.
@@ -62,8 +75,14 @@ export function injectFrameAssets(html: string, layout: FrameLayout, entry = "in
   return `${doctype}${assets}${html.slice(doctype.length)}`
 }
 
-/** Where a frame serves a file another artifact lends it: `__sixb/ref/<id>@<version>/<path>`. */
+/**
+ * Where a frame serves a file another artifact lends it, at the version its address pins or the
+ * latest: `__sixb/ref/<id>@<version>/<path>` or `__sixb/ref/<id>@latest/<path>`.
+ */
 export const FRAME_REFERENCE_PREFIX = `${FRAME_ASSET_PREFIX}ref/`
+
+/** A lent file's path under {@link FRAME_REFERENCE_PREFIX}: its artifact, version, and path. */
+export const FRAME_REFERENCE_PATH = /^([^/@]+)@(\d+|latest)\/(.+)$/
 
 /** The path, from an entry, of a file one of its frame's targets lends it. */
 function frameReferencePath(target: ArtifactFrameTarget, entry: string): string | null {

@@ -139,8 +139,9 @@ describe("an observer and artifacts", () => {
       files: [{ path: "document.md", file }],
     }
 
-    // Version 1 comes from code, 2 from the conversation, 3 from code again.
+    // Version 1 comes from code, 2 from the conversation, 3 from code again, each created.
     const { artifact, version: first } = await owner.artifacts.create(content)
+    await owner.artifacts.freeze(artifact.id)
     const { projectId: _projectId, artifactId: _artifactId, version: _number, ...input } = first
     await deps.storage.artifacts.publish({
       projectId,
@@ -152,7 +153,8 @@ describe("an observer and artifacts", () => {
         origin: { threadId: "thr_marie", runId: "run_marie" },
       },
     })
-    await owner.artifacts.publish(artifact.id, { ...content, title: "Edited from code" })
+    await owner.artifacts.freeze(artifact.id)
+    await owner.artifacts.update(artifact.id, { ...content, title: "Edited from code" })
 
     expect(await observer.artifacts.access(artifact.id)).toBe("read")
     expect(await observer.artifacts.get(artifact.id)).toMatchObject({
@@ -162,7 +164,11 @@ describe("an observer and artifacts", () => {
     expect(await observer.artifacts.getVersion(artifact.id, 1)).toMatchObject({ version: 1 })
     expect((await observer.artifacts.listVersions(artifact.id))?.total).toBe(3)
 
-    await expect(observer.artifacts.publish(artifact.id, content)).rejects.toMatchObject({
+    await expect(observer.artifacts.update(artifact.id, content)).rejects.toMatchObject({
+      code: "read_only",
+    })
+    // Nor does an observer create a version or restore one.
+    await expect(observer.artifacts.freeze(artifact.id)).rejects.toMatchObject({
       code: "read_only",
     })
     await expect(observer.artifacts.state(artifact.id).get("filters")).rejects.toMatchObject({

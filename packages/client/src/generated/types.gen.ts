@@ -105,15 +105,20 @@ export type ObjectQueryFacetsResponse = {
 export type ArtifactErrorResponse = {
   error: string
   /**
-   * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+   * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
    */
   code?: string
   /**
-   * With artifact_moved: the latest version and who published it
+   * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
    */
   latest?: {
     version: number
+    revision: number
     author: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    frozenBy?: {
       type: "user" | "serviceAccount" | "system"
       id: string
     }
@@ -17923,7 +17928,7 @@ export type ListArtifactsData = {
   path?: never
   query?: {
     /**
-     * Only artifacts with a version the Agent published in this thread
+     * Only artifacts this conversation shares: the Agent wrote them in it
      */
     thread?: string
     /**
@@ -17943,15 +17948,20 @@ export type ListArtifactsErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -17963,15 +17973,20 @@ export type ListArtifactsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -17996,7 +18011,14 @@ export type ListArtifactsResponses = {
         id: string
       }
       latestVersion: number
+      /**
+       * Counts the artifact's changes: a write, a version created, a restore. It only grows, so content read at one revision is that revision's for good
+       */
+      revision: number
       createdAt: string
+      /**
+       * When the artifact last changed
+       */
       updatedAt: string
     }>
     hasMore: boolean
@@ -18040,15 +18062,20 @@ export type CreateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18060,15 +18087,20 @@ export type CreateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18080,15 +18112,20 @@ export type CreateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18100,15 +18137,20 @@ export type CreateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18120,15 +18162,20 @@ export type CreateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18153,12 +18200,27 @@ export type CreateArtifactResponses = {
         id: string
       }
       latestVersion: number
+      /**
+       * Counts the artifact's changes: a write, a version created, a restore. It only grows, so content read at one revision is that revision's for good
+       */
+      revision: number
       createdAt: string
+      /**
+       * When the artifact last changed
+       */
       updatedAt: string
     }
     version: {
       artifactId: string
       version: number
+      /**
+       * The artifact's revision when this version last changed: the latest version's is the artifact's
+       */
+      revision: number
+      /**
+       * Someone created this version: it never changes again. The latest version is open until then, and each write replaces its content
+       */
+      frozen: boolean
       title: string
       entry: string
       files: Array<{
@@ -18220,6 +18282,10 @@ export type CreateArtifactResponses = {
                   file: string
                   w: number
                   h: number
+                  /**
+                   * What the board's preview is a picture of: a board kept as it was keeps it
+                   */
+                  renderKey?: string
                 }
               | {
                   id: string
@@ -18227,6 +18293,10 @@ export type CreateArtifactResponses = {
                   title?: string
                 }
             >
+            /**
+             * The modes each board has a preview in: both, or the one its theme.json pins
+             */
+            themes?: Array<"light" | "dark">
           }
         | {
             kind: "file"
@@ -18238,15 +18308,45 @@ export type CreateArtifactResponses = {
         at: string
         resolvedVersion: number
       }>
+      /**
+       * Who last wrote its content
+       */
       author: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
+      /**
+       * The Agent turn and thread its content was last written from
+       */
       origin?: {
         threadId: string
         runId: string
       }
+      /**
+       * When the version was opened
+       */
       createdAt: string
+      /**
+       * When its content was last written
+       */
+      updatedAt: string
+      /**
+       * When it was created, which froze it
+       */
+      frozenAt?: string
+      /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
+       */
+      boardPreviews?: {
+        [key: string]: "ready" | "pending" | "none"
+      }
     }
     warnings: Array<{
       code: string
@@ -18274,15 +18374,20 @@ export type DeleteArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18294,15 +18399,20 @@ export type DeleteArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18314,15 +18424,20 @@ export type DeleteArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18359,15 +18474,20 @@ export type GetArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18379,15 +18499,20 @@ export type GetArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18399,15 +18524,20 @@ export type GetArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18432,7 +18562,14 @@ export type GetArtifactResponses = {
         id: string
       }
       latestVersion: number
+      /**
+       * Counts the artifact's changes: a write, a version created, a restore. It only grows, so content read at one revision is that revision's for good
+       */
+      revision: number
       createdAt: string
+      /**
+       * When the artifact last changed
+       */
       updatedAt: string
     }
     /**
@@ -18440,16 +18577,48 @@ export type GetArtifactResponses = {
      */
     versions: Array<{
       version: number
+      /**
+       * The artifact's revision when this version last changed: the latest version's is the artifact's
+       */
+      revision: number
+      /**
+       * Someone created this version: it never changes again. The latest version is open until then, and each write replaces its content
+       */
+      frozen: boolean
       title: string
+      /**
+       * Who last wrote its content
+       */
       author: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
+      /**
+       * The Agent turn and thread its content was last written from
+       */
       origin?: {
         threadId: string
         runId: string
       }
+      /**
+       * When the version was opened
+       */
       createdAt: string
+      /**
+       * When its content was last written
+       */
+      updatedAt: string
+      /**
+       * When it was created, which froze it
+       */
+      frozenAt?: string
+      /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
     }>
     /**
      * What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it, or only read as an observer of one
@@ -18476,15 +18645,20 @@ export type ClearArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18496,15 +18670,20 @@ export type ClearArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18516,15 +18695,20 @@ export type ClearArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18565,15 +18749,20 @@ export type GetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18585,15 +18774,20 @@ export type GetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18605,15 +18799,20 @@ export type GetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18664,15 +18863,20 @@ export type DeleteArtifactStateValueErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18684,15 +18888,20 @@ export type DeleteArtifactStateValueErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18704,15 +18913,20 @@ export type DeleteArtifactStateValueErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18724,15 +18938,20 @@ export type DeleteArtifactStateValueErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18780,15 +18999,20 @@ export type SetArtifactStateErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18800,15 +19024,20 @@ export type SetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18820,15 +19049,20 @@ export type SetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18840,15 +19074,20 @@ export type SetArtifactStateErrors = {
   413: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18860,15 +19099,20 @@ export type SetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18894,7 +19138,7 @@ export type SetArtifactStateResponses = {
 
 export type SetArtifactStateResponse = SetArtifactStateResponses[keyof SetArtifactStateResponses]
 
-export type PublishArtifactVersionData = {
+export type UpdateArtifactData = {
   body: {
     kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
     title: string
@@ -18916,33 +19160,38 @@ export type PublishArtifactVersionData = {
       }
     }>
     /**
-     * The version this one was made from. When another was published since, the publish is refused with 409 artifact_moved, naming the latest version.
+     * The revision this was made from. When the artifact changed since, it is refused with 409 artifact_moved, naming the revision and who last wrote the latest version.
      */
-    baseVersion?: number
+    baseRevision?: number
   }
   path: {
     artifactId: string
   }
   query?: never
-  url: "/api/artifacts/{artifactId}/versions"
+  url: "/api/artifacts/{artifactId}/content"
 }
 
-export type PublishArtifactVersionErrors = {
+export type UpdateArtifactErrors = {
   /**
    * Response for status 400
    */
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18954,15 +19203,20 @@ export type PublishArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18974,15 +19228,20 @@ export type PublishArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -18994,15 +19253,20 @@ export type PublishArtifactVersionErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19014,15 +19278,20 @@ export type PublishArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19030,14 +19299,13 @@ export type PublishArtifactVersionErrors = {
   }
 }
 
-export type PublishArtifactVersionError =
-  PublishArtifactVersionErrors[keyof PublishArtifactVersionErrors]
+export type UpdateArtifactError = UpdateArtifactErrors[keyof UpdateArtifactErrors]
 
-export type PublishArtifactVersionResponses = {
+export type UpdateArtifactResponses = {
   /**
-   * Response for status 201
+   * Response for status 200
    */
-  201: {
+  200: {
     artifact: {
       id: string
       projectId: string
@@ -19048,12 +19316,27 @@ export type PublishArtifactVersionResponses = {
         id: string
       }
       latestVersion: number
+      /**
+       * Counts the artifact's changes: a write, a version created, a restore. It only grows, so content read at one revision is that revision's for good
+       */
+      revision: number
       createdAt: string
+      /**
+       * When the artifact last changed
+       */
       updatedAt: string
     }
     version: {
       artifactId: string
       version: number
+      /**
+       * The artifact's revision when this version last changed: the latest version's is the artifact's
+       */
+      revision: number
+      /**
+       * Someone created this version: it never changes again. The latest version is open until then, and each write replaces its content
+       */
+      frozen: boolean
       title: string
       entry: string
       files: Array<{
@@ -19115,6 +19398,10 @@ export type PublishArtifactVersionResponses = {
                   file: string
                   w: number
                   h: number
+                  /**
+                   * What the board's preview is a picture of: a board kept as it was keeps it
+                   */
+                  renderKey?: string
                 }
               | {
                   id: string
@@ -19122,6 +19409,10 @@ export type PublishArtifactVersionResponses = {
                   title?: string
                 }
             >
+            /**
+             * The modes each board has a preview in: both, or the one its theme.json pins
+             */
+            themes?: Array<"light" | "dark">
           }
         | {
             kind: "file"
@@ -19133,15 +19424,45 @@ export type PublishArtifactVersionResponses = {
         at: string
         resolvedVersion: number
       }>
+      /**
+       * Who last wrote its content
+       */
       author: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
+      /**
+       * The Agent turn and thread its content was last written from
+       */
       origin?: {
         threadId: string
         runId: string
       }
+      /**
+       * When the version was opened
+       */
       createdAt: string
+      /**
+       * When its content was last written
+       */
+      updatedAt: string
+      /**
+       * When it was created, which froze it
+       */
+      frozenAt?: string
+      /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
+       */
+      boardPreviews?: {
+        [key: string]: "ready" | "pending" | "none"
+      }
     }
     warnings: Array<{
       code: string
@@ -19151,8 +19472,1785 @@ export type PublishArtifactVersionResponses = {
   }
 }
 
-export type PublishArtifactVersionResponse =
-  PublishArtifactVersionResponses[keyof PublishArtifactVersionResponses]
+export type UpdateArtifactResponse = UpdateArtifactResponses[keyof UpdateArtifactResponses]
+
+export type FreezeArtifactVersionData = {
+  body: {
+    /**
+     * The revision this was made from. When the artifact changed since, it is refused with 409 artifact_moved, naming the revision and who last wrote the latest version.
+     */
+    baseRevision?: number
+  }
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/freeze"
+}
+
+export type FreezeArtifactVersionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type FreezeArtifactVersionError =
+  FreezeArtifactVersionErrors[keyof FreezeArtifactVersionErrors]
+
+export type FreezeArtifactVersionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    artifact: {
+      id: string
+      projectId: string
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      title: string
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      latestVersion: number
+      /**
+       * Counts the artifact's changes: a write, a version created, a restore. It only grows, so content read at one revision is that revision's for good
+       */
+      revision: number
+      createdAt: string
+      /**
+       * When the artifact last changed
+       */
+      updatedAt: string
+    }
+    version: {
+      artifactId: string
+      version: number
+      /**
+       * The artifact's revision when this version last changed: the latest version's is the artifact's
+       */
+      revision: number
+      /**
+       * Someone created this version: it never changes again. The latest version is open until then, and each write replaces its content
+       */
+      frozen: boolean
+      title: string
+      entry: string
+      files: Array<{
+        /**
+         * The file's path inside the artifact, such as figures/revenue.svg
+         */
+        path: string
+        file: {
+          blobId: string
+          digest: string
+          sizeBytes: number
+          fileName?: string
+          mediaType?: string
+          logicalPath?: string
+        }
+      }>
+      outline:
+        | {
+            kind: "document"
+            headings: Array<{
+              depth: number
+              text: string
+              slug: string
+            }>
+          }
+        | {
+            kind: "sheet"
+            sheets: Array<{
+              name: string
+              /**
+               * The rows of its CSV; none for a live sheet
+               */
+              rows: number
+              columns: Array<string>
+              /**
+               * A live sheet's query, queries/<name>.json, whose rows each reader reads
+               */
+              query?: string
+            }>
+            charts: Array<string>
+          }
+        | {
+            kind: "slides"
+            slides: Array<{
+              title?: string
+            }>
+          }
+        | {
+            kind: "page"
+            title?: string
+          }
+        | {
+            kind: "canvas"
+            items: Array<
+              | {
+                  id: string
+                  type: "board"
+                  title?: string
+                  file: string
+                  w: number
+                  h: number
+                  /**
+                   * What the board's preview is a picture of: a board kept as it was keeps it
+                   */
+                  renderKey?: string
+                }
+              | {
+                  id: string
+                  type: "section"
+                  title?: string
+                }
+            >
+            /**
+             * The modes each board has a preview in: both, or the one its theme.json pins
+             */
+            themes?: Array<"light" | "dark">
+          }
+        | {
+            kind: "file"
+            mediaType: string
+          }
+      references: Array<{
+        address: string
+        as: "embed" | "link"
+        at: string
+        resolvedVersion: number
+      }>
+      /**
+       * Who last wrote its content
+       */
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * The Agent turn and thread its content was last written from
+       */
+      origin?: {
+        threadId: string
+        runId: string
+      }
+      /**
+       * When the version was opened
+       */
+      createdAt: string
+      /**
+       * When its content was last written
+       */
+      updatedAt: string
+      /**
+       * When it was created, which froze it
+       */
+      frozenAt?: string
+      /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
+       */
+      boardPreviews?: {
+        [key: string]: "ready" | "pending" | "none"
+      }
+    }
+  }
+}
+
+export type FreezeArtifactVersionResponse =
+  FreezeArtifactVersionResponses[keyof FreezeArtifactVersionResponses]
+
+export type ListArtifactCommentsData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/comments"
+}
+
+export type ListArtifactCommentsErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type ListArtifactCommentsError = ListArtifactCommentsErrors[keyof ListArtifactCommentsErrors]
+
+export type ListArtifactCommentsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * Comments and replies, oldest first
+     */
+    comments: Array<{
+      artifactId: string
+      id: string
+      /**
+       * The comment it replies to, for a reply
+       */
+      parentId?: string
+      anchor: {
+        /**
+         * The id of the canvas's board it is about
+         */
+        board?: string
+        /**
+         * The address of the board's element it is about, such as body>main:0>h1:0
+         */
+        element?: string
+        /**
+         * The element's first words, which name it once it is gone; kept to 120 characters
+         */
+        label?: string
+        /**
+         * Where on the board its pin is, as fractions of the board's width and height from its top left
+         */
+        point?: {
+          x: number
+          y: number
+        }
+        /**
+         * The artifact's revision its author saw
+         */
+        revision: number
+      }
+      /**
+       * Plain text
+       */
+      body: string
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+       */
+      authorName: string | null
+      /**
+       * The Agent's run that wrote it for its author, and that run's conversation
+       */
+      origin?: {
+        threadId: string
+        runId: string
+      }
+      createdAt: string
+      /**
+       * When someone marked it resolved
+       */
+      resolvedAt?: string
+      /**
+       * Who marked it resolved
+       */
+      resolvedBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }>
+  }
+}
+
+export type ListArtifactCommentsResponse =
+  ListArtifactCommentsResponses[keyof ListArtifactCommentsResponses]
+
+export type AddArtifactCommentData = {
+  body: {
+    /**
+     * Plain text
+     */
+    body: string
+    /**
+     * What it is about: a board, an element of the board, or, without, the artifact; at the artifact's revision by default. A reply is about what it replies to.
+     */
+    anchor?: {
+      /**
+       * The id of the canvas's board it is about
+       */
+      board?: string
+      /**
+       * The address of the board's element it is about, such as body>main:0>h1:0
+       */
+      element?: string
+      /**
+       * The element's first words, which name it once it is gone; kept to 120 characters
+       */
+      label?: string
+      /**
+       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       */
+      point?: {
+        x: number
+        y: number
+      }
+      /**
+       * The artifact's revision its author saw
+       */
+      revision?: number
+    }
+    /**
+     * The comment it replies to
+     */
+    parentId?: string
+  }
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/comments"
+}
+
+export type AddArtifactCommentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 413
+   */
+  413: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type AddArtifactCommentError = AddArtifactCommentErrors[keyof AddArtifactCommentErrors]
+
+export type AddArtifactCommentResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    artifactId: string
+    id: string
+    /**
+     * The comment it replies to, for a reply
+     */
+    parentId?: string
+    anchor: {
+      /**
+       * The id of the canvas's board it is about
+       */
+      board?: string
+      /**
+       * The address of the board's element it is about, such as body>main:0>h1:0
+       */
+      element?: string
+      /**
+       * The element's first words, which name it once it is gone; kept to 120 characters
+       */
+      label?: string
+      /**
+       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       */
+      point?: {
+        x: number
+        y: number
+      }
+      /**
+       * The artifact's revision its author saw
+       */
+      revision: number
+    }
+    /**
+     * Plain text
+     */
+    body: string
+    author: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    /**
+     * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+     */
+    authorName: string | null
+    /**
+     * The Agent's run that wrote it for its author, and that run's conversation
+     */
+    origin?: {
+      threadId: string
+      runId: string
+    }
+    createdAt: string
+    /**
+     * When someone marked it resolved
+     */
+    resolvedAt?: string
+    /**
+     * Who marked it resolved
+     */
+    resolvedBy?: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+  }
+}
+
+export type AddArtifactCommentResponse =
+  AddArtifactCommentResponses[keyof AddArtifactCommentResponses]
+
+export type ResolveArtifactCommentData = {
+  body: {
+    /**
+     * False opens it again
+     */
+    resolved?: boolean
+  }
+  path: {
+    artifactId: string
+    commentId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/comments/{commentId}/resolve"
+}
+
+export type ResolveArtifactCommentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type ResolveArtifactCommentError =
+  ResolveArtifactCommentErrors[keyof ResolveArtifactCommentErrors]
+
+export type ResolveArtifactCommentResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    artifactId: string
+    id: string
+    /**
+     * The comment it replies to, for a reply
+     */
+    parentId?: string
+    anchor: {
+      /**
+       * The id of the canvas's board it is about
+       */
+      board?: string
+      /**
+       * The address of the board's element it is about, such as body>main:0>h1:0
+       */
+      element?: string
+      /**
+       * The element's first words, which name it once it is gone; kept to 120 characters
+       */
+      label?: string
+      /**
+       * Where on the board its pin is, as fractions of the board's width and height from its top left
+       */
+      point?: {
+        x: number
+        y: number
+      }
+      /**
+       * The artifact's revision its author saw
+       */
+      revision: number
+    }
+    /**
+     * Plain text
+     */
+    body: string
+    author: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    /**
+     * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+     */
+    authorName: string | null
+    /**
+     * The Agent's run that wrote it for its author, and that run's conversation
+     */
+    origin?: {
+      threadId: string
+      runId: string
+    }
+    createdAt: string
+    /**
+     * When someone marked it resolved
+     */
+    resolvedAt?: string
+    /**
+     * Who marked it resolved
+     */
+    resolvedBy?: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+  }
+}
+
+export type ResolveArtifactCommentResponse =
+  ResolveArtifactCommentResponses[keyof ResolveArtifactCommentResponses]
+
+export type DeleteArtifactCommentData = {
+  body?: never
+  path: {
+    artifactId: string
+    commentId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/comments/{commentId}"
+}
+
+export type DeleteArtifactCommentErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type DeleteArtifactCommentError =
+  DeleteArtifactCommentErrors[keyof DeleteArtifactCommentErrors]
+
+export type DeleteArtifactCommentResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    deleted: true
+  }
+}
+
+export type DeleteArtifactCommentResponse =
+  DeleteArtifactCommentResponses[keyof DeleteArtifactCommentResponses]
+
+export type ListArtifactRestorePointsData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/restore-points"
+}
+
+export type ListArtifactRestorePointsErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type ListArtifactRestorePointsError =
+  ListArtifactRestorePointsErrors[keyof ListArtifactRestorePointsErrors]
+
+export type ListArtifactRestorePointsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * Newest first: an artifact keeps its last 20
+     */
+    restorePoints: Array<{
+      artifactId: string
+      /**
+       * The revision whose content it holds, which restores it
+       */
+      revision: number
+      /**
+       * The version it was taken of
+       */
+      version: number
+      /**
+       * Whether that version was already created, and so frozen, when the point was taken: its content is then that version's
+       */
+      frozen: boolean
+      title: string
+      /**
+       * Who had last written that content
+       */
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      origin?: {
+        threadId: string
+        runId: string
+      }
+      /**
+       * When that content was written
+       */
+      updatedAt: string
+      /**
+       * Taken before an Agent turn's first write to the artifact, or before a restore
+       */
+      reason: "turn" | "restore"
+      /**
+       * With turn: the turn's run
+       */
+      turnRunId?: string
+      /**
+       * When it was taken
+       */
+      createdAt: string
+    }>
+  }
+}
+
+export type ListArtifactRestorePointsResponse =
+  ListArtifactRestorePointsResponses[keyof ListArtifactRestorePointsResponses]
+
+export type GetArtifactRestorePointData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * The revision whose content the restore point holds
+     */
+    revision: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/restore-points/{revision}"
+}
+
+export type GetArtifactRestorePointErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type GetArtifactRestorePointError =
+  GetArtifactRestorePointErrors[keyof GetArtifactRestorePointErrors]
+
+export type GetArtifactRestorePointResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    artifactId: string
+    /**
+     * The revision whose content it holds, which restores it
+     */
+    revision: number
+    /**
+     * The version it was taken of
+     */
+    version: number
+    /**
+     * Whether that version was already created, and so frozen, when the point was taken: its content is then that version's
+     */
+    frozen: boolean
+    title: string
+    /**
+     * Who had last written that content
+     */
+    author: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    origin?: {
+      threadId: string
+      runId: string
+    }
+    /**
+     * When that content was written
+     */
+    updatedAt: string
+    /**
+     * Taken before an Agent turn's first write to the artifact, or before a restore
+     */
+    reason: "turn" | "restore"
+    /**
+     * With turn: the turn's run
+     */
+    turnRunId?: string
+    /**
+     * When it was taken
+     */
+    createdAt: string
+    entry: string
+    files: Array<{
+      /**
+       * The file's path inside the artifact, such as figures/revenue.svg
+       */
+      path: string
+      file: {
+        blobId: string
+        digest: string
+        sizeBytes: number
+        fileName?: string
+        mediaType?: string
+        logicalPath?: string
+      }
+    }>
+    outline:
+      | {
+          kind: "document"
+          headings: Array<{
+            depth: number
+            text: string
+            slug: string
+          }>
+        }
+      | {
+          kind: "sheet"
+          sheets: Array<{
+            name: string
+            /**
+             * The rows of its CSV; none for a live sheet
+             */
+            rows: number
+            columns: Array<string>
+            /**
+             * A live sheet's query, queries/<name>.json, whose rows each reader reads
+             */
+            query?: string
+          }>
+          charts: Array<string>
+        }
+      | {
+          kind: "slides"
+          slides: Array<{
+            title?: string
+          }>
+        }
+      | {
+          kind: "page"
+          title?: string
+        }
+      | {
+          kind: "canvas"
+          items: Array<
+            | {
+                id: string
+                type: "board"
+                title?: string
+                file: string
+                w: number
+                h: number
+                /**
+                 * What the board's preview is a picture of: a board kept as it was keeps it
+                 */
+                renderKey?: string
+              }
+            | {
+                id: string
+                type: "section"
+                title?: string
+              }
+          >
+          /**
+           * The modes each board has a preview in: both, or the one its theme.json pins
+           */
+          themes?: Array<"light" | "dark">
+        }
+      | {
+          kind: "file"
+          mediaType: string
+        }
+    references: Array<{
+      address: string
+      as: "embed" | "link"
+      at: string
+      resolvedVersion: number
+    }>
+  }
+}
+
+export type GetArtifactRestorePointResponse =
+  GetArtifactRestorePointResponses[keyof GetArtifactRestorePointResponses]
+
+export type GetArtifactRestorePointFileContentData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * The revision whose content the restore point holds
+     */
+    revision: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/artifacts/{artifactId}/restore-points/{revision}/content"
+}
+
+export type GetArtifactRestorePointFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type GetArtifactRestorePointFileContentError =
+  GetArtifactRestorePointFileContentErrors[keyof GetArtifactRestorePointFileContentErrors]
+
+export type GetArtifactRestorePointFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetArtifactRestorePointFileContentResponse =
+  GetArtifactRestorePointFileContentResponses[keyof GetArtifactRestorePointFileContentResponses]
+
+export type RestoreArtifactData = {
+  body: {
+    /**
+     * The revision this was made from. When the artifact changed since, it is refused with 409 artifact_moved, naming the revision and who last wrote the latest version.
+     */
+    baseRevision?: number
+  }
+  path: {
+    artifactId: string
+    /**
+     * The revision whose content the restore point holds
+     */
+    revision: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/restore-points/{revision}/restore"
+}
+
+export type RestoreArtifactErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type RestoreArtifactError = RestoreArtifactErrors[keyof RestoreArtifactErrors]
+
+export type RestoreArtifactResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    artifact: {
+      id: string
+      projectId: string
+      kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
+      title: string
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      latestVersion: number
+      /**
+       * Counts the artifact's changes: a write, a version created, a restore. It only grows, so content read at one revision is that revision's for good
+       */
+      revision: number
+      createdAt: string
+      /**
+       * When the artifact last changed
+       */
+      updatedAt: string
+    }
+    version: {
+      artifactId: string
+      version: number
+      /**
+       * The artifact's revision when this version last changed: the latest version's is the artifact's
+       */
+      revision: number
+      /**
+       * Someone created this version: it never changes again. The latest version is open until then, and each write replaces its content
+       */
+      frozen: boolean
+      title: string
+      entry: string
+      files: Array<{
+        /**
+         * The file's path inside the artifact, such as figures/revenue.svg
+         */
+        path: string
+        file: {
+          blobId: string
+          digest: string
+          sizeBytes: number
+          fileName?: string
+          mediaType?: string
+          logicalPath?: string
+        }
+      }>
+      outline:
+        | {
+            kind: "document"
+            headings: Array<{
+              depth: number
+              text: string
+              slug: string
+            }>
+          }
+        | {
+            kind: "sheet"
+            sheets: Array<{
+              name: string
+              /**
+               * The rows of its CSV; none for a live sheet
+               */
+              rows: number
+              columns: Array<string>
+              /**
+               * A live sheet's query, queries/<name>.json, whose rows each reader reads
+               */
+              query?: string
+            }>
+            charts: Array<string>
+          }
+        | {
+            kind: "slides"
+            slides: Array<{
+              title?: string
+            }>
+          }
+        | {
+            kind: "page"
+            title?: string
+          }
+        | {
+            kind: "canvas"
+            items: Array<
+              | {
+                  id: string
+                  type: "board"
+                  title?: string
+                  file: string
+                  w: number
+                  h: number
+                  /**
+                   * What the board's preview is a picture of: a board kept as it was keeps it
+                   */
+                  renderKey?: string
+                }
+              | {
+                  id: string
+                  type: "section"
+                  title?: string
+                }
+            >
+            /**
+             * The modes each board has a preview in: both, or the one its theme.json pins
+             */
+            themes?: Array<"light" | "dark">
+          }
+        | {
+            kind: "file"
+            mediaType: string
+          }
+      references: Array<{
+        address: string
+        as: "embed" | "link"
+        at: string
+        resolvedVersion: number
+      }>
+      /**
+       * Who last wrote its content
+       */
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * The Agent turn and thread its content was last written from
+       */
+      origin?: {
+        threadId: string
+        runId: string
+      }
+      /**
+       * When the version was opened
+       */
+      createdAt: string
+      /**
+       * When its content was last written
+       */
+      updatedAt: string
+      /**
+       * When it was created, which froze it
+       */
+      frozenAt?: string
+      /**
+       * Who created it
+       */
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
+       */
+      boardPreviews?: {
+        [key: string]: "ready" | "pending" | "none"
+      }
+    }
+  }
+}
+
+export type RestoreArtifactResponse = RestoreArtifactResponses[keyof RestoreArtifactResponses]
 
 export type CreateArtifactFrameData = {
   body?: never
@@ -19174,15 +21272,20 @@ export type CreateArtifactFrameErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19194,15 +21297,20 @@ export type CreateArtifactFrameErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19214,15 +21322,20 @@ export type CreateArtifactFrameErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19234,15 +21347,20 @@ export type CreateArtifactFrameErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19291,15 +21409,20 @@ export type GetArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19311,15 +21434,20 @@ export type GetArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19331,15 +21459,20 @@ export type GetArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
-     * With artifact_moved: the latest version and who published it
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
      */
     latest?: {
       version: number
+      revision: number
       author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
         type: "user" | "serviceAccount" | "system"
         id: string
       }
@@ -19356,6 +21489,14 @@ export type GetArtifactVersionResponses = {
   200: {
     artifactId: string
     version: number
+    /**
+     * The artifact's revision when this version last changed: the latest version's is the artifact's
+     */
+    revision: number
+    /**
+     * Someone created this version: it never changes again. The latest version is open until then, and each write replaces its content
+     */
+    frozen: boolean
     title: string
     entry: string
     files: Array<{
@@ -19417,6 +21558,10 @@ export type GetArtifactVersionResponses = {
                 file: string
                 w: number
                 h: number
+                /**
+                 * What the board's preview is a picture of: a board kept as it was keeps it
+                 */
+                renderKey?: string
               }
             | {
                 id: string
@@ -19424,6 +21569,10 @@ export type GetArtifactVersionResponses = {
                 title?: string
               }
           >
+          /**
+           * The modes each board has a preview in: both, or the one its theme.json pins
+           */
+          themes?: Array<"light" | "dark">
         }
       | {
           kind: "file"
@@ -19435,20 +21584,116 @@ export type GetArtifactVersionResponses = {
       at: string
       resolvedVersion: number
     }>
+    /**
+     * Who last wrote its content
+     */
     author: {
       type: "user" | "serviceAccount" | "system"
       id: string
     }
+    /**
+     * The Agent turn and thread its content was last written from
+     */
     origin?: {
       threadId: string
       runId: string
     }
+    /**
+     * When the version was opened
+     */
     createdAt: string
+    /**
+     * When its content was last written
+     */
+    updatedAt: string
+    /**
+     * When it was created, which froze it
+     */
+    frozenAt?: string
+    /**
+     * Who created it
+     */
+    frozenBy?: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    /**
+     * A canvas's boards by id, as reading or publishing the version returns them: ready when its preview is, pending while it is rendered, none when none will come and the board shows its outline
+     */
+    boardPreviews?: {
+      [key: string]: "ready" | "pending" | "none"
+    }
   }
 }
 
 export type GetArtifactVersionResponse =
   GetArtifactVersionResponses[keyof GetArtifactVersionResponses]
+
+export type GetArtifactBoardPreviewData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+    /**
+     * The board's id in the canvas
+     */
+    board: string
+  }
+  query?: {
+    /**
+     * The reader's mode; a canvas whose theme.json pins one is pictured only in it
+     */
+    theme?: "light" | "dark"
+    /**
+     * full, the default: a PNG of the board at its own size. small: a WebP at most 480 pixels wide, for a canvas that shows many boards at once
+     */
+    size?: "full" | "small"
+    /**
+     * The version's revision the picture is of. Another than the version's current one is 404 preview_not_found: the version changed, and says which pictures it has now. One that matches is cached for good
+     */
+    revision?: number
+    /**
+     * The board's render key the picture is of, as the version's outline names it, in place of revision: the picture stays the same while the board shows the same, however often the canvas around it changes. Another than the board's current one is 404 preview_not_found. One that matches is cached for good
+     */
+    key?: string
+  }
+  url: "/api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview"
+}
+
+export type GetArtifactBoardPreviewErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ArtifactErrorResponse
+  /**
+   * Response for status 403
+   */
+  403: ArtifactErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ArtifactErrorResponse
+  /**
+   * Response for status 501
+   */
+  501: ArtifactErrorResponse
+}
+
+export type GetArtifactBoardPreviewError =
+  GetArtifactBoardPreviewErrors[keyof GetArtifactBoardPreviewErrors]
+
+export type GetArtifactBoardPreviewResponses = {
+  /**
+   * The board's preview
+   */
+  200: Blob | File
+}
+
+export type GetArtifactBoardPreviewResponse =
+  GetArtifactBoardPreviewResponses[keyof GetArtifactBoardPreviewResponses]
 
 export type GetArtifactQueryData = {
   body?: never
@@ -20564,6 +22809,7 @@ export type ListEventsData = {
       | "datasets"
       | "rules"
       | "users"
+      | "artifacts"
     type?:
       | "object.created"
       | "object.updated"
@@ -20598,6 +22844,8 @@ export type ListEventsData = {
       | "user.reactivated"
       | "user.invited"
       | "user.profile.updated"
+      | "artifact.updated"
+      | "artifact.commented"
     afterCursor?: string
     limit?: string
   }
@@ -21788,6 +24036,8 @@ export type ListEventsResponses = {
             | "user.reactivated"
             | "user.invited"
             | "user.profile.updated"
+            | "artifact.updated"
+            | "artifact.commented"
           topic:
             | "objects"
             | "telemetry"
@@ -21799,6 +24049,7 @@ export type ListEventsResponses = {
             | "datasets"
             | "rules"
             | "users"
+            | "artifacts"
           payload: {
             [key: string]: unknown
           }

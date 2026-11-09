@@ -100,7 +100,7 @@ export async function prepareAgentSandboxApiContext(
   )
 
   // A persistent workspace keeps what earlier runs installed: each artifact's copy must hold exactly
-  // the version installed now, never a file only an older version had.
+  // the revision installed now, never a file only an older one had.
   if (input.artifacts) {
     const cleared = await input.sandbox.runCommand(
       "bash",

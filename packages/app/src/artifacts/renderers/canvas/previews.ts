@@ -1,0 +1,126 @@
+import { client, getArtifactVersion } from "@sixb/client"
+import { BOARD_PREVIEW_WAIT_MS, SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/artifacts"
+import { type Query, useQuery } from "@tanstack/react-query"
+import type { ArtifactVersion } from "../../queries"
+
+/**
+ * Whether a board's picture can be shown: `ready`, `pending` while it is rendered, `none` when
+ * none will come and the board shows its outline.
+ */
+export type BoardPreviewStatus = "ready" | "pending" | "none"
+
+export type BoardPreviews = Readonly<Record<string, BoardPreviewStatus>>
+
+const NO_PREVIEWS: BoardPreviews = {}
+
+/** The first look again for pictures still rendered, and the longest between two. */
+const FIRST_CHECK_MS = 2_000
+const LONGEST_CHECK_MS = 30_000
+
+/**
+ * How long to wait before asking the version again which pictures are ready: never when none is
+ * pending or the version's last write is past the server's wait, else a little longer each time
+ * it is asked. An open version waits from its last write, as the server does.
+ */
+export function nextPreviewCheck(
+  previews: BoardPreviews,
+  version: Pick<ArtifactVersion, "updatedAt">,
+  checks: number,
+  now: number
+): number | false {
+  if (!Object.values(previews).includes("pending")) return false
+
+  if (now - Date.parse(version.updatedAt) >= BOARD_PREVIEW_WAIT_MS) return false
+
+  return Math.min(LONGEST_CHECK_MS, FIRST_CHECK_MS * 1.5 ** checks)
+}
+
+/**
+ * A canvas version's boards and whether each one's picture is ready, asked again while some are
+ * rendered, as {@link nextPreviewCheck} says. Its own query, so the viewer's version stays as it
+ * was read. Without a version, a canvas drawn on its own, no board has a picture.
+ */
+export function useBoardPreviews(version: ArtifactVersion | undefined): BoardPreviews {
+  return useQuery(boardPreviewsQuery(version)).data ?? NO_PREVIEWS
+}
+
+/**
+ * The query {@link useBoardPreviews} runs. The version's own answer starts it when it holds one:
+ * one without it, such as a version seeded from elsewhere, is asked rather than read as none.
+ */
+export function boardPreviewsQuery(version: ArtifactVersion | undefined) {
+  return {
+    // A revision's boards are pictured once: an open version that changed asks again.
+    queryKey: ["artifact-board-previews", version?.artifactId, version?.version, version?.revision],
+    queryFn: async (): Promise<BoardPreviews> => {
+      if (!version) return NO_PREVIEWS
+
+      const { data } = await getArtifactVersion({
+        path: { artifactId: version.artifactId, version: String(version.version) },
+        throwOnError: true,
+      })
+      return data.boardPreviews ?? NO_PREVIEWS
+    },
+    ...(version?.boardPreviews ? { initialData: version.boardPreviews } : {}),
+    enabled: version !== undefined,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+    refetchInterval: (current: Query<BoardPreviews>) =>
+      version
+        ? nextPreviewCheck(
+            current.state.data ?? NO_PREVIEWS,
+            version,
+            current.state.dataUpdateCount,
+            Date.now()
+          )
+        : false,
+  }
+}
+
+/** A board's picture at its own size, or one at most {@link SMALL_BOARD_PREVIEW_WIDTH} wide. */
+export type BoardPreviewSize = "small" | "full"
+
+/**
+ * The picture a board's tile shows, from how wide it is on screen: the small one while that
+ * covers it pixel for pixel, the full one past it, so a canvas fitted to a hundred boards holds a
+ * hundred small pictures, not a hundred screens.
+ */
+export function boardPreviewSize(screenWidth: number, pixelRatio: number): BoardPreviewSize {
+  return screenWidth * pixelRatio <= SMALL_BOARD_PREVIEW_WIDTH ? "small" : "full"
+}
+
+/**
+ * Where a board's picture is, in the reader's mode, at a size, of what the board shows: the
+ * server picks the mode a canvas pins, and the full size is its default. Named by the board's
+ * render key, the picture stays the same while the board does, however often an open canvas
+ * changes around it, as it does edited live; without one, by the revision shown. Either way it is
+ * kept for good, and one the version moved past is not found, never shown.
+ */
+export function boardPreviewUrl(
+  version: Pick<ArtifactVersion, "artifactId" | "version" | "revision" | "outline">,
+  board: string,
+  mode: "light" | "dark",
+  size: BoardPreviewSize = "full"
+): string {
+  const artifact = `/api/artifacts/${encodeURIComponent(version.artifactId)}`
+  const path = `${artifact}/versions/${version.version}/boards/${encodeURIComponent(board)}/preview`
+  const url = new URL(path, client.getConfig().baseUrl || window.location.origin)
+  url.searchParams.set("theme", mode)
+  if (size === "small") url.searchParams.set("size", "small")
+  const key = renderKeyOf(version, board)
+  if (key) url.searchParams.set("key", key)
+  else url.searchParams.set("revision", String(version.revision))
+  return url.toString()
+}
+
+/** The render key a version's outline gives a board, if it gives one. */
+export function renderKeyOf(
+  version: Pick<ArtifactVersion, "outline">,
+  board: string
+): string | undefined {
+  if (version.outline.kind !== "canvas") return undefined
+  const item = version.outline.items.find(
+    (candidate) => candidate.type === "board" && candidate.id === board
+  )
+  return item?.type === "board" ? item.renderKey : undefined
+}

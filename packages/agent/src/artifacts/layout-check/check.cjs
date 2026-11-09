@@ -3,15 +3,22 @@
 // sandbox's headless Chromium. A deck shows at 1280×720 with each slide filling the page, and every
 // slide is measured in each of its themes with the layout probe and screenshot in the first. A page
 // loads at 1280px and at a phone's 390px, is measured whole in each theme, its top 4000px, and
-// screenshot at each width. A canvas's boards load each at its own size, measured as a page is and
-// screenshot as boards/<id>.png. It writes one line of JSON:
-// { layout, slides, problems, errors, screenshots, stopped? } or { skipped }.
+// screenshot at each width. A canvas's boards load each at its own size, four at a time, measured
+// as a page is and screenshot as boards/<id>.png; a board boards.json marks `pictured` also in
+// each other theme, as boards/<id>.<theme>.png, and each of its pictures for readers also at most
+// `smallWidth` wide, as boards/<id>.<theme>.small.webp; a board whose page did not load whole is
+// not pictured, but listed in `unpictured`, as a broken picture would stay. With overview.html, the
+// whole canvas as it opens is screenshot as overview.png. It writes one line of JSON:
+// { layout, slides, problems, errors, screenshots, previews, unpictured, oversized, stalls,
+// overview?, stopped? } or
+// { skipped }.
 //
 //   node check.cjs <directory> <output directory> <library directory> <deadline in ms> <layout>
 //
 // The library holds what the worker installs beside this script: deck.css, page.css, runtime.js,
 // probe.js. The output directory holds entries.json, each page the check opens by its path, with
-// the kit and runtime in it; boards.json, a canvas's boards and their sizes; files.json,
+// the kit and runtime in it; boards.json, a canvas's boards and their sizes; overview.html and
+// overview.json, a canvas's page of itself and the window it opens in; files.json,
 // the paths the version publishes: only those are served, since the reader gets only those; and
 // themes.json, the themes the reader sees it in: Sixb's light and dark, or the mode its
 // theme.json pins, with its tokens; and queries.json, the version's queries by name with the
@@ -27,6 +34,7 @@
 const http = require("node:http")
 const fs = require("node:fs")
 const path = require("node:path")
+const { pathToFileURL } = require("node:url")
 
 const [deck, out, lib, deadline, layout = "deck"] = process.argv.slice(2)
 const DEADLINE_MS = Number(deadline) || 100_000
@@ -63,9 +71,66 @@ const TYPES = {
   ".otf": "font/otf",
 }
 
+/**
+ * How large a board's page draws, in CSS pixels: its document's scroll size, or its largest
+ * element's, which a page that clips its overflow still lays out, such as a fixed 1280×720 frame.
+ * Run in the page.
+ */
+function contentSize() {
+  const root = document.documentElement
+  let w = Math.max(root.scrollWidth, document.body?.scrollWidth ?? 0)
+  let h = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0)
+  for (const element of document.body?.querySelectorAll("*") ?? []) {
+    const rect = element.getBoundingClientRect()
+    w = Math.max(w, rect.width)
+    h = Math.max(h, rect.height)
+  }
+  return { w: Math.round(w), h: Math.round(h) }
+}
+
+/** How far a page may pass its board before it is too large for it: a scrollbar, a rounding. */
+const slack = (size) => Math.max(4, Math.round(size * 0.02))
+
+/** How many of a canvas's boards the check opens at once, each in a browser context of its own. */
+const LANES = 4
+/** A laptop's width, and reduced motion: what animates in is measured and shown where it lands. */
+const PAGE_OPTIONS = {
+  viewport: { width: 1280, height: 720 },
+  deviceScaleFactor: 1,
+  reducedMotion: "reduce",
+}
+const NOUN = { canvas: "the canvas", page: "the page" }[layout] ?? "the deck"
+
 /** What the check has found so far, which a check that stops early reports. */
-const found = { layout, slides: 0, problems: [], errors: [], screenshots: [] }
-const findings = () => ({ ...found, errors: [...new Set(found.errors)].slice(0, 10) })
+const found = {
+  layout,
+  slides: 0,
+  problems: [],
+  errors: [],
+  screenshots: [],
+  // A canvas's: each board's picture in each theme the reader sees it in, the boards that stopped
+  // answering, and the whole canvas as it opens.
+  previews: [],
+  unpictured: [],
+  // A canvas's boards whose page draws larger than the board shows.
+  oversized: [],
+  stalls: [],
+  overview: undefined,
+}
+/** A canvas's boards by their place in it: its lanes finish in any order. */
+let boardOrder = new Map()
+const byBoard = (left, right) =>
+  (boardOrder.get(left.board) ?? 0) - (boardOrder.get(right.board) ?? 0)
+const findings = () => ({
+  ...found,
+  errors: [...new Set(found.errors)].slice(0, 10),
+  problems: [...found.problems].sort(byBoard),
+  screenshots: [...found.screenshots].sort(
+    (left, right) => byBoard({ board: shotBoard(left) }, { board: shotBoard(right) })
+  ),
+  previews: [...found.previews].sort(byBoard),
+})
+const shotBoard = (file) => path.basename(file, ".png")
 
 let reported = false
 /** Writes the report, then exits once it is written. */
@@ -101,6 +166,230 @@ function loadPlaywright() {
     }
   }
   return null
+}
+
+/** A stall: a bound of the check's, or one of Playwright's, ran out. */
+function isStall(error) {
+  return error instanceof Stalled || error?.name === "TimeoutError"
+}
+
+/**
+ * A page the check opens, with what it reports of loading listened for, and the ways to drive it,
+ * each bounded and named after the step `stepOf` says it is at.
+ */
+function openTab(page, stepOf) {
+  const { errors } = found
+  // What failed to load since the page last loaded: a picture of it would show it broken.
+  const failures = []
+  const failed = (message) => {
+    errors.push(message)
+    failures.push(message)
+  }
+  page.on("pageerror", (error) => errors.push(error.message))
+  // A file that fails names itself; Chromium's console line for it does not.
+  const local = (url) => url.replace(/^http:\/\/127\.0\.0\.1:\d+\//, "")
+  page.on("console", (message) => {
+    if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
+      errors.push(message.text())
+    }
+  })
+  page.on("requestfailed", (request) => failed(`${local(request.url())} did not load`))
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      failed(`${local(response.url())} did not load (${response.status()})`)
+    }
+  })
+
+  // A font or a library from a CDN may be out of reach; the entry is measured as it loaded.
+  const load = async (url) => {
+    failures.length = 0
+    await page
+      .goto(url, { waitUntil: "load", timeout: 15_000 })
+      .catch((error) => failed(`${NOUN} did not finish loading: ${error.message}`))
+    // Each theme is measured as it settles, not on its way there.
+    await within(
+      stepOf(),
+      page.addStyleTag({
+        content: "*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }",
+      })
+    ).catch(() => {})
+    await within(`${NOUN}'s fonts`, page.evaluate(() => document.fonts?.ready)).catch(() => {})
+  }
+  const settle = () =>
+    within(
+      stepOf(),
+      page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+    )
+  const send = (method, params) =>
+    within(
+      stepOf(),
+      page.evaluate(
+        ({ protocol, method, params }) =>
+          window.postMessage({ protocol, id: 0, method, params }, "*"),
+        { protocol: PROTOCOL, method, params }
+      )
+    )
+  return { page, load, settle, send, failures }
+}
+
+/**
+ * A canvas's boards, each at its own size in each theme, a few at once. Each lane is a browser
+ * context of its own, so a board that stops answering costs only its lane, which goes on in a new
+ * one. A board's first theme is screenshot as boards/<id>.png; a board marked `pictured`, which
+ * the reader sees as a picture until they open it, in every theme, the others as
+ * boards/<id>.<theme>.png. Then the whole canvas as it opens, when overview.html says how. Returns
+ * whether a board stalled.
+ */
+async function checkCanvas(browser, port, probe, themes) {
+  const boards = JSON.parse(fs.readFileSync(path.join(out, "boards.json"), "utf8"))
+  boardOrder = new Map(boards.map((board, index) => [board.id, index]))
+  fs.mkdirSync(path.join(out, "boards"), { recursive: true })
+
+  const names = Object.keys(themes)
+  const waiting = [...boards]
+  let stalled = false
+
+  const open = async () => {
+    const context = await within("the browser", browser.newContext(PAGE_OPTIONS))
+    let step = NOUN
+    const tab = openTab(await within("the browser", context.newPage()), () => step)
+    return { ...tab, context, at: (next) => (step = next) }
+  }
+
+  const checkBoard = async (tab, board) => {
+    tab.at(`board '${board.id}'`)
+    await tab.page.setViewportSize({ width: board.w, height: Math.min(board.h, PAGE_HEIGHT) })
+    await tab.load(`http://127.0.0.1:${port}/${board.file.split("/").map(encodeURIComponent).join("/")}`)
+
+    const pictures = []
+    for (const [index, name] of names.entries()) {
+      const step = tab.at(`board '${board.id}' in ${name} mode`)
+      await tab.send("theme", themes[name])
+      await tab.settle()
+      for (const problem of await within(step, tab.page.evaluate(`(${probe})("page")`))) {
+        found.problems.push({ ...problem, board: board.id, theme: name })
+      }
+      if (index === 0) {
+        const page = await within(step, tab.page.evaluate(contentSize))
+        if (page.w > board.w + slack(board.w) || page.h > board.h + slack(board.h)) {
+          found.oversized.push({ board: board.id, w: board.w, h: board.h, page })
+        }
+      }
+
+      if (index > 0 && !board.pictured) continue
+      const file = path.join(out, "boards", index === 0 ? `${board.id}.png` : `${board.id}.${name}.png`)
+      const png = await tab.page.screenshot({ path: file, timeout: STEP_MS })
+      if (index === 0) found.screenshots.push(file)
+      if (!board.pictured || tab.failures.length > 0) continue
+
+      const small = path.join(out, "boards", `${board.id}.${name}.small.webp`)
+      await shrink(browser, png, board.smallWidth, small)
+      pictures.push(
+        { board: board.id, theme: name, size: "full", path: file, bytes: png.length },
+        { board: board.id, theme: name, size: "small", path: small, bytes: fs.statSync(small).size }
+      )
+    }
+
+    // A page that did not load whole is pictured broken, and its picture would stay: none is
+    // taken, and the board keeps its outline until it loads.
+    if (!board.pictured) return
+    if (tab.failures.length > 0) {
+      found.unpictured.push({ board: board.id, reason: tab.failures[0] })
+      return
+    }
+    found.previews.push(...pictures)
+  }
+
+  const lane = async () => {
+    let tab = await open()
+    for (let board = waiting.shift(); board; board = waiting.shift()) {
+      try {
+        await checkBoard(tab, board)
+      } catch (error) {
+        if (!isStall(error)) throw error
+        stalled = true
+        found.stalls.push({
+          board: board.id,
+          message: error instanceof Stalled ? error.message : `board '${board.id}' did not respond in time`,
+        })
+        // Its page may be frozen and keep its context from closing: exiting kills both.
+        void within("the browser", tab.context.close(), 5_000).catch(() => {})
+        tab = await open()
+      }
+    }
+    await within("the browser", tab.context.close(), 5_000).catch(() => {})
+  }
+
+  await Promise.all(Array.from({ length: Math.min(LANES, boards.length) }, lane))
+  await overview(browser)
+  return stalled
+}
+
+/** How a small picture's WebP is encoded: as sharp as text needs at its size, by eye. */
+const SMALL_QUALITY = 0.85
+/** A blank page where small pictures are encoded, apart from every board's scripts. */
+let encoder
+
+/**
+ * A board's screenshot at most `width` wide, its aspect kept, as WebP in `file`: what a canvas
+ * shows when it draws the board small. Encoded by the browser's own canvas.
+ */
+async function shrink(browser, png, width, file) {
+  encoder ??= within("the browser", browser.newContext()).then((context) =>
+    within("the browser", context.newPage())
+  )
+  const page = await encoder
+  const webp = await within(
+    "a small picture",
+    page.evaluate(
+      async ({ data, width, quality }) => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${data}`
+        await image.decode()
+        const scale = Math.min(1, width / image.naturalWidth)
+        const canvas = document.createElement("canvas")
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+        const context = canvas.getContext("2d")
+        context.imageSmoothingQuality = "high"
+        context.drawImage(image, 0, 0, canvas.width, canvas.height)
+        const blob = await new Promise((done) => canvas.toBlob(done, "image/webp", quality))
+        if (blob?.type !== "image/webp") throw new Error("this browser does not encode WebP")
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        let binary = ""
+        for (let at = 0; at < bytes.length; at += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+        }
+        return btoa(binary)
+      },
+      { data: png.toString("base64"), width, quality: SMALL_QUALITY }
+    )
+  )
+  fs.writeFileSync(file, Buffer.from(webp, "base64"))
+}
+
+/**
+ * overview.html, the whole canvas as the app opens it with each board its picture, screenshot
+ * as overview.png at the size overview.json gives. One that fails leaves the check as it is.
+ */
+async function overview(browser) {
+  const html = path.join(out, "overview.html")
+  if (!fs.existsSync(html)) return
+
+  const viewport = JSON.parse(fs.readFileSync(path.join(out, "overview.json"), "utf8"))
+  let context
+  try {
+    context = await within("the overview", browser.newContext({ viewport, deviceScaleFactor: 1 }))
+    const page = await within("the overview", context.newPage())
+    await page.goto(pathToFileURL(html).href, { waitUntil: "load", timeout: 15_000 })
+    const file = path.join(out, "overview.png")
+    await page.screenshot({ path: file, timeout: STEP_MS })
+    found.overview = file
+  } catch {
+    // Without its overview, the Agent still has each board's screenshot.
+  } finally {
+    if (context) await within("the browser", context.close(), 5_000).catch(() => {})
+  }
 }
 
 function serve() {
@@ -159,84 +448,19 @@ async function main() {
     server.close()
     return { skipped: "no_browser", detail: String(error?.message ?? error).slice(0, 300) }
   }
-  const noun = { canvas: "the canvas", page: "the page" }[layout] ?? "the deck"
-  let step = noun
+  let step = NOUN
   let stalled = false
+  const { port } = server.address()
   try {
-    // Reduced motion, so what animates in is measured and shown where it lands.
-    const page = await browser.newPage({
-      viewport: { width: 1280, height: 720 },
-      deviceScaleFactor: 1,
-      reducedMotion: "reduce",
-    })
-    const { errors, problems, screenshots } = found
-    page.on("pageerror", (error) => errors.push(error.message))
-    // A file that fails names itself; Chromium's console line for it does not.
-    const local = (url) => url.replace(/^http:\/\/127\.0\.0\.1:\d+\//, "")
-    page.on("console", (message) => {
-      if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
-        errors.push(message.text())
-      }
-    })
-    page.on("requestfailed", (request) => errors.push(`${local(request.url())} did not load`))
-    page.on("response", (response) => {
-      if (response.status() >= 400) {
-        errors.push(`${local(response.url())} did not load (${response.status()})`)
-      }
-    })
-    const { port } = server.address()
-    // A font or a library from a CDN may be out of reach; the entry is measured as it loaded.
-    const load = async (url) => {
-      await page
-        .goto(url, { waitUntil: "load", timeout: 15_000 })
-        .catch((error) => errors.push(`${noun} did not finish loading: ${error.message}`))
-      // Each theme is measured as it settles, not on its way there.
-      await within(
-        step,
-        page.addStyleTag({
-          content: "*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }",
-        })
-      ).catch(() => {})
-      await within(`${noun}'s fonts`, page.evaluate(() => document.fonts?.ready)).catch(() => {})
-    }
-    const settle = () =>
-      within(
-        step,
-        page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
-      )
-    const send = (method, params) =>
-      within(
-        step,
-        page.evaluate(
-          ({ protocol, method, params }) =>
-            window.postMessage({ protocol, id: 0, method, params }, "*"),
-          { protocol: PROTOCOL, method, params }
-        )
-      )
     if (layout === "canvas") {
-      // Each board at its own size, as the canvas shows it, in each theme.
-      const boards = JSON.parse(fs.readFileSync(path.join(out, "boards.json"), "utf8"))
-      fs.mkdirSync(path.join(out, "boards"), { recursive: true })
-      for (const board of boards) {
-        step = `board '${board.id}'`
-        await page.setViewportSize({ width: board.w, height: Math.min(board.h, PAGE_HEIGHT) })
-        await load(`http://127.0.0.1:${port}/${board.file.split("/").map(encodeURIComponent).join("/")}`)
-        for (const [index, name] of Object.keys(themes).entries()) {
-          step = `board '${board.id}' in ${name} mode`
-          await send("theme", themes[name])
-          await settle()
-          for (const problem of await within(step, page.evaluate(`(${probe})("page")`))) {
-            problems.push({ ...problem, board: board.id, theme: name })
-          }
-          if (index === 0) {
-            const file = path.join(out, "boards", `${board.id}.png`)
-            await page.screenshot({ path: file, timeout: STEP_MS })
-            screenshots.push(file)
-          }
-        }
-      }
+      stalled = await checkCanvas(browser, port, probe, themes)
       return findings()
     }
+    const { page, load, settle, send } = openTab(
+      await browser.newPage(PAGE_OPTIONS),
+      () => step
+    )
+    const { problems, screenshots } = found
     if (layout === "page") {
       for (const view of VIEWS) {
         step = `the page at ${view.width}px`
@@ -303,7 +527,7 @@ async function main() {
   } catch (error) {
     // Playwright's own timeouts, for a slide that never shows or a screenshot never taken, are
     // stalls too.
-    if (!(error instanceof Stalled) && error?.name !== "TimeoutError") throw error
+    if (!isStall(error)) throw error
     stalled = true
     return {
       ...findings(),

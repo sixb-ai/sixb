@@ -31,7 +31,7 @@ export interface SixbApiRoute {
 /**
  * `read` changes nothing (a read sent as POST); `memory` writes the Agent's own notes; `file` stores
  * a blob nothing points at yet; `model` costs what AI limits already bound; `artifact` publishes
- * into the run's conversation.
+ * into the run's conversation, or answers a comment on one of its artifacts.
  */
 export type AgentApiEffect =
   | "read"
@@ -565,12 +565,79 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
-    operationId: "publishArtifactVersion",
-    method: "POST",
-    path: "/api/artifacts/:artifactId/versions",
+    operationId: "updateArtifact",
+    method: "PUT",
+    path: "/api/artifacts/:artifactId/content",
     accessToken: true,
     agentApi: true,
     agentEffect: "artifact",
+  },
+  // Creating a version and restoring are a person's: a run token neither freezes what it wrote
+  // nor puts earlier content back.
+  {
+    operationId: "freezeArtifactVersion",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/freeze",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "listArtifactRestorePoints",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/restore-points",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "getArtifactRestorePoint",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/restore-points/:revision",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "getArtifactRestorePointFileContent",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/restore-points/:revision/content",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "restoreArtifact",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/restore-points/:revision/restore",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "listArtifactComments",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/comments",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "addArtifactComment",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/comments",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "artifact",
+  },
+  {
+    operationId: "resolveArtifactComment",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/comments/:commentId/resolve",
+    accessToken: true,
+    agentApi: true,
+    agentEffect: "artifact",
+  },
+  {
+    operationId: "deleteArtifactComment",
+    method: "DELETE",
+    path: "/api/artifacts/:artifactId/comments/:commentId",
+    accessToken: true,
+    agentApi: false,
   },
   {
     operationId: "getArtifactVersion",
@@ -578,6 +645,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/versions/:version",
     accessToken: true,
     agentApi: true,
+  },
+  {
+    operationId: "getArtifactBoardPreview",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/versions/:version/boards/:board/preview",
+    accessToken: true,
+    agentApi: false,
   },
   {
     operationId: "getArtifactQuery",

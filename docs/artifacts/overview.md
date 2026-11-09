@@ -1,8 +1,8 @@
 # Artifacts
 
 An artifact is a piece of finished work your project keeps: a report, a chart, a file someone
-needs. Each one has versions that never change once published, and a page in your app where its
-owner reads it.
+needs. Changes go to its current version until someone creates a version, which then never changes.
+Each artifact has a page in your app where its owner reads it.
 
 ## Kinds
 
@@ -39,20 +39,48 @@ const { artifact } = await sixb.artifacts.create({
 })
 ```
 
-`sixb.artifacts.publish(artifact.id, input)` adds the next version. Publishing checks the whole
-version first: a document's images must be files in that version or another artifact's address, so
-it reads the same wherever it opens.
+`sixb.artifacts.update(artifact.id, input)` replaces the current version's content. An update
+checks the whole version first: a document's images must be files in that version or another
+artifact's address, so it reads the same wherever it opens.
 
-Pass `baseVersion`, the version your change was made from, when someone else may publish in
-between. If another version was published since, the publish fails with `artifact_moved` (409 over
-HTTP) and names the latest version and its author, rather than replace changes you never saw:
+Pass `baseRevision`, the revision your change was made from, when someone else may change it in
+between. If it changed since, the update fails with `artifact_moved` (409 over HTTP), naming the
+revision and who last wrote it, rather than replace changes you never saw:
 
 ```ts
-await sixb.artifacts.publish(artifact.id, { ...input, baseVersion: 3 })
+await sixb.artifacts.update(artifact.id, { ...input, baseRevision: artifact.revision })
 ```
 
-From outside the server, use `POST /api/artifacts` and
-`POST /api/artifacts/{artifactId}/versions` with files uploaded through `POST /api/files`.
+A canvas is edited by several people at once, so an update to one is merged instead. Your changes
+since `baseRevision` are applied, item by item and line by line, to what it holds now, and the
+result says `merged: true`. Where you and someone else set the same value, such as an item's
+position, yours wins; words you both typed in the same text are both kept. A canvas still fails
+with `artifact_moved` when Sixb no longer holds the files of `baseRevision`.
+
+From outside the server, use `POST /api/artifacts` and `PUT /api/artifacts/{artifactId}/content`
+with files uploaded through `POST /api/files`.
+
+## Versions and restore points
+
+- The latest version is **open**: each update, from your code, the Agent, or a save in the app,
+  replaces it.
+- **Creating a version** freezes it: it never changes again, and the next change opens the next
+  one. Creating it twice changes nothing.
+- Every change counts in the artifact's `revision`, which only grows. Content read at one revision
+  stays that revision's.
+- Before an Agent turn's first change to an artifact, and before each restore, the artifact keeps a
+  **restore point** of what it held: its last 20. Restoring one writes it back as a change, which
+  can itself be restored.
+
+| To | SDK | HTTP |
+| --- | --- | --- |
+| Create a version | `sixb.artifacts.freeze(id)` | `POST /api/artifacts/{id}/freeze` |
+| List restore points | `sixb.artifacts.listRestorePoints(id)` | `GET /api/artifacts/{id}/restore-points` |
+| Restore one | `sixb.artifacts.restore(id, revision)` | `POST /api/artifacts/{id}/restore-points/{revision}/restore` |
+
+Whoever may change an artifact may create its versions and restore it; the Agent does neither.
+Each change sends `artifact.updated` to whoever reads the artifact, over the
+[events websocket](../websockets/overview.md).
 
 ## The Agent publishes
 
@@ -62,13 +90,17 @@ reply. The first one a reply publishes opens beside the conversation as soon as 
 while the Agent is still working; on a phone, where it would open over the conversation, it waits
 on its card instead.
 
-Ask for a change and the Agent publishes the next version of the same artifact. The reply shows it
-as a line with the version number and what changed, such as a sheet or section added, and the
-version menu keeps the earlier versions. The conversation's header lists every artifact it
-published.
+Ask for a change and the Agent updates the same artifact: its current version, until you create
+one. The reply shows it as a line with what changed, such as a sheet or section added, and the
+version menu keeps the versions you created. **Restore** in the version menu puts back what the
+artifact held before one of the Agent's turns, or before a restore, once you confirm. The
+conversation's header lists every artifact it published.
 
-A cancelled reply keeps what it already published. Retrying a reply that failed removes what it
-published along with what it said.
+A cancelled reply keeps what it already published. Retrying a reply that failed takes back what it
+changed, along with what it said: an artifact only the reply changed goes back to its restore
+point, and one it created is removed. One anyone else changed meanwhile, even between two of the
+reply's writes, or whose version someone created, keeps every change. One it created that someone
+else commented on stays too, with its comments.
 
 The Agent learns the formats from a built-in skill, `sixb-artifacts`.
 
@@ -77,10 +109,17 @@ publishes it when it is what you asked for.
 
 ## Edit in the app
 
-Sheets and canvases are edited where they open. Press **Edit** on the latest version: the header
-becomes a draft bar with Undo, Redo, Discard, and **Save as version N**. Saving publishes your
-draft as the next version; the earlier ones stay in the version menu. ⌘S saves, and leaving with
-changes asks first.
+Sheets and canvases are edited where they open: press **Edit** on the latest version.
+
+A sheet is edited as a draft. The header becomes a draft bar with Undo, Redo, Discard, and
+**Save**. Saving replaces the current version with your draft; **Create version** keeps it as a
+numbered version in the version menu. ⌘S saves, and leaving with changes asks first. If someone
+changed the sheet while you were editing, the save stops and says so: open what they saved, or save
+yours over it.
+
+A canvas is edited live, with everyone who has it open: there is no draft to save. The header keeps
+Undo, Redo, and **Done**, your changes are saved as you make them, and everyone's are merged. See
+[Edit a canvas live](#edit-a-canvas-live).
 
 | In a sheet | |
 | --- | --- |
@@ -96,10 +135,100 @@ changes asks first.
 | Arrows | Drag from the dot on an item's side to another item; the toolbar sets a line's style and label |
 | Style | A note's or a shape's color, a text's size, a shape's form, for everything selected |
 
-Boards' pages are the Agent's to change; on the canvas you arrange them. If someone published a
-version while you were editing, the save stops and says so: open the new version, or save yours
-over it. The next time the Agent works on the artifact, it starts from your version and keeps your
-changes.
+On the canvas you arrange the boards, and the Agent writes what they show. The next time the Agent
+works on the artifact, it starts from the latest version and keeps your changes.
+
+## Edit a canvas live
+
+A canvas is edited by everyone at once over `/ws/artifacts`. Each person sees the others' changes
+as they make them, and who else is there.
+
+- Whoever may change the canvas edits it; whoever may only read it watches.
+- Changes are written to the current version about 1.5 seconds after the last one, at most every
+  10 seconds while someone keeps editing, and when the last editor leaves. Each write is a normal
+  change, by the last person who edited, and sends `artifact.updated`.
+- What the Agent or anyone else publishes meanwhile is merged into what people are editing, and
+  their unsaved changes stay. While an Agent turn changes boards, everyone sees which ones.
+- Everyone sees the others' changes and presence at once, whichever server they are connected
+  to. Someone who reconnects after editing offline gets their changes merged in.
+- A write that fails is reported and tried again, for as long as the server runs; the changes stay
+  meanwhile. Changes the server could never save, because it stopped first, are reported to
+  [`onError`](../logging/overview.md#report-failures) as `artifact.live_write.failed`.
+
+`@sixb/core/artifacts/live` holds the document and the socket's messages for a client to build
+on, `@sixb/core/artifacts/live/protocol` the messages alone, without Yjs, and
+`@sixb/client/artifact-live` the socket. The [WebSockets](../websockets/overview.md#live-artifacts)
+page lists the messages.
+
+### Edit what a board shows
+
+A board's HTML stays yours to write. What its source holds can also be changed in place: words,
+pictures, and inline styles.
+
+- Each element in a board's source has an address, its path from the `<body>`, such as
+  `body>main:0>h1:0`. What a script builds, such as a chart drawn from live data, has none and
+  can't be edited in place.
+- An element can be a block of text, which you type into, keeping the bold or the link around the
+  rest. It can also be an image, whose picture and description change, or anything else.
+- Every element takes `color`, `background`, `background-color`, `font-size`, `font-weight`,
+  `text-align`, `padding`, `gap` and `border-radius` in its inline style.
+- Edits go to everyone editing the canvas at once, and merge with what the Agent writes.
+
+| `@sixb/core/artifacts/live` | |
+| --- | --- |
+| `boardElements(source)` | Every static element: its address, kind, source range, and first words |
+| `setBoardText`, `setBoardImage`, `setBoardStyle` | An edit, as changes to the source |
+| `mergeBoardText(source, address, base, typed)` | Typed words, merged with changes since `base` |
+| `applyBoardEditToText(text, edit)` | Makes it in the board's `Y.Text` |
+| `boardFramePatches(before, after)` | What a frame showing `before` patches to show `after` |
+
+A board's frame link serves it for editing with `?sixb-edit`. The frame's `edit` request then
+turns editing on, and takes `edit.patch`. With `typing: false`, picking an element types nothing
+into it, as when the reader picks what to comment on.
+
+- Transfer a `MessagePort` with the first `edit` request after the frame loads. The frame reports
+  `edit.hover`, `edit.select` (with where the reader clicked) and `edit.text` through that port
+  alone.
+- The board's scripts can't post on the port: the frame takes it before they run, and they never
+  see the request that hands it over. The frame reports only the reader's own clicks and keys.
+- They can still rewrite what an element holds, so take `edit.text` only for the element the
+  reader picked, and stop taking it once `boardFramePatches` returns null.
+
+## Comment on an artifact
+
+Whoever reads an artifact reads its comments and adds their own. A comment on a canvas can be about
+a board, or an element of one. Its author, or anyone who may change the artifact, resolves or
+deletes it. Replies go one level deep. A copy of the artifact, such as a forked conversation's,
+keeps no comments.
+
+```ts
+const comment = await sixb.artifacts.addComment(artifact.id, {
+  body: "Make the title warmer.",
+  anchor: { board: "welcome", element: "body>main:0>h1:0", label: "Welcome back" },
+})
+await sixb.artifacts.addComment(artifact.id, { body: "Done.", parentId: comment.id })
+await sixb.artifacts.resolveComment(artifact.id, comment.id)
+```
+
+| To | HTTP |
+| --- | --- |
+| List | `GET /api/artifacts/{id}/comments` |
+| Add, or reply | `POST /api/artifacts/{id}/comments` |
+| Resolve, or open again | `POST /api/artifacts/{id}/comments/{commentId}/resolve` |
+| Delete, with its replies | `DELETE /api/artifacts/{id}/comments/{commentId}` |
+
+- An anchor records the revision its author saw, and the element's first words. These still name
+  the element once it is gone. Its `point` places the comment's pin on the board, as fractions of
+  the board's width and height.
+- Each comment names its author in `authorName`, as their profile does, or `null` for someone the
+  project no longer knows. One the Agent wrote for its author has `origin`, its run and
+  conversation.
+- Each change sends `artifact.commented` to whoever reads the artifact.
+- An artifact holds at most 1,000 comments, each up to 4,000 characters.
+- `quoteArtifactComment(comment)` from `@sixb/core/artifacts` writes a comment as the Agent reads
+  it, with where it is and its id, for a message that asks the Agent to act on it. The Agent then
+  resolves each comment it addressed, and replies to the ones it can't, with
+  `sixb artifacts comments`.
 
 ## Write a document
 
@@ -311,7 +440,8 @@ fleet-planner/
   buttons are drawn like the app's. A page picks a few components by class: `.eyebrow`, `.lede`,
   `.card`, `.grid`, `.row`, `.stat` (with `.label`, `.value`, `.delta`), `.tag`, `.callout`,
   `.note`, and `.table-scroll`.
-  The page's own CSS overrides the kit and the theme.
+  The page's own CSS overrides the kit and the theme, and text takes the colour the page gives
+  its body: a page with its own light background reads the same in dark mode.
 - The page's `<title>`, else its first `<h1>`, names it in cards and lists.
 - A page runs its own scripts, with the same limits as a deck: it can't read the app's cookies or
   call the API itself, and it loads only its own files and a few public CDNs (jsDelivr, cdnjs,
@@ -381,7 +511,7 @@ brainstorm or a retro, a diagram, a mood board.
 | `board`   | An HTML file of the canvas, shown as a page `w` by `h`: a screen, a mockup, a poster |
 | `section` | A group's heading, drawn at the top left of the region it names                      |
 | `note`    | A sticky note of plain text that grows to hold it; `tone` picks its color            |
-| `text`    | A label or a heading, `size` `s`, `m`, `l`, or `xl`                                  |
+| `text`    | A label or a heading, `size` `s`, `m`, `l`, `xl`, or `xxl` (120 px, a title)          |
 | `shape`   | A `rect`, `ellipse`, or `diamond`, with optional text                                |
 | `arrow`   | From one item, or a point `{ "x", "y" }`, to another, with an optional `label`, `dashed` |
 | `embed`   | Another artifact, or a part of one, at a size                                        |
@@ -391,19 +521,45 @@ brainstorm or a retro, a diagram, a mood board.
 - Boards are pages: Sixb adds the page kit and runtime to each, and boards may share CSS and
   images beside them (`boards/shared.css`).
 - `artifact:…#welcome` opens the canvas with that board open, or on that section; a document
-  embeds a board with `![Welcome](artifact:…#welcome)`. A canvas holds at most 500 items and 40
-  boards; sizes run from 40 to 8,000 pixels and positions within ±100,000.
+  embeds a board with `![Welcome](artifact:…#welcome)`. A canvas holds at most 1,000 items and
+  100 boards; sizes run from 40 to 8,000 pixels and positions within ±100,000.
 
 Readers drag or scroll to pan, pinch or ⌘-scroll to zoom, fit everything with the controls, and
-press the zoom to go to 100%. Boards run live once they're on screen, up to 12 at once, and keep
-running as the reader zooms out; on the canvas they're pictures, so dragging over one pans.
-Double-click a board, press Enter on it, or press the button by its name to open it: it fills the
-viewer and answers like a page, ← and → step through the boards in order, and Esc goes back to the
-canvas.
+press the zoom to go to 100%. Boards and embeds run live once the view shows them at half their
+size, or 360 pixels wide while a board has no preview yet, up to 8 at once, and keep running as
+the reader zooms out; on the canvas they're pictures, so dragging over one pans. Double-click a
+board, press Enter on it, or press the button by its name to open it: it opens at its own size,
+scaled to fit the viewer, and answers like a page, ← and → step through the boards in order, and
+Esc goes back to the canvas. In an opened board, a button or a `#` link whose words are the label
+of an arrow leaving it opens the board the arrow points to.
 
 Publishing warns of boards that overlap and of notes or text on a board. When the Agent publishes a
 canvas, its sandbox's browser opens each board at its own size, as it checks a page, and the Agent
-gets each board's warnings and screenshot.
+gets each board's warnings and screenshot, and `overview.png`, the canvas as it opens.
+
+Each board also gets a preview: a picture of it in light and dark, or in the mode `theme.json`
+pins, shown in place of the board until it runs, in the reader's mode. Each comes in two sizes:
+`full`, a PNG of the board at its own size, and `small`, a WebP at most 480 pixels wide, shown
+while the board is drawn small. While it is rendered, the board shows its outline, or its last
+preview when it changed, and the viewer shows the new one as soon as it is ready.
+
+- The Agent's check takes them as it publishes. A version published otherwise, such as one whose
+  boards were resized in the app, is pictured by the agent worker in a blank sandbox of the
+  project, which reaches only the CDNs a board may load from; without sandboxes, boards have no
+  preview. The worker waits until the canvas has not been written for 15 seconds, so a canvas
+  edited live is pictured once, as it is when people pause.
+- A preview is named by what the board shows: its HTML, the files it can load, and its size, in
+  its canvas. Moving a board keeps its preview, whoever saves the canvas; resizing it or changing
+  what it loads renders a new one. A board kept as it was keeps the picture it was first given.
+- A board whose page does not load whole, a file or a font that fails, gets no preview and shows
+  its outline: a broken picture would stay.
+- A board that reads a query is pictured with the data its publisher could read when they
+  published it, which everyone who can open the canvas then sees in its preview; publishing warns
+  of it. In a canvas with queries, a change someone else saves renders the previews again,
+  with their data, and a copy of the canvas, such as a forked conversation's, gets none of them.
+- `GET /api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview?theme=dark&size=small`
+  serves one to whoever reads the version, and reading or publishing a version says which boards'
+  previews are `ready`, `pending`, or `none`.
 
 ## Declare a query
 
@@ -465,9 +621,9 @@ await sixb.artifacts.create({
 ## Reference another artifact
 
 A document, a sheet, a deck, a page, or an agent's reply can show another artifact, or a part of
-it, by its address. A report that shows a sheet's chart stays current when the sheet changes. The Agent is
-told to pin the version a reply describes (`@2`), so that what the reply shows matches its words;
-an address it writes without a version follows the latest one.
+it, by its address. A report that shows a sheet's chart stays current when the sheet changes. A
+reply pins a created version it describes (`@2`), so that what it shows matches its words; an
+address without a version follows the latest one.
 
 ```text
 artifact:<id>[@<version>][/<file>][#<part>]
@@ -476,7 +632,7 @@ artifact:<id>[@<version>][/<file>][#<part>]
 | Address                                       | Points at                                   |
 | --------------------------------------------- | ------------------------------------------- |
 | `artifact:art_k3m9q2x7tp`                     | The artifact, at its latest version         |
-| `artifact:art_k3m9q2x7tp@2`                   | Version 2, which never changes              |
+| `artifact:art_k3m9q2x7tp@2`                   | Version 2, created, which never changes     |
 | `artifact:art_k3m9q2x7tp/figures/revenue.svg` | A file inside it                            |
 | `artifact:art_k3m9q2x7tp#Regions`             | A sheet                                     |
 | `artifact:art_k3m9q2x7tp#Regions!A1:D5`       | A range of a sheet; row 1 is its header row |
@@ -499,9 +655,9 @@ source and whether it follows the latest version or a fixed one. Something shown
 artifact appears as a link. In a sheet, a `link` or `image` column cell can hold an address.
 
 Publishing resolves every address in a version against what its author can read, and refuses one
-that names nothing, saying what the target has instead. When a new version renames or removes
-something another artifact shows, it publishes with a warning naming that artifact. A reader who
-can't open a target sees it as unavailable.
+that names nothing, saying what the target has instead, and one pinned to a version still open.
+When a change renames or removes something another artifact shows, it publishes with a warning
+naming that artifact. A reader who can't open a target sees it as unavailable.
 
 ## Open an artifact
 
@@ -516,8 +672,8 @@ an image. Filter it by kind with `?kind=document`, `sheet`, `slides`, or `file`;
 takes the same `kind`. The user menu, search (⌘K), and a conversation's artifact menu link to it.
 
 The link button in an artifact's header copies a link to its page, and the one beside a heading a
-link to that section. A link to the latest version keeps following the artifact as new versions
-are published; a link copied from an earlier version stays on it.
+link to that section. A link to the latest version keeps following the artifact as it changes; a
+link copied from an earlier version stays on it.
 
 An artifact belongs to its owner. Server code that runs as the system, outside any user's request,
 reaches every artifact in the project.
@@ -530,16 +686,16 @@ reads the conversation reads the artifact, at its latest version, whatever publi
 | | Owner | [Participant](../models/overview.md#share-a-conversation) | [Observer](../apps/activity.md#read-a-conversation) |
 | --- | --- | --- | --- |
 | Read every version, list the conversation's artifacts | ✓ | ✓ | ✓ |
-| Publish a version, keep page data with `sixb.state` | ✓ | ✓ | – |
+| Change it, create versions, restore it, keep page data with `sixb.state` | ✓ | ✓ | – |
 | Delete it | ✓ | – | – |
 
-- A version saved by anyone who can update it is seen by every reader of every conversation that
+- A change saved by anyone who can update it is seen by every reader of every conversation that
   shares the artifact. Its author is whoever saved it; the artifact stays its owner's.
 - The agent revises someone else's artifact only in a conversation that already shares it. When
   it revises one of yours in a conversation, that conversation shares it from then on, with its
   history.
-- Retrying a turn takes back what it published: an artifact only that turn shared in the
-  conversation is no longer shared there.
+- Retrying a turn takes back what it changed: an artifact it put back is no longer shared in a
+  conversation only that turn shared it in. One someone changed since stays, and stays shared.
 - The owner's other artifacts stay private. An embed or link to one is refused with 403
   `not_shared` for whoever cannot read it, so a page can say it is not shared in this
   conversation; an unknown id is a 404. The difference tells anyone whether an id exists, never

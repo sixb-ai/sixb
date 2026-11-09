@@ -6,13 +6,13 @@
  *
  * In every layout it applies the theme the app sends, then fires `sixb:theme` on the window for
  * what draws its own colors; answers the app's requests; and tells the app about the links the
- * reader follows, to other artifacts or to web pages, for the app to open them, and where its
- * `<sixb-embed>` boxes are, for the app to draw them over the frame. A deck it also lays out:
- * every `section.slide` is a 1280×720 slide, shown one at a time scaled to fit, or all at once in
- * a grid. The URL's fragment can open it at a slide, and with `sixb-fill` show that slide alone
- * filling the frame, as a thumbnail or an embed does; it tells the app about keys and picks in the
- * overview. A page scrolls as it is: it reports the embeds near its view as it scrolls, and its
- * height as it changes.
+ * reader follows, to other artifacts or to web pages, for the app to open them, the words of the
+ * buttons they press, and where its `<sixb-embed>` boxes are, for the app to draw them over the
+ * frame. A deck it also lays out: every `section.slide` is a 1280×720 slide, shown one at a time
+ * scaled to fit, or all at once in a grid. The URL's fragment can open it at a slide, and with
+ * `sixb-fill` show that slide alone filling the frame, as a thumbnail or an embed does; it tells
+ * the app about keys and picks in the overview. A page scrolls as it is: it reports the embeds
+ * near its view as it scrolls, and its height as it changes.
  *
  * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
  * call is a message the app answers, and the app keeps the values. Opened on its own, with no app
@@ -26,6 +26,16 @@
  * When the objects a query reads change, the app reads it again and tells the frame, which fires
  * `sixb:query` on the window with `detail.name`, for the page to call `sixb.query(name)` again.
  * Opened on its own, nothing tells it: the rows the check served are all there is.
+ *
+ * A canvas's board served for editing has each static element marked with its address
+ * (`data-sixb-at`), its kind (`data-sixb-edit`) and a text's words hashed (`data-sixb-text`), as
+ * `annotateBoard` writes them. While the app has editing on, a click picks an element instead of
+ * following it, the frame reports what the reader points at and picks, and a text element takes
+ * the reader's typing, each change posted as its words. What a script built, or a text whose words
+ * a script rewrote, is reported as scripted and takes nothing. What others change arrives as
+ * patches, element by element; the one the reader is typing in takes its own once they leave it,
+ * so their caret stays. What editing reports goes through the port the app hands over with its
+ * first `edit` request, taken before the page's scripts run: they cannot post on it.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -48,6 +58,29 @@ export function frameRuntime(): void {
   const MAX_VALUE_BYTES = 65536
   /** A query's name, as `isArtifactQueryName` says: refused here before it is sent. */
   const QUERY_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/
+  /** The longest words a press reports, an arrow's label's, as `ARTIFACT_LIMITS` says. */
+  const MAX_LABEL_LENGTH = 120
+  /** What `annotateBoard` marks a board's elements with. */
+  const AT = "data-sixb-at"
+  const KIND = "data-sixb-edit"
+  const WORDS = "data-sixb-text"
+  const MAX_EDIT_LABEL = 80
+  /** A comment's bubble, its tip where the pin goes, as the canvas draws it. */
+  const COMMENT_CURSOR =
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 21V11a8 8 0 1 1 8 8H3z' fill='%23111' stroke='white' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E\") 3 21, crosshair"
+  /**
+   * How picking shows: editing, a dashed line around what the pointer is over and a solid one
+   * around what is picked, under a bubble pointer when commenting. One blue whatever the
+   * page or the theme, as a design tool's selection is, so it shows on light and dark alike.
+   */
+  const EDITING_CSS = [
+    "[data-sixb-editing] [data-sixb-hover] { outline: 1px dashed #0a84ff; outline-offset: 2px; }",
+    "[data-sixb-editing] [data-sixb-picked] { outline: 2px solid #0a84ff; outline-offset: 2px; }",
+    "[data-sixb-editing] [contenteditable] { cursor: text; }",
+    `[data-sixb-commenting], [data-sixb-commenting] * { cursor: ${COMMENT_CURSOR} !important; }`,
+    "[data-sixb-commenting] [data-sixb-hover] { outline: 2px dashed #0a84ff; outline-offset: 3px; }",
+    "[data-sixb-commenting] [data-sixb-picked] { outline: 2px solid #0a84ff; outline-offset: 3px; }",
+  ].join(" ")
   const root = document.documentElement
   // Only set while the runtime itself runs, so kept for what reads it later.
   const script = document.currentScript as HTMLScriptElement | null
@@ -186,6 +219,229 @@ export function frameRuntime(): void {
     reportEmbeds()
   }
 
+  // ── Editing a board ─────────────────────────────────────────────────
+
+  // What editing reports goes to the app through the port its first `edit` request hands over,
+  // never through the window, where the page's own scripts post too. The port, and the way to
+  // post on it, are taken before any of the page's scripts run, which cannot reach either.
+  const portPost = typeof MessagePort === "function" ? MessagePort.prototype.postMessage : undefined
+  const apply = Reflect.apply
+  let editPort: MessagePort | null = null
+  const postEdit = (message: Record<string, unknown>) => {
+    if (editPort && portPost) apply(portPost, editPort, [{ protocol: PROTOCOL, ...message }])
+  }
+
+  let editing = false
+  /** Whether a text the reader picks takes their typing: not while they pick what to comment on. */
+  let typable = true
+  let pointed: Element | null = null
+  let picked: Element | null = null
+  let typing: HTMLElement | null = null
+  /** What others changed in the element the reader is typing in, for when they leave it. */
+  let held: Record<string, unknown> | null = null
+  /** The words the reader's typing starts from: as they began, then as last posted. */
+  let typedFrom = ""
+
+  /** FNV-1a over the words' UTF-16 code units, as `boardTextHash` hashes them. */
+  const wordsHash = (text: string): string => {
+    let hash = 0x811c9dc5
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index)
+      hash = Math.imul(hash, 0x01000193) >>> 0
+    }
+    return hash.toString(16)
+  }
+
+  /** A text's words as they read: a line break between two words parts them. */
+  const spokenWords = (element: Element): string => {
+    const copy = element.cloneNode(true)
+    if (!(copy instanceof Element)) return element.textContent ?? ""
+    for (const lineBreak of Array.from(copy.querySelectorAll("br"))) lineBreak.replaceWith(" ")
+    for (const code of Array.from(copy.querySelectorAll("script, style, template"))) code.remove()
+    return copy.textContent ?? ""
+  }
+
+  /**
+   * What is drawn as picked or pointed at: the element, or, picking what to comment on, what a
+   * script built too, which a comment can be about though it cannot be edited.
+   */
+  const commentable = (element: Element | null, node: EventTarget | null): Element | null =>
+    element ??
+    (!typable && node instanceof Element && node !== root && node !== document.body ? node : null)
+
+  /** The element the reader means by `node`, as the app is told of it. */
+  const editTarget = (node: EventTarget | null) => {
+    const start = node instanceof Element ? node : null
+    const element = start?.closest(`[${AT}]`) ?? null
+    const box = (start ?? element)?.getBoundingClientRect()
+    const rect = {
+      x: box?.left ?? 0,
+      y: box?.top ?? 0,
+      width: box?.width ?? 0,
+      height: box?.height ?? 0,
+    }
+    const kind = element?.getAttribute(KIND) ?? ""
+    // The page itself is no part of it to quote.
+    const shown =
+      start && start !== root && start !== document.body
+        ? spokenWords(start).replace(/\s+/g, " ").trim()
+        : ""
+    const scripted = {
+      address: null,
+      kind: "scripted",
+      within: element?.getAttribute(AT) ?? null,
+      ...(shown ? { label: shown.slice(0, MAX_EDIT_LABEL) } : {}),
+      rect,
+    }
+    if (!element) return { element: null, target: scripted }
+
+    // What is inside a text, or drawn whole, is part of it; anything else inside a box that has
+    // no address of its own is a script's.
+    if (element !== start && kind !== "text" && kind !== "whole") {
+      return { element: null, target: scripted }
+    }
+    const words = element.textContent ?? ""
+    if (kind === "text" && wordsHash(words) !== element.getAttribute(WORDS)) {
+      return { element: null, target: { ...scripted, within: element.getAttribute(AT) } }
+    }
+
+    const own = element.getBoundingClientRect()
+    const label = (kind === "image" ? (element.getAttribute("alt") ?? "") : spokenWords(element))
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_EDIT_LABEL)
+    return {
+      element,
+      target: {
+        address: element.getAttribute(AT),
+        kind,
+        label,
+        rect: { x: own.left, y: own.top, width: own.width, height: own.height },
+      },
+    }
+  }
+
+  const mark = (attribute: string, previous: Element | null, next: Element | null) => {
+    previous?.removeAttribute(attribute)
+    next?.setAttribute(attribute, "")
+    return next
+  }
+
+  const stopTyping = () => {
+    const element = typing
+    if (!element) return
+    typing = null
+    element.removeAttribute("contenteditable")
+    const patch = held
+    held = null
+    if (patch) applyPatch(element, patch)
+  }
+
+  /** Makes an element what a patch says it holds now: its attributes, then what is inside it. */
+  const applyPatch = (element: Element, patch: Record<string, unknown>) => {
+    const attributes = patch.attributes
+    if (attributes && typeof attributes === "object") {
+      const next = attributes as Record<string, unknown>
+      for (const name of element.getAttributeNames()) {
+        if (!(name in next) && !name.startsWith("data-sixb-")) element.removeAttribute(name)
+      }
+      for (const [name, value] of Object.entries(next)) {
+        if (typeof value === "string" && /^[a-z_:][a-z0-9_.:-]*$/i.test(name)) {
+          element.setAttribute(name, value)
+        }
+      }
+    }
+    if (typeof patch.html === "string") element.innerHTML = patch.html
+  }
+
+  const startEditing = (on: boolean, typingAllowed: boolean) => {
+    editing = on
+    typable = typingAllowed
+    if (!typable) stopTyping()
+    root.toggleAttribute("data-sixb-editing", on)
+    // Picking what to comment on: the pointer is a comment's bubble, and what it would comment on
+    // is outlined.
+    root.toggleAttribute("data-sixb-commenting", on && !typable)
+    if (on && !document.getElementById("sixb-editing")) {
+      const style = document.createElement("style")
+      style.id = "sixb-editing"
+      style.textContent = EDITING_CSS
+      document.head.append(style)
+    }
+    if (!on) {
+      stopTyping()
+      pointed = mark("data-sixb-hover", pointed, null)
+      picked = mark("data-sixb-picked", picked, null)
+    }
+  }
+
+  // Before anything of the page's own: editing, a click picks, and nothing follows it.
+  window.addEventListener(
+    "click",
+    (event) => {
+      // Only the reader's own clicks: the page's scripts can click too.
+      if (!editing || !event.isTrusted) return
+      if (typing?.contains(event.target as Node | null)) return
+      event.preventDefault()
+      event.stopPropagation()
+      stopTyping()
+
+      const { element, target } = editTarget(event.target)
+      picked = mark("data-sixb-picked", picked, commentable(element, event.target))
+      // Where the reader clicked, for a comment's pin.
+      const at = { x: event.clientX, y: event.clientY }
+      postEdit({ event: "edit.select", params: { target, at } })
+      if (typable && element instanceof HTMLElement && target.kind === "text") {
+        typing = element
+        typedFrom = element.textContent ?? ""
+        element.setAttribute("contenteditable", "plaintext-only")
+        element.focus()
+      }
+    },
+    true
+  )
+  document.addEventListener("mouseover", (event) => {
+    if (!editing || !event.isTrusted) return
+    const { element, target } = editTarget(event.target)
+    const shown = commentable(element, event.target)
+    if (shown === pointed && shown !== null) return
+    pointed = mark("data-sixb-hover", pointed, shown)
+    postEdit({ event: "edit.hover", params: { target } })
+  })
+  // The pointer gone from the page, nothing is under it: it left for nothing of the page.
+  document.addEventListener("mouseout", (event) => {
+    if (!editing || !event.isTrusted || event.relatedTarget !== null || pointed === null) return
+    pointed = mark("data-sixb-hover", pointed, null)
+    postEdit({ event: "edit.hover", params: { target: null } })
+  })
+  document.addEventListener("input", (event) => {
+    if (!editing || !event.isTrusted || !typing || !typing.contains(event.target as Node | null)) {
+      return
+    }
+    const text = typing.textContent ?? ""
+    // Its words are the reader's now: still theirs to type in.
+    typing.setAttribute(WORDS, wordsHash(text))
+    postEdit({
+      event: "edit.text",
+      params: { address: typing.getAttribute(AT), base: typedFrom, text },
+    })
+    typedFrom = text
+  })
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!typing || !event.isTrusted) return
+      // A text element's words are one block: a new line would be new markup.
+      if (event.key === "Enter") event.preventDefault()
+      if (event.key === "Escape") typing.blur()
+      event.stopPropagation()
+    },
+    true
+  )
+  document.addEventListener("focusout", (event) => {
+    if (typing && event.target === typing) stopTyping()
+  })
+
   const handle = (method: string, params: Record<string, unknown>) => {
     switch (method) {
       case "theme": {
@@ -235,6 +491,22 @@ export function frameRuntime(): void {
         if (!QUERY_NAME.test(name)) throw new Error(`Unknown query '${name}'.`)
 
         window.dispatchEvent(new CustomEvent("sixb:query", { detail: { name } }))
+        return
+      }
+      case "edit":
+        startEditing(params.on === true, params.typing !== false)
+        return
+      case "edit.patch": {
+        const patches = Array.isArray(params.patches) ? params.patches : []
+        for (const patch of patches as Record<string, unknown>[]) {
+          const address = typeof patch?.address === "string" ? patch.address : null
+          const element = address
+            ? document.querySelector(`[${AT}="${CSS.escape(address)}"]`)
+            : null
+          if (!element) continue
+          if (element === typing) held = { ...(held ?? {}), ...patch }
+          else applyPatch(element, patch)
+        }
         return
       }
       case "scroll":
@@ -356,28 +628,37 @@ export function frameRuntime(): void {
     enumerable: true,
   })
 
-  window.addEventListener("message", (event) => {
-    if (event.source !== window.parent) return
-    const data = event.data as Record<string, unknown> | null
-    // The app's answer to a call.
-    if (data && data.protocol === PROTOCOL && typeof data.result === "number") {
-      const pending = calls.get(data.result)
-      calls.delete(data.result)
-      if (typeof data.error === "string") pending?.reject(new Error(data.error))
-      else pending?.resolve(data.value)
-      return
-    }
-    // Requests only: at the top level, as in the layout check, the frame's own answers come back
-    // to it, and answering an answer would trade error messages with itself for good.
-    if (!data || data.protocol !== PROTOCOL || typeof data.id !== "number") return
-    if (typeof data.method !== "string") return
-    try {
-      handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
-      post({ id: data.id })
-    } catch (error) {
-      post({ id: data.id, error: error instanceof Error ? error.message : String(error) })
-    }
-  })
+  // First of all the page's listeners, and the only one to hear the app's requests: a request
+  // stops here, so the page's scripts never see the port an `edit` request hands over.
+  window.addEventListener(
+    "message",
+    (event) => {
+      if (event.source !== window.parent) return
+      const data = event.data as Record<string, unknown> | null
+      // The app's answer to a call.
+      if (data && data.protocol === PROTOCOL && typeof data.result === "number") {
+        const pending = calls.get(data.result)
+        calls.delete(data.result)
+        if (typeof data.error === "string") pending?.reject(new Error(data.error))
+        else pending?.resolve(data.value)
+        return
+      }
+      // Requests only: at the top level, as in the layout check, the frame's own answers come back
+      // to it, and answering an answer would trade error messages with itself for good.
+      if (!data || data.protocol !== PROTOCOL || typeof data.id !== "number") return
+      if (typeof data.method !== "string") return
+      event.stopImmediatePropagation()
+      const port = event.ports?.[0]
+      if (data.method === "edit" && port) editPort = port
+      try {
+        handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
+        post({ id: data.id })
+      } catch (error) {
+        post({ id: data.id, error: error instanceof Error ? error.message : String(error) })
+      }
+    },
+    true
+  )
 
   // A deck's keys move it wherever focus is; a page's keys are its own.
   window.addEventListener("keydown", (event) => {
@@ -391,6 +672,13 @@ export function frameRuntime(): void {
 
   document.addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null
+
+    // A button, or a link within the page, by its words: on a canvas, an opened board follows the
+    // arrow they label.
+    const pressed = target?.closest<HTMLElement>('button, [role="button"], a[href^="#"]')
+    const words = (pressed?.innerText ?? pressed?.textContent ?? "").replace(/\s+/g, " ").trim()
+    if (words && words.length <= MAX_LABEL_LENGTH) post({ event: "press", params: { text: words } })
+
     const link = target?.closest<HTMLAnchorElement>("a[href]")
     if (link) {
       const href = link.getAttribute("href") ?? ""

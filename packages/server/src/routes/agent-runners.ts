@@ -39,6 +39,7 @@ export function agentRunSessionHost(host: SixbHostView): AgentRunSessionHost | n
         host.broker
       )
     ),
+    domainEvents: host.events,
     security: host.definitions.security,
     sdk: host,
     definitions: host.definitions,

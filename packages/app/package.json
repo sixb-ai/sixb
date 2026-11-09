@@ -59,10 +59,13 @@
     "@sixb/ui": "workspace:^",
     "@tailwindcss/cli": "^4.2.2",
     "@xyflow/react": "^12.10.2",
+    "lib0": "0.2.119",
     "lucide-react": "^0.562.0",
     "parse5": "^8.0.0",
     "recharts": "^3.8.0",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "y-protocols": "1.0.7",
+    "yjs": "^13.6.33"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.0.0",

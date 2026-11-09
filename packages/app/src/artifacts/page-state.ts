@@ -8,7 +8,7 @@ import {
 } from "@sixb/client"
 import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import type { FrameCall } from "@sixb/core/artifacts"
-import { type QueryClient, useQuery } from "@tanstack/react-query"
+import { type QueryClient, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query"
 
 /** A `sixb.state` call: a page's values, which the app keeps for the artifact. */
 type StateCall = Exclude<FrameCall, { readonly method: "query.run" }>
@@ -92,8 +92,9 @@ export async function resetPageState(queries: QueryClient, artifactId: string): 
 
 /** How many values the reader's page keeps, as far as the app has read: none until it asks. */
 export function usePageStateCount(artifactId: string): number {
-  const { data } = useQuery<KeptValues>({
-    queryKey: stateKey(artifactId),
+  const queries = useQueryClient()
+  const { data } = useQuery({
+    ...stateQuery(queries, artifactId),
     // Read by the frame's first call; this only follows what it read.
     enabled: false,
   })
@@ -150,17 +151,25 @@ async function keptValues(queries: QueryClient, artifactId: string): Promise<Kep
   const inTab = observedPages(queries).get(artifactId)
   if (inTab) return inTab
 
-  return queries.fetchQuery({
+  return queries.fetchQuery(stateQuery(queries, artifactId))
+}
+
+/**
+ * How the reader's values for an artifact are read: one query, which a frame's first call fetches
+ * and the viewer follows. An observer's are none from the API, and live in this tab from then on.
+ */
+function stateQuery(queries: QueryClient, artifactId: string) {
+  return queryOptions({
     queryKey: stateKey(artifactId),
-    queryFn: async () => {
+    queryFn: async (): Promise<KeptValues> => {
       try {
         const { data } = await getArtifactState({ path: { artifactId }, throwOnError: true })
-        return new Map(data.entries.map((entry) => [entry.key, entry.value])) as KeptValues
+        return new Map(data.entries.map((entry) => [entry.key, entry.value]))
       } catch (error) {
         if (!isReadOnly(error)) throw error
 
         observedPages(queries).set(artifactId, new Map())
-        return new Map() as KeptValues
+        return new Map()
       }
     },
     staleTime: STATE_STALE_MS,

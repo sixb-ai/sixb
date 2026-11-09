@@ -27,7 +27,7 @@ export function AgentMessageBody({ message }: AgentMessageBodyProps) {
   return (
     <>
       {message.id === null ? <LivePublishes runId={message.runId} parts={parts} /> : null}
-      <AssistantBody parts={parts} live={message.status === "streaming"} />
+      <AssistantBody parts={parts} live={message.status === "streaming"} runId={message.runId} />
     </>
   )
 }

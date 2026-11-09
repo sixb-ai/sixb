@@ -196,7 +196,7 @@ is a warning, and the page is checked with `sixb.query` rejecting.
 1. Open both screenshots with `view_file` and look at them as the reader will: does the page read
    well, and do its numbers make sense?
 2. Fix what the warnings name and what you see, in the page's files.
-3. Publish the next version with `publish_artifact_version`, and check again.
+3. Update the artifact with `update_artifact`, and check again.
 
 A script error means the page may show nothing at all: fix it first.
 

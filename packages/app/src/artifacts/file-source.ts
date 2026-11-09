@@ -46,8 +46,10 @@ export function artifactFileSource(input: {
   readonly baseUrl?: string
 }): FileSource {
   const routePath = `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${input.version}/content`
+  // An open version's file changes at its address: the cache key, its bytes' digest, gives each
+  // content its own URL, so an image the browser kept is never shown for another.
   const url = (disposition: "inline" | "attachment") =>
-    contentUrl(routePath, { path: input.path, disposition }, input.baseUrl)
+    contentUrl(routePath, { path: input.path, disposition, v: input.fileRef.digest }, input.baseUrl)
   return {
     id: `artifact:${input.artifactId}@${input.version}/${input.path}`,
     fileRef: input.fileRef,

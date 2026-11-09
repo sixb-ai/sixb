@@ -177,6 +177,9 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       query: (...args) => call("artifacts.query", args),
       updatable: (artifactId) => call("artifacts.updatable", [artifactId]),
       publish: (publish) => call("artifacts.publish", [publish]),
+      turnWrites: () => call("artifacts.turnWrites", []),
+      storePreviews: (previews) => call("artifacts.storePreviews", [previews]),
+      missingPreviews: (version) => call("artifacts.missingPreviews", [version]),
     },
     files: {
       async put(file) {

@@ -464,6 +464,11 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("091-dataset-ingest-inbox", datasetIngestInboxSql),
     pgSql("092-run-recovery", runRecoverySql),
     pgSql("093-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
+    pgSql("094-artifact-board-previews", artifactBoardPreviewsSql),
+    pgSql("095-artifact-open-versions", artifactOpenVersionsSql),
+    pgSql("096-artifact-documents", artifactDocumentsSql),
+    pgSql("097-artifact-frame-files", artifactFrameFilesSql),
+    pgSql("098-artifact-comments", artifactCommentsSql),
   ],
 })
 
@@ -549,3 +554,12 @@ import runRecoverySql from "./migrations/092-run-recovery.sql" with { type: "tex
 import webhookAndProjectionLeasesSql from "./migrations/093-webhook-and-projection-leases.sql" with {
   type: "text",
 }
+import artifactBoardPreviewsSql from "./migrations/094-artifact-board-previews.sql" with {
+  type: "text",
+}
+import artifactOpenVersionsSql from "./migrations/095-artifact-open-versions.sql" with {
+  type: "text",
+}
+import artifactDocumentsSql from "./migrations/096-artifact-documents.sql" with { type: "text" }
+import artifactFrameFilesSql from "./migrations/097-artifact-frame-files.sql" with { type: "text" }
+import artifactCommentsSql from "./migrations/098-artifact-comments.sql" with { type: "text" }

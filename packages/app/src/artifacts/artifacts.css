@@ -266,3 +266,83 @@
 .sixb-artboard .sixb-resize-line {
   border-color: color-mix(in oklab, var(--primary) 80%, transparent) !important;
 }
+
+/*
+ * A canvas drawn from its live document (renderers/canvas/presence.tsx). An item someone else
+ * moves glides to where they put it, as their drag reaches here a few times a second; one the
+ * reader drags follows the pointer. Presence draws over every item.
+ */
+.sixb-artboard[data-live] .react-flow__node:not(.dragging) {
+  transition: transform 90ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sixb-artboard[data-live] .react-flow__node:not(.dragging) {
+    transition: none;
+  }
+}
+
+.sixb-artboard .react-flow__viewport-portal {
+  z-index: 2000;
+}
+
+/* Zoomed far out, a tile waiting for its picture is still (renderers/canvas/board.tsx). */
+.sixb-artboard[data-far] [aria-busy] > svg {
+  animation: none;
+}
+
+/*
+ * A board an Agent turn is changing: a ring in the accent, and a soft light sweeping across it,
+ * faint enough to read the page through. Still, a faint tint, for who asks for less motion.
+ */
+.sixb-agent-board {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--primary) 50%, transparent);
+}
+
+.sixb-agent-board::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--primary);
+  opacity: 0.09;
+  mask-image: linear-gradient(105deg, transparent 35%, #000 50%, transparent 65%);
+  mask-size: 250% 100%;
+  mask-repeat: no-repeat;
+  animation: sixb-agent-sweep 2.6s ease-in-out infinite;
+}
+
+@keyframes sixb-agent-sweep {
+  from {
+    mask-position: 100% 0;
+  }
+  to {
+    mask-position: 0% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sixb-agent-board::before {
+    mask-image: none;
+    opacity: 0.05;
+    animation: none;
+  }
+}
+
+/*
+ * Placing a comment on a canvas (renderers/canvas/commenting.tsx): the pointer is a comment's
+ * bubble, its tip where the pin goes.
+ */
+.sixb-artboard[data-commenting] :is(.react-flow__pane, .react-flow__node-board) {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 21V11a8 8 0 1 1 8 8H3z' fill='%23111' stroke='white' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E")
+      3 21,
+    crosshair;
+}
+
+/* The board a click would comment on, outlined in the selection blue the opened board uses. */
+.sixb-artboard[data-commenting] .react-flow__node-board:hover {
+  outline: calc(2px / var(--sixb-zoom, 1)) solid #0a84ff;
+  outline-offset: calc(4px / var(--sixb-zoom, 1));
+  border-radius: 10px;
+}

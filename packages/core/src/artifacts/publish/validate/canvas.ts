@@ -1,6 +1,13 @@
 import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { CANVAS_FILE, type Canvas, parseCanvas } from "../../canvas"
+import {
+  type CanvasBox,
+  type CanvasPoint,
+  canvasArrowLine,
+  canvasEndBox,
+  canvasItemBox,
+} from "../../canvas-display"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { CanvasOutline, CanvasOutlineItem } from "../../outline"
 import type { ArtifactWarning } from "../../warnings"
@@ -71,7 +78,11 @@ export async function validateCanvas(
       }),
     },
     references,
-    warnings: layoutWarnings(canvas),
+    warnings: [
+      ...layoutWarnings(canvas),
+      ...overprintWarnings(canvas),
+      ...crossingArrowWarnings(canvas),
+    ],
   }
 }
 
@@ -115,4 +126,125 @@ function layoutWarnings(canvas: Canvas): ArtifactWarning[] {
     })
   }
   return warnings
+}
+
+/** The most pairs of words drawn over each other warned of one by one. */
+const MAX_OVERPRINTS = 12
+
+/**
+ * Texts and notes drawn over each other, as the app draws them: a title's box reckoned from its
+ * words and size, lines and all, so a subtitle placed under where a large title ends is caught.
+ */
+function overprintWarnings(canvas: Canvas): ArtifactWarning[] {
+  const worded = canvas.items.flatMap((item) => {
+    if (item.type !== "text" && item.type !== "note") return []
+    const box = canvasItemBox(item)
+    return box ? [{ item, box }] : []
+  })
+
+  const pairs = worded.flatMap((first, index) =>
+    worded
+      .slice(index + 1)
+      .filter((second) => intersects(first.box, second.box))
+      .map((second) => [first.item, second.item] as const)
+  )
+
+  const warnings: ArtifactWarning[] = pairs.slice(0, MAX_OVERPRINTS).map(([first, second]) => ({
+    code: "canvas_text_overlap",
+    part: first.id,
+    message: `${first.type === "note" ? "Note" : "Text"} '${first.id}' and ${second.type} '${second.id}' are drawn over each other, so neither reads: move one clear of the other.`,
+  }))
+  const more = pairs.length - warnings.length
+  if (more > 0) {
+    warnings.push({
+      code: "canvas_text_overlap",
+      message: `${more} more pair${more === 1 ? " is" : "s are"} drawn over each other.`,
+    })
+  }
+  return warnings
+}
+
+/** Whether two boxes share some area: touching edges do not. */
+function intersects(a: CanvasBox, b: CanvasBox): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+/** The most arrows warned of one by one, and items named for one arrow. */
+const MAX_CROSSING_ARROWS = 12
+const MAX_CROSSED_ITEMS = 3
+
+/**
+ * Arrows drawn across other items: the straight line the app draws, from the edge of one end's box
+ * to the edge of the other's, through a board, a note, a shape, a text, or an embed. Sections hold
+ * what their arrows join, so an arrow crosses them on purpose. A row that wraps to the next is the
+ * usual cause: its last item's arrow runs back across the row to the next one's first.
+ */
+function crossingArrowWarnings(canvas: Canvas): ArtifactWarning[] {
+  const boxes = new Map(
+    canvas.items.flatMap((item) => {
+      const box = canvasItemBox(item)
+      return box ? [[item.id, box] as const] : []
+    })
+  )
+  const crossable = canvas.items.filter((item) => item.type !== "arrow" && item.type !== "section")
+
+  const crossing = canvas.items.flatMap((arrow) => {
+    if (arrow.type !== "arrow") return []
+    const from = canvasEndBox(arrow.from, boxes)
+    const to = canvasEndBox(arrow.to, boxes)
+    if (!from || !to) return []
+
+    const { start, end } = canvasArrowLine(from, to)
+    const crossed = crossable.filter((item) => {
+      const box = boxes.get(item.id)
+      return item.id !== arrow.from && item.id !== arrow.to && box && crosses(start, end, box)
+    })
+    return crossed.length === 0 ? [] : [{ arrow, crossed }]
+  })
+
+  const warnings: ArtifactWarning[] = crossing
+    .slice(0, MAX_CROSSING_ARROWS)
+    .map(({ arrow, crossed }) => {
+      const named = crossed.slice(0, MAX_CROSSED_ITEMS).map((item) => `${item.type} '${item.id}'`)
+      const more = crossed.length - named.length
+      return {
+        code: "canvas_arrow_crosses",
+        part: arrow.id,
+        message: `Arrow '${arrow.id}' is drawn across ${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}: join neighbours in a row with arrows, and let a sequence that wraps to the next row read on without one.`,
+      }
+    })
+  const more = crossing.length - warnings.length
+  if (more > 0) {
+    warnings.push({
+      code: "canvas_arrow_crosses",
+      message: `${more} more arrow${more === 1 ? " is" : "s are"} drawn across other items.`,
+    })
+  }
+  return warnings
+}
+
+/** Whether the segment from `start` to `end` passes through the inside of a box. */
+function crosses(start: CanvasPoint, end: CanvasPoint, box: CanvasBox): boolean {
+  // Liang-Barsky: clip the segment to the box, and see whether anything of it is left inside.
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  let enter = 0
+  let leave = 1
+  const edges: readonly (readonly [number, number])[] = [
+    [-dx, start.x - box.x],
+    [dx, box.x + box.width - start.x],
+    [-dy, start.y - box.y],
+    [dy, box.y + box.height - start.y],
+  ]
+  for (const [direction, room] of edges) {
+    if (direction === 0) {
+      if (room <= 0) return false
+      continue
+    }
+    const at = room / direction
+    if (direction < 0) enter = Math.max(enter, at)
+    else leave = Math.min(leave, at)
+    if (enter >= leave) return false
+  }
+  return true
 }

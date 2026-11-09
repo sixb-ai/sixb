@@ -1,5 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
@@ -113,16 +121,24 @@ const HANGING_DECK = `<!doctype html>
 </body>
 </html>`
 
-/** The processes running now whose command line names Playwright's browser profile. */
-async function browsers(): Promise<Set<string>> {
-  const ps = Bun.spawn(["ps", "-A", "-o", "pid=,command="], { stdout: "pipe", stderr: "ignore" })
+/**
+ * The browsers running now that this file's checks launched: each check runs with its temporary
+ * directory under `root`, where Playwright puts each browser's profile. Another Playwright on the
+ * machine, such as a script taking screenshots of the app while the suite runs, is not counted:
+ * matching on the profile's name alone once counted one as a browser the check left behind.
+ */
+async function browsers(root: string): Promise<Set<string>> {
+  const ps = Bun.spawn(["ps", "-ww", "-A", "-o", "pid=,command="], {
+    stdout: "pipe",
+    stderr: "ignore",
+  })
   const kill = setTimeout(() => ps.kill("SIGKILL"), 10_000)
   try {
     const [output] = await Promise.all([new Response(ps.stdout).text(), ps.exited])
     return new Set(
       output
         .split("\n")
-        .filter((line) => line.includes("playwright_chromiumdev_profile"))
+        .filter((line) => line.includes(join(root, "tmp", "playwright_chromiumdev_profile")))
         .map((line) => line.trim().split(/\s+/)[0] ?? "")
     )
   } finally {
@@ -130,14 +146,33 @@ async function browsers(): Promise<Set<string>> {
   }
 }
 
+/** A WebP's width and height, from its first chunk: lossy, lossless, or extended. */
+function webpSize(bytes: Buffer): [number, number] {
+  const chunk = bytes.subarray(12, 16).toString("latin1")
+  if (chunk === "VP8 ") return [bytes.readUInt16LE(26) & 0x3fff, bytes.readUInt16LE(28) & 0x3fff]
+  if (chunk === "VP8L") {
+    const bits = bytes.readUInt32LE(21)
+    return [(bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1]
+  }
+  return [bytes.readUIntLE(24, 3) + 1, bytes.readUIntLE(27, 3) + 1]
+}
+
 describe.skipIf(!playwright)("the layout check in a browser", () => {
   let root: string
   beforeAll(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-layout-e2e-")))
+    mkdirSync(join(root, "tmp"))
     mkdirSync(join(root, "deck/img"), { recursive: true })
     writeFileSync(join(root, "deck/index.html"), DECK)
   })
   afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  /** Where the check finds Playwright, and its temporary directory: see `browsers`. */
+  const env = () => ({
+    SIXB_PLAYWRIGHT: playwright,
+    TMPDIR: join(root, "tmp"),
+    ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
+  })
 
   const check = (
     deck: string,
@@ -152,10 +187,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       handle: {
         sandbox: new LocalBashSandbox(root),
         contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-        env: {
-          SIXB_PLAYWRIGHT: playwright,
-          ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
-        },
+        env: env(),
       },
       directory: join(root, "deck"),
       files,
@@ -360,6 +392,104 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   )
 
   test(
+    "names a board smaller than its page, with both sizes",
+    async () => {
+      // A slide drawn as a fixed 1280×720 frame, on a board of 520×292: every view of the board
+      // shows the frame's top left. Reproduce by measuring only what the board scrolls: the body
+      // clips the frame, and nothing is said.
+      mkdirSync(join(root, "frames"), { recursive: true })
+      const frame = `<!doctype html><html><head><style>html, body { margin: 0; overflow: hidden } .frame { width: 1280px; height: 720px; background: #123 }</style></head><body><div class="frame"><h1>Q3</h1></div></body></html>`
+      const fits = `<!doctype html><html><head><style>body { margin: 0 }</style></head><body><main><h1>Fits</h1></main></body></html>`
+      writeFileSync(join(root, "frames", "cover.html"), frame)
+      writeFileSync(join(root, "frames", "fits.html"), fits)
+
+      const result = await checkLayout({
+        layout: "canvas",
+        boards: [
+          {
+            id: "cover",
+            file: "cover.html",
+            w: 520,
+            h: 292,
+            html: new TextEncoder().encode(frame),
+          },
+          { id: "fits", file: "fits.html", w: 520, h: 292, html: new TextEncoder().encode(fits) },
+        ],
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: env(),
+        },
+        directory: join(root, "frames"),
+        files: ["cover.html", "fits.html"],
+        name: "frames",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+
+      const small = result.warnings.filter((warning) => warning.code === "layout_board_too_small")
+      expect(small.map((warning) => warning.part)).toEqual(["cover"])
+      expect(small[0]?.message).toStartWith("Board 'cover' is 520×292 but its page draws 1280×720")
+      expect(small[0]?.message).toContain('Set its "w" and "h" in canvas.json to 1280 and 720')
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "pictures no board whose page did not load whole, and says so",
+    async () => {
+      // Reproduce by picturing every board that was checked: Pricing's picture, unstyled for its
+      // missing stylesheet, is kept under its key and shown to every reader.
+      mkdirSync(join(root, "partial"), { recursive: true })
+      const page = (head: string) =>
+        `<!doctype html><html><head>${head}</head><body><main><h1>Plans</h1></main></body></html>`
+      const whole = page("")
+      const partial = page('<link rel="stylesheet" href="missing.css">')
+      writeFileSync(join(root, "partial", "plans.html"), whole)
+      writeFileSync(join(root, "partial", "pricing.html"), partial)
+
+      const result = await checkLayout({
+        layout: "canvas",
+        boards: [
+          {
+            id: "plans",
+            file: "plans.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(whole),
+            pictured: true,
+          },
+          {
+            id: "pricing",
+            file: "pricing.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(partial),
+            pictured: true,
+          },
+        ],
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: env(),
+        },
+        directory: join(root, "partial"),
+        files: ["plans.html", "pricing.html"],
+        name: "partial",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+
+      expect(new Set(result.previews.map((picture) => picture.board))).toEqual(new Set(["plans"]))
+      expect(result.screenshots).toHaveLength(2)
+      const untaken = result.warnings.find((warning) => warning.code === "preview_not_taken")
+      expect(untaken).toMatchObject({ part: "pricing" })
+      expect(untaken?.message).toContain("missing.css did not load (404)")
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
     "checks each of a canvas's boards at its own size, naming the board",
     async () => {
       // A phone board that reads well, and one whose fixed-width box is wider than the board.
@@ -396,10 +526,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         handle: {
           sandbox: new LocalBashSandbox(root),
           contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-          env: {
-            SIXB_PLAYWRIGHT: playwright,
-            ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
-          },
+          env: env(),
         },
         directory: join(root, "canvas"),
         files: ["canvas.json", "boards/welcome.html", "boards/region.html", "boards/shared.css"],
@@ -421,17 +548,117 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   )
 
   test(
+    "pictures many boards at once in both themes, goes on past one that hangs, and draws the canvas",
+    async () => {
+      // Reproduce the hang by opening every board in one page, as the check did: the frozen board
+      // stops the check, and no board after it is pictured. Reproduce the pictures by taking the
+      // first theme only: there is no dark picture of any board.
+      const before = await browsers(root)
+      mkdirSync(join(root, "many"), { recursive: true })
+      const ids = Array.from({ length: 12 }, (_, index) => `board-${index + 1}`)
+      const html = (title: string) =>
+        `<!doctype html><html><head></head><body><main><h1>${title}</h1><p class="lede">One of many.</p></main></body></html>`
+      // Freezes once the check sends it its first theme, after it loaded.
+      const hanging = `<!doctype html><html><head></head><body><main><h1>Hangs</h1></main><script>addEventListener("message", (event) => { if (event.data?.method === "theme") for (;;) {} })</script></body></html>`
+      for (const id of ids) writeFileSync(join(root, "many", `${id}.html`), html(id))
+      writeFileSync(join(root, "many", "hangs.html"), hanging)
+
+      const boards = [
+        ...ids.slice(0, 4).map((id) => ({ id, file: `${id}.html`, html: html(id) })),
+        { id: "hangs", file: "hangs.html", html: hanging },
+        ...ids.slice(4).map((id) => ({ id, file: `${id}.html`, html: html(id) })),
+      ].map((board, index) => ({
+        ...board,
+        // A laptop's screen first, which its small picture shrinks to 480 pixels wide.
+        w: index === 0 ? 1280 : 390,
+        h: index === 0 ? 800 : 844,
+        html: new TextEncoder().encode(board.html),
+        pictured: true,
+        x: index === 0 ? -1400 : (index % 5) * 480,
+        y: Math.floor(index / 5) * 1000,
+      }))
+
+      const started = Date.now()
+      const result = await checkLayout({
+        layout: "canvas",
+        boards,
+        canvas: {
+          items: [
+            { id: "flow", type: "text", x: 0, y: -120, text: "A flow of many boards", size: "xl" },
+            ...boards.map(({ id, file, w, h, x, y }) => ({
+              id,
+              type: "board" as const,
+              file,
+              x,
+              y,
+              w,
+              h,
+            })),
+            { id: "first", type: "arrow", from: "board-1", to: "board-2", dashed: false },
+          ],
+        },
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: env(),
+        },
+        directory: join(root, "many"),
+        files: [...ids.map((id) => `${id}.html`), "hangs.html"],
+        name: "many",
+        signal: AbortSignal.timeout(110_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+
+      // Thirteen boards, one at a time, take longer than the frozen board's bound alone.
+      expect(Date.now() - started).toBeLessThan(60_000)
+      expect(result.screenshots).toHaveLength(12)
+      expect(result.warnings.map((warning) => `${warning.part} ${warning.code}`)).toContain(
+        "hangs layout_incomplete"
+      )
+
+      // Every other board in both themes and both sizes, the dark picture apart from the light
+      // one, and the small one a WebP no wider than 480 pixels, its aspect kept.
+      expect(result.previews).toHaveLength(48)
+      const picture = (id: string, theme: string, size: string) => {
+        const found = result.previews.find(
+          (each) => each.board === id && each.theme === theme && each.size === size
+        )
+        if (!found) throw new Error(`Board '${id}' was not pictured ${size} in ${theme} mode.`)
+        return readFileSync(found.path)
+      }
+      for (const id of ids) {
+        expect(picture(id, "light", "full").equals(picture(id, "dark", "full"))).toBe(false)
+        for (const theme of ["light", "dark"]) {
+          const small = picture(id, theme, "small")
+          expect(small.subarray(8, 12).toString("latin1")).toBe("WEBP")
+          expect(webpSize(small)).toEqual(id === ids[0] ? [480, 300] : [390, 844])
+        }
+      }
+
+      expect(result.overview).toBe(".sixb/agent/checks/many/overview.png")
+      const overview = readFileSync(join(root, ".sixb/agent/checks/many/overview.png"))
+      // A PNG's width and height, at bytes 16 to 24 of its header.
+      expect([overview.readUInt32BE(16), overview.readUInt32BE(20)]).toEqual([1440, 900])
+
+      const left = async () => [...(await browsers(root))].filter((pid) => !before.has(pid))
+      for (let wait = 0; (await left()).length > 0 && wait < 30; wait++) await Bun.sleep(100)
+      expect(await left()).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
     "reports what it found when the deck stops answering, and leaves no browser behind",
     async () => {
       // Reproduce by removing check.cjs's bounds and deadline: the check waits on the frozen
       // page until the command's timeout kills node, and Chromium keeps running.
-      const before = await browsers()
+      const before = await browsers(root)
       const result = await check(HANGING_DECK, ["index.html"], "hanging")
       if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
       expect(result.screenshots).toEqual([".sixb/agent/checks/hanging/slide-01.png"])
       expect(result.warnings.at(-1)).toMatchObject({ code: "layout_incomplete" })
       expect(result.warnings.at(-1)?.message).toContain("slide 2 in light mode did not respond")
-      const left = async () => [...(await browsers())].filter((pid) => !before.has(pid))
+      const left = async () => [...(await browsers(root))].filter((pid) => !before.has(pid))
       for (let wait = 0; (await left()).length > 0 && wait < 30; wait++) await Bun.sleep(100)
       expect(await left()).toEqual([])
     },

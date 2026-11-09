@@ -90,7 +90,10 @@ describe("parseCanvas", () => {
       withItems({ id: "n", type: "note", x: 0, y: 0, w: 200, text: "Hi", tone: "red" }),
       'has the tone "red"',
     ],
-    [withItems({ id: "t", type: "text", x: 0, y: 0, text: "Hi", size: "xxl" }), '"size" is "xxl"'],
+    [
+      withItems({ id: "t", type: "text", x: 0, y: 0, text: "Hi", size: "huge" }),
+      '"size" is "huge"; use one of s, m, l, xl, xxl',
+    ],
     [
       withItems({ id: "s", type: "shape", shape: "star", x: 0, y: 0, w: 80, h: 80 }),
       '"shape" is "star"',
@@ -126,8 +129,21 @@ describe("parseCanvas", () => {
       "the canvas has 'start'; it takes \"items\"",
     ],
     [
-      withItems(...Array.from({ length: 41 }, (_, index) => board(`b${index}`))),
-      "at most 40 boards",
+      withItems(...Array.from({ length: 101 }, (_, index) => board(`b${index}`))),
+      "at most 100 boards",
+    ],
+    [
+      withItems(
+        ...Array.from({ length: 1001 }, (_, index) => ({
+          id: `n${index}`,
+          type: "note",
+          x: 0,
+          y: index * 200,
+          w: 200,
+          text: "A",
+        }))
+      ),
+      "at most 1000 items",
     ],
   ])("refuses %s", (text, message) => {
     const parsed = parseCanvas(text)
@@ -203,7 +219,15 @@ describe("publishing a canvas", () => {
       kind: "canvas",
       items: [
         { id: "signup", type: "section", title: "Sign-up flow" },
-        { id: "home", type: "board", title: "Home", file: "boards/home.html", w: 1280, h: 800 },
+        {
+          id: "home",
+          type: "board",
+          title: "Home",
+          file: "boards/home.html",
+          w: 1280,
+          h: 800,
+          renderKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
         {
           id: "pricing",
           type: "board",
@@ -211,8 +235,10 @@ describe("publishing a canvas", () => {
           file: "boards/pricing.html",
           w: 1280,
           h: 800,
+          renderKey: expect.stringMatching(/^[0-9a-f]{64}$/),
         },
       ],
+      themes: ["light", "dark"],
     })
     expect(
       published.version.references.map(({ address, as, at }) => ({ address, as, at }))
@@ -272,6 +298,93 @@ describe("publishing a canvas", () => {
         part: "ask",
         message:
           "Note 'ask' sits on board 'pricing' and covers its page: put it beside the board, and an arrow to it when it is about the board.",
+      },
+    ])
+  })
+
+  test("warns of texts and notes drawn over each other, sizing a title by its words and lines", async () => {
+    // Reproduce by testing texts by their top line at a fixed height, or not at all: the subtitle
+    // set under the top of a 120-pixel title, and the line under a two-line heading's first line,
+    // print over them unseen.
+    const { publish } = setup()
+    const text = (id: string, y: number, size: string, words: string, x = 0) => ({
+      id,
+      type: "text",
+      x,
+      y,
+      text: words,
+      size,
+    })
+    const published = await publish({
+      "canvas.json": JSON.stringify({
+        items: [
+          text("title", -1000, "xxl", "Launch film"),
+          // 120 pixels at a line height of 1.15 end 138 pixels down: this starts at 100.
+          text("subtitle", -900, "m", "Seven shots, one story"),
+          text("heading", -600, "xl", "Act one\nThe call"),
+          // Two lines of 44 pixels take 101: this starts under the first one.
+          text("under", -540, "m", "Where it starts"),
+          // And this one clear of both.
+          text("clear", -480, "m", "Where it goes"),
+          { id: "ask", type: "note", x: 2000, y: -1000, w: 280, text: "Shorter cut?" },
+          { id: "also", type: "note", x: 2100, y: -950, w: 280, text: "Music?" },
+          text("tag", -1000, "s", "Draft", 2200),
+          {
+            id: "pricing",
+            type: "board",
+            file: "boards/pricing.html",
+            x: 0,
+            y: 0,
+            w: 1280,
+            h: 800,
+          },
+          text("over-board", 100, "m", "On the board", 40),
+        ],
+      }),
+      "boards/pricing.html": "<main></main>",
+    })
+
+    expect(
+      published.warnings
+        .filter((warning) => warning.code === "canvas_text_overlap")
+        .map((warning) => warning.message)
+    ).toEqual([
+      "Text 'title' and text 'subtitle' are drawn over each other, so neither reads: move one clear of the other.",
+      "Text 'heading' and text 'under' are drawn over each other, so neither reads: move one clear of the other.",
+      "Note 'ask' and note 'also' are drawn over each other, so neither reads: move one clear of the other.",
+      "Note 'ask' and text 'tag' are drawn over each other, so neither reads: move one clear of the other.",
+    ])
+  })
+
+  test("warns of an arrow drawn across other items, never of one across its section", async () => {
+    // A row of two boards wrapping to a second row, a note under the first row, and a section
+    // around them all. Reproduce by testing arrows against nothing: the wrap's arrow runs back
+    // across the note unseen; or against every item: each arrow crosses the section it sits in.
+    const { publish } = setup()
+    const published = await publish({
+      "canvas.json": JSON.stringify({
+        items: [
+          { id: "flow", type: "section", x: -80, y: -80, w: 2900, h: 2000, title: "Flow" },
+          board("home"),
+          board("pricing", 1400),
+          { ...board("checkout"), y: 1100 },
+          { id: "why", type: "note", x: 1200, y: 850, w: 300, text: "Annual first?" },
+          { id: "next", type: "arrow", from: "home", to: "pricing" },
+          { id: "wrap", type: "arrow", from: "pricing", to: "checkout" },
+          { id: "aside", type: "arrow", from: { x: 2800, y: 400 }, to: "pricing" },
+        ],
+      }),
+      "boards/home.html": "<main></main>",
+      "boards/pricing.html": "<main></main>",
+      "boards/checkout.html": "<main></main>",
+    })
+
+    expect(published.warnings).toEqual([
+      {
+        code: "canvas_arrow_crosses",
+        part: "wrap",
+        message:
+          "Arrow 'wrap' is drawn across note 'why': join neighbours in a row with arrows, and let a sequence that wraps to the next row read on without one.",
       },
     ])
   })

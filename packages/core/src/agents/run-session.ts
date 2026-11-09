@@ -1,6 +1,7 @@
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { createSixbError } from "../errors/internal"
+import type { DomainEventLog } from "../events/service"
 import type { AuthorizationRef } from "../execution"
 import {
   type AgentExecutionHost,
@@ -48,7 +49,7 @@ import {
 import { measuringAgentContextTokenRates, readAgentContextTokenRates } from "./context-token-rate"
 import { AgentToolPublicError } from "./errors"
 import { createAgentRunExecutionToken } from "./ids"
-import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
+import { type AgentRunArtifacts, agentRunArtifacts, announceAgentTurnEnded } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
 import {
   AgentExecutionLostError,
@@ -277,6 +278,8 @@ export interface AgentRunSessionHost extends AgentRunChildrenHost {
   readonly recoverAiModelCall: RecoverAiModelCall
   /** Where live records go; the host keeps them best effort (see isolateStreamSink). */
   readonly events: StreamSink
+  /** The project's domain events: what the run changes in artifacts is told there. */
+  readonly domainEvents: Pick<DomainEventLog, "emit">
   /** The project's security definitions, which decide a run's authority. */
   readonly security: SecurityDefinitionCatalog
   /** Where a project tool's logs go; the project's logging service when absent. */
@@ -517,6 +520,10 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       await host.afterFinish?.(finished).catch((error: unknown) => {
         console.error(`[Sixb] What follows agent run '${run.id}' failed; repair retries it.`, error)
       })
+      // A turn's presence on the canvases it wrote ends with it; a child's with its turn.
+      if (run.kind === "conversation" && host.storage.artifacts) {
+        await announceAgentTurnEnded(host, run.id)
+      }
       return finished
     },
     assertOwned: () => assertAgentRunOwned(agents, fence),

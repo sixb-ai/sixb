@@ -1,9 +1,13 @@
 import { CANVAS_FILE, type Canvas, parseCanvas } from "@sixb/core/artifacts"
 import { useOptionalTheme } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
-import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useArtifactEditing, useReportDraft } from "../../edit-session"
 import { type History, recordChange, redoChange, startHistory, undoChange } from "../../history"
+import { type LiveCanvas, liveCanvasOf } from "../../live/canvas"
+import { useLiveArtifactState, useViewerLiveArtifact } from "../../live/hooks"
+import { shareSelection } from "../../live/presence"
+import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, useFileText, versionFileSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
@@ -17,8 +21,13 @@ const CanvasBoard = lazy(() => import("./canvas"))
  * A version's `canvas.json`, parsed once it is read: undefined until then, and null when it
  * cannot be read or does not parse.
  */
-export function useCanvas(version: ArtifactVersion): Canvas | null | undefined {
-  const file = useFileText(versionFileSource(version, CANVAS_FILE))
+export function useCanvas(
+  version: ArtifactVersion,
+  options: { readonly enabled?: boolean } = {}
+): Canvas | null | undefined {
+  const file = useFileText(
+    options.enabled === false ? null : versionFileSource(version, CANVAS_FILE)
+  )
   return useMemo(() => {
     if (file.text === undefined) return file.loading ? undefined : null
     const parsed = parseCanvas(file.text)
@@ -26,7 +35,27 @@ export function useCanvas(version: ArtifactVersion): Canvas | null | undefined {
   }, [file.text, file.loading])
 }
 
-/** A canvas artifact: its board, in the app's theme or its own, opened where an address points. */
+/** The mode a canvas's boards draw in: the one its theme.json pins, else the app's. */
+export function useCanvasMode(version: ArtifactVersion): "light" | "dark" {
+  const theme = useArtifactThemeAttributes(version)
+  const app = useOptionalTheme()?.resolvedTheme
+
+  if (theme.className === "dark" || theme.className === "light") return theme.className
+
+  return (
+    app ??
+    (typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+      ? "dark"
+      : "light")
+  )
+}
+
+/**
+ * A canvas artifact: its board, in the app's theme or its own, opened where an address points.
+ * Held live by the viewer, it is drawn from its live document once that holds it, everyone's
+ * changes as they make them, and edited there; else from the version's `canvas.json`, edited as
+ * a draft the header saves.
+ */
 export function CanvasRenderer({
   version,
   part,
@@ -36,17 +65,19 @@ export function CanvasRenderer({
 }) {
   const messages = useArtifactMessages()
   const theme = useArtifactThemeAttributes(version)
-  const app = useOptionalTheme()?.resolvedTheme
-  const canvas = useCanvas(version)
-  const draft = useCanvasDraft(canvas)
-  // The board draws in the mode its theme.json pins, else the app's.
-  const mode =
-    theme.className === "dark" || theme.className === "light"
-      ? theme.className
-      : (app ??
-        (typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-          ? "dark"
-          : "light"))
+  const mode = useCanvasMode(version)
+  const live = useViewerLiveArtifact()
+  const liveState = useLiveArtifactState(live)
+  const liveCanvas = live && liveState.synced && !liveState.left ? liveCanvasOf(live) : null
+  const fromDocument = useLiveCanvas(liveCanvas)
+  const fromVersion = useCanvas(version, { enabled: !fromDocument })
+  const canvas = fromDocument ?? fromVersion
+  const editing = useArtifactEditing()
+  const liveEdit = useLiveEditor(
+    live,
+    fromDocument && editing && liveState.access === "edit" ? liveCanvas : null
+  )
+  const draft = useCanvasDraft(fromDocument ? undefined : canvas)
   const loading = <ViewerLoading label={messages.viewer.loading} />
   if (canvas === undefined) return loading
   if (canvas === null) return <ViewerNotice title={messages.canvas.loadFailed} />
@@ -59,7 +90,8 @@ export function CanvasRenderer({
       <Suspense fallback={loading}>
         <CanvasBoard
           canvas={draft.canvas ?? canvas}
-          {...(draft.edit ? { edit: draft.edit } : {})}
+          {...(liveEdit ? { edit: liveEdit } : draft.edit ? { edit: draft.edit } : {})}
+          {...(fromDocument && live ? { live } : {})}
           version={version}
           title={version.title}
           mode={mode}
@@ -67,6 +99,43 @@ export function CanvasRenderer({
         />
       </Suspense>
     </div>
+  )
+}
+
+const noSubscription = () => () => {}
+const nothing = () => null
+
+/** The canvas a live document holds, as it changes; null while there is none. */
+function useLiveCanvas(canvas: LiveCanvas | null): Canvas | null {
+  return useSyncExternalStore(
+    canvas?.subscribe ?? noSubscription,
+    canvas?.getCanvas ?? nothing,
+    nothing
+  )
+}
+
+/**
+ * Editing the live document: each change written for everyone at once, this reader's own taken
+ * back by undo, and what they select shown to the others. Null while not editing.
+ */
+function useLiveEditor(live: LiveArtifact | null, canvas: LiveCanvas | null): CanvasEditor | null {
+  return useMemo<CanvasEditor | null>(
+    () =>
+      live && canvas
+        ? {
+            apply: (change) => canvas.apply(change),
+            undo: () => canvas.undo(),
+            redo: () => canvas.redo(),
+            live: {
+              startDrag: () => canvas.startDrag(),
+              endDrag: () => canvas.endDrag(),
+              stopCapturing: () => canvas.stopCapturing(),
+              select: (ids) => shareSelection(live, ids),
+              editBoard: (path, make, files) => canvas.editBoard(path, make, files),
+            },
+          }
+        : null,
+    [live, canvas]
   )
 }
 

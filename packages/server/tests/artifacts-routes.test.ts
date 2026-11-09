@@ -135,15 +135,37 @@ describe("artifact routes", () => {
       warnings: [],
     })
 
-    const published = await app.fetch(
-      new Request(url(`/api/artifacts/${id}/versions`), {
+    // Version 1 is open until Alice creates it; her next save then opens version 2.
+    const frozen = await app.fetch(
+      new Request(url(`/api/artifacts/${id}/freeze`), {
         method: "POST",
+        headers: alice.mutationHeaders,
+        body: JSON.stringify({ baseRevision: 1 }),
+      })
+    )
+    expect(frozen.status).toBe(200)
+    expect(await frozen.json()).toMatchObject({
+      artifact: { latestVersion: 1, revision: 2 },
+      version: {
+        version: 1,
+        revision: 2,
+        frozen: true,
+        frozenAt: expect.any(String),
+        frozenBy: { type: "user", id: "alice" },
+      },
+    })
+
+    const published = await app.fetch(
+      new Request(url(`/api/artifacts/${id}/content`), {
+        method: "PUT",
         headers: alice.mutationHeaders,
         body: JSON.stringify({ kind: "document", title: "Q3 report, revised", files }),
       })
     )
-    expect(published.status).toBe(201)
-    expect((await published.json()).version.version).toBe(2)
+    expect(published.status).toBe(200)
+    const second = await published.json()
+    expect(second.version).toMatchObject({ version: 2, revision: 3, frozen: false })
+    expect(second.version).not.toHaveProperty("frozenAt")
 
     const listed = await (await app.fetch(new Request(url("/api/artifacts"), alice))).json()
     expect(listed).toMatchObject({
@@ -159,7 +181,15 @@ describe("artifact routes", () => {
 
     const detail = await (await app.fetch(new Request(url(`/api/artifacts/${id}`), alice))).json()
     expect(detail.artifact.title).toBe("Q3 report, revised")
-    expect(detail.versions.map((version: { version: number }) => version.version)).toEqual([2, 1])
+    expect(
+      detail.versions.map((version: { version: number; frozen: boolean }) => [
+        version.version,
+        version.frozen,
+      ])
+    ).toEqual([
+      [2, false],
+      [1, true],
+    ])
 
     const latest = await app.fetch(new Request(url(`/api/artifacts/${id}/versions/latest`), alice))
     expect((await latest.json()).version).toBe(2)
@@ -206,6 +236,14 @@ describe("artifact routes", () => {
           body: JSON.stringify(body),
         })
       )
+    const update = (artifactId: string, body: unknown) =>
+      app.fetch(
+        new Request(url(`/api/artifacts/${artifactId}/content`), {
+          method: "PUT",
+          headers: alice.mutationHeaders,
+          body: JSON.stringify(body),
+        })
+      )
 
     const missingEntry = await post("/api/artifacts", {
       kind: "document",
@@ -222,7 +260,7 @@ describe("artifact routes", () => {
     const { artifact } = await (
       await post("/api/artifacts", { kind: "document", title: "Report", files })
     ).json()
-    const mismatch = await post(`/api/artifacts/${artifact.id}/versions`, {
+    const mismatch = await update(artifact.id, {
       kind: "file",
       title: "Report",
       files,
@@ -230,24 +268,43 @@ describe("artifact routes", () => {
     expect(mismatch.status).toBe(409)
     expect((await mismatch.json()).code).toBe("artifact_kind_mismatch")
 
-    // A save from version 1 after version 2 was published is refused, naming version 2.
-    const edited = await post(`/api/artifacts/${artifact.id}/versions`, {
+    // A save from revision 1 after another save is refused, naming revision 2.
+    const edited = await update(artifact.id, {
       kind: "document",
       title: "Report",
       files,
-      baseVersion: 1,
+      baseRevision: 1,
     })
-    expect(edited.status).toBe(201)
-    const moved = await post(`/api/artifacts/${artifact.id}/versions`, {
+    expect(edited.status).toBe(200)
+    const moved = await update(artifact.id, {
       kind: "document",
       title: "Report",
       files,
-      baseVersion: 1,
+      baseRevision: 1,
     })
     expect(moved.status).toBe(409)
     expect(await moved.json()).toMatchObject({
       code: "artifact_moved",
-      latest: { version: 2, author: { type: "user" } },
+      latest: { version: 1, revision: 2, author: { type: "user" } },
+    })
+    const freezeMoved = await post(`/api/artifacts/${artifact.id}/freeze`, { baseRevision: 1 })
+    expect(freezeMoved.status).toBe(409)
+    expect((await freezeMoved.json()).code).toBe("artifact_moved")
+
+    // After a freeze, a save from before it is told who created the version.
+    expect((await post(`/api/artifacts/${artifact.id}/freeze`, { baseRevision: 2 })).status).toBe(
+      200
+    )
+    const afterFreeze = await update(artifact.id, {
+      kind: "document",
+      title: "Report",
+      files,
+      baseRevision: 2,
+    })
+    expect(afterFreeze.status).toBe(409)
+    expect(await afterFreeze.json()).toMatchObject({
+      code: "artifact_moved",
+      latest: { version: 1, revision: 3, frozenBy: { type: "user", id: "alice" } },
     })
 
     const badReference = await post("/api/artifacts", {
@@ -285,8 +342,8 @@ describe("artifact routes", () => {
     }
     expect((await (await app.fetch(new Request(url("/api/artifacts"), bob))).json()).total).toBe(0)
     const bobPublish = await app.fetch(
-      new Request(url(`${base}/versions`), {
-        method: "POST",
+      new Request(url(`${base}/content`), {
+        method: "PUT",
         headers: bob.mutationHeaders,
         body: JSON.stringify({ kind: "document", title: "Mine", files }),
       })
@@ -305,6 +362,117 @@ describe("artifact routes", () => {
     ]) {
       expect((await app.fetch(new Request(url(path), alice))).status, path).toBe(404)
     }
+  })
+})
+
+describe("an artifact's restore points", () => {
+  // Guard proof: answer the restore route from the point without `baseRevision`; the save Alice
+  // never saw is then replaced.
+  test("are listed, read, and restored by whoever may update the artifact", async () => {
+    const { app, storage, put } = createApp()
+    const alice = await seedSession(storage, "alice")
+    const bob = await seedSession(storage, "bob")
+    const files = [await put("document.md", "# Report\n", "text/markdown")]
+    const call = (path: string, init: { method?: string; body?: unknown } = {}, as = alice) =>
+      app.fetch(
+        new Request(url(path), {
+          method: init.method ?? "GET",
+          headers: init.method ? as.mutationHeaders : as.headers,
+          ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        })
+      )
+    const { artifact, version } = await (
+      await call("/api/artifacts", {
+        method: "POST",
+        body: { kind: "document", title: "Report", files },
+      })
+    ).json()
+    const base = `/api/artifacts/${artifact.id}`
+
+    // An Agent turn rewrites it: its first write keeps what it replaced.
+    const draft = [await put("document.md", "# Report, the turn's\n", "text/markdown")]
+    await storage.artifacts.publish({
+      projectId: PROJECT_ID,
+      artifactId: artifact.id,
+      kind: "document",
+      version: {
+        title: "Report, drafted",
+        entry: "document.md",
+        files: draft,
+        outline: version.outline,
+        references: [],
+        author: { type: "user", id: "alice" },
+        origin: { threadId: "thr_alice", runId: "run_alice" },
+        updatedAt: new Date(),
+      },
+      turnRunId: "run_alice",
+    })
+
+    const listed = await (await call(`${base}/restore-points`)).json()
+    expect(listed).toEqual({
+      restorePoints: [
+        {
+          artifactId: artifact.id,
+          revision: 1,
+          version: 1,
+          frozen: false,
+          title: "Report",
+          author: { type: "user", id: "alice" },
+          updatedAt: expect.any(String),
+          reason: "turn",
+          turnRunId: "run_alice",
+          createdAt: expect.any(String),
+        },
+      ],
+    })
+    expect(await (await call(`${base}/restore-points/1`)).json()).toMatchObject({
+      revision: 1,
+      entry: "document.md",
+      files,
+      outline: version.outline,
+    })
+    const before = await call(`${base}/restore-points/1/content?path=document.md`)
+    expect(await before.text()).toBe("# Report\n")
+
+    const stale = await call(`${base}/restore-points/1/restore`, {
+      method: "POST",
+      body: { baseRevision: 1 },
+    })
+    expect(stale.status).toBe(409)
+    expect((await stale.json()).code).toBe("artifact_moved")
+
+    const restored = await call(`${base}/restore-points/1/restore`, {
+      method: "POST",
+      body: { baseRevision: 2 },
+    })
+    expect(restored.status).toBe(200)
+    expect(await restored.json()).toMatchObject({
+      artifact: { revision: 3, title: "Report" },
+      version: { version: 1, revision: 3, frozen: false, files },
+    })
+    expect(
+      (await (await call(`${base}/restore-points`)).json()).restorePoints.map(
+        (point: { revision: number; reason: string }) => [point.revision, point.reason]
+      )
+    ).toEqual([
+      [2, "restore"],
+      [1, "turn"],
+    ])
+
+    expect((await call(`${base}/restore-points/9`)).status).toBe(404)
+    expect(await (await call(`${base}/restore-points/9`)).json()).toMatchObject({
+      code: "restore_point_not_found",
+    })
+    expect(
+      (await call(`${base}/restore-points/9/restore`, { method: "POST", body: {} })).status
+    ).toBe(404)
+    for (const path of [`${base}/restore-points`, `${base}/restore-points/1`]) {
+      const refused = await call(path, {}, bob)
+      expect(refused.status, path).toBe(403)
+      expect(await refused.json()).toMatchObject({ code: "not_shared" })
+    }
+    const bobRestores = await call(`${base}/restore-points/1/restore`, { method: "POST" }, bob)
+    expect(bobRestores.status).toBe(403)
   })
 })
 

@@ -253,6 +253,7 @@ sixb objects get-by Customer email ada@example.com
 | `workflows`, `workflow-runs` | Start workflows and inspect runs. |
 | `files` | Upload and download files. |
 | `users` | List and search the [member directory](../auth/members.md#read-the-member-directory), for example `sixb users search ava`. |
+| `artifacts` | Read, resolve and reply to comments: `sixb artifacts comments list <id>`. |
 | `models` | List the project's models with their prices, and call them: text, images, speech, transcription. |
 | `datasets` | Read datasets, their versions and rows, for example `sixb datasets rows orders --limit 10`. Columns your clearances don't cover are left out. |
 | `syncs`, `sync-runs`, `pipelines`, `pipeline-runs` | See the syncs and pipelines you may run and their run history. Starting a run still happens in the app. |

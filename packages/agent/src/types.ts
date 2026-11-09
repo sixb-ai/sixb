@@ -83,9 +83,10 @@ export interface AgentRunFiles {
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
   /**
-   * Install the latest version of each artifact these runs published in the thread in the run's
-   * `$SIXB_ARTIFACTS`; nothing for a run that installs no artifacts. Throws, naming them, when
-   * some could not be installed.
+   * Install the latest revision of each thread artifact the run's turn wrote, its children's
+   * writes among them, in the run's `$SIXB_ARTIFACTS`, and in the folder the Agent last published
+   * each from; nothing for a run that installs no artifacts. Resolves to the folders it wrote.
+   * Throws, naming them, when some could not be installed.
    */
-  installArtifactsFrom(runIds: readonly string[], signal: AbortSignal): Promise<void>
+  installTurnArtifacts(signal: AbortSignal): Promise<readonly string[]>
 }

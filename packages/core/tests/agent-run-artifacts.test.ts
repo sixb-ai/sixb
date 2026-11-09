@@ -1,6 +1,9 @@
-import { describe, expect, test } from "bun:test"
-import { SixbHost } from "../src"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
+import { defineObjectType, InMemoryBroker, prop, type SandboxFactory, SixbHost } from "../src"
 import { AgentExecutionLostError, agentRunArtifacts } from "../src/agents"
+import { announceAgentTurnEnded } from "../src/agents/run-artifacts"
+import { BOARD_PREVIEW_JOB } from "../src/artifacts/canvas-display"
+import { artifactLiveStream } from "../src/artifacts/live/presence"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { bindDurableAgentExecution } from "../src/execution/agent"
 import { bindRequestExecution } from "../src/execution/request"
@@ -14,9 +17,30 @@ const projectId = "agent-run-artifacts"
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
 
+// A test that times out never reaches its own `finally`.
+afterEach(() => {
+  jest.useRealTimers()
+  jest.setSystemTime()
+})
+
+/** What a live canvas's boards read. */
+const Task = defineObjectType({
+  id: "Task",
+  name: "Task",
+  properties: [prop("id", "string", { primary: true, required: true })],
+})
+
+/** The project's sandboxes, which only the agent worker opens. */
+const sandboxes: SandboxFactory = {
+  supportsRequestCredentials: true,
+  create: async () => {
+    throw new Error("Must not create a sandbox")
+  },
+}
+
 async function setup() {
   const deps = createTestRuntimeDeps()
-  const host = new SixbHost({ id: projectId, ontology: [], ...deps })
+  const host = new SixbHost({ id: projectId, ontology: [Task], ...deps, sandboxes })
   const { storage } = deps
 
   // Alice's conversation, with Bob taking part, and a turn Bob asked for running in it.
@@ -81,12 +105,16 @@ async function setup() {
         sessionId: "session-usr_bob",
         groupIds: [],
         roleIds: [],
-        grants: { ...emptyGrantIndex(), "run:agent": true },
+        grants: {
+          ...emptyGrantIndex(),
+          "run:agent": true,
+          "view:object": new Set([Task.id]),
+        },
       },
     },
   })
   const artifacts = agentRunArtifacts(
-    { projectId, storage },
+    { projectId, storage, domainEvents: host.events, broker: host.broker },
     started,
     "exec_bob",
     async () => runSdk
@@ -102,7 +130,28 @@ async function setup() {
       }),
     },
   ]
-  return { storage, runSdk, started, artifacts, as, document }
+  const canvas = async (extra: Record<string, string> = {}) =>
+    Promise.all(
+      Object.entries({
+        "canvas.json": JSON.stringify({
+          items: [
+            { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          ],
+        }),
+        "welcome.html": "<main><h1>Welcome</h1></main>",
+        ...extra,
+      }).map(async ([path, body]) => ({
+        path,
+        file: await deps.blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
+      }))
+    )
+  const png = () =>
+    deps.blobStorage.put({
+      body: new TextEncoder().encode("png"),
+      fileName: "welcome.png",
+      mediaType: "image/png",
+    })
+  return { deps, host, storage, runSdk, started, artifacts, as, document, canvas, png }
 }
 
 describe("a run's artifacts", () => {
@@ -139,12 +188,20 @@ describe("a run's artifacts", () => {
       files: await document("# Notes\n"),
     })
 
+    // The turn's writes replace the open version, and open the next one after Alice creates it.
     const next = await artifacts.publish({
       artifactId: shared.artifact.id,
       title: "Plan",
       files: await document("# Plan, revised\n"),
     })
-    expect(next.version.version).toBe(2)
+    expect(next.version).toMatchObject({ version: 1, revision: 2 })
+    await as(alice).artifacts.freeze(shared.artifact.id)
+    const opened = await artifacts.publish({
+      artifactId: shared.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, third\n"),
+    })
+    expect(opened.version).toMatchObject({ version: 2, revision: 4 })
 
     expect(await artifacts.updatable(elsewhere.artifact.id)).toBeNull()
     const refused = await artifacts
@@ -175,6 +232,128 @@ describe("a run's artifacts", () => {
     expect((await storage.artifacts.list({ projectId })).total).toBe(0)
   })
 
+  // Guard proof: drop the origin check from storePreviews; Alice's version, which shows what she
+  // can see, takes the pictures Bob's turn took with his rights. Drop the content check, and the
+  // pictures of what Bob's turn first wrote are kept under the boards of what it wrote next.
+  // Compare revisions instead, and the pictures taken while Alice created the version are refused.
+  test("keeps the pictures of what it wrote, while the version holds it", async () => {
+    const { storage, artifacts, as, canvas, png } = await setup()
+    const previews = [
+      { board: "welcome", theme: "light" as const, size: "full" as const, file: await png() },
+    ]
+    const store = (at: { artifactId: string; version: number; updatedAt: Date }) =>
+      artifacts.storePreviews({ ...at, previews }).catch((error: unknown) => error)
+
+    jest.setSystemTime(new Date("2026-11-08T10:00:00.000Z"))
+    try {
+      const first = await artifacts.publish({
+        kind: "canvas",
+        title: "Onboarding",
+        files: await canvas(),
+        rendersPreviews: true,
+      })
+      const { id } = first.artifact
+      const writtenFirst = { artifactId: id, version: 1, updatedAt: first.version.updatedAt }
+
+      // The turn writes the open version again: what it pictured first is no longer there.
+      jest.setSystemTime(new Date("2026-11-08T10:01:00.000Z"))
+      const second = await artifacts.publish({
+        artifactId: id,
+        title: "Onboarding",
+        files: await canvas({ "welcome.html": "<main><h1>Welcome aboard</h1></main>" }),
+        rendersPreviews: true,
+      })
+      const written = { artifactId: id, version: 1, updatedAt: second.version.updatedAt }
+      expect(await store(writtenFirst)).toMatchObject({ code: "not_allowed" })
+      expect(await store(written)).toEqual([])
+      const outline = second.version.outline
+      const renderKey =
+        outline.kind === "canvas" && outline.items[0]?.type === "board"
+          ? outline.items[0].renderKey
+          : undefined
+      expect(
+        await storage.artifacts.listBoardPreviews({ projectId, renderKeys: [renderKey ?? ""] })
+      ).toMatchObject([{ theme: "light", size: "full", file: previews[0]?.file }])
+
+      // Alice creates the version while the check pictures it: it still holds what the turn
+      // wrote, so the pictures are still kept.
+      await as(alice).artifacts.freeze(id, { baseRevision: second.version.revision })
+      expect(await store(written)).toEqual([])
+
+      // Alice, the conversation's owner, writes it in the app: her version 2 is hers to picture.
+      jest.setSystemTime(new Date("2026-11-08T10:02:00.000Z"))
+      const edited = await as(alice).artifacts.update(id, {
+        kind: "canvas",
+        title: "Onboarding",
+        files: await canvas(),
+      })
+      const atEdited = { artifactId: id, version: 2, updatedAt: edited.version.updatedAt }
+      for (const at of [{ ...written, version: 2 }, atEdited]) {
+        expect(await store(at)).toMatchObject({ code: "not_allowed" })
+      }
+    } finally {
+      jest.setSystemTime()
+    }
+  })
+
+  // Guard proof: answer the queries of every run's publish, or of none. A publisher that renders
+  // its own previews then runs each query twice, or a command in the sandbox leaves its live
+  // boards without a preview.
+  test("answers its queries for previews only when it does not render them itself", async () => {
+    const { deps, runSdk, artifacts, canvas } = await setup()
+    const query = spyOn(runSdk.artifacts, "query")
+    const files = () =>
+      canvas({ "queries/tasks.json": JSON.stringify({ kind: "start", objectTypeId: Task.id }) })
+    const claim = async () =>
+      (
+        await deps.queues.agents.claim({
+          projectId,
+          workerId: "test",
+          limit: 10,
+          leaseMs: 3_600_000,
+        })
+      )[0]?.job
+
+    // The publish tool, whose layout check reads the answers and pictures the boards.
+    const checked = await artifacts.publish({
+      kind: "canvas",
+      title: "Tasks",
+      files: await files(),
+      rendersPreviews: true,
+    })
+    expect(query).not.toHaveBeenCalled()
+
+    // A command in the sandbox, which publishes through the API with the run's token.
+    const commanded = await artifacts.publish({
+      kind: "canvas",
+      title: "Tasks",
+      files: await files(),
+    })
+    expect(query).toHaveBeenCalledTimes(1)
+    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
+    const job = await claim()
+    expect(job).toMatchObject({
+      type: "agent.artifact-previews.requested",
+      payload: {
+        artifactId: commanded.artifact.id,
+        version: 1,
+        updatedAt: commanded.version.updatedAt.toISOString(),
+        queries: { blobId: expect.any(String) },
+      },
+    })
+
+    // The publish tool's job waits out the check's grace, and carries no answers.
+    expect(await claim()).toBeUndefined()
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.graceMs))
+    const waited = await claim()
+    expect(waited?.payload).toEqual({
+      artifactId: checked.artifact.id,
+      version: 1,
+      updatedAt: checked.version.updatedAt.toISOString(),
+    })
+  })
+
   // Guard proof: drop assertAgentRunOwned from the publish transaction; the run that ended while
   // its version was checked publishes.
   test("publishes nothing when the run ends while its version is checked", async () => {
@@ -196,11 +375,16 @@ describe("a run's artifacts", () => {
         return runSdk.blobs.stat(blobId)
       },
     }
-    const artifacts = agentRunArtifacts({ projectId, storage }, started, "exec_bob", async () => ({
-      artifacts: runSdk.artifacts,
-      execution: runSdk.execution,
-      blobs,
-    }))
+    const artifacts = agentRunArtifacts(
+      { projectId, storage, domainEvents: { emit: async () => {} }, broker: new InMemoryBroker() },
+      started,
+      "exec_bob",
+      async () => ({
+        artifacts: runSdk.artifacts,
+        execution: runSdk.execution,
+        blobs,
+      })
+    )
 
     const refused = await artifacts
       .publish({ kind: "document", title: "Plan", files: await document("# Plan\n") })
@@ -209,5 +393,145 @@ describe("a run's artifacts", () => {
     expect(ended).toBe(true)
     expect(refused).toBeInstanceOf(AgentExecutionLostError)
     expect((await storage.artifacts.list({ projectId })).total).toBe(0)
+  })
+  // Guard proof: write every artifact under the run itself rather than its turn in
+  // `agentRunArtifacts`; the child's write then keeps a second restore point.
+  test("keeps one restore point per turn, before its first write to an existing artifact", async () => {
+    const { storage, started, runSdk, artifacts, as, document } = await setup()
+    const plan = await as(alice).artifacts.create({
+      kind: "document",
+      title: "Plan",
+      files: await document("# Plan\n"),
+    })
+    // Alice's artifact, shared in her conversation by an earlier turn of hers.
+    await storage.artifacts.publish({
+      projectId,
+      artifactId: plan.artifact.id,
+      kind: "document",
+      version: { ...plan.version, origin: { threadId: "thr_alice", runId: "run_alice" } },
+    })
+
+    await artifacts.publish({
+      artifactId: plan.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, Bob\n"),
+    })
+    // A child of Bob's turn, writing into the same conversation.
+    const childExecution = await createTestAgentExecution(storage, {
+      projectId,
+      runId: "run_bob_child",
+      sourceExecutionId: started.executionId,
+    })
+    await storage.agents.runs.createSubagent({
+      id: "run_bob_child",
+      projectId,
+      executionId: childExecution,
+      parentRunId: started.id,
+      parentExecutionToken: "exec_bob",
+      spawnKey: "plan",
+      spec: { model: { provider: "test", modelId: "test-model" }, task: "Plan", toolNames: [] },
+      thread: { id: "thr_bob_child", create: true },
+      trigger: { id: "msg_bob_child", parts: [{ type: "text", text: "Plan" }] },
+      maxActiveChildren: 4,
+    })
+    const startedChild = await storage.agents.runs.start({
+      projectId,
+      id: "run_bob_child",
+      execution: { token: "exec_child", queueLeaseExpiresAt: new Date("2099-01-01") },
+    })
+    const child = agentRunArtifacts(
+      { projectId, storage, domainEvents: { emit: async () => {} }, broker: new InMemoryBroker() },
+      startedChild,
+      "exec_child",
+      async () => runSdk
+    )
+    await child.publish({
+      artifactId: plan.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, Bob's child\n"),
+    })
+
+    const created = await artifacts.publish({
+      kind: "document",
+      title: "Notes",
+      files: await document("# Notes\n"),
+    })
+
+    const points = await storage.artifacts.listRestorePoints({ projectId, id: plan.artifact.id })
+    expect(
+      points.map(({ revision, reason, turnRunId }) => ({ revision, reason, turnRunId }))
+    ).toEqual([{ revision: 2, reason: "turn", turnRunId: "run_bob" }])
+    expect(await child.turnWrites()).toEqual(await artifacts.turnWrites())
+    expect(await artifacts.turnWrites()).toEqual(
+      [
+        { artifactId: plan.artifact.id, created: false, revision: 4, writes: 2 },
+        { artifactId: created.artifact.id, created: true, revision: 1, writes: 1 },
+      ].sort((left, right) => (left.artifactId < right.artifactId ? -1 : 1))
+    )
+  })
+
+  // Guard proof: drop the announcement from AgentRunArtifacts.publish; a reader outside the
+  // conversation never learns that the artifact changed.
+  test("tells whoever reads an artifact it writes that it changed", async () => {
+    const { host, artifacts, document } = await setup()
+    const created = await artifacts.publish({
+      kind: "document",
+      title: "Plan",
+      files: await document("# Plan\n"),
+    })
+    const cursor = await host.events.latestCursor()
+
+    const written = await artifacts.publish({
+      artifactId: created.artifact.id,
+      title: "Plan",
+      files: await document("# Plan, revised\n"),
+    })
+
+    const events = await host.events.read({
+      ...(cursor === undefined ? {} : { afterCursor: cursor }),
+      types: ["artifact.updated"],
+    })
+    expect(events.map((event) => event.payload)).toEqual([
+      {
+        artifactId: created.artifact.id,
+        version: 1,
+        revision: written.version.revision,
+        frozen: false,
+      },
+    ])
+  })
+  // Guard proof: drop announceAgentBoards from AgentRunArtifacts.publish; the canvas's viewers
+  // never learn which boards the turn is changing.
+  test("tells a canvas's viewers which boards the turn changes, and when the turn ends", async () => {
+    const { host, artifacts, canvas, deps } = await setup()
+    const records = async () =>
+      (
+        await deps.broker.read({
+          projectId,
+          streamId: artifactLiveStream(created.artifact.id).id,
+        })
+      ).records.map(({ name, payload }) => ({ name, payload }))
+
+    const created = await artifacts.publish({
+      kind: "canvas",
+      title: "Flow",
+      files: await canvas(),
+    })
+    // A new board is news, and so is one whose page the turn rewrites.
+    await artifacts.publish({
+      artifactId: created.artifact.id,
+      title: "Flow",
+      files: await canvas({ "welcome.html": "<main><h1>Hello</h1></main>" }),
+    })
+    await announceAgentTurnEnded(
+      { projectId, storage: deps.storage, domainEvents: host.events, broker: host.broker },
+      "run_bob"
+    )
+
+    expect(await records()).toEqual([
+      { name: "agent", payload: { runId: "run_bob", boards: ["welcome"], at: expect.any(String) } },
+      { name: "agent", payload: { runId: "run_bob", boards: ["welcome"], at: expect.any(String) } },
+      { name: "agent-ended", payload: { runId: "run_bob" } },
+    ])
   })
 })

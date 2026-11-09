@@ -48,6 +48,7 @@ const BUILT_IN_TOOL_VIEWS: ReadonlyMap<string, BuiltInToolView> = new Map([
   ["read", (tool) => <ReadToolView tool={tool} />],
   ["view_file", (tool) => <ViewFileToolView tool={tool} />],
   ["publish_artifact", publishArtifact],
+  ["update_artifact", publishArtifact],
   ["publish_artifact_version", publishArtifact],
   [
     "web_fetch",

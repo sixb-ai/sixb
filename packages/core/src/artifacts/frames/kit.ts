@@ -420,8 +420,12 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
   main { display: block; max-width: 1120px; margin: 0 auto; padding: 40px 32px 56px; }
   @media (max-width: 640px) { main { padding: 24px 16px 40px; } }
 
-  /* Type. */
-  :is(h1, h2, h3, h4) { margin: 0 0 0.5em; color: var(--foreground); text-wrap: balance; }
+  /*
+   * Type. Text takes the body's colour, or the colour of whatever the page paints it on: the kit
+   * colours only the surfaces it paints itself. A rule on a heading would win over the colour a
+   * page gives its body, and a page with its own light background loses its headings in dark mode.
+   */
+  :is(h1, h2, h3, h4) { margin: 0 0 0.5em; text-wrap: balance; }
   h1 { font-size: 32px; line-height: 1.15; font-weight: 650; letter-spacing: -0.025em; }
   h2 { margin-top: 1.6em; font-size: 21px; line-height: 1.25; font-weight: 620; letter-spacing: -0.015em; }
   h3 { margin-top: 1.4em; font-size: 16px; line-height: 1.35; font-weight: 600; }
@@ -440,7 +444,7 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
   }
   small, .muted, .note { color: var(--muted-foreground); }
   small, .note { font-size: 13px; }
-  a { color: var(--foreground); text-decoration-color: color-mix(in oklab, var(--foreground) 35%, transparent); text-underline-offset: 3px; }
+  a { color: inherit; text-decoration-color: color-mix(in oklab, currentColor 35%, transparent); text-underline-offset: 3px; }
   a:hover { text-decoration-color: currentColor; }
   strong { font-weight: 600; }
   hr { margin: 32px 0; border: 0; border-top: 1px solid var(--border); }
@@ -507,7 +511,7 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
   :is(button, .button):disabled { opacity: 0.5; cursor: default; }
   :is(button, .button).secondary { border-color: var(--border); background: var(--card); color: var(--foreground); }
   :is(button, .button).secondary:hover { background: var(--muted); }
-  :is(button, .button).ghost { background: transparent; color: var(--foreground); }
+  :is(button, .button).ghost { background: transparent; color: inherit; }
   :is(button, .button).ghost:hover { background: var(--muted); }
   fieldset { margin: 0 0 16px; padding: 0; border: 0; }
   .field { margin-bottom: 16px; }
@@ -518,7 +522,6 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--card);
-    color: var(--card-foreground);
     box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   }
   .card > :last-child { margin-bottom: 0; }

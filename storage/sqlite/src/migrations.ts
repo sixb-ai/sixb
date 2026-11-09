@@ -322,6 +322,11 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("088-dataset-ingest-inbox", datasetIngestInboxSql),
     sqliteSql("089-run-recovery", runRecoverySql),
     sqliteSql("090-webhook-and-projection-leases", webhookAndProjectionLeasesSql),
+    sqliteSql("091-artifact-board-previews", artifactBoardPreviewsSql),
+    sqliteSql("092-artifact-open-versions", artifactOpenVersionsSql),
+    sqliteSql("093-artifact-documents", artifactDocumentsSql),
+    sqliteSql("094-artifact-frame-files", artifactFrameFilesSql),
+    sqliteSql("095-artifact-comments", artifactCommentsSql),
   ],
 })
 
@@ -741,3 +746,12 @@ import runRecoverySql from "./migrations/089-run-recovery.sql" with { type: "tex
 import webhookAndProjectionLeasesSql from "./migrations/090-webhook-and-projection-leases.sql" with {
   type: "text",
 }
+import artifactBoardPreviewsSql from "./migrations/091-artifact-board-previews.sql" with {
+  type: "text",
+}
+import artifactOpenVersionsSql from "./migrations/092-artifact-open-versions.sql" with {
+  type: "text",
+}
+import artifactDocumentsSql from "./migrations/093-artifact-documents.sql" with { type: "text" }
+import artifactFrameFilesSql from "./migrations/094-artifact-frame-files.sql" with { type: "text" }
+import artifactCommentsSql from "./migrations/095-artifact-comments.sql" with { type: "text" }

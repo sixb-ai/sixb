@@ -655,6 +655,8 @@ export interface SixbEventsApi {
   syncs(options?: SixbEventsClientOptions): EventsRunBuilder<SixbEventOfTopic<"syncs">>
   /** Member events. Reading them requires `can.view(project.users)`. */
   users(options?: SixbEventsClientOptions): EventsUsersBuilder<SixbEventOfTopic<"users">>
+  /** An artifact changed: each goes to whoever may read that artifact. */
+  artifacts(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"artifacts">>
 }
 
 function topicBuilder<TEvent extends SixbEvent>(
@@ -710,6 +712,7 @@ eventsApi.pipeline = (pipeline, options) => {
 eventsApi.schedules = (options) => topicBuilder("schedules", options)
 eventsApi.rules = (options) => topicBuilder("rules", options)
 eventsApi.datasets = (options) => topicBuilder("datasets", options)
+eventsApi.artifacts = (options) => topicBuilder("artifacts", options)
 eventsApi.workflows = (options) => runBuilder("workflows", options)
 eventsApi.pipelines = (options) => runBuilder("pipelines", options)
 eventsApi.syncs = (options) => runBuilder("syncs", options)

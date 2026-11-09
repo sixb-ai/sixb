@@ -11,8 +11,9 @@ Connect to the API origin using `wss://` in production. Connections use an authe
 | `/ws/events` | Domain events. | Events are filtered by the caller's resource permissions. |
 | `/ws/logs` | Handler logs. | Requires `can.observe(project.logs)`. |
 | `/ws/agents` | Agent run output and activity. | Requires access to the agent and requested run. |
+| `/ws/artifacts` | Artifacts edited live. | Changing an artifact edits it; reading it watches. |
 
-After receiving `connected`, send a subscription message. The server acknowledges it with `subscribed`. Send `unsubscribe` or close the socket when finished. Errors arrive as a message with `type: "error"` and a `message` string. A message you send can be at most 64 KiB; the server closes a connection that sends a larger one.
+After receiving `connected`, send a subscription message (`/ws/artifacts` has its own messages, below). The server acknowledges it with `subscribed`. Send `unsubscribe` or close the socket when finished. Errors arrive as a message with `type: "error"` and a `message` string. A message you send can be at most 64 KiB; the server closes a connection that sends a larger one.
 
 Session identity is established when connecting. WebSocket traffic does not renew the browser session; reconnect after signing in again or changing accounts.
 
@@ -60,8 +61,9 @@ This abbreviated example shows common fields. The event also carries its subject
 | `datasets` | `dataset.version.committed` |
 | `syncs`, `pipelines` | Run lifecycle events. |
 | `users` | `user.joined`, `user.invited`, `user.suspended`, `user.reactivated`, `user.profile.updated` |
+| `artifacts` | `artifact.updated`, `artifact.commented` |
 
-Visibility follows the subject's permissions. For example, invoice events require view access to invoices, and link events require view access to both endpoint types. Member events require `can.view(project.users)`, like the [member directory](../auth/members.md#read-the-member-directory). There is no separate grant to read all domain events.
+Visibility follows the subject's permissions. For example, invoice events require view access to invoices, and link events require view access to both endpoint types. Member events require `can.view(project.users)`, like the [member directory](../auth/members.md#read-the-member-directory). Artifact events go to whoever can read the [artifact](../artifacts/overview.md#versions-and-restore-points). There is no separate grant to read all domain events.
 
 ## Replay events
 
@@ -113,3 +115,33 @@ A sub-agent's run streams the same way to the owner and participants of its conv
 Send `replay` with a run ID, optional cursor, and `limit` to read a bounded page. `subscribe.activity` selects project agent activity instead of an individual run. A socket has one active subscription.
 
 React apps can use `useAgentRunStream` from `@sixb/client/hooks` instead of handling these messages directly.
+
+## Live artifacts
+
+`/ws/artifacts` keeps a canvas's current version in step between everyone editing it. Each
+connection holds the version as a Yjs document and exchanges
+[y-protocols](https://github.com/yjs/y-protocols) sync and awareness messages, base64-encoded.
+
+| You send | |
+| --- | --- |
+| `{ "type": "join", "artifactId" }` | Start editing, or watching, an artifact. A connection holds at most 16 |
+| `{ "type": "sync", "artifactId", "data", "more"? }` | A sync message: step 1 after `joined`, then your document's updates. A larger one goes in parts of at most 32 KiB, `more: true` on all but the last |
+| `{ "type": "awareness", "artifactId", "data" }` | Who you are and what you point at |
+| `{ "type": "leave", "artifactId" }` | Stop |
+
+| You receive | |
+| --- | --- |
+| `joined` | `access` (`edit` or `watch`), `revision`, and `user`, who you are to the others |
+| `sync`, `awareness` | Apply them to your document and your awareness |
+| `status` | Whether changes are written: `saved` at `revision`, `unsaved`, `saving`, or `failed` with an `error`; `snapshot` is what is written, as a Yjs snapshot, so you can forget the changes it covers |
+| `access` | You may now only watch |
+| `left` | You no longer hold it: `left` (asked), `not_found`, `not_shared`, `not_live` |
+
+- A watcher's updates are refused with an `error`; it may still send step 1 and awareness.
+- Keep your document when you reconnect, to any server. After `joined`, the server's own step 1
+  asks for what your document holds that it lacks, and your answer brings back what you changed
+  while away.
+- The server sets `user` in every awareness state it shares (`id`, `name` and `color`), whatever
+  your own state says. It shares your states only for awareness clients nobody else uses.
+- While an Agent turn changes boards, the server's own awareness state holds `sixbAgent`: each
+  turn's `runId` and the `boards` it changed. A client's state never holds it.

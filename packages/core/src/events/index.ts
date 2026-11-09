@@ -79,6 +79,9 @@ export {
 } from "./service"
 export type {
   ActionEventOrigin,
+  ArtifactCommentedEvent,
+  ArtifactEvent,
+  ArtifactUpdatedEvent,
   AuthorableDomainEvent,
   AuthorableEventDraft,
   DatasetEvent,

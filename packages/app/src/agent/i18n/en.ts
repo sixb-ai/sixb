@@ -124,6 +124,10 @@ export const en = {
     searching: "Searching…",
     empty: (query: string) => `No objects found for “${query}”`,
     remove: (label: string) => `Remove ${label} context`,
+    /** A chip of comments: what shows them, and a comment the project cannot name the author of. */
+    showComments: (label: string) => `Show ${label}`,
+    someone: "Someone",
+    replies: (count: number) => (count === 1 ? "1 reply" : `${count} replies`),
     /** A context entry with no readable name. */
     unnamed: "Context",
   },
@@ -772,6 +776,12 @@ export const en = {
     publishing: (title: string) => `Publishing ${title || "an artifact"}`,
     published: (title: string) => `Published ${title || "an artifact"}`,
     publishFailed: (title: string) => `Couldn't publish ${title || "an artifact"}`,
+    /** An `update_artifact` call, which changes an artifact's current version. */
+    updating: (title: string) => `Updating ${title || "an artifact"}`,
+    updated: (title: string) => `Updated ${title || "an artifact"}`,
+    updateFailed: (title: string) => `Couldn't update ${title || "an artifact"}`,
+    /** A revised artifact whose structure stayed as it was: what changed is within it. */
+    changed: "Updated",
     open: (title: string) => `Open ${title}`,
     /** Labels the cards of what one response published. */
     cards: "Published in this response",

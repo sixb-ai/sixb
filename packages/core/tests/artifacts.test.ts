@@ -191,6 +191,43 @@ describe("publishing any version", () => {
     )
   })
 
+  test("holds up to 500 files and 250 MB, and refuses a version past either", async () => {
+    const { as, put } = setup()
+    const page = await put("index.html", "<!doctype html><title>Assets</title><p>Assets</p>")
+    const asset = await put("assets/0.svg", "<svg/>", "image/svg+xml")
+    const assets = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({ ...asset, path: `assets/${index}.svg` }))
+
+    const published = await as("alice").artifacts.create({
+      kind: "page",
+      title: "Assets",
+      files: [page, ...assets(499)],
+    })
+    expect(published.version.files).toHaveLength(500)
+
+    await expectRequestError(
+      as("alice").artifacts.create({
+        kind: "page",
+        title: "Assets",
+        files: [page, ...assets(500)],
+      }),
+      "invalid_artifact",
+      "A version holds at most 500 files; this one has 501."
+    )
+
+    // Counted from the references, before any byte is read: eleven files of 24 MB pass 250 MB.
+    const large = { ...asset.file, sizeBytes: 24 * 1024 * 1024 }
+    await expectRequestError(
+      as("alice").artifacts.create({
+        kind: "page",
+        title: "Assets",
+        files: [page, ...assets(11).map((file) => ({ ...file, file: large }))],
+      }),
+      "invalid_artifact",
+      `a version may hold at most ${250 * 1024 * 1024}`
+    )
+  })
+
   test("publishes a file as it is, and only one", async () => {
     const { as, put } = setup()
     const deck = await put("board-pack.pdf", "%PDF-1.7", "application/pdf")
@@ -232,24 +269,24 @@ describe("artifact ownership", () => {
     expect(await as("bob").artifacts.listVersions(artifact.id)).toBeNull()
     expect((await as("bob").artifacts.list()).total).toBe(0)
     await expectRequestError(
-      as("bob").artifacts.publish(artifact.id, { kind: "document", title: "Mine now", files }),
+      as("bob").artifacts.update(artifact.id, { kind: "document", title: "Mine now", files }),
       "not_shared"
     )
     expect(await as("bob").artifacts.access(artifact.id)).toBe("none")
     expect(await as("bob").artifacts.delete(artifact.id)).toBe(false)
     expect((await createTestSixb(host).artifacts.get(artifact.id))?.id).toBe(artifact.id)
 
-    const second = await as("alice").artifacts.publish(artifact.id, {
+    const second = await as("alice").artifacts.update(artifact.id, {
       kind: "document",
       title: "Report, revised",
       files,
     })
-    expect(second.version.version).toBe(2)
+    expect(second.version).toMatchObject({ version: 1, revision: 2 })
     expect((await as("alice").artifacts.getVersion(artifact.id, "latest"))?.title).toBe(
       "Report, revised"
     )
     await expectRequestError(
-      as("alice").artifacts.publish(artifact.id, { kind: "file", title: "Report", files }),
+      as("alice").artifacts.update(artifact.id, { kind: "file", title: "Report", files }),
       "artifact_kind_mismatch"
     )
     expect((await as("alice").artifacts.list()).artifacts.map((item) => item.id)).toEqual([

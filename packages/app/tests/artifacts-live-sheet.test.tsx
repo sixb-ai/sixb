@@ -212,6 +212,7 @@ function cache(
       title: "Overdue",
       owner: { type: "user", id: "user-1" },
       latestVersion: 1,
+      revision: 1,
       createdAt: "2026-10-01T12:00:00.000Z",
       updatedAt: "2026-10-01T12:00:00.000Z",
     },
@@ -221,12 +222,15 @@ function cache(
         title: "Overdue",
         author: { type: "user", id: "user-1" },
         createdAt: "2026-10-01T12:00:00.000Z",
+        updatedAt: "2026-10-01T12:00:00.000Z",
+        revision: 1,
+        frozen: true,
       },
     ],
     access: "owner",
   } satisfies GetArtifactResponse)
 
-  const key = artifactQueryKey(OVERDUE, 1, "overdue")
+  const key = artifactQueryKey(version, "overdue")
   if (answer instanceof SixbApiError) {
     queries.getQueryCache().build(queries, { queryKey: key }).setState({
       status: "error",
@@ -688,6 +692,7 @@ describe("a live artifact's header", () => {
         title: "Review",
         owner: { type: "user", id: "user-1" },
         latestVersion: 1,
+        revision: 1,
         createdAt: "2026-10-01T12:00:00.000Z",
         updatedAt: "2026-10-01T12:00:00.000Z",
       },
@@ -697,6 +702,9 @@ describe("a live artifact's header", () => {
           title: "Review",
           author: { type: "user", id: "user-1" },
           createdAt: "2026-10-01T12:00:00.000Z",
+          updatedAt: "2026-10-01T12:00:00.000Z",
+          revision: 1,
+          frozen: true,
         },
       ],
       access: "owner",

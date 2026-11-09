@@ -64,6 +64,11 @@ Members:
   sixb users search <text>            Find members by name or email
   sixb users list|get ...
 
+Artifact comments:
+  sixb artifacts comments list <artifact-id>
+                                      Open comments, as threads with where each is
+  sixb artifacts comments resolve|reply ...
+
 A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
 \`sixb users search <name>\`.
 
@@ -274,6 +279,16 @@ Options:
 exact email, ignoring case, and finds suspended members too. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
+  artifacts: `Usage:
+  sixb artifacts comments list <artifact-id> [--status open|resolved|all]
+  sixb artifacts comments resolve <artifact-id> <comment-id> [--reopen]
+  sixb artifacts comments reply <artifact-id> <comment-id> <text>|--file <path|->
+
+\`list\` prints {"threads"}, open ones by default: each comment with its anchor (board, element
+address, label, revision), its body, authorName and its replies. A message quoting comments
+names each one's id as \`comment <id>\`. Resolve a comment once the change it asks for is made;
+reply to one to say why it is not. Reading takes access to the artifact; resolving, the right to
+change it or being the comment's author.`,
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]

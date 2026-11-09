@@ -1,4 +1,5 @@
 import { EventsError } from "./errors"
+import type { ArtifactEvent } from "./types/artifacts"
 import type { DatasetEvent } from "./types/datasets"
 import type { DomainEvent, DomainEventDraft } from "./types/index"
 import type { LinkEvent } from "./types/links"
@@ -195,6 +196,18 @@ export const USER_EVENT_DEFINITIONS = defineEventGroup<UserEvent>({
   },
 })
 
+// One stream per artifact, so its changes stay in order.
+export const ARTIFACT_EVENT_DEFINITIONS = defineEventGroup<ArtifactEvent>({
+  "artifact.updated": {
+    topic: "artifacts",
+    partitionKey: (payload) => payload.artifactId,
+  },
+  "artifact.commented": {
+    topic: "artifacts",
+    partitionKey: (payload) => payload.artifactId,
+  },
+})
+
 export const EVENT_DEFINITIONS = {
   ...OBJECT_EVENT_DEFINITIONS,
   ...TELEMETRY_EVENT_DEFINITIONS,
@@ -206,6 +219,7 @@ export const EVENT_DEFINITIONS = {
   ...DATASET_EVENT_DEFINITIONS,
   ...RULE_EVENT_DEFINITIONS,
   ...USER_EVENT_DEFINITIONS,
+  ...ARTIFACT_EVENT_DEFINITIONS,
 } as const satisfies EventDefinitionMap
 
 export const EVENT_TYPES = Object.keys(EVENT_DEFINITIONS) as readonly DomainEvent["type"][]

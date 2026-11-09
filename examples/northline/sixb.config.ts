@@ -79,6 +79,8 @@ export const sixb = createSixb({
       failure = `${context.pendingDeliveries} ingested delivery(ies) of '${context.datasetId}' wait since ${context.oldestReceivedAt}`
     } else if (context.type === "dataset.ingest.rejected") {
       failure = `ingested delivery '${context.deliveryId}' of '${context.datasetId}' was refused with ${context.failure.code}`
+    } else if (context.type === "artifact.live_write.failed") {
+      failure = `live changes to artifact '${context.artifactId}' were never saved, after ${context.attempts} attempt(s)`
     } else {
       failure = `${context.source} rule evaluation failed with ${context.failure.code}`
     }

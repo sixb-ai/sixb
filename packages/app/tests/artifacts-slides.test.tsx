@@ -7,7 +7,7 @@ import { createRef } from "react"
 import { DECK_KEYS } from "../../core/src/artifacts/frames/protocol"
 import { leaveEscapeToDeck } from "../src/agent/artifact-panel"
 import { artifactFileSource } from "../src/artifacts/file-source"
-import { ArtifactFrame, type ArtifactFrameHandle } from "../src/artifacts/frame"
+import { ArtifactFrame, type ArtifactFrameHandle, frameLinkKey } from "../src/artifacts/frame"
 import { ArtifactReferencesProvider } from "../src/artifacts/references/references"
 import { deckKeyAction, slideFromPart } from "../src/artifacts/renderers/slides/navigation"
 import { SlidesRenderer } from "../src/artifacts/renderers/slides/slides"
@@ -98,13 +98,16 @@ function deckVersion(
     references: input.references ?? [],
     author: { type: "user", id: "user-1" },
     createdAt: "2026-10-17T12:00:00.000Z",
+    updatedAt: "2026-10-17T12:00:00.000Z",
+    revision: 1,
+    frozen: true,
   }
 }
 
 /** A cache that reads nothing itself, with the deck's frame link minted already. */
 function frameCache(version: GetArtifactVersionResponse, token = "token"): QueryClient {
   const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
-  cache.setQueryData(["artifact-frame", version.artifactId, version.version], {
+  cache.setQueryData(frameLinkKey(version), {
     path: `/api/artifact-frames/${token}/`,
     expiresAt: "2026-10-17T13:00:00.000Z",
   })
@@ -237,7 +240,7 @@ describe("a deck's frame", () => {
     const source = () => ui.container.querySelector("iframe")?.getAttribute("src")
     expect(source()).toContain("/first/")
     await changeCache(() => {
-      cache.setQueryData(["artifact-frame", DECK, 1], {
+      cache.setQueryData(frameLinkKey({ artifactId: DECK, version: 1, revision: 1 }), {
         path: "/api/artifact-frames/second/",
         expiresAt: "2026-10-17T14:00:00.000Z",
       })
@@ -405,7 +408,7 @@ describe("a deck", () => {
     const failing = frameCache(version)
     failing
       .getQueryCache()
-      .build(failing, { queryKey: ["artifact-frame", DECK, 1] })
+      .build(failing, { queryKey: frameLinkKey({ artifactId: DECK, version: 1, revision: 1 }) })
       .setState({
         data: undefined,
         status: "error",
@@ -422,6 +425,28 @@ describe("a deck", () => {
       expect(ui.container.textContent).not.toContain("These slides could not be opened.")
       await act(async () => {
         jest.advanceTimersByTime(20_000)
+      })
+      expect(ui.container.textContent).toContain("These slides could not be opened.")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("says it could not open soon after its frame loads something that never says it is ready", async () => {
+    // A browser that blocks the frame loads its own error page instead. Reproduce by dropping the
+    // frame's `onLoad` in ArtifactFrame: the stage waits out the full 20 seconds.
+    jest.useFakeTimers()
+    try {
+      const version = deckVersion()
+      const ui = render(<Deck cache={frameCache(version)} version={version} />)
+      const iframe = ui.container.querySelector("iframe")
+      if (!iframe) throw new Error("[test] No frame.")
+
+      await act(async () => {
+        fireEvent.load(iframe)
+      })
+      await act(async () => {
+        jest.advanceTimersByTime(2_000)
       })
       expect(ui.container.textContent).toContain("These slides could not be opened.")
     } finally {

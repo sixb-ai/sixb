@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test"
-import type { ArtifactFile, ArtifactRequestErrorCode, AuthorizationContext } from "../src"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
+import type {
+  ArtifactFile,
+  ArtifactRequestErrorCode,
+  AuthorizationContext,
+  SandboxFactory,
+} from "../src"
 import {
   ArtifactRequestError,
   AuthorizationError,
@@ -10,8 +15,10 @@ import {
   ref,
   SixbHost,
 } from "../src"
+import { BOARD_PREVIEW_JOB } from "../src/artifacts/canvas-display"
 import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
-import { prepareArtifactVersion } from "../src/artifacts/publish"
+import { parseArtifactQueryAnswers, prepareArtifactVersion } from "../src/artifacts/publish"
+import { serializeArtifactQueryResult } from "../src/artifacts/serialize-query"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -54,8 +61,18 @@ const Owned = defineObjectType({
 
 type Ontology = ConstructorParameters<typeof SixbHost>[0]["ontology"]
 
-function setup(deps = createTestRuntimeDeps(), ontology: Ontology = [Invoice]) {
-  const host = new SixbHost({ id: projectId, ontology, markings: [financial], ...deps })
+function setup(
+  deps = createTestRuntimeDeps(),
+  ontology: Ontology = [Invoice],
+  options: { readonly sandboxes?: SandboxFactory } = {}
+) {
+  const host = new SixbHost({
+    id: projectId,
+    ontology,
+    markings: [financial],
+    ...deps,
+    ...(options.sandboxes ? { sandboxes: options.sandboxes } : {}),
+  })
 
   const as = (
     id: string,
@@ -130,6 +147,39 @@ const open = {
 }
 
 describe("publishing a version that holds queries", () => {
+  test("tells a canvas's author that its boards' previews show what they can see", async () => {
+    // Reproduce by dropping the warning from prepareArtifactVersion: the author learns only when
+    // a reader sees their rows on a board they never opened.
+    const { as, put } = setup()
+    const canvas = async (files: readonly ArtifactFile[]) =>
+      as("alice", { cleared: true }).artifacts.create({
+        kind: "canvas",
+        title: "Collections",
+        files: [
+          await put(
+            "canvas.json",
+            JSON.stringify({
+              items: [
+                { id: "overdue", type: "board", file: "overdue.html", x: 0, y: 0, w: 640, h: 480 },
+              ],
+            })
+          ),
+          await put("overdue.html", "<main><h1>Overdue</h1></main>"),
+          ...files,
+        ],
+      })
+
+    const live = await canvas([await put("queries/open.json", JSON.stringify(open))])
+    expect(live.warnings).toEqual([
+      {
+        code: "canvas_previews_show_author_data",
+        message:
+          "Its boards read live data, so each board's preview shows the data its author can see, to everyone who can open the canvas, until they open the board.",
+      },
+    ])
+    expect((await canvas([])).warnings).toEqual([])
+  })
+
   test("keeps each query among its files, as a node, a request, or a facets request", async () => {
     const { as, page } = setup()
 
@@ -578,5 +628,118 @@ describe("publishing queries from query builders", () => {
       }),
       "[Sixb] 'queries/open.json' is both a file and a query; give it once."
     )
+  })
+})
+
+describe("picturing a canvas's boards that read queries", () => {
+  afterEach(() => {
+    jest.setSystemTime()
+  })
+
+  /** The project's sandboxes, which only the agent worker opens. */
+  const sandboxes: SandboxFactory = {
+    supportsRequestCredentials: true,
+    create: async () => {
+      throw new Error("Must not create a sandbox")
+    },
+  }
+
+  async function setupCanvas() {
+    const context = setup(createTestRuntimeDeps(), [Invoice], { sandboxes })
+    await seedInvoices(context.host, 2)
+
+    const files = async () => [
+      await context.put(
+        "canvas.json",
+        JSON.stringify({
+          items: [
+            { id: "overdue", type: "board", file: "overdue.html", x: 0, y: 0, w: 640, h: 480 },
+          ],
+        })
+      ),
+      await context.put("overdue.html", "<main><h1>Overdue</h1></main>"),
+      await context.put("queries/open.json", JSON.stringify(open)),
+      await context.put(
+        "queries/statuses.json",
+        JSON.stringify({ query: start, facets: [{ propertyId: "status", limit: 10 }] })
+      ),
+    ]
+
+    /** The answers the job that pictures the version's boards carries, once it is due. */
+    const answers = async () => {
+      jest.setSystemTime(new Date(Date.now() + BOARD_PREVIEW_JOB.settleMs))
+      const claimed = await context.deps.queues.agents.claim({
+        projectId,
+        workerId: "test",
+        limit: 10,
+      })
+      const job = claimed[0]?.job
+      if (job?.type !== "agent.artifact-previews.requested" || !job.payload.queries) {
+        throw new Error("Expected a job that carries the version's query answers.")
+      }
+      const blob = await context.deps.blobStorage.open(job.payload.queries.blobId)
+      return parseArtifactQueryAnswers(await new Response(blob).text())
+    }
+
+    return { ...context, files, answers }
+  }
+
+  test("hands the job the answers its publisher read, as the route serves them", async () => {
+    // Reproduce by leaving the answers out of the job: the worker opens the boards with every
+    // query rejecting, and pictures nothing of the rows readers see.
+    const { as, files, answers } = await setupCanvas()
+    const alice = as("alice", { cleared: true })
+
+    const { artifact } = await alice.artifacts.create({
+      kind: "canvas",
+      title: "Collections",
+      files: await files(),
+    })
+
+    const read = async (name: string) => {
+      const result = await alice.artifacts.query(artifact.id, name)
+      if (!result) throw new Error(`Expected query '${name}' to run.`)
+      return { result: serializeArtifactQueryResult(result) }
+    }
+    expect(await answers()).toEqual({ open: await read("open"), statuses: await read("statuses") })
+  })
+
+  test("answers a query its publisher may not read as its rejection, and publishes", async () => {
+    // Reproduce by letting the query's error out of the request: the version is stored, but the
+    // publish fails, and its author publishes it again.
+    const { as, files, answers } = await setupCanvas()
+    const alice = as("alice", { cleared: true })
+    const query = alice.artifacts.query.bind(alice.artifacts)
+    const failing = spyOn(alice.artifacts, "query").mockImplementation(
+      async (artifactId, name, options) => {
+        // Checking the version at publish runs through the checker, not this: only answers do.
+        if (name === "open") {
+          throw new AuthorizationError(
+            "view:object:Invoice",
+            "Principal 'alice' is not allowed to view object type 'Invoice'"
+          )
+        }
+        if (name === "statuses") throw new Error("connection reset")
+        return query(artifactId, name, options)
+      }
+    )
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+
+    try {
+      const published = await alice.artifacts.create({
+        kind: "canvas",
+        title: "Collections",
+        files: await files(),
+      })
+      expect(published.version.version).toBe(1)
+    } finally {
+      failing.mockRestore()
+      warn.mockRestore()
+    }
+
+    expect(await answers()).toEqual({
+      open: { error: "Principal 'alice' is not allowed to view object type 'Invoice'." },
+      statuses: { error: "[Sixb] The query could not be read." },
+    })
   })
 })

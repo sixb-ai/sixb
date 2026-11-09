@@ -229,6 +229,9 @@ export type {
 
 export type {
   ActionEventOrigin,
+  ArtifactCommentedEvent,
+  ArtifactEvent,
+  ArtifactUpdatedEvent,
   DatasetEvent,
   DatasetEventSelectorBuilder,
   DatasetEventSelectorContext,
@@ -966,6 +969,7 @@ export type {
 export type { AgentThreadParticipantInput } from "./agents/participants"
 export type { AgentThreadParticipant, AgentThreadView } from "./agents/thread-access"
 export type { ArtifactAccess } from "./artifacts/access"
+export type { ArtifactCommentInput } from "./artifacts/comments"
 export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"
 export type {
@@ -975,7 +979,7 @@ export type {
   ArtifactStateValue,
   ArtifactsRuntime,
   ListArtifactsRuntimeInput,
-  PublishArtifactRuntimeInput,
+  UpdateArtifactRuntimeInput,
 } from "./artifacts/execution"
 export type { ArtifactKind } from "./artifacts/kinds"
 export type { ArtifactOutline } from "./artifacts/outline"
@@ -1011,6 +1015,7 @@ export type {
 } from "./datasets/lineage"
 export type {
   SixbActionPhaseFailedContext,
+  SixbArtifactLiveWriteFailedContext,
   SixbDatasetIngestFlushFailedContext,
   SixbDatasetIngestRejectedContext,
   SixbErrorContext,

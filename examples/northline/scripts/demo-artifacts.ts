@@ -21,22 +21,29 @@ async function upload(name: string, body: BlobPart, mediaType: string): Promise<
   return fileRef
 }
 
+// With an artifactId, its current version is created first, so the content lands in the next one.
 async function publish(
   input: { readonly kind: Kind; readonly title: string; readonly files: Record<string, FileRef> },
   artifactId?: string
 ): Promise<{ readonly id: string; readonly version: number }> {
-  const published = await apiRequest(
-    artifactId ? `/artifacts/${encodeURIComponent(artifactId)}/versions` : "/artifacts",
-    {
+  const artifactPath = artifactId ? `/artifacts/${encodeURIComponent(artifactId)}` : null
+  if (artifactPath) {
+    await apiRequest(`${artifactPath}/freeze`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        kind: input.kind,
-        title: input.title,
-        files: Object.entries(input.files).map(([path, file]) => ({ path, file })),
-      }),
-    }
-  )
+      body: "{}",
+    })
+  }
+
+  const published = await apiRequest(artifactPath ? `${artifactPath}/content` : "/artifacts", {
+    method: artifactPath ? "PUT" : "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      kind: input.kind,
+      title: input.title,
+      files: Object.entries(input.files).map(([path, file]) => ({ path, file })),
+    }),
+  })
   if (
     !isRecord(published) ||
     !isRecord(published.artifact) ||

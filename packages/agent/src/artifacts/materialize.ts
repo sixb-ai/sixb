@@ -2,7 +2,12 @@ import { posix } from "node:path"
 import type { Sandbox, SandboxFileRecord } from "@sixb/core"
 import { formatArtifactAddress } from "@sixb/core/artifacts"
 import type { AgentRunArtifacts, AgentRunFileStore } from "@sixb/core/internal/agents"
-import type { ArtifactOutline, ArtifactRecord, ArtifactVersionRecord } from "@sixb/core/storage"
+import type {
+  ArtifactFile,
+  ArtifactOutline,
+  ArtifactRecord,
+  ArtifactVersionRecord,
+} from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "../abort"
 
 /** How many of the thread's artifacts are installed, newest first, and how many bytes in all. */
@@ -27,26 +32,35 @@ interface ManifestEntry {
   readonly kind: string
   readonly title: string
   readonly version: number
+  /** The artifact's revision this copy holds: an update made from it starts from there. */
+  readonly revision: number
+  /**
+   * The version is open: each update replaces it until the user creates a version. A frozen one
+   * never changes, and the next update opens the next version.
+   */
+  readonly open: boolean
   /** The artifact's address: an artifact that shows it follows its latest version. */
   readonly address: string
-  /** The same at this version, which never changes: a reply shows what its words describe. */
-  readonly pinned: string
+  /**
+   * The same at this version, once the user created it, which then never changes: a reply shows
+   * what its words describe. None while the version is open.
+   */
+  readonly pinned?: string
   /**
    * Addresses of its parts: a document's sections, a sheet's sheets and charts, a deck's slides, a
    * canvas's boards and sections.
    */
   readonly parts?: readonly {
     readonly address: string
-    readonly pinned: string
+    readonly pinned?: string
     readonly name: string
   }[]
   /** Where the version's files are, as the agent names it; absent when not installed. */
   readonly directory?: string
   readonly files: readonly string[]
   /**
-   * The latest version was published outside this conversation: a person's edit in the app,
-   * another conversation, or the project's code. The next version starts from it and keeps its
-   * changes.
+   * The latest version was last written outside this conversation: a person's edit in the app,
+   * another conversation, or the project's code. An update starts from it and keeps its changes.
    */
   readonly edited?: true
 }
@@ -54,15 +68,22 @@ interface ManifestEntry {
 /**
  * The conversation's artifacts as the run's sandbox holds them: the latest version of each under
  * `<directory>/<id>/`, listed in the manifest, newest first. A publish replaces its artifact's copy
- * and entry, so both stay the latest version for the rest of the run: revising from the copy never
- * starts from the version before. A publish refused because the artifact moved on installs the
- * version it moved to.
+ * and entry, so both stay at the latest revision for the rest of the run: revising from the copy
+ * never starts from what the artifact held before. A publish refused because the artifact moved
+ * on installs what it moved to.
  */
 export class InstalledArtifacts implements MaterializedArtifacts {
   #entries: readonly ManifestEntry[]
   /** The installed copies' sizes, by artifact id. */
   readonly #installed: Map<string, number>
-  #updates: Promise<void> = Promise.resolve()
+  /** The files of the revision each entry lists, by artifact id: what an update starts from. */
+  readonly #bases = new Map<string, readonly ArtifactFile[]>()
+  /**
+   * The folder the Agent last published each artifact from, in the sandbox: it holds what the
+   * installed copy holds, so its next update, from there, starts from the base.
+   */
+  readonly #folders = new Map<string, { readonly path: string; readonly absolute: string }>()
+  #updates: Promise<unknown> = Promise.resolve()
 
   constructor(
     private readonly layout: {
@@ -73,24 +94,52 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     },
     entries: readonly ManifestEntry[],
     installed: Map<string, number>,
-    readonly files: readonly SandboxFileRecord[]
+    readonly files: readonly SandboxFileRecord[],
+    bases: ReadonlyMap<string, readonly ArtifactFile[]> = new Map()
   ) {
     this.#entries = entries
     this.#installed = installed
+    for (const [id, base] of bases) this.#bases.set(id, base)
   }
 
   get manifestJson(): string {
-    return JSON.stringify({ artifacts: this.#entries }, null, 2)
+    return manifestJson(this.#entries)
   }
 
-  /** The version the manifest lists for an artifact: the one its copy holds. */
-  versionOf(artifactId: string): number | undefined {
-    return this.#entries.find((entry) => entry.id === artifactId)?.version
+  /** The revision the manifest lists for an artifact: the one its copy holds. */
+  revisionOf(artifactId: string): number | undefined {
+    return this.#entries.find((entry) => entry.id === artifactId)?.revision
+  }
+
+  /** Where an artifact's copy is installed, as the agent names it; none when it is not. */
+  directoryOf(artifactId: string): string | undefined {
+    return this.#entries.find((entry) => entry.id === artifactId)?.directory
   }
 
   /**
-   * Install the version just published in place of the artifact's copy, and list it first. One
-   * update runs at a time, so parallel publishes never write an older manifest over a newer one.
+   * The revision an update of an artifact starts from, and its files: those of the copy, which a
+   * canvas's update is merged from when others wrote it since.
+   */
+  baseOf(
+    artifactId: string
+  ): { readonly revision: number; readonly files: readonly ArtifactFile[] } | undefined {
+    const revision = this.revisionOf(artifactId)
+    const files = this.#bases.get(artifactId)
+    return revision === undefined || !files ? undefined : { revision, files }
+  }
+
+  /** Records the folder the Agent published an artifact from: `path` as it named it. */
+  publishedFrom(artifactId: string, folder: { readonly path: string; readonly absolute: string }) {
+    this.#folders.set(artifactId, folder)
+  }
+
+  /**
+   * Install a revision in place of the artifact's copy, and list it first: the copy, the base of
+   * the next update, and the folder the Agent last published it from move together, so an update
+   * from that folder never takes out what someone else wrote. One that fails to write them keeps
+   * the base as it was, and rejects. One update runs at a time, so
+   * parallel publishes never write an older manifest over a newer one. Resolves to the folder it
+   * wrote, as the Agent named it, if any.
    */
   replace(
     sandbox: Sandbox,
@@ -98,7 +147,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
     options: { readonly edited?: boolean } = {}
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const update = this.#updates.then(() =>
       this.#replace(sandbox, published, files, signal, options)
     )
@@ -115,7 +164,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
     options: { readonly edited?: boolean }
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
     const inSandbox = (path: string) => posix.resolve(sandbox.workingDirectory, path)
@@ -124,7 +173,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     for (const [id, bytes] of this.#installed) if (id !== artifact.id) othersBytes += bytes
     const install = othersBytes + sizeBytes <= maxBytes
 
-    // A version's directory holds exactly that version: files an older one had must not linger.
+    // An artifact's directory holds exactly one revision: files an older one had must not linger.
     const removed = await sandbox.runCommand("bash", ["-c", 'rm -rf -- "$SIXB_ARTIFACT_COPY"'], {
       env: { SIXB_ARTIFACT_COPY: inSandbox(directory) },
       timeout: REMOVE_TIMEOUT_MS,
@@ -135,9 +184,10 @@ export class InstalledArtifacts implements MaterializedArtifacts {
         `[SixbAgent] Could not remove ${directory}: ${removed.stderr.trim() || `exit ${removed.exitCode}`}`
       )
     }
-    if (install) this.#installed.set(artifact.id, sizeBytes)
-    else this.#installed.delete(artifact.id)
-    this.#entries = [
+    // The copy, the folder and the base move together: until both are written, the next update
+    // starts from the revision before, which the folder still holds.
+    const previous = this.#bases.get(artifact.id) ?? []
+    const entries = [
       manifestEntry(artifact, version, install ? directory : undefined, options),
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
     ]
@@ -148,13 +198,58 @@ export class InstalledArtifacts implements MaterializedArtifacts {
             contents: file.bytes,
           }))
         : []),
-      { path: inSandbox(manifestPath), contents: this.manifestJson },
+      { path: inSandbox(manifestPath), contents: manifestJson(entries) },
     ])
+
+    const moved = await this.#writeFolder(sandbox, artifact.id, previous, files, signal)
+
+    if (install) this.#installed.set(artifact.id, sizeBytes)
+    else this.#installed.delete(artifact.id)
+    this.#bases.set(artifact.id, version.files)
+    this.#entries = entries
+    return moved
+  }
+
+  /**
+   * The folder the Agent last published an artifact from takes a revision too: each file as it
+   * holds it, and none of the files the revision before held that it does not. Resolves to the
+   * folder, as the Agent named it, if any.
+   */
+  async #writeFolder(
+    sandbox: Sandbox,
+    artifactId: string,
+    previous: readonly ArtifactFile[],
+    files: readonly PublishedArtifactFile[],
+    signal: AbortSignal
+  ): Promise<string | undefined> {
+    const folder = this.#folders.get(artifactId)
+    if (!folder) return undefined
+
+    const kept = new Set(files.map((file) => file.path))
+    const gone = previous
+      .filter((file) => !kept.has(file.path))
+      .map((file) => posix.join(folder.absolute, file.path))
+    if (gone.length > 0) {
+      const removedFiles = await sandbox.runCommand(
+        "bash",
+        ["-c", 'rm -f -- "$@"', "rm", ...gone],
+        { timeout: REMOVE_TIMEOUT_MS, signal }
+      )
+      if (removedFiles.exitCode !== 0 || removedFiles.timedOut) {
+        throw new Error(
+          `[SixbAgent] Could not update ${folder.path}: ${removedFiles.stderr.trim() || `exit ${removedFiles.exitCode}`}`
+        )
+      }
+    }
+    await sandbox.writeFiles(
+      files.map((file) => ({ path: posix.join(folder.absolute, file.path), contents: file.bytes }))
+    )
+    return folder.path
   }
 }
 
 /** What a turn reads of its conversation's artifacts, as its requester, through its session. */
-export type TurnArtifacts = Pick<AgentRunArtifacts, "getVersion" | "list" | "listVersions">
+export type TurnArtifacts = Pick<AgentRunArtifacts, "getVersion" | "list" | "turnWrites">
 
 /**
  * The latest version of each artifact the conversation shares, installed under `<directory>/<id>/`
@@ -182,6 +277,7 @@ export async function materializeThreadArtifacts(input: {
   const entries: ManifestEntry[] = []
   const files: SandboxFileRecord[] = []
   const installed = new Map<string, number>()
+  const bases = new Map<string, readonly ArtifactFile[]>()
   const artifacts = await input.artifacts.list({ limit: MATERIALIZE_MAX_ARTIFACTS })
   let installedBytes = 0
   for (const artifact of artifacts) {
@@ -207,12 +303,14 @@ export async function materializeThreadArtifacts(input: {
         signal.throwIfAborted()
         // One unreadable blob must not cost every later run of the thread its sandbox.
         console.warn(
-          `[SixbAgent] Could not install version ${version.version} of artifact '${artifact.id}':`,
+          `[SixbAgent] Could not install revision ${version.revision} of artifact '${artifact.id}':`,
           error
         )
         install = false
       }
     }
+    bases.set(artifact.id, version.files)
+    // Edited when its last write came from anywhere but this conversation.
     entries.push(
       manifestEntry(artifact, version, install ? directory : undefined, {
         edited: version.origin?.threadId !== input.threadId,
@@ -223,46 +321,49 @@ export async function materializeThreadArtifacts(input: {
     { directory: input.directory, manifestPath: input.manifestPath, maxBytes },
     entries,
     installed,
-    files
+    files,
+    bases
   )
 }
 
 /**
- * Install the latest version of each thread artifact one of `runIds` published a version of, in
- * place of the copy the run holds: a parent turn sees what its children published like its own,
- * whoever published since. One that cannot be installed does not stop the others; the error at the
- * end names each.
+ * Install the latest revision of each thread artifact the run's turn wrote, its children's writes
+ * among them, in place of the copy the run holds when it holds another: a parent turn sees what
+ * its children wrote like its own, whoever wrote since. One that cannot be installed does not stop
+ * the others; the error at the end names each.
  */
-export async function installArtifactsPublishedBy(input: {
+export async function installTurnArtifacts(input: {
   readonly installed: InstalledArtifacts
   readonly artifacts: TurnArtifacts
   readonly blobStorage: AgentRunFileStore
   readonly sandbox: Sandbox
-  readonly runIds: readonly string[]
   readonly signal: AbortSignal
-}): Promise<void> {
-  const runIds = new Set(input.runIds)
-  const artifacts = await input.artifacts.list({ limit: MATERIALIZE_MAX_ARTIFACTS })
+}): Promise<string[]> {
+  const [writes, artifacts] = await Promise.all([
+    input.artifacts.turnWrites(),
+    input.artifacts.list({ limit: MATERIALIZE_MAX_ARTIFACTS }),
+  ])
+  const written = new Set(writes.map((write) => write.artifactId))
 
   const failed: string[] = []
+  const folders: string[] = []
   // Oldest first: each install lists its artifact first, so the newest ends up first.
   for (const artifact of [...artifacts].reverse()) {
     input.signal.throwIfAborted()
-    if (input.installed.versionOf(artifact.id) === artifact.latestVersion) continue
+    if (!written.has(artifact.id)) continue
+    if (input.installed.revisionOf(artifact.id) === artifact.revision) continue
 
     try {
-      const versions = await input.artifacts.listVersions(artifact.id, {
-        limit: artifact.latestVersion,
-      })
-      const published = versions?.versions.some(
-        (version) => version.origin !== undefined && runIds.has(version.origin.runId)
-      )
-      if (!published) continue
-
       const version = await input.artifacts.getVersion(artifact.id, artifact.latestVersion)
       if (!version) continue
       const files = await readArtifactVersionFiles(input.blobStorage, version, input.signal)
-      await input.installed.replace(input.sandbox, { artifact, version }, files, input.signal)
+      const folder = await input.installed.replace(
+        input.sandbox,
+        { artifact, version },
+        files,
+        input.signal
+      )
+      if (folder) folders.push(folder)
     } catch (error) {
       input.signal.throwIfAborted()
       console.warn(`[SixbAgent] Could not install artifact '${artifact.id}':`, error)
@@ -272,6 +373,12 @@ export async function installArtifactsPublishedBy(input: {
   if (failed.length > 0) {
     throw new Error(`[SixbAgent] Could not install artifacts ${failed.join(", ")}.`)
   }
+  return folders
+}
+
+/** The manifest the sandbox reads, listing these entries. */
+function manifestJson(entries: readonly ManifestEntry[]): string {
+  return JSON.stringify({ artifacts: entries }, null, 2)
 }
 
 function manifestEntry(
@@ -280,14 +387,20 @@ function manifestEntry(
   directory: string | undefined,
   { edited = false }: { readonly edited?: boolean } = {}
 ): ManifestEntry {
+  // Only a frozen version is pinned: an open one changes with every update.
+  const pinnedAt = version.frozenAt ? version.version : undefined
   return {
     id: artifact.id,
     kind: artifact.kind,
     title: version.title,
     version: version.version,
+    revision: version.revision,
+    open: version.frozenAt === undefined,
     address: formatArtifactAddress({ artifactId: artifact.id }),
-    pinned: formatArtifactAddress({ artifactId: artifact.id, version: version.version }),
-    ...partsOf(artifact.id, version.version, version.outline),
+    ...(pinnedAt === undefined
+      ? {}
+      : { pinned: formatArtifactAddress({ artifactId: artifact.id, version: pinnedAt }) }),
+    ...partsOf(artifact.id, pinnedAt, version.outline),
     ...(directory === undefined ? {} : { directory }),
     files: version.files.map((file) => file.path),
     ...(edited ? { edited: true as const } : {}),
@@ -296,16 +409,18 @@ function manifestEntry(
 
 /**
  * The parts an address can name, each with its address written out, so the Agent copies an
- * address instead of working out a heading's slug.
+ * address instead of working out a heading's slug; pinned too in a frozen version.
  */
 function partsOf(
   artifactId: string,
-  version: number,
+  pinnedAt: number | undefined,
   outline: ArtifactOutline
 ): { readonly parts?: ManifestEntry["parts"] } {
   const part = (name: string, label: string) => ({
     address: formatArtifactAddress({ artifactId, part: name }),
-    pinned: formatArtifactAddress({ artifactId, version, part: name }),
+    ...(pinnedAt === undefined
+      ? {}
+      : { pinned: formatArtifactAddress({ artifactId, version: pinnedAt, part: name }) }),
     name: label,
   })
   const parts =

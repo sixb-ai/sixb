@@ -120,6 +120,19 @@ export interface ComposerProps {
   /** Exact context snapshot to restore after a failed send. */
   readonly draftContext?: readonly AgentContextEntryInput[]
   readonly draftNonce?: number
+  /**
+   * What an artifact hands the conversation, such as the comments the reader asks the Agent to
+   * act on, each time `nonce` changes to a non-zero value: its context joins the chips, replacing
+   * one of the same identity, and its words start an empty input, the reader's own kept. Nothing
+   * is sent.
+   */
+  readonly insertion?: {
+    readonly text: string
+    readonly context?: AgentContextInput
+    readonly nonce: number
+  }
+  /** The insertion of that `nonce` joined the input: its holder lets it go. */
+  readonly onInserted?: (nonce: number) => void
   /** Ambient context offered for the next turn. Explicit @ selections remain composer-local. */
   readonly ambientContext?: readonly AgentContextInput[]
   /** Scope drag/drop and overlays to an embedded panel instead of the whole viewport. */
@@ -223,6 +236,8 @@ export function Composer({
   draftAttachments,
   draftContext,
   draftNonce,
+  insertion,
+  onInserted,
   ambientContext = [],
   compact = false,
   approvalMode,
@@ -375,6 +390,29 @@ export function Composer({
     setMention(null)
     textareaRef.current?.focus()
   }, [draftNonce])
+
+  // What an artifact hands the input: its context as a chip, its words in an empty input, the
+  // caret after what the input holds.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: added only when the nonce changes
+  useEffect(() => {
+    if (!insertion?.nonce) return
+    const { context, text } = insertion
+    if (context) {
+      const identity = agentContextIdentity(context)
+      setContextEntries((current) => [
+        ...current.filter((entry) => agentContextIdentity(entry.context) !== identity),
+        { context, origin: "explicit" },
+      ])
+    }
+    setValue((current) => (current.trim() ? current : text))
+    onInserted?.(insertion.nonce)
+    requestAnimationFrame(() => {
+      const input = textareaRef.current
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+  }, [insertion?.nonce])
 
   // However a dictation ends, the focus returns to the input, the caret after any transcript.
   useEffect(() => {

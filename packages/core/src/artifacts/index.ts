@@ -28,8 +28,21 @@ export {
   type CanvasShapeItem,
   type CanvasText,
   type CanvasTextSize,
+  formatCanvas,
   parseCanvas,
 } from "./canvas"
+export {
+  BOARD_PREVIEW_WAIT_MS,
+  CANVAS_FIT_PADDING,
+  CANVAS_TEXT_PIXELS,
+  type CanvasBox,
+  type CanvasPoint,
+  canvasArrowLine,
+  canvasNoteFontSize,
+  canvasShapeFontSize,
+  SMALL_BOARD_PREVIEW_WIDTH,
+} from "./canvas-display"
+export { quoteArtifactComment } from "./comment-text"
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
 export {
   checkFormula,
@@ -53,8 +66,11 @@ export {
   FRAME_THEME_TOKENS,
   type FrameCall,
   type FrameCallResult,
+  type FrameEditTarget,
   type FrameEmbed,
   type FrameEvent,
+  type FramePoint,
+  type FrameRect,
   type FrameRequest,
   type FrameResponse,
   type FrameStart,
@@ -63,7 +79,7 @@ export {
   parseFrameEvent,
 } from "./frames/protocol"
 export { ARTIFACT_KINDS, type ArtifactKind } from "./kinds"
-export { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+export { ARTIFACT_COMMENT_LIMITS, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 export {
   type LiveSheetColumn,
   type LiveSheetLayout,
@@ -99,7 +115,12 @@ export {
   resolveArtifactAddress,
 } from "./resolve"
 export { checkSheet } from "./sheet-rules"
-export { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "./theme"
+export {
+  ARTIFACT_THEME_FILE,
+  type ArtifactTheme,
+  type ArtifactThemeMode,
+  parseArtifactTheme,
+} from "./theme"
 export { ARTIFACT_TONES, type ArtifactTone } from "./tones"
 export {
   type LiveSheetColumnSource,

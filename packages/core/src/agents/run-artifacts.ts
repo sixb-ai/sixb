@@ -1,21 +1,43 @@
+import { BOARD_PREVIEW_JOB } from "../artifacts/canvas-display"
 import { ArtifactRequestError } from "../artifacts/errors"
+import { announceArtifactUpdates } from "../artifacts/events"
 import {
   type ArtifactsRuntime,
   artifactAccessRule,
+  artifactPreviewRequester,
   artifactQueryChecker,
 } from "../artifacts/execution"
 import type { ArtifactKind } from "../artifacts/kinds"
+import { appendArtifactLive, changedBoards } from "../artifacts/live/presence"
+import { firstArtifactDocument } from "../artifacts/live/state"
+import { withMergedWrite } from "../artifacts/publish/merge"
+import {
+  type BoardPreviewInput,
+  missingBoardPreviews,
+  type RefusedBoardPreview,
+  storeBoardPreviews,
+} from "../artifacts/publish/previews"
 import {
   artifactVersionWarnings,
   type PublishedArtifact,
   prepareArtifactVersion,
   storeArtifactVersion,
 } from "../artifacts/publish/publish"
+import type { ArtifactThemeMode } from "../artifacts/theme"
 import { type Principal, principalsEqual } from "../auth/types"
+import type { FileRef } from "../blob-storage"
+import type { Broker } from "../broker"
+import type { DomainEventLog } from "../events/service"
 import type { Sixb } from "../runtime/sixb"
 import type { Storage } from "../storage"
 import type { AgentStorage, ConversationAgentRunRecord, SubagentRunRecord } from "../storage/agents"
-import type { ArtifactFile, ArtifactRecord } from "../storage/artifacts/types"
+import type {
+  ArtifactFile,
+  ArtifactRecord,
+  ArtifactStorage,
+  ArtifactTurnWriteRecord,
+  ArtifactVersionRecord,
+} from "../storage/artifacts/types"
 import { assertAgentRunOwned } from "./run-fence"
 import { conversationThreadId } from "./thread-access"
 
@@ -34,38 +56,93 @@ export interface AgentRunArtifacts {
   listVersions: ArtifactsRuntime["listVersions"]
   query: ArtifactsRuntime["query"]
   /**
-   * The artifact, when the run may publish its next version: its requester owns it, or the
-   * conversation shares it and they take part. Another is `null`, even one they could update from
-   * another conversation: publishing here would share it in this one.
+   * The artifact, when the run may write it: its requester owns it, or the conversation shares it
+   * and they take part. Another is `null`, even one they could update from another conversation:
+   * writing it here would share it in this one.
    */
   updatable(artifactId: string): Promise<ArtifactRecord | null>
   /**
-   * Publish as the run: a new artifact owned by the conversation's owner, or the next version of an
-   * updatable one, authored by the requester, with the run and its conversation as origin. Nothing
-   * is stored once the run lost its execution ({@link AgentExecutionLostError}), or a child's
-   * parent ended. Refusals are {@link ArtifactRequestError}s.
+   * Publish as the run: a new artifact owned by the conversation's owner, or the latest version of
+   * an updatable one, authored by the requester, with the run and its conversation as origin. A
+   * write replaces the open version's content, or opens the next version after a frozen one; the
+   * turn's first write to an artifact keeps a restore point, and a retry of the turn undoes its
+   * writes. Nothing is stored once the run lost its execution ({@link AgentExecutionLostError}),
+   * or a child's parent ended. Refusals are {@link ArtifactRequestError}s.
    */
   publish(input: AgentRunArtifactPublish): Promise<PublishedArtifact>
+  /**
+   * The artifacts the run's turn wrote, its sub-agents' writes among them, each with the revision
+   * the turn's last write left it at.
+   */
+  turnWrites(): Promise<readonly ArtifactTurnWriteRecord[]>
+  /**
+   * Keeps the pictures the run took of the boards of a version it wrote, as their previews: its
+   * requester authored the content, and the pictures show what they can see. Refuses any other
+   * version, and one written again since. Each picture stands alone: those not kept are
+   * returned, with why. Creating the version since leaves its content, and its pictures.
+   */
+  storePreviews(input: AgentRunBoardPreviews): Promise<readonly RefusedBoardPreview[]>
+  /**
+   * The boards of a version the run wrote still without a picture, and the modes each misses: a
+   * board it kept as it was keeps the pictures it had. Refuses any other version, and one written
+   * again since.
+   */
+  missingPreviews(input: AgentRunVersion): Promise<readonly AgentRunMissingPreview[]>
+}
+
+/** A version of an artifact, as one of the run's writes left its content. */
+export interface AgentRunVersion {
+  readonly artifactId: string
+  readonly version: number
+  /** The version's `updatedAt` after the write: a content written again since has another. */
+  readonly updatedAt: Date
+}
+
+/** The pictures a run took of a version's boards. */
+export interface AgentRunBoardPreviews extends AgentRunVersion {
+  readonly previews: readonly BoardPreviewInput[]
+}
+
+/** A board of a version without a picture in these modes. */
+export interface AgentRunMissingPreview {
+  readonly board: string
+  readonly themes: readonly ArtifactThemeMode[]
 }
 
 /** A version a run publishes: of a new artifact of `kind`, or of the artifact `artifactId`. */
 export type AgentRunArtifactPublish = {
   readonly title: string
   readonly files: readonly ArtifactFile[]
+  /**
+   * The publisher renders the version's boards itself, as the publish tool's layout check does,
+   * and hands their pictures over with `storePreviews`. The worker then renders only what is still
+   * missing, after a grace period, and without the version's query answers, which the check read.
+   * Any other publish, such as a command in the sandbox, has its queries answered at once.
+   */
+  readonly rendersPreviews?: boolean
 } & (
   | { readonly kind: ArtifactKind }
   | {
       readonly artifactId: string
       /** The artifact's kind, when the caller names one: another is refused. */
       readonly kind?: ArtifactKind
-      /** The version this one was made from: publishing fails with `artifact_moved` past it. */
-      readonly baseVersion?: number
+      /**
+       * The revision this content was made from: publishing fails with `artifact_moved` past it,
+       * unless it is a canvas's, which takes what changed from `baseFiles` into what it holds now.
+       */
+      readonly baseRevision?: number
+      /** The files of `baseRevision`: the copy the run started from. */
+      readonly baseFiles?: readonly ArtifactFile[]
     }
 )
 
 export interface AgentRunArtifactsHost {
   readonly projectId: string
   readonly storage: Storage
+  /** Where `artifact.updated` goes once a write to an artifact is stored. */
+  readonly domainEvents: Pick<DomainEventLog, "emit">
+  /** Where the turn's presence on a canvas it writes goes, for whoever has it open. */
+  readonly broker: Pick<Broker, "ensureStream" | "append">
 }
 
 /** The SDK a run acts through, bound to its execution: as its requester. */
@@ -92,6 +169,8 @@ export function agentRunArtifacts(
     return publisher
   }
   const fence = { projectId, id: run.id, executionToken }
+  // A child writes as the turn it works under: one restore point per turn, undone by its retry.
+  const turnRunId = run.kind === "subagent" ? run.parentRunId : run.id
 
   const updatable = async (artifactId: string): Promise<ArtifactRecord | null> => {
     const [{ threadId }, { artifacts: reader }] = await Promise.all([publisherOf(), sdk()])
@@ -137,42 +216,202 @@ export function agentRunArtifacts(
       // checks again that the run holds its conversation and the requester may still publish.
       const context = { projectId, storage: requireArtifacts(storage), blobStorage: blobs }
       const reading = artifactAccessRule(reader, storage)
-      const prepared = await prepareArtifactVersion(context, {
-        ...("artifactId" in input
-          ? {
-              artifactId: input.artifactId,
-              ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
-            }
-          : {}),
-        kind,
-        title: input.title,
-        files: input.files,
-        author,
-        owner,
-        readable: async (artifact) => (await reading.accessTo(artifact)) !== "none",
-        // As the requester, so a query never reads what they cannot.
-        checkQuery: artifactQueryChecker(reader),
-        origin: { threadId, runId: run.id },
-      })
-      const stored = await storage.transaction(async (tx) => {
-        await assertAgentRunOwned(requireAgents(tx), fence)
-        if (run.kind === "subagent") await assertParentActive(requireAgents(tx), run)
-        if (execution.requestedBy) {
-          await assertTakesPart(
-            requireAgents(tx),
-            { projectId, threadId, owner },
-            execution.requestedBy
+      const write = async (
+        files: readonly ArtifactFile[],
+        baseRevision?: number,
+        document?: FileRef
+      ) => {
+        const prepared = await prepareArtifactVersion(context, {
+          ...("artifactId" in input
+            ? {
+                artifactId: input.artifactId,
+                ...(baseRevision === undefined ? {} : { baseRevision }),
+              }
+            : {}),
+          kind,
+          title: input.title,
+          files,
+          author,
+          owner,
+          readable: async (artifact) => (await reading.accessTo(artifact)) !== "none",
+          // As the requester, so a query never reads what they cannot.
+          checkQuery: artifactQueryChecker(reader),
+          origin: { threadId, runId: run.id },
+          turnRunId,
+          ...(document ? { document } : {}),
+        })
+        const stored = await storage.transaction(async (tx) => {
+          await assertAgentRunOwned(requireAgents(tx), fence)
+          if (run.kind === "subagent") await assertParentActive(requireAgents(tx), run)
+          if (execution.requestedBy) {
+            await assertTakesPart(
+              requireAgents(tx),
+              { projectId, threadId, owner },
+              execution.requestedBy
+            )
+          }
+          // The owner may have deleted it since, or removed the requester from the conversation.
+          return storeArtifactVersion(
+            { ...context, storage: requireArtifacts(tx) },
+            prepared,
+            (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
           )
-        }
-        // The owner may have deleted it since, or removed the requester from the conversation.
-        return storeArtifactVersion(
-          { ...context, storage: requireArtifacts(tx) },
-          prepared,
-          (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
-        )
-      })
-      return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+        })
+        return { prepared, stored }
+      }
+
+      // What the canvas showed before, so that its viewers learn which boards the turn changes.
+      const before =
+        kind === "canvas" && "artifactId" in input
+          ? await latestVersionOf(requireArtifacts(storage), projectId, input.artifactId)
+          : null
+
+      // A canvas written since the copy the run started from is merged into, not refused.
+      const { prepared, stored, merged } =
+        "artifactId" in input
+          ? await withMergedWrite(
+              context,
+              {
+                artifactId: input.artifactId,
+                kind,
+                files: input.files,
+                ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+                ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
+              },
+              async (each) => ({
+                ...(await write(each.files, each.baseRevision, each.document)),
+                merged: each.merged,
+              })
+            )
+          : {
+              ...(await write(
+                input.files,
+                undefined,
+                await firstArtifactDocument(blobs, kind, input.files)
+              )),
+              merged: false,
+            }
+      if ("artifactId" in input) await announceArtifactUpdates(host.domainEvents, [stored.version])
+      if (kind === "canvas") await announceAgentBoards(host, turnRunId, before, stored.version)
+
+      // A publisher that renders its own previews reads the query answers in its layout check, and
+      // normally pictures every board: answering them here too would run each query twice. So its
+      // job waits, carries none, and a board that reads one and that the check missed keeps its
+      // outline. Every other publish has its answers read now, as its requester.
+      await artifactPreviewRequester(reader)(
+        stored.version,
+        input.rendersPreviews ? { delayMs: BOARD_PREVIEW_JOB.graceMs, withoutAnswers: true } : {}
+      )
+
+      return {
+        ...stored,
+        warnings: await artifactVersionWarnings(context, prepared, stored),
+        ...(merged ? { merged: true as const } : {}),
+      }
     },
+
+    async turnWrites() {
+      return requireArtifacts(storage).listTurnWrites({ projectId, turnRunId })
+    },
+
+    async storePreviews({ previews, ...at }) {
+      const [{ blobs }, version] = await Promise.all([sdk(), publishedVersion(at)])
+      return storeBoardPreviews(
+        { storage: requireArtifacts(storage), blobStorage: blobs },
+        version,
+        previews
+      )
+    },
+
+    async missingPreviews(at) {
+      const missing = await missingBoardPreviews(
+        requireArtifacts(storage),
+        await publishedVersion(at)
+      )
+      return missing.map(({ board, themes }) => ({ board: board.id, themes }))
+    },
+  }
+
+  /**
+   * Only the run that wrote a version's content pictures its boards with its author's rights, and
+   * only while the version holds that content: the pictures are kept under its boards' render keys.
+   * A change that leaves the content, such as creating the version, changes nothing here.
+   */
+  async function publishedVersion(at: AgentRunVersion): Promise<ArtifactVersionRecord> {
+    const version = await requireArtifacts(storage).getVersion({
+      projectId,
+      artifactId: at.artifactId,
+      version: at.version,
+    })
+    const written = at.updatedAt.getTime()
+    if (!version || version.origin?.runId !== run.id || version.updatedAt.getTime() !== written) {
+      throw new ArtifactRequestError(
+        "not_allowed",
+        `[Sixb] Version ${at.version} of artifact '${at.artifactId}' does not hold what this run wrote at ${at.updatedAt.toISOString()}.`
+      )
+    }
+    return version
+  }
+}
+
+/** The latest version of an artifact, or null without one. */
+async function latestVersionOf(
+  storage: ArtifactStorage,
+  projectId: string,
+  artifactId: string
+): Promise<ArtifactVersionRecord | null> {
+  const artifact = await storage.get({ projectId, id: artifactId })
+  if (!artifact) return null
+  return storage.getVersion({ projectId, artifactId, version: artifact.latestVersion })
+}
+
+/**
+ * Tells whoever has the canvas open which boards the turn is changing. The write is stored by
+ * now: a broker that refuses only leaves its viewers without the notice.
+ */
+async function announceAgentBoards(
+  host: AgentRunArtifactsHost,
+  turnRunId: string,
+  before: ArtifactVersionRecord | null,
+  after: ArtifactVersionRecord
+): Promise<void> {
+  const boards = changedBoards(before, after)
+  if (boards.length === 0) return
+
+  try {
+    await appendArtifactLive(host.broker, host.projectId, after.artifactId, {
+      name: "agent",
+      payload: { runId: turnRunId, boards, at: new Date().toISOString() },
+    })
+  } catch (error) {
+    console.warn(
+      `[Sixb] Could not tell the viewers of '${after.artifactId}' what the Agent changes:`,
+      error
+    )
+  }
+}
+
+/**
+ * Tells whoever has open an artifact a turn wrote that the turn ended, so its presence goes. A
+ * turn that ends without saying so is forgotten after `AGENT_PRESENCE_MS`.
+ */
+export async function announceAgentTurnEnded(
+  host: AgentRunArtifactsHost,
+  turnRunId: string
+): Promise<void> {
+  try {
+    const writes = await requireArtifacts(host.storage).listTurnWrites({
+      projectId: host.projectId,
+      turnRunId,
+    })
+    for (const { artifactId } of writes) {
+      await appendArtifactLive(host.broker, host.projectId, artifactId, {
+        name: "agent-ended",
+        payload: { runId: turnRunId },
+      })
+    }
+  } catch (error) {
+    console.warn(`[Sixb] Could not tell the viewers of turn '${turnRunId}' that it ended:`, error)
   }
 }
 

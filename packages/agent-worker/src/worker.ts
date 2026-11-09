@@ -22,6 +22,7 @@ import {
   withAgentActivityStream,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
+import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import {
@@ -36,6 +37,7 @@ import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals } from "./approval-repair"
+import { renderArtifactPreviews } from "./artifact-previews"
 import { workerChildren } from "./child-runner"
 import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
 import { runnerContext } from "./execution-context"
@@ -166,6 +168,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const { job } = claimed
     if (job.type === "agent.ai-usage.record.requested") {
       await recordRecoveredAiModelCall(this.host.storage, job)
+      return
+    }
+    if (job.type === "agent.artifact-previews.requested") {
+      await renderArtifactPreviews({ host: this.host, job, signal })
       return
     }
     const context = this.requireContext()
@@ -300,6 +306,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
           }
     }
+    // Pictures are derived: after a few attempts, the boards keep their outlines.
+    if (claimed.job.type === "agent.artifact-previews.requested") {
+      console.error(
+        `[SixbAgentWorker] Could not picture the boards of '${claimed.job.payload.artifactId}' version ${claimed.job.payload.version}.`,
+        error
+      )
+      return claimed.job.attempt < BOARD_PREVIEW_JOB.attempts
+        ? { kind: "retry", availableAt: backoff(BOARD_PREVIEW_JOB.backoffMs) }
+        : { kind: "fail" }
+    }
     if (error instanceof RunOwnedElsewhereError) return retryOnceReleased(error)
     // The node's result is durable; only its workflow resume is unpublished. Redeliver until it is.
     if (error instanceof WorkflowResumeDispatchError) {
@@ -359,7 +375,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
       }
     }
-    if (claimed.job.type === "agent.workflow-node.requested") {
+    if (
+      claimed.job.type === "agent.workflow-node.requested" ||
+      claimed.job.type === "agent.artifact-previews.requested"
+    ) {
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
     // A deferred duplicate stays deferred during shutdown: failing it would orphan a live run.
@@ -482,6 +501,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       broker: this.host.broker,
       recoverAiModelCall: context.recoverAiModelCall,
       events: context.streamSink,
+      domainEvents: this.host.events,
       security: this.host.definitions.security,
       maxActiveChildren: context.subagentConcurrencyPerRun,
       sdk: this.host,

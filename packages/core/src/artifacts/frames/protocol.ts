@@ -1,4 +1,5 @@
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "../limits"
+import type { BoardElementKind, BoardFramePatch } from "../live/board"
 import { isArtifactQueryName } from "../queries"
 import { ARTIFACT_THEME_TOKENS } from "../theme"
 
@@ -50,6 +51,19 @@ export type FrameRequest =
    * `sixb.query(name)` again; the app sends it only for the queries that frame has read.
    */
   | FrameRequestOf<"query.changed", { readonly name: string }>
+  /**
+   * Starts or stops editing a canvas's board, served for editing (`?sixb-edit`): the frame then
+   * reports what the reader points at and picks, by address, and lets them type into text. With
+   * `typing: false`, a text the reader picks takes no typing, as when they pick what to comment on.
+   * The first request after the frame loads transfers a `MessagePort`: the frame reports editing
+   * (`edit.hover`, `edit.select`, `edit.text`) through it alone, never through the window.
+   */
+  | FrameRequestOf<"edit", { readonly on: boolean; readonly typing?: boolean }>
+  /**
+   * What someone else changed in the board, element by element, as `boardFramePatches` says. The
+   * element the reader is typing in takes its patch once they leave it.
+   */
+  | FrameRequestOf<"edit.patch", { readonly patches: readonly BoardFramePatch[] }>
 
 interface FrameRequestOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
@@ -89,6 +103,65 @@ export type FrameEvent =
   | FrameEventOf<"embeds", { readonly embeds: readonly FrameEmbed[] }>
   /** A page's height as laid out at the frame's width, so a document can size the frame to it. */
   | FrameEventOf<"size", { readonly height: number }>
+  /**
+   * The reader pressed a button, or a link within the page, that reads `text`: a canvas's opened
+   * board follows the arrow that leaves it with that label. At most a label's length.
+   */
+  | FrameEventOf<"press", { readonly text: string }>
+  /** Editing, the reader points at an element, or at none. */
+  | FrameEventOf<"edit.hover", { readonly target: FrameEditTarget | null }>
+  /** Editing, the reader picked an element, or none, clicking `at` that point of the frame. */
+  | FrameEventOf<
+      "edit.select",
+      { readonly target: FrameEditTarget | null; readonly at?: FramePoint }
+    >
+  /**
+   * Editing, the reader typed in a text element: all its words now, as plain text, and `base`,
+   * its words as the frame last posted them, or as they were when the reader started typing. The
+   * app makes it with `mergeBoardText`, so what others changed in the element since stays.
+   *
+   * The runtime takes the port before the board's scripts run, and stops the request that hands
+   * it over before they hear it, so they cannot post on it; it reports only the reader's own
+   * clicks and keys. What it posts is what the element holds, which the board's scripts can still
+   * rewrite. The app takes `edit.text` only for the element the reader picked, the last
+   * `edit.select` it heard, and nothing once the board's elements changed under the frame.
+   */
+  | FrameEventOf<
+      "edit.text",
+      { readonly address: string; readonly base: string; readonly text: string }
+    >
+
+/**
+ * An element of a board being edited. One a script built, or whose words a script rewrote, is
+ * `scripted`: it has no address of its own, and `within` names the element it sits in.
+ */
+export type FrameEditTarget =
+  | {
+      readonly address: string
+      readonly kind: BoardElementKind
+      readonly label: string
+      readonly rect: FrameRect
+    }
+  | {
+      readonly address: null
+      readonly kind: "scripted"
+      readonly within: string | null
+      /** The words the reader pointed at, as the page shows them now. */
+      readonly label?: string
+      readonly rect: FrameRect
+    }
+
+export interface FramePoint {
+  readonly x: number
+  readonly y: number
+}
+
+export interface FrameRect {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
 
 /** One `<sixb-embed>` the frame shows. */
 export interface FrameEmbed {
@@ -284,8 +357,84 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
       return Number.isFinite(params.height) && Number(params.height) >= 0
         ? event("size", { height: Math.min(Number(params.height), MAX_HEIGHT) })
         : null
+    case "edit.hover":
+    case "edit.select": {
+      const at = data.event === "edit.select" ? parsePoint(params.at) : undefined
+      if (at === null) return null
+      const point = at ? { at } : {}
+      if (params.target === null) return event(data.event, { target: null, ...point })
+      const target = parseEditTarget(params.target)
+      return target ? event(data.event, { target, ...point }) : null
+    }
+    case "edit.text":
+      return isEditAddress(params.address) &&
+        typeof params.text === "string" &&
+        params.text.length <= MAX_EDIT_TEXT_LENGTH &&
+        typeof params.base === "string" &&
+        params.base.length <= MAX_EDIT_TEXT_LENGTH
+        ? event("edit.text", { address: params.address, base: params.base, text: params.text })
+        : null
+    case "press":
+      return typeof params.text === "string" &&
+        params.text.length > 0 &&
+        params.text.length <= ARTIFACT_LIMITS.maxCanvasLabelLength
+        ? event("press", { text: params.text })
+        : null
     default:
       return null
+  }
+}
+
+/** The most words a text element of a board takes from one edit: a board's own size. */
+const MAX_EDIT_TEXT_LENGTH = ARTIFACT_LIMITS.maxBoardBytes
+
+const EDIT_KINDS: readonly string[] = ["text", "image", "whole", "box"]
+
+/** The longest label a frame reports for an element: the runtime cuts its own at 80. */
+const MAX_EDIT_LABEL_LENGTH = 200
+
+/** An address as `boardElements` writes one: steps of a tag and an index, from the body. */
+function isEditAddress(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length <= 2048 && /^body(>[a-z][a-z0-9-]*:\d+)*$/.test(value)
+  )
+}
+
+/** A point the frame reports: undefined for none, null for one that does not read. */
+function parsePoint(value: unknown): FramePoint | null | undefined {
+  if (value === undefined) return undefined
+  if (!isRecord(value) || !Number.isFinite(value.x) || !Number.isFinite(value.y)) return null
+  return { x: Number(value.x), y: Number(value.y) }
+}
+
+function parseEditTarget(value: unknown): FrameEditTarget | null {
+  if (!isRecord(value) || !isRecord(value.rect)) return null
+  const { x, y, width, height } = value.rect
+  if (![x, y, width, height].every(Number.isFinite)) return null
+  const rect = { x: Number(x), y: Number(y), width: Number(width), height: Number(height) }
+
+  if (value.kind === "scripted") {
+    if (value.address !== null) return null
+    if (value.within !== null && !isEditAddress(value.within)) return null
+    const label =
+      typeof value.label === "string" && value.label.length <= MAX_EDIT_LABEL_LENGTH
+        ? { label: value.label }
+        : {}
+    return {
+      address: null,
+      kind: "scripted",
+      within: value.within as string | null,
+      ...label,
+      rect,
+    }
+  }
+  if (!isEditAddress(value.address) || !EDIT_KINDS.includes(String(value.kind))) return null
+  if (typeof value.label !== "string" || value.label.length > MAX_EDIT_LABEL_LENGTH) return null
+  return {
+    address: value.address,
+    kind: value.kind as BoardElementKind,
+    label: value.label,
+    rect,
   }
 }
 

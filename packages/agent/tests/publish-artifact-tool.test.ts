@@ -13,6 +13,7 @@ import { dirname, join } from "node:path"
 import {
   AgentToolPublicError,
   AuthorizationError,
+  type BlobStorage,
   defineMarking,
   defineObjectType,
   InMemoryBlobStorage,
@@ -26,12 +27,23 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { documentFiles } from "@sixb/core/artifacts/live"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import { AgentExecutionLostError, agentRunArtifacts } from "@sixb/core/internal/agents"
+import {
+  loadArtifactDocument,
+  storeLiveFiles,
+  writeLiveArtifact,
+} from "@sixb/core/internal/artifacts/live"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
-import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
+import * as Y from "yjs"
+import {
+  type InstalledArtifacts,
+  installTurnArtifacts,
+  materializeThreadArtifacts,
+} from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
@@ -145,7 +157,7 @@ function runArtifactsFor(
   })
   options.reader?.(sdk.artifacts)
   return agentRunArtifacts(
-    { projectId, storage },
+    { projectId, storage, domainEvents: host.events, broker: host.broker },
     { id: publishing.id, projectId, kind: "conversation", threadId: publishing.threadId },
     options.executionToken ?? publishing.executionToken,
     async () => sdk
@@ -213,6 +225,8 @@ function write(path: string, contents: string): void {
 }
 
 type ToolOptions = {
+  /** What the sandbox's layout check reports; it has no browser when omitted. */
+  readonly check?: Check
   readonly budget?: AgentFileBudget
   readonly executionToken?: string
   /** The run's install; each call is a run of its own without one. */
@@ -227,6 +241,8 @@ type ToolOptions = {
   readonly clearances?: ReadonlySet<string>
   /** Changes the requester's view of artifacts, as their rights changing mid-turn would. */
   readonly reader?: (reader: ReturnType<typeof readerFor>) => void
+  /** The blob storage the tools store and read the Agent's files in; the project's when omitted. */
+  readonly blobStorage?: BlobStorage
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -248,14 +264,75 @@ function install(
  * The run's sandbox: a real bash in the directory, without the agent image's browser, so a deck's
  * layout check skips at once on any host. layout-check.test.ts runs the check itself.
  */
-function sandbox(): LocalBashSandbox {
+function sandbox(check: Check = skippedCheck): LocalBashSandbox {
   const local = new LocalBashSandbox(root)
   const run = local.runCommand.bind(local)
   local.runCommand = async (command, args, options) =>
     options?.env?.SIXB_CHECK_DECK === undefined
       ? run(command, args, options)
-      : { exitCode: 0, stdout: '{"skipped":"no_browser"}\n', stderr: "", durationMs: 0 }
+      : {
+          exitCode: 0,
+          stdout: `${JSON.stringify(check(options.env.SIXB_CHECK_OUT ?? ""))}\n`,
+          stderr: "",
+          durationMs: 0,
+        }
   return local
+}
+
+/** What the check's script reports, given its output directory. */
+type Check = (output: string) => Record<string, unknown>
+const skippedCheck: Check = () => ({ skipped: "no_browser" })
+
+/**
+ * A canvas's check as the browser runs it: each board screenshot in light mode, and a board
+ * `pictured` in dark mode too, each picture holding the board's id and mode.
+ */
+const canvasCheck: Check = (output) => {
+  const boards = JSON.parse(readFileSync(join(output, "boards.json"), "utf8")) as {
+    readonly id: string
+    readonly pictured: boolean
+  }[]
+  const shot = (name: string, contents: string) => {
+    mkdirSync(join(output, "boards"), { recursive: true })
+    writeFileSync(join(output, "boards", name), contents)
+    return join(output, "boards", name)
+  }
+  writeFileSync(join(output, "overview.png"), "the canvas")
+  return {
+    layout: "canvas",
+    problems: [],
+    errors: [],
+    screenshots: boards.map((board) => shot(`${board.id}.png`, `${board.id} light`)),
+    previews: boards
+      .filter((board) => board.pictured)
+      .flatMap((board) => [
+        {
+          board: board.id,
+          theme: "light",
+          size: "full",
+          path: join(output, "boards", `${board.id}.png`),
+        },
+        {
+          board: board.id,
+          theme: "light",
+          size: "small",
+          path: shot(`${board.id}.light.small.webp`, `${board.id} light small`),
+        },
+        {
+          board: board.id,
+          theme: "dark",
+          size: "full",
+          path: shot(`${board.id}.dark.png`, `${board.id} dark`),
+        },
+        {
+          board: board.id,
+          theme: "dark",
+          size: "small",
+          path: shot(`${board.id}.dark.small.webp`, `${board.id} dark small`),
+        },
+      ]),
+    overview: join(output, "overview.png"),
+  }
 }
 
 function tools(options: ToolOptions = {}) {
@@ -263,10 +340,10 @@ function tools(options: ToolOptions = {}) {
     artifacts: runArtifactsFor({ ...options, user: options.author ?? owner }),
     threadId: (options.run ?? run).threadId,
     owner,
-    blobStorage,
+    blobStorage: options.blobStorage ?? blobStorage,
     budget: options.budget ?? new AgentFileBudget(),
     resolveSandbox: async () => ({
-      sandbox: sandbox(),
+      sandbox: sandbox(options.check),
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
@@ -280,7 +357,7 @@ async function publish(input: Record<string, unknown>, options?: ToolOptions): P
   return create.execute(create.parseInput(input), context)
 }
 
-/** `publish_artifact_version`: the next version of one. */
+/** `update_artifact`: one's latest version. */
 async function publishVersion(
   input: Record<string, unknown>,
   options?: ToolOptions
@@ -332,9 +409,9 @@ async function publishElsewhere(
       references: [],
       author: owner,
       ...(origin ? { origin } : {}),
-      createdAt: new Date(),
+      updatedAt: new Date(),
     },
-    baseVersion: latest.latestVersion,
+    baseRevision: latest.revision,
   })
 }
 
@@ -349,7 +426,14 @@ describe("publish_artifact", () => {
 
     const output = await publish({ path: "work/review", kind: "document", title: "Q3 review" })
 
-    expect(output).toMatchObject({ version: 1, kind: "document", title: "Q3 review", warnings: [] })
+    expect(output).toMatchObject({
+      version: 1,
+      revision: 1,
+      open: true,
+      kind: "document",
+      title: "Q3 review",
+      warnings: [],
+    })
     const id = (output as { artifactId: string }).artifactId
     const artifact = await storage.artifacts.get({ projectId, id })
     expect(artifact?.owner).toEqual(owner)
@@ -359,7 +443,7 @@ describe("publish_artifact", () => {
     expect(version?.author).toEqual(owner)
     expect(tools().create.toModelOutput?.(output, context)).toEqual({
       type: "text",
-      value: `Published "Q3 review" as artifact ${id}, version 1.\nTo change it, publish its next version with publish_artifact_version and this id.`,
+      value: `Published "Q3 review" as artifact ${id}, version 1 at revision 1.\nThe version is open: each update replaces it until the user creates a version. To change it, call update_artifact with this id.`,
     })
   })
 
@@ -368,6 +452,8 @@ describe("publish_artifact", () => {
     const output = {
       artifactId: "art_fl33tpl4n0",
       version: 2,
+      revision: 5,
+      open: true,
       kind: "page",
       title: "Fleet planner",
       warnings: [
@@ -379,17 +465,18 @@ describe("publish_artifact", () => {
       ],
       layoutCheck: {
         screenshots: [
-          ".sixb/agent/checks/art_fl33tpl4n0-v2/desktop.png",
-          ".sixb/agent/checks/art_fl33tpl4n0-v2/phone.png",
+          ".sixb/agent/checks/art_fl33tpl4n0-r5/desktop.png",
+          ".sixb/agent/checks/art_fl33tpl4n0-r5/phone.png",
         ],
       },
     }
     expect(tools().version.toModelOutput?.(output, context)).toEqual({
       type: "text",
       value: [
-        'Published "Fleet planner" as artifact art_fl33tpl4n0, version 2.',
+        'Updated "Fleet planner": artifact art_fl33tpl4n0, version 2 at revision 5.',
+        "The version is open: each update replaces it until the user creates a version. To change it, call update_artifact with this id.",
         "Warning (phone): On a phone (390px): table “Region” runs past the screen's right edge.",
-        "Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_fl33tpl4n0-v2/desktop.png at 1280px and .sixb/agent/checks/art_fl33tpl4n0-v2/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and publish the next version.",
+        "Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_fl33tpl4n0-r5/desktop.png at 1280px and .sixb/agent/checks/art_fl33tpl4n0-r5/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and update the artifact.",
       ].join("\n"),
     })
   })
@@ -404,16 +491,177 @@ describe("publish_artifact", () => {
       warnings: [],
       layoutCheck: {
         screenshots: [
-          ".sixb/agent/checks/art_0nb0ard1ng-v1/boards/welcome.png",
-          ".sixb/agent/checks/art_0nb0ard1ng-v1/boards/region.png",
+          ".sixb/agent/checks/art_0nb0ard1ng-r1/boards/welcome.png",
+          ".sixb/agent/checks/art_0nb0ard1ng-r1/boards/region.png",
         ],
       },
     }
     expect(tools().create.toModelOutput?.(output, context)).toMatchObject({
       value: expect.stringContaining(
-        "Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_0nb0ard1ng-v1/boards/<id>.png (2 boards)."
+        "Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_0nb0ard1ng-r1/boards/<id>.png (2 boards)."
       ),
     })
+  })
+
+  test("tells the Agent of a board smaller than its page, with the size to give it", () => {
+    // Reproduce by leaving the check's warnings out of the summary: the Agent reads only the
+    // screenshots, each the page's top left, and never learns why.
+    const output = {
+      artifactId: "art_0nb0ard1ng",
+      version: 1,
+      kind: "canvas",
+      title: "Pitch",
+      warnings: [
+        {
+          code: "layout_board_too_small",
+          part: "cover",
+          message: "Board 'cover' is 520×292 but its page draws 1280×720.",
+        },
+      ],
+      layoutCheck: { screenshots: [".sixb/agent/checks/art_0nb0ard1ng-v1/boards/cover.png"] },
+    }
+    expect(tools().create.toModelOutput?.(output, context)).toMatchObject({
+      value: expect.stringContaining(
+        "Warning (cover): Board 'cover' is 520×292 but its page draws 1280×720."
+      ),
+    })
+  })
+
+  test("keeps every picture it could read, and warns of a board one of whose was lost", async () => {
+    // Reproduce by handing the pictures over all or nothing: the one picture the sandbox lost
+    // leaves both boards without any, and the Agent is never told.
+    const board = (id: string, x: number) => ({
+      id,
+      type: "board",
+      file: `${id}.html`,
+      x,
+      y: 0,
+      w: 390,
+      h: 844,
+    })
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({ items: [board("welcome", 0), board("region", 480)] })
+    )
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    write("work/flow/region.html", "<main><h1>Regions</h1></main>")
+    // The check says it took Welcome's small dark picture, but it is not there to read.
+    const lossy: Check = (output) => {
+      const report = canvasCheck(output)
+      rmSync(join(output, "boards", "welcome.dark.small.webp"))
+      return report
+    }
+
+    const published = (await publish(
+      { path: "work/flow", kind: "canvas", title: "Onboarding" },
+      { check: lossy }
+    )) as { artifactId: string; warnings: { code: string; part?: string; message: string }[] }
+
+    const stored = await storage.artifacts.getVersion({
+      projectId,
+      artifactId: published.artifactId,
+      version: 1,
+    })
+    const outline = stored?.outline
+    const keys =
+      outline?.kind === "canvas"
+        ? outline.items.flatMap((item) => (item.type === "board" ? [item.renderKey ?? ""] : []))
+        : []
+    expect(await storage.artifacts.listBoardPreviews({ projectId, renderKeys: keys })).toHaveLength(
+      7
+    )
+    expect(published.warnings.filter((warning) => warning.code === "preview_not_kept")).toEqual([
+      {
+        code: "preview_not_kept",
+        part: "welcome",
+        message:
+          "Board 'welcome' has no preview for the small one in dark mode (it could not be read): readers see its outline there until they open it.",
+      },
+    ])
+  })
+
+  test("keeps the pictures of a canvas's boards, and pictures only the boards it changed", async () => {
+    // Reproduce the second half by picturing every board: the welcome board, kept as it was, is
+    // pictured again. Reproduce the first by dropping storePreviews: nothing is kept.
+    const board = (id: string, x: number) => ({
+      id,
+      type: "board",
+      file: `${id}.html`,
+      x,
+      y: 0,
+      w: 390,
+      h: 844,
+    })
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({ items: [board("welcome", 0), board("region", 480)] })
+    )
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    write("work/flow/region.html", "<main><h1>Regions</h1></main>")
+    const pictures = async (artifactId: string, version: number) => {
+      const stored = await storage.artifacts.getVersion({ projectId, artifactId, version })
+      const outline = stored?.outline
+      const keys =
+        outline?.kind === "canvas"
+          ? outline.items.flatMap((item) => (item.type === "board" ? [item.renderKey ?? ""] : []))
+          : []
+      const kept = await storage.artifacts.listBoardPreviews({ projectId, renderKeys: keys })
+      return Promise.all(
+        kept.map(
+          async ({ theme, file }) =>
+            `${theme}: ${await new Response(await blobStorage.open(file.blobId)).text()}`
+        )
+      )
+    }
+
+    const first = (await publish(
+      { path: "work/flow", kind: "canvas", title: "Onboarding" },
+      { check: canvasCheck }
+    )) as { artifactId: string; layoutCheck: { overview: string } }
+    expect((await pictures(first.artifactId, 1)).sort()).toEqual([
+      "dark: region dark",
+      "dark: region dark small",
+      "dark: welcome dark",
+      "dark: welcome dark small",
+      "light: region light",
+      "light: region light small",
+      "light: welcome light",
+      "light: welcome light small",
+    ])
+    expect(first.layoutCheck.overview).toBe(
+      `.sixb/agent/checks/${first.artifactId}-r1/overview.png`
+    )
+    expect(tools().create.toModelOutput?.(first as unknown as JsonValue, context)).toMatchObject({
+      value: expect.stringContaining(
+        `Open .sixb/agent/checks/${first.artifactId}-r1/overview.png to see the canvas as it opens`
+      ),
+    })
+
+    write("work/flow/region.html", "<main><h1>Regions, by city</h1></main>")
+    await publishVersion(
+      { id: first.artifactId, path: "work/flow", title: "Onboarding" },
+      { check: canvasCheck }
+    )
+
+    // The update replaced the open version: its check is the new revision's.
+    const checked = JSON.parse(read(`.sixb/agent/checks/${first.artifactId}-r2/boards.json`)) as {
+      readonly id: string
+      readonly pictured: boolean
+    }[]
+    expect(checked.map(({ id, pictured }) => `${id}: ${pictured}`)).toEqual([
+      "welcome: false",
+      "region: true",
+    ])
+    expect((await pictures(first.artifactId, 1)).sort()).toEqual([
+      "dark: region dark",
+      "dark: region dark small",
+      "dark: welcome dark",
+      "dark: welcome dark small",
+      "light: region light",
+      "light: region light small",
+      "light: welcome light",
+      "light: welcome light small",
+    ])
   })
 
   test("publishes one Markdown file as a document and any other file under its name", async () => {
@@ -433,7 +681,7 @@ describe("publish_artifact", () => {
     }
   })
 
-  test("publishes the next version of an artifact the owner has, in its kind", async () => {
+  test("updates an artifact the owner has, in its kind, in its open version", async () => {
     write("work/review/document.md", "# Q3 review\n\nDraft.\n")
     write("exports/regions.csv", "region,visits\nNorth,1284\n")
     const review = (await publish({
@@ -455,21 +703,48 @@ describe("publish_artifact", () => {
 
     expect(
       await publishVersion({ id: review.artifactId, path: "work/review", title: "Final" })
-    ).toMatchObject({ artifactId: review.artifactId, version: 2, kind: "document", title: "Final" })
+    ).toMatchObject({
+      artifactId: review.artifactId,
+      version: 1,
+      revision: 2,
+      open: true,
+      kind: "document",
+      title: "Final",
+    })
     // A file keeps its kind, so a single file publishes under its own name, not as a document.
     await publishVersion({ id: regions.artifactId, path: "exports/regions.csv", title: "Regions" })
-    const regionsV2 = await storage.artifacts.getVersion({
+    const regionsUpdated = await storage.artifacts.getVersion({
       projectId,
       artifactId: regions.artifactId,
-      version: 2,
+      version: 1,
     })
-    expect(regionsV2?.files.map((file) => file.path)).toEqual(["regions.csv"])
+    expect(regionsUpdated?.files.map((file) => file.path)).toEqual(["regions.csv"])
+    expect(regionsUpdated?.revision).toBe(2)
+
+    // Once the user creates the version, the next update opens the next one.
+    await storage.artifacts.freeze({
+      projectId,
+      artifactId: review.artifactId,
+      frozenAt: new Date(),
+      frozenBy: owner,
+    })
+    write("work/review/document.md", "# Q3 review\n\nAfter the review.\n")
+    const opened = await publishVersion(
+      { id: review.artifactId, path: "work/review", title: "Final" },
+      { installed: install() }
+    )
+    expect(opened).toMatchObject({ version: 2, revision: 4, open: true })
+    expect(tools().version.toModelOutput?.(opened, context)).toMatchObject({
+      value: expect.stringContaining(
+        `Updated "Final": artifact ${review.artifactId}, version 2 at revision 4.\nThe version is open:`
+      ),
+    })
   })
 
   test("refuses ids that are not an artifact of the owner's, and says how to create one", async () => {
     write("work/review/document.md", "# Q3 review\n\nDraft.\n")
     const shape =
-      "[SixbAgent] publish_artifact_version refused: id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
+      "[SixbAgent] update_artifact refused: id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
     // What a model sends when it means "no artifact yet".
     for (const id of [" ", "", "new", "null", "0", ".sixb-new"]) {
       expect(await refusal({ id, path: "work/review", title: "Q3" }, "version")).toBe(shape)
@@ -477,7 +752,7 @@ describe("publish_artifact", () => {
     expect(
       await refusal({ id: "art_0000000000", path: "work/review", title: "Q3" }, "version")
     ).toBe(
-      "[SixbAgent] publish_artifact_version refused: there is no artifact 'art_0000000000'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
+      "[SixbAgent] update_artifact refused: there is no artifact 'art_0000000000'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
     )
   })
 
@@ -506,7 +781,7 @@ describe("publish_artifact", () => {
       { author: bob, run: bobsThread }
     ).catch((error: unknown) => error)
     expect(tools().version.errorText(elsewhere)).toBe(
-      `[SixbAgent] publish_artifact_version refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact.`
+      `[SixbAgent] update_artifact refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact.`
     )
     expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
       run.threadId,
@@ -515,7 +790,7 @@ describe("publish_artifact", () => {
     // In the conversation that shares it, Bob's turn revises it.
     expect(
       await publishVersion({ id: artifactId, path: "work/review", title: "Bob's" }, { author: bob })
-    ).toMatchObject({ version: 2 })
+    ).toMatchObject({ version: 1, revision: 2 })
 
     // Removed, Bob reaches it no more: nothing else shares it with him.
     await storage.agents.threads.removeParticipant({
@@ -530,7 +805,7 @@ describe("publish_artifact", () => {
         { author: bob, run: bobsThread }
       )
     ).rejects.toBeInstanceOf(AgentToolPublicError)
-    expect((await storage.artifacts.get({ projectId, id: artifactId }))?.latestVersion).toBe(2)
+    expect((await storage.artifacts.get({ projectId, id: artifactId }))?.revision).toBe(2)
   })
 
   test("shares the owner's own artifact in the conversation their turn revises it in", async () => {
@@ -635,9 +910,9 @@ describe("publish_artifact", () => {
     ).rejects.toThrow("exceed the 1024-byte run limit")
   })
 
-  test("counts a file once per run, however many versions keep it", async () => {
-    // The publish, look, fix loop the layout check asks for: each version keeps the figure.
-    // Reproduce by reserving each version's whole size: the third version exceeds the budget.
+  test("counts a file once per run, however many updates keep it", async () => {
+    // The publish, look, fix loop the layout check asks for: each update keeps the figure.
+    // Reproduce by reserving each update's whole size: the third one exceeds the budget.
     const figure = `<svg xmlns='http://www.w3.org/2000/svg'><desc>${"x".repeat(600)}</desc></svg>`
     write("work/review/figures/chart.svg", figure)
     write("work/review/document.md", "# Q3 review\n\n![Chart](figures/chart.svg)\n")
@@ -678,9 +953,9 @@ describe("publish_artifact", () => {
     expect((await storage.artifacts.list({ projectId })).artifacts).toEqual([])
   })
 
-  test("keeps the installed copy and the manifest at the version it just published", async () => {
+  test("keeps the installed copy and the manifest at the revision it just wrote", async () => {
     // Reproduce by not replacing the install after a publish: the copy and the manifest stay at
-    // the version before, and revising from the copy publishes over this one.
+    // the revision before, and revising from the copy is refused as moved.
     write("work/review/document.md", "# Q3 review\n\n![Chart](figures/chart.svg)\n")
     write("work/review/figures/chart.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
     const installed = install()
@@ -696,27 +971,429 @@ describe("publish_artifact", () => {
     await publishVersion({ id: artifactId, path: "work/review", title: "Q3, final" }, { installed })
 
     expect(read(`${copy}/document.md`)).toBe("# Q3 review\n\nNo chart.\n")
-    // The copy holds that version alone.
+    // The copy holds that revision alone. Open, the version has no pinned address.
     expect(existsSync(join(root, copy, "figures"))).toBe(false)
-    expect(JSON.parse(read(".sixb/agent/context/artifacts.json")).artifacts).toEqual([
+    const [entry] = JSON.parse(read(".sixb/agent/context/artifacts.json")).artifacts
+    expect(entry).toEqual(
       expect.objectContaining({
         id: artifactId,
         title: "Q3, final",
-        version: 2,
-        pinned: `artifact:${artifactId}@2`,
+        version: 1,
+        revision: 2,
+        open: true,
+        address: `artifact:${artifactId}`,
         directory: copy,
         files: ["document.md"],
-      }),
-    ])
+      })
+    )
+    expect(entry).not.toHaveProperty("pinned")
     expect(JSON.parse((await installed).manifestJson)).toEqual(
       JSON.parse(read(".sixb/agent/context/artifacts.json"))
     )
   })
 
-  test("refuses to publish over a version saved during the run, and installs that one", async () => {
-    // Reproduce by publishing without the installed version as base: the Agent's version 3 lands
-    // on version 2 and the person's edit is gone from the latest version. Reproduce the install by
-    // skipping it on the refusal: the copy still holds version 1.
+  // Reproduce by leaving `baseFiles` out of the update in publish(): the person's note, saved in
+  // the app meanwhile, refuses the update; drop `mergedFiles`, and the copy lacks their note.
+  test("merges an update to a canvas with a save made during the run, and says so", async () => {
+    const items = (note?: string) =>
+      JSON.stringify({
+        items: [
+          { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          ...(note ? [{ id: "todo", type: "note", x: 0, y: 900, w: 200, text: note }] : []),
+        ],
+      })
+    write("work/flow/canvas.json", items())
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person adds a note in the app.
+    const latest = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    if (!latest) throw new Error("Expected version 1.")
+    const body = new TextEncoder().encode(items("Ship it"))
+    const canvas = await blobStorage.put({ body, expectedSizeBytes: body.byteLength })
+    await storage.artifacts.publish({
+      projectId,
+      artifactId,
+      kind: "canvas",
+      version: {
+        ...latest,
+        files: latest.files.map((entry) =>
+          entry.path === "canvas.json" ? { ...entry, file: canvas } : entry
+        ),
+        updatedAt: new Date(),
+      },
+      baseRevision: 1,
+    })
+
+    // The Agent, from its copy at revision 1, rewrites the board.
+    write("work/flow/welcome.html", "<main><h1>Hello</h1></main>")
+    const output = (await publishVersion(
+      { id: artifactId, path: "work/flow", title: "Flow" },
+      { installed }
+    )) as { revision: number; mergedSince?: number }
+
+    expect(output).toMatchObject({ revision: 3, mergedSince: 1 })
+    expect(tools().version.toModelOutput?.(output as unknown as JsonValue, context)).toMatchObject({
+      value: expect.stringContaining(
+        "Merged with changes made meanwhile, since revision 1, which you started from: your folder now holds the merged result"
+      ),
+    })
+    const copy = `.sixb/agent/artifacts/${artifactId}`
+    expect(
+      JSON.parse(read(`${copy}/canvas.json`)).items.map((item: { id: string }) => item.id)
+    ).toEqual(["welcome", "todo"])
+    expect(read(`${copy}/welcome.html`)).toBe("<main><h1>Hello</h1></main>")
+  })
+
+  // Reproduce by dropping `syncPublishedFolder` from publish(): the Agent's folder keeps what it
+  // wrote, without the words merged in, and its next update, made from that folder, takes them
+  // out.
+  test("keeps every word a person types in a board live while the Agent's turn updates it", async () => {
+    const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({
+        items: [{ id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 }],
+      })
+    )
+    write("work/flow/welcome.html", board("Welcome"))
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person's live document, as a room holds it, typing in the paragraph and writing back.
+    const latest = async () => {
+      const artifact = await storage.artifacts.get({ projectId, id: artifactId })
+      const version =
+        artifact &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: artifact.latestVersion,
+        }))
+      if (!artifact || !version) throw new Error("Expected the canvas.")
+      return { artifact, version }
+    }
+    const stored = async () => {
+      const { artifact, version } = await latest()
+      return loadArtifactDocument(blobStorage, artifact, version.files)
+    }
+    const doc = await stored()
+    const text = () => doc.getMap("files").get("welcome.html") as Y.Text
+    const type = (word: string) => text().insert(text().toString().indexOf("</p>"), ` ${word}`)
+    const follow = async () => Y.applyUpdate(doc, Y.encodeStateAsUpdate(await stored()))
+    const writeBack = async () => {
+      const { artifact, version } = await latest()
+      await writeLiveArtifact(readerFor(owner), artifactId, {
+        title: artifact.title,
+        baseTitle: artifact.title,
+        files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
+        baseRevision: artifact.revision,
+        update: Y.encodeStateAsUpdate(doc),
+      })
+      await follow()
+    }
+
+    type("w1")
+    await writeBack()
+
+    // The Agent, from its copy, retitles the board: merged, its copy is installed again.
+    write("work/flow/welcome.html", board("Hello"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+
+    // It edits its folder again, which holds the merged result, while the person types: nobody
+    // wrote since its last update, which merged their first word in.
+    const edit = (heading: string) =>
+      write(
+        "work/flow/welcome.html",
+        read("work/flow/welcome.html").replace(/<h1>.*<\/h1>/, `<h1>${heading}</h1>`)
+      )
+    expect(read("work/flow/welcome.html")).toContain("Notes: w1</p>")
+    type("w2")
+    edit("Hello again")
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+    type("w3")
+    type("w4")
+    await writeBack()
+    type("w5")
+
+    // And once more, now that the person wrote since.
+    edit("Hello, team")
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+    type("w6")
+    await writeBack()
+
+    const { version } = await latest()
+    const welcome = version.files.find((entry) => entry.path === "welcome.html")
+    const html = welcome
+      ? await new Response(await blobStorage.open(welcome.file.blobId)).text()
+      : ""
+    expect(html).toBe(
+      "<main>\n  <p>Notes: w1 w2 w3 w4 w5 w6</p>\n  <h1>Hello, team</h1>\n</main>\n"
+    )
+    expect(text().toString()).toBe(html)
+  })
+
+  // Reproduce by installing the Agent's own files when the merged ones cannot be read, as before:
+  // the base moves to the merged revision while the folder lacks the person's word, and the next
+  // update, from the folder, takes it out.
+  test("keeps a person's words when the merged result cannot be read back into the Agent's folder", async () => {
+    const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({
+        items: [{ id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 }],
+      })
+    )
+    write("work/flow/welcome.html", board("Welcome"))
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person types a word in the board, live.
+    const { artifact, version } = await (async () => {
+      const stored = await storage.artifacts.get({ projectId, id: artifactId })
+      const latest =
+        stored &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: stored.latestVersion,
+        }))
+      if (!stored || !latest) throw new Error("Expected the canvas.")
+      return { artifact: stored, version: latest }
+    })()
+    const doc = await loadArtifactDocument(blobStorage, artifact, version.files)
+    const text = doc.getMap("files").get("welcome.html") as Y.Text
+    text.insert(text.toString().indexOf("</p>"), " w1")
+    await writeLiveArtifact(readerFor(owner), artifactId, {
+      title: artifact.title,
+      baseTitle: artifact.title,
+      files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
+      baseRevision: artifact.revision,
+      update: Y.encodeStateAsUpdate(doc),
+    })
+
+    // The Agent retitles the board: merged and stored, but the blob store fails as the tool reads
+    // the merged files back.
+    const unreadable = new Proxy(blobStorage, {
+      get(target, key) {
+        if (key === "open") {
+          return async () => {
+            throw new Error("The blob store is unavailable.")
+          }
+        }
+        const value = Reflect.get(target, key)
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    })
+    write("work/flow/welcome.html", board("Hello"))
+    const output = await publishVersion(
+      { id: artifactId, path: "work/flow", title: "Flow" },
+      { installed, blobStorage: unreadable }
+    )
+
+    expect(output).toMatchObject({ mergedSince: 1, notInstalled: true, nextUpdateFrom: 1 })
+    expect(tools().version.toModelOutput?.(output, context)).toMatchObject({
+      value: expect.stringContaining(
+        "the merged result could not be installed: your folder and $SIXB_ARTIFACTS_DIR/"
+      ),
+    })
+    expect(read("work/flow/welcome.html")).toBe(board("Hello"))
+
+    // From its folder, which lacks the word, it retitles the board again.
+    write("work/flow/welcome.html", board("Hello again"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+
+    const { version: latest } = await (async () => {
+      const stored = await storage.artifacts.get({ projectId, id: artifactId })
+      const at =
+        stored &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: stored.latestVersion,
+        }))
+      if (!at) throw new Error("Expected the canvas.")
+      return { version: at }
+    })()
+    const welcome = latest.files.find((entry) => entry.path === "welcome.html")
+    expect(
+      welcome ? await new Response(await blobStorage.open(welcome.file.blobId)).text() : ""
+    ).toBe("<main>\n  <p>Notes: w1</p>\n  <h1>Hello again</h1>\n</main>\n")
+  })
+
+  // Reproduce by recording the files the Agent submitted as the base of its next update, instead
+  // of the stored result: the word its copy holds, and the person typed, is in the board twice.
+  test("keeps each of their words once when the Agent updates from its installed copy", async () => {
+    const board = (heading: string) => `<main>\n  <p>Notes:</p>\n  <h1>${heading}</h1>\n</main>\n`
+    write(
+      "work/flow/canvas.json",
+      JSON.stringify({
+        items: [{ id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 }],
+      })
+    )
+    write("work/flow/welcome.html", board("Welcome"))
+    const { artifactId } = (await publish({
+      path: "work/flow",
+      kind: "canvas",
+      title: "Flow",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    // The person's live document, as a room holds it, typing in the paragraph and writing back.
+    const latest = async () => {
+      const artifact = await storage.artifacts.get({ projectId, id: artifactId })
+      const version =
+        artifact &&
+        (await storage.artifacts.getVersion({
+          projectId,
+          artifactId,
+          version: artifact.latestVersion,
+        }))
+      if (!artifact || !version) throw new Error("Expected the canvas.")
+      return { artifact, version }
+    }
+    const stored = async () => {
+      const { artifact, version } = await latest()
+      return loadArtifactDocument(blobStorage, artifact, version.files)
+    }
+    const doc = await stored()
+    const text = () => doc.getMap("files").get("welcome.html") as Y.Text
+    const type = (word: string) => text().insert(text().toString().indexOf("</p>"), ` ${word}`)
+    const follow = async () => Y.applyUpdate(doc, Y.encodeStateAsUpdate(await stored()))
+    const writeBack = async () => {
+      const { artifact, version } = await latest()
+      await writeLiveArtifact(readerFor(owner), artifactId, {
+        title: artifact.title,
+        baseTitle: artifact.title,
+        files: await storeLiveFiles(blobStorage, documentFiles(doc), version.files),
+        baseRevision: artifact.revision,
+        update: Y.encodeStateAsUpdate(doc),
+      })
+      await follow()
+    }
+
+    type("w1")
+    await writeBack()
+
+    // The Agent, from its copy, retitles the board: merged, its copy is installed again.
+    write("work/flow/welcome.html", board("Hello"))
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+
+    // It starts from its copy, as it is told to, which holds the person's first word; they type on.
+    const copy = `.sixb/agent/artifacts/${artifactId}/welcome.html`
+    write("work/flow/welcome.html", read(copy).replace("Hello", "Hello, team"))
+    type("w2")
+    type("w3")
+    await writeBack()
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    await follow()
+
+    const { version } = await latest()
+    const welcome = version.files.find((entry) => entry.path === "welcome.html")
+    const html = welcome
+      ? await new Response(await blobStorage.open(welcome.file.blobId)).text()
+      : ""
+    expect(html).toBe("<main>\n  <p>Notes: w1 w2 w3</p>\n  <h1>Hello, team</h1>\n</main>\n")
+    expect(text().toString()).toBe(html)
+  })
+
+  // Reproduce by not writing the revision into the folder the Agent published from in
+  // InstalledArtifacts.replace: the folder lacks the child's note, and the parent's update from
+  // it takes the note out.
+  test("writes a child's write into the folder the parent published from, so the parent keeps it", async () => {
+    const items = (note?: string) =>
+      JSON.stringify({
+        items: [
+          { id: "welcome", type: "board", file: "welcome.html", x: 0, y: 0, w: 390, h: 844 },
+          ...(note ? [{ id: "todo", type: "note", x: 0, y: 900, w: 200, text: note }] : []),
+        ],
+      })
+    write("work/flow/canvas.json", items())
+    write("work/flow/welcome.html", "<main><h1>Welcome</h1></main>")
+    const installed = install()
+    const { artifactId } = (await publish(
+      { path: "work/flow", kind: "canvas", title: "Flow" },
+      { installed }
+    )) as { artifactId: string }
+
+    // A child of the turn adds a note to the canvas.
+    const latest = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    if (!latest) throw new Error("Expected version 1.")
+    const body = new TextEncoder().encode(items("Ship it"))
+    const canvas = await blobStorage.put({ body, expectedSizeBytes: body.byteLength })
+    await runArtifactsFor().publish({
+      artifactId,
+      title: "Flow",
+      files: latest.files.map((entry) =>
+        entry.path === "canvas.json" ? { ...entry, file: canvas } : entry
+      ),
+      baseRevision: latest.revision,
+      baseFiles: latest.files,
+    })
+
+    // Waiting for it, the parent installs what it wrote: in its copy, and in its folder.
+    const folders = await installTurnArtifacts({
+      installed: await installed,
+      artifacts: runArtifactsFor(),
+      blobStorage,
+      sandbox: sandbox(),
+      signal: new AbortController().signal,
+    })
+    expect(folders).toEqual(["work/flow"])
+    expect(read("work/flow/canvas.json")).toContain("Ship it")
+
+    // It updates from its folder: the child's note stays.
+    write("work/flow/welcome.html", "<main><h1>Hello</h1></main>")
+    await publishVersion({ id: artifactId, path: "work/flow", title: "Flow" }, { installed })
+    const artifact = await storage.artifacts.get({ projectId, id: artifactId })
+    const version =
+      artifact &&
+      (await storage.artifacts.getVersion({
+        projectId,
+        artifactId,
+        version: artifact.latestVersion,
+      }))
+    const stored = version?.files.find((entry) => entry.path === "canvas.json")
+    const json = stored ? await new Response(await blobStorage.open(stored.file.blobId)).text() : ""
+    expect(JSON.parse(json).items.map((item: { id: string }) => item.id)).toEqual([
+      "welcome",
+      "todo",
+    ])
+  })
+
+  test("refuses to update over a save made during the run, and installs it", async () => {
+    // Reproduce by publishing without the installed revision as base: the Agent's update replaces
+    // the person's save unseen. Reproduce the install by skipping it on the refusal: the copy
+    // still holds revision 1.
     write("work/plan/document.md", "# Plan\n\nDraft.\n")
     const { artifactId } = (await publish({
       path: "work/plan",
@@ -738,22 +1415,43 @@ describe("publish_artifact", () => {
 
     expect(error).toBeInstanceOf(AgentToolPublicError)
     expect(version.errorText(error)).toBe(
-      `[SixbAgent] publish_artifact_version refused: artifact '${artifactId}' moved on from version 1, which you started from: version 2 was published by its owner outside a conversation, such as in the app, so nothing was published. $SIXB_ARTIFACTS lists version 2, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and publish.`
+      `[SixbAgent] update_artifact refused: artifact '${artifactId}' changed since revision 1, which you started from: it is at revision 2, whose version 1 was last written by its owner outside a conversation, such as in the app, so nothing was published. $SIXB_ARTIFACTS lists revision 2, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and update it.`
     )
-    expect((await storage.artifacts.get({ projectId, id: artifactId }))?.latestVersion).toBe(2)
+    expect((await storage.artifacts.get({ projectId, id: artifactId }))?.revision).toBe(2)
 
     // The copy and the manifest now hold the person's version, marked as edited.
     const copy = `.sixb/agent/artifacts/${artifactId}`
     expect(read(`${copy}/document.md`)).toBe("# Plan\n\nThe person's edit.\n")
     expect(JSON.parse(read(".sixb/agent/context/artifacts.json")).artifacts).toEqual([
-      expect.objectContaining({ id: artifactId, version: 2, edited: true }),
+      expect.objectContaining({ id: artifactId, version: 1, revision: 2, edited: true }),
     ])
 
-    // Built on that version, the next publish goes through.
+    // Built on that revision, the next update goes through.
     write("work/plan/document.md", "# Plan\n\nThe person's edit, then the Agent's.\n")
     expect(
       await publishVersion({ id: artifactId, path: "work/plan", title: "Plan" }, { installed })
-    ).toMatchObject({ artifactId, version: 3 })
+    ).toMatchObject({ artifactId, version: 1, revision: 3 })
+
+    // A version created during the run is named with who created it.
+    const bob = { type: "user", id: "usr_bob" } as const
+    await storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date(), frozenBy: bob })
+    const stale = await version
+      .execute(version.parseInput({ id: artifactId, path: "work/plan", title: "Plan" }), context)
+      .catch((error: unknown) => error)
+    expect(version.errorText(stale)).toContain(
+      "whose version 1 was last written earlier in this conversation, and then created as a version by user 'usr_bob', so nothing was published"
+    )
+
+    // Published from work/plan since, that folder takes what a refusal installs, as the copy does.
+    await publishElsewhere(artifactId, "# Plan\n\nThe person's second edit.\n")
+    write("work/plan/document.md", "# Plan\n\nThe Agent's second edit.\n")
+    const refused = await version
+      .execute(version.parseInput({ id: artifactId, path: "work/plan", title: "Plan" }), context)
+      .catch((error: unknown) => error)
+    expect(version.errorText(refused)).toContain(
+      "and written into work/plan, the folder you published it from"
+    )
+    expect(read("work/plan/document.md")).toBe("# Plan\n\nThe person's second edit.\n")
   })
 
   test("lays a deck out with the files it publishes, and only those", async () => {
@@ -771,7 +1469,7 @@ describe("publish_artifact", () => {
     const whole = (await publish({ path: "work/q3", kind: "slides", title: "Q3" })) as {
       artifactId: string
     }
-    const served = (id: string) => JSON.parse(read(`.sixb/agent/checks/${id}-v1/files.json`))
+    const served = (id: string) => JSON.parse(read(`.sixb/agent/checks/${id}-r1/files.json`))
     expect(served(single.artifactId)).toEqual(["index.html"])
     expect(served(whole.artifactId)).toEqual(["img/fleet.svg", "index.html"])
   })
@@ -932,16 +1630,23 @@ function fakePage() {
 
 describe("materializeThreadArtifacts", () => {
   test("installs the thread's latest versions, newest first, within the byte budget", async () => {
+    // Reproduce the pins by listing them for open versions too: the Agent's reply then pins
+    // content its next update replaces.
+    const freeze = (artifactId: string) =>
+      storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date(), frozenBy: owner })
     write("a/document.md", "# First\n\nOne.\n")
     write("b/document.md", "# Second\n\nTwo.\n")
     const first = (await publish({ path: "a", kind: "document", title: "First" })) as {
       artifactId: string
     }
+    // The user creates version 1; the update opens version 2.
+    await freeze(first.artifactId)
     write("a/document.md", "# First\n\nOne, revised.\n")
     await publishVersion({ id: first.artifactId, path: "a", title: "First" })
     const second = (await publish({ path: "b", kind: "document", title: "Second" })) as {
       artifactId: string
     }
+    await freeze(second.artifactId)
 
     const installed = await install()
 
@@ -952,6 +1657,8 @@ describe("materializeThreadArtifacts", () => {
           kind: "document",
           title: "Second",
           version: 1,
+          revision: 2,
+          open: false,
           // Ready to copy: the Agent never works out a heading's slug.
           address: `artifact:${second.artifactId}`,
           pinned: `artifact:${second.artifactId}@1`,
@@ -970,15 +1677,10 @@ describe("materializeThreadArtifacts", () => {
           kind: "document",
           title: "First",
           version: 2,
+          revision: 3,
+          open: true,
           address: `artifact:${first.artifactId}`,
-          pinned: `artifact:${first.artifactId}@2`,
-          parts: [
-            {
-              address: `artifact:${first.artifactId}#first`,
-              pinned: `artifact:${first.artifactId}@2#first`,
-              name: "First",
-            },
-          ],
+          parts: [{ address: `artifact:${first.artifactId}#first`, name: "First" }],
           directory: `.sixb/agent/artifacts/${first.artifactId}`,
           files: ["document.md"],
         },
@@ -1001,15 +1703,10 @@ describe("materializeThreadArtifacts", () => {
       kind: "document",
       title: "First",
       version: 2,
+      revision: 3,
+      open: true,
       address: `artifact:${first.artifactId}`,
-      pinned: `artifact:${first.artifactId}@2`,
-      parts: [
-        {
-          address: `artifact:${first.artifactId}#first`,
-          pinned: `artifact:${first.artifactId}@2#first`,
-          name: "First",
-        },
-      ],
+      parts: [{ address: `artifact:${first.artifactId}#first`, name: "First" }],
       files: ["document.md"],
     })
     expect(bounded.files).toHaveLength(1)
@@ -1031,26 +1728,29 @@ describe("materializeThreadArtifacts", () => {
     }
     expect(JSON.parse((await install()).manifestJson).artifacts[0]).not.toHaveProperty("edited")
 
-    // The person saves version 2 in the app: no thread origin.
+    // The person saves in the app: no thread origin.
     const first = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
     if (!first) throw new Error("Version 1 was not stored.")
     const {
       projectId: _project,
       artifactId: _artifact,
       version: _version,
+      revision: _revision,
       origin: _origin,
+      createdAt: _created,
       ...content
     } = first
     await storage.artifacts.publish({
       projectId,
       artifactId,
       kind: "document",
-      version: { ...content, createdAt: new Date() },
-      baseVersion: 1,
+      version: { ...content, updatedAt: new Date() },
+      baseRevision: 1,
     })
-    // Reproduce by marking every entry: the Agent's own versions read as edited too.
+    // Reproduce by marking every entry: the Agent's own writes read as edited too.
     expect(JSON.parse((await install()).manifestJson).artifacts[0]).toMatchObject({
-      version: 2,
+      version: 1,
+      revision: 2,
       edited: true,
     })
   })
@@ -1069,7 +1769,8 @@ describe("materializeThreadArtifacts", () => {
     })
 
     expect(JSON.parse((await install()).manifestJson).artifacts[0]).toMatchObject({
-      version: 2,
+      version: 1,
+      revision: 2,
       edited: true,
     })
   })
@@ -1082,6 +1783,8 @@ describe("materializeThreadArtifacts", () => {
     const { artifactId } = (await publish({ path: "deck", kind: "slides", title: "Q3" })) as {
       artifactId: string
     }
+    // Pinned too once the user created the version.
+    await storage.artifacts.freeze({ projectId, artifactId, frozenAt: new Date(), frozenBy: owner })
     expect(JSON.parse((await install()).manifestJson).artifacts[0].parts).toEqual([
       {
         address: `artifact:${artifactId}#1`,
@@ -1129,7 +1832,7 @@ describe("materializeThreadArtifacts", () => {
         `.sixb/agent/artifacts/${second.artifactId}/document.md`,
       ])
       expect(String(warn.mock.calls[0]?.[0])).toStartWith(
-        `[SixbAgent] Could not install version 1 of artifact '${first.artifactId}'`
+        `[SixbAgent] Could not install revision 1 of artifact '${first.artifactId}'`
       )
     } finally {
       warn.mockRestore()
@@ -1290,7 +1993,7 @@ describe("a version's queries", () => {
       { grants, clearances: new Set([financial.id]) }
     )) as { artifactId: string }
 
-    const checks = `.sixb/agent/checks/${published.artifactId}-v1`
+    const checks = `.sixb/agent/checks/${published.artifactId}-r1`
     expect(JSON.parse(read(`${checks}/queries.json`))).toEqual({ invoices: 200 })
     expect(JSON.parse(read(`${checks}/queries/invoices.json`))).toEqual({
       kind: "objects",
@@ -1352,7 +2055,7 @@ describe("a version's queries", () => {
       },
     ])
 
-    const checks = `.sixb/agent/checks/${published.artifactId}-v1`
+    const checks = `.sixb/agent/checks/${published.artifactId}-r1`
     expect(JSON.parse(read(`${checks}/queries.json`))).toEqual({ invoices: 409 })
     expect(JSON.parse(read(`${checks}/queries/invoices.json`))).toEqual({
       error: "Principal 'usr_owner' is not allowed to view object type 'Invoice'.",

@@ -70,11 +70,14 @@ export class LocalBashSandbox implements Sandbox {
     args: readonly string[] = [],
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
+    // `bash -c <script> [name args...]` runs as it is, its arguments in `$@`; anything else runs
+    // its last argument as the script.
     const script = args.at(-1)
     if (command !== "bash" || typeof script !== "string") {
       throw new Error(`Unexpected command ${command}`)
     }
-    const child = Bun.spawn(["bash", "-c", script], {
+    const argv = args[0] === "-c" ? ["bash", ...args] : ["bash", "-c", script]
+    const child = Bun.spawn(argv, {
       cwd: this.workingDirectory,
       env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...options.env },
       stdout: "pipe",
@@ -129,6 +132,8 @@ export async function runTurnInSession(
       recoverAiModelCall,
       events,
       security: EMPTY_SECURITY,
+      // A turn run directly writes no artifact.
+      domainEvents: { emit: async () => {} },
       // A turn run directly has no environment, so nothing it does binds the run's SDK.
       sdk: {
         id: turn.context.id,

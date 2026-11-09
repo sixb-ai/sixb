@@ -26,7 +26,8 @@ interface ReferenceContext {
 /**
  * Resolves every address a version uses against what its author can read, recording the version
  * each one resolved to. An address that resolves to nothing refuses the version, saying where it
- * is and what the target has instead.
+ * is and what the target has instead, and so does one pinned to a version still open: a pin names
+ * content that never changes.
  */
 export async function resolveReferences(
   context: ReferenceContext,
@@ -79,6 +80,11 @@ export async function resolveReferences(
     }
     const target = await version
     if (!target) throw invalidArtifact(`${where}: “${record.title}” has no version ${number}.`)
+    if (address.version !== undefined && !target.frozenAt) {
+      throw invalidArtifact(
+        `${where} pins version ${number} of “${record.title}”, which is still open and changes with every write. Write artifact:${record.id} without @${number} to follow its latest version; a version can be pinned once someone creates it.`
+      )
+    }
     const result = resolveArtifactAddress(address, { kind: record.kind, ...target })
     if ("problem" in result) {
       throw invalidArtifact(`${where}: “${target.title}” ${result.problem}.`)
@@ -89,8 +95,8 @@ export async function resolveReferences(
 }
 
 /**
- * The artifacts a new version breaks: each one whose latest version follows this artifact's latest
- * and names something this version no longer has. Only artifacts the author can read are named,
+ * The artifacts a write breaks: each one whose latest version follows this artifact's latest and
+ * names something this version no longer has. Only artifacts the author can read are named,
  * and only those the version breaks are checked: most dependents cost no read.
  */
 export async function brokenDependents(
@@ -115,7 +121,7 @@ export async function brokenDependents(
       if (!("problem" in result)) continue
       broken.push({
         code: "reference_broken",
-        message: `“${dependent.title}” (${dependent.artifactId}) ${reference.as === "embed" ? "shows" : "links to"} ${reference.address}, but version ${version.version} ${result.problem}. Publish its next version with an address that resolves, or restore what it names.`,
+        message: `“${dependent.title}” (${dependent.artifactId}) ${reference.as === "embed" ? "shows" : "links to"} ${reference.address}, but version ${version.version} ${result.problem}. Update it with an address that resolves, or restore what it names.`,
       })
     }
     if (broken.length === 0) continue

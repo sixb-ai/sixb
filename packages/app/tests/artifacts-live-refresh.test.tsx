@@ -5,8 +5,14 @@ import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render } from "@testing-library/react"
 import type { ReactNode } from "react"
-import { ArtifactFrame } from "../src/artifacts/frame"
-import { LIVE_QUERY_DEBOUNCE_MS, useArtifactQuery } from "../src/artifacts/queries"
+import { ArtifactFrame, frameLinkKey } from "../src/artifacts/frame"
+import {
+  artifactVersionOptions,
+  LIVE_QUERY_DEBOUNCE_MS,
+  useArtifactQuery,
+  useArtifactUpdates,
+  useArtifactVersion,
+} from "../src/artifacts/queries"
 import { installDom } from "./helpers/dom"
 
 const browser = installDom([
@@ -38,6 +44,9 @@ const version: GetArtifactVersionResponse = {
   references: [],
   author: { type: "user", id: "user-1" },
   createdAt: "2026-10-23T12:00:00.000Z",
+  updatedAt: "2026-10-23T12:00:00.000Z",
+  revision: 1,
+  frozen: true,
 }
 
 /** What each query reads: `overdue` its invoices and their customers, `paid` the payments. */
@@ -161,6 +170,21 @@ function linkCreated(sourceTypeId: string, targetTypeId: string) {
   }
 }
 
+/** An artifact changed, as the server tells whoever may read it. */
+function artifactUpdated(artifactId: string, revision: number) {
+  cursor += 1
+  return {
+    id: `evt-${cursor}`,
+    cursor: `c${cursor}`,
+    projectId: "project",
+    occurredAt: "2026-10-23T12:00:00.000Z",
+    type: "artifact.updated",
+    topic: "artifacts",
+    partitionKey: artifactId,
+    payload: { artifactId, version: 1, revision, frozen: false },
+  }
+}
+
 async function publish(...events: readonly unknown[]): Promise<void> {
   const [socket, ...more] = FakeWebSocket.instances
   if (!socket) throw new Error("Expected the provider's socket.")
@@ -174,7 +198,7 @@ async function publish(...events: readonly unknown[]): Promise<void> {
 
 function mount(children: ReactNode) {
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  cache.setQueryData(["artifact-frame", PAGE, 1], {
+  cache.setQueryData(frameLinkKey({ artifactId: PAGE, version: 1, revision: 1 }), {
     path: "/api/artifact-frames/token-v1/",
     expiresAt: "2026-10-23T13:00:00.000Z",
   })
@@ -328,5 +352,115 @@ describe("a live artifact's queries", () => {
     )
     await settle()
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+})
+
+describe("an artifact the reader has open", () => {
+  /** The open version, as a view shows it: its revision. */
+  function Current() {
+    useArtifactUpdates(PAGE)
+    const { data } = useArtifactVersion(PAGE, 1)
+    return <output>{data?.revision}</output>
+  }
+
+  test("is read again when it changes, and not when another artifact does", async () => {
+    // Reproduce by dropping useArtifactUpdates from the view: it reads the version once, and shows
+    // revision 1 after the change.
+    const reads: string[] = []
+    const previous = client.getConfig().fetch
+    client.setConfig({
+      fetch: Object.assign(
+        async (input: Request) => {
+          reads.push(new URL(input.url).pathname)
+          return Response.json({ ...version, revision: reads.length })
+        },
+        { preconnect: globalThis.fetch.preconnect }
+      ) as unknown as typeof fetch,
+    })
+    try {
+      const { ui } = mount(<Current />)
+      await settle()
+      expect(reads).toEqual([`/api/artifacts/${PAGE}/versions/1`])
+
+      await publish(artifactUpdated("art_0th3r00001", 7))
+      await settle()
+      expect(reads).toHaveLength(1)
+
+      await publish(artifactUpdated(PAGE, 2))
+      await settle()
+      expect(reads).toHaveLength(2)
+      expect(ui.container.textContent).toBe("2")
+    } finally {
+      client.setConfig({ fetch: previous })
+    }
+  })
+
+  test("is read again once a list knows a later revision of it", async () => {
+    // A gallery's card knows the artifact's revision from the list. Reproduce by dropping the
+    // revision check from useArtifactVersion: the card keeps revision 1.
+    const reads: string[] = []
+    const previous = client.getConfig().fetch
+    client.setConfig({
+      fetch: Object.assign(
+        async (input: Request) => {
+          reads.push(new URL(input.url).pathname)
+          return Response.json({ ...version, frozen: false, revision: reads.length })
+        },
+        { preconnect: globalThis.fetch.preconnect }
+      ) as unknown as typeof fetch,
+    })
+    function Card({ known }: { readonly known: number }) {
+      const { data } = useArtifactVersion(PAGE, 1, { revision: known })
+      return <output>{data?.revision}</output>
+    }
+    try {
+      const { ui, cache } = mount(<Card known={1} />)
+      await settle()
+      expect(ui.container.textContent).toBe("1")
+
+      ui.rerender(
+        <QueryClientProvider client={cache}>
+          <SixbEventsProvider>
+            <Card known={2} />
+          </SixbEventsProvider>
+        </QueryClientProvider>
+      )
+      await settle()
+      expect(reads).toHaveLength(2)
+      expect(ui.container.textContent).toBe("2")
+    } finally {
+      client.setConfig({ fetch: previous })
+    }
+  })
+})
+
+describe("a created version", () => {
+  test("is read once by its number, and again as the latest", async () => {
+    // The next write after it opens a newer version, which `latest` names then. Reproduce by
+    // keeping every frozen read fresh in artifactVersionOptions: `latest` is not read again.
+    const reads: string[] = []
+    const previous = client.getConfig().fetch
+    client.setConfig({
+      fetch: Object.assign(
+        async (input: Request) => {
+          reads.push(new URL(input.url).pathname)
+          return Response.json(version)
+        },
+        { preconnect: globalThis.fetch.preconnect }
+      ) as unknown as typeof fetch,
+    })
+    try {
+      const cache = new QueryClient()
+      const minuteAgo = Date.now() - 60_000
+      for (const at of [1, "latest"] as const) {
+        const options = artifactVersionOptions(PAGE, at)
+        cache.setQueryData(options.queryKey, version, { updatedAt: minuteAgo })
+        await cache.fetchQuery(options)
+      }
+
+      expect(reads).toEqual([`/api/artifacts/${PAGE}/versions/latest`])
+    } finally {
+      client.setConfig({ fetch: previous })
+    }
   })
 })

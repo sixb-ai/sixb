@@ -41,8 +41,16 @@ export interface ReconnectingSocketOptions {
   readonly shouldReconnectAfterSetupError?: (error: unknown) => boolean
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  /** Built fresh for each subscription so it can carry the latest resume cursor. */
-  readonly subscribeMessage: () => unknown
+  /**
+   * Doubles the wait before each reconnect after the first, from `reconnectDelayMs` up to this,
+   * until a connection is ready again. Without it, every reconnect waits `reconnectDelayMs`.
+   */
+  readonly maxReconnectDelayMs?: number
+  /**
+   * Built fresh for each subscription so it can carry the latest resume cursor. A stream that
+   * subscribes its own way, with messages of its own through `send`, has none.
+   */
+  readonly subscribeMessage?: () => unknown
   /**
    * Optional protocol-level readiness check. When provided, defer the subscribe
    * frame until an inbound message passes this check. Without it, subscribe as
@@ -63,6 +71,8 @@ export interface ReconnectingSocketOptions {
 }
 
 export interface ReconnectingSocket {
+  /** Sends a message as JSON on the connection open now; false when none is. */
+  send(message: unknown): boolean
   /** Stop reconnecting and close the underlying WebSocket. */
   close(): void
 }
@@ -82,7 +92,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       reconnecting: false,
       error: SHARED_ACCESS_REALTIME_UNAVAILABLE,
     })
-    return { close: () => undefined }
+    return { send: () => false, close: () => undefined }
   }
 
   const { reconnect = true, reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS } = options
@@ -96,6 +106,8 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let connectionGeneration = 0
+  // Reconnects since the last connection that was ready, for the backoff.
+  let failures = 0
 
   const setState = (next: ReconnectingSocketState) => {
     state = next
@@ -111,10 +123,14 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
 
   const scheduleReconnect = () => {
     if (!reconnect || stopped || reconnectTimer) return
+    const delay = options.maxReconnectDelayMs
+      ? Math.min(options.maxReconnectDelayMs, reconnectDelayMs * 2 ** failures)
+      : reconnectDelayMs
+    failures += 1
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
       void connect()
-    }, reconnectDelayMs)
+    }, delay)
   }
 
   const connect = async () => {
@@ -162,12 +178,13 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     const subscribe = () => {
       if (stopped || subscribed || socket !== ws) return
       subscribed = true
-      ws.send(JSON.stringify(options.subscribeMessage()))
+      if (options.subscribeMessage) ws.send(JSON.stringify(options.subscribeMessage()))
     }
 
     ws.onopen = () => {
       if (stopped) return
       openedOnce = true
+      if (!options.readyWhen) failures = 0
       setState({ connected: true, reconnecting: false, error: null })
       if (!options.subscribeWhen) subscribe()
       if (options.readyWhen) {
@@ -190,7 +207,10 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     ws.onmessage = (messageEvent) => {
       if (stopped) return
       if (options.subscribeWhen?.(messageEvent.data)) subscribe()
-      if (options.readyWhen?.(messageEvent.data)) clearReadyTimer()
+      if (options.readyWhen?.(messageEvent.data)) {
+        clearReadyTimer()
+        failures = 0
+      }
       options.onMessage(messageEvent.data, sink)
     }
 
@@ -213,6 +233,12 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   void connect()
 
   return {
+    send(message) {
+      // 1 is OPEN: read as a number, so a socket that is not the browser's still answers it.
+      if (stopped || !socket || socket.readyState !== 1) return false
+      socket.send(JSON.stringify(message))
+      return true
+    },
     close() {
       stopped = true
       connectionGeneration += 1

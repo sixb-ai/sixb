@@ -14,6 +14,8 @@ const fileRef = (name: string) => ({
 const VERSION = {
   artifactId: "art_s3ll5ab0ok",
   version: 3,
+  revision: 7,
+  frozen: false,
   title: "Q3 operations",
   entry: "sheets/Regions.csv",
   files: [
@@ -39,7 +41,7 @@ function api(published: () => Response) {
         requests.push({ url, body: file.name })
         return Response.json(fileRef(`new-${file.name}`), { status: 201 })
       }
-      requests.push({ url, body: await input.json() })
+      requests.push({ url: `${input.method} ${url}`, body: await input.json() })
       return published()
     },
     { preconnect: globalThis.fetch.preconnect }
@@ -48,9 +50,9 @@ function api(published: () => Response) {
 }
 
 describe("publishing an edit", () => {
-  test("uploads only what changed and carries the rest over from the version edited", async () => {
+  test("uploads only what changed and saves from the revision edited", async () => {
     const { client, requests } = api(() =>
-      Response.json({ artifact: {}, version: { version: 4 }, warnings: [] }, { status: 201 })
+      Response.json({ artifact: {}, version: { version: 4 }, warnings: [] })
     )
     const changed = new Map<string, Blob | null>([
       ["sheets/Regions.csv", new Blob(["Region,Visits\nNorth,1300\n"])],
@@ -65,11 +67,11 @@ describe("publishing an edit", () => {
       "Targets.csv",
     ])
     expect(requests.at(-1)).toEqual({
-      url: "/api/artifacts/art_s3ll5ab0ok/versions",
+      url: "PUT /api/artifacts/art_s3ll5ab0ok/content",
       body: {
         kind: "sheet",
         title: "Q3 operations",
-        baseVersion: 3,
+        baseRevision: 7,
         files: [
           { path: "sheets/Regions.csv", file: fileRef("new-Regions.csv") },
           { path: "workbook.json", file: fileRef("workbook") },
@@ -79,21 +81,32 @@ describe("publishing an edit", () => {
     })
   })
 
-  test("says who published when the artifact moved past the version edited", async () => {
+  test("says who changed it, and who created its version, when the artifact moved on", async () => {
+    // Reproduce by dropping frozenBy from movedTo: the notice can't say a version was created.
     const { client } = api(() =>
       Response.json(
         {
-          error: "[Sixb] Artifact 'art_s3ll5ab0ok' is at version 4, not version 3.",
+          error: "[Sixb] Artifact 'art_s3ll5ab0ok' is at revision 9, not revision 7.",
           code: "artifact_moved",
-          latest: { version: 4, author: { type: "user", id: "usr_mina" } },
+          latest: {
+            version: 3,
+            revision: 9,
+            author: { type: "user", id: "usr_ana" },
+            frozenBy: { type: "user", id: "usr_mina" },
+          },
         },
         { status: 409 }
       )
     )
-    const saving = publishEdit(VERSION, new Map(), { client })
-    await expect(saving).rejects.toBeInstanceOf(ArtifactMovedError)
-    await expect(saving).rejects.toMatchObject({
-      latest: { version: 4, author: { type: "user", id: "usr_mina" } },
+    const error = await publishEdit(VERSION, new Map(), { client }).catch((caught) => caught)
+    expect(error).toBeInstanceOf(ArtifactMovedError)
+    expect(error).toMatchObject({
+      latest: {
+        version: 3,
+        revision: 9,
+        author: { type: "user", id: "usr_ana" },
+        frozenBy: { type: "user", id: "usr_mina" },
+      },
     })
   })
 })

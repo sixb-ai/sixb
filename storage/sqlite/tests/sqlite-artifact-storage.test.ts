@@ -10,7 +10,7 @@ runArtifactStorageContractSuite("SqliteArtifactStorage", {
 
 describe("SqliteArtifactStorage frame grants", () => {
   // The column only has to hold a JSON array. To see this fail, read `targets` back with a bare
-  // `JSON.parse` in `findFrameGrant`: the grant then comes back with a target that has no version.
+  // `JSON.parse` in `findFrameGrant`: the grant then comes back with a target that has no revision.
   test("refuses a stored grant whose targets do not read back", async () => {
     const storage = new SqliteStorage()
     try {
@@ -27,17 +27,21 @@ describe("SqliteArtifactStorage frame grants", () => {
           outline: { kind: "slides", slides: [] },
           references: [],
           author: { type: "user", id: "usr_owner" },
-          createdAt,
+          updatedAt: createdAt,
         },
       })
       const db = (storage as unknown as { connection: { db: Database } }).connection.db
       db.query(
         `INSERT INTO artifact_frame_grants
-           (project_id, token_hash, artifact_id, version, targets, created_at, expires_at)
-         VALUES ('project', ?, 'art_deck', 1, ?, ?, ?)`
+           (project_id, token_hash, artifact_id, version, files_digest, targets, created_at,
+            expires_at)
+         VALUES ('project', ?, 'art_deck', 1, ?, ?, ?, ?)`
       ).run(
         "a".repeat(64),
-        JSON.stringify([{ address: "artifact:art_chart", artifactId: "art_chart" }]),
+        "f".repeat(64),
+        JSON.stringify([
+          { address: "artifact:art_chart", artifactId: "art_chart", version: "newest" },
+        ]),
         createdAt.toISOString(),
         new Date(createdAt.getTime() + 60 * 60 * 1000).toISOString()
       )

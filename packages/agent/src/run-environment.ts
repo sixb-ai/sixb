@@ -33,7 +33,7 @@ import {
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import {
   type InstalledArtifacts,
-  installArtifactsPublishedBy,
+  installTurnArtifacts,
   type MaterializedArtifacts,
   materializeThreadArtifacts,
 } from "./artifacts/materialize"
@@ -1033,15 +1033,14 @@ async function startAgentEnvironment(
     sandbox: resolveSandbox,
     blobStorage: context.blobStorage,
     budget: fileBudget,
-    async installArtifactsFrom(runIds, signal) {
-      if (!artifacts) return
+    async installTurnArtifacts(signal) {
+      if (!artifacts) return []
 
-      await installArtifactsPublishedBy({
+      return installTurnArtifacts({
         installed: await artifacts.installed,
         artifacts: artifacts.reader,
         blobStorage: context.blobStorage,
         sandbox: (await ready).sandbox,
-        runIds,
         signal,
       })
     },

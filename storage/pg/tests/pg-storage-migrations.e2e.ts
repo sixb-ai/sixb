@@ -132,6 +132,11 @@ const SHIPPED_MIGRATIONS = [
   "091-dataset-ingest-inbox",
   "092-run-recovery",
   "093-webhook-and-projection-leases",
+  "094-artifact-board-previews",
+  "095-artifact-open-versions",
+  "096-artifact-documents",
+  "097-artifact-frame-files",
+  "098-artifact-comments",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -689,6 +694,69 @@ describe("Postgres storage migrations", () => {
       await expect(
         storage.artifacts.listThreadIds({ projectId: "project-a", id: "art_0000000001" })
       ).resolves.toEqual(["thread-1"])
+    })
+  })
+
+  test("freezes every existing version, so an address pinned to one keeps naming it", async () => {
+    // Removal proof: drop the UPDATE of `artifact_versions` from 090; the latest version is then
+    // open, and the next write replaces what @2 names.
+    const index = indexOf("095-artifact-open-versions")
+    await withDatabase({ migrateThrough: index }, async ({ storage, sql, migrateThrough }) => {
+      await sql.unsafe(`
+        INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id,
+          latest_version, next_version, created_at, updated_at
+        ) VALUES (
+          'project-a', 'art_0000000001', 'document', 'Report', 'user', 'usr-1', 2, 4,
+          '2026-07-01T12:00:00.000Z', '2026-07-01T12:01:00.000Z'
+        )
+        `)
+      for (const [version, at] of [
+        [1, "2026-07-01T12:00:00.000Z"],
+        [2, "2026-07-01T12:01:00.000Z"],
+      ] as const) {
+        await sql.unsafe(`
+          INSERT INTO artifact_versions (
+            project_id, artifact_id, version, title, entry, files, outline, refs,
+            author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
+          ) VALUES (
+            'project-a', 'art_0000000001', ${version}, 'Report', 'document.md', '[]'::jsonb,
+            '{"kind":"document","headings":[]}'::jsonb, '[]'::jsonb, 'user', 'usr-1',
+            'thread-1', 'run-1', '${at}'
+          )
+          `)
+      }
+
+      // Through 091 too, whose column the storage reads.
+      await migrateThrough(index + 2)
+      const at = { projectId: "project-a", artifactId: "art_0000000001" }
+      expect(
+        await storage.artifacts.get({ projectId: "project-a", id: at.artifactId })
+      ).toMatchObject({ latestVersion: 2, revision: 2 })
+      expect(await storage.artifacts.getVersion({ ...at, version: 2 })).toMatchObject({
+        revision: 2,
+        updatedAt: new Date("2026-07-01T12:01:00.000Z"),
+        frozenAt: new Date("2026-07-01T12:01:00.000Z"),
+        // Created by whoever published it.
+        frozenBy: { type: "user", id: "usr-1" },
+      })
+
+      // The next write opens version 4: 3 was a retried turn's, and is never reused.
+      const written = await storage.artifacts.publish({
+        ...at,
+        kind: "document",
+        version: {
+          title: "Report, revised",
+          entry: "document.md",
+          files: [],
+          outline: { kind: "document", headings: [] },
+          references: [],
+          author: { type: "user", id: "usr-1" },
+          updatedAt: new Date("2026-07-02T12:00:00.000Z"),
+        },
+      })
+      expect(written.version).toMatchObject({ version: 4, revision: 3 })
+      expect((await storage.artifacts.getVersion({ ...at, version: 2 }))?.title).toBe("Report")
     })
   })
 

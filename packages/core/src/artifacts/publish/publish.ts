@@ -1,4 +1,5 @@
 import type { Principal } from "../../auth"
+import type { FileRef } from "../../blob-storage"
 import { ArtifactStorageError } from "../../storage/artifacts/errors"
 import type {
   ArtifactFile,
@@ -16,7 +17,12 @@ import type { ArtifactKind } from "../kinds"
 import { ARTIFACT_LIMITS } from "../limits"
 import type { ArtifactOutline } from "../outline"
 import type { CheckedArtifactQuery } from "../queries"
-import { ARTIFACT_THEME_FILE, parseArtifactTheme } from "../theme"
+import {
+  ARTIFACT_THEME_FILE,
+  type ArtifactTheme,
+  artifactThemeModes,
+  parseArtifactTheme,
+} from "../theme"
 import type { ArtifactWarning } from "../warnings"
 import {
   type ArtifactBlobStorage,
@@ -24,6 +30,7 @@ import {
   invalidArtifact,
   readArtifactText,
 } from "./files"
+import { canvasPreviewOutline, withBoardRenderKeys } from "./previews"
 import { type ArtifactQueryChecker, checkArtifactQueries } from "./queries"
 import {
   brokenDependents,
@@ -45,7 +52,10 @@ export interface PublishArtifactContext {
 }
 
 export interface PublishArtifactInput {
-  /** Publishes the next version of this artifact; without it, a new artifact is created. */
+  /**
+   * Writes this artifact's latest version: its open version, or the next one when it is frozen.
+   * Without it, a new artifact is created.
+   */
   readonly artifactId?: string
   readonly kind: ArtifactKind
   readonly title: string
@@ -65,8 +75,15 @@ export interface PublishArtifactInput {
    */
   readonly checkQuery?: ArtifactQueryChecker
   readonly origin?: ArtifactOrigin
-  /** The version this one was made from: publishing fails with `artifact_moved` past it. */
-  readonly baseVersion?: number
+  /** The revision this content was made from: publishing fails with `artifact_moved` past it. */
+  readonly baseRevision?: number
+  /**
+   * The Agent turn that publishes: its first write to an artifact keeps a restore point, and a
+   * retry of the turn undoes what it wrote.
+   */
+  readonly turnRunId?: string
+  /** The content as the artifact's Yjs document, stored with it, for a kind edited live. */
+  readonly document?: FileRef
 }
 
 /**
@@ -80,14 +97,25 @@ export interface PublishedArtifact {
   readonly artifact: ArtifactRecord
   readonly version: ArtifactVersionRecord
   readonly warnings: readonly ArtifactWarning[]
+  /** The write was merged with what others wrote since its base revision, as a canvas's is. */
+  readonly merged?: true
 }
 
 const CREATE_ATTEMPTS = 3
 
+/** A reader sees a board's picture until they open it, and the picture was taken as its author. */
+const LIVE_BOARD_PREVIEWS: ArtifactWarning = {
+  code: "canvas_previews_show_author_data",
+  message:
+    "Its boards read live data, so each board's preview shows the data its author can see, to everyone who can open the canvas, until they open the board.",
+}
+
 /** A version checked against its kind and with its addresses resolved, ready to store. */
 export interface PreparedArtifactVersion {
   readonly artifactId?: string
-  readonly baseVersion?: number
+  readonly baseRevision?: number
+  readonly turnRunId?: string
+  readonly document?: FileRef
   readonly kind: ArtifactKind
   /** Owns the artifact when this version creates it. */
   readonly owner: Principal
@@ -123,7 +151,8 @@ export async function prepareArtifactVersion(
 ): Promise<PreparedArtifactVersion> {
   const title = checkTitle(input.title)
   await checkArtifactFiles(context.blobStorage, input.files)
-  if (input.kind !== "file") await checkTheme(context.blobStorage, input.files)
+  const theme =
+    input.kind === "file" ? undefined : await readTheme(context.blobStorage, input.files)
 
   // The queries first: a live sheet's columns are checked against what its query returns.
   const queries = await checkArtifactQueries(
@@ -142,28 +171,39 @@ export async function prepareArtifactVersion(
 
   return {
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
-    ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
+    ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+    ...(input.turnRunId === undefined ? {} : { turnRunId: input.turnRunId }),
+    ...(input.document ? { document: input.document } : {}),
     kind: input.kind,
     owner: input.owner ?? input.author,
     readable,
-    warnings: validated.warnings ?? [],
+    warnings: [
+      ...(validated.warnings ?? []),
+      ...(input.kind === "canvas" && queries.size > 0 ? [LIVE_BOARD_PREVIEWS] : []),
+    ],
     version: {
       title,
       entry: validated.entry,
       files: input.files.map(({ path, file }) => ({ path, file: { ...file } })),
-      outline: validated.outline,
+      // A canvas's boards are shown as pictures until they are read, in the modes a reader sees;
+      // each is named by what it shows once the version has its artifact.
+      outline:
+        validated.outline.kind === "canvas"
+          ? canvasPreviewOutline(validated.outline, artifactThemeModes(theme))
+          : validated.outline,
       references,
       author: input.author,
       ...(input.origin ? { origin: input.origin } : {}),
-      createdAt: new Date(),
+      updatedAt: new Date(),
     },
   }
 }
 
 /**
- * Stores a prepared version: the next one of its artifact, or the first of a new one. The next
- * version is refused unless `access` says its author may update the artifact: a caller that stores
- * inside a transaction answers it from there, so the check and the write see the same artifact.
+ * Stores a prepared version: as its artifact's latest version, or the first of a new artifact. A
+ * write to an artifact is refused unless `access` says its author may update it: a caller that
+ * stores inside a transaction answers it from there, so the check and the write see the same
+ * artifact.
  */
 export async function storeArtifactVersion(
   context: PublishArtifactContext,
@@ -171,9 +211,7 @@ export async function storeArtifactVersion(
   access: PublishAccess
 ): Promise<PublishedArtifactVersion> {
   const { artifactId } = prepared
-  if (!artifactId) {
-    return createArtifact(context, prepared.kind, prepared.owner, prepared.version)
-  }
+  if (!artifactId) return createArtifact(context, prepared)
 
   const artifact = await context.storage.get({ projectId: context.projectId, id: artifactId })
   if (!artifact) throw notFound(artifactId)
@@ -184,7 +222,7 @@ export async function storeArtifactVersion(
 
 /**
  * What is worth fixing in a stored version: what its kind's check found, then what it breaks in
- * other artifacts that show it. A first version breaks nothing: no other artifact could name it
+ * other artifacts that show it. A new artifact breaks nothing: no other artifact could name it
  * yet. The version is stored by now, so a failed check only loses those warnings.
  */
 export async function artifactVersionWarnings(
@@ -256,16 +294,18 @@ async function validateKind(
   }
 }
 
-async function checkTheme(
+/** The version's `theme.json`, refused when it is not one; none without the file. */
+async function readTheme(
   blobStorage: ArtifactBlobStorage,
   files: readonly ArtifactFile[]
-): Promise<void> {
+): Promise<ArtifactTheme | undefined> {
   const themeFile = files.find((file) => file.path === ARTIFACT_THEME_FILE)
-  if (!themeFile) return
+  if (!themeFile) return undefined
   const parsed = parseArtifactTheme(
     await readArtifactText(blobStorage, themeFile, ARTIFACT_LIMITS.maxThemeBytes)
   )
   if ("error" in parsed) throw invalidArtifact(parsed.error)
+  return parsed.theme
 }
 
 function checkTitle(value: string): string {
@@ -289,20 +329,32 @@ async function publishVersion(
       projectId: context.projectId,
       artifactId,
       kind: prepared.kind,
-      version: prepared.version,
-      ...(prepared.baseVersion === undefined ? {} : { baseVersion: prepared.baseVersion }),
+      version: withBoardRenderKeys(prepared.version, artifactId),
+      ...(prepared.baseRevision === undefined ? {} : { baseRevision: prepared.baseRevision }),
+      ...(prepared.turnRunId === undefined ? {} : { turnRunId: prepared.turnRunId }),
+      ...(prepared.document ? { document: prepared.document } : {}),
     })
   } catch (error) {
-    if (error instanceof ArtifactStorageError && error.code === "artifact_not_found") {
-      throw new ArtifactRequestError("artifact_not_found", error.message)
-    }
-    if (error instanceof ArtifactStorageError && error.code === "artifact_kind_mismatch") {
-      throw new ArtifactRequestError("artifact_kind_mismatch", error.message)
-    }
-    if (error instanceof ArtifactStorageError && error.code === "artifact_moved") {
-      throw new ArtifactRequestError("artifact_moved", error.message, error.latest)
-    }
-    throw error
+    throw artifactRequestError(error)
+  }
+}
+
+/**
+ * A storage refusal as the caller is told it: a missing artifact or restore point, a kind it does
+ * not have, or a revision it moved past. Anything else is thrown as it is.
+ */
+export function artifactRequestError(error: unknown): unknown {
+  if (!(error instanceof ArtifactStorageError)) return error
+
+  switch (error.code) {
+    case "artifact_not_found":
+    case "artifact_kind_mismatch":
+    case "restore_point_not_found":
+      return new ArtifactRequestError(error.code, error.message)
+    case "artifact_moved":
+      return new ArtifactRequestError("artifact_moved", error.message, error.latest)
+    default:
+      return error
   }
 }
 
@@ -315,18 +367,19 @@ function notFound(artifactId: string): ArtifactRequestError {
 
 async function createArtifact(
   context: PublishArtifactContext,
-  kind: ArtifactKind,
-  owner: Principal,
-  version: ArtifactVersionInput
+  prepared: PreparedArtifactVersion
 ): Promise<PublishedArtifactVersion> {
   for (let attempt = 1; ; attempt += 1) {
+    const id = createArtifactId()
     try {
       return await context.storage.create({
         projectId: context.projectId,
-        id: createArtifactId(),
-        kind,
-        owner,
-        version,
+        id,
+        kind: prepared.kind,
+        owner: prepared.owner,
+        version: withBoardRenderKeys(prepared.version, id),
+        ...(prepared.turnRunId === undefined ? {} : { turnRunId: prepared.turnRunId }),
+        ...(prepared.document ? { document: prepared.document } : {}),
       })
     } catch (error) {
       const collided = error instanceof ArtifactStorageError && error.code === "artifact_exists"

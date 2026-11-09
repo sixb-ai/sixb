@@ -95,6 +95,7 @@ Pass `onError` to `createSixb()`. `reportError` is your monitoring integration. 
 | `lake.retention.failed` | One automatic lake cleanup failed. The next one, `cleanupEvery` later, tries again. |
 | `dataset.ingest.flush.failed` | Changes `ingest` stored wait: writing them to the dataset failed five times in a row, or nothing wrote them for 10 minutes. They stay stored, and writing goes on trying. |
 | `dataset.ingest.rejected` | One `ingest` call's changes were refused when written to the dataset. The context names the call (`deliveryId`, `executionId`), how many changes it held, the refused change's key and sequence, and why. `sixb lake rejected` prints the whole call for a week. |
+| `artifact.live_write.failed` | Changes made to a canvas live were never saved: the server stopped first, or nobody left could save them. `artifactId` names the canvas. |
 
 Notifications may be repeated, and a process crash can prevent delivery. Use `notificationId` to deduplicate alerts. The callback does not change the operation's outcome.
 

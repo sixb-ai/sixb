@@ -1,5 +1,6 @@
 import { createRuntimeArtifactAccessRule } from "../artifacts/execution"
 import { createArtifactId } from "../artifacts/ids"
+import { boardPreviewsOfCopy } from "../artifacts/publish/previews"
 import type { Principal } from "../auth"
 import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -145,8 +146,13 @@ async function createCopy(
 ): Promise<string> {
   for (let attempt = 1; ; attempt += 1) {
     const id = createArtifactId()
+    const previews = boardPreviewsOfCopy(id)
     try {
-      await artifacts.copy({ ...input, id })
+      // A board's picture is its artifact's: the copy's boards are named anew. Static boards keep
+      // their pictures; one that shows its author's data runs live for the copy's readers.
+      await artifacts.copy({ ...input, id, outlineOf: previews.outlineOf })
+      await previews.carry(artifacts, input.projectId)
+
       return id
     } catch (error) {
       const collided = error instanceof ArtifactStorageError && error.code === "artifact_exists"

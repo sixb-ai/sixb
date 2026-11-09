@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
-import type { ArtifactTheme } from "@sixb/core/artifacts"
+import type { ArtifactTheme, ArtifactThemeMode, Canvas } from "@sixb/core/artifacts"
+import { SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/artifacts"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,
@@ -10,9 +11,12 @@ import {
   layoutProbe,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
+import { type ArtifactQueryAnswer, artifactThemeModes } from "@sixb/core/internal/artifacts/publish"
+import type { ArtifactBoardPreviewSize } from "@sixb/core/storage"
 import { loginShellArgs } from "../../login-shell"
 import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
+import { canvasOverviewHtml, OVERVIEW_VIEWPORT } from "./overview"
 
 /** The check's library and each check's files, in the run's context directory. */
 const LIBRARY = "lib/layout-check"
@@ -32,6 +36,10 @@ export type LayoutCheck =
       readonly warnings: readonly LayoutWarning[]
       /** One per slide, or a page's at each width, as the agent names them. */
       readonly screenshots: readonly string[]
+      /** Each `pictured` board in each mode the reader sees it in, at its path in the sandbox. */
+      readonly previews: readonly CheckedPreview[]
+      /** A canvas as it opens in the app, as the agent names it, when the check took it. */
+      readonly overview?: string
     }
   | { readonly status: "skipped"; readonly reason: string }
 
@@ -53,6 +61,20 @@ export interface CheckedBoard {
   readonly w: number
   readonly h: number
   readonly html: Uint8Array
+  /** Screenshot in every mode, not only the first: it needs its pictures for readers. */
+  readonly pictured?: boolean
+}
+
+/** A board's picture in one mode and size, which the check took. */
+export interface CheckedPreview {
+  readonly board: string
+  readonly theme: ArtifactThemeMode
+  /** `full`, a PNG of the board; `small`, a WebP at most 480 pixels wide. */
+  readonly size: ArtifactBoardPreviewSize
+  /** Absolute, in the sandbox. */
+  readonly path: string
+  /** How large the check wrote it. */
+  readonly bytes?: number
 }
 
 interface CheckReport {
@@ -62,6 +84,14 @@ interface CheckReport {
   readonly problems?: readonly CheckedProblem[]
   readonly errors?: readonly string[]
   readonly screenshots?: readonly string[]
+  readonly previews?: readonly CheckedPreview[]
+  /** A canvas's boards whose page draws larger than the board's `w` by `h`. */
+  readonly oversized?: readonly OversizedBoard[]
+  /** A canvas's boards not pictured: something on their page did not load. */
+  readonly unpictured?: readonly { readonly board: string; readonly reason: string }[]
+  /** A canvas's boards that stopped answering, which the check went on without. */
+  readonly stalls?: readonly { readonly board: string; readonly message: string }[]
+  readonly overview?: string
   /** Why the check stopped before it finished; what it found until then is above. */
   readonly stopped?: string
   readonly skipped?: string
@@ -73,7 +103,7 @@ interface CheckReport {
  * What a page's `sixb.query(name)` reads in the check: the query route's JSON as it answers the
  * requester, or why the query failed for them.
  */
-export type CheckedQuery = { readonly result: unknown } | { readonly error: string }
+export type CheckedQuery = ArtifactQueryAnswer
 
 /** A width a page is checked at, as a laptop and a phone show it. */
 export type PageView = "desktop" | "phone"
@@ -103,7 +133,12 @@ export async function checkLayout(
     readonly timeoutMs?: number
   } & (
     | { readonly layout: FrameLayout; readonly entry: Uint8Array }
-    | { readonly layout: "canvas"; readonly boards: readonly CheckedBoard[] }
+    | {
+        readonly layout: "canvas"
+        readonly boards: readonly CheckedBoard[]
+        /** The canvas's items, for a picture of it as it opens; none without. */
+        readonly canvas?: Canvas
+      }
   )
 ): Promise<LayoutCheck> {
   const { sandbox } = input.handle
@@ -154,9 +189,17 @@ export async function checkLayout(
           {
             path: posix.join(output, "boards.json"),
             contents: JSON.stringify(
-              input.boards.map(({ id, file, w, h }) => ({ id, file, w, h }))
+              input.boards.map(({ id, file, w, h, pictured }) => ({
+                id,
+                file,
+                w,
+                h,
+                pictured: pictured === true,
+                ...(pictured ? { smallWidth: SMALL_BOARD_PREVIEW_WIDTH } : {}),
+              }))
             ),
           },
+          ...overviewFiles(output, input.canvas, input.theme),
         ]
       : []),
     { path: posix.join(output, "themes.json"), contents: JSON.stringify(deckThemes(input.theme)) },
@@ -209,14 +252,32 @@ export async function checkLayout(
   const noun = { deck: "deck", page: "page", canvas: "canvas" }[input.layout]
   const reached = { deck: "Slides", page: "Widths", canvas: "Boards" }[input.layout]
   const checks = posix.join(input.handle.contextDirectory, CHECKS, input.name)
-  const screenshots = (report.screenshots ?? []).map((path) =>
-    posix.join(checks, posix.relative(output, path))
-  )
+  const named = (path: string) => posix.join(checks, posix.relative(output, path))
+  const screenshots = (report.screenshots ?? []).map(named)
   return {
     status: "checked",
     screenshots,
+    // Only pictures of the boards asked for, where the check writes them.
+    previews: (report.previews ?? []).filter(
+      ({ board, path }) =>
+        input.layout === "canvas" &&
+        input.boards.some((each) => each.id === board && each.pictured) &&
+        path.startsWith(`${output}/`)
+    ),
+    ...(report.overview ? { overview: named(report.overview) } : {}),
     warnings: [
       ...layoutWarnings(report.problems ?? []),
+      ...oversizedWarnings(report.oversized ?? []),
+      ...(report.unpictured ?? []).map(({ board, reason }) => ({
+        code: "preview_not_taken",
+        part: board,
+        message: `Board '${board}' has no preview: ${reason.slice(0, 200)}, and a picture of it would show it broken to every reader. It shows its outline until a version loads whole.`,
+      })),
+      ...(report.stalls ?? []).map(({ board, message }) => ({
+        code: "layout_incomplete",
+        part: board,
+        message: `Board '${board}' stopped answering: ${message.slice(0, 200)}. The check went on without it.`,
+      })),
       ...(report.errors ?? []).map((error) => ({
         code: "layout_load_error",
         message: `While the ${noun} loaded: ${error.slice(0, 200)}.`,
@@ -261,13 +322,34 @@ function queryFiles(
  * pins, each with the deck's tokens over Sixb's.
  */
 function deckThemes(theme: ArtifactTheme | undefined) {
-  const modes = theme?.mode ? [theme.mode] : (["light", "dark"] as const)
   return Object.fromEntries(
-    modes.map((mode) => {
+    artifactThemeModes(theme).map((mode) => {
       const base = FRAME_DEFAULT_THEMES[mode]
       return [mode, { ...base, tokens: { ...base.tokens, ...theme?.tokens } }]
     })
   )
+}
+
+/**
+ * A canvas's page of itself as it opens, in the first theme the reader sees it in, each board
+ * the screenshot the check takes of it, and the window to screenshot it in.
+ */
+function overviewFiles(
+  output: string,
+  canvas: Canvas | undefined,
+  theme: ArtifactTheme | undefined
+): { path: string; contents: string }[] {
+  if (!canvas) return []
+
+  const [mode = "light"] = artifactThemeModes(theme)
+  const tokens = { ...FRAME_DEFAULT_THEMES[mode].tokens, ...theme?.tokens }
+  return [
+    {
+      path: posix.join(output, "overview.html"),
+      contents: canvasOverviewHtml({ canvas, tokens, image: (id) => `boards/${id}.png` }),
+    },
+    { path: posix.join(output, "overview.json"), contents: JSON.stringify(OVERVIEW_VIEWPORT) },
+  ]
 }
 
 function asset(path: string): string {
@@ -285,6 +367,34 @@ function parseReport(stdout: string): CheckReport | null {
   } catch {
     return null
   }
+}
+
+/** A board whose page draws larger than the board, in CSS pixels. */
+interface OversizedBoard {
+  readonly board: string
+  readonly w: number
+  readonly h: number
+  readonly page: { readonly w: number; readonly h: number }
+}
+
+/**
+ * Each board whose page is larger than the board: the canvas, its preview, and the opened board
+ * all show only its top left. The board takes the page's size; the canvas's zoom makes it small.
+ */
+export function oversizedWarnings(boards: readonly OversizedBoard[]): LayoutWarning[] {
+  const warnings: LayoutWarning[] = boards.slice(0, MAX_WARNINGS).map(({ board, w, h, page }) => ({
+    code: "layout_board_too_small",
+    part: board,
+    message: `Board '${board}' is ${w}×${h} but its page draws ${page.w}×${page.h}, so the canvas, its preview and the opened board show only its top left. Set its "w" and "h" in canvas.json to ${Math.max(w, page.w)} and ${Math.max(h, page.h)}: the canvas's zoom draws it small, never a smaller board.`,
+  }))
+  const more = boards.length - warnings.length
+  if (more > 0) {
+    warnings.push({
+      code: "layout_board_too_small",
+      message: `${more} more board${more === 1 ? "" : "s"} draw a page larger than the board; give each board its page's size.`,
+    })
+  }
+  return warnings
 }
 
 /** The most a check reports; the screenshots show the rest. */

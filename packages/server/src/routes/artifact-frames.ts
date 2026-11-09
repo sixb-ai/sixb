@@ -1,8 +1,10 @@
 import type { SixbHostView } from "@sixb/core"
 import { parseArtifactAddress } from "@sixb/core/artifacts"
+import { annotateBoard } from "@sixb/core/artifacts/live"
 import {
   ARTIFACT_FRAME_ROUTE_PREFIX,
   FRAME_ASSETS,
+  FRAME_REFERENCE_PATH,
   FRAME_REFERENCE_PREFIX,
   frameEntries,
   frameLayout,
@@ -11,6 +13,11 @@ import {
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
 import { openFileRef } from "@sixb/core/internal/blob-storage"
+import type {
+  ArtifactFrameTarget,
+  ArtifactStorage,
+  ArtifactVersionRecord,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { frameContentSecurityPolicy } from "../artifacts/frame"
 import type { ResolvedSixbApiBrowserPolicy } from "../auth/browser-origin"
@@ -24,7 +31,8 @@ interface FrameContext {
 /**
  * Serves a version's files to its sandboxed frame, under the token a frame link carries: the token
  * is the credential, so the route is public. Each entry gets its layout's kit and the runtime,
- * which are served beside the files. Hidden from OpenAPI: clients receive frame links, they
+ * which are served beside the files. A canvas's board asked for with `?sixb-edit` is served for
+ * editing: its static elements marked with their addresses. Hidden from OpenAPI: clients receive frame links, they
  * never build them.
  */
 export function registerArtifactFrameRoutes(
@@ -84,21 +92,16 @@ async function frameResponse(
   }
   let lent = false
   if (path?.startsWith(FRAME_REFERENCE_PREFIX)) {
-    // A file another artifact lends this one: only one its frame was issued with, at that version.
-    const match = /^([^/@]+)@(\d+)\/(.+)$/.exec(path.slice(FRAME_REFERENCE_PREFIX.length))
+    // A file another artifact lends this one: only one its frame was issued with. A pinned
+    // address shows its created version; an unpinned one the lender's latest, as it is now.
+    const match = FRAME_REFERENCE_PATH.exec(path.slice(FRAME_REFERENCE_PREFIX.length))
     const target = frame.targets.find(
       (candidate) =>
         candidate.artifactId === match?.[1] &&
-        candidate.version === Number(match?.[2]) &&
+        String(candidate.version) === match?.[2] &&
         parseArtifactAddress(candidate.address)?.path === match?.[3]
     )
-    const lender = target
-      ? await storage.getVersion({
-          projectId: host.id,
-          artifactId: target.artifactId,
-          version: target.version,
-        })
-      : null
+    const lender = target ? await lenderVersion(storage, host.id, target) : null
     if (!lender || !match) return notFound()
     version = lender
     path = match[3] ?? null
@@ -115,8 +118,18 @@ async function frameResponse(
     headers.set("cache-control", "private, no-cache")
     if (options.head) return new Response(null, { headers })
     const text = await new Response(opened.body).text()
+
+    // A canvas's board served for editing has its static elements marked with their addresses,
+    // for the runtime to report and edit them by.
+    const editing =
+      version.outline.kind === "canvas" && new URL(request.url).searchParams.has("sixb-edit")
+    const source = editing ? annotateBoard(text) : text
     return new Response(
-      injectFrameAssets(rewriteFrameReferences(text, frame.targets, file.path), layout, file.path),
+      injectFrameAssets(
+        rewriteFrameReferences(source, frame.targets, file.path),
+        layout,
+        file.path
+      ),
       { headers }
     )
   }
@@ -133,6 +146,21 @@ async function frameResponse(
   for (const [name, value] of headers) response.headers.set(name, value)
   response.headers.set("content-disposition", "inline")
   return response
+}
+
+async function lenderVersion(
+  storage: ArtifactStorage,
+  projectId: string,
+  target: ArtifactFrameTarget
+): Promise<ArtifactVersionRecord | null> {
+  const { artifactId } = target
+  const version =
+    target.version === "latest"
+      ? (await storage.get({ projectId, id: artifactId }))?.latestVersion
+      : target.version
+  if (version === undefined) return null
+
+  return storage.getVersion({ projectId, artifactId, version })
 }
 
 function decodePath(raw: string | undefined): string | null {

@@ -9,6 +9,7 @@ import {
   prop,
   SixbHost,
 } from "../src"
+import { boardPreview, boardPreviews } from "../src/artifacts/publish"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { createTestAgentExecution, createTestSixb } from "../src/testing"
@@ -458,6 +459,86 @@ describe("adding and removing participants", () => {
   })
 })
 
+/**
+ * Alice's canvas of one board, shared in the conversation at version 2, its board pictured in
+ * light as her worker rendered it. A live canvas's board reads her invoices. Bob may read them too.
+ */
+async function sharedCanvas(host: Host, options: { readonly live?: true } = {}) {
+  const reads = { "view:object": new Set([Invoice.id]) }
+  const shared = await sharedThread(host, { owner: reads, participant: reads, cleared: true })
+  const artifacts = host.storage.artifacts
+  if (!artifacts) throw new Error("Expected artifact storage.")
+
+  const put = async (path: string, body: string) => ({
+    path,
+    file: await host.blobStorage.put({ body: new TextEncoder().encode(body), fileName: path }),
+  })
+  const canvas = (x: number) =>
+    put(
+      "canvas.json",
+      JSON.stringify({
+        items: [{ id: "due", type: "board", file: "due.html", x, y: 0, w: 640, h: 480 }],
+      })
+    )
+  // Only the invoices' ids: Bob is not cleared for their amounts.
+  const due = { kind: "start", objectTypeId: Invoice.id }
+  const query = JSON.stringify({ kind: "project", input: due, properties: ["id"] })
+  const pages = [
+    await put("due.html", '<main><script>sixb.query("due")</script></main>'),
+    ...(options.live ? [await put("queries/due.json", query)] : []),
+  ]
+
+  const created = await shared.owner.artifacts.create({
+    kind: "canvas",
+    title: "Invoices",
+    files: [await canvas(0), ...pages],
+  })
+  const { version } = await artifacts.publish({
+    projectId,
+    artifactId: created.artifact.id,
+    kind: "canvas",
+    version: { ...created.version, origin: { threadId: shared.thread.id, runId: "run_alice" } },
+  })
+
+  // Her worker pictured the board.
+  const outline = version.outline
+  const renderKey =
+    outline.kind === "canvas" && outline.items[0]?.type === "board"
+      ? outline.items[0].renderKey
+      : undefined
+  if (!renderKey) throw new Error("Expected the board's render key.")
+  const picture = await host.blobStorage.put({
+    body: new TextEncoder().encode("Alice's invoices"),
+    mediaType: "image/png",
+  })
+  await artifacts.putBoardPreviews({
+    projectId,
+    previews: [{ renderKey, theme: "light", size: "full", file: picture, createdAt: new Date() }],
+  })
+
+  const latest = async (artifactId: string) => {
+    const record = await artifacts.get({ projectId, id: artifactId })
+    const version = record
+      ? await artifacts.getVersion({ projectId, artifactId, version: record.latestVersion })
+      : null
+    if (!version) throw new Error(`Expected the latest version of '${artifactId}'.`)
+    return version
+  }
+
+  /** The board's light picture in an artifact's latest version, as the preview route serves it. */
+  const pictured = async (artifactId: string) =>
+    boardPreview(
+      (await boardPreviews(artifacts, await latest(artifactId))).get("due"),
+      "light",
+      "full"
+    )
+
+  /** The canvas with its board moved: the board's page as it was. */
+  const moved = async () => [await canvas(40), ...pages]
+
+  return { ...shared, artifacts, artifactId: created.artifact.id, picture, latest, pictured, moved }
+}
+
 describe("forking a shared conversation", () => {
   // Guard proof: fork only when the caller owns the source; Bob's fork is then refused.
   test("a participant forks it into a thread they own alone", async () => {
@@ -480,6 +561,38 @@ describe("forking a shared conversation", () => {
     ])
     expect(await owner.agent.threads.getById(fork.id)).toBeNull()
     expect((await owner.agent.threads.getById(thread.id))?.participants).toHaveLength(1)
+  })
+
+  // Guard proof: copy without outlineOf in fork.ts; Bob's copy names its board as Alice's
+  // version does, and the route serves him the picture of Alice's rows.
+  test("gives no preview of the owner's live boards to whoever forks it", async () => {
+    const { host } = setup()
+    const { participant, thread, artifacts, artifactId, picture, pictured } = await sharedCanvas(
+      host,
+      { live: true }
+    )
+    expect(await pictured(artifactId)).toMatchObject({ file: picture })
+
+    const fork = await participant.agent.threads.fork(thread.id)
+    const { artifacts: copies } = await artifacts.list({ projectId, threadId: fork.id })
+    expect(copies).toHaveLength(1)
+    expect(await pictured(copies[0]?.id ?? "")).toBeUndefined()
+  })
+
+  // Guard proof: leave out `previews.carry` in fork.ts; the copy's board, named anew, has no
+  // picture and shows its outline.
+  test("keeps the previews of the owner's static boards in the copy", async () => {
+    const { host } = setup()
+    const { participant, thread, artifacts, artifactId, picture, latest, pictured } =
+      await sharedCanvas(host)
+
+    const fork = await participant.agent.threads.fork(thread.id)
+    const { artifacts: copies } = await artifacts.list({ projectId, threadId: fork.id })
+    const copyId = copies[0]?.id ?? ""
+
+    // Named for the copy, with the same picture.
+    expect((await latest(copyId)).outline).not.toEqual((await latest(artifactId)).outline)
+    expect(await pictured(copyId)).toMatchObject({ file: picture })
   })
 
   test("anyone else, an observer, or a removed participant cannot fork it", async () => {
@@ -594,19 +707,20 @@ describe("artifacts a shared conversation shares", () => {
     const { owner, participant, thread, artifact, content } = await sharedArtifact(host)
 
     // The owner's edit from outside the conversation is shared too: the artifact is, whole.
-    await owner.artifacts.publish(artifact.id, { ...content, title: "Edited in the app" })
+    await owner.artifacts.update(artifact.id, { ...content, title: "Edited in the app" })
     expect(await participant.artifacts.access(artifact.id)).toBe("update")
     expect(await participant.artifacts.get(artifact.id)).toMatchObject({
-      latestVersion: 3,
+      latestVersion: 1,
+      revision: 3,
       title: "Edited in the app",
       owner: alice,
     })
 
-    const saved = await participant.artifacts.publish(artifact.id, {
+    const saved = await participant.artifacts.update(artifact.id, {
       ...content,
       title: "Bob's edit",
     })
-    expect(saved.version).toMatchObject({ version: 4, author: bob })
+    expect(saved.version).toMatchObject({ version: 1, revision: 4, author: bob })
     expect(saved.artifact.owner).toEqual(alice)
 
     await participant.artifacts.state(artifact.id).set("filters", { region: "EMEA" })
@@ -629,7 +743,7 @@ describe("artifacts a shared conversation shares", () => {
     const { owner, participant, thread, artifact, content } = await sharedArtifact(host)
 
     // A save in the app has no conversation: it links the artifact nowhere new.
-    await participant.artifacts.publish(artifact.id, { ...content, title: "Bob's edit" })
+    await participant.artifacts.update(artifact.id, { ...content, title: "Bob's edit" })
     expect(await host.storage.artifacts?.listThreadIds({ projectId, id: artifact.id })).toEqual([
       thread.id,
     ])
@@ -643,9 +757,162 @@ describe("artifacts a shared conversation shares", () => {
       return open(...args)
     }
     await expect(
-      participant.artifacts.publish(artifact.id, { ...content, title: "Too late" })
+      participant.artifacts.update(artifact.id, { ...content, title: "Too late" })
     ).rejects.toMatchObject({ code: "not_shared" })
-    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ revision: 3 })
+  })
+
+  // Guard proof: answer freeze and restore from `accessTo` without `assertUpdatable` in the
+  // runtime's `change`; Cleo, whom the conversation does not share it with, then creates a version.
+  test("whoever may update one creates its versions and restores it; nobody else", async () => {
+    const { host } = setup()
+    const { owner, participant, other, artifact, content } = await sharedArtifact(host)
+
+    const frozen = await participant.artifacts.freeze(artifact.id, { baseRevision: 2 })
+    expect(frozen.version).toMatchObject({ version: 1, revision: 3, frozenAt: expect.any(Date) })
+    // Creating it again changes nothing.
+    expect((await owner.artifacts.freeze(artifact.id)).artifact.revision).toBe(3)
+
+    // A turn rewrites it: the turn's first write kept what it replaced.
+    const opened = await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: artifact.id,
+      kind: "document",
+      version: { ...frozen.version, title: "Turn's draft", updatedAt: new Date() },
+      turnRunId: "run_turn",
+    })
+    expect(opened?.version).toMatchObject({ version: 2, revision: 4 })
+    const [point] = (await participant.artifacts.listRestorePoints(artifact.id)) ?? []
+    expect(point).toMatchObject({ revision: 3, version: 1, frozen: true, reason: "turn" })
+
+    const restored = await participant.artifacts.restore(artifact.id, 3, { baseRevision: 4 })
+    expect(restored.version).toMatchObject({
+      version: 2,
+      revision: 5,
+      title: content.title,
+      author: bob,
+    })
+    expect(await owner.artifacts.getRestorePoint(artifact.id, 4)).toMatchObject({
+      title: "Turn's draft",
+      reason: "restore",
+    })
+
+    for (const refused of [
+      () => other.artifacts.freeze(artifact.id),
+      () => other.artifacts.restore(artifact.id, 4),
+    ]) {
+      expect(await refused().catch((error: unknown) => error)).toMatchObject({
+        code: "not_shared",
+      })
+    }
+    expect(await other.artifacts.listRestorePoints(artifact.id)).toBeNull()
+    expect(await other.artifacts.getRestorePoint(artifact.id, 4)).toBeNull()
+    await expect(participant.artifacts.restore(artifact.id, 9)).rejects.toMatchObject({
+      code: "restore_point_not_found",
+    })
+  })
+
+  // Guard proof: show artifact events to every principal in `createEventsRuntime`; Cleo then
+  // learns that Alice's artifact changed. Drop `undoTurnWrites` from retryAgentRun, and the
+  // turn's draft outlives its retry. Leave out the `requester` it passes, and Alice's own comment
+  // keeps the chart.
+  test("a retry puts back what the turn wrote, and tells only whoever reads it", async () => {
+    const { host } = setup()
+    const { owner, participant, other, run, artifact, content } = await sharedArtifact(host)
+    const before = await owner.artifacts.getVersion(artifact.id, "latest")
+    if (!before) throw new Error("Expected the shared version.")
+
+    // Alice's failed turn rewrote the report and created a chart.
+    await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: artifact.id,
+      kind: "document",
+      version: { ...before, title: "Turn's draft", updatedAt: new Date() },
+      turnRunId: run.id,
+    })
+    const chart = await host.storage.artifacts?.create({
+      projectId,
+      id: "art_turnchart",
+      kind: "document",
+      owner: alice,
+      version: { ...before, title: "Chart", updatedAt: new Date() },
+      turnRunId: run.id,
+    })
+    const table = await host.storage.artifacts?.create({
+      projectId,
+      id: "art_turntable",
+      kind: "document",
+      owner: alice,
+      version: { ...before, title: "Table", updatedAt: new Date() },
+      turnRunId: run.id,
+    })
+
+    // Alice commented on the chart, and Bob on the table: his words keep the table.
+    const comment = (artifactId: string, author: typeof alice | typeof bob) =>
+      host.storage.artifacts?.createComment({
+        projectId,
+        artifactId,
+        id: `cmt_${author.id}`,
+        anchor: { revision: 1 },
+        body: "Bigger labels",
+        author,
+        createdAt: new Date(),
+      })
+    await comment("art_turnchart", alice)
+    await comment("art_turntable", bob)
+    const cursor = await host.events.latestCursor()
+
+    await owner.agent.runs.retry(run.id)
+
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({
+      title: content.title,
+      revision: 4,
+    })
+    expect(await owner.artifacts.get(chart?.artifact.id ?? "")).toBeNull()
+    expect(await owner.artifacts.get(table?.artifact.id ?? "")).toMatchObject({ title: "Table" })
+
+    const read = async (reader: typeof owner) =>
+      (
+        await reader.events.read({
+          ...(cursor === undefined ? {} : { afterCursor: cursor }),
+          types: ["artifact.updated"],
+        })
+      ).map((event) => event.payload)
+    const updated = { artifactId: artifact.id, version: 1, revision: 4, frozen: false }
+    expect(await read(owner)).toEqual([updated])
+    expect(await read(participant)).toEqual([updated])
+    expect(await read(other)).toEqual([])
+  })
+
+  // Guard proof: keep the author in every render key in previews.ts; Bob moving the board names it
+  // anew, and every reader sees its outline until the worker renders it again.
+  test("a participant's save keeps a static board's preview", async () => {
+    const { host } = setup()
+    const { participant, artifactId, picture, pictured, moved } = await sharedCanvas(host)
+
+    const saved = await participant.artifacts.update(artifactId, {
+      kind: "canvas",
+      title: "Invoices",
+      files: await moved(),
+    })
+
+    expect(saved.version).toMatchObject({ author: bob })
+    expect(await pictured(artifactId)).toMatchObject({ file: picture })
+  })
+
+  // Guard proof: leave the author out of a live board's render key; Bob's version then shows
+  // readers the picture of Alice's rows.
+  test("a participant's save renders a live board's preview again, with their data", async () => {
+    const { host } = setup()
+    const { participant, artifactId, pictured, moved } = await sharedCanvas(host, { live: true })
+
+    await participant.artifacts.update(artifactId, {
+      kind: "canvas",
+      title: "Invoices",
+      files: await moved(),
+    })
+
+    expect(await pictured(artifactId)).toBeUndefined()
   })
 
   test("nobody else reaches them, nor the owner's artifacts the conversation does not share", async () => {
@@ -654,7 +921,7 @@ describe("artifacts a shared conversation shares", () => {
 
     expect(await participant.artifacts.access(notes.id)).toBe("none")
     expect(await participant.artifacts.get(notes.id)).toBeNull()
-    await expect(participant.artifacts.publish(notes.id, content)).rejects.toMatchObject({
+    await expect(participant.artifacts.update(notes.id, content)).rejects.toMatchObject({
       code: "not_shared",
     })
 
@@ -666,7 +933,7 @@ describe("artifacts a shared conversation shares", () => {
       mediaType: "text/markdown",
     })
     await expect(
-      participant.artifacts.publish(artifact.id, {
+      participant.artifacts.update(artifact.id, {
         ...content,
         files: [{ path: "document.md", file: embedding }],
       })
@@ -720,8 +987,12 @@ describe("artifacts a shared conversation shares", () => {
   test("a fork gets its own copies, with their history, and its messages name them", async () => {
     const { host } = setup()
     const { owner, participant, thread, run, artifact, content } = await sharedArtifact(host)
-    await owner.artifacts.publish(artifact.id, { ...content, title: "Latest" })
-    // A card for version 2, as publish_artifact_version leaves one, and an embed pinned to @1.
+    // Alice creates versions 1 and 2, and writes the open version 3.
+    await owner.artifacts.freeze(artifact.id)
+    await owner.artifacts.update(artifact.id, content)
+    await owner.artifacts.freeze(artifact.id)
+    await owner.artifacts.update(artifact.id, { ...content, title: "Latest" })
+    // A card for version 2, as update_artifact leaves one, and an embed pinned to @1.
     await host.storage.agents?.messages.append({
       projectId,
       id: "msg_shown",
@@ -732,7 +1003,7 @@ describe("artifacts a shared conversation shares", () => {
         {
           type: "tool-call",
           toolCallId: "call_publish",
-          toolName: "publish_artifact_version",
+          toolName: "update_artifact",
           input: { id: artifact.id },
           state: "output-available",
           output: { artifactId: artifact.id, version: 2 },
@@ -916,7 +1187,7 @@ describe("queries in the artifacts a conversation shares", () => {
     // Bob is not cleared for amounts: a query that returns them is his to leave out.
     const all = await put("queries/invoices.json", '{"kind":"start","objectTypeId":"Invoice"}')
     const refused = await participant.artifacts
-      .publish(artifact.id, { kind: "page", title: "Invoices", files: [index, all] })
+      .update(artifact.id, { kind: "page", title: "Invoices", files: [index, all] })
       .catch((error: unknown) => error)
     expect(refused).toMatchObject({
       code: "invalid_artifact",
@@ -928,7 +1199,7 @@ describe("queries in the artifacts a conversation shares", () => {
       "queries/invoices.json",
       '{"kind":"project","input":{"kind":"start","objectTypeId":"Invoice"},"properties":["id"]}'
     )
-    await participant.artifacts.publish(artifact.id, {
+    await participant.artifacts.update(artifact.id, {
       kind: "page",
       title: "Invoices",
       files: [index, ids],

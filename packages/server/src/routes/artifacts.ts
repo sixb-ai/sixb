@@ -17,6 +17,16 @@ import {
   createArtifactFrame,
   serializeArtifactQueryResult,
 } from "@sixb/core/internal/artifacts/frames"
+import {
+  boardPreview,
+  boardPreviewStatuses,
+  boardPreviews,
+} from "@sixb/core/internal/artifacts/publish"
+import type {
+  ArtifactCommentRecord,
+  ArtifactRestorePointRecord,
+  PublishedArtifactVersion,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -26,8 +36,16 @@ import {
   fileContentGetResponses,
   fileContentHeadResponses,
 } from "../files/content"
+import { principalName } from "../live/awareness"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
+  AddArtifactCommentBodySchema,
+  ArtifactBoardPreviewParamsSchema,
+  ArtifactBoardPreviewQuerySchema,
+  ArtifactChangeResponseSchema,
+  ArtifactCommentListResponseSchema,
+  ArtifactCommentParamsSchema,
+  ArtifactCommentSchema,
   ArtifactErrorResponseSchema,
   ArtifactFrameResponseSchema,
   ArtifactListQuerySchema,
@@ -35,18 +53,25 @@ import {
   ArtifactParamsSchema,
   ArtifactQueryParamsSchema,
   ArtifactResponseSchema,
+  ArtifactRestorePointListResponseSchema,
+  ArtifactRestorePointParamsSchema,
+  ArtifactRestorePointSchema,
   ArtifactStateParamsSchema,
   ArtifactStateResponseSchema,
   ArtifactVersionParamsSchema,
   ArtifactVersionSchema,
   ClearArtifactStateResponseSchema,
+  DeleteArtifactCommentResponseSchema,
   DeleteArtifactResponseSchema,
   DeleteArtifactStateResponseSchema,
+  FreezeArtifactBodySchema,
   PublishArtifactBodySchema,
-  PublishArtifactVersionBodySchema,
   PublishedArtifactResponseSchema,
+  ResolveArtifactCommentBodySchema,
+  RestoreArtifactBodySchema,
   SetArtifactStateBodySchema,
   SetArtifactStateResponseSchema,
+  UpdateArtifactBodySchema,
 } from "../schemas/artifacts"
 import { FileContentQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
@@ -63,6 +88,7 @@ function artifactBody(artifact: ArtifactRecord) {
     title: artifact.title,
     owner: artifact.owner,
     latestVersion: artifact.latestVersion,
+    revision: artifact.revision,
     createdAt: toIsoString(artifact.createdAt),
     updatedAt: toIsoString(artifact.updatedAt),
   }
@@ -72,6 +98,8 @@ function versionBody(version: ArtifactVersionRecord) {
   return {
     artifactId: version.artifactId,
     version: version.version,
+    revision: version.revision,
+    frozen: version.frozenAt !== undefined,
     title: version.title,
     entry: version.entry,
     files: version.files,
@@ -80,13 +108,94 @@ function versionBody(version: ArtifactVersionRecord) {
     author: version.author,
     origin: version.origin,
     createdAt: toIsoString(version.createdAt),
+    updatedAt: toIsoString(version.updatedAt),
+    ...(version.frozenAt ? { frozenAt: toIsoString(version.frozenAt) } : {}),
+    ...(version.frozenBy ? { frozenBy: version.frozenBy } : {}),
   }
 }
 
-function serializePublished(published: PublishedArtifact) {
+/**
+ * Names the authors of these comments, each read once, as the live canvas names who is on it.
+ */
+function commentAuthors(host: SixbHostView) {
+  const names = new Map<string, Promise<string | null>>()
+  return (comment: ArtifactCommentRecord) => {
+    const key = `${comment.author.type}:${comment.author.id}`
+    let name = names.get(key)
+    if (!name) {
+      name = principalName(host.storage, host.projectId, comment.author)
+      names.set(key, name)
+    }
+    return name
+  }
+}
+
+async function commentBody(
+  comment: ArtifactCommentRecord,
+  nameOf: (comment: ArtifactCommentRecord) => Promise<string | null>
+) {
+  return {
+    authorName: await nameOf(comment),
+    ...(comment.origin ? { origin: comment.origin } : {}),
+    artifactId: comment.artifactId,
+    id: comment.id,
+    ...(comment.parentId === undefined ? {} : { parentId: comment.parentId }),
+    anchor: comment.anchor,
+    body: comment.body,
+    author: comment.author,
+    createdAt: toIsoString(comment.createdAt),
+    ...(comment.resolvedAt ? { resolvedAt: toIsoString(comment.resolvedAt) } : {}),
+    ...(comment.resolvedBy ? { resolvedBy: comment.resolvedBy } : {}),
+  }
+}
+
+function restorePointSummary(point: ArtifactRestorePointRecord) {
+  return {
+    artifactId: point.artifactId,
+    revision: point.revision,
+    version: point.version,
+    frozen: point.frozen,
+    title: point.title,
+    author: point.author,
+    origin: point.origin,
+    updatedAt: toIsoString(point.updatedAt),
+    reason: point.reason,
+    ...(point.turnRunId === undefined ? {} : { turnRunId: point.turnRunId }),
+    createdAt: toIsoString(point.createdAt),
+  }
+}
+
+/**
+ * A version as one is answered alone, or just written: a canvas's boards say whether their
+ * previews are worth waiting for, so a viewer seeded from either asks for them alike.
+ */
+async function versionResponse(host: SixbHostView, version: ArtifactVersionRecord) {
+  const storage = host.storage.artifacts
+  const statuses =
+    storage && version.outline.kind === "canvas"
+      ? await boardPreviewStatuses(storage, version, {
+          renders: host.sandboxes !== undefined,
+          now: new Date(),
+        })
+      : undefined
+
+  return {
+    ...versionBody(version),
+    ...(statuses ? { boardPreviews: Object.fromEntries(statuses) } : {}),
+  }
+}
+
+async function serializeChange(host: SixbHostView, change: PublishedArtifactVersion) {
+  return ArtifactChangeResponseSchema.parse({
+    artifact: artifactBody(change.artifact),
+    version: await versionResponse(host, change.version),
+  })
+}
+
+async function serializePublished(host: SixbHostView, published: PublishedArtifact) {
   return PublishedArtifactResponseSchema.parse({
     artifact: artifactBody(published.artifact),
-    version: versionBody(published.version),
+    version: await versionResponse(host, published.version),
     warnings: published.warnings,
   })
 }
@@ -134,9 +243,31 @@ async function runTokenArtifacts(
   const run = await host.storage.agents?.runs.getById({ projectId: host.id, id: runId })
   if (!run || !sixb) throw new AgentExecutionLostError(runId)
 
-  return agentRunArtifacts({ projectId: host.id, storage: host.storage }, run, executionToken, () =>
-    Promise.resolve(sixb)
+  return agentRunArtifacts(
+    { projectId: host.id, storage: host.storage, domainEvents: host.events, broker: host.broker },
+    run,
+    executionToken,
+    () => Promise.resolve(sixb)
   )
+}
+
+/**
+ * The Agent's run a request with a run token comes from, and its conversation: a comment it writes
+ * says so. Undefined for anyone else, who writes as themselves.
+ */
+async function runTokenOrigin(
+  host: SixbHostView,
+  context: unknown
+): Promise<{ readonly threadId: string; readonly runId: string } | undefined> {
+  const { agentExecution } = requestAuthState(context)
+  // A workflow's node has no conversation: its run token reaches no comment.
+  if (!agentExecution || agentExecution.kind === "workflow") return undefined
+
+  const run = await host.storage.agents?.runs.getById({
+    projectId: host.id,
+    id: agentExecution.runId,
+  })
+  return run?.threadId ? { threadId: run.threadId, runId: run.id } : undefined
 }
 
 function versionParam(value: string): number | "latest" {
@@ -156,6 +287,15 @@ async function refusal(context: unknown, artifactId: string, set: RouteSet) {
   return refusalFor(await requireRequestSixb(context).artifacts.access(artifactId), set)
 }
 
+/** Why a restore point was not found: its artifact is not readable, or keeps no such point. */
+async function restorePointRefusal(context: unknown, artifactId: string, set: RouteSet) {
+  const access = await requireRequestSixb(context).artifacts.access(artifactId)
+  if (access === null || access === "none") return refusalFor(access, set)
+
+  set.status = 404
+  return { error: "Restore point not found", code: "restore_point_not_found" as const }
+}
+
 /** The refusal for what the caller may do with an artifact, once that is known. */
 function refusalFor(access: ArtifactAccess | null, set: RouteSet) {
   if (access !== "none") return notFound(set)
@@ -171,7 +311,9 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
   if (error instanceof ArtifactRequestError) {
     switch (error.code) {
       case "artifact_not_found":
+      case "comment_not_found":
       case "query_not_found":
+      case "restore_point_not_found":
         set.status = 404
         break
       case "artifact_kind_mismatch":
@@ -180,9 +322,11 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
         set.status = 409
         break
       case "invalid_artifact":
+      case "invalid_comment":
       case "invalid_state":
         set.status = 400
         break
+      case "comments_full":
       case "state_full":
         set.status = 413
         break
@@ -225,14 +369,17 @@ function artifactErrorResponse(status: number) {
   }
 }
 
-const publishResponses = {
-  201: PublishedArtifactResponseSchema,
+const writeRefusals = {
   400: ArtifactErrorResponseSchema,
   403: ArtifactErrorResponseSchema,
   404: ArtifactErrorResponseSchema,
   409: ArtifactErrorResponseSchema,
   501: ArtifactErrorResponseSchema,
 }
+
+const createResponses = { 201: PublishedArtifactResponseSchema, ...writeRefusals }
+
+const updateResponses = { 200: PublishedArtifactResponseSchema, ...writeRefusals }
 
 async function artifactFileContentResponse(
   host: SixbHostView,
@@ -274,6 +421,135 @@ async function artifactFileContentResponse(
     }
     return handleArtifactRouteError(error, context.set)
   }
+}
+
+/** A file of a restore point, to whoever reads its artifact. */
+async function restorePointFileContentResponse(
+  host: SixbHostView,
+  context: {
+    readonly params: { readonly artifactId: string; readonly revision: string }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: RouteSet
+  }
+) {
+  try {
+    const query = FileContentQuerySchema.parse(context.query)
+    const { artifactId } = context.params
+    const point = await requireRequestSixb(context).artifacts.getRestorePoint(
+      artifactId,
+      Number(context.params.revision)
+    )
+    if (!point) return await restorePointRefusal(context, artifactId, context.set)
+
+    const file = point.files.find((candidate) => candidate.path === query.path)
+    const response =
+      file &&
+      (await createFileContentResponse({
+        blobStorage: host.blobStorage,
+        fileRef: file.file,
+        disposition: query.disposition,
+        request: context.request,
+      }))
+    if (!response) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+    return response
+  } catch (error) {
+    if (error instanceof ZodError) {
+      context.set.status = 400
+      return { error: "Invalid file content query" }
+    }
+    return handleArtifactRouteError(error, context.set)
+  }
+}
+
+/**
+ * A board's preview, to whoever reads its version: reading the version as the caller is the
+ * check. Its render key names what the board shows, so a frozen version's preview never changes.
+ */
+async function artifactBoardPreviewResponse(
+  host: SixbHostView,
+  context: {
+    readonly params: {
+      readonly artifactId: string
+      readonly version: string
+      readonly board: string
+    }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: RouteSet & { headers: Record<string, string | number> }
+  }
+) {
+  try {
+    const query = ArtifactBoardPreviewQuerySchema.parse(context.query)
+    const { artifactId, board } = context.params
+    const number = versionParam(context.params.version)
+
+    const version = await requireRequestSixb(context).artifacts.getVersion(artifactId, number)
+    if (!version) return await refusal(context, artifactId, context.set)
+
+    // A picture of a revision the version moved past, or of what the board showed before, is not
+    // this one's.
+    const current =
+      query.key !== undefined
+        ? boardRenderKey(version, board) === query.key
+        : query.revision === undefined || query.revision === version.revision
+
+    // The reader's mode, unless the canvas pins another.
+    const themes = version.outline.kind === "canvas" ? (version.outline.themes ?? []) : []
+    const theme = query.theme && themes.includes(query.theme) ? query.theme : themes[0]
+
+    const storage = host.storage.artifacts
+    const preview =
+      storage && theme && current
+        ? boardPreview(
+            (await boardPreviews(storage, version)).get(board),
+            theme,
+            query.size ?? "full"
+          )
+        : undefined
+    const response =
+      preview &&
+      (await createFileContentResponse({
+        blobStorage: host.blobStorage,
+        fileRef: preview.file,
+        request: context.request,
+      }))
+    if (!response) {
+      context.set.status = 404
+      // It may be rendered in a moment: nothing may keep this answer.
+      context.set.headers["cache-control"] = "no-store"
+      return { error: "Board preview not found", code: "preview_not_found" as const }
+    }
+
+    // A frozen version never changes, nor its boards' pictures, and neither does a revision; an
+    // open version asked for without one does at each write.
+    response.headers.set(
+      "cache-control",
+      (number !== "latest" && version.frozenAt) ||
+        query.revision !== undefined ||
+        query.key !== undefined
+        ? "private, max-age=31536000, immutable"
+        : "private, no-cache"
+    )
+    return response
+  } catch (error) {
+    return handleArtifactRouteError(error, context.set)
+  }
+}
+
+/** The render key a canvas version's outline gives one of its boards. */
+function boardRenderKey(
+  version: { readonly outline: ArtifactVersionRecord["outline"] },
+  board: string
+): string | undefined {
+  if (version.outline.kind !== "canvas") return undefined
+  const item = version.outline.items.find(
+    (candidate) => candidate.type === "board" && candidate.id === board
+  )
+  return item?.type === "board" ? item.renderKey : undefined
 }
 
 export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
@@ -327,14 +603,14 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             ? await run.publish(contentInput(body))
             : await requireRequestSixb(context).artifacts.create(contentInput(body))
           context.set.status = 201
-          return serializePublished(published)
+          return await serializePublished(host, published)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
       },
       {
         body: PublishArtifactBodySchema,
-        response: publishResponses,
+        response: createResponses,
         detail: {
           summary: "Create an artifact",
           description:
@@ -562,37 +838,338 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
-    .post(
-      "/api/artifacts/:artifactId/versions",
+    .put(
+      "/api/artifacts/:artifactId/content",
       async (context) => {
         try {
-          const body = PublishArtifactVersionBodySchema.parse(context.body)
+          const body = UpdateArtifactBodySchema.parse(context.body)
           const { artifactId } = context.params
           const content = {
             ...contentInput(body),
-            ...(body.baseVersion === undefined ? {} : { baseVersion: body.baseVersion }),
+            ...(body.baseRevision === undefined ? {} : { baseRevision: body.baseRevision }),
           }
           const run = await runTokenArtifacts(host, context)
           const published = run
             ? await run.publish({ ...content, artifactId })
-            : await requireRequestSixb(context).artifacts.publish(artifactId, content)
-          context.set.status = 201
-          return serializePublished(published)
+            : await requireRequestSixb(context).artifacts.update(artifactId, content)
+          return await serializePublished(host, published)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
       },
       {
         params: ArtifactParamsSchema,
-        body: PublishArtifactVersionBodySchema,
-        response: publishResponses,
+        body: UpdateArtifactBodySchema,
+        response: updateResponses,
         detail: {
-          summary: "Publish an artifact's next version",
+          summary: "Update an artifact",
           description:
-            "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since. With a run token, only an artifact the run's conversation shares or its requester owns; the version is shared in that conversation. A run that lost its execution gets 409 execution_lost.",
+            "Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.",
           tags: [OPENAPI_TAGS.artifacts.name],
-          operationId: "publishArtifactVersion",
-          security: accessTokenSecurityRequirement("publishArtifactVersion"),
+          operationId: "updateArtifact",
+          security: accessTokenSecurityRequirement("updateArtifact"),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/freeze",
+      async (context) => {
+        try {
+          const body = FreezeArtifactBodySchema.parse(context.body ?? {})
+          const frozen = await requireRequestSixb(context).artifacts.freeze(
+            context.params.artifactId,
+            body.baseRevision === undefined ? {} : { baseRevision: body.baseRevision }
+          )
+          return await serializeChange(host, frozen)
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        body: FreezeArtifactBodySchema,
+        response: {
+          200: ArtifactChangeResponseSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          409: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Create a version",
+          description:
+            "Freezes the artifact's open latest version: it never changes again, and the next write opens the next version. A latest version already frozen is returned as it is. Whoever may update the artifact may create a version. With baseRevision, it is refused with 409 artifact_moved when the open version changed since.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "freezeArtifactVersion",
+          security: accessTokenSecurityRequirement("freezeArtifactVersion"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/comments",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const comments = await requireRequestSixb(context).artifacts.listComments(artifactId)
+          if (!comments) return await refusal(context, artifactId, context.set)
+
+          const nameOf = commentAuthors(host)
+          return ArtifactCommentListResponseSchema.parse({
+            comments: await Promise.all(comments.map((comment) => commentBody(comment, nameOf))),
+          })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ArtifactCommentListResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "List an artifact's comments",
+          description:
+            "Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "listArtifactComments",
+          security: accessTokenSecurityRequirement("listArtifactComments"),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/comments",
+      async (context) => {
+        try {
+          const body = AddArtifactCommentBodySchema.parse(context.body)
+          const origin = await runTokenOrigin(host, context)
+          const comment = await requireRequestSixb(context).artifacts.addComment(
+            context.params.artifactId,
+            {
+              body: body.body,
+              ...(body.anchor ? { anchor: body.anchor } : {}),
+              ...(body.parentId ? { parentId: body.parentId } : {}),
+              ...(origin ? { origin } : {}),
+            }
+          )
+          context.set.status = 201
+          return ArtifactCommentSchema.parse(await commentBody(comment, commentAuthors(host)))
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        body: AddArtifactCommentBodySchema,
+        response: {
+          201: ArtifactCommentSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          413: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Comment on an artifact",
+          description:
+            "Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "addArtifactComment",
+          security: accessTokenSecurityRequirement("addArtifactComment"),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/comments/:commentId/resolve",
+      async (context) => {
+        try {
+          const body = ResolveArtifactCommentBodySchema.parse(context.body ?? {})
+          const comment = await requireRequestSixb(context).artifacts.resolveComment(
+            context.params.artifactId,
+            context.params.commentId,
+            body.resolved
+          )
+          return ArtifactCommentSchema.parse(await commentBody(comment, commentAuthors(host)))
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactCommentParamsSchema,
+        body: ResolveArtifactCommentBodySchema,
+        response: {
+          200: ArtifactCommentSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Resolve an artifact's comment",
+          description:
+            "Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "resolveArtifactComment",
+          security: accessTokenSecurityRequirement("resolveArtifactComment"),
+        },
+      }
+    )
+    .delete(
+      "/api/artifacts/:artifactId/comments/:commentId",
+      async (context) => {
+        try {
+          await requireRequestSixb(context).artifacts.deleteComment(
+            context.params.artifactId,
+            context.params.commentId
+          )
+          return DeleteArtifactCommentResponseSchema.parse({ deleted: true })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactCommentParamsSchema,
+        response: {
+          200: DeleteArtifactCommentResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Delete an artifact's comment",
+          description:
+            "Deletes the comment and its replies. Its author, or whoever may update the artifact, may.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "deleteArtifactComment",
+          security: accessTokenSecurityRequirement("deleteArtifactComment"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/restore-points",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const points = await requireRequestSixb(context).artifacts.listRestorePoints(artifactId)
+          if (!points) return await refusal(context, artifactId, context.set)
+
+          return ArtifactRestorePointListResponseSchema.parse({
+            restorePoints: points.map(restorePointSummary),
+          })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ArtifactRestorePointListResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "List an artifact's restore points",
+          description:
+            "What the artifact's latest version held before each Agent turn's first write to it, and before each restore, newest first. They are not versions: restoring one puts its content back in the latest version.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "listArtifactRestorePoints",
+          security: accessTokenSecurityRequirement("listArtifactRestorePoints"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/restore-points/:revision",
+      async (context) => {
+        try {
+          const { artifactId, revision } = context.params
+          const point = await requireRequestSixb(context).artifacts.getRestorePoint(
+            artifactId,
+            Number(revision)
+          )
+          if (!point) return await restorePointRefusal(context, artifactId, context.set)
+
+          return ArtifactRestorePointSchema.parse({
+            ...restorePointSummary(point),
+            entry: point.entry,
+            files: point.files,
+            outline: point.outline,
+            references: point.references,
+          })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactRestorePointParamsSchema,
+        response: {
+          200: ArtifactRestorePointSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get an artifact's restore point",
+          description:
+            "Its files, outline, and references, as the latest version held them. Read a file's bytes with GET /api/artifacts/{artifactId}/restore-points/{revision}/content.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactRestorePoint",
+          security: accessTokenSecurityRequirement("getArtifactRestorePoint"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/restore-points/:revision/content",
+      async (context) => restorePointFileContentResponse(host, context),
+      {
+        params: ArtifactRestorePointParamsSchema,
+        query: FileContentQuerySchema,
+        detail: {
+          summary: "Get a file of an artifact's restore point",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactRestorePointFileContent",
+          security: accessTokenSecurityRequirement("getArtifactRestorePointFileContent"),
+          responses: fileContentGetResponses({ optionalStorage: true }),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/restore-points/:revision/restore",
+      async (context) => {
+        try {
+          const body = RestoreArtifactBodySchema.parse(context.body ?? {})
+          const { artifactId, revision } = context.params
+          const restored = await requireRequestSixb(context).artifacts.restore(
+            artifactId,
+            Number(revision),
+            body.baseRevision === undefined ? {} : { baseRevision: body.baseRevision }
+          )
+          return await serializeChange(host, restored)
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactRestorePointParamsSchema,
+        body: RestoreArtifactBodySchema,
+        response: {
+          200: ArtifactChangeResponseSchema,
+          400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          409: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Restore an artifact",
+          description:
+            "Puts a restore point's content back in the latest version, as an update writes it: in place while it is open, as the next version when it is frozen. What it replaces becomes a restore point, so the restore can be undone. Whoever may update the artifact may restore it. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "restoreArtifact",
+          security: accessTokenSecurityRequirement("restoreArtifact"),
         },
       }
     )
@@ -637,7 +1214,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Open a version in a frame",
           description:
-            "A short-lived path that serves the files of a version that opens in a sandboxed frame, as slides do. It expires within an hour. A kind that does not open in a frame is refused with 409 artifact_kind_mismatch.",
+            "A short-lived path that serves the files of a version that opens in a sandboxed frame, as slides do, at the revision it has now: once the version is written again, the path serves nothing and a new one is needed. It expires within an hour. A kind that does not open in a frame is refused with 409 artifact_kind_mismatch.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "createArtifactFrame",
           security: accessTokenSecurityRequirement("createArtifactFrame"),
@@ -653,7 +1230,8 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             versionParam(context.params.version)
           )
           if (!version) return await refusal(context, context.params.artifactId, context.set)
-          return ArtifactVersionSchema.parse(versionBody(version))
+
+          return ArtifactVersionSchema.parse(await versionResponse(host, version))
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -672,6 +1250,36 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactVersion",
           security: accessTokenSecurityRequirement("getArtifactVersion"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/boards/:board/preview",
+      async (context) => artifactBoardPreviewResponse(host, context),
+      {
+        params: ArtifactBoardPreviewParamsSchema,
+        query: ArtifactBoardPreviewQuerySchema,
+        detail: {
+          summary: "Get the preview of a canvas's board",
+          description:
+            "A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A frozen version's preview never changes, and is cached as such, as is one asked for at a revision; an open version's otherwise, and \"latest\", are revalidated. 404 preview_not_found until it is rendered, when it never will be, or when revision is not the version's current one: the version says which.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactBoardPreview",
+          security: accessTokenSecurityRequirement("getArtifactBoardPreview"),
+          responses: {
+            200: {
+              description: "The board's preview",
+              content: {
+                "image/png": { schema: { type: "string", format: "binary" } },
+                "image/webp": { schema: { type: "string", format: "binary" } },
+              },
+            },
+            304: { description: "The preview is unchanged; reuse the privately cached one" },
+            400: artifactErrorResponse(400),
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+            501: artifactErrorResponse(501),
+          },
         },
       }
     )

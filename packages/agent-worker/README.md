@@ -146,29 +146,36 @@ Earlier files in the retained conversation are discoverable through the sandbox'
 `$SIXB_ATTACHMENTS` manifest and inspectable using `view_file` when materialized. Current user
 attachments and file-producing tool results retain their model-input projections.
 
-`publish_artifact` creates an artifact and `publish_artifact_version` publishes the next version of
-one (`../agent/src/artifacts/publish-tool.ts`). They are two tools so that every argument of each is required:
-a mode carried by an optional or null argument is where models differ, and with every property
-required each model adapter sends both schemas strict. Offered only to conversations whose storage
-holds artifacts, each reads a file or directory from the sandbox, stores its bytes against the run's
-file budget, which counts identical content once, and publishes it with the thread and run as its
-origin, authored by whoever asked for the turn: a new artifact for the thread's owner, or the next
-version of one the requester owns or this conversation already shares, so a turn never shares
-someone else's artifact in another conversation. The turn installs, revises and refers to
-artifacts through the requester's own `sixb.artifacts`, so it reaches nothing they could not.
-Validation runs first; the version commits in a transaction that checks the run still holds its
-execution token and asks core's access rule again, so a run reclaimed by another delivery, or a
-requester removed meanwhile, publishes nothing. The version exists when the tool returns: the
-conversation shows it mid-turn, a cancelled run keeps it, and retrying the run deletes it with the
-run's messages. After a deck publishes, the
+`publish_artifact` creates an artifact and `update_artifact` writes its latest version
+(`../agent/src/artifacts/publish-tool.ts`): the open version's content is replaced, or the next
+version opens after one the user created; only people create versions. They are two tools so that
+every argument of each is required: a mode carried by an optional or null argument is where models
+differ, and with every property required each model adapter sends both schemas strict. Offered only
+to conversations whose storage holds artifacts, each reads a file or directory from the sandbox,
+stores its bytes against the run's file budget, which counts identical content once, and publishes
+it with the thread and run as its origin, authored by whoever asked for the turn: a new artifact
+for the thread's owner, or an update of one the requester owns or this conversation already
+shares, so a turn never shares someone else's artifact in another conversation. The turn installs,
+revises and refers to artifacts through the requester's own `sixb.artifacts`, so it reaches nothing
+they could not. Validation runs first; the write commits in a transaction that checks the run still
+holds its execution token and asks core's access rule again, so a run reclaimed by another
+delivery, or a requester removed meanwhile, writes nothing. A child writes as its parent's turn:
+the turn's first write to an existing artifact keeps a restore point, and its writes are recorded
+under the turn. The write exists when the tool returns: the conversation shows it mid-turn, a
+cancelled run keeps it, and retrying the run undoes it with the run's messages, unless anyone else
+changed the artifact since the turn's first write to it, between its writes included, or created
+the version that write replaced. After a deck publishes, the
 layout check (`../agent/src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
 the files the version holds; it bounds every wait on the page and exits before its command's
 timeout, so a deck that hangs costs a partial report rather than a browser left running.
 
 Before each conversation run, `../agent/src/artifacts/materialize.ts` installs the latest version of each
-artifact the thread published under `$SIXB_ARTIFACTS_DIR/<id>/` and lists them in `$SIXB_ARTIFACTS`,
+artifact the thread shares under `$SIXB_ARTIFACTS_DIR/<id>/` and lists them in `$SIXB_ARTIFACTS`,
 newest first within a byte budget; an artifact whose files cannot be read is listed without them.
-Each publish replaces its artifact's copy and entry, so both stay the latest version during the run.
+Each entry names the revision its copy holds, which the next update is based on, and a pinned
+address only for a version the user created. Each publish replaces its artifact's copy and entry,
+so both stay at the latest revision during the run; after `wait_agent`, what the turn's children
+wrote is installed the same way.
 The built-in `sixb-artifacts` skill (`../agent/src/skills/`) describes the formats the publisher accepts; its
 examples are published in the tests.
 

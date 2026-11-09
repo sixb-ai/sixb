@@ -4,8 +4,8 @@ import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render } from "@testing-library/react"
-import { ArtifactFrame } from "../src/artifacts/frame"
-import { resetPageState } from "../src/artifacts/page-state"
+import { ArtifactFrame, frameLinkKey } from "../src/artifacts/frame"
+import { resetPageState, usePageStateCount } from "../src/artifacts/page-state"
 import { installDom } from "./helpers/dom"
 
 const browser = installDom([
@@ -38,6 +38,9 @@ function pageVersion(): GetArtifactVersionResponse {
     references: [],
     author: { type: "user", id: "user-1" },
     createdAt: "2026-10-19T12:00:00.000Z",
+    updatedAt: "2026-10-19T12:00:00.000Z",
+    revision: 1,
+    frozen: true,
   }
 }
 
@@ -94,16 +97,22 @@ beforeEach(() => {
   kept = new Map([["inputs", { rate: 412, occupancy: 88 }]])
 })
 
+/** The count the viewer's menu shows of the values the page keeps. */
+function Count({ artifactId }: { readonly artifactId: string }) {
+  return <output>{usePageStateCount(artifactId)}</output>
+}
+
 function mount(artifactId = PAGE) {
   const version = { ...pageVersion(), artifactId }
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  cache.setQueryData(["artifact-frame", version.artifactId, version.version], {
+  cache.setQueryData(frameLinkKey(version), {
     path: "/api/artifact-frames/token/",
     expiresAt: "2026-10-19T13:00:00.000Z",
   })
   const ui = render(
     <QueryClientProvider client={cache}>
       <ArtifactFrame version={version} title="Lisbon rate what-if" />
+      <Count artifactId={artifactId} />
     </QueryClientProvider>
   )
   const frame = ui.container.querySelector("iframe")?.contentWindow
@@ -127,7 +136,9 @@ function mount(artifactId = PAGE) {
   const results = () => posted.filter((message) => "result" in message)
   /** Where the frame mounted now loads its page. */
   const source = () => ui.container.querySelector("iframe")?.getAttribute("src")
-  return { cache, posted, call, results, source }
+  /** The count the viewer shows. */
+  const count = () => ui.container.querySelector("output")?.textContent
+  return { cache, posted, call, results, source, count }
 }
 
 describe("a page's data", () => {
@@ -153,6 +164,26 @@ describe("a page's data", () => {
       `PUT /api/artifacts/${PAGE}/state/pinned`,
       `DELETE /api/artifacts/${PAGE}/state/pinned`,
     ])
+  })
+
+  test("is counted for the viewer without being read until the page asks", async () => {
+    // The count follows the query the frame's first call reads, and declares how it is read.
+    // Reproduce by dropping its queryFn: React Query logs a missing queryFn on every draw.
+    const logged: unknown[] = []
+    const error = console.error
+    console.error = (...args: unknown[]) => logged.push(args[0])
+    try {
+      const { call, count } = mount()
+      expect(count()).toBe("0")
+      expect(requests).toEqual([])
+
+      await call({ call: 1, method: "state.get", params: { key: "inputs" } })
+      expect(count()).toBe("1")
+      expect(requests).toEqual([`GET /api/artifacts/${PAGE}/state`])
+    } finally {
+      console.error = error
+    }
+    expect(logged.filter((message) => String(message).includes("queryFn"))).toEqual([])
   })
 
   test("answers only its own frame", async () => {
@@ -211,7 +242,7 @@ describe("a page's data", () => {
 
     // Another frame of the version mints a newer link; this one keeps loading the page it has.
     act(() => {
-      cache.setQueryData(["artifact-frame", PAGE, 1], {
+      cache.setQueryData(frameLinkKey({ artifactId: PAGE, version: 1, revision: 1 }), {
         path: "/api/artifact-frames/renewed/",
         expiresAt: "2026-10-19T14:00:00.000Z",
       })

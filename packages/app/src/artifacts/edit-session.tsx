@@ -1,4 +1,4 @@
-import type { PublishArtifactVersionResponse } from "@sixb/client"
+import type { UpdateArtifactResponse } from "@sixb/client"
 import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import type { QueryClient } from "@tanstack/react-query"
 import { createContext, type ReactNode, useContext, useEffect } from "react"
@@ -57,16 +57,16 @@ const MEDIA_TYPES: Readonly<Record<string, string>> = {
 }
 
 /**
- * Publishes a draft as the artifact's next version, and fills the cache with it: the new version,
- * and each file's text, the changed ones from the draft and the rest from the version edited, so
- * the new version opens at once, without reading again what the reader already has.
+ * Saves a draft as the artifact's latest, and fills the cache with what it saved: the version, and
+ * each file's text, the changed ones from the draft and the rest from the version edited, so it
+ * shows at once, without reading again what the reader already has.
  */
 export async function saveDraft(
   queries: QueryClient,
   version: ArtifactVersion,
   draft: ArtifactDraft,
-  options: { readonly baseVersion?: number } = {}
-): Promise<PublishArtifactVersionResponse> {
+  options: { readonly baseRevision?: number } = {}
+): Promise<UpdateArtifactResponse> {
   const texts = draft.files()
   const changed = new Map(
     [...texts].map(([path, text]) => [

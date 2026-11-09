@@ -159,6 +159,22 @@ export interface SixbRuleEvaluationFailedContext
   readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
 }
 
+/**
+ * What people changed in a canvas live was never stored: the server stopped before it could write
+ * it back, or storage refused it with nobody left who may write it. Until then a failed write-back
+ * is only logged: the server keeps the changes and tries again while it runs.
+ */
+export interface SixbArtifactLiveWriteFailedContext
+  extends SixbFailureContext<"artifact.live_write.failed"> {
+  /** The last write-back's failure. */
+  readonly failure: SixbFailure<"storage.unavailable" | "internal.unexpected">
+  readonly artifactId: string
+  /** The revision the unwritten changes were made on. */
+  readonly revision: number
+  /** The write-backs tried, none of which was stored. */
+  readonly attempts: number
+}
+
 /** A terminal automatic-indexing failure, correlated with its persisted request and profile. */
 export interface SixbVectorIndexingFailedContext
   extends SixbFailureContext<"vector.indexing.failed"> {
@@ -251,6 +267,7 @@ export interface SixbDatasetIngestRejectedContext
  * Failure notifications never change the outcome of the operation they observe.
  */
 export type SixbErrorContext =
+  | SixbArtifactLiveWriteFailedContext
   | SixbVectorIndexingFailedContext
   | SixbLakeRetentionFailedContext
   | SixbDatasetIngestFlushFailedContext

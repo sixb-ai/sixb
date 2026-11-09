@@ -4,7 +4,7 @@ import { type AgentRunWebPlan, agentToolSpec } from "@sixb/core/internal/agents"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import {
   PUBLISH_ARTIFACT_TOOL_SPEC,
-  PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
+  UPDATE_ARTIFACT_TOOL_SPEC,
 } from "../src/artifacts/publish-tool"
 import { BASH_OUTPUT_TOOL_SPEC, BASH_STOP_TOOL_SPEC } from "../src/tools/background"
 import { BASH_TOOL_SPEC } from "../src/tools/bash"
@@ -40,7 +40,7 @@ describe("agent model tool specifications", () => {
       BASH_OUTPUT_TOOL_SPEC,
       BASH_STOP_TOOL_SPEC,
       PUBLISH_ARTIFACT_TOOL_SPEC,
-      PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
+      UPDATE_ARTIFACT_TOOL_SPEC,
     ])
   })
 

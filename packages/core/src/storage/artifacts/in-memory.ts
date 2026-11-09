@@ -1,23 +1,41 @@
+import { ARTIFACT_COMMENT_LIMITS, ARTIFACT_RESTORE_POINTS } from "../../artifacts/limits"
 import { type Principal, principalsEqual } from "../../auth"
+import type { FileRef } from "../../blob-storage"
 import { paginate } from "../pagination"
-import { artifactStateBytes, artifactStorageErrors, checkArtifactStateWrite } from "./record"
+import {
+  artifactStateBytes,
+  artifactStorageErrors,
+  checkArtifactStateWrite,
+  othersCommented,
+  turnUndoable,
+} from "./record"
 import type {
+  ArtifactBoardPreviewRecord,
+  ArtifactCommentKey,
+  ArtifactCommentRecord,
   ArtifactFrameGrantRecord,
   ArtifactRecord,
+  ArtifactRestorePointReason,
+  ArtifactRestorePointRecord,
   ArtifactStateEntry,
   ArtifactStateKeyInput,
   ArtifactStateScope,
   ArtifactStorage,
+  ArtifactTurnInput,
+  ArtifactTurnWriteRecord,
   ArtifactVersionInput,
   ArtifactVersionRecord,
   CopyArtifactInput,
+  CreateArtifactCommentInput,
   CreateArtifactInput,
   DeleteArtifactInput,
-  DeleteArtifactVersionsByOriginInput,
   DeleteExpiredArtifactFrameGrantsInput,
   FindArtifactFrameGrantInput,
+  FreezeArtifactVersionInput,
   GetArtifactInput,
+  GetArtifactRestorePointInput,
   GetArtifactVersionInput,
+  ListArtifactBoardPreviewsInput,
   ListArtifactsInput,
   ListArtifactsResult,
   ListArtifactVersionsInput,
@@ -25,30 +43,44 @@ import type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  PutArtifactBoardPreviewsInput,
+  ResolveArtifactCommentInput,
+  RestoreArtifactInput,
   SetArtifactStateInput,
+  UndoArtifactTurnInput,
+  UndoneArtifactTurn,
 } from "./types"
 
 interface StoredArtifact {
   readonly record: ArtifactRecord
-  /** Oldest first. */
+  /** Oldest first: only the last may be open. */
   readonly versions: readonly ArtifactVersionRecord[]
   /** The number the next version gets; it only grows, so a deleted number is never reused. */
   readonly nextVersion: number
   /** The threads it is shared in, by id. */
   readonly threads: ReadonlyMap<string, ThreadLink>
+  /** Newest first. */
+  readonly restorePoints: readonly ArtifactRestorePointRecord[]
+  /** What each Agent turn that wrote it last left it at, by the turn's run. */
+  readonly turnWrites: ReadonlyMap<string, ArtifactTurnWriteRecord>
+  /** Oldest first. */
+  readonly comments: readonly ArtifactCommentRecord[]
 }
 
 interface ThreadLink {
   /** When it was first shared there. */
   readonly sharedAt: Date
-  /** Copied for the thread: shared there whatever versions it keeps. */
+  /** Copied for the thread: shared there for as long as it lasts. */
   readonly copied: boolean
+  /** The Agent turn whose write shared it there, which a retry of the turn takes back. */
+  readonly linkedByRunId?: string
 }
 
 interface InMemoryArtifactSnapshot {
   readonly artifacts: ReadonlyMap<string, StoredArtifact>
   readonly frameGrants: ReadonlyMap<string, ArtifactFrameGrantRecord>
   readonly state: ReadonlyMap<string, ReadonlyMap<string, ArtifactStateEntry>>
+  readonly boardPreviews: ReadonlyMap<string, ArtifactBoardPreviewRecord>
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
@@ -56,11 +88,20 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   private frameGrants = new Map<string, ArtifactFrameGrantRecord>()
   /** By artifact and reader, then by key. */
   private state = new Map<string, Map<string, ArtifactStateEntry>>()
+  /** By project, render key, mode, and size; no artifact owns one. */
+  private boardPreviews = new Map<string, ArtifactBoardPreviewRecord>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     const key = artifactKey(input.projectId, input.id)
     if (this.artifacts.has(key)) throw artifactStorageErrors.exists(input.id)
-    const version = versionRecord(input.projectId, input.id, 1, input.version)
+
+    const content = input.version
+    const version = versionRecord(input.projectId, input.id, {
+      version: 1,
+      revision: 1,
+      content,
+      createdAt: content.updatedAt,
+    })
     const record: ArtifactRecord = {
       projectId: input.projectId,
       id: input.id,
@@ -68,16 +109,33 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       title: version.title,
       owner: { ...input.owner },
       latestVersion: 1,
-      createdAt: new Date(version.createdAt),
-      updatedAt: new Date(version.createdAt),
+      revision: 1,
+      createdAt: new Date(content.updatedAt),
+      updatedAt: new Date(content.updatedAt),
+      ...(input.document
+        ? { document: { file: structuredClone(input.document), revision: 1 } }
+        : {}),
     }
-    this.artifacts.set(key, {
-      record,
-      versions: [version],
-      nextVersion: 2,
-      threads: sharedIn(new Map(), version),
-    })
-    return published(record, version)
+
+    const stored = turnWrote(
+      sharedIn(
+        {
+          record,
+          versions: [version],
+          nextVersion: 2,
+          threads: new Map(),
+          restorePoints: [],
+          turnWrites: new Map(),
+          comments: [],
+        },
+        content,
+        input.turnRunId
+      ),
+      input.turnRunId,
+      { created: true }
+    )
+    this.artifacts.set(key, stored)
+    return published(stored)
   }
 
   async publish(input: PublishArtifactVersionInput): Promise<PublishedArtifactVersion> {
@@ -87,34 +145,159 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     if (stored.record.kind !== input.kind) {
       throw artifactStorageErrors.kindMismatch(input.artifactId, stored.record.kind, input.kind)
     }
-    const latest = stored.versions.find(
-      (candidate) => candidate.version === stored.record.latestVersion
+    assertBase(stored, input.baseRevision)
+
+    // A turn's first write keeps what it replaces, so the turn can be undone.
+    const { turnRunId } = input
+    const firstOfTurn = turnRunId !== undefined && !stored.turnWrites.has(turnRunId)
+    const kept = firstOfTurn
+      ? withRestorePoint(stored, {
+          reason: "turn",
+          turnRunId,
+          createdAt: input.version.updatedAt,
+        })
+      : stored
+
+    const next = turnWrote(
+      sharedIn(written(kept, input.version, input.document), input.version, turnRunId),
+      turnRunId,
+      { created: false }
     )
-    if (input.baseVersion !== undefined && latest && latest.version !== input.baseVersion) {
-      throw artifactStorageErrors.moved(input.artifactId, input.baseVersion, {
-        version: latest.version,
-        author: structuredClone(latest.author),
-      })
+    this.artifacts.set(key, next)
+    return published(next)
+  }
+
+  async freeze(input: FreezeArtifactVersionInput): Promise<PublishedArtifactVersion> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    if (!stored) throw artifactStorageErrors.notFound(input.artifactId)
+
+    const latest = latestOf(stored)
+    if (latest.frozenAt) return published(stored)
+    assertBase(stored, input.baseRevision)
+
+    const revision = stored.record.revision + 1
+    const frozen = {
+      ...latest,
+      revision,
+      frozenAt: new Date(input.frozenAt),
+      frozenBy: structuredClone(input.frozenBy),
     }
-    const version = versionRecord(
-      input.projectId,
-      input.artifactId,
-      stored.nextVersion,
-      input.version
+    // A freeze keeps the content, so a document that held it still does.
+    const { document } = stored.record
+    const next: StoredArtifact = {
+      ...stored,
+      record: {
+        ...stored.record,
+        revision,
+        updatedAt: new Date(input.frozenAt),
+        ...(document?.revision === stored.record.revision
+          ? { document: { ...document, revision } }
+          : {}),
+      },
+      versions: [...stored.versions.slice(0, -1), frozen],
+    }
+    this.artifacts.set(key, next)
+    return published(next)
+  }
+
+  async listRestorePoints(input: GetArtifactInput): Promise<ArtifactRestorePointRecord[]> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.id))
+    return structuredClone([...(stored?.restorePoints ?? [])])
+  }
+
+  async getRestorePoint(
+    input: GetArtifactRestorePointInput
+  ): Promise<ArtifactRestorePointRecord | null> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.artifactId))
+    const point = stored?.restorePoints.find((each) => each.revision === input.revision)
+    return point ? structuredClone(point) : null
+  }
+
+  async restoreTo(input: RestoreArtifactInput): Promise<PublishedArtifactVersion> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    if (!stored) throw artifactStorageErrors.notFound(input.artifactId)
+
+    const point = stored.restorePoints.find((each) => each.revision === input.revision)
+    if (!point) throw artifactStorageErrors.restorePointNotFound(input.artifactId, input.revision)
+    assertBase(stored, input.baseRevision)
+
+    // What the restore replaces is kept first, so the restore can be undone.
+    const kept = withRestorePoint(stored, { reason: "restore", createdAt: input.restoredAt })
+    const next = written(
+      kept,
+      {
+        title: point.title,
+        entry: point.entry,
+        files: point.files,
+        outline: point.outline,
+        references: point.references,
+        author: input.author,
+        updatedAt: input.restoredAt,
+      },
+      input.document
     )
-    const record: ArtifactRecord = {
-      ...stored.record,
-      title: version.title,
-      latestVersion: version.version,
-      updatedAt: new Date(version.createdAt),
+    this.artifacts.set(key, next)
+    return published(next)
+  }
+
+  async listTurnWrites(input: ArtifactTurnInput): Promise<ArtifactTurnWriteRecord[]> {
+    const writes: ArtifactTurnWriteRecord[] = []
+    for (const stored of this.artifacts.values()) {
+      if (stored.record.projectId !== input.projectId) continue
+
+      const write = stored.turnWrites.get(input.turnRunId)
+      if (write) writes.push(structuredClone(write))
     }
-    this.artifacts.set(key, {
-      record,
-      versions: [...stored.versions, version],
-      nextVersion: stored.nextVersion + 1,
-      threads: sharedIn(stored.threads, version),
-    })
-    return published(record, version)
+
+    // Code-unit order, as SQLite compares text.
+    return writes.sort((left, right) => (left.artifactId < right.artifactId ? -1 : 1))
+  }
+
+  async undoTurnWrites(input: UndoArtifactTurnInput): Promise<UndoneArtifactTurn> {
+    const { turnRunId } = input
+    const restored: PublishedArtifactVersion[] = []
+    const deleted: string[] = []
+
+    for (const [key, stored] of this.artifacts) {
+      if (stored.record.projectId !== input.projectId) continue
+
+      const write = stored.turnWrites.get(turnRunId)
+      if (!write) continue
+
+      const revision = stored.record.revision
+      if (
+        write.created &&
+        turnUndoable({ write, revision }) &&
+        !othersCommented(stored.comments, input)
+      ) {
+        this.deleteArtifact(key)
+        deleted.push(stored.record.id)
+        continue
+      }
+
+      const point = stored.restorePoints.find((each) => each.turnRunId === turnRunId)
+      const target = point && stored.versions.find((each) => each.version === point.version)
+      const untouched =
+        !write.created &&
+        turnUndoable({
+          write,
+          revision,
+          ...(point ? { point } : {}),
+          ...(target ? { target: { frozen: target.frozenAt !== undefined } } : {}),
+        })
+      const undone =
+        untouched && point ? undo(stored, point, input.documents?.[stored.record.id]) : null
+
+      // Undone, the turn's restore point is what the artifact holds again, and the threads it
+      // alone shared the artifact in no longer do. Kept, the artifact stays where it was made.
+      const next = forgetTurn(undone ?? stored, turnRunId, { undone: undone !== null })
+      this.artifacts.set(key, next)
+      if (undone) restored.push(published(next))
+    }
+
+    return { restored, deleted }
   }
 
   async get(input: GetArtifactInput): Promise<ArtifactRecord | null> {
@@ -167,15 +350,21 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     if (this.artifacts.has(key)) throw artifactStorageErrors.exists(input.id)
 
     const record: ArtifactRecord = { ...source.record, id: input.id, owner: { ...input.owner } }
-    const versions = source.versions.map(({ origin: _origin, ...version }) =>
-      structuredClone({ ...version, artifactId: input.id })
-    )
+    const versions = source.versions.map(({ origin: _origin, ...version }) => {
+      const copied = structuredClone({ ...version, artifactId: input.id })
+      const outline = input.outlineOf?.(copied)
+      return outline ? { ...copied, outline: structuredClone(outline) } : copied
+    })
     const sharedAt = new Date(input.copiedAt ?? new Date())
     this.artifacts.set(key, {
       record,
       versions,
       nextVersion: source.nextVersion,
       threads: new Map([[input.threadId, { sharedAt, copied: true }]]),
+      restorePoints: [],
+      turnWrites: new Map(),
+      // Comments stay with the original.
+      comments: [],
     })
     return structuredClone(record)
   }
@@ -187,10 +376,8 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     const referencing: ArtifactVersionRecord[] = []
     for (const stored of this.artifacts.values()) {
       if (stored.record.projectId !== input.projectId) continue
-      const latest = stored.versions.find(
-        (candidate) => candidate.version === stored.record.latestVersion
-      )
-      if (latest?.references.some((reference) => refersTo(reference.address, prefix))) {
+      const latest = latestOf(stored)
+      if (latest.references.some((reference) => refersTo(reference.address, prefix))) {
         referencing.push(structuredClone(latest))
       }
     }
@@ -268,48 +455,123 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return count
   }
 
-  async delete(input: DeleteArtifactInput): Promise<boolean> {
-    return this.deleteArtifact(artifactKey(input.projectId, input.id))
+  async listBoardPreviews(
+    input: ListArtifactBoardPreviewsInput
+  ): Promise<ArtifactBoardPreviewRecord[]> {
+    const keys = new Set(input.renderKeys)
+    const kept = [...this.boardPreviews.values()].filter(
+      (preview) => preview.projectId === input.projectId && keys.has(preview.renderKey)
+    )
+
+    // By key, mode, then size, in code-unit order, as SQLite compares text.
+    const order = (preview: ArtifactBoardPreviewRecord) =>
+      `${preview.renderKey}\0${preview.theme}\0${preview.size}`
+    return structuredClone(kept.sort((left, right) => (order(left) < order(right) ? -1 : 1)))
   }
 
-  async deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number> {
-    let deleted = 0
-    for (const [key, stored] of this.artifacts) {
-      if (stored.record.projectId !== input.projectId) continue
-      const remaining = stored.versions.filter((version) => version.origin?.runId !== input.runId)
-      if (remaining.length === stored.versions.length) continue
-      deleted += stored.versions.length - remaining.length
-      const latest = remaining.at(-1)
-      if (!latest) {
-        this.deleteArtifact(key)
-        continue
-      }
+  async putBoardPreviews(input: PutArtifactBoardPreviewsInput): Promise<void> {
+    for (const preview of input.previews) {
+      const key = `${input.projectId}\0${preview.renderKey}\0${preview.theme}\0${preview.size}`
+      if (this.boardPreviews.has(key)) continue
 
-      // A run publishes from one thread: the link stays only if a version from it remains.
-      const threadId = stored.versions.find((version) => version.origin?.runId === input.runId)
-        ?.origin?.threadId
-      const threads = new Map(stored.threads)
-      if (
-        threadId &&
-        !threads.get(threadId)?.copied &&
-        !remaining.some((version) => version.origin?.threadId === threadId)
-      ) {
-        threads.delete(threadId)
-      }
-
-      this.artifacts.set(key, {
-        ...stored,
-        record: {
-          ...stored.record,
-          title: latest.title,
-          latestVersion: latest.version,
-          updatedAt: new Date(latest.createdAt),
-        },
-        versions: remaining,
-        threads,
-      })
+      this.boardPreviews.set(key, structuredClone({ projectId: input.projectId, ...preview }))
     }
-    return deleted
+  }
+
+  async createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    if (!stored) throw artifactStorageErrors.notFound(input.artifactId)
+
+    if (input.parentId !== undefined) {
+      const parent = stored.comments.find((each) => each.id === input.parentId)
+      if (!parent || parent.parentId !== undefined) {
+        throw artifactStorageErrors.commentNotFound(input.artifactId, input.parentId)
+      }
+    }
+    if (stored.comments.length >= ARTIFACT_COMMENT_LIMITS.maxComments) {
+      throw artifactStorageErrors.commentsFull(input.artifactId)
+    }
+
+    // Field by field, as the SQL providers store it.
+    const comment: ArtifactCommentRecord = structuredClone({
+      projectId: input.projectId,
+      artifactId: input.artifactId,
+      id: input.id,
+      ...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+      anchor: {
+        ...(input.anchor.board === undefined ? {} : { board: input.anchor.board }),
+        ...(input.anchor.element === undefined ? {} : { element: input.anchor.element }),
+        ...(input.anchor.label === undefined ? {} : { label: input.anchor.label }),
+        ...(input.anchor.point === undefined
+          ? {}
+          : { point: { x: input.anchor.point.x, y: input.anchor.point.y } }),
+        revision: input.anchor.revision,
+      },
+      body: input.body,
+      author: input.author,
+      ...(input.origin
+        ? { origin: { threadId: input.origin.threadId, runId: input.origin.runId } }
+        : {}),
+      createdAt: input.createdAt,
+    })
+    this.artifacts.set(key, { ...stored, comments: [...stored.comments, comment] })
+    return structuredClone(comment)
+  }
+
+  async getComment(input: ArtifactCommentKey): Promise<ArtifactCommentRecord | null> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.artifactId))
+    const comment = stored?.comments.find((each) => each.id === input.id)
+    return comment ? structuredClone(comment) : null
+  }
+
+  async listComments(input: GetArtifactInput): Promise<ArtifactCommentRecord[]> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.id))
+    // By when, and those made in the same instant as they were made: a stable sort keeps them.
+    const ordered = [...(stored?.comments ?? [])].sort(
+      (left, right) => left.createdAt.getTime() - right.createdAt.getTime()
+    )
+    return structuredClone(ordered)
+  }
+
+  async resolveComment(input: ResolveArtifactCommentInput): Promise<ArtifactCommentRecord | null> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    const comment = stored?.comments.find((each) => each.id === input.id)
+    if (!stored || !comment) return null
+
+    const { resolvedAt: _at, resolvedBy: _by, ...open } = comment
+    const next: ArtifactCommentRecord = input.resolved
+      ? {
+          ...open,
+          resolvedAt: new Date(input.resolved.at),
+          resolvedBy: structuredClone(input.resolved.by),
+        }
+      : open
+    this.artifacts.set(key, {
+      ...stored,
+      comments: stored.comments.map((each) => (each.id === input.id ? next : each)),
+    })
+    return structuredClone(next)
+  }
+
+  async deleteComment(input: ArtifactCommentKey): Promise<boolean> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    if (!stored?.comments.some((each) => each.id === input.id)) return false
+
+    // Its replies go with it.
+    this.artifacts.set(key, {
+      ...stored,
+      comments: stored.comments.filter(
+        (each) => each.id !== input.id && each.parentId !== input.id
+      ),
+    })
+    return true
+  }
+
+  async delete(input: DeleteArtifactInput): Promise<boolean> {
+    return this.deleteArtifact(artifactKey(input.projectId, input.id))
   }
 
   snapshot(): InMemoryArtifactSnapshot {
@@ -317,6 +579,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       artifacts: this.artifacts,
       frameGrants: this.frameGrants,
       state: this.state,
+      boardPreviews: this.boardPreviews,
     })
   }
 
@@ -325,6 +588,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     this.artifacts = new Map(restored.artifacts)
     this.frameGrants = new Map(restored.frameGrants)
     this.state = new Map([...restored.state].map(([key, kept]) => [key, new Map(kept)]))
+    this.boardPreviews = new Map(restored.boardPreviews)
   }
 
   /**
@@ -342,31 +606,242 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   }
 }
 
+function latestOf(stored: StoredArtifact): ArtifactVersionRecord {
+  const latest = stored.versions.at(-1)
+  if (!latest) throw new Error(`[Sixb] Artifact '${stored.record.id}' has no version.`)
+  return latest
+}
+
+/** Refuses a write made from a revision the artifact has moved past. */
+function assertBase(stored: StoredArtifact, baseRevision: number | undefined): void {
+  if (baseRevision === undefined || baseRevision === stored.record.revision) return
+
+  const latest = latestOf(stored)
+  throw artifactStorageErrors.moved(stored.record.id, baseRevision, {
+    version: latest.version,
+    revision: latest.revision,
+    author: structuredClone(latest.author),
+    ...(latest.frozenBy ? { frozenBy: structuredClone(latest.frozenBy) } : {}),
+  })
+}
+
 function versionRecord(
   projectId: string,
   artifactId: string,
-  version: number,
-  input: ArtifactVersionInput
+  input: {
+    readonly version: number
+    readonly revision: number
+    readonly content: ArtifactVersionInput
+    readonly createdAt: Date
+  }
 ): ArtifactVersionRecord {
-  return structuredClone({ ...input, projectId, artifactId, version })
+  // Field by field, as the SQL providers store it: nothing else a caller passes is kept.
+  const { content } = input
+  return structuredClone({
+    projectId,
+    artifactId,
+    version: input.version,
+    revision: input.revision,
+    title: content.title,
+    entry: content.entry,
+    files: content.files,
+    outline: content.outline,
+    references: content.references,
+    author: content.author,
+    ...(content.origin ? { origin: content.origin } : {}),
+    createdAt: input.createdAt,
+    updatedAt: content.updatedAt,
+  })
 }
 
-/** The links an artifact has once this version is stored: its origin's thread among them. */
+/**
+ * The artifact once content is written to its latest version: in place while it is open, as the
+ * next version when it is frozen.
+ */
+function written(
+  stored: StoredArtifact,
+  content: ArtifactVersionInput,
+  document: FileRef | undefined
+): StoredArtifact {
+  const { record } = stored
+  const latest = latestOf(stored)
+  const revision = record.revision + 1
+
+  const opens = latest.frozenAt !== undefined
+  const version = versionRecord(record.projectId, record.id, {
+    version: opens ? stored.nextVersion : latest.version,
+    revision,
+    content,
+    createdAt: opens ? content.updatedAt : latest.createdAt,
+  })
+
+  return {
+    ...stored,
+    record: {
+      ...record,
+      title: version.title,
+      latestVersion: version.version,
+      revision,
+      updatedAt: new Date(content.updatedAt),
+      ...(document ? { document: { file: structuredClone(document), revision } } : {}),
+    },
+    versions: opens ? [...stored.versions, version] : [...stored.versions.slice(0, -1), version],
+    nextVersion: opens ? stored.nextVersion + 1 : stored.nextVersion,
+  }
+}
+
+/** The artifact with a restore point of its latest version, past the oldest it keeps. */
+function withRestorePoint(
+  stored: StoredArtifact,
+  input: {
+    readonly reason: ArtifactRestorePointReason
+    readonly turnRunId?: string
+    readonly createdAt: Date
+  }
+): StoredArtifact {
+  const {
+    projectId,
+    artifactId,
+    version,
+    revision,
+    frozenAt,
+    frozenBy: _frozenBy,
+    createdAt: _,
+    ...content
+  } = latestOf(stored)
+  const point: ArtifactRestorePointRecord = structuredClone({
+    projectId,
+    artifactId,
+    revision,
+    version,
+    frozen: frozenAt !== undefined,
+    ...content,
+    reason: input.reason,
+    ...(input.turnRunId === undefined ? {} : { turnRunId: input.turnRunId }),
+    createdAt: input.createdAt,
+  })
+
+  return {
+    ...stored,
+    restorePoints: [point, ...stored.restorePoints].slice(0, ARTIFACT_RESTORE_POINTS),
+  }
+}
+
+/**
+ * The artifact as a turn's restore point holds it, at a new revision: an open version takes its
+ * content back, and a version the turn opened past a frozen one is dropped.
+ */
+function undo(
+  stored: StoredArtifact,
+  point: ArtifactRestorePointRecord,
+  document: FileRef | undefined
+): StoredArtifact | null {
+  const versions = stored.versions.filter((version) => version.version <= point.version)
+  const target = versions.at(-1)
+  if (target?.version !== point.version) return null
+
+  const revision = stored.record.revision + 1
+  const version: ArtifactVersionRecord = point.frozen
+    ? { ...target, revision }
+    : versionRecord(target.projectId, target.artifactId, {
+        version: target.version,
+        revision,
+        content: {
+          title: point.title,
+          entry: point.entry,
+          files: point.files,
+          outline: point.outline,
+          references: point.references,
+          author: point.author,
+          ...(point.origin ? { origin: point.origin } : {}),
+          updatedAt: point.updatedAt,
+        },
+        createdAt: target.createdAt,
+      })
+
+  const { record } = stored
+  return {
+    ...stored,
+    record: {
+      ...record,
+      title: version.title,
+      latestVersion: version.version,
+      revision,
+      updatedAt: new Date(Math.max(point.updatedAt.getTime(), target.frozenAt?.getTime() ?? 0)),
+      ...(document ? { document: { file: structuredClone(document), revision } } : {}),
+    },
+    versions: [...versions.slice(0, -1), version],
+  }
+}
+
+/**
+ * The artifact without the turn's writes, and once undone to the turn's restore point, without
+ * that point and the links the turn made.
+ */
+function forgetTurn(
+  stored: StoredArtifact,
+  turnRunId: string,
+  { undone }: { readonly undone: boolean }
+): StoredArtifact {
+  const turnWrites = new Map(stored.turnWrites)
+  turnWrites.delete(turnRunId)
+
+  return {
+    ...stored,
+    restorePoints: undone
+      ? stored.restorePoints.filter((point) => point.turnRunId !== turnRunId)
+      : stored.restorePoints,
+    turnWrites,
+    threads: undone
+      ? new Map(
+          [...stored.threads].filter(([, link]) => link.copied || link.linkedByRunId !== turnRunId)
+        )
+      : stored.threads,
+  }
+}
+
+/** The artifact once its origin's thread shares it, by the turn that wrote from there. */
 function sharedIn(
-  threads: ReadonlyMap<string, ThreadLink>,
-  version: ArtifactVersionRecord
-): ReadonlyMap<string, ThreadLink> {
-  const threadId = version.origin?.threadId
-  if (!threadId || threads.has(threadId)) return threads
+  stored: StoredArtifact,
+  content: ArtifactVersionInput,
+  turnRunId: string | undefined
+): StoredArtifact {
+  const threadId = content.origin?.threadId
+  if (!threadId || stored.threads.has(threadId)) return stored
 
-  return new Map(threads).set(threadId, { sharedAt: new Date(version.createdAt), copied: false })
+  const link: ThreadLink = {
+    sharedAt: new Date(content.updatedAt),
+    copied: false,
+    ...(turnRunId === undefined ? {} : { linkedByRunId: turnRunId }),
+  }
+  return { ...stored, threads: new Map(stored.threads).set(threadId, link) }
 }
 
-function published(
-  record: ArtifactRecord,
-  version: ArtifactVersionRecord
-): PublishedArtifactVersion {
-  return structuredClone({ artifact: record, version })
+/** The artifact once a turn wrote it, with the revision it left; the newest turns are kept. */
+function turnWrote(
+  stored: StoredArtifact,
+  turnRunId: string | undefined,
+  { created }: { readonly created: boolean }
+): StoredArtifact {
+  if (turnRunId === undefined) return stored
+
+  const earlier = stored.turnWrites.get(turnRunId)
+  const write: ArtifactTurnWriteRecord = {
+    artifactId: stored.record.id,
+    created: earlier?.created ?? created,
+    revision: stored.record.revision,
+    writes: (earlier?.writes ?? 0) + 1,
+  }
+  const others = [...stored.turnWrites].filter(([turn]) => turn !== turnRunId)
+  const kept = [[turnRunId, write] as const, ...others]
+    .sort(([, left], [, right]) => right.revision - left.revision)
+    .slice(0, ARTIFACT_RESTORE_POINTS)
+
+  return { ...stored, turnWrites: new Map(kept) }
+}
+
+function published(stored: StoredArtifact): PublishedArtifactVersion {
+  return structuredClone({ artifact: stored.record, version: latestOf(stored) })
 }
 
 function artifactKey(projectId: string, id: string): string {

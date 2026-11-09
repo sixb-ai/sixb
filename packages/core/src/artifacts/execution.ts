@@ -10,10 +10,12 @@ import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
   ArtifactFile,
   ArtifactRecord,
+  ArtifactRestorePointRecord,
   ArtifactStorage,
   ArtifactVersionRecord,
   ListArtifactsResult,
   ListArtifactVersionsResult,
+  PublishedArtifactVersion,
 } from "../storage/artifacts/types"
 import type { Storage } from "../storage/types"
 import {
@@ -22,11 +24,21 @@ import {
   assertUpdatable,
   createArtifactAccessRule,
 } from "./access"
+import { type ArtifactCommentsRuntime, createArtifactCommentsRuntime } from "./comments"
 import { ArtifactRequestError } from "./errors"
+import { announceArtifactUpdates } from "./events"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+import { firstArtifactDocument, keepsDocument } from "./live/state"
 import { invalidArtifact, readArtifactText } from "./publish/files"
+import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
 import {
+  type BoardPreviewRequester,
+  boardsReadLiveData,
+  requestBoardPreviews,
+} from "./publish/previews"
+import {
+  artifactRequestError,
   artifactVersionWarnings,
   type PreparedArtifactVersion,
   type PublishedArtifact,
@@ -69,12 +81,48 @@ export type ArtifactQueryInput =
       readonly facets: readonly { readonly property: PropertyToken; readonly limit: number }[]
     }
 
-export interface PublishArtifactRuntimeInput extends ArtifactContentInput {
+export interface UpdateArtifactRuntimeInput extends ArtifactContentInput {
   /**
-   * The version this one was made from, such as the one a person edited. When another version was
-   * published since, publishing fails with `artifact_moved`, naming the latest and its author.
+   * The revision this content was made from, such as the one a person edited. When the artifact
+   * changed since, the update fails with `artifact_moved`, naming its revision and who wrote it;
+   * a canvas instead takes what changed from that revision's files into what it holds now.
    */
-  readonly baseVersion?: number
+  readonly baseRevision?: number
+  /**
+   * The files of `baseRevision`, which a canvas's merge starts from. Without them, it looks for
+   * them among the artifact's versions and restore points, and refuses with `artifact_moved` when
+   * none holds them.
+   */
+  readonly baseFiles?: readonly ArtifactFile[]
+  /**
+   * The title of `baseRevision`. A canvas merged past it keeps a title someone gave it since,
+   * unless this write changes the title itself.
+   */
+  readonly baseTitle?: string
+}
+
+/**
+ * A live room's write-back, for this repo's server: the canvas's Yjs document as its editors hold
+ * it, merged into the stored one. The version holds what the merged document holds.
+ */
+export interface LiveArtifactWrite {
+  readonly title: string
+  /** The title the room last read: a title given since stays. */
+  readonly baseTitle: string
+  /** The revision the room last took in. */
+  readonly baseRevision: number
+  /**
+   * The document's files as the room stored them: what the merged version holds alike keeps
+   * these references.
+   */
+  readonly files: readonly ArtifactFile[]
+  /** The document, encoded with `Y.encodeStateAsUpdate`. */
+  readonly update: Uint8Array
+}
+
+/** A change made from what the caller saw: past `baseRevision`, it fails with `artifact_moved`. */
+export interface ArtifactRevisionInput {
+  readonly baseRevision?: number
 }
 
 export interface ListArtifactsRuntimeInput {
@@ -94,14 +142,38 @@ export interface ListArtifactsRuntimeInput {
  * {@link ArtifactAccess} says. System code reaches every artifact in the project, and an access
  * token only its own.
  */
-export interface ArtifactsRuntime {
+export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
   /** Creates an artifact owned by the caller, with its first version. */
   create(input: ArtifactContentInput): Promise<PublishedArtifact>
   /**
-   * Publishes the next version, authored by the caller; the artifact keeps its owner. The kind must
-   * be the artifact's. Throws `not_shared` or `read_only` when the caller may not update it.
+   * Writes the latest version, authored by the caller: its open version's content is replaced, or
+   * the next version opens when it is frozen. The artifact keeps its owner, and the kind must be
+   * its. Throws `not_shared` or `read_only` when the caller may not update it.
    */
-  publish(artifactId: string, input: PublishArtifactRuntimeInput): Promise<PublishedArtifact>
+  update(artifactId: string, input: UpdateArtifactRuntimeInput): Promise<PublishedArtifact>
+  /**
+   * Creates a version: the open latest version is frozen, so it never changes again and the next
+   * write opens the next one. A latest version already frozen is returned as it is. Who may
+   * update may freeze; throws as `update` does.
+   */
+  freeze(artifactId: string, input?: ArtifactRevisionInput): Promise<PublishedArtifactVersion>
+  /**
+   * What the artifact's latest version held before each Agent turn's first write to it, and
+   * before each restore, newest first; `null` when the caller cannot read the artifact.
+   */
+  listRestorePoints(artifactId: string): Promise<ArtifactRestorePointRecord[] | null>
+  /** `null` when the caller cannot read the artifact, or it keeps no such restore point. */
+  getRestorePoint(artifactId: string, revision: number): Promise<ArtifactRestorePointRecord | null>
+  /**
+   * Puts a restore point's content back in the latest version, authored by the caller, as
+   * `update` writes it. What it replaces becomes a restore point, so the restore can be undone.
+   * Throws as `update` does, and `restore_point_not_found`.
+   */
+  restore(
+    artifactId: string,
+    revision: number,
+    input?: ArtifactRevisionInput
+  ): Promise<PublishedArtifactVersion>
   /** What the caller may do with the artifact; `null` when there is no such artifact. */
   access(artifactId: string): Promise<ArtifactAccess | null>
   /** `null` when the caller cannot read it. */
@@ -174,6 +246,8 @@ const publishers = new WeakMap<
   {
     readonly rule: (storage?: ArtifactAccessStorage) => ArtifactAccessRule
     readonly checkQuery: ArtifactQueryChecker
+    readonly requestPreviews: BoardPreviewRequester
+    readonly writeLive: (artifactId: string, write: LiveArtifactWrite) => Promise<PublishedArtifact>
   }
 >()
 
@@ -197,6 +271,29 @@ export function artifactAccessRule(
 /** What checks a version's queries as the caller `artifacts` acts for. */
 export function artifactQueryChecker(artifacts: Partial<ArtifactsRuntime>): ArtifactQueryChecker {
   return publisherOf(artifacts).checkQuery
+}
+
+/**
+ * What asks for the pictures a stored version's boards miss, in the project `artifacts` belongs
+ * to: nothing in a project without sandboxes, where nothing renders them.
+ */
+export function artifactPreviewRequester(
+  artifacts: Partial<ArtifactsRuntime>
+): BoardPreviewRequester {
+  return publisherOf(artifacts).requestPreviews
+}
+
+/**
+ * Writes a live room's document back into the canvas, as the caller `artifacts` acts for: the
+ * write `update` makes, checked, authored and announced as it is, from the document instead of
+ * from files.
+ */
+export function writeLiveArtifact(
+  artifacts: Partial<ArtifactsRuntime>,
+  artifactId: string,
+  write: LiveArtifactWrite
+): Promise<PublishedArtifact> {
+  return publisherOf(artifacts).writeLive(artifactId, write)
 }
 
 /** The access rule for the runtime's caller, reading from `storage`. */
@@ -235,7 +332,11 @@ export function createRuntimeArtifactAccessRule(
 
 export function createArtifactsRuntime(
   runtime: SixbRuntimeContext,
-  blobStorage: BlobStorage
+  blobStorage: BlobStorage,
+  options: {
+    /** The project has sandboxes, where the agent worker renders the pictures of boards. */
+    readonly rendersBoardPreviews?: boolean
+  } = {}
 ): ArtifactsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   // Shared-link sessions and unresolved authority reach no artifact.
@@ -266,6 +367,22 @@ export function createArtifactsRuntime(
   const rule = (storage?: ArtifactAccessStorage): ArtifactAccessRule =>
     createRuntimeArtifactAccessRule(runtime, storage)
   const checkQuery = createArtifactQueryChecker(runtime)
+  const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
+    const storage = runtime.storage.artifacts
+    if (!options.rendersBoardPreviews || !storage) return
+
+    // Its queries are answered as whoever published it, who is this runtime's caller.
+    await requestBoardPreviews(
+      {
+        storage,
+        queue: runtime.queues.agents,
+        blobStorage,
+        query: (name) => artifacts.query(version.artifactId, name, { version: version.version }),
+      },
+      version,
+      requestOptions
+    )
+  }
 
   /** The artifact with what the caller may do with it; `null` when there is none. */
   const reach = async (
@@ -321,6 +438,33 @@ export function createArtifactsRuntime(
     })
 
   /**
+   * Changes an artifact the caller may update, in one transaction that decides it there, so a
+   * participant removed meanwhile changes nothing.
+   */
+  const change = (
+    artifactId: string,
+    write: (storage: ArtifactStorage, author: Principal) => Promise<PublishedArtifactVersion>
+  ) => {
+    const author = requireCaller()
+    requireStorage()
+
+    return runtime.storage.transaction(async (tx) => {
+      const storage = tx.artifacts
+      if (!storage) throw new Error("[Sixb] Storage transactions hold no artifacts.")
+
+      const artifact = await storage.get({ projectId: runtime.projectId, id: artifactId })
+      if (!artifact) throw notFound(artifactId)
+      assertUpdatable(artifactId, await rule(tx).publishAccess(artifact))
+
+      try {
+        return await write(storage, author)
+      } catch (error) {
+        throw artifactRequestError(error)
+      }
+    })
+  }
+
+  /**
    * The version's files with its `queries` stored among them. Publishing then checks each one as
    * it checks a query file.
    */
@@ -346,42 +490,168 @@ export function createArtifactsRuntime(
     return files
   }
 
+  /**
+   * Stores the latest version, authored by the caller, who may update the artifact. A canvas
+   * written since the base is merged into, not refused: the merge is what is checked.
+   */
+  const write = async (
+    input: ArtifactWrite & { readonly title: string }
+  ): Promise<PublishedArtifact> => {
+    const author = requireCaller()
+    const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
+
+    return withMergedWrite(context, input, async (merged) => {
+      const prepared = await prepareArtifactVersion(context, {
+        artifactId: input.artifactId,
+        kind: input.kind,
+        title: merged.title ?? input.title,
+        files: merged.files,
+        ...(merged.baseRevision === undefined ? {} : { baseRevision: merged.baseRevision }),
+        ...(merged.document ? { document: merged.document } : {}),
+        author,
+        readable: readableBy(rule()),
+        checkQuery,
+      })
+      const stored = await store(prepared)
+      await announceArtifactUpdates(runtime.events, [stored.version])
+      await requestPreviews(stored.version)
+
+      return {
+        ...stored,
+        warnings: await artifactVersionWarnings(context, prepared, stored),
+        ...(merged.merged ? { merged: true as const } : {}),
+      }
+    })
+  }
+
+  /** A live room's write-back: only a canvas keeps a document to merge it into. */
+  const writeLive = async (
+    artifactId: string,
+    input: LiveArtifactWrite
+  ): Promise<PublishedArtifact> => {
+    const artifact = await requireUpdatable(artifactId)
+    if (!keepsDocument(artifact.kind)) {
+      throw invalidArtifact(
+        `Artifact '${artifactId}' is a ${artifact.kind}, which is not edited live: publish its files.`
+      )
+    }
+
+    return write({ artifactId, kind: artifact.kind, ...input })
+  }
+
   const artifacts: ArtifactsRuntime = {
+    ...createArtifactCommentsRuntime({
+      projectId: runtime.projectId,
+      storage: requireStorage,
+      events: runtime.events,
+      caller: requireCaller,
+      reach,
+    }),
+
     async create(input) {
       const author = requireCaller()
+      const files = await contentFiles(input)
+      const document = await firstArtifactDocument(blobStorage, input.kind, files)
 
-      return publishArtifact(
+      const published = await publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
         {
           kind: input.kind,
           title: input.title,
-          files: await contentFiles(input),
+          files,
+          ...(document ? { document } : {}),
           author,
           readable: readableBy(rule()),
           checkQuery,
         },
         (artifact) => rule().publishAccess(artifact)
       )
+      await requestPreviews(published.version)
+
+      return published
     },
 
-    async publish(artifactId, input) {
-      const author = requireCaller()
+    async update(artifactId, input) {
       await requireUpdatable(artifactId)
 
-      const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
-      const prepared = await prepareArtifactVersion(context, {
+      return write({
         artifactId,
         kind: input.kind,
-        title: input.title,
         files: await contentFiles(input),
-        ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
-        author,
-        readable: readableBy(rule()),
-        checkQuery,
+        ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+        ...(input.baseFiles === undefined ? {} : { baseFiles: input.baseFiles }),
+        title: input.title,
+        ...(input.baseTitle === undefined ? {} : { baseTitle: input.baseTitle }),
       })
-      const stored = await store(prepared)
+    },
 
-      return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+    async freeze(artifactId, input = {}) {
+      const frozenAt = new Date()
+      const frozen = await change(artifactId, (storage, author) =>
+        storage.freeze({
+          projectId: runtime.projectId,
+          artifactId,
+          ...(input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }),
+          frozenAt,
+          frozenBy: author,
+        })
+      )
+
+      // A version frozen before changed nothing to announce.
+      if (frozen.version.frozenAt?.getTime() === frozenAt.getTime()) {
+        await announceArtifactUpdates(runtime.events, [frozen.version])
+      }
+      return frozen
+    },
+
+    async listRestorePoints(artifactId) {
+      if (!(await getReadable(artifactId))) return null
+      return requireStorage().listRestorePoints({ projectId: runtime.projectId, id: artifactId })
+    },
+
+    async getRestorePoint(artifactId, revision) {
+      if (!(await getReadable(artifactId))) return null
+      return requireStorage().getRestorePoint({
+        projectId: runtime.projectId,
+        artifactId,
+        revision,
+      })
+    },
+
+    async restore(artifactId, revision, input = {}) {
+      // A canvas's document takes the restored content as a change, so editors keep theirs.
+      const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
+      const point = await context.storage.getRestorePoint({
+        projectId: runtime.projectId,
+        artifactId,
+        revision,
+      })
+      const restored = await withDocumentHolding(
+        context,
+        artifactId,
+        point?.files ?? null,
+        input.baseRevision,
+        (held) =>
+          change(artifactId, (storage, author) =>
+            storage.restoreTo({
+              projectId: runtime.projectId,
+              artifactId,
+              revision,
+              ...held,
+              author,
+              restoredAt: new Date(),
+            })
+          )
+      )
+      await announceArtifactUpdates(runtime.events, [restored.version])
+
+      // Pictures of live boards show their author's data: a restore by someone else leaves the
+      // ones it misses to the boards that read none.
+      await requestPreviews(
+        restored.version,
+        boardsReadLiveData(restored.version) ? { withoutAnswers: true } : {}
+      )
+      return restored
     },
 
     async access(artifactId) {
@@ -493,7 +763,7 @@ export function createArtifactsRuntime(
     },
   }
 
-  publishers.set(artifacts, { rule, checkQuery })
+  publishers.set(artifacts, { rule, checkQuery, requestPreviews, writeLive })
   return artifacts
 }
 

@@ -12,6 +12,7 @@ import { client } from "../client.gen"
 import {
   abortFileUpload,
   addAgentThreadParticipants,
+  addArtifactComment,
   addConnectorConnection,
   cancelAgentRun,
   cancelAgentRunById,
@@ -35,6 +36,7 @@ import {
   deleteAgentMemory,
   deleteAiLimitPolicy,
   deleteArtifact,
+  deleteArtifactComment,
   deleteArtifactStateValue,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
@@ -43,6 +45,7 @@ import {
   existsObjects,
   facetObjects,
   forkAgentThread,
+  freezeArtifactVersion,
   generateImages,
   generateSpeech,
   generateText,
@@ -67,8 +70,11 @@ import {
   getAiModelCallFileContent,
   getAiModelCallFiles,
   getArtifact,
+  getArtifactBoardPreview,
   getArtifactFileContent,
   getArtifactQuery,
+  getArtifactRestorePoint,
+  getArtifactRestorePointFileContent,
   getArtifactState,
   getArtifactVersion,
   getAuthAccessManagementOptions,
@@ -128,6 +134,8 @@ import {
   listAiLimitPolicies,
   listAiModelCallGroups,
   listAiModelCalls,
+  listArtifactComments,
+  listArtifactRestorePoints,
   listArtifacts,
   listAuthAccessTokens,
   listAuthInvitations,
@@ -167,7 +175,6 @@ import {
   moveAgentThreadToComputer,
   type Options,
   postAgentThreadMessage,
-  publishArtifactVersion,
   queryObjectLinks,
   queryObjects,
   reactivateAuthMember,
@@ -180,6 +187,8 @@ import {
   requestPipelineRun,
   requestSyncRun,
   requestWorkflowRun,
+  resolveArtifactComment,
+  restoreArtifact,
   retryAgentRun,
   revokeAuthAccessToken,
   revokeAuthInvitation,
@@ -203,6 +212,7 @@ import {
   transcribeAudio,
   updateAgentPreferences,
   updateAiLimitPolicy,
+  updateArtifact,
   updateAuthMemberGroups,
   updateAuthProfile,
   uploadFileContent,
@@ -215,6 +225,9 @@ import type {
   AddAgentThreadParticipantsData,
   AddAgentThreadParticipantsError,
   AddAgentThreadParticipantsResponse,
+  AddArtifactCommentData,
+  AddArtifactCommentError,
+  AddArtifactCommentResponse,
   AddConnectorConnectionData,
   AddConnectorConnectionError,
   AddConnectorConnectionResponse,
@@ -281,6 +294,9 @@ import type {
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyError,
   DeleteAiLimitPolicyResponse,
+  DeleteArtifactCommentData,
+  DeleteArtifactCommentError,
+  DeleteArtifactCommentResponse,
   DeleteArtifactData,
   DeleteArtifactError,
   DeleteArtifactResponse,
@@ -307,6 +323,9 @@ import type {
   ForkAgentThreadData,
   ForkAgentThreadError,
   ForkAgentThreadResponse,
+  FreezeArtifactVersionData,
+  FreezeArtifactVersionError,
+  FreezeArtifactVersionResponse,
   GenerateImagesData,
   GenerateImagesError,
   GenerateImagesResponse,
@@ -376,6 +395,9 @@ import type {
   GetAiModelCallFilesData,
   GetAiModelCallFilesError,
   GetAiModelCallFilesResponse,
+  GetArtifactBoardPreviewData,
+  GetArtifactBoardPreviewError,
+  GetArtifactBoardPreviewResponse,
   GetArtifactData,
   GetArtifactError,
   GetArtifactFileContentData,
@@ -385,6 +407,12 @@ import type {
   GetArtifactQueryError,
   GetArtifactQueryResponse,
   GetArtifactResponse,
+  GetArtifactRestorePointData,
+  GetArtifactRestorePointError,
+  GetArtifactRestorePointFileContentData,
+  GetArtifactRestorePointFileContentError,
+  GetArtifactRestorePointFileContentResponse,
+  GetArtifactRestorePointResponse,
   GetArtifactStateData,
   GetArtifactStateError,
   GetArtifactStateResponse,
@@ -558,6 +586,12 @@ import type {
   ListAiModelCallsData,
   ListAiModelCallsError,
   ListAiModelCallsResponse,
+  ListArtifactCommentsData,
+  ListArtifactCommentsError,
+  ListArtifactCommentsResponse,
+  ListArtifactRestorePointsData,
+  ListArtifactRestorePointsError,
+  ListArtifactRestorePointsResponse,
   ListArtifactsData,
   ListArtifactsError,
   ListArtifactsResponse,
@@ -664,9 +698,6 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
-  PublishArtifactVersionData,
-  PublishArtifactVersionError,
-  PublishArtifactVersionResponse,
   QueryObjectLinksData,
   QueryObjectLinksError,
   QueryObjectLinksResponse,
@@ -701,6 +732,12 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunError,
   RequestWorkflowRunResponse,
+  ResolveArtifactCommentData,
+  ResolveArtifactCommentError,
+  ResolveArtifactCommentResponse,
+  RestoreArtifactData,
+  RestoreArtifactError,
+  RestoreArtifactResponse,
   RetryAgentRunData,
   RetryAgentRunError,
   RetryAgentRunResponse,
@@ -770,6 +807,9 @@ import type {
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyError,
   UpdateAiLimitPolicyResponse,
+  UpdateArtifactData,
+  UpdateArtifactError,
+  UpdateArtifactResponse,
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsError,
   UpdateAuthMemberGroupsResponse,
@@ -6290,24 +6330,275 @@ export const setArtifactStateMutation = (
 }
 
 /**
- * Publish an artifact's next version
+ * Update an artifact
  *
- * The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since. With a run token, only an artifact the run's conversation shares or its requester owns; the version is shared in that conversation. A run that lost its execution gets 409 execution_lost.
+ * Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.
  */
-export const publishArtifactVersionMutation = (
-  options?: Partial<Options<PublishArtifactVersionData>>
-): UseMutationOptions<
-  PublishArtifactVersionResponse,
-  PublishArtifactVersionError,
-  Options<PublishArtifactVersionData>
-> => {
+export const updateArtifactMutation = (
+  options?: Partial<Options<UpdateArtifactData>>
+): UseMutationOptions<UpdateArtifactResponse, UpdateArtifactError, Options<UpdateArtifactData>> => {
   const mutationOptions: UseMutationOptions<
-    PublishArtifactVersionResponse,
-    PublishArtifactVersionError,
-    Options<PublishArtifactVersionData>
+    UpdateArtifactResponse,
+    UpdateArtifactError,
+    Options<UpdateArtifactData>
   > = {
     mutationFn: async (fnOptions) => {
-      const { data } = await publishArtifactVersion({
+      const { data } = await updateArtifact({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Create a version
+ *
+ * Freezes the artifact's open latest version: it never changes again, and the next write opens the next version. A latest version already frozen is returned as it is. Whoever may update the artifact may create a version. With baseRevision, it is refused with 409 artifact_moved when the open version changed since.
+ */
+export const freezeArtifactVersionMutation = (
+  options?: Partial<Options<FreezeArtifactVersionData>>
+): UseMutationOptions<
+  FreezeArtifactVersionResponse,
+  FreezeArtifactVersionError,
+  Options<FreezeArtifactVersionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    FreezeArtifactVersionResponse,
+    FreezeArtifactVersionError,
+    Options<FreezeArtifactVersionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await freezeArtifactVersion({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listArtifactCommentsQueryKey = (options: Options<ListArtifactCommentsData>) =>
+  createQueryKey("listArtifactComments", options)
+
+/**
+ * List an artifact's comments
+ *
+ * Every comment and reply, oldest first, resolved ones included. Whoever reads the artifact reads them.
+ */
+export const listArtifactCommentsOptions = (options: Options<ListArtifactCommentsData>) =>
+  queryOptions<
+    ListArtifactCommentsResponse,
+    ListArtifactCommentsError,
+    ListArtifactCommentsResponse,
+    ReturnType<typeof listArtifactCommentsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listArtifactComments({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listArtifactCommentsQueryKey(options),
+  })
+
+/**
+ * Comment on an artifact
+ *
+ * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
+ */
+export const addArtifactCommentMutation = (
+  options?: Partial<Options<AddArtifactCommentData>>
+): UseMutationOptions<
+  AddArtifactCommentResponse,
+  AddArtifactCommentError,
+  Options<AddArtifactCommentData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    AddArtifactCommentResponse,
+    AddArtifactCommentError,
+    Options<AddArtifactCommentData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await addArtifactComment({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Resolve an artifact's comment
+ *
+ * Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.
+ */
+export const resolveArtifactCommentMutation = (
+  options?: Partial<Options<ResolveArtifactCommentData>>
+): UseMutationOptions<
+  ResolveArtifactCommentResponse,
+  ResolveArtifactCommentError,
+  Options<ResolveArtifactCommentData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ResolveArtifactCommentResponse,
+    ResolveArtifactCommentError,
+    Options<ResolveArtifactCommentData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await resolveArtifactComment({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Delete an artifact's comment
+ *
+ * Deletes the comment and its replies. Its author, or whoever may update the artifact, may.
+ */
+export const deleteArtifactCommentMutation = (
+  options?: Partial<Options<DeleteArtifactCommentData>>
+): UseMutationOptions<
+  DeleteArtifactCommentResponse,
+  DeleteArtifactCommentError,
+  Options<DeleteArtifactCommentData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteArtifactCommentResponse,
+    DeleteArtifactCommentError,
+    Options<DeleteArtifactCommentData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteArtifactComment({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listArtifactRestorePointsQueryKey = (
+  options: Options<ListArtifactRestorePointsData>
+) => createQueryKey("listArtifactRestorePoints", options)
+
+/**
+ * List an artifact's restore points
+ *
+ * What the artifact's latest version held before each Agent turn's first write to it, and before each restore, newest first. They are not versions: restoring one puts its content back in the latest version.
+ */
+export const listArtifactRestorePointsOptions = (options: Options<ListArtifactRestorePointsData>) =>
+  queryOptions<
+    ListArtifactRestorePointsResponse,
+    ListArtifactRestorePointsError,
+    ListArtifactRestorePointsResponse,
+    ReturnType<typeof listArtifactRestorePointsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listArtifactRestorePoints({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listArtifactRestorePointsQueryKey(options),
+  })
+
+export const getArtifactRestorePointQueryKey = (options: Options<GetArtifactRestorePointData>) =>
+  createQueryKey("getArtifactRestorePoint", options)
+
+/**
+ * Get an artifact's restore point
+ *
+ * Its files, outline, and references, as the latest version held them. Read a file's bytes with GET /api/artifacts/{artifactId}/restore-points/{revision}/content.
+ */
+export const getArtifactRestorePointOptions = (options: Options<GetArtifactRestorePointData>) =>
+  queryOptions<
+    GetArtifactRestorePointResponse,
+    GetArtifactRestorePointError,
+    GetArtifactRestorePointResponse,
+    ReturnType<typeof getArtifactRestorePointQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactRestorePoint({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactRestorePointQueryKey(options),
+  })
+
+export const getArtifactRestorePointFileContentQueryKey = (
+  options: Options<GetArtifactRestorePointFileContentData>
+) => createQueryKey("getArtifactRestorePointFileContent", options)
+
+/**
+ * Get a file of an artifact's restore point
+ */
+export const getArtifactRestorePointFileContentOptions = (
+  options: Options<GetArtifactRestorePointFileContentData>
+) =>
+  queryOptions<
+    GetArtifactRestorePointFileContentResponse,
+    GetArtifactRestorePointFileContentError,
+    GetArtifactRestorePointFileContentResponse,
+    ReturnType<typeof getArtifactRestorePointFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactRestorePointFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactRestorePointFileContentQueryKey(options),
+  })
+
+/**
+ * Restore an artifact
+ *
+ * Puts a restore point's content back in the latest version, as an update writes it: in place while it is open, as the next version when it is frozen. What it replaces becomes a restore point, so the restore can be undone. Whoever may update the artifact may restore it. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since.
+ */
+export const restoreArtifactMutation = (
+  options?: Partial<Options<RestoreArtifactData>>
+): UseMutationOptions<
+  RestoreArtifactResponse,
+  RestoreArtifactError,
+  Options<RestoreArtifactData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RestoreArtifactResponse,
+    RestoreArtifactError,
+    Options<RestoreArtifactData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await restoreArtifact({
         ...options,
         ...fnOptions,
         throwOnError: true,
@@ -6321,7 +6612,7 @@ export const publishArtifactVersionMutation = (
 /**
  * Open a version in a frame
  *
- * A short-lived path that serves the files of a version that opens in a sandboxed frame, as slides do. It expires within an hour. A kind that does not open in a frame is refused with 409 artifact_kind_mismatch.
+ * A short-lived path that serves the files of a version that opens in a sandboxed frame, as slides do, at the revision it has now: once the version is written again, the path serves nothing and a new one is needed. It expires within an hour. A kind that does not open in a frame is refused with 409 artifact_kind_mismatch.
  */
 export const createArtifactFrameMutation = (
   options?: Partial<Options<CreateArtifactFrameData>>
@@ -6372,6 +6663,33 @@ export const getArtifactVersionOptions = (options: Options<GetArtifactVersionDat
       return data
     },
     queryKey: getArtifactVersionQueryKey(options),
+  })
+
+export const getArtifactBoardPreviewQueryKey = (options: Options<GetArtifactBoardPreviewData>) =>
+  createQueryKey("getArtifactBoardPreview", options)
+
+/**
+ * Get the preview of a canvas's board
+ *
+ * A picture of the board as its version shows it, in the reader's mode: a PNG at its own size, or with size=small a WebP at most 480 pixels wide, which a viewer shows until the board is opened. It shows the data the version's author can see. A frozen version's preview never changes, and is cached as such, as is one asked for at a revision; an open version's otherwise, and "latest", are revalidated. 404 preview_not_found until it is rendered, when it never will be, or when revision is not the version's current one: the version says which.
+ */
+export const getArtifactBoardPreviewOptions = (options: Options<GetArtifactBoardPreviewData>) =>
+  queryOptions<
+    GetArtifactBoardPreviewResponse,
+    GetArtifactBoardPreviewError,
+    GetArtifactBoardPreviewResponse,
+    ReturnType<typeof getArtifactBoardPreviewQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactBoardPreview({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactBoardPreviewQueryKey(options),
   })
 
 export const getArtifactQueryQueryKey = (options: Options<GetArtifactQueryData>) =>

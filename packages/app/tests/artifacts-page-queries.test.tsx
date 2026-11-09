@@ -3,7 +3,7 @@ import { client, type GetArtifactVersionResponse } from "@sixb/client"
 import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render } from "@testing-library/react"
-import { ArtifactFrame } from "../src/artifacts/frame"
+import { ArtifactFrame, frameLinkKey } from "../src/artifacts/frame"
 import { artifactQueryKey } from "../src/artifacts/queries"
 import { installDom } from "./helpers/dom"
 
@@ -37,6 +37,9 @@ function pageVersion(version: number): GetArtifactVersionResponse {
     references: [],
     author: { type: "user", id: "user-1" },
     createdAt: "2026-10-23T12:00:00.000Z",
+    updatedAt: "2026-10-23T12:00:00.000Z",
+    revision: version,
+    frozen: true,
   }
 }
 
@@ -101,7 +104,7 @@ beforeEach(() => {
 function mount(versions: readonly number[]) {
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   for (const version of versions) {
-    cache.setQueryData(["artifact-frame", PAGE, version], {
+    cache.setQueryData(frameLinkKey({ artifactId: PAGE, version, revision: version }), {
       path: `/api/artifact-frames/token-v${version}/`,
       expiresAt: "2026-10-23T13:00:00.000Z",
     })
@@ -172,7 +175,7 @@ describe("a page's queries", () => {
 
     expect(thumbnail?.results).toEqual([{ protocol: FRAME_PROTOCOL, result: 1, value: overdue(1) }])
     expect(requests).toEqual([`GET /api/artifacts/${PAGE}/versions/1/queries/overdue`])
-    expect(stage?.cache.getQueryData<unknown>(artifactQueryKey(PAGE, 1, "overdue"))).toEqual(
+    expect(stage?.cache.getQueryData<unknown>(artifactQueryKey(pageVersion(1), "overdue"))).toEqual(
       overdue(1)
     )
   })
@@ -200,5 +203,25 @@ describe("a page's queries", () => {
     expect(frame?.results).toEqual([
       { protocol: FRAME_PROTOCOL, result: 1, error: "[SixbApp] sixb.query refused the call." },
     ])
+  })
+})
+
+describe("a version's query results", () => {
+  test("are its query file's: a change to it reads them again, one elsewhere keeps them", () => {
+    // An open version changes in place. Reproduce by keying results by version alone: the
+    // changed query keeps the rows the old one read.
+    const file = (path: string, digit: string) => ({
+      path,
+      file: { blobId: `blob_${digit}`, digest: `sha256:${digit.repeat(64)}`, sizeBytes: 10 },
+    })
+    const at = (query: string, page: string) => ({
+      ...pageVersion(1),
+      files: [file("queries/overdue.json", query), file("index.html", page)],
+    })
+    const key = (version: ReturnType<typeof at>) =>
+      JSON.stringify(artifactQueryKey(version, "overdue"))
+
+    expect(key(at("1", "1"))).toBe(key(at("1", "2")))
+    expect(key(at("1", "1"))).not.toBe(key(at("2", "1")))
   })
 })
