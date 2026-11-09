@@ -1,5 +1,6 @@
 import { AuthStorageError } from "../errors"
 import type {
+  ApplyDirectoryVerdictInput,
   AuthStorage,
   CompleteDeviceAuthorizationInput,
   CompleteDeviceAuthorizationResult,
@@ -49,6 +50,7 @@ import {
   upsertGroupMembershipRecord,
   userKey,
   validateCompleteSessionInput,
+  withUserStatus,
 } from "./shared"
 import { InMemoryAuthUserStore } from "./users"
 
@@ -451,15 +453,50 @@ export class InMemoryAuthStorage implements AuthStorage {
       )
     }
 
-    const next: UserRecord = {
-      ...existing,
-      status: "suspended",
-      updatedAt: cloneDate(input.suspendedAt),
-    }
+    const next = withUserStatus(existing, "suspended", "manual", input.suspendedAt)
     this.state.users.set(key, cloneRecord(next))
     revokeActiveSessionsForUser(this.state, input.projectId, input.userId, input.suspendedAt)
 
     return { user: cloneRecord(next), previousUser: cloneRecord(existing) }
+  }
+
+  async applyDirectoryVerdict(input: ApplyDirectoryVerdictInput): Promise<UpdateAuthUserResult> {
+    const key = userKey(input.projectId, input.userId)
+    const existing = this.state.users.get(key)
+    if (!existing) {
+      throw new AuthStorageError(
+        "missing_user",
+        `[Sixb] User '${input.userId}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const previousUser = cloneRecord(existing)
+    // Only the directory lifts its own suspensions; anyone else's stands.
+    if (existing.status === "suspended" && existing.suspensionSource !== "directory") {
+      return { user: previousUser, previousUser }
+    }
+
+    if (input.verdict.status === "inactive") {
+      if (existing.status === "suspended") return { user: previousUser, previousUser }
+      const next = withUserStatus(existing, "suspended", "directory", input.appliedAt)
+      this.state.users.set(key, cloneRecord(next))
+      revokeActiveSessionsForUser(this.state, input.projectId, input.userId, input.appliedAt)
+      return { user: cloneRecord(next), previousUser }
+    }
+
+    let user = existing
+    if (existing.status === "suspended") {
+      user = withUserStatus(existing, "active", "directory", input.appliedAt)
+      this.state.users.set(key, cloneRecord(user))
+    }
+    this.syncDirectoryGroups({
+      completedAt: input.appliedAt,
+      groupIds: input.verdict.groupIds,
+      projectId: input.projectId,
+      userId: input.userId,
+      existing: [],
+    })
+    return { user: cloneRecord(user), previousUser }
   }
 
   // The identity provider owns the name and picture it sends: every sign-in overwrites them, and

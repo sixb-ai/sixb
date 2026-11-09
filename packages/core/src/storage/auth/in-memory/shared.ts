@@ -17,6 +17,8 @@ import type {
   UpsertAuthServiceAccountGroupMembershipInput,
   UserIdentityRecord,
   UserRecord,
+  UserStatus,
+  UserSuspensionSource,
 } from "../types"
 
 export interface AuthStorageState {
@@ -123,6 +125,19 @@ export function assertNonEmpty(value: string, label: string): string {
     throw new AuthStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
+}
+
+/** The user with this status. Only a suspended user carries a suspension source. */
+export function withUserStatus(
+  user: UserRecord,
+  status: UserStatus,
+  suspensionSource: UserSuspensionSource,
+  updatedAt: Date
+): UserRecord {
+  const { suspensionSource: _previous, ...rest } = user
+  return status === "suspended"
+    ? { ...rest, status, suspensionSource, updatedAt: cloneDate(updatedAt) }
+    : { ...rest, status, updatedAt: cloneDate(updatedAt) }
 }
 
 export function normalizeEmail(email: string): string {

@@ -95,4 +95,23 @@ export class SqliteAuthUserIdentityStore implements AuthUserIdentityStore {
 
     return rows.map(rowToIdentityRecord)
   }
+
+  async listForStrategy(params: {
+    readonly projectId: string
+    readonly strategyId: string
+  }): Promise<readonly UserIdentityRecord[]> {
+    const rows = this.db
+      .query(
+        `
+        SELECT *
+        FROM auth_user_identities
+        WHERE project_id = ?
+          AND strategy_id = ?
+        ORDER BY subject ASC
+      `
+      )
+      .all(params.projectId, params.strategyId) as SqliteAuthUserIdentityRow[]
+
+    return rows.map(rowToIdentityRecord)
+  }
 }

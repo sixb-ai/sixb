@@ -218,6 +218,7 @@ const shippedMigrationIds = [
   "096-object-artifact-refs",
   "097-shared-link-guests",
   "098-connector-connection-owners",
+  "099-user-suspension-source",
 ]
 
 afterEach(async () => {

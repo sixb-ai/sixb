@@ -344,6 +344,7 @@ export type {
 } from "./artifacts"
 export type {
   AccessTokenRecord,
+  ApplyDirectoryVerdictInput,
   AuthAccessTokenStore,
   AuthDeviceAuthorizationStore,
   AuthGroupMembershipStore,
@@ -374,6 +375,7 @@ export type {
   CreateOrUpdateAuthInvitationInput,
   DeviceAuthorizationRecord,
   DeviceAuthorizationStatus,
+  DirectoryVerdict,
   GroupMembershipRecord,
   GroupMembershipSource,
   InvitationRecord,
@@ -407,6 +409,7 @@ export type {
   UserIdentityRecord,
   UserRecord,
   UserStatus,
+  UserSuspensionSource,
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage, MAX_PENDING_DEVICE_AUTHORIZATIONS } from "./auth"
 export type {

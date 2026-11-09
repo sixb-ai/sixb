@@ -82,4 +82,19 @@ export class PgAuthUserIdentityStore implements AuthUserIdentityStore {
 
     return rows.map(rowToIdentityRecord)
   }
+
+  async listForStrategy(params: {
+    readonly projectId: string
+    readonly strategyId: string
+  }): Promise<readonly UserIdentityRecord[]> {
+    const rows = await this.sql<PgAuthUserIdentityRow[]>`
+      SELECT *
+      FROM auth_user_identities
+      WHERE project_id = ${params.projectId}
+        AND strategy_id = ${params.strategyId}
+      ORDER BY subject COLLATE "C" ASC
+    `
+
+    return rows.map(rowToIdentityRecord)
+  }
 }

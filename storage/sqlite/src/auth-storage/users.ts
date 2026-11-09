@@ -8,6 +8,8 @@ import type {
   UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UserRecord,
+  UserStatus,
+  UserSuspensionSource,
 } from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
@@ -62,9 +64,10 @@ export class SqliteAuthUserStore implements AuthUserStore {
             display_name,
             avatar_url,
             status,
+            suspension_source,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -74,6 +77,7 @@ export class SqliteAuthUserStore implements AuthUserStore {
           input.displayName ?? null,
           input.avatarUrl ?? null,
           input.status ?? "active",
+          suspensionSourceFor(input.status ?? "active"),
           toIso(createdAt),
           toIso(updatedAt)
         )
@@ -92,6 +96,7 @@ export class SqliteAuthUserStore implements AuthUserStore {
       displayName: input.displayName,
       avatarUrl: input.avatarUrl,
       status: input.status ?? "active",
+      ...(input.status === "suspended" ? { suspensionSource: "manual" as const } : {}),
       createdAt,
       updatedAt,
     }
@@ -197,16 +202,24 @@ export class SqliteAuthUserStore implements AuthUserStore {
           `
           UPDATE auth_users
           SET status = ?,
+              suspension_source = ?,
               updated_at = ?
           WHERE project_id = ?
             AND id = ?
         `
         )
-        .run(input.status, toIso(updatedAt), input.projectId, input.id)
+        .run(
+          input.status,
+          suspensionSourceFor(input.status),
+          toIso(updatedAt),
+          input.projectId,
+          input.id
+        )
 
       const user = rowToUserRecord({
         ...existing,
         status: input.status,
+        suspension_source: suspensionSourceFor(input.status),
         updated_at: toIso(updatedAt),
       })
       return { user, previousUser: rowToUserRecord(existing) }
@@ -269,4 +282,9 @@ function changesProfile(user: UserRecord, input: UpdateAuthUserProfileInput): bo
   const avatarUrl = input.avatarUrl === undefined ? user.avatarUrl : (input.avatarUrl ?? undefined)
 
   return displayName !== user.displayName || avatarUrl !== user.avatarUrl
+}
+
+// A user suspended through the user store was suspended by hand.
+function suspensionSourceFor(status: UserStatus): UserSuspensionSource | null {
+  return status === "suspended" ? "manual" : null
 }
