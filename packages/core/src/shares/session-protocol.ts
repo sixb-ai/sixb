@@ -19,6 +19,8 @@ export interface SharedSessionContext {
   readonly access: ShareAccessPlan
   readonly expiresAt: Date
   readonly absoluteExpiresAt: Date
+  /** The name the session's visitor gave, which their comments and presence carry. */
+  readonly guestName?: string
 }
 
 export interface SharedSessionCredential {
@@ -158,6 +160,66 @@ export class SharedSessionProtocol {
     return result ? this.context(result.grant, result.session) : null
   }
 
+  /**
+   * The session as it is now, for a connection that authenticated it once and stays open: the same
+   * checks as `resolve`, by its id, without the secret or a renewal. Null once it is revoked or
+   * expired, or its grant is.
+   */
+  async current(
+    context: Pick<SharedSessionContext, "grantId" | "sessionId">
+  ): Promise<SharedSessionContext | null> {
+    const now = this.currentTime()
+
+    const result = await this.host.storage.transaction(async (tx) => {
+      const session = await requireSessions(tx).getById({
+        projectId: this.host.projectId,
+        id: context.sessionId,
+      })
+      if (
+        !session ||
+        session.grantId !== context.grantId ||
+        session.revokedAt !== undefined ||
+        session.expiresAt.getTime() <= now.getTime() ||
+        session.absoluteExpiresAt.getTime() <= now.getTime()
+      ) {
+        return null
+      }
+
+      const grant = await activeGrant(tx, this.host.projectId, context.grantId, now)
+      if (!grant || session.absoluteExpiresAt.getTime() !== grant.expiresAt.getTime()) return null
+      return { grant, session }
+    })
+
+    return result ? this.context(result.grant, result.session) : null
+  }
+
+  /**
+   * Keeps the name the session's visitor gives, as `guestName()` keeps it. Null when the session
+   * ended meanwhile.
+   */
+  async setGuestName(
+    context: Pick<SharedSessionContext, "grantId" | "sessionId">,
+    name: string
+  ): Promise<SharedSessionContext | null> {
+    const now = this.currentTime()
+
+    const result = await this.host.storage.transaction(async (tx) => {
+      const grant = await activeGrant(tx, this.host.projectId, context.grantId, now)
+      if (!grant) return null
+
+      const session = await requireSessions(tx).setGuestName({
+        projectId: this.host.projectId,
+        id: context.sessionId,
+        grantId: context.grantId,
+        name,
+        now,
+      })
+      return session ? { grant, session } : null
+    })
+
+    return result ? this.context(result.grant, result.session) : null
+  }
+
   async revoke(context: Pick<SharedSessionContext, "grantId" | "sessionId">): Promise<void> {
     const revokedAt = this.currentTime()
     await this.host.storage.transaction(async (tx) => {
@@ -182,6 +244,7 @@ export class SharedSessionProtocol {
       access: effectiveAccess(this.host, grant),
       expiresAt: new Date(session.expiresAt),
       absoluteExpiresAt: new Date(session.absoluteExpiresAt),
+      ...(session.guestName === undefined ? {} : { guestName: session.guestName }),
     }
   }
 

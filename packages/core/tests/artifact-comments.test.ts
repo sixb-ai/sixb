@@ -240,5 +240,11 @@ describe("comments on an artifact", () => {
     ).toBe(
       '[welcome · body>main:0>h1:0 · "Welcome back" · revision 12 · comment cmt_4k2a9c0d1e · from Ava Martin] Warmer'
     )
+    // A shared link's guest says so: nobody vouches for the name they typed.
+    expect(
+      quoteArtifactComment({ authorName: "Ava Martin", guest: true, anchor, body: "Warmer" })
+    ).toBe(
+      '[welcome · body>main:0>h1:0 · "Welcome back" · revision 12 · from guest Ava Martin] Warmer'
+    )
   })
 })

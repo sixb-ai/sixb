@@ -4,12 +4,15 @@ import { isRuntimeAllowed } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import { type AuthorizedObjectReader, objectReadersIn } from "../execution/authorized-object-reader"
+import type { SharedAccessDelegationRef } from "../execution/types"
 import type { ObjectQuery } from "../objects/query/ir"
 import type { PropertyToken } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
+  ArtifactCommentAuthor,
   ArtifactFile,
+  ArtifactGuest,
   ArtifactRecord,
   ArtifactRestorePointRecord,
   ArtifactStorage,
@@ -367,13 +370,15 @@ function accessRuleIn(
   return createArtifactAccessRule({
     storage: artifacts,
     projectId: runtime.projectId,
-    // Shared-link sessions and unresolved authority reach no artifact.
+    // A shared link's session reaches artifacts as a guest; unresolved authority reaches none.
     caller:
       authority.type === "unrestricted"
         ? "system"
         : authority.type === "principal"
           ? authority.context.principal
-          : null,
+          : authority.type === "delegated"
+            ? "guest"
+            : null,
     sharing: authority.type === "principal" && authority.ref.credential?.type === "session",
     conversation: async (threadId) => {
       if (await threads.read(threadId)) return "update"
@@ -433,7 +438,7 @@ export function createArtifactsRuntime(
   } = {}
 ): ArtifactsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
-  // Shared-link sessions and unresolved authority reach no artifact.
+  // A shared link's session writes nothing but comments, as a guest; unresolved authority, nothing.
   const caller: Principal | null =
     authority.type === "principal"
       ? authority.context.principal
@@ -453,9 +458,20 @@ export function createArtifactsRuntime(
   }
   const requireCaller = (): Principal => {
     if (!caller) {
-      throw new ArtifactRequestError("not_allowed", "[Sixb] This caller cannot publish artifacts.")
+      throw new ArtifactRequestError(
+        "not_allowed",
+        authority.type === "delegated"
+          ? "[Sixb] A shared link's guest reads its artifacts and comments on them, nothing more."
+          : "[Sixb] This caller cannot publish artifacts."
+      )
     }
     return caller
+  }
+
+  /** Who writes a comment: the caller, or a shared link's guest under the name they gave. */
+  const commentAuthor = async (): Promise<ArtifactCommentAuthor> => {
+    if (authority.type !== "delegated" || !authority.delegation) return requireCaller()
+    return sharedLinkGuest(runtime, authority.delegation)
   }
 
   const rule = (): ArtifactAccessRule => createRuntimeArtifactAccessRule(runtime)
@@ -641,7 +657,8 @@ export function createArtifactsRuntime(
       projectId: runtime.projectId,
       storage: requireStorage,
       events: runtime.events,
-      caller: requireCaller,
+      author: commentAuthor,
+      manager: requireCaller,
       reach,
     }),
 
@@ -945,6 +962,30 @@ function holderObject(runtime: SixbRuntimeContext, holding: ArtifactHolding): Ar
   const title = typeof value === "string" || typeof value === "number" ? String(value).trim() : ""
 
   return { objectTypeId, primaryId, propertyId, ...(title ? { title } : {}) }
+}
+
+/**
+ * The guest a shared link's session comments as: the name its visitor gave, kept by the session.
+ * Refused with `name_required` until they give one.
+ */
+async function sharedLinkGuest(
+  runtime: SixbRuntimeContext,
+  delegation: SharedAccessDelegationRef
+): Promise<ArtifactGuest> {
+  const session = await runtime.storage.shareSessions?.getById({
+    projectId: runtime.projectId,
+    id: delegation.sessionId,
+  })
+
+  const name = session?.grantId === delegation.grantId ? session.guestName : undefined
+  if (!name) {
+    throw new ArtifactRequestError(
+      "name_required",
+      "[Sixb] A shared link's guest gives their name before they comment."
+    )
+  }
+
+  return { type: "guest", id: delegation.sessionId, name }
 }
 
 function notFound(artifactId: string): ArtifactRequestError {
