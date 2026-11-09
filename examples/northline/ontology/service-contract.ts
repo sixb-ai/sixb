@@ -1,4 +1,4 @@
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
+import { defineObjectType, link, prop, ref, stringEnum } from "@sixb/core/ontology"
 import { CustomerAccount } from "./customer-account"
 import { Facility } from "./facility"
 
@@ -33,6 +33,12 @@ export const ServiceContract = defineObjectType({
     prop("majorComponentsExcluded", "boolean", { required: true }),
     prop("approvalThreshold", "double", { required: true }),
     prop("sourceUpdatedAt", "timestamp", { query: { searchable: true, sortable: true } }),
+    // Set in Northline, not by the business system: the canvas a new contract's start is
+    // planned in, and reviewed with the customer.
+    prop("onboardingPlan", ref.artifact(), {
+      nullable: true,
+      description: "The plan reviewed with the customer when the contract starts.",
+    }),
   ],
   links: [
     link("customer", CustomerAccount, { cardinality: "one" }),

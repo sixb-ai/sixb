@@ -138,6 +138,10 @@ bun run demo:approve-quote  # approve a pending source-system quote
 bun run demo:artifacts      # publish sample artifacts and print their links
 ```
 
+`demo:artifacts` also gives the Cold Chain Priority contract (`/contracts/contract-camden-priority`)
+its onboarding plan: a canvas held in `ServiceContract.onboardingPlan`, shown live on the contract's
+page. **Attach onboarding plan** on the contract's page in the Console attaches another.
+
 Mutable source state lives under `.sixb/demo-sources/` and survives ordinary restarts. Only
 `demo:reset` replaces it.
 
