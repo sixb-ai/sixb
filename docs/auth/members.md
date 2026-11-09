@@ -33,7 +33,21 @@ Open **Settings › Members** in your [app](../apps/overview.md#settings) to inv
 
 Administrators can manage an existing user only when all of that user's current groups are in scope. Group changes also require the new groups to be in scope. A user cannot suspend themselves or remove their own groups.
 
-Suspending a user revokes their sessions. Reactivating them requires a new sign-in. Role grants do not give member-management permissions; membership policies do.
+Suspending a user ends their sessions, refuses their [access tokens](#service-accounts-and-tokens) while they are suspended, and revokes the [connections they made with their own accounts](../connectors/authentication.md#let-people-connect-their-own-accounts). What a `merge` or `append` sync already read from those connections stays, visible to whoever your grants allow; see [syncs](../syncs/overview.md#sync-connected-accounts). A reactivated user's access tokens work again; they sign in again for a session and connect their accounts again. Role grants do not give member-management permissions; membership policies do.
+
+### When someone leaves
+
+Signing in through an identity provider stops a person who left from signing in again, but Sixb hears of it only when you tell it. Three ways:
+
+| Who | How |
+| --- | --- |
+| An administrator | **Settings › Members** › Suspend. Use it when access must end now. |
+| Your identity provider's directory | The orchestrator checks it every hour and suspends whoever it reports disabled, deleted, or unassigned. For Microsoft Entra, add [`entraDirectory()`](https://github.com/sixb-ai/sixb/tree/main/auth/oidc#when-someone-leaves) to your OIDC strategy. |
+| Your code | `sixb.users.suspend(userRef(id))` in an action, workflow, or schedule, for a source Sixb doesn't read, such as your HR system. |
+
+The directory lifts only the suspensions it made: a person it suspended is reactivated when it reports them active again, and one an administrator or your code suspended stays suspended. Suspending or reactivating someone takes two reads of the directory a minute apart that agree, so a change the provider is still spreading, or a role swapped by removing the old one first, suspends no one by mistake. Reactivating someone the directory still reports gone lasts only until its next check, which suspends them again. A check that would suspend more than a quarter of the members at once, and more than two, suspends no one and reports a failure to [`onError`](../logging/overview.md#report-failures), since that looks like a misconfigured directory rather than a wave of departures.
+
+`sixb.users.suspend(user)` and `sixb.users.reactivate(user)` take a user reference or `{ email }` and return the member's profile. Only trusted code may call them: no grant lets a person, or the agent acting for one, suspend a member. Suspending a member the directory suspended keeps them suspended, and the directory no longer lifts it.
 
 ## Read the member directory
 
@@ -82,7 +96,7 @@ Sixb publishes an event when membership changes. Use them to onboard new members
 | --- | --- | --- |
 | `user.joined` | A person signs in for the first time, which creates their account. | `user`, `invitationId` when they accepted an invitation |
 | `user.invited` | An invitation is created, and sent when your sign-in method sends invitations. Inviting the same person again publishes it again. | `invitationId`, `email`, `expiresAt`, `requestedBy` |
-| `user.suspended`, `user.reactivated` | An administrator changes the member's status. | `user`, `requestedBy` |
+| `user.suspended`, `user.reactivated` | A member's status changes. | `user`, and `requestedBy` when an administrator changed it. Without `requestedBy`, the identity provider's directory or your code did. |
 | `user.profile.updated` | The member's name or picture changes. | `user`, `changes`, and `requestedBy` when the member edited it. Without `requestedBy`, their identity provider changed it at sign-in. |
 
 `user` is the member's profile, as [`sixb.users.get`](#read-the-member-directory) returns it. `changes` holds only the fields that changed, each with its operation (`created`, `updated` or `cleared`) and values. Saving the values a member already has, such as the same name, publishes nothing.
