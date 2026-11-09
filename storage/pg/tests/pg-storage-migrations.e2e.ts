@@ -138,6 +138,7 @@ const SHIPPED_MIGRATIONS = [
   "097-artifact-frame-files",
   "098-artifact-comments",
   "099-object-artifact-refs",
+  "100-shared-link-guests",
 ]
 
 const steps = postgresStorageMigrations.steps

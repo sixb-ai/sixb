@@ -1,9 +1,11 @@
+import { guestName } from "../../shares/guest-name"
 import { ShareSessionStorageError } from "./errors"
 import type {
   CreateShareSessionInput,
   GetShareSessionByIdInput,
   RenewShareSessionIfValidInput,
   RevokeShareSessionInput,
+  SetShareSessionGuestNameInput,
   ShareSessionRecord,
 } from "./types"
 
@@ -63,6 +65,14 @@ export function parseShareSessionRecord(input: unknown): ShareSessionRecord {
       throw invalidRecord("Share session revocation time must not precede creation time.")
     }
 
+    const storedGuestName = input.guestName
+    if (storedGuestName === null) {
+      throw invalidRecord("Share session guest name must be omitted rather than null.")
+    }
+    if (storedGuestName !== undefined && guestName(storedGuestName) !== storedGuestName) {
+      throw invalidRecord("Share session guest name is not one a visitor may give.")
+    }
+
     return {
       id: identifier(input.id, "Share session id"),
       projectId: identifier(input.projectId, "Project id"),
@@ -72,6 +82,7 @@ export function parseShareSessionRecord(input: unknown): ShareSessionRecord {
       expiresAt,
       absoluteExpiresAt,
       ...(revokedAt === undefined ? {} : { revokedAt }),
+      ...(storedGuestName === undefined ? {} : { guestName: storedGuestName as string }),
     }
   } catch (error) {
     if (error instanceof ShareSessionStorageError) {
@@ -108,6 +119,23 @@ export function normalizeRenewShareSessionIfValidInput(
     tokenHash: sha256(input.tokenHash, "Share session token hash"),
     now,
     expiresAt,
+  }
+}
+
+export function normalizeSetShareSessionGuestNameInput(
+  input: SetShareSessionGuestNameInput
+): SetShareSessionGuestNameInput {
+  if (!isRecord(input)) throw invalidInput("Share session guest name input must be an object.")
+  const name = guestName(input.name)
+  if (name === null || name !== input.name) {
+    throw invalidInput("Share session guest name must be one guestName() keeps.")
+  }
+  return {
+    projectId: identifier(input.projectId, "Project id"),
+    id: identifier(input.id, "Share session id"),
+    grantId: identifier(input.grantId, "Share grant id"),
+    name,
+    now: inputDate(input.now, "Share session guest name time"),
   }
 }
 

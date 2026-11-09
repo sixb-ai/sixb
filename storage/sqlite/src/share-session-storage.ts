@@ -3,6 +3,7 @@ import {
   normalizeGetShareSessionByIdInput,
   normalizeRenewShareSessionIfValidInput,
   normalizeRevokeShareSessionInput,
+  normalizeSetShareSessionGuestNameInput,
   normalizeShareSessionCreate,
   parseShareSessionRecord,
 } from "@sixb/core/internal/share-session-storage-provider"
@@ -11,6 +12,7 @@ import type {
   GetShareSessionByIdInput,
   RenewShareSessionIfValidInput,
   RevokeShareSessionInput,
+  SetShareSessionGuestNameInput,
   ShareSessionRecord,
   ShareSessionStorage,
 } from "@sixb/core/storage"
@@ -124,6 +126,34 @@ export class SqliteShareSessionStorage implements ShareSessionStorage {
     return row ? rowToRecord(row) : null
   }
 
+  async setGuestName(input: SetShareSessionGuestNameInput): Promise<ShareSessionRecord | null> {
+    const normalized = normalizeSetShareSessionGuestNameInput(input)
+    const now = normalized.now.toISOString()
+    const row = this.db
+      .query(
+        `
+          UPDATE share_sessions
+          SET guest_name = ?
+          WHERE project_id = ?
+            AND id = ?
+            AND grant_id = ?
+            AND revoked_at IS NULL
+            AND expires_at > ?
+            AND absolute_expires_at > ?
+          RETURNING *
+        `
+      )
+      .get(
+        normalized.name,
+        normalized.projectId,
+        normalized.id,
+        normalized.grantId,
+        now,
+        now
+      ) as SqliteShareSessionRow | null
+    return row ? rowToRecord(row) : null
+  }
+
   async revoke(input: RevokeShareSessionInput): Promise<ShareSessionRecord | null> {
     const normalized = normalizeRevokeShareSessionInput(input)
     const current = this.getRow(normalized.projectId, normalized.id)
@@ -167,6 +197,7 @@ interface SqliteShareSessionRow {
   readonly expires_at: unknown
   readonly absolute_expires_at: unknown
   readonly revoked_at: unknown
+  readonly guest_name: unknown
 }
 
 function rowToRecord(row: SqliteShareSessionRow): ShareSessionRecord {
@@ -179,6 +210,7 @@ function rowToRecord(row: SqliteShareSessionRow): ShareSessionRecord {
     expiresAt: row.expires_at,
     absoluteExpiresAt: row.absolute_expires_at,
     ...(row.revoked_at === null ? {} : { revokedAt: row.revoked_at }),
+    ...(row.guest_name === null ? {} : { guestName: row.guest_name }),
   })
 }
 

@@ -7,6 +7,7 @@ import { isFileRef } from "../../blob-storage"
 import { type ArtifactLatestVersion, ArtifactStorageError } from "./errors"
 import type {
   ArtifactBoardPreviewRecord,
+  ArtifactCommentAuthor,
   ArtifactCommentRecord,
   ArtifactDocument,
   ArtifactFile,
@@ -161,7 +162,7 @@ export function othersCommented(
 ): boolean {
   return comments.some(({ author, origin }) => {
     if (origin?.runId === turn.turnRunId) return false
-    return !turn.requester || !principalsEqual(author, turn.requester)
+    return !turn.requester || author.type === "guest" || !principalsEqual(author, turn.requester)
   })
 }
 
@@ -309,6 +310,11 @@ export const artifactStorageErrors = {
       "artifact_comments_full",
       `[Sixb] Artifact '${artifactId}' holds ${ARTIFACT_COMMENT_LIMITS.maxComments} comments, as many as it may: delete some first.`
     ),
+  guestCommentsFull: (artifactId: string) =>
+    new ArtifactStorageError(
+      "artifact_comments_full",
+      `[Sixb] Guests have left ${ARTIFACT_COMMENT_LIMITS.maxGuestComments} comments on artifact '${artifactId}', as many as they may: a member can delete some.`
+    ),
 }
 
 export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
@@ -354,7 +360,7 @@ export function parseArtifactCommentRow(row: Row): ArtifactCommentRecord {
             runId: text(row.originRunId, "originRunId", where),
           },
         }),
-    author: principal(row.authorPrincipalType, row.authorPrincipalId, "author", where),
+    author: commentAuthor(row, where),
     createdAt: date(row.createdAt, "createdAt", where),
     ...(row.resolvedAt == null
       ? {}
@@ -438,6 +444,20 @@ function principal(type: unknown, id: unknown, column: string, where: string): P
     throw corrupt(where, `${column} is not a principal`)
   }
   return { type: type as Principal["type"], id: text(id, column, where) }
+}
+
+/** A comment's author: a principal, or a guest with the name they gave and nothing else. */
+function commentAuthor(row: Row, where: string): ArtifactCommentAuthor {
+  if (row.authorPrincipalType !== "guest") {
+    if (row.authorName != null) throw corrupt(where, "a principal's comment keeps a guest's name")
+    return principal(row.authorPrincipalType, row.authorPrincipalId, "author", where)
+  }
+
+  return {
+    type: "guest",
+    id: text(row.authorPrincipalId, "author", where),
+    name: text(row.authorName, "authorName", where),
+  }
 }
 
 /** A boolean, as Postgres returns it or as SQLite keeps it: 0 or 1. */

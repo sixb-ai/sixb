@@ -4,6 +4,7 @@ export {
   normalizeGetShareSessionByIdInput,
   normalizeRenewShareSessionIfValidInput,
   normalizeRevokeShareSessionInput,
+  normalizeSetShareSessionGuestNameInput,
   normalizeShareSessionCreate,
   parseShareSessionRecord,
 } from "./record"

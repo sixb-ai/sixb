@@ -91,8 +91,11 @@ export function createArtifactCommentsRuntime(input: {
     const comment = await input.storage().getComment({ projectId, artifactId, id: commentId })
     if (!comment) throw commentNotFound(artifactId, commentId)
 
+    // A guest's comment is managed by those who may change the artifact, never by a guest.
     const changes = access === "owner" || access === "update"
-    if (!changes && !principalsEqual(comment.author, input.caller())) {
+    const authored =
+      comment.author.type !== "guest" && principalsEqual(comment.author, input.caller())
+    if (!changes && !authored) {
       throw new ArtifactRequestError(
         "not_allowed",
         "[Sixb] Only a comment's author, or whoever may change the artifact, resolves or deletes it."

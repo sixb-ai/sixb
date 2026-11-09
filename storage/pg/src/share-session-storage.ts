@@ -2,6 +2,7 @@ import {
   normalizeGetShareSessionByIdInput,
   normalizeRenewShareSessionIfValidInput,
   normalizeRevokeShareSessionInput,
+  normalizeSetShareSessionGuestNameInput,
   normalizeShareSessionCreate,
   parseShareSessionRecord,
 } from "@sixb/core/internal/share-session-storage-provider"
@@ -10,6 +11,7 @@ import type {
   GetShareSessionByIdInput,
   RenewShareSessionIfValidInput,
   RevokeShareSessionInput,
+  SetShareSessionGuestNameInput,
   ShareSessionRecord,
   ShareSessionStorage,
 } from "@sixb/core/storage"
@@ -80,6 +82,22 @@ export class PgShareSessionStorage implements ShareSessionStorage {
     return row ? recordFromRow(row) : null
   }
 
+  async setGuestName(input: SetShareSessionGuestNameInput): Promise<ShareSessionRecord | null> {
+    const normalized = normalizeSetShareSessionGuestNameInput(input)
+    const [row] = await this.sql<PgShareSessionRow[]>`
+      UPDATE share_sessions
+      SET guest_name = ${normalized.name}
+      WHERE project_id = ${normalized.projectId}
+        AND id = ${normalized.id}
+        AND grant_id = ${normalized.grantId}
+        AND revoked_at IS NULL
+        AND expires_at > ${normalized.now}
+        AND absolute_expires_at > ${normalized.now}
+      RETURNING *
+    `
+    return row ? recordFromRow(row) : null
+  }
+
   async revoke(input: RevokeShareSessionInput): Promise<ShareSessionRecord | null> {
     const normalized = normalizeRevokeShareSessionInput(input)
     const current = await this.getById(normalized)
@@ -107,6 +125,7 @@ interface PgShareSessionRow {
   readonly expires_at: unknown
   readonly absolute_expires_at: unknown
   readonly revoked_at: unknown
+  readonly guest_name: unknown
 }
 
 function recordFromRow(row: PgShareSessionRow): ShareSessionRecord {
@@ -119,6 +138,7 @@ function recordFromRow(row: PgShareSessionRow): ShareSessionRecord {
     expiresAt: row.expires_at,
     absoluteExpiresAt: row.absolute_expires_at,
     ...(row.revoked_at === null ? {} : { revokedAt: row.revoked_at }),
+    ...(row.guest_name === null ? {} : { guestName: row.guest_name }),
   })
 }
 

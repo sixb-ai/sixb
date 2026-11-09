@@ -429,6 +429,21 @@ export interface ArtifactCommentAnchor {
   readonly revision: number
 }
 
+/**
+ * A visitor who opened a shared link to an object that holds the artifact: no account, only the
+ * name they typed for their link's session. Comments are the one record a guest writes, so the
+ * kind stays here rather than in `Principal`, which is who signed in.
+ */
+export interface ArtifactGuest {
+  readonly type: "guest"
+  /** The shared link's session they comment from: each session is one guest. */
+  readonly id: string
+  readonly name: string
+}
+
+/** Who wrote a comment: someone who signed in, the project's code, or a shared link's guest. */
+export type ArtifactCommentAuthor = Principal | ArtifactGuest
+
 /** A comment on an artifact, or a reply to one. */
 export interface ArtifactCommentRecord {
   readonly projectId: string
@@ -439,7 +454,7 @@ export interface ArtifactCommentRecord {
   readonly anchor: ArtifactCommentAnchor
   /** Plain text. */
   readonly body: string
-  readonly author: Principal
+  readonly author: ArtifactCommentAuthor
   /** The Agent's run that wrote it for its author, and that run's conversation. */
   readonly origin?: ArtifactOrigin
   readonly createdAt: Date
@@ -562,7 +577,8 @@ export interface ArtifactStorage {
   /**
    * Adds a comment, or a reply to one. Throws `artifact_not_found`; `comment_not_found` when
    * `parentId` names no comment of the artifact, or a reply; and `artifact_comments_full` past
-   * `ARTIFACT_COMMENT_LIMITS.maxComments`, checked in the same transaction as the write.
+   * `ARTIFACT_COMMENT_LIMITS.maxComments`, or, for a guest's, past `maxGuestComments` written by
+   * guests, both checked in the same transaction as the write.
    */
   createComment(input: CreateArtifactCommentInput): Promise<ArtifactCommentRecord>
   getComment(input: ArtifactCommentKey): Promise<ArtifactCommentRecord | null>
