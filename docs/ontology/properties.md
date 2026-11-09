@@ -212,6 +212,11 @@ await sixb.objects(Meeting).upsert({
 | An action's parameters, a workflow's input | An artifact whoever requested the run can change |
 | An action's edits, server code running as the system | Any existing artifact |
 
+- Whoever reads the object and the property reads the artifact; whoever may also edit the
+  object changes it. See [Hold an artifact in an object](../artifacts/overview.md#hold-an-artifact-in-an-object).
+- Putting an artifact in a property shares it with that object's readers and editors, whoever set
+  it. Like a file, the artifact does not take the property's markings: whoever reaches it another
+  way, such as through another object, still reads it.
 - An artifact that does not exist, and one the writer cannot change, are refused with the same
   error. Reading an artifact is not enough to put it in a property.
 - Values an object already holds stay valid, even after the artifact is deleted.

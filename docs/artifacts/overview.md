@@ -673,6 +673,24 @@ await sixb.objects(Meeting).upsert({
 A writer can only give an object an artifact they can change. The artifact stays when the object
 is deleted.
 
+Whoever reads the object reads the artifact, and whoever may also edit the object changes it:
+
+| | Reads the object | Also has `can.edit` on its type |
+| --- | --- | --- |
+| Read every version, comment, follow it live | ✓ | ✓ |
+| Change it, create versions, restore it, keep page data with `sixb.state` | – | ✓ |
+| Delete it | – | – |
+
+- The reader must see the object and the property: a
+  [view condition](../auth/authorization.md#grant-only-some-objects) that hides the object, or a
+  [marking](../auth/markings.md) they are not cleared for, hides the artifact too.
+- Access tokens reach it the same way.
+- `/artifacts` does not list it: it opens from the object. `sixb.artifacts.holders(id)`, or
+  `GET /api/artifacts/{artifactId}/holders`, lists the objects that hold it among those you read,
+  with their titles.
+- When the agent changes it for someone who may edit the object, the conversation shares it from
+  then on.
+
 ## Open an artifact
 
 Every artifact has a page at `/artifacts/{artifactId}` that fills the window, over your app's
@@ -705,9 +723,9 @@ reads the conversation reads the artifact, at its latest version, whatever publi
 
 - A change saved by anyone who can update it is seen by every reader of every conversation that
   shares the artifact. Its author is whoever saved it; the artifact stays its owner's.
-- The agent revises someone else's artifact only in a conversation that already shares it. When
-  it revises one of yours in a conversation, that conversation shares it from then on, with its
-  history.
+- The agent revises someone else's artifact only in a conversation that already shares it, or
+  when an object you may edit holds it. When it revises one you may change this way, or one of
+  yours, in a conversation, that conversation shares it from then on, with its history.
 - Retrying a turn takes back what it changed: an artifact it put back is no longer shared in a
   conversation only that turn shared it in. One someone changed since stays, and stays shared.
 - The owner's other artifacts stay private. An embed or link to one is refused with 403
@@ -715,7 +733,8 @@ reads the conversation reads the artifact, at its latest version, whatever publi
   conversation; an unknown id is a 404. The difference tells anyone whether an id exists, never
   what it holds.
 - An observer's page runs, but keeps nothing: its `sixb.state` values last as long as the tab.
-- Only a signed-in session reaches shared artifacts: an access token reaches only its own.
+- Only a signed-in session reaches what a conversation shares: an access token reaches its own
+  artifacts, and those an object it reads holds.
 - `sixb.artifacts.access(id)` says what the caller may do: `owner`, `update`, `read`, or `none`.
 
 ## Theme an artifact
