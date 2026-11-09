@@ -38,7 +38,14 @@ whose content it holds, replaced with every content write (see
 - On `join`, the server reads the person's access to the artifact. `owner` and `update` edit,
   `read` watches, and anything else is refused with `left`.
 - The first join opens the room from the stored document. Other kinds are refused as `not_live`.
-- `joined` says who the connection is (`user`: id, name and color, read once per connection).
+- `joined` says who the connection is (`user`: id, name and color, read once per connection). A
+  shared link's guest is read at each join instead, from its session: `guest:<sessionId>`, the
+  name they gave, and `guest: true`. Once they give a name, their socket reads it from the session
+  (`LiveRooms.refreshUser`): their awareness states take it, and the room shares them again. A name is never an email or an id, since every connection,
+  a guest's included, sees the same state: someone who gave none has an empty name.
+- A shared link's socket reads its session again every `SHARED_SOCKET_RECHECK_MS`, and on its next
+  message past that (`routes/ws/shared-sockets.ts`): its SDK keeps the authority the upgrade
+  proved, so revocation is seen only there. One that ended is closed with 4401.
 - A socket message is at most 64 KiB. A larger sync message is sent in parts (`more: true`, see
   `liveSync`), each its own base64, and assembled per connection and artifact up to
   `MAX_LIVE_SYNC_BYTES`.

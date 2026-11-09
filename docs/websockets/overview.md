@@ -4,7 +4,9 @@ The Sixb API streams domain changes, run logs, and agent output over WebSockets.
 
 ## Connect
 
-Connect to the API origin using `wss://` in production. Connections use an authenticated browser session from an allowed browser origin, or a signed-in native client's access token in an `Authorization: Bearer` header. Personal access tokens, service-account tokens, and shared-access sessions cannot authenticate WebSockets.
+Connect to the API origin using `wss://` in production. Connections use an authenticated browser session from an allowed browser origin, or a signed-in native client's access token in an `Authorization: Bearer` header. Personal access tokens and service-account tokens cannot authenticate WebSockets.
+
+A [shared link's](../auth/shared-access.md#share-an-objects-artifacts) session opens `/ws/artifacts` and `/ws/events` only, naming its grant in the URL: `?shareGrant=<grantId>`. It watches the artifacts the link reaches and receives their events, nothing else. Once the link is revoked or its session ends, the server closes the socket with code `4401` within seconds; reconnecting is refused. The Client SDK does this for you.
 
 | Endpoint | Streams | Access |
 | --- | --- | --- |
@@ -142,6 +144,8 @@ connection holds the version as a Yjs document and exchanges
   asks for what your document holds that it lacks, and your answer brings back what you changed
   while away.
 - The server sets `user` in every awareness state it shares (`id`, `name` and `color`), whatever
-  your own state says. It shares your states only for awareness clients nobody else uses.
+  your own state says. It shares your states only for awareness clients nobody else uses. `name`
+  is the person's profile name, never their email: it is empty for someone who gave none, whom the
+  app shows as a team member. A shared link's guest has `guest: true` and the name they gave.
 - While an Agent turn changes boards, the server's own awareness state holds `sixbAgent`: each
   turn's `runId` and the `boards` it changed. A client's state never holds it.

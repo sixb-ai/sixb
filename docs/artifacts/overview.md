@@ -223,8 +223,12 @@ await sixb.artifacts.resolveComment(artifact.id, comment.id)
 - Each comment names its author in `authorName`, as their profile does, or `null` for someone the
   project no longer knows. One the Agent wrote for its author has `origin`, its run and
   conversation.
+- A visitor of a [shared link](../auth/shared-access.md#share-an-objects-artifacts) to an object
+  that holds the artifact comments as a guest: `author.type` is `guest` and `authorName` the name
+  they gave. Only someone who may change the artifact resolves or deletes a guest's comment.
 - Each change sends `artifact.commented` to whoever reads the artifact.
-- An artifact holds at most 1,000 comments, each up to 4,000 characters.
+- An artifact holds at most 1,000 comments, each up to 4,000 characters; guests write at most 200
+  of them.
 - `quoteArtifactComment(comment)` from `@sixb/core/artifacts` writes a comment as the Agent reads
   it, with where it is and its id, for a message that asks the Agent to act on it. The Agent then
   resolves each comment it addressed, and replies to the ones it can't, with
@@ -684,7 +688,9 @@ Whoever reads the object reads the artifact, and whoever may also edit the objec
 - The reader must see the object and the property: a
   [view condition](../auth/authorization.md#grant-only-some-objects) that hides the object, or a
   [marking](../auth/markings.md) they are not cleared for, hides the artifact too.
-- Access tokens reach it the same way.
+- Access tokens reach it the same way, and so does a
+  [shared link](../auth/shared-access.md#share-an-objects-artifacts) to the object, which reads
+  it, follows it live, and comments as a guest.
 - `/artifacts` does not list it: it opens from the object. `sixb.artifacts.holders(id)`, or
   `GET /api/artifacts/{artifactId}/holders`, lists the objects that hold it among those you read,
   with their titles.

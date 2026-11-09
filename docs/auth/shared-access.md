@@ -69,7 +69,31 @@ const { data } = await issueSharedAccessGrant({
 const url = data.url
 ```
 
-The URL is returned only when issued. Anyone holding it can use its permitted access until it expires or is revoked. The destination is a normal [app page](../apps/overview.md); its queries and action buttons use the shared session automatically. So do images, videos, and download links whose URL comes from [`objectFileContentUrl`](../client/overview.md#display-files); a file URL built by hand is not part of the shared session.
+The URL is returned only when issued. Anyone holding it can use its permitted access until it expires or is revoked. The destination is a normal [app page](../apps/overview.md); its queries and action buttons use the shared session automatically. So do images, videos, and download links whose URL comes from [`objectFileContentUrl`](../client/overview.md#display-files), and file content and board preview URLs passed through `withSharedAccess(url)` from `@sixb/client`, as the artifact viewer does for its files and board pictures. No other URL reads the link from its query, and a file URL built by hand is not part of the shared session.
+
+## Share an object's artifacts
+
+When the shared object holds an [artifact](../artifacts/overview.md#hold-an-artifact-in-an-object),
+such as the canvas a meeting is prepared in, `can.view(target)` is enough for the recipient to
+read it. Nothing else in the Share definition is needed.
+
+The recipient is a guest:
+
+- They read every version, and follow the artifact live: canvas edits, who is looking, new
+  comments.
+- They comment under a name they type once. Their comments and their live cursor carry it, marked
+  as a guest's for everyone.
+- A board whose canvas reads your data shows its outline until they open it: its picture would
+  show what its author sees, and the opened board runs with the visitor's own access.
+- They change nothing: no edits, versions, restores, or page data. Only members who may change the
+  artifact resolve or delete comments, a guest's included.
+- They never see a member's email: a member without a profile name is shown as a team member.
+- They stay in while the page is open and visible, through a meeting where they only watch. A page
+  left hidden signs them out after the inactivity window, 15 minutes by default.
+- Revoking the link closes their live connection within seconds. Their comments stay, under the
+  name they gave.
+
+Guests together write at most 200 of an artifact's 1,000 comments, so members always keep room.
 
 ## Know who used a link
 
@@ -105,4 +129,4 @@ A link that is invalid, expired, or revoked shows a generic, translated screen. 
 
 ## Limitations
 
-Revoke outstanding grants before permanently removing or reusing a Share definition's ID. Shared sessions currently do not support WebSockets, uploads, direct object writes, or action parameters containing object, file, user, or artifact references.
+Revoke outstanding grants before permanently removing or reusing a Share definition's ID. Shared sessions currently do not support uploads, direct object writes, or action parameters containing object, file, user, or artifact references. Live updates cover the artifacts the link reaches; other WebSocket streams, such as object events, logs, and agent output, are not available. A frame opened for a deck or page keeps working until it expires, within an hour, even once the link is revoked.
