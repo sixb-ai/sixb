@@ -179,8 +179,16 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
           : `Connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
       )
     }
+    // Like syncs, never open a suspended person's connection, even while its revocation is unfinished.
+    const [readable] = await this.withoutSuspendedOwners([connection])
+    if (!readable) {
+      throw createConnectorCodedError(
+        "connector.not_found",
+        `Connector '${definition.id}' does not open the connections of a suspended member.`
+      )
+    }
 
-    return this.connectExecutionConnection(definition, connection)
+    return this.connectExecutionConnection(definition, readable)
   }
 
   /** Snapshot the connected records that one trusted primitive execution may consume. */

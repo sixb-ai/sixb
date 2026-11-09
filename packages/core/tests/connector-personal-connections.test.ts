@@ -326,6 +326,28 @@ describe("personal connections in actions and workflows", () => {
     expect(read.map(({ id }) => id)).toEqual([ben.id])
   })
 
+  // Removal proof: drop the `withoutSuspendedOwners` check from `connectConnection`.
+  test("actions never open a suspended person's connection", async () => {
+    const harness = createHarness({ owners: ["user"] })
+    await connectOwn(harness, "user-a")
+    await connectOwn(harness, "user-b")
+    // Suspended in storage alone, as if the provider had refused the revocation.
+    await harness.storage.auth.suspendUserAndRevokeSessions({
+      projectId: "project",
+      userId: "user-a",
+      suspendedAt: harness.now(),
+    })
+    const open = (userId: User) =>
+      harness.service.connectConnection(harness.connector, {
+        owner: userOwner(userId),
+        slot: "default",
+      })
+
+    const refused = expectSixbError(await rejectionOf(open("user-a")), "connector.not_found")
+    expect(refused.message).toContain("suspended member")
+    expect((await open("user-b")).accountId).toBe("account-a")
+  })
+
   test("a suspension revokes the person's own grants and nobody else's", async () => {
     const harness = createHarness({ owners: ["project", "user"] })
     const ada = await connectOwn(harness, "user-a")
