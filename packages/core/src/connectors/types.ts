@@ -57,8 +57,8 @@ export interface ProjectConnectorConnectionOwner {
 }
 
 /**
- * A connection one person made with their own account. Only they manage it, and only syncs and
- * webhooks read it; `sixb.connector()` refuses it.
+ * A connection one person made with their own account. Only they manage it. Syncs and webhooks
+ * read it, and `sixb.connector()` opens it in a run they requested or one no one requested.
  */
 export interface UserConnectorConnectionOwner {
   readonly type: "user"

@@ -209,6 +209,9 @@ export const recordPayment = defineAction("recordPayment")
   })
 ```
 
+To call a service with a person's own account, open their
+[personal connection](../connectors/authentication.md#act-with-a-persons-account) instead.
+
 Return JSON-compatible values or no value from `.writeback()`. For example, return an ID or a
 string timestamp rather than an SDK client or `Date` instance. An action can use `.writeback()`
 without `.edits()` when it only needs to call an external system.

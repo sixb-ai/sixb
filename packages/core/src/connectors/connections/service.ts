@@ -159,12 +159,6 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   ): Promise<ConnectorClient<TAdapter>> {
     this.assertOAuthRegistered(definition)
     assertConnectorConnectionSelector(selector)
-    if (selector.owner.type === "user") {
-      throw createConnectorCodedError(
-        "connector.configuration_invalid",
-        `[Sixb] sixb.connector() opens project connections only; syncs and webhooks read '${definition.id}' personal connections.`
-      )
-    }
     const connection = await withConnectorStorageBoundary(
       "Connector connection could not be read.",
       () =>
@@ -177,7 +171,9 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     if (!connection) {
       throw createConnectorCodedError(
         "connector.not_found",
-        `Connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
+        selector.owner.type === "user"
+          ? `Connector '${definition.id}' has no connection for user '${selector.owner.id}' in slot '${selector.slot}'.`
+          : `Connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
       )
     }
 

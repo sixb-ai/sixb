@@ -55,6 +55,7 @@ export function createConnectorRuntime(
           `[Sixb] Connector '${definition.id}' uses persistent connections and requires an explicit owner and slot.`
         )
       }
+      assertPersonalConnectionRequester(definition, execution, selector)
       return service.connectConnection(definition, selector)
     }
     if (selector) {
@@ -142,6 +143,26 @@ export function getConnectorExecutionSourceResolver(
       ]
     },
   }
+}
+
+/**
+ * A run someone requested opens only that person's own connection, so no one can act with another
+ * person's account by calling an action, even with can.manage. A run no one requested, such as one
+ * an event or a schedule started, picks the owner from its data, as syncs and webhooks do.
+ */
+function assertPersonalConnectionRequester(
+  definition: ConnectorDefinition,
+  execution: ExecutionContext,
+  selector: ConnectorConnectionSelector
+): void {
+  const owner = selector.owner
+  const requester = execution.requestedBy
+  if (owner?.type !== "user" || requester === undefined) return
+  if (requester.type === "user" && requester.id === owner.id) return
+  throw new AuthorizationError(
+    `connection:connector:${definition.id}`,
+    `[Sixb] A run requested by someone else can't use a personal connection of connector '${definition.id}'. Only its owner's own runs, or runs no one requested, can.`
+  )
 }
 
 function assertConnectorConnectionAccess(
