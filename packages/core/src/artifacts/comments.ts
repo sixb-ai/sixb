@@ -79,7 +79,7 @@ export function createArtifactCommentsRuntime(input: {
     if (reached.access === "none") {
       throw new ArtifactRequestError(
         "not_shared",
-        `[Sixb] Artifact '${artifactId}' is not shared in a conversation you read.`
+        `[Sixb] Artifact '${artifactId}' is not shared with you.`
       )
     }
     return reached

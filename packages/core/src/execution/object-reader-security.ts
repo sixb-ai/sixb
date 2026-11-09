@@ -61,14 +61,18 @@ export class ObjectReaderSecurity {
   /** The properties each conditioned type's condition reads, which its clearance must show. */
   readonly #conditionProperties: ReadonlyMap<string, readonly string[]>
 
-  constructor(input: {
-    readonly authorization: RuntimeAuthorization
-    readonly authority: ResolvedExecutionAuthority
-    readonly projectId: string
-    readonly ontology: OntologyRegistry
-    readonly appliedMarkings?: AppliedMarkings
-    readonly requestedBy: AuthorizablePrincipal | undefined
-  }) {
+  constructor(
+    input: {
+      readonly authorization: RuntimeAuthorization
+      readonly authority: ResolvedExecutionAuthority
+      readonly projectId: string
+      readonly requestedBy: AuthorizablePrincipal | undefined
+    } & (
+      | { readonly ontology: OntologyRegistry; readonly appliedMarkings?: AppliedMarkings }
+      /** A clearance resolved already, as {@link withClearance} passes it. */
+      | { readonly clearance: ObjectReaderClearance }
+    )
+  ) {
     const authority = input.authority
     this.authorization = input.authorization
     this.authority = authority
@@ -114,13 +118,29 @@ export class ObjectReaderSecurity {
       })
     }
 
-    this.clearance = new ObjectReaderClearance({
-      ontology: input.ontology,
-      clearances: clearancesForAuthority(authority),
-      ...(input.appliedMarkings === undefined ? {} : { appliedMarkings: input.appliedMarkings }),
-    })
+    this.clearance =
+      "clearance" in input
+        ? input.clearance
+        : new ObjectReaderClearance({
+            ontology: input.ontology,
+            clearances: clearancesForAuthority(authority),
+            ...(input.appliedMarkings === undefined
+              ? {}
+              : { appliedMarkings: input.appliedMarkings }),
+          })
 
     Object.freeze(this)
+  }
+
+  /** The same authority, reading under `clearance`: this security's own, pinned. */
+  withClearance(clearance: ObjectReaderClearance): ObjectReaderSecurity {
+    return new ObjectReaderSecurity({
+      authorization: this.authorization,
+      authority: this.authority,
+      projectId: this.runtime.projectId,
+      requestedBy: this.requestingUser,
+      clearance,
+    })
   }
 
   assertObjectTypesViewable(objectTypeIds: readonly string[], clearance: Clearance): void {

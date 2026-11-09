@@ -138,6 +138,27 @@ class AuthorizedObjectReaderImpl {
     }
   }
 
+  /** Readers of other storages, through the same authority, under the clearance it holds now. */
+  static async readingFrom(
+    reader: AuthorizedObjectReaderImpl
+  ): Promise<(objects: ObjectStorage) => AuthorizedObjectReaderImpl> {
+    const security = reader.#security.withClearance(await reader.#security.clearance.pinned())
+    const ontology = new ObjectReaderOntology(reader.#ontology.registry, security)
+
+    return (objects) => {
+      const rebound = new AuthorizedObjectReaderImpl(readerConstructionKey, {
+        ontology,
+        security,
+        models: reader.#models,
+        storage: objectStorageForAuthority(security, objects),
+        ...(reader.#users === undefined ? {} : { users: reader.#users }),
+      })
+
+      Object.freeze(rebound)
+      return rebound
+    }
+  }
+
   /** What the reader cannot read now, for surfaces such as events that redact on their own. */
   static async clearance(reader: AuthorizedObjectReaderImpl): Promise<Clearance> {
     return reader.#security.clearance.current()
@@ -827,6 +848,19 @@ export function assertAuthorizedObjectReaderBinding(input: {
   readonly scope: ExecutionScope
 }): void {
   AuthorizedObjectReaderImpl.assertBound(input.reader, input.scope)
+}
+
+/**
+ * The reader for a storage transaction's objects, so that a decision made inside it reads what
+ * the transaction sees: the same authority and conditions, under the clearance it holds now.
+ *
+ * Resolving a clearance may read the project's storage, which a transaction's callback cannot, so
+ * it is resolved here, before the transaction opens, and kept for every reader this returns.
+ */
+export function objectReadersIn(
+  reader: AuthorizedObjectReader
+): Promise<(objects: ObjectStorage) => AuthorizedObjectReader> {
+  return AuthorizedObjectReaderImpl.readingFrom(reader)
 }
 
 /** Return inert metadata projected from the exact authority already owned by the reader. */

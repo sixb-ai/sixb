@@ -976,6 +976,8 @@ export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"
 export type {
   ArtifactContentInput,
+  ArtifactHolderObject,
+  ArtifactHolders,
   ArtifactQueryInput,
   ArtifactStateRuntime,
   ArtifactStateValue,

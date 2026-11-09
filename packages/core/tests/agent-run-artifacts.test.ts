@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
-import { defineObjectType, InMemoryBroker, prop, type SandboxFactory, SixbHost } from "../src"
+import {
+  artifactRef,
+  defineObjectType,
+  InMemoryBroker,
+  prop,
+  ref,
+  type SandboxFactory,
+  SixbHost,
+} from "../src"
 import { AgentExecutionLostError, agentRunArtifacts } from "../src/agents"
 import { announceAgentTurnEnded } from "../src/agents/run-artifacts"
 import { BOARD_PREVIEW_JOB } from "../src/artifacts/canvas-display"
@@ -7,7 +15,7 @@ import { artifactLiveStream } from "../src/artifacts/live/presence"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { bindDurableAgentExecution } from "../src/execution/agent"
 import { bindRequestExecution } from "../src/execution/request"
-import { createTestAgentExecution } from "../src/testing"
+import { createTestAgentExecution, createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // The rules a run publishes by, wherever it runs: the session holds them in a worker, and the API
@@ -30,6 +38,16 @@ const Task = defineObjectType({
   properties: [prop("id", "string", { primary: true, required: true })],
 })
 
+/** What Bob edits: a brief holds the document it was written from. */
+const Brief = defineObjectType({
+  id: "Brief",
+  name: "Brief",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("doc", ref.artifact(), { nullable: true }),
+  ],
+})
+
 /** The project's sandboxes, which only the agent worker opens. */
 const sandboxes: SandboxFactory = {
   supportsRequestCredentials: true,
@@ -40,7 +58,7 @@ const sandboxes: SandboxFactory = {
 
 async function setup() {
   const deps = createTestRuntimeDeps()
-  const host = new SixbHost({ id: projectId, ontology: [Task], ...deps, sandboxes })
+  const host = new SixbHost({ id: projectId, ontology: [Task, Brief], ...deps, sandboxes })
   const { storage } = deps
 
   // Alice's conversation, with Bob taking part, and a turn Bob asked for running in it.
@@ -69,7 +87,7 @@ async function setup() {
   })
 
   // Signed in with a session, as a person asking in the app is.
-  const as = (user: typeof alice | typeof bob) =>
+  const as = (user: { readonly type: "user"; readonly id: string }) =>
     bindRequestExecution(host, {
       request: new Request("http://localhost/test"),
       authorization: {
@@ -108,7 +126,8 @@ async function setup() {
         grants: {
           ...emptyGrantIndex(),
           "run:agent": true,
-          "view:object": new Set([Task.id]),
+          "view:object": new Set([Task.id, Brief.id]),
+          "edit:object": new Set([Brief.id]),
         },
       },
     },
@@ -212,6 +231,37 @@ describe("a run's artifacts", () => {
       })
       .catch((error: unknown) => error)
     expect(refused).toMatchObject({ code: "artifact_not_found" })
+  })
+
+  // Guard proof: drop the holders from publishAccess in createArtifactAccessRule; Bob's turn then
+  // cannot revise the brief's document, which no conversation shares.
+  test("revises what an object its requester edits holds, and shares it from then on", async () => {
+    const { host, artifacts, as, document } = await setup()
+    const carol = { type: "user", id: "usr_carol" } as const
+    const { artifact } = await as(carol).artifacts.create({
+      kind: "document",
+      title: "Brief",
+      files: await document("# Brief\n"),
+    })
+    await createTestSixb(host)
+      .objects(Brief)
+      .upsert({ properties: { id: "b1", doc: artifactRef(artifact.id) } })
+
+    // Alice, who cannot see briefs, reaches it once Bob's turn writes it in her conversation.
+    expect(await as(alice).artifacts.access(artifact.id)).toBe("none")
+    expect(await artifacts.updatable(artifact.id)).toMatchObject({ id: artifact.id })
+
+    const revised = await artifacts.publish({
+      artifactId: artifact.id,
+      title: "Brief",
+      files: await document("# Brief, revised\n"),
+    })
+    expect(revised.version).toMatchObject({
+      author: bob,
+      origin: { threadId: "thr_alice", runId: "run_bob" },
+    })
+    expect(revised.artifact.owner).toEqual(carol)
+    expect(await as(alice).artifacts.access(artifact.id)).toBe("update")
   })
 
   // Guard proof: drop assertTakesPart from the publish transaction; Bob's turn creates an artifact

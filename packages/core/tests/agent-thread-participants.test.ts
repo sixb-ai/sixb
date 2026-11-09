@@ -947,7 +947,7 @@ describe("artifacts a shared conversation shares", () => {
     expect(await participant.artifacts.get(artifact.id)).toBeNull()
   })
 
-  // Guard proof: let `sharing` in createRuntimeArtifactAccessRule allow any credential but an
+  // Guard proof: let `sharing` in artifacts/execution.ts allow any credential but an
   // access token; Bob without a credential then reads Alice's artifact. Drop the check entirely,
   // and his token reads it too.
   test("only a session reaches what is shared: an access token or no credential reach their own", async () => {

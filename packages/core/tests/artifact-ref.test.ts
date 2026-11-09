@@ -448,15 +448,17 @@ describe("artifactRef writes", () => {
     )
   })
 
-  // Guard: the `held` skip in `materializer/edits/artifact-refs.ts`; without it Bob cannot
-  // retitle a meeting that holds Alice's artifact, nor anyone one whose artifact was deleted.
-  test("keeps what an object already holds, even unreadable or deleted since", async () => {
+  // Guard: the `held` skip in `materializer/edits/artifact-refs.ts`; without it no one retitles a
+  // meeting whose artifact was deleted. Bob reads Alice's artifact through the meeting itself, so
+  // a deleted one is what a meeting holds and its writer cannot reach.
+  test("keeps what an object already holds, even deleted since", async () => {
     const { as, artifactOf } = await setup()
     const doc = await artifactOf("usr_alice")
     const alice = as("usr_alice")
     await alice.objects(Meeting).upsert({
       properties: { id: "m1", title: "Draft", kickoffDoc: artifactRef(doc) },
     })
+    expect(await alice.artifacts.delete(doc)).toBe(true)
 
     const bob = as("usr_bob").objects(Meeting)
     await bob.upsert({ properties: { id: "m1", title: "Final", kickoffDoc: artifactRef(doc) } })
@@ -471,12 +473,6 @@ describe("artifactRef writes", () => {
         properties: { id: "m1", kickoffDoc: artifactRef(doc), attachments: [artifactRef(doc)] },
       })
     ).rejects.toThrow(missing("Property 'Meeting.attachments'", doc))
-
-    expect(await alice.artifacts.delete(doc)).toBe(true)
-    await alice.objects(Meeting).upsert({
-      properties: { id: "m1", title: "Archived", kickoffDoc: artifactRef(doc) },
-    })
-    expect((await bob.get("m1"))?.properties.title).toBe("Archived")
   })
 
   // Guard: `assertParamArtifactsUpdatable` in `actions/request.ts`; without it Bob's run hands
