@@ -204,7 +204,7 @@ export class RedisBroker implements Broker {
     }
 
     const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
-    const retained = ensured && (await this.retainedRange(ensured))
+    const retained = ensured === null ? null : await this.retainedRange(ensured)
     if (ensured === null || retained === null) {
       return { records: [], cursor: params.afterCursor, hasMore: false }
     }
@@ -291,7 +291,7 @@ export class RedisBroker implements Broker {
     }
 
     const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
-    const retained = ensured && (await this.retainedRange(ensured))
+    const retained = ensured === null ? null : await this.retainedRange(ensured)
     if (ensured === null || retained === null) {
       return { records: [], cursor: params.beforeCursor, hasMore: false }
     }

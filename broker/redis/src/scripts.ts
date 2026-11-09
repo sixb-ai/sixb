@@ -370,7 +370,10 @@ local function advance_boundary(candidate)
   end
 end
 
--- An expired stream key took its records without a trim recording them.
+-- An expired stream key took its records without a trim recording them. The
+-- recreated key also forgets its last id, so new ids come from the server clock
+-- alone; they stay above the boundary unless the clock steps back further than
+-- the time the key took to expire.
 if redis.call("EXISTS", stream_key) == 0 then
   advance_boundary(redis.call("HGET", meta_key, "lastId"))
   redis.call("HSET", meta_key, "retainedBytes", "0")

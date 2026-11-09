@@ -11,6 +11,7 @@ import { createTestBroker, requireRedisUrl } from "./helpers"
 // `expire_idle_stream` in src/scripts.ts.
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const run = { id: "agents.runs.run_1", retention: { maxAgeMs: TWO_HOURS_MS, maxRecords: 5_000 } }
 
 describe("RedisBroker idle stream expiry", () => {
@@ -29,7 +30,7 @@ describe("RedisBroker idle stream expiry", () => {
       expect(streamTtl).toBeLessThanOrEqual(TWO_HOURS_MS + 60_000)
       // Metadata outlives the records so a returning reader still learns its cursor expired.
       expect(metaTtl).toBeGreaterThan(streamTtl)
-      expect(metaTtl).toBeLessThanOrEqual(TWO_HOURS_MS + 60_000 + 24 * 60 * 60 * 1000)
+      expect(metaTtl).toBeLessThanOrEqual(TWO_HOURS_MS + 60_000 + ONE_DAY_MS)
 
       // Every append pushes the expiry out again.
       await redis.send("PEXPIRE", [keys.streamKey, "5000"])
@@ -37,6 +38,19 @@ describe("RedisBroker idle stream expiry", () => {
       await broker.append({ projectId, streamId: run.id, records: [{ payload: "finished" }] })
       expect(await pttl(redis, keys.streamKey)).toBeGreaterThan(TWO_HOURS_MS - 1_000)
       expect(await pttl(redis, keys.metaKey)).toBeGreaterThan(TWO_HOURS_MS - 1_000)
+    })
+  })
+
+  test("expires the metadata of a stream that is ensured but never written", async () => {
+    // Most run control streams are ensured for a cancel that never comes. To see this fail, drop
+    // the `expire_idle_stream` call from ENSURE_STREAM_SCRIPT.
+    await withBroker(async ({ broker, projectId, keys, redis }) => {
+      await broker.ensureStream({ projectId, stream: run })
+
+      expect(await redis.exists(keys.streamKey)).toBe(false)
+      const metaTtl = await pttl(redis, keys.metaKey)
+      expect(metaTtl).toBeGreaterThan(TWO_HOURS_MS + ONE_DAY_MS - 1_000)
+      expect(metaTtl).toBeLessThanOrEqual(TWO_HOURS_MS + 60_000 + ONE_DAY_MS)
     })
   })
 
@@ -111,6 +125,29 @@ describe("RedisBroker idle stream expiry", () => {
         (await broker.read({ projectId, streamId: run.id, afterCursor: last!.cursor })).records
       ).toEqual([])
       expect(await broker.latestCursor({ projectId, streamId: run.id })).toBeUndefined()
+    })
+  })
+
+  test("rejects cursors from before the expiry when a write comes before any read", async () => {
+    // A read finds the stream non-empty again, so only the append can record what the expired
+    // key took. To see this fail, drop the `advance_boundary` call from the "expired stream key"
+    // branch of APPEND_RECORDS_SCRIPT.
+    await withBroker(async ({ broker, projectId, keys, redis }) => {
+      await broker.ensureStream({ projectId, stream: run })
+      await broker.append({ projectId, streamId: run.id, records: [{ payload: "old" }] })
+      await redis.del(keys.streamKey)
+
+      const [next] = await broker.append({
+        projectId,
+        streamId: run.id,
+        records: [{ payload: "new" }],
+      })
+
+      const error = await broker
+        .read({ projectId, streamId: run.id, afterCursor: "0-0" })
+        .catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(BrokerCursorExpiredError)
+      expect((await broker.read({ projectId, streamId: run.id })).records).toEqual([next!])
     })
   })
 
