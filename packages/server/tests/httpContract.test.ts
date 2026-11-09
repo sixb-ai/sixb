@@ -481,6 +481,7 @@ describe("SixbServer HTTP contract", () => {
     await sixb.storage.webhookRuns!.finish({
       id: "webhook-run-previous",
       projectId: "contract-project",
+      executionToken: "first",
       status: "succeeded",
       finishedAt: new Date("2026-02-18T09:10:01.000Z"),
       responseStatus: 202,

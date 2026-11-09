@@ -8,12 +8,17 @@ import {
 import { shareProjectionRegistry } from "@sixb/core/internal/projections"
 import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import { shareDatasetVersionMarkings } from "@sixb/core/internal/security"
-import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
-import { QueueWorker } from "@sixb/core/internal/workers"
+import type {
+  HeldRunClaim,
+  QueueWorkerFailureDecision,
+  RunDelivery,
+} from "@sixb/core/internal/workers"
+import { RunOwnedElsewhereError, RunWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
 import {
   PROJECTION_RUN_FAILURE_CODES,
   type ProjectionRunFailureCode,
+  ProjectionRunHeldError,
   type ProjectionRunRecord,
   type ProjectionRunStorage,
 } from "@sixb/core/storage"
@@ -35,9 +40,10 @@ export interface ProjectionWorkerOptions {
  */
 const DEFAULT_VECTOR_CONCURRENCY = 4
 
-export class ProjectionWorker extends QueueWorker<
+export class ProjectionWorker extends RunWorker<
   ProjectionRunRequestedQueueJob,
-  typeof PROJECTION_RUN_FAILURE_CODES
+  typeof PROJECTION_RUN_FAILURE_CODES,
+  ProjectionRunRecord
 > {
   private readonly vectorWorker?: VectorIndexingWorker
   private readonly host: ProjectionWorkerHost
@@ -60,6 +66,9 @@ export class ProjectionWorker extends QueueWorker<
       failureCodes: PROJECTION_RUN_FAILURE_CODES,
       workerId: `projection-worker-${host.id}`,
       claimLimit: options.concurrency,
+      runs: projectionRunsStorage,
+      executions: host.storage.executions,
+      maxAttempts: Number.POSITIVE_INFINITY,
     })
     this.host = host
     this.projectionRunsStorage = projectionRunsStorage
@@ -84,57 +93,76 @@ export class ProjectionWorker extends QueueWorker<
     await Promise.all([super.wait(), this.vectorWorker?.wait()])
   }
 
-  protected async execute(
-    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
-    signal: AbortSignal
-  ): Promise<void> {
-    const { job } = claimed
-    const run = await this.projectionRunsStorage.getById({
-      projectId: this.host.id,
-      id: job.payload.runId,
-    })
+  /**
+   * A projection takes its run inside the job, which also asserts the run's immutable identity and
+   * answers a replay from its outcome. Its token is the one the materializer fences commits with.
+   */
+  protected async claimRun(
+    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>
+  ): Promise<RunDelivery<ProjectionRunRecord>> {
+    const run = await this.findRun(claimed)
     if (!run) {
-      throw new Error(`[SixbProjectionWorker] Projection run '${job.payload.runId}' was not found.`)
-    }
-    const durableExecution = await this.host.storage.executions.getById({
-      projectId: this.host.id,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
       throw new Error(
-        `[SixbProjectionWorker] Projection run '${run.id}' references missing execution '${run.executionId}'.`
+        `[SixbProjectionWorker] Projection run '${claimed.job.payload.runId}' was not found.`
       )
     }
+
+    return { outcome: "deferred", run }
+  }
+
+  protected async executeRun(
+    claim: HeldRunClaim<ProjectionRunRecord>,
+    _claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
+    signal: AbortSignal
+  ): Promise<void> {
+    const { run } = claim
+
+    const durableExecution = await this.requireExecution(run)
     const execution = bindDurablePrimitiveExecution(this.host, {
       execution: durableExecution,
       primitive: { kind: "projection", id: run.identity.projectionId, runId: run.id },
     })
     const context = buildProjectionContext(this.host, this.projectionRunsStorage, execution)
-    await runProjectionJob({
-      runtime: context,
-      job: { id: run.id, ...run.identity },
-      signal,
-      onRunFailed: (error, run, failure) => {
-        reportRunFailure(this.host, error, {
-          projectId: this.host.id,
-          attempt: run.attempt,
-          runKind: "projection",
-          run: {
-            runId: run.id,
-            projectionId: run.identity.projectionId,
-            projectionKind: run.identity.projectionKind,
-          },
-          failure,
-        })
-      },
-    })
+
+    try {
+      await runProjectionJob({
+        runtime: context,
+        job: { id: run.id, ...run.identity },
+        signal,
+        execution: claim.execution,
+        onRunFailed: (error, run, failure) => {
+          reportRunFailure(this.host, error, {
+            projectId: this.host.id,
+            attempt: run.attempt,
+            runKind: "projection",
+            run: {
+              runId: run.id,
+              projectionId: run.identity.projectionId,
+              projectionKind: run.identity.projectionKind,
+            },
+            failure,
+          })
+        },
+      })
+    } catch (error) {
+      if (error instanceof ProjectionRunHeldError) {
+        throw new RunOwnedElsewhereError(error.runId, error.ownedUntil)
+      }
+      throw error
+    }
   }
 
+  /** A deterministic failure is a verdict only on a run the job never took: it has no record. */
   protected override async onExecutionError(
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
   ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
-    return this.failureDecision(claimed, error)
+    if (isPermanentProjectionFailure(error)) {
+      const run = await this.findRun(claimed)
+      if (!run || run.status === "queued") return { kind: "fail" }
+    }
+
+    return super.onExecutionError(claimed, error)
   }
 
   protected override async onAbortError(
@@ -142,50 +170,31 @@ export class ProjectionWorker extends QueueWorker<
     error: unknown
   ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
     if (error instanceof MaterializationCancellationError) {
-      const run = await this.projectionRunsStorage.getById({
-        projectId: this.host.id,
-        id: claimed.job.payload.runId,
-      })
-      return terminalFailureDecision(run)
+      const run = await this.findRun(claimed)
+
+      // A running run's error is its last attempt's failure, not an outcome to report.
+      return run?.error && run.status !== "running"
+        ? { kind: "fail", failure: run.error }
+        : { kind: "fail" }
     }
-    return this.failureDecision(claimed, error)
+
+    return super.onAbortError(claimed, error)
   }
 
-  private async failureDecision(
-    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
-    error: unknown
-  ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
-    const run = await this.projectionRunsStorage.getById({
+  protected override nextRetryAt(claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>): string {
+    return projectionRetryAvailableAt({
+      jobId: claimed.job.payload.runId,
+      attempt: claimed.job.attempt,
+    })
+  }
+
+  private findRun(
+    claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>
+  ): Promise<ProjectionRunRecord | null> {
+    return this.projectionRunsStorage.getById({
       projectId: this.host.id,
       id: claimed.job.payload.runId,
     })
-    if (run?.status === "running") return retryWithBackoff(claimed)
-    if (run?.status === "queued") {
-      return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
-    }
-    if (run) return terminalFailureDecision(run)
-    return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
-  }
-}
-
-function terminalFailureDecision(
-  run: ProjectionRunRecord | null
-): QueueWorkerFailureDecision<ProjectionRunFailureCode> {
-  // A running run's error is its last attempt's failure, not an outcome to report.
-  return run?.error && run.status !== "running"
-    ? { kind: "fail", failure: run.error }
-    : { kind: "fail" }
-}
-
-function retryWithBackoff(
-  claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>
-): QueueWorkerFailureDecision {
-  return {
-    kind: "retry",
-    availableAt: projectionRetryAvailableAt({
-      jobId: claimed.job.payload.runId,
-      attempt: claimed.job.attempt,
-    }),
   }
 }
 

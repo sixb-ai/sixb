@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto"
 import type { ExecutionStorage } from "../executions"
 import type { AssertSourceMaterializationExecutionInput } from "../ontology/sources"
 import {
+  type ConfirmRunExecutionInput,
+  laterLease,
+  type ReleaseRunExecutionInput,
+} from "../run-claim"
+import {
   compareStartedAt,
   latestStartedAtByOwnerId,
   matchesRunListDateFilters,
@@ -40,6 +45,7 @@ import {
   type FailProjectionRunEnqueueInput,
   type FindSupersedingProjectionRunInput,
   type FinishProjectionRunInput,
+  type ListLapsedProjectionRunsInput,
   type ListLatestProjectionRunsInput,
   type ListLatestProjectionRunsResult,
   type ListProjectionRunsInput,
@@ -145,13 +151,62 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
         status: "running",
         attempt,
         // A fresh token per claim fences every earlier execution of this run.
-        executionToken: randomUUID(),
+        executionToken: input.execution?.token ?? randomUUID(),
+        queueLeaseExpiresAt: input.execution?.queueLeaseExpiresAt,
         startedAt: existing.startedAt ?? new Date(input.startedAt ?? new Date()),
         finishedAt: undefined,
       }
 
       this.rows.set(key, structuredClone(record))
       return createProjectionRunClaim(record)
+    })
+  }
+
+  async confirmExecutionOwnership(input: ConfirmRunExecutionInput): Promise<ProjectionRunRecord> {
+    return this.runRootOperation(() => {
+      const key = projectionRunKey(input.projectId, input.id)
+      const existing = this.rows.get(key)
+      if (!existing) throw projectionRunNotFound(input.projectId, input.id)
+      if (existing.status !== "running" || existing.executionToken !== input.executionToken) {
+        throw staleProjectionRunExecution(input.id)
+      }
+
+      const record: StoredProjectionRunRecord = {
+        ...existing,
+        queueLeaseExpiresAt: laterLease(existing.queueLeaseExpiresAt, input.queueLeaseExpiresAt),
+      }
+      this.rows.set(key, structuredClone(record))
+      return publicProjectionRunRecord(record)
+    })
+  }
+
+  async listLapsed(input: ListLapsedProjectionRunsInput): Promise<readonly ProjectionRunRecord[]> {
+    return this.runRootOperation(() =>
+      [...this.rows.values()]
+        .filter(
+          (run) =>
+            run.projectId === input.projectId &&
+            run.status === "running" &&
+            run.queueLeaseExpiresAt !== undefined &&
+            run.queueLeaseExpiresAt.getTime() <= input.lapsedBy.getTime()
+        )
+        .sort(
+          (left, right) =>
+            (left.queueLeaseExpiresAt?.getTime() ?? 0) - (right.queueLeaseExpiresAt?.getTime() ?? 0)
+        )
+        .slice(0, input.limit)
+        .map((run) => structuredClone(run))
+    )
+  }
+
+  async releaseExecution(input: ReleaseRunExecutionInput): Promise<void> {
+    return this.runRootOperation(() => {
+      const key = projectionRunKey(input.projectId, input.id)
+      const existing = this.rows.get(key)
+      if (existing?.status !== "running" || existing.executionToken !== input.executionToken) return
+
+      const queueLeaseExpiresAt = new Date(input.releasedAt ?? new Date())
+      this.rows.set(key, structuredClone({ ...existing, queueLeaseExpiresAt }))
     })
   }
 

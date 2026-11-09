@@ -74,6 +74,7 @@ describe("Webhook admission on PostgreSQL", () => {
     await pg.webhookRuns.finish({
       projectId,
       id: first.run.id,
+      executionToken: String(first.run.execution?.token),
       status: "failed",
       responseStatus: 503,
       error: {

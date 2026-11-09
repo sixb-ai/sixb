@@ -78,7 +78,7 @@ What can still be lost:
 | A broker outage that outlasts cron occurrences | All but the one in hand: the `cron` pass retries that one until the broker accepts it, then counts on from then | The next occurrence |
 | A cron occurrence that falls while no orchestrator runs | That occurrence | The next one. It was never emitted |
 | An outage, or a stop, longer than retention (two days by default) | What retention dropped | Projections and `dataset.updated()` pipelines: their passes. Otherwise nothing |
-| A queue that loses a job: an in-memory queue with its process, a Redis flush or failover | Nothing: the run is durable | The `runs` pass publishes a job for a queued run, and for a running run whose lease lapsed |
+| A queue that loses a job: an in-memory queue with its process, a Redis flush or failover | Nothing: the run is durable | The `runs` pass publishes a job for a queued run, and for a running run whose lease lapsed. A queued projection run has the `projections` pass |
 | A run of an older version whose worker is gone | The rest of that run, which ends `cancelled` after 24 h | The `runs` pass ends it. For `dataset.updated()` pipelines a cancelled run does not count as having read, so the `triggers` pass fires again |
 
 The cap of 64 is per event type, not per target: one target that always fails with an unclassified
@@ -93,7 +93,7 @@ Projection admission has an event path and a recovery path:
 ```text
 dataset.version.committed --> ProjectionRunDispatcher -> durable execution + run -> queue
 lake change feed + startup lookup ---^
-stuck-run sweep ---------------------^
+`runs` pass -------------------------^
 ```
 
 All of them call the same `ProjectionRunDispatcher`, which derives the same deterministic run ID.
@@ -111,10 +111,11 @@ lake's history:
   - reads the lake's change feed (`LakeStorage.listLatestVersionsSince`) and dispatches the newest
     data version of each changed dataset. Idle, that is one catalog query, shared with the
     `triggers` pass: both read through one `LakeChangeFeed`;
-  - looks up directly each projection whose dispatch failed, until it succeeds;
-  - dispatches again the runs `queued` for longer than one pass interval and the runs that failed
-    with a retryable `queue.enqueue_failed`, which republishes them. Runs admitted under an
-    earlier projection revision are left alone; the start-up lookup admits the current one.
+  - looks up directly each projection whose dispatch failed, until it succeeds.
+
+The `runs` pass dispatches again the runs `queued` for longer than one pass interval and those that
+failed with a retryable `queue.enqueue_failed`, which republishes them. Runs admitted under an
+earlier projection revision are left alone; the start-up lookup admits the current one.
 
 The live event path, not the interval, sets normal projection latency. The interval bounds only
 how long a lost event or publication waits for repair.
@@ -164,7 +165,7 @@ own failure count. See `packages/core/docs/runtime-lifecycle.md`.
 | `projections` | 30 s, with projection routes | See above |
 | `triggers` | 30 s, with dataset-triggered pipelines | See above |
 | `ingest` | 30 s, when a dataset can be ingested | The only part of ingestion here, and a safety net: `ingest` queues its own flush, and asks again when a request stays open for 30 s. Queues the flush of every dataset whose deliveries wait with no flush holding it, under the request the inbox holds, so a request that has a job queues nothing more. Reports a dataset nothing wrote for 10 minutes, once per stall, as `dataset.ingest.flush.failed`, and purges refused deliveries after a week |
-| `runs` | 30 s, with syncs, pipelines or workflows | `republishLostRuns`: see [run recovery](../core/src/workers/README.md#jobs-that-never-come-back). A run whose job is on its way stays out for 30 s. Idle, that is one query per primitive through its status index, reading no finished run |
+| `runs` | 30 s, with syncs, pipelines, workflows or projections | `republishLostRuns`: see [run recovery](../core/src/workers/README.md#jobs-that-never-come-back). A run whose job is on its way stays out for 30 s. Idle, that is one query per primitive through its status index, reading no finished run |
 | `lake-retention` | Each `cleanupEvery` from the epoch, when retention runs on its own | Enqueues `lake.retention.requested` on the `lake` queue, under the interval as job id. A lake worker runs it: one slow catalog write here would stall the project's other upkeep |
 
 Outbox rows are claimed under a lease, so passes in two processes never claim the same row together.
@@ -193,8 +194,8 @@ no manual wiring is needed there.
 
 - The `projections` pass repairs a missed dataset event by admitting the latest data-bearing
   version. It is not an event replay log and does not materialize every intermediate version.
-- Publication recovery requires a repeated dispatch or the `runs` pass. The projection run sweep
-  supplies the first, and event schedules can replay retained events.
+- Publication recovery requires a repeated dispatch, which the `runs` pass supplies for queued
+  projection runs, and event schedules can replay retained events.
 - The change-feed cursor is process memory, so each start pays one latest-version lookup per
   projected dataset before it tails the feed.
 - Broker progress is process-local. Retention can still overtake a slow consumer; backpressure

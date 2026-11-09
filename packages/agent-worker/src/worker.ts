@@ -30,7 +30,7 @@ import {
   recordRecoveredAiModelCall,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
-import { QueueWorker } from "@sixb/core/internal/workers"
+import { QueueWorker, RunOwnedElsewhereError, retryOnceReleased } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
@@ -38,7 +38,6 @@ import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals } from "./approval-repair"
 import { workerChildren } from "./child-runner"
 import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
-import { AgentRunOwnedElsewhereError } from "./errors"
 import { runnerContext } from "./execution-context"
 import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import {
@@ -65,8 +64,6 @@ const DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN = 4
 const AGENT_DISPATCH_REPAIR_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
-/** Floor for a duplicate's deferral, so a skewed lease clock cannot make it redeliver at once. */
-const OWNED_ELSEWHERE_MIN_DEFER_MS = 1_000
 const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
 
@@ -214,7 +211,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status === "running") {
       const ownedUntil = queuedRun.execution?.queueLeaseExpiresAt
       if (ownedUntil && ownedUntil.getTime() > Date.now()) {
-        throw new AgentRunOwnedElsewhereError(queuedRun.id, ownedUntil)
+        throw new RunOwnedElsewhereError(queuedRun.id, ownedUntil)
       }
       await endInterruptedAgentRun(this.sessionHost(context), queuedRun, this.leaseMs)
       return
@@ -303,7 +300,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
           }
     }
-    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
+    if (error instanceof RunOwnedElsewhereError) return retryOnceReleased(error)
     // The node's result is durable; only its workflow resume is unpublished. Redeliver until it is.
     if (error instanceof WorkflowResumeDispatchError) {
       console.error(`${error.message} Retrying.`, error.cause)
@@ -366,7 +363,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
     // A deferred duplicate stays deferred during shutdown: failing it would orphan a live run.
-    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
+    if (error instanceof RunOwnedElsewhereError) return retryOnceReleased(error)
     // Shutdown reached us before we could record the run's fate: redeliver so another process
     // finalizes it. Otherwise the run is already terminal, so fail (no redelivery needed).
     if (error instanceof AgentFinalizationError) {
@@ -602,14 +599,6 @@ function assertAgentWorkerStorage(
       "[SixbAgentWorker] Agent workers require storage.aiLimits support."
     )
   }
-}
-
-function retryOnceReleased(error: AgentRunOwnedElsewhereError): QueueWorkerFailureDecision {
-  const availableAt = Math.max(
-    error.ownedUntil.getTime(),
-    Date.now() + OWNED_ELSEWHERE_MIN_DEFER_MS
-  )
-  return { kind: "retry", availableAt: new Date(availableAt).toISOString() }
 }
 
 function backoff(ms: number): string {

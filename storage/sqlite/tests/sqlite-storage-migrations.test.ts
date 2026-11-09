@@ -208,6 +208,7 @@ const shippedMigrationIds = [
   "087-lake-retention-runs",
   "088-dataset-ingest-inbox",
   "089-run-recovery",
+  "090-webhook-and-projection-leases",
 ]
 
 afterEach(async () => {

@@ -33,10 +33,7 @@ import {
   LakeChangeFeed,
   type LakeChangeFeedInput,
 } from "../../core/src/maintenance/passes/lake-change-feed"
-import {
-  type ProjectionsPassInput,
-  projectionsPass,
-} from "../../core/src/maintenance/passes/projections-pass"
+import { projectionsPass } from "../../core/src/maintenance/passes/projections-pass"
 import { compileRoutes } from "../src/compile-routes"
 import { createMaintenancePasses } from "../src/maintenance-passes"
 import type {
@@ -443,12 +440,6 @@ async function noLakeChanges() {
   return { cursor: "0", versions: [] }
 }
 
-const noProjectionRuns: ProjectionsPassInput["projectionRuns"] = {
-  async list() {
-    return { runs: [], hasMore: false, total: 0 }
-  },
-}
-
 function invoiceProjectionDescriptor(
   overrides: Partial<ProjectionDispatchDescriptor> = {}
 ): ProjectionDispatchDescriptor {
@@ -848,7 +839,6 @@ describe("OrchestratorWorker", () => {
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
       lakeStorage,
-      projectionRuns: noProjectionRuns,
     }).run(signal)
 
     expect(dispatches[0]).toMatchObject({
@@ -877,7 +867,6 @@ describe("OrchestratorWorker", () => {
       dispatcher,
       descriptors: [descriptor],
       lakeStorage,
-      projectionRuns: noProjectionRuns,
     })
 
     const failure = await pass.run(signal).catch((error) => error)
@@ -917,7 +906,6 @@ describe("OrchestratorWorker", () => {
       projectId: PROJECT_ID,
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
-      projectionRuns: noProjectionRuns,
       feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
       lakeStorage: {
         async listVersions() {
@@ -951,7 +939,6 @@ describe("OrchestratorWorker", () => {
       projectId: PROJECT_ID,
       dispatcher: createTestProjectionDispatcher([]),
       descriptors: [descriptor],
-      projectionRuns: noProjectionRuns,
       feed: testFeed({ listLatestVersionsSince: noLakeChanges }),
       lakeStorage: {
         async listVersions() {
@@ -1355,7 +1342,7 @@ describe("OrchestratorWorker", () => {
         pipelines: createTestPipelineRunDispatcher(new InMemoryQueues()),
       },
       lakeStorage,
-      projectionRuns: noProjectionRuns,
+      projectionRuns: storage.projectionRuns,
       pipelineRuns: storage.pipelineRuns,
     })
     const feed = spyOn(lakeStorage, "listLatestVersionsSince")
