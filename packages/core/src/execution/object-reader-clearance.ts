@@ -58,6 +58,23 @@ export class ObjectReaderClearance {
   }
 
   /**
+   * This clearance as it is now, for a reader that must not read the project's storage, such as
+   * one inside a storage transaction: what applied dataset versions add is read once, here, and
+   * kept. A clearance they cannot affect reads nothing and is returned as it is.
+   */
+  async pinned(): Promise<ObjectReaderClearance> {
+    const applied = this.#applied
+    if (!applied) return this
+
+    const snapshot = await applied.current()
+    return new ObjectReaderClearance({
+      ontology: this.#ontology,
+      clearances: this.#clearances,
+      appliedMarkings: pinnedAppliedMarkings(applied, snapshot),
+    })
+  }
+
+  /**
    * What the authority cannot read in an object event. Reads the event's origin version only for
    * an authority its markings affect.
    */
@@ -75,6 +92,20 @@ export class ObjectReaderClearance {
         sources.earlier ? applied.forEarlierValues(snapshot, sources.objectTypeId) : snapshot
       )
       .then((snapshot) => resolvePropertyClearance(this.#ontology, clearances, snapshot))
+  }
+}
+
+/** Applied markings that answer `snapshot` as current, and never refresh it. */
+function pinnedAppliedMarkings(
+  applied: AppliedMarkings,
+  snapshot: AppliedMarkingsSnapshot
+): AppliedMarkings {
+  return {
+    affects: (clearances) => applied.affects(clearances),
+    current: async () => snapshot,
+    invalidate: () => {},
+    forEventOrigin: (current, origin) => applied.forEventOrigin(current, origin),
+    forEarlierValues: (current, objectTypeId) => applied.forEarlierValues(current, objectTypeId),
   }
 }
 

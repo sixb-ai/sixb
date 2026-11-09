@@ -1,4 +1,4 @@
-import { createRuntimeArtifactAccessRule } from "../artifacts/execution"
+import { type TransactionAccessRules, transactionArtifactAccessRules } from "../artifacts/execution"
 import { createArtifactId } from "../artifacts/ids"
 import { boardPreviewsOfCopy } from "../artifacts/publish/previews"
 import type { Principal } from "../auth"
@@ -47,6 +47,7 @@ export async function forkAgentThread(
 
   try {
     // One transaction: a fork that fails leaves no copy behind, and none copied is missing.
+    const ruleIn = await transactionArtifactAccessRules(runtime)
     return await runtime.storage.transaction(async (tx) => {
       const threads = tx.agents?.threads
       if (!threads) {
@@ -56,7 +57,7 @@ export async function forkAgentThread(
         )
       }
 
-      const artifactCopies = await copySharedArtifacts(runtime, tx, {
+      const artifactCopies = await copySharedArtifacts(runtime, tx, ruleIn, {
         sourceThreadId: source.id,
         forkId: id,
         owner: input.ownerPrincipal,
@@ -100,6 +101,7 @@ export async function forkAgentThread(
 async function copySharedArtifacts(
   runtime: SixbRuntimeContext,
   tx: Storage,
+  ruleIn: TransactionAccessRules,
   input: {
     readonly sourceThreadId: string
     readonly forkId: string
@@ -123,7 +125,7 @@ async function copySharedArtifacts(
     return {}
   }
 
-  const access = createRuntimeArtifactAccessRule(runtime, tx)
+  const access = ruleIn(tx)
   const copies: Record<string, string> = {}
   const { artifacts: shared } = await artifacts.list({ projectId, threadId: input.sourceThreadId })
   for (const artifact of shared) {
