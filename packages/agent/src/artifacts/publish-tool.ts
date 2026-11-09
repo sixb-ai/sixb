@@ -58,7 +58,8 @@ import {
 
 const CREATE_TOOL = "publish_artifact"
 const UPDATE_TOOL = "update_artifact"
-type PublishToolName = typeof CREATE_TOOL | typeof UPDATE_TOOL
+const OPEN_TOOL = "open_artifact"
+type ArtifactToolName = typeof CREATE_TOOL | typeof UPDATE_TOOL | typeof OPEN_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
 const PUBLISHABLE_KINDS = ARTIFACT_KINDS
@@ -96,7 +97,7 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
 export const UPDATE_ARTIFACT_TOOL_SPEC = {
   name: UPDATE_TOOL,
   description:
-    "Update an artifact of this conversation from a file or directory in the sandbox: your files replace its current version's, which stays open, and its kind stays. Versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/. Returns the version and revision it wrote; a refusal says what to fix.",
+    "Update an artifact of this conversation, or one an object the user may edit holds, from a file or directory in the sandbox: your files replace its current version's, which stays open, and its kind stays. Versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/; open one it does not list with open_artifact first. Returns the version and revision it wrote; a refusal says what to fix.",
   inputSchema: {
     type: "object",
     properties: {
@@ -105,6 +106,20 @@ export const UPDATE_ARTIFACT_TOOL_SPEC = {
       title: TITLE_PROPERTY,
     },
     required: ["id", "path", "title"],
+    additionalProperties: false,
+  } satisfies JsonObject,
+} as const
+
+export const OPEN_ARTIFACT_TOOL_SPEC = {
+  name: OPEN_TOOL,
+  description:
+    "Open an artifact $SIXB_ARTIFACTS does not list, such as one a project object holds: its current version is installed under $SIXB_ARTIFACTS_DIR/<id>/ and listed in $SIXB_ARTIFACTS, to read it, or to revise it with update_artifact when the user may change it. Publishes nothing. Returns its title, revision, and whether the user may only read it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "The artifact's id, such as art_k3m9q2x7tp." },
+    },
+    required: ["id"],
     additionalProperties: false,
   } satisfies JsonObject,
 } as const
@@ -119,6 +134,10 @@ export interface UpdateArtifactToolInput {
   readonly id: string
   readonly path: string
   readonly title: string
+}
+
+export interface OpenArtifactToolInput {
+  readonly id: string
 }
 
 interface PublishToolsInput {
@@ -142,10 +161,17 @@ interface PublishToolsInput {
  * `AgentRunArtifacts.publish`). An update replaces the open version's content, or opens the next
  * version after one the user created. What it wrote exists when the tool returns, so the
  * conversation shows it mid-turn and a cancelled run keeps it.
+ *
+ * `open_artifact` installs one the conversation does not list, as the requester reads it, so an
+ * update starts from what it holds.
  */
 export function createPublishArtifactTools(
   input: PublishToolsInput
-): readonly [ModelTool<PublishArtifactToolInput>, ModelTool<UpdateArtifactToolInput>] {
+): readonly [
+  ModelTool<PublishArtifactToolInput>,
+  ModelTool<UpdateArtifactToolInput>,
+  ModelTool<OpenArtifactToolInput>,
+] {
   return [
     {
       ...PUBLISH_ARTIFACT_TOOL_SPEC,
@@ -163,11 +189,18 @@ export function createPublishArtifactTools(
       toModelOutput: (output) => ({ type: "text", value: publishSummary(output, UPDATE_TOOL) }),
       errorText: (error) => publishErrorText(error, UPDATE_TOOL),
     },
+    {
+      ...OPEN_ARTIFACT_TOOL_SPEC,
+      parseInput: parseOpenArtifactInput,
+      execute: (request, { signal }) => open(input, request.id, signal),
+      toModelOutput: (output) => ({ type: "text", value: openSummary(output) }),
+      errorText: (error) => publishErrorText(error, OPEN_TOOL),
+    },
   ]
 }
 
 /** A run that lost its conversation stores nothing, and the trace says so instead of "an error". */
-function publishErrorText(error: unknown, tool: PublishToolName): string {
+function publishErrorText(error: unknown, tool: ArtifactToolName): string {
   return error instanceof AgentExecutionLostError
     ? publishError(tool, "this run no longer holds its conversation, so nothing was published")
         .message
@@ -183,21 +216,37 @@ interface PublishRequest {
 
 async function publish(
   input: PublishToolsInput,
-  tool: PublishToolName,
+  tool: ArtifactToolName,
   request: PublishRequest,
   signal: AbortSignal
 ): Promise<JsonValue> {
   signal.throwIfAborted()
+  const installed = await input.installed
+
+  // One the conversation does not list, such as an artifact an object holds, is opened first: the
+  // Agent revises what it holds instead of writing over it unseen.
+  if (
+    "artifactId" in request.target &&
+    installed.revisionOf(request.target.artifactId) === undefined
+  ) {
+    const { artifactId } = request.target
+    if (!(await input.artifacts.get(artifactId))) throw noArtifact(tool, artifactId)
+
+    throw publishError(
+      tool,
+      `artifact '${artifactId}' is not open in this conversation, so nothing was published: call ${OPEN_TOOL} with its id, then revise its copy and update it`
+    )
+  }
+
   const kind: ArtifactKind =
     "kind" in request.target
       ? request.target.kind
-      : (await updatableArtifact(input, request.target.artifactId, tool)).kind
+      : (await updatableArtifact(input, request.target.artifactId, tool, installed)).kind
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
   // An installed artifact is updated from its copy: writing past the revision the copy holds would
   // drop whatever was written since. A canvas is merged instead, from the copy's files.
-  const installed = await input.installed
   const base =
     "artifactId" in request.target ? installed.baseOf(request.target.artifactId) : undefined
   const baseRevision =
@@ -575,14 +624,23 @@ const UNREACHABLE: ReadonlySet<string> = new Set(["artifact_not_found", "not_sha
 async function updatableArtifact(
   input: PublishToolsInput,
   artifactId: string,
-  tool: PublishToolName
+  tool: ArtifactToolName,
+  installed?: InstalledArtifacts
 ): Promise<ArtifactRecord> {
   const artifact = await input.artifacts.updatable(artifactId)
-  if (!artifact) throw noArtifact(tool, artifactId)
-  return artifact
+  if (artifact) return artifact
+
+  // One installed to read is named as such: it exists, and the Agent was told it reads it.
+  if (installed?.readOnly(artifactId)) {
+    throw publishError(
+      tool,
+      `you can read artifact '${artifactId}' but not change it, so nothing was published`
+    )
+  }
+  throw noArtifact(tool, artifactId)
 }
 
-function noArtifact(tool: PublishToolName, artifactId: string): AgentToolPublicError {
+function noArtifact(tool: ArtifactToolName, artifactId: string): AgentToolPublicError {
   return publishError(
     tool,
     `there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call ${CREATE_TOOL}`
@@ -648,6 +706,61 @@ async function artifactMoved(
   )
 }
 
+/**
+ * Installs the artifact's latest version under `$SIXB_ARTIFACTS_DIR/<id>/`, as the requester reads
+ * it: to read only, when they may not change it. Opening shares nothing: the conversation shares it
+ * once the Agent updates it from that copy.
+ */
+async function open(
+  input: PublishToolsInput,
+  artifactId: string,
+  signal: AbortSignal
+): Promise<JsonValue> {
+  signal.throwIfAborted()
+  const artifact = await input.artifacts.get(artifactId)
+  if (!artifact) throw publishError(OPEN_TOOL, `there is no artifact '${artifactId}' you can read`)
+
+  const [installed, updatable, latest] = await Promise.all([
+    input.installed,
+    input.artifacts.updatable(artifactId),
+    input.artifacts.getVersion(artifactId, artifact.latestVersion),
+  ])
+  if (!latest) {
+    throw new Error(`[SixbAgent] Version ${artifact.latestVersion} of '${artifactId}' is missing.`)
+  }
+
+  const readOnly = updatable === null
+  try {
+    const { sandbox } = await input.resolveSandbox()
+    const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
+    await installed.replace(sandbox, { artifact, version: latest }, files, signal, {
+      edited: latest.origin?.threadId !== input.threadId,
+      readOnly,
+    })
+  } catch (error) {
+    if (signal.aborted) throw error
+    console.warn(
+      `[SixbAgent] Could not install revision ${latest.revision} of artifact '${artifactId}':`,
+      error
+    )
+    throw publishError(
+      OPEN_TOOL,
+      `its revision ${latest.revision} could not be installed in the sandbox, so tell the user you could not open it`
+    )
+  }
+
+  const directory = installed.directoryOf(artifactId)
+  return {
+    artifactId,
+    kind: artifact.kind,
+    title: latest.title,
+    version: latest.version,
+    revision: latest.revision,
+    readOnly,
+    ...(directory ? { directory } : {}),
+  }
+}
+
 interface PublishSource {
   /** The file's path in the artifact. */
   readonly path: string
@@ -679,7 +792,7 @@ async function listSources(
   handle: AgentSandboxHandle,
   path: string,
   kind: ArtifactKind,
-  tool: PublishToolName,
+  tool: ArtifactToolName,
   signal: AbortSignal
 ): Promise<PublishSource[]> {
   let absolutePath: string
@@ -743,7 +856,25 @@ async function listSources(
   }))
 }
 
-function publishSummary(output: JsonValue, tool: PublishToolName): string {
+/** What the Agent is told of an artifact it opened: where to read it, and whether it may change it. */
+function openSummary(output: JsonValue): string {
+  if (typeof output !== "object" || output === null || Array.isArray(output)) {
+    return JSON.stringify(output)
+  }
+
+  const where =
+    typeof output.directory === "string"
+      ? `installed under ${output.directory}/`
+      : "listed in $SIXB_ARTIFACTS, but too large to install"
+  return [
+    `Opened "${String(output.title)}": artifact ${String(output.artifactId)}, version ${String(output.version)} at revision ${String(output.revision)}, ${where}.`,
+    output.readOnly === true
+      ? "The user may read it but not change it: do not update it."
+      : `To change it, edit a copy of that folder and call ${UPDATE_TOOL} with this id: this conversation then shares it.`,
+  ].join(" ")
+}
+
+function publishSummary(output: JsonValue, tool: ArtifactToolName): string {
   if (typeof output !== "object" || output === null || Array.isArray(output)) {
     return JSON.stringify(output)
   }
@@ -828,6 +959,15 @@ function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   }
 }
 
+function parseOpenArtifactInput(value: unknown): OpenArtifactToolInput {
+  const input = inputObject(value, OPEN_TOOL, ["id"])
+  const id = typeof input.id === "string" ? input.id.trim() : ""
+  if (!isArtifactId(id)) {
+    throw publishError(OPEN_TOOL, "id must be an artifact id such as art_k3m9q2x7tp")
+  }
+  return { id }
+}
+
 function parseUpdateArtifactInput(value: unknown): UpdateArtifactToolInput {
   const input = inputObject(value, UPDATE_TOOL, ["id", "path", "title"])
   const id = typeof input.id === "string" ? input.id.trim() : ""
@@ -846,7 +986,7 @@ function parseUpdateArtifactInput(value: unknown): UpdateArtifactToolInput {
 
 function inputObject(
   value: unknown,
-  tool: PublishToolName,
+  tool: ArtifactToolName,
   keys: readonly string[]
 ): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -858,20 +998,20 @@ function inputObject(
   return input
 }
 
-function pathInput(value: unknown, tool: PublishToolName): string {
+function pathInput(value: unknown, tool: ArtifactToolName): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw publishError(tool, "path must be a file or directory in the sandbox")
   }
   return value
 }
 
-function titleInput(value: unknown, tool: PublishToolName): string {
+function titleInput(value: unknown, tool: ArtifactToolName): string {
   if (typeof value !== "string") throw publishError(tool, "title must be text")
   return value
 }
 
 /** Refusals the Agent can act on become its error text; anything else stays internal. */
-function toPublishError(error: unknown, tool: PublishToolName, path?: string): unknown {
+function toPublishError(error: unknown, tool: ArtifactToolName, path?: string): unknown {
   if (error instanceof SandboxFileError) {
     if (error.reason === "not_found" && path !== undefined) {
       return publishError(tool, `there is no file or directory at '${path}'`)
@@ -884,7 +1024,7 @@ function toPublishError(error: unknown, tool: PublishToolName, path?: string): u
   return error
 }
 
-function publishError(tool: PublishToolName, message: string): AgentToolPublicError {
+function publishError(tool: ArtifactToolName, message: string): AgentToolPublicError {
   const sentence = /[.!?]$/.test(message) ? message : `${message}.`
   return new AgentToolPublicError(`[SixbAgent] ${tool} refused: ${sentence}`)
 }

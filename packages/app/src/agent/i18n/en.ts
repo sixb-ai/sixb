@@ -780,6 +780,10 @@ export const en = {
     updating: (title: string) => `Updating ${title || "an artifact"}`,
     updated: (title: string) => `Updated ${title || "an artifact"}`,
     updateFailed: (title: string) => `Couldn't update ${title || "an artifact"}`,
+    /** An `open_artifact` call, which installs an artifact for the agent to read or revise. */
+    opening: (title: string) => `Opening ${title || "an artifact"}`,
+    opened: (title: string) => `Opened ${title || "an artifact"}`,
+    openFailed: (title: string) => `Couldn't open ${title || "an artifact"}`,
     /** A revised artifact whose structure stayed as it was: what changed is within it. */
     changed: "Updated",
     open: (title: string) => `Open ${title}`,

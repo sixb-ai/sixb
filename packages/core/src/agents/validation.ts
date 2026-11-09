@@ -20,6 +20,7 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "ask_parent",
   "publish_artifact",
   "update_artifact",
+  "open_artifact",
   // What `update_artifact` was called: earlier threads hold calls to it.
   "publish_artifact_version",
   ...AGENT_WEB_TOOL_NAMES,
