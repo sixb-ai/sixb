@@ -3,6 +3,7 @@ import {
   client,
   type GetConnectorResponse,
   type GetDatasetResponse,
+  type GetLakeHealthResponse,
   type GetSyncResponse,
   type ListDatasetRowsResponse,
 } from "@sixb/client"
@@ -10,6 +11,7 @@ import {
   getAuthSessionQueryKey,
   getConnectorQueryKey,
   getDatasetQueryKey,
+  getLakeHealthQueryKey,
   getSyncQueryKey,
   listDatasetRowsQueryKey,
   listDatasetVersionsQueryKey,
@@ -22,7 +24,12 @@ import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-libra
 import { type ReactNode, useLayoutEffect } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { SyncButton } from "../src"
-import { ConsoleConnectorPage, ConsoleDatasetPage, SectionsProvider } from "../src/pages"
+import {
+  ConsoleConnectorPage,
+  ConsoleDatasetPage,
+  ConsoleLakeHealthPage,
+  SectionsProvider,
+} from "../src/pages"
 import { DatasetCell, datasetColumnNames } from "../src/pages/console/data/datasets"
 import { projectionRunsPollInterval } from "../src/pages/console/data/projections"
 import { installDom } from "./helpers/dom"
@@ -408,5 +415,120 @@ describe("a dataset version's details", () => {
 
     expect(within(sheet).getByText("A sync")).toBeDefined()
     expect(within(sheet).queryByText("Computed from")).toBeNull()
+  })
+})
+
+describe("Lake health", () => {
+  const cleanup: GetLakeHealthResponse["cleanup"] = {
+    state: "ok",
+    lastRequestedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    lastRunAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    keepVersionsFor: "7d",
+    deleteFilesAfter: "7d",
+    cleanupEvery: "1h",
+  }
+
+  function renderHealth(health: GetLakeHealthResponse) {
+    return renderPage(<ConsoleLakeHealthPage />, {
+      path: "/console/lake-health",
+      data: [[getLakeHealthQueryKey(), health]],
+    })
+  }
+
+  // Reproduce: list inlined rows at zero, or drop the warnings list, in lake-health.tsx.
+  test("shows each dataset's storage, its warnings, and what cleanup does", () => {
+    const { view } = renderHealth({
+      available: true,
+      cleanup,
+      datasets: [
+        {
+          datasetId: "raw.events",
+          materialized: true,
+          rowCount: 1_200,
+          dataFiles: 12,
+          smallDataFiles: 9,
+          dataBytes: 48_000,
+          deleteFiles: 2,
+          inlinedRows: 0,
+          retainedSnapshots: 31,
+          partitionBy: ["region"],
+          warnings: [
+            { code: "partitioned-small-dataset", message: "Partitioned below a million rows." },
+          ],
+        },
+        {
+          datasetId: "raw.drafts",
+          materialized: false,
+          rowCount: 0,
+          dataFiles: 0,
+          smallDataFiles: 0,
+          dataBytes: 0,
+          deleteFiles: 0,
+          inlinedRows: 0,
+          retainedSnapshots: 0,
+          partitionBy: [],
+          warnings: [],
+        },
+      ],
+    })
+
+    expect(view.getByText("Healthy")).toBeDefined()
+    expect(view.getByText("1 hour")).toBeDefined()
+    expect(view.getAllByText("7 days")).toHaveLength(2)
+    expect(view.getByText("5 minutes ago")).toBeDefined()
+    expect(view.getByText("4 minutes ago")).toBeDefined()
+    expect(view.getByRole("link", { name: "raw.events" }).getAttribute("href")).toBe(
+      "/console/datasets/raw.events"
+    )
+    expect(view.getByText("12 files (9 small)")).toBeDefined()
+    expect(view.getByText("2 delete files")).toBeDefined()
+    expect(view.queryByText(/^\d+ inlined rows?$/)).toBeNull()
+    expect(view.getByText("Partitioned by region")).toBeDefined()
+    expect(view.getByText("1 warning")).toBeDefined()
+    expect(view.getByText("Partitioned below a million rows.")).toBeDefined()
+    expect(view.getByText("Not written yet")).toBeDefined()
+  })
+
+  test("says so when the lake storage has no maintenance", () => {
+    const { view } = renderHealth({ available: false, cleanup, datasets: [] })
+
+    expect(view.getByText("This lake storage has no maintenance")).toBeDefined()
+    expect(view.queryByText("Automatic cleanup")).toBeNull()
+  })
+
+  test("says when automatic cleanup is off", () => {
+    const { view } = renderHealth({
+      available: true,
+      cleanup: { ...cleanup, state: "off", lastRequestedAt: null, lastRunAt: null },
+      datasets: [],
+    })
+
+    expect(view.getByText("Off")).toBeDefined()
+    expect(view.getAllByText("Never")).toHaveLength(2)
+    expect(view.getByText("No datasets")).toBeDefined()
+  })
+
+  // Reproduce: show `states.ok` for every state in lake-health.tsx. The page then says cleanup runs
+  // while the lake grows.
+  test("names what is missing instead of claiming that cleanup runs", () => {
+    const expected = [
+      ["not-requested", "Not running", "the orchestrator is not running"],
+      ["no-worker", "Waiting for a lake worker", "no lake worker has run it"],
+      ["failing", "Failing", "The last attempt failed"],
+    ] as const
+
+    for (const [state, label, note] of expected) {
+      const { view } = renderHealth({
+        available: true,
+        cleanup: { ...cleanup, state },
+        datasets: [],
+      })
+
+      expect(view.getByText(label)).toBeDefined()
+      expect(view.getByText(new RegExp(note))).toBeDefined()
+      expect(view.queryByText("Healthy")).toBeNull()
+
+      view.unmount()
+    }
   })
 })

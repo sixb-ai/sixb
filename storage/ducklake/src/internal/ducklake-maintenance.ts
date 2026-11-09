@@ -12,6 +12,7 @@ import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { type ExpiryPlan, ExpiryWalk } from "./ducklake-expiry-walk"
+import { DuckLakeReadsBusy } from "./ducklake-read-gate"
 import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
 import { describeDatasetStorage } from "./ducklake-storage-stats"
 import { isSqliteCatalog } from "./ducklake-version-transaction"
@@ -60,6 +61,15 @@ interface Retention {
   readonly deleteFilesAfterMs: number
   readonly dryRun: boolean
   readonly limit: number
+  readonly signal: AbortSignal | undefined
+}
+
+/** How one step ended. Neither a lost race nor busy reads is a failure of the step. */
+interface RetentionStepResult<T> {
+  readonly value: T
+  readonly yield?: RetentionYield
+  /** Reads kept the step out: its work waits for a later pass, and counts as no yield. */
+  readonly readsBusy?: boolean
 }
 
 /**
@@ -72,8 +82,9 @@ interface Retention {
  * them once they have been scheduled for `deleteFilesAfterMs`.
  *
  * A pass is bounded: it reads the history oldest first and stops once it has `limit` snapshots to
- * expire, and it deletes about `limit` files at most. Only the file deletion keeps this
- * provider's reads out, for as long as the deletion itself.
+ * expire, and it deletes about `limit` files at most. Only deleting files keeps this provider's
+ * reads out, for as long as the deletion itself, and a pass with no file to delete never does. It
+ * waits for open reads for a bounded time, then leaves the files to a later pass.
  */
 export class DuckLakeMaintenance implements LakeMaintenance {
   /** Passes in a row in which a step yielded, in this provider. */
@@ -114,7 +125,7 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     // Orphans are files no catalog row knows. Listing the whole data path is the costly part of
     // their search, so it waits for a pass that finds no backlog left.
     const backlog = plan.hasMore || files.value.hasMore || expired.yield !== undefined
-    const orphaned = backlog
+    const orphaned: RetentionStepResult<number> = backlog
       ? { value: 0 }
       : await yieldingToConcurrentPass(
           "orphaned file deletion",
@@ -136,7 +147,7 @@ export class DuckLakeMaintenance implements LakeMaintenance {
       keptVersions: plan.keptVersions,
       deletedFiles: files.value.deleted,
       orphanedFiles: orphaned.value,
-      hasMore: backlog || orphaned.yield !== undefined,
+      hasMore: backlog || orphaned.yield !== undefined || orphaned.readsBusy === true,
     }
   }
 
@@ -240,7 +251,14 @@ export class DuckLakeMaintenance implements LakeMaintenance {
   ): Promise<{ readonly deleted: number; readonly hasMore: boolean }> {
     const dueBefore = new Date(Date.now() - retention.deleteFilesAfterMs)
 
-    return this.connections.withMaintenanceRuntime(async (runtime) => {
+    const due = await this.connections.withAttachedRuntime((runtime) =>
+      this.scheduledFileTimes(runtime, dueBefore, 1)
+    )
+    if (due.length === 0) {
+      return { deleted: 0, hasMore: false }
+    }
+
+    return this.connections.withMaintenanceRuntime(retention.signal, async (runtime) => {
       const scheduled = await this.scheduledFileTimes(runtime, dueBefore, retention.limit + 1)
       const first = scheduled[0]
       if (first === undefined) {
@@ -302,16 +320,25 @@ export class DuckLakeMaintenance implements LakeMaintenance {
     return { deleted: deleted.length, hasMore: false }
   }
 
+  /**
+   * Listing the data path can take long and deletes nothing, so it runs beside reads. Only a pass
+   * that found orphans keeps them out, which is rare.
+   */
   private async deleteOrphanedFiles(retention: Retention): Promise<number> {
     const olderThan = new Date(Date.now() - retention.deleteFilesAfterMs)
+    const sql = (dryRun: boolean) =>
+      procedureSql("ducklake_delete_orphaned_files", this.aliasSql(), {
+        dryRun,
+        selection: `older_than => ${timestampSql(olderThan)}`,
+      })
 
-    const deleted = await this.connections.withMaintenanceRuntime((runtime) =>
-      runtime.query(
-        procedureSql("ducklake_delete_orphaned_files", this.aliasSql(), {
-          dryRun: retention.dryRun,
-          selection: `older_than => ${timestampSql(olderThan)}`,
-        })
-      )
+    const found = await this.connections.withAttachedRuntime((runtime) => runtime.query(sql(true)))
+    if (retention.dryRun || found.length === 0) {
+      return found.length
+    }
+
+    const deleted = await this.connections.withMaintenanceRuntime(retention.signal, (runtime) =>
+      runtime.query(sql(false))
     )
 
     return deleted.length
@@ -358,10 +385,14 @@ async function yieldingToConcurrentPass<T>(
   step: RetentionStep,
   run: () => Promise<T>,
   yielded: T
-): Promise<{ readonly value: T; readonly yield?: RetentionYield }> {
+): Promise<RetentionStepResult<T>> {
   try {
     return { value: await run() }
   } catch (error) {
+    if (error instanceof DuckLakeReadsBusy) {
+      return { value: yielded, readsBusy: true }
+    }
+
     if (lostToConcurrentPass(error)) {
       return { value: yielded, yield: { step, error } }
     }
@@ -406,7 +437,13 @@ function resolveRetention(options: LakeRetentionOptions): Retention {
     )
   }
 
-  return { keepVersionsForMs, deleteFilesAfterMs, dryRun: options.dryRun ?? false, limit }
+  return {
+    keepVersionsForMs,
+    deleteFilesAfterMs,
+    dryRun: options.dryRun ?? false,
+    limit,
+    signal: options.signal,
+  }
 }
 
 function protectedSnapshotId(ref: DatasetVersionRef): string {

@@ -740,6 +740,14 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
   },
+  // How the lake stores each dataset the caller may view: counts and sizes, never rows.
+  {
+    operationId: "getLakeHealth",
+    method: "GET",
+    path: "/api/lake/health",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "listSyncs",
     method: "GET",

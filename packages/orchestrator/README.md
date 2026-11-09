@@ -161,6 +161,7 @@ own failure count. See `packages/core/docs/runtime-lifecycle.md`.
 | `cron` | Each occurrence, to the second | Appends `schedule.triggered`, which the direct route consumes like any other event. An occurrence the broker refuses fails the pass and is retried every 10 seconds |
 | `projections` | 30 s, with projection routes | See above |
 | `triggers` | 30 s, with dataset-triggered pipelines | See above |
+| `lake-retention` | Each `cleanupEvery` from the epoch, when retention runs on its own | Enqueues `lake.retention.requested` on the `lake` queue, under the interval as job id. A lake worker runs it: one slow catalog write here would stall the project's other upkeep |
 
 Outbox rows are claimed under a lease, so passes in two processes never claim the same row together.
 A second orchestrator is otherwise harmless too: both emit each cron occurrence, and `occurrenceKey`

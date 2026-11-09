@@ -37,6 +37,7 @@
     "@sixb/client": "workspace:^",
     "@sixb/core": "workspace:*",
     "@sixb/cli-core": "workspace:^",
+    "@sixb/lake-worker": "workspace:*",
     "@sixb/orchestrator": "workspace:*",
     "@sixb/pipeline-worker": "workspace:*",
     "@sixb/projection-worker": "workspace:*",

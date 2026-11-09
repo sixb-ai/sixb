@@ -1,12 +1,18 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
 import { runCheck } from "../src/commands/check"
+import { lakeFixture } from "./fixtures/lake-project/sixb.config"
 import { runCliToCompletion } from "./shared/cli-process"
 import { runInProcess } from "./shared/in-process"
 
 function fixtureEntry(name: string): string {
   return resolve(import.meta.dir, "fixtures", name, "sixb.config.ts")
 }
+
+afterEach(() => {
+  lakeFixture.unansweredRequest = false
+  lakeFixture.events = []
+})
 
 function check(fixture: string) {
   return runInProcess(() => runCheck({ entry: fixtureEntry(fixture) }))
@@ -52,6 +58,24 @@ describe("sixb check", () => {
     expect(result.output.replace(/[\s│]+/g, " ")).toContain(
       "property 'Invoice.title' is projected from column 'invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices'."
     )
+  })
+
+  // No process can tell what the others run, so storage is what notices separate `sixb worker`
+  // processes without `lake`. Reproduce: drop `lakeWorkerWarnings` from commands/check.ts.
+  test("warns when requests for lake cleanup go unanswered", async () => {
+    lakeFixture.unansweredRequest = true
+
+    const result = await check("lake-project")
+
+    expect(result.output).toContain("no lake worker has run it")
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("says nothing about lake cleanup when nothing asks for it", async () => {
+    const result = await check("lake-project")
+
+    expect(result.output).toMatch(/✓ \S+ is healthy/)
+    expect(result.output).not.toContain("lake worker")
   })
 
   // The process boundary: a deploy gated on `sixb check` needs the process to end. This fixture's

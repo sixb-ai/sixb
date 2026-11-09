@@ -119,6 +119,62 @@ export const en = {
       hidden: { sync: "A sync", pipeline: "A pipeline" },
     },
   },
+  lakeHealth: {
+    title: "Lake health",
+    description: "How the lake stores each dataset, and how it cleans up after itself.",
+    unavailableTitle: "This lake storage has no maintenance",
+    unavailableDescription:
+      "Its provider neither describes how datasets are stored nor removes replaced versions. DuckLake does both.",
+    cleanupTitle: "Automatic cleanup",
+    cleanupDescription:
+      "Removes replaced versions and the files only they read. The versions projections applied are always kept.",
+    status: "Status",
+    states: {
+      ok: "Healthy",
+      cleaning: "Cleaning now",
+      off: "Off",
+      idle: "Nothing to clean",
+      "not-requested": "Not running",
+      "no-worker": "Waiting for a lake worker",
+      failing: "Failing",
+    },
+    stateNotes: {
+      off: "The project turned it off. Replaced versions stay until someone cleans up by hand.",
+      idle: "No dataset writes to this lake yet.",
+      ok: "The orchestrator requests it and a lake worker runs it.",
+      cleaning: "A lake worker is removing expired versions and their files.",
+      "not-requested":
+        "Nothing is asking for cleanup: the orchestrator is not running. Replaced versions stay until it does.",
+      "no-worker":
+        "Cleanup is requested, but no lake worker has run it. Replaced versions stay until one does.",
+      failing:
+        "The last attempt failed, and the next one tries again. The details went to the project's error handler.",
+    },
+    interval: "Interval",
+    lastRequested: "Last requested",
+    lastRun: "Last run",
+    never: "Never",
+    keepVersionsFor: "Keeps replaced versions for",
+    deleteFilesAfter: "Deletes unread files after",
+    datasetsTitle: "Datasets",
+    datasetsDescription:
+      "Compaction merges small files and inlined rows after the writes that leave them.",
+    emptyTitle: "No datasets",
+    emptyDescription: "A sync or pipeline declares the dataset it writes.",
+    notWritten: "Not written yet",
+    files: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} file`, other: `${formatted} files` }),
+    smallFiles: (_count: number, formatted: string) => `${formatted} small`,
+    deleteFiles: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} delete file`, other: `${formatted} delete files` }),
+    inlinedRows: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} inlined row`, other: `${formatted} inlined rows` }),
+    snapshots: (count: number, formatted: string) =>
+      plural("en", count, { one: `${formatted} snapshot`, other: `${formatted} snapshots` }),
+    partitionedBy: (columns: string) => `Partitioned by ${columns}`,
+    warnings: (count: number) =>
+      plural("en", count, { one: "1 warning", other: `${count} warnings` }),
+  },
   pipelines: {
     title: "Pipelines",
     description: "Pipelines turn datasets into new ones, one step after another.",
@@ -294,6 +350,69 @@ export const fr: Translation<DataMessages> = {
       ingest: "Ingérée directement",
       hidden: { sync: "Une synchronisation", pipeline: "Un pipeline" },
     },
+  },
+  lakeHealth: {
+    title: "Santé du lac",
+    description: "Comment le lac stocke chaque jeu de données, et comment il se nettoie.",
+    unavailableTitle: "Ce stockage de lac n’a pas de maintenance",
+    unavailableDescription:
+      "Son fournisseur ne décrit pas le stockage des jeux de données et ne supprime pas les versions remplacées. DuckLake fait les deux.",
+    cleanupTitle: "Nettoyage automatique",
+    cleanupDescription:
+      "Supprime les versions remplacées et les fichiers qu’elles seules lisent. Les versions appliquées par les projections sont toujours conservées.",
+    status: "État",
+    states: {
+      ok: "Opérationnel",
+      cleaning: "Nettoyage en cours",
+      off: "Désactivé",
+      idle: "Rien à nettoyer",
+      "not-requested": "À l’arrêt",
+      "no-worker": "En attente d’un worker du lac",
+      failing: "En échec",
+    },
+    stateNotes: {
+      off: "Le projet l’a désactivé. Les versions remplacées restent jusqu’à un nettoyage manuel.",
+      idle: "Aucun jeu de données n’écrit encore dans ce lac.",
+      ok: "L’orchestrateur le demande et un worker du lac l’exécute.",
+      cleaning: "Un worker du lac supprime les versions expirées et leurs fichiers.",
+      "not-requested":
+        "Rien ne demande le nettoyage : l’orchestrateur ne tourne pas. Les versions remplacées restent en attendant.",
+      "no-worker":
+        "Le nettoyage est demandé, mais aucun worker du lac ne l’a exécuté. Les versions remplacées restent en attendant.",
+      failing:
+        "La dernière tentative a échoué et la suivante réessaiera. Le détail est parti vers le gestionnaire d’erreurs du projet.",
+    },
+    interval: "Intervalle",
+    lastRequested: "Dernière demande",
+    lastRun: "Dernière exécution",
+    never: "Jamais",
+    keepVersionsFor: "Conserve les versions remplacées",
+    deleteFilesAfter: "Supprime les fichiers non lus après",
+    datasetsTitle: "Jeux de données",
+    datasetsDescription:
+      "La compaction fusionne les petits fichiers et les lignes du catalogue après les écritures qui les laissent.",
+    emptyTitle: "Aucun jeu de données",
+    emptyDescription: "Une synchronisation ou un pipeline déclare le jeu de données qu’il écrit.",
+    notWritten: "Pas encore écrit",
+    files: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} fichier`, other: `${formatted} fichiers` }),
+    smallFiles: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} petit`, other: `${formatted} petits` }),
+    deleteFiles: (count: number, formatted: string) =>
+      plural("fr", count, {
+        one: `${formatted} fichier de suppression`,
+        other: `${formatted} fichiers de suppression`,
+      }),
+    inlinedRows: (count: number, formatted: string) =>
+      plural("fr", count, {
+        one: `${formatted} ligne dans le catalogue`,
+        other: `${formatted} lignes dans le catalogue`,
+      }),
+    snapshots: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} instantané`, other: `${formatted} instantanés` }),
+    partitionedBy: (columns: string) => `Partitionné par ${columns}`,
+    warnings: (count: number) =>
+      plural("fr", count, { one: "1 avertissement", other: `${count} avertissements` }),
   },
   pipelines: {
     title: "Pipelines",

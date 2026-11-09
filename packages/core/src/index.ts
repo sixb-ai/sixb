@@ -1015,6 +1015,7 @@ export type {
   SixbErrorHandler,
   SixbEventDeliveryFailedContext,
   SixbFailedRun,
+  SixbLakeRetentionFailedContext,
   SixbMaintenancePassFailedContext,
   SixbOrchestratorDispatchFailedContext,
   SixbRuleEvaluationFailedContext,
@@ -1048,6 +1049,7 @@ export type {
   OutboxSummary,
   SixbReadiness,
 } from "./maintenance"
+export type { LakeMaintenanceOptions } from "./maintenance/lake-retention"
 export type {
   LanguageModel,
   LanguageModelDefinition,

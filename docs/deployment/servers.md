@@ -83,7 +83,7 @@ export default defineDeploy({
 })
 ```
 
-The rules process waits idly when the project has no rules; turn it off to save memory. Keep the orchestrator on: it runs cron schedules and delivers events whose first delivery failed.
+The rules process waits idly when the project has no rules; turn it off to save memory. Keep the orchestrator on: it runs cron schedules, delivers events whose first delivery failed, and requests [storage maintenance](../datasets/overview.md#storage-maintenance), which runs in the `lake` worker. `sixb deploy` warns when a deployment leaves either out.
 
 | Service | Settings |
 | --- | --- |

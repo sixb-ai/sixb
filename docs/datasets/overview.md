@@ -161,6 +161,32 @@ The caller needs a view grant on the dataset. Columns it is not cleared for are 
 metadata. A version names its producer's run, and lists its inputs, only as far as the caller may
 view them.
 
+## Storage maintenance
+
+Each write adds a version, and a replaced version keeps its files. Sixb removes them on its own, in every project:
+
+```ts
+export const sixb = createSixb({
+  // ...providers
+  lakeMaintenance: { keepVersionsFor: "14d", cleanupEvery: "6h" },
+})
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Run cleanup on its own. |
+| `keepVersionsFor` | `"7d"` | How long a version stays readable after a newer one replaced it. At least `"1h"`. |
+| `deleteFilesAfter` | `"7d"` | How long a file no kept version reads stays in storage. At least `"1h"`. |
+| `cleanupEvery` | `"1h"` | How often cleanup runs, such as `15m`, `6h` or `1d`. |
+
+- The latest version of each dataset, and the versions projections applied, are always kept.
+- The orchestrator requests cleanup and a `lake` worker runs it, so both must be running. `sixb dev` and `sixb worker-group` include the worker; a deployment that names its worker `types` must list `lake`, and `sixb deploy` warns when it does not. Separate `sixb worker <type>` processes need a `sixb worker lake`: the orchestrator's output, `sixb check` and the Console say when none has run.
+- Reads running in the same process delay file deletion by about half a minute at most: past that, cleanup leaves the files to its next run.
+- Small files are merged by the lake provider itself after the writes that leave them.
+- Console › Lake health shows when cleanup was last requested and last started, says which of the two is missing when one is, and shows how each dataset is stored, with warnings such as a partitioned small dataset.
+- `sixb lake cleanup` cleans up now, with the settings above unless its flags say otherwise. `--dry-run` measures what one pass would remove.
+- Cleanup needs a lake provider that supports it, such as DuckLake. Otherwise nothing runs.
+
 ## File location
 
 Export definitions from `datasets/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.

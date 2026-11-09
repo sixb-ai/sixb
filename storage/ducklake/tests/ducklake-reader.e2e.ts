@@ -5,12 +5,14 @@ import { join } from "node:path"
 import { col, defineDataset } from "@sixb/core"
 import { DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 import type { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
+import { duckLakeMetadataTableName } from "../src/internal/sql"
 import { collectRows } from "./test-utils"
 
 const dataset = defineDataset("reader.synthetic", {
   schema: [col("id", "string"), col("value", "int64")],
 })
 const rowCount = 12_003
+const ONE_HOUR = { keepVersionsForMs: 60 * 60_000, deleteFilesAfterMs: 60 * 60_000 }
 
 // Red check: restore ducklake-row-reader.ts from the parent commit. The consumer metadata/write
 // tests time out because the previous paged iterator holds its attachment lease across yields.
@@ -208,8 +210,9 @@ describe("DuckLake reader lifecycle", () => {
   })
 
   test("waiting maintenance allows nested inputs and waits for paged readers too", async () => {
-    await withLake({ maxStreamingReads: 1 }, async (lake) => {
+    await withLake({ maxStreamingReads: 1 }, async (lake, options) => {
       await seed(lake)
+      await scheduleDueFiles(lake, options)
       const controller = new AbortController()
       const rows = lake
         .readRows({ datasetId: dataset.id, signal: controller.signal })
@@ -221,7 +224,7 @@ describe("DuckLake reader lifecycle", () => {
       try {
         await rows.next()
         let finished = false
-        maintenance = lake.maintenance.applyRetention().then(() => {
+        maintenance = lake.maintenance.applyRetention(ONE_HOUR).then(() => {
           finished = true
         })
         await Bun.sleep(20)
@@ -245,6 +248,28 @@ describe("DuckLake reader lifecycle", () => {
     })
   })
 })
+
+/** Replaces the seeded version and ages it: only a pass with files to delete waits for reads. */
+async function scheduleDueFiles(lake: DuckLakeStorage, options: DuckLakeStorageOptions) {
+  const writer = await lake.beginWrite({ dataset, mode: "snapshot" })
+  await writer.writeRows(
+    (async function* () {
+      for (let id = 0; id < rowCount; id++) yield { id: String(id), value: id + 1 }
+    })()
+  )
+  await writer.commit()
+
+  const backdate = async (table: string, column: string) => {
+    const runtime = await connectionsFor(lake).attachedRuntime()
+    const name = duckLakeMetadataTableName(options, table)
+
+    await runtime.run(`UPDATE ${name} SET ${column} = ${column} - INTERVAL '2 hours'`)
+  }
+
+  await backdate("ducklake_snapshot", "snapshot_time")
+  await lake.maintenance.applyRetention(ONE_HOUR)
+  await backdate("ducklake_files_scheduled_for_deletion", "schedule_start")
+}
 
 async function seed(lake: DuckLakeStorage) {
   await lake.createDataset(dataset)

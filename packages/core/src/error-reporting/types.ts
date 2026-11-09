@@ -200,11 +200,23 @@ export interface SixbOrchestratorDispatchFailedContext
 }
 
 /**
+ * One automatic lake retention run failed. The lake keeps what that run would have removed; the
+ * next interval's run tries again.
+ */
+export interface SixbLakeRetentionFailedContext
+  extends SixbFailureContext<"lake.retention.failed"> {
+  readonly failure: SixbFailure<"internal.unexpected" | "runtime.cancelled">
+  /** The start of the interval the run was for. */
+  readonly intervalStart: string
+}
+
+/**
  * Context supplied to the global Sixb error handler, discriminated by `type`.
  * Failure notifications never change the outcome of the operation they observe.
  */
 export type SixbErrorContext =
   | SixbVectorIndexingFailedContext
+  | SixbLakeRetentionFailedContext
   | SixbActionPhaseFailedContext
   | SixbRunFailedContext
   | SixbEventDeliveryFailedContext

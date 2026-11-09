@@ -29,6 +29,7 @@ export interface WorkspaceDependencyEntry {
 export const coreInternalCompanions: ReadonlySet<string> = new Set([
   "@sixb/agent",
   "@sixb/agent-worker",
+  "@sixb/lake-worker",
   "@sixb/orchestrator",
   "@sixb/pg",
   "@sixb/pipeline-worker",

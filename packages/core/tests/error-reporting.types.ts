@@ -40,6 +40,7 @@ type _errorContextIsDiscriminated = Expect<
     | "vector.indexing.failed"
     | "maintenance.pass.failed"
     | "orchestrator.dispatch.failed"
+    | "lake.retention.failed"
   >
 >
 type _errorContextAlwaysDeduplicable = Expect<Equal<SixbErrorContext["notificationId"], string>>

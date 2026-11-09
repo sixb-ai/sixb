@@ -82,6 +82,7 @@ import {
   getDataset,
   getDatasetVersion,
   getDatasetVersionLineage,
+  getLakeHealth,
   getLatestTelemetry,
   getObject,
   getObjectByUniqueProperty,
@@ -422,6 +423,9 @@ import type {
   GetDatasetVersionLineageError,
   GetDatasetVersionLineageResponse,
   GetDatasetVersionResponse,
+  GetLakeHealthData,
+  GetLakeHealthError,
+  GetLakeHealthResponse,
   GetLatestTelemetryData,
   GetLatestTelemetryError,
   GetLatestTelemetryResponse,
@@ -2701,6 +2705,31 @@ export const listDatasetRowsInfiniteOptions = (options: Options<ListDatasetRowsD
       queryKey: listDatasetRowsInfiniteQueryKey(options),
     }
   )
+
+export const getLakeHealthQueryKey = (options?: Options<GetLakeHealthData>) =>
+  createQueryKey("getLakeHealth", options)
+
+/**
+ * Describe how the lake stores each dataset, and what its retention does
+ */
+export const getLakeHealthOptions = (options?: Options<GetLakeHealthData>) =>
+  queryOptions<
+    GetLakeHealthResponse,
+    GetLakeHealthError,
+    GetLakeHealthResponse,
+    ReturnType<typeof getLakeHealthQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getLakeHealth({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getLakeHealthQueryKey(options),
+  })
 
 export const listSyncsQueryKey = (options?: Options<ListSyncsData>) =>
   createQueryKey("listSyncs", options)

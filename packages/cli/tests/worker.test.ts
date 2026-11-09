@@ -30,7 +30,7 @@ describe("sixb worker", () => {
     [
       "an unknown worker type",
       { workerType: "missing" },
-      "Unknown worker 'missing'. Available: sync, agent, pipeline, projection, workflow",
+      "Unknown worker 'missing'. Available: sync, agent, pipeline, projection, workflow, lake",
     ],
     [
       "the action worker",

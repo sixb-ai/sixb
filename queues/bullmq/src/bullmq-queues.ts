@@ -2,6 +2,7 @@ import type { Queues } from "@sixb/core"
 import type {
   AgentQueueJob,
   AgentQueueJobFailureCode,
+  LakeQueueJob,
   PipelineQueueJobFailureCode,
   PipelineRunRequestedQueueJob,
   ProjectionQueueJobFailureCode,
@@ -64,9 +65,9 @@ export interface BullMqQueuesOptions {
  *   - `BullMqQueues`      — the provider, holds the lanes (this class)
  *   - `BullMqQueue<T>`    — one lane, typed by its job payload, implements `Queue<T>`
  *
- * The lanes (`syncRuns`, `pipelines`, `projections`, `workflows`) have different generic types,
- * which is why they cannot collapse into a single class: one `BullMqQueue<T>` cannot represent
- * every lane-specific job type at once.
+ * The lanes (`syncRuns`, `pipelines`, `projections`, `workflows`, `lake`) have different generic
+ * types, which is why they cannot collapse into a single class: one `BullMqQueue<T>` cannot
+ * represent every lane-specific job type at once.
  *
  * Each lane maps to one BullMQ queue per `projectId` (queue name `${projectId}:${laneId}`).
  * Two IORedis connections are opened — one for `Queue` handles and one for `Worker` handles
@@ -78,6 +79,7 @@ export class BullMqQueues implements Queues {
     VectorIndexingQueueJob,
     "internal.unexpected" | "runtime.cancelled"
   >
+  readonly lake: BullMqQueue<LakeQueueJob, "internal.unexpected" | "runtime.cancelled">
   readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
   readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
@@ -100,6 +102,7 @@ export class BullMqQueues implements Queues {
     }
 
     this.vectorIndexing = new BullMqQueue(shared, "vector.indexing")
+    this.lake = new BullMqQueue(shared, "lake")
     this.syncRuns = new BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
       shared,
       "sync.runs"
@@ -132,6 +135,7 @@ export class BullMqQueues implements Queues {
       this.workflows.close(),
       this.agents.close(),
       this.vectorIndexing.close(),
+      this.lake.close(),
     ])
     // Short grace so a just-dispatched Redis command (typically the final stalled-check tick)
     // can settle on the socket before owned IORedis handles are quit. No-op when connections

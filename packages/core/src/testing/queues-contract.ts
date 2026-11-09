@@ -91,6 +91,34 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         ).toHaveLength(0)
       })
     })
+
+    // A lake job claimed from `syncRuns` would run as a sync.
+    test("lake work has its own lane beside sync runs, with idempotent job ids", async () => {
+      await withQueues(async (queues) => {
+        const jobs = [
+          {
+            id: "lake-retention:2026-11-05T10:00:00.000Z",
+            type: "lake.retention.requested" as const,
+            payload: { intervalStart: "2026-11-05T10:00:00.000Z" },
+          },
+        ]
+        await queues.lake.enqueue({ projectId: "project-a", jobs })
+        await queues.lake.enqueue({ projectId: "project-a", jobs })
+
+        expect(
+          await queues.syncRuns.claim({ projectId: "project-a", workerId: "sync" })
+        ).toHaveLength(0)
+
+        const claimed = await queues.lake.claim({
+          projectId: "project-a",
+          workerId: "lake",
+          limit: 2,
+        })
+        expect(claimed).toHaveLength(1)
+        expect(claimed[0]!.job.payload).toEqual({ intervalStart: "2026-11-05T10:00:00.000Z" })
+      })
+    })
+
     describe("enqueue", () => {
       test("returns envelopes with generated id, createdAt, availableAt, attempt=0", async () => {
         await withQueues(async (queues) => {

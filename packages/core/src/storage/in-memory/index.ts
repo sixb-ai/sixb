@@ -21,6 +21,10 @@ import {
 } from "../file-download-grants"
 import { type FileUploadSessionStore, InMemoryFileUploadSessions } from "../file-upload-sessions"
 import {
+  InMemoryLakeRetentionRunStorage,
+  type LakeRetentionRunStorage,
+} from "../lake-retention-runs"
+import {
   InMemoryMaintenanceHeartbeatStorage,
   type MaintenanceHeartbeatStorage,
 } from "../maintenance-heartbeats"
@@ -139,6 +143,7 @@ export class InMemoryStorage implements Storage {
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   private readonly fileDownloadGrantStorage = new InMemoryFileDownloadGrantStorage()
   private readonly maintenanceHeartbeatStorage = new InMemoryMaintenanceHeartbeatStorage()
+  private readonly lakeRetentionRunStorage = new InMemoryLakeRetentionRunStorage()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
   private readonly activityStorage = new InMemoryActivityStorage()
   readonly auth: AuthStorage
@@ -161,6 +166,7 @@ export class InMemoryStorage implements Storage {
   readonly fileUploadSessions: FileUploadSessionStore
   readonly fileDownloadGrants: FileDownloadGrantStorage
   readonly maintenanceHeartbeats: MaintenanceHeartbeatStorage
+  readonly lakeRetentionRuns: LakeRetentionRunStorage
   readonly connectorConnections: ConnectorConnectionStorage
   readonly activity: ActivityStorage
 
@@ -200,6 +206,7 @@ export class InMemoryStorage implements Storage {
       this.maintenanceHeartbeatStorage,
       scope
     )
+    this.lakeRetentionRuns = createOperationScopedFacade(this.lakeRetentionRunStorage, scope)
     this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
     this.activity = createOperationScopedFacade(this.activityStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
@@ -413,6 +420,7 @@ export class InMemoryStorage implements Storage {
       fileUploadSessions: this.fileUploadSessionStorage,
       fileDownloadGrants: this.fileDownloadGrantStorage,
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage,
+      lakeRetentionRuns: this.lakeRetentionRunStorage,
       connectorConnections: this.connectorConnectionStorage,
       activity: this.activityStorage,
       ping: async () => undefined,
@@ -447,6 +455,7 @@ export class InMemoryStorage implements Storage {
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
       fileDownloadGrants: this.fileDownloadGrantStorage.snapshot(),
       maintenanceHeartbeats: this.maintenanceHeartbeatStorage.snapshot(),
+      lakeRetentionRuns: this.lakeRetentionRunStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
       activity: this.activityStorage.snapshot(),
     }
@@ -476,6 +485,7 @@ export class InMemoryStorage implements Storage {
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
     this.fileDownloadGrantStorage.restore(snapshot.fileDownloadGrants)
     this.maintenanceHeartbeatStorage.restore(snapshot.maintenanceHeartbeats)
+    this.lakeRetentionRunStorage.restore(snapshot.lakeRetentionRuns)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
     this.activityStorage.restore(snapshot.activity)
   }
@@ -505,6 +515,7 @@ export interface InMemoryStorageSnapshot {
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
   readonly fileDownloadGrants: ReturnType<InMemoryFileDownloadGrantStorage["snapshot"]>
   readonly maintenanceHeartbeats: ReturnType<InMemoryMaintenanceHeartbeatStorage["snapshot"]>
+  readonly lakeRetentionRuns: ReturnType<InMemoryLakeRetentionRunStorage["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
   readonly activity: ReturnType<InMemoryActivityStorage["snapshot"]>
 }

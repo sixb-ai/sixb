@@ -13,6 +13,7 @@ import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
+import { LakeWorker } from "@sixb/lake-worker"
 import {
   type CompileRoutesDiagnostic,
   compileRoutesWithDiagnostics,
@@ -28,7 +29,7 @@ import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 import { stopQuietly } from "./role-lifecycle"
 import type { WorkerConcurrency } from "./worker-registry"
-import { agentRuntimeRequired, agentWorkerRequired } from "./worker-registry"
+import { agentRuntimeRequired, agentWorkerRequired, lakeWorkerRequired } from "./worker-registry"
 
 export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -43,6 +44,7 @@ async function closeProvider(provider: { close?(): void | Promise<void> }): Prom
 export interface RunningSixbRuntime {
   readonly rulesWorker: RulesWorker | null
   readonly syncWorker: SyncWorker | null
+  readonly lakeWorker: LakeWorker | null
   readonly agentWorker: AgentWorker | null
   readonly projectionWorker: ProjectionWorker | null
   readonly pipelineWorker: PipelineWorker | null
@@ -226,20 +228,22 @@ export async function startOrchestratorRuntime(
  *   3. PipelineWorker (claims from queues)
  *   4. WorkflowWorker (claims from queues)
  *   5. SyncWorker (claims from queues)
- *   6. Orchestrator (subscribes to events, enqueues jobs, runs cron and the maintenance loop)
- *   7. API server, when this process serves it
- *   8. AgentWorker (claims from queues; its turns call the API)
+ *   6. LakeWorker (claims from queues)
+ *   7. Orchestrator (subscribes to events, enqueues jobs, runs cron and the maintenance loop)
+ *   8. API server, when this process serves it
+ *   9. AgentWorker (claims from queues; its turns call the API)
  *
  * Shutdown order (producers before consumers):
  *   1. AgentWorker (ends its turns while the API still answers them)
  *   2. API server
  *   3. Orchestrator (stops cron, drains pending dispatches)
- *   4. SyncWorker
- *   5. WorkflowWorker
- *   6. PipelineWorker
- *   7. ProjectionWorker
- *   8. RulesWorker (drains pending evaluations)
- *   9. Runtime providers (connectors, broker)
+ *   4. LakeWorker
+ *   5. SyncWorker
+ *   6. WorkflowWorker
+ *   7. PipelineWorker
+ *   8. ProjectionWorker
+ *   9. RulesWorker (drains pending evaluations)
+ *  10. Runtime providers (connectors, broker)
  */
 export async function startSixbRuntime(
   sixb: LoadedSixbHost,
@@ -249,6 +253,7 @@ export async function startSixbRuntime(
   let orchestratorRuntime: RunningOrchestratorRuntime | null = null
   let rulesWorker: RulesWorker | null = null
   let syncWorker: SyncWorker | null = null
+  let lakeWorker: LakeWorker | null = null
   let agentWorker: AgentWorker | null = null
   let pipelineWorker: PipelineWorker | null = null
   let workflowWorker: WorkflowWorker | null = null
@@ -260,6 +265,7 @@ export async function startSixbRuntime(
     await stopQuietly(() => agentWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => options.api?.stop() ?? Promise.resolve())
     await stopQuietly(() => orchestratorRuntime?.stop() ?? Promise.resolve())
+    await stopQuietly(() => lakeWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => syncWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => workflowWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => pipelineWorker?.stop() ?? Promise.resolve())
@@ -317,6 +323,11 @@ export async function startSixbRuntime(
         await syncWorker.start()
       }
 
+      if (lakeWorkerRequired(sixb)) {
+        lakeWorker = new LakeWorker(sixb, { concurrency: options.workerConcurrency?.lake })
+        await lakeWorker.start()
+      }
+
       orchestratorRuntime = await startOrchestratorRuntime(sixb)
       orchestratorWorker = orchestratorRuntime.orchestratorWorker
       warnings.push(...orchestratorRuntime.warnings)
@@ -333,6 +344,7 @@ export async function startSixbRuntime(
     const workers: Worker[] = []
     if (rulesWorker) workers.push(rulesWorker)
     if (syncWorker) workers.push(syncWorker)
+    if (lakeWorker) workers.push(lakeWorker)
     if (agentWorker) workers.push(agentWorker)
     if (projectionWorker) workers.push(projectionWorker)
     if (pipelineWorker) workers.push(pipelineWorker)
@@ -344,6 +356,7 @@ export async function startSixbRuntime(
   return {
     rulesWorker,
     syncWorker,
+    lakeWorker,
     agentWorker,
     projectionWorker,
     pipelineWorker,

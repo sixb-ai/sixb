@@ -88,8 +88,9 @@ tested build there, in a server image for example, makes a deploy independent of
 
 ### Maintenance
 
-DuckLake keeps every snapshot, and every file a snapshot reads, until retention removes them.
-`lakeStorage.maintenance` implements core's `LakeMaintenance`:
+DuckLake keeps every snapshot, and every file a snapshot reads, until retention removes them. The
+framework runs retention on its own, as `lakeMaintenance` configures it, and `sixb lake cleanup`
+runs it now. `lakeStorage.maintenance` implements core's `LakeMaintenance`:
 
 ```ts
 const report = await lakeStorage.maintenance.applyRetention({
@@ -102,6 +103,12 @@ const report = await lakeStorage.maintenance.applyRetention({
 const health = await lakeStorage.maintenance.describeStorage(["invoices"])
 // [{ dataFiles, smallDataFiles, deleteFiles, inlinedRows, retainedSnapshots, warnings, ... }]
 ```
+
+Deleting files keeps this provider's reads out, and a pass with no file to delete never does. A
+pass that has files to delete waits 30 seconds for open reads, then holds new reads back for 5 seconds
+so that overlapping reads cannot keep it out for good. If a read still outlasts that, the pass leaves
+the files to a later one with `hasMore: true`, and new reads are not held back again for 5 minutes.
+Pass `signal` to stop a pass that is waiting.
 
 `sixb lake cleanup` runs one pass, protecting the version each projection applied.
 

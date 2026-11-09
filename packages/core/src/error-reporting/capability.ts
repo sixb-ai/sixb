@@ -2,6 +2,7 @@ import { SixbErrorReporter } from "./reporter"
 import {
   type ReportActionPhaseFailureInput,
   type ReportEventDeliveryFailureInput,
+  type ReportLakeRetentionFailureInput,
   type ReportMaintenancePassFailureInput,
   type ReportOrchestratorDispatchFailureInput,
   type ReportRuleEvaluationFailureInput,
@@ -9,6 +10,7 @@ import {
   type ReportVectorIndexingFailureInput,
   reportActionPhaseFailure as reportActionPhaseFailureWith,
   reportEventDeliveryFailure as reportEventDeliveryFailureWith,
+  reportLakeRetentionFailure as reportLakeRetentionFailureWith,
   reportMaintenancePassFailure as reportMaintenancePassFailureWith,
   reportOrchestratorDispatchFailure as reportOrchestratorDispatchFailureWith,
   reportRuleEvaluationFailure as reportRuleEvaluationFailureWith,
@@ -54,6 +56,7 @@ export type {
   ReportEventDeliveryFailureInput,
   ReportMaintenancePassFailureInput,
   ReportOrchestratorDispatchFailureInput,
+  ReportLakeRetentionFailureInput,
   ReportRuleEvaluationFailureInput,
   ReportRunFailureInput,
   ReportVectorIndexingFailureInput,
@@ -117,4 +120,12 @@ export function reportVectorIndexingFailure(
   input: ReportVectorIndexingFailureInput
 ): void {
   reportVectorIndexingFailureWith(resolveSixbErrorReporter(host), error, input)
+}
+
+export function reportLakeRetentionFailure(
+  host: object,
+  error: unknown,
+  input: ReportLakeRetentionFailureInput
+): void {
+  reportLakeRetentionFailureWith(resolveSixbErrorReporter(host), error, input)
 }
