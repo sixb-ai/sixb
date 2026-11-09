@@ -118,8 +118,11 @@ const comment = (
   ...extra,
 })
 
-/** Alice's canvas, which Bob reads, or may change, as the viewer reads it. */
-function seeded(access: "read" | "update" = "read"): QueryClient {
+/**
+ * Alice's canvas, which Bob reads, or may change, as the viewer reads it; in the mode its
+ * `theme.json` pins, when `pinned` names one.
+ */
+function seeded(access: "read" | "update" = "read", pinned?: "light" | "dark"): QueryClient {
   const queries = new QueryClient({
     defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
   })
@@ -159,6 +162,12 @@ function seeded(access: "read" | "update" = "read"): QueryClient {
     sizeBytes: 10,
     mediaType: "application/json",
   }
+  const theme = {
+    blobId: "blob_theme",
+    digest: `sha256:${"1".repeat(64)}`,
+    sizeBytes: 20,
+    mediaType: "application/json",
+  }
   queries.setQueryData(
     getArtifactVersionQueryKey({ path: { artifactId: ARTIFACT_ID, version: "1" } }),
     {
@@ -166,7 +175,10 @@ function seeded(access: "read" | "update" = "read"): QueryClient {
       version: 1,
       title: "Onboarding",
       entry: "canvas.json",
-      files: [{ path: "canvas.json", file }],
+      files: [
+        { path: "canvas.json", file },
+        ...(pinned ? [{ path: "theme.json", file: theme }] : []),
+      ],
       outline: { kind: "canvas", items: [] },
       references: [],
       author: alice,
@@ -183,6 +195,17 @@ function seeded(access: "read" | "update" = "read"): QueryClient {
     fileRef: file,
   })
   queries.setQueryData([...source.queryKey, "text"], formatCanvas(CANVAS))
+
+  if (pinned) {
+    const themeSource = artifactFileSource({
+      artifactId: ARTIFACT_ID,
+      version: 1,
+      path: "theme.json",
+      fileRef: theme,
+    })
+    queries.setQueryData([...themeSource.queryKey, "text"], JSON.stringify({ mode: pinned }))
+  }
+
   return queries
 }
 
@@ -260,6 +283,8 @@ async function open(
     readonly edits?: boolean
     /** The app's event socket is open, as the app opens it, and the test plays the server. */
     readonly events?: boolean
+    /** The mode the canvas's `theme.json` pins. */
+    readonly pinned?: "light" | "dark"
   } = {}
 ) {
   const server = new FakeServer(ARTIFACT_ID, CANVAS)
@@ -280,7 +305,7 @@ async function open(
     </MemoryRouter>
   )
   const ui = render(
-    <QueryClientProvider client={seeded(options.edits ? "update" : "read")}>
+    <QueryClientProvider client={seeded(options.edits ? "update" : "read", options.pinned)}>
       {options.events ? <SixbEventsProvider>{viewer}</SixbEventsProvider> : viewer}
     </QueryClientProvider>
   )
@@ -346,6 +371,27 @@ const thread = (panel: HTMLElement, id: string) => {
 }
 
 describe("comments on a canvas", () => {
+  // A canvas that pins light mode keeps it on its board; the comments beside it are the app's, in
+  // the app's mode, or their sheet stays light under a dark app's light words.
+  // Guard proof: put the pinned mode back on CanvasRenderer's root; the panel is then inside it.
+  test("are the app's, in its mode, beside a canvas that pins its own", async () => {
+    document.documentElement.classList.add("dark")
+    try {
+      serveComments([comment("cmt_1", alice, "Warmer colors")])
+      const { ui } = await open({ pinned: "light" })
+      const panel = await openPanel(ui)
+
+      // The board, and only the board, is light.
+      const canvas = ui.getByRole("region", { name: "Canvas Onboarding" })
+      expect(canvas.querySelector(":scope > .light")).toBeTruthy()
+      expect(canvas.closest(".light")).toBeNull()
+      expect(panel.closest(".light")).toBeNull()
+      ui.unmount()
+    } finally {
+      document.documentElement.classList.remove("dark")
+    }
+  })
+
   // Guard proof: return true from canManageComment for anyone; Alice's thread then offers Bob
   // Resolve.
   test("are resolved and deleted by their author, the reader's others left alone", async () => {

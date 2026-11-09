@@ -130,7 +130,7 @@ export function CommentsPanel({
       data-comments-panel=""
       className={cn(
         // A sheet over the canvas's foot while it is narrow, a column beside it once it is wide.
-        "absolute inset-x-0 bottom-0 z-30 flex max-h-[68%] flex-col rounded-t-2xl border-t border-border bg-background shadow-[0_-12px_32px_-18px_rgb(0_0_0/0.35)]",
+        "absolute inset-x-0 bottom-0 z-30 flex max-h-[68%] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-[0_-12px_32px_-18px_rgb(0_0_0/0.35)]",
         "motion-safe:animate-in motion-safe:slide-in-from-bottom-4 motion-safe:fade-in-0",
         "@3xl/canvas:relative @3xl/canvas:inset-auto @3xl/canvas:z-auto @3xl/canvas:h-full @3xl/canvas:max-h-none @3xl/canvas:w-[22rem] @3xl/canvas:shrink-0 @3xl/canvas:rounded-none @3xl/canvas:border-t-0 @3xl/canvas:border-l @3xl/canvas:shadow-none @3xl/canvas:slide-in-from-right-4 @3xl/canvas:slide-in-from-bottom-0"
       )}
