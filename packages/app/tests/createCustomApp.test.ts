@@ -410,7 +410,7 @@ describe("createCustomApp.start", () => {
       expect(new Set(nonces).size).toBe(1)
       const csp = shared.headers.get("content-security-policy") ?? ""
       expect(csp).toContain(`script-src 'nonce-${nonces[0]}'`)
-      expect(csp).toContain("connect-src 'self' https://api.example.test")
+      expect(csp).toContain("connect-src 'self' https://api.example.test wss://api.example.test")
       // Without media-src, <video> and <audio> fall back to default-src 'none' and stay blank,
       // even for a blob: URL built from a successful fetch.
       for (const directive of ["img-src", "media-src"]) {

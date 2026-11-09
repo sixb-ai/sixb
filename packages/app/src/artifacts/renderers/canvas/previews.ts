@@ -1,4 +1,4 @@
-import { client, getArtifactVersion } from "@sixb/client"
+import { client, getArtifactVersion, withSharedAccess } from "@sixb/client"
 import { BOARD_PREVIEW_WAIT_MS, SMALL_BOARD_PREVIEW_WIDTH } from "@sixb/core/artifacts"
 import { type Query, useQuery } from "@tanstack/react-query"
 import type { ArtifactVersion } from "../../queries"
@@ -110,7 +110,8 @@ export function boardPreviewUrl(
   const key = renderKeyOf(version, board)
   if (key) url.searchParams.set("key", key)
   else url.searchParams.set("revision", String(version.revision))
-  return url.toString()
+  // An `<img>` sends no header: a shared link's session names its grant in the address.
+  return withSharedAccess(url.toString())
 }
 
 /** The render key a version's outline gives a board, if it gives one. */

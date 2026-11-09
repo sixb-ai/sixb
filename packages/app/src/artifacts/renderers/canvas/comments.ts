@@ -10,6 +10,7 @@ import { listArtifactCommentsOptions, listArtifactCommentsQueryKey } from "@sixb
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { useCurrentUser } from "../../../session"
+import { useSharedGuest } from "../../../shared-session"
 import { useArtifactMessages } from "../../messages"
 
 // The comments on a canvas: read once, kept in step as anyone adds, resolves or deletes one by the
@@ -28,7 +29,7 @@ export interface CommentThread {
 }
 
 /** Why a comment action failed, in the reader's terms. */
-export type CommentFailure = "full" | "invalid" | "notAllowed" | "gone" | "failed"
+export type CommentFailure = "full" | "invalid" | "notAllowed" | "gone" | "failed" | "name"
 
 export class CommentActionError extends Error {
   readonly name = "CommentActionError"
@@ -159,6 +160,9 @@ function commentError(error: unknown): CommentActionError {
       return new CommentActionError("full")
     case "invalid_comment":
       return new CommentActionError("invalid")
+    case "name_required":
+    case "invalid_name":
+      return new CommentActionError("name")
     case "not_allowed":
       return new CommentActionError("notAllowed")
     case "comment_not_found":
@@ -188,19 +192,28 @@ export interface CommentAuthor {
   readonly you: boolean
   /** The Agent wrote it, for its author. */
   readonly agent?: boolean
+  /** A shared link's visitor wrote it, under a name nobody vouches for. */
+  readonly guest?: boolean
 }
 
 /**
  * Who wrote a comment: the reader themselves, else the name the API gives its author, and the
- * Agent for them when its run wrote it. Null for an author the project cannot name.
+ * Agent for them when its run wrote it. A shared link's guest is marked as one, for everyone, and
+ * is "you" to themselves. Null for an author the project cannot name.
  */
 export function useCommentAuthors(): (
   comment: Pick<ArtifactComment, "author" | "authorName" | "origin">
 ) => CommentAuthor | null {
   const user = useCurrentUser()
+  const guest = useSharedGuest()
   const messages = useArtifactMessages().canvas.comments
 
   return ({ author, authorName, origin }) => {
+    if (author.type === "guest") {
+      const name = authorName ?? messages.guest
+      return { name, you: author.id === guest?.id, guest: true }
+    }
+
     const own = author.type === "user" && author.id === user?.id
     if (origin) {
       const name = own ? messages.you.toLowerCase() : (authorName ?? messages.someone)

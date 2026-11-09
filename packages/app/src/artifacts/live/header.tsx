@@ -2,7 +2,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Check, CloudOff, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react"
 import { useArtifactMessages } from "../messages"
 import { PersonAvatar } from "../person-avatar"
-import { useLivePresence } from "./presence"
+import { livePersonName, useLivePresence } from "./presence"
 import type { LiveArtifact, LiveArtifactState } from "./session"
 
 /** The most people the header shows faces of; the rest count in a `+N`. */
@@ -13,17 +13,23 @@ const MAX_FACES = 3
  * selection takes on the canvas, and the Agent while a turn changes it. Nothing when nobody is.
  */
 export function LiveAvatars({ live }: { readonly live: LiveArtifact }) {
-  const messages = useArtifactMessages().live
+  const messages = useArtifactMessages()
   const { people, agents } = useLivePresence(live)
   const working = agents.length > 0
   if (people.length === 0 && !working) return null
 
+  // A shared link's guest is named as one: the name is only what they typed.
+  const labels = { guest: messages.canvas.comments.guest, teamMember: messages.live.teamMember }
+  const nameOf = (person: (typeof people)[number]) => {
+    const name = livePersonName(person, labels)
+    return person.guest && person.name ? `${name} (${labels.guest})` : name
+  }
   const shown = people.slice(0, MAX_FACES)
-  const names = [...people.map((person) => person.name), ...(working ? [messages.agent] : [])]
+  const names = [...people.map(nameOf), ...(working ? [messages.live.agent] : [])]
   return (
     <div
       role="group"
-      aria-label={messages.here(names.join(", "))}
+      aria-label={messages.live.here(names.join(", "))}
       title={names.join(", ")}
       data-live-avatars=""
       className="flex shrink-0 items-center gap-0 pl-1 -space-x-1"
@@ -41,13 +47,14 @@ export function LiveAvatars({ live }: { readonly live: LiveArtifact }) {
           key={person.id}
           className="relative rounded-full"
           style={{ boxShadow: `0 0 0 1.5px var(--background), 0 0 0 3px ${person.color}` }}
+          title={nameOf(person)}
         >
-          <PersonAvatar name={person.name} size="sm" className="bg-background" />
+          <PersonAvatar name={livePersonName(person, labels)} size="sm" className="bg-background" />
         </span>
       ))}
       {people.length > shown.length ? (
         <span className="relative flex size-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
-          {messages.more(people.length - shown.length)}
+          {messages.live.more(people.length - shown.length)}
         </span>
       ) : null}
     </div>

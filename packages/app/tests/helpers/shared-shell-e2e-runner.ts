@@ -238,7 +238,7 @@ function assertSafeSharedDocument(response: Response, html: string, development:
     "frame-ancestors 'none'",
     "form-action 'none'",
     "manifest-src 'none'",
-    "connect-src 'self' https://api.example.test",
+    "connect-src 'self' https://api.example.test wss://api.example.test",
   ]) {
     assertIncludes(csp, directive, `shared CSP ${directive}`)
   }

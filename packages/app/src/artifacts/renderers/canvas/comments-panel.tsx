@@ -19,13 +19,22 @@ import {
   Check,
   CornerDownRight,
   MessageSquare,
+  MessageSquarePlus,
   MoreHorizontal,
   RotateCcw,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react"
-import { type ComponentPropsWithoutRef, forwardRef, useEffect, useRef, useState } from "react"
+import {
+  type ComponentPropsWithoutRef,
+  forwardRef,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
+import { GuestBadge } from "../../guest-badge"
 import { useArtifactMessages } from "../../messages"
 import { PersonAvatar } from "../../person-avatar"
 import { CommentComposer } from "./comment-pins"
@@ -217,7 +226,19 @@ export function CommentsPanel({
             resolved.length > 0 ? (
               <Empty title={messages.emptyOpen} />
             ) : (
-              <Empty title={messages.empty} hint={messages.emptyHint} />
+              <Empty
+                title={messages.empty}
+                hint={
+                  <>
+                    {messages.emptyHint.before}{" "}
+                    <MessageSquarePlus
+                      className="inline size-3.5 align-[-0.2em] text-foreground"
+                      aria-label={messages.tool}
+                    />{" "}
+                    {messages.emptyHint.after}
+                  </>
+                }
+              />
             )
           ) : (
             <Empty title={messages.emptyResolved} />
@@ -495,6 +516,7 @@ function Message({
           <PersonAvatar name={author?.name || name} size="xs" />
         )}
         <span className="truncate font-medium text-foreground">{name}</span>
+        {author?.guest ? <GuestBadge /> : null}
         <time dateTime={comment.createdAt} className="shrink-0 text-muted-foreground">
           {when(comment.createdAt)}
         </time>
@@ -520,7 +542,7 @@ function useWhen(): (iso: string) => string {
   }
 }
 
-function Empty({ title, hint }: { readonly title: string; readonly hint?: string }) {
+function Empty({ title, hint }: { readonly title: string; readonly hint?: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
       <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">

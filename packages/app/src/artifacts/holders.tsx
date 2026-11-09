@@ -14,6 +14,7 @@ import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { humanizeIdentifier } from "../pages/console/ontology/lib/labels"
 import { objectHref } from "../pages/routes"
+import { useSharedGuest } from "../shared-session"
 import { useArtifactMessages } from "./messages"
 
 type Holder = ListArtifactHoldersResponse["holders"][number]
@@ -38,6 +39,7 @@ export function ArtifactHolders({ artifactId }: { readonly artifactId: string })
     retry: false,
   })
   const label = useHolderLabel()
+  const guest = useSharedGuest() !== null
 
   const holders = data?.holders ?? []
   const [first] = holders
@@ -48,6 +50,22 @@ export function ArtifactHolders({ artifactId }: { readonly artifactId: string })
     others === 0
       ? `${messages.belongsTo} ${label(first)}`
       : messages.belongsToMany(holders.length, data?.hasMore ?? false)
+
+  // A shared link's guest reads the objects their link shares, not the app's pages about them:
+  // the pill says what holds the artifact, and goes nowhere.
+  if (guest) {
+    return (
+      <span title={named} aria-label={named} className={cn(PILL, "hover:border-border/80")}>
+        <ObjectIcon />
+        <span className="hidden truncate @md:inline">{label(first)}</span>
+        {others > 0 ? (
+          <span className="hidden shrink-0 tabular-nums @md:inline">
+            {messages.andMore(others)}
+          </span>
+        ) : null}
+      </span>
+    )
+  }
 
   const wide =
     others === 0 ? (
