@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto"
 import type { GroupDefinition } from "@sixb/core"
 import type {
+  AuthDirectoryCheckInput,
+  AuthStrategyDirectory,
+  DirectoryVerdict,
   InvitationDeliveryInput,
   InvitationRecipientInput,
   InvitationRecipientResult,
@@ -21,6 +24,7 @@ import {
 import { type AuthStorage, AuthStorageError } from "@sixb/core/storage"
 import { type OidcClaims, toOidcClaims, verifiedEmail } from "./claims"
 import { defaultOidcClientAdapter, type OidcClientAdapter } from "./client"
+import type { OidcDirectory } from "./directory"
 import { createOidcInvitationEmail, type SendOidcInvitationInput } from "./email"
 import { OidcAuthError } from "./errors"
 import { createOpaqueSecret, formatOidcState, parseOidcState, sha256 } from "./state"
@@ -52,6 +56,11 @@ export interface OidcOptions {
    * user granted at least one may sign in without an invitation.
    */
   readonly groups?: (claims: OidcClaims) => readonly GroupDefinition[]
+  /**
+   * The provider's directory, checked on a schedule so someone who leaves is suspended without
+   * waiting for an administrator. See `entraDirectory` in `@sixb/auth-oidc/entra`.
+   */
+  readonly directory?: OidcDirectory
   readonly sendInvitation?: (message: SendOidcInvitationInput) => Promise<void>
   readonly from?: string
   readonly subject?: string
@@ -67,6 +76,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   readonly kind = "oidc"
   readonly id: string
   readonly bootstrapGroupIds: readonly string[]
+  readonly directory?: AuthStrategyDirectory
 
   private readonly issuer: URL
   private readonly clientId: string
@@ -104,6 +114,48 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
     this.from = options.from
     this.subject = options.subject ?? "You are invited to Sixb"
     this.client = options.clientAdapter ?? defaultOidcClientAdapter
+    const directory = options.directory
+    if (directory) {
+      this.directory = {
+        ...(directory.intervalMs === undefined ? {} : { intervalMs: directory.intervalMs }),
+        ...(directory.confirmAfterMs === undefined
+          ? {}
+          : { confirmAfterMs: directory.confirmAfterMs }),
+        check: (input) => this.checkDirectory(directory, input),
+      }
+    }
+  }
+
+  // The directory answers in claims, which go through `groups` exactly as a sign-in's would.
+  private async checkDirectory(
+    directory: OidcDirectory,
+    input: AuthDirectoryCheckInput
+  ): Promise<ReadonlyMap<string, DirectoryVerdict>> {
+    const identities = input.identities.map((identity) => ({
+      subject: identity.subject,
+      claims: toOidcClaims({ ...identity.claims, sub: identity.subject }),
+    }))
+    const answers = await directory.check({
+      app: { issuer: this.issuer, clientId: this.clientId, clientSecret: this.clientSecret },
+      identities,
+      signal: input.signal,
+    })
+
+    const verdicts = new Map<string, DirectoryVerdict>()
+    for (const { subject, claims } of identities) {
+      const answer = answers.get(subject)
+      if (!answer) continue
+      if (answer.status === "inactive" || !answer.claims || !this.groups) {
+        verdicts.set(subject, { status: answer.status })
+        continue
+      }
+      const current = toOidcClaims({ ...claims, ...answer.claims, sub: subject })
+      verdicts.set(subject, {
+        status: "active",
+        groupIds: normalizeGroupRefs(this.groups(current)),
+      })
+    }
+    return verdicts
   }
 
   async startOidcSignIn(input: OidcStartSignInInput): Promise<OidcStartSignInResult> {
