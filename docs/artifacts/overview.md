@@ -659,6 +659,20 @@ that names nothing, saying what the target has instead, and one pinned to a vers
 When a change renames or removes something another artifact shows, it publishes with a warning
 naming that artifact. A reader who can't open a target sees it as unavailable.
 
+## Hold an artifact in an object
+
+An object can hold an artifact, such as the canvas a meeting is prepared in, in a
+[`ref.artifact()` property](../ontology/properties.md#reference-an-artifact):
+
+```ts
+await sixb.objects(Meeting).upsert({
+  properties: { id: "meeting-1", kickoffDoc: artifactRef(artifact.id) },
+})
+```
+
+A writer can only give an object an artifact they can change. The artifact stays when the object
+is deleted.
+
 ## Open an artifact
 
 Every artifact has a page at `/artifacts/{artifactId}` that fills the window, over your app's

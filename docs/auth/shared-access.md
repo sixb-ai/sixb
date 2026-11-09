@@ -105,4 +105,4 @@ A link that is invalid, expired, or revoked shows a generic, translated screen. 
 
 ## Limitations
 
-Revoke outstanding grants before permanently removing or reusing a Share definition's ID. Shared sessions currently do not support WebSockets, uploads, direct object writes, or action parameters containing object, file, or user references.
+Revoke outstanding grants before permanently removing or reusing a Share definition's ID. Shared sessions currently do not support WebSockets, uploads, direct object writes, or action parameters containing object, file, user, or artifact references.
