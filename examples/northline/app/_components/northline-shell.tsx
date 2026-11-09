@@ -1,4 +1,4 @@
-import { SectionNav, UserMenu, useCurrentSection } from "@sixb/app"
+import { SectionNav, UserMenu, useCurrentSection, useSharedGuest } from "@sixb/app"
 import { events, objectQueryKeys, useInvalidateOnEvent, useObjectsCount } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { SidebarContent, SidebarFooter, SidebarHeader, SidebarInset } from "@sixb/ui/components"
@@ -29,8 +29,13 @@ export function NorthlineShell({ children }: PropsWithChildren) {
   const sectionActive = useCurrentSection() !== null
   // The threads list, Console and Settings pages bring their own margins, and some fill the height.
   const ownLayout = conversationActive || location.pathname === "/threads" || sectionActive
+  const guest = useSharedGuest()
   useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], { debounceMs: 75 })
   useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], { debounceMs: 75 })
+
+  // A customer who opened a shared link sees the page it opens, under Northline's name: none of
+  // the places, search or assistant a member works with.
+  if (guest) return <GuestFrame>{children}</GuestFrame>
 
   return (
     <>
@@ -81,6 +86,25 @@ export function NorthlineShell({ children }: PropsWithChildren) {
         <OperationsAssistant />
       </div>
     </>
+  )
+}
+
+function GuestFrame({ children }: PropsWithChildren) {
+  return (
+    <div className="flex h-(--viewport-height) min-h-0 w-full flex-col bg-background">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-5 pt-[env(safe-area-inset-top,0px)] sm:px-10 lg:px-14">
+        <span className="flex items-center gap-2.5">
+          <NorthlineMark className="mx-0 size-[24px]" />
+          <span className="text-[15px] font-semibold tracking-[-0.01em]">Northline</span>
+        </span>
+        <span className="text-[12.5px] text-muted-foreground">Shared with you</span>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto" data-app-scroll>
+        <div className="mx-auto w-full max-w-[1180px] px-5 pt-6 pb-10 sm:px-10 md:pt-10 md:pb-16 lg:px-14">
+          {children}
+        </div>
+      </div>
+    </div>
   )
 }
 
