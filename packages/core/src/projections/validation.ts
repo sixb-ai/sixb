@@ -414,6 +414,18 @@ export function validateProjectionsAtStartup(
           `[Sixb] ${prefix}: property "${projection.objectTypeId}.${propId}" holds user references (ref.user()), which a dataset column cannot hold. Map a ref.user() property from a column of member emails with userRef.fromEmail(column), or set it from an Action or a runtime edit.`
         )
       }
+      // Nor can it prove that the artifact it names exists, or that anyone may read it.
+      if (
+        findPrimitiveSchema(
+          property.schema,
+          ontology.getValueTypesById(),
+          (schema) => schema === "artifactRef"
+        )
+      ) {
+        throw new ProjectionValidationError(
+          `[Sixb] ${prefix}: property "${projection.objectTypeId}.${propId}" holds artifact references (ref.artifact()), which a dataset column cannot hold. Set it from an Action or a runtime edit.`
+        )
+      }
     }
     for (const propId of Object.keys(projection.users ?? {})) {
       if (!(propId in projection.properties)) {

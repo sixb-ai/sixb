@@ -40,13 +40,18 @@ interface RefBuilder {
   user(): "userRef"
   /** Reference to a stored file, valued as a `FileRef`. Serialized as `"fileRef"`. */
   file(): "fileRef"
+  /**
+   * Reference to an artifact, valued `{ type: "artifact", id }` and followed at its latest
+   * version. Serialized as `"artifactRef"`.
+   */
+  artifact(): "artifactRef"
 }
 
 /**
  * Schemas that point outside the value itself.
  *
  * Scalars are plain strings (`"string"`, `"timestamp"`); anything that points elsewhere or takes
- * parameters is a builder: `ref(Customer)`, `ref.user()`, `ref.file()`.
+ * parameters is a builder: `ref(Customer)`, `ref.user()`, `ref.file()`, `ref.artifact()`.
  */
 export const ref: RefBuilder = Object.assign(
   <const TObjectType extends ObjectType>(
@@ -58,6 +63,7 @@ export const ref: RefBuilder = Object.assign(
   {
     user: (): "userRef" => "userRef",
     file: (): "fileRef" => "fileRef",
+    artifact: (): "artifactRef" => "artifactRef",
   }
 )
 

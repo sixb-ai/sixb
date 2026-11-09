@@ -111,25 +111,26 @@ type ProjectionSchemaByDatasetColumnType = {
 }
 
 /**
- * A dataset column cannot hold user references, even nested ones: only `userRef.fromEmail` fills a
- * `ref.user()` property. Registration rejects the rest too.
+ * A dataset column cannot hold user or artifact references, even nested ones: only
+ * `userRef.fromEmail` fills a `ref.user()` property, and nothing fills a `ref.artifact()` one.
+ * Registration rejects the rest too.
  */
-type SchemaContainsUserRef<TSchema> = TSchema extends "userRef"
+type SchemaContainsRef<TSchema> = TSchema extends "userRef" | "artifactRef"
   ? true
   : TSchema extends { type: "array"; items: infer TItems }
-    ? SchemaContainsUserRef<TItems>
+    ? SchemaContainsRef<TItems>
     : TSchema extends { type: "map"; valueSchema: infer TValue }
-      ? SchemaContainsUserRef<TValue>
+      ? SchemaContainsRef<TValue>
       : TSchema extends { type: "object"; properties: infer TFields }
         ? true extends {
             [K in keyof TFields]: TFields[K] extends { schema: infer TField }
-              ? SchemaContainsUserRef<TField>
+              ? SchemaContainsRef<TField>
               : false
           }[keyof TFields]
           ? true
           : false
         : TSchema extends { type: "valueTypeRef"; _resolved: infer TResolved }
-          ? SchemaContainsUserRef<TResolved>
+          ? SchemaContainsRef<TResolved>
           : false
 
 type DatasetColumnCompatibleWithSchema<
@@ -137,7 +138,7 @@ type DatasetColumnCompatibleWithSchema<
   TSchema extends Schema,
 > = [ResolvedProjectionSchema<TSchema>] extends [never]
   ? false
-  : SchemaContainsUserRef<TSchema> extends true
+  : SchemaContainsRef<TSchema> extends true
     ? false
     : ResolvedProjectionSchema<TSchema> extends ProjectionSchemaByDatasetColumnType[TColumnType]
       ? true

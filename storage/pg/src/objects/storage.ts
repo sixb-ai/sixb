@@ -100,6 +100,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     timestamp: { equality: true, ordering: true },
     // jsonb equality and containment compare both fields of `{ type, id }`, whatever key order.
     userRef: { equality: true },
+    artifactRef: { equality: true },
   },
   limits: {
     totalCount: true,

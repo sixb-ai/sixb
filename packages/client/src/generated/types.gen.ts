@@ -205,6 +205,7 @@ export type ArtifactQueryProperty = {
     | "uuid"
     | "fileRef"
     | "userRef"
+    | "artifactRef"
     | "enum"
     | "array"
     | "object"

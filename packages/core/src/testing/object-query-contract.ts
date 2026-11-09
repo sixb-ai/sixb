@@ -21,6 +21,7 @@ import {
   type MaterializerFixtureObject,
   type MaterializerTestFixture,
 } from "./materializer-fixture"
+import { createStoredArtifact } from "./stored-artifacts"
 
 export interface ObjectQueryProviderContractSuiteOptions<TStorage extends Storage> {
   /** Factory that produces a fresh complete storage instance for each test case. */
@@ -180,6 +181,27 @@ const Label = defineObjectType({
   ],
 })
 
+const Briefing = defineObjectType({
+  id: "ContractBriefing",
+  name: "Contract Briefing",
+  properties: [
+    prop("id", "string", {
+      required: true,
+      primary: true,
+      query: { searchable: true, sortable: true },
+    }),
+    prop("brief", ref.artifact(), {
+      nullable: true,
+      query: { searchable: true, filterable: true },
+    }),
+    prop(
+      "attachments",
+      { type: "array", items: ref.artifact() },
+      { query: { searchable: true, filterable: true } }
+    ),
+  ],
+})
+
 export const objectQueryContractOntology = new OntologyRegistry({
   sources: [
     Room,
@@ -192,6 +214,7 @@ export const objectQueryContractOntology = new OntologyRegistry({
     Task,
     Meeting,
     Label,
+    Briefing,
   ],
 })
 
@@ -1004,6 +1027,76 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
             ],
           },
         ])
+      })
+    })
+
+    test("matches artifact references on type and id", async () => {
+      await withStorage(async ({ storage: complete, objects: storage, fixture }) => {
+        const [kickoff, agenda, notes] = ["art_kkkkkkkkkk", "art_aaaaaaaaaa", "art_nnnnnnnnnn"]
+        for (const id of [kickoff, agenda, notes]) {
+          await createStoredArtifact(complete, { projectId, id })
+        }
+
+        const artifact = (id: string) => ({ type: "artifact", id })
+        await fixture.seed({
+          objects: [
+            objectSeed(Briefing.id, "b1", {
+              brief: artifact(kickoff),
+              attachments: [artifact(agenda)],
+            }),
+            objectSeed(Briefing.id, "b2", {
+              brief: artifact(kickoff),
+              attachments: [artifact(agenda), artifact(notes)],
+            }),
+            objectSeed(Briefing.id, "b3", { brief: artifact(agenda), attachments: [] }),
+            objectSeed(Briefing.id, "b4", { brief: null, attachments: [] }),
+            objectSeed(Briefing.id, "b5", { attachments: [artifact(kickoff)] }),
+          ],
+        })
+
+        const ids = async (predicate: ObjectQueryPredicate) => {
+          const result = await executeObjectQuery(
+            {
+              projectId,
+              query: {
+                kind: "sort",
+                fields: [{ kind: "property", propertyId: "id" }],
+                input: {
+                  kind: "filter",
+                  predicate,
+                  input: { kind: "start", objectTypeId: Briefing.id },
+                },
+              },
+            },
+            { ontology: objectQueryContractOntology, storage }
+          )
+          expect(result.plan.mode).toBe("pushdown")
+          return result.objects.map((object) => object.primaryId)
+        }
+
+        expect(await ids({ op: "eq", propertyId: "brief", value: artifact(kickoff) })).toEqual([
+          "b1",
+          "b2",
+        ])
+        // Field order is not part of the value.
+        expect(
+          await ids({ op: "eq", propertyId: "brief", value: { id: kickoff, type: "artifact" } })
+        ).toEqual(["b1", "b2"])
+        expect(await ids({ op: "neq", propertyId: "brief", value: artifact(kickoff) })).toEqual([
+          "b3",
+          "b4",
+          "b5",
+        ])
+        expect(
+          await ids({ op: "in", propertyId: "brief", values: [artifact(agenda), null] })
+        ).toEqual(["b3", "b4"])
+        expect(await ids({ op: "exists", propertyId: "brief", value: false })).toEqual(["b5"])
+        expect(
+          await ids({ op: "contains", propertyId: "attachments", value: artifact(agenda) })
+        ).toEqual(["b1", "b2"])
+        expect(
+          await ids({ op: "contains", propertyId: "attachments", value: artifact(notes) })
+        ).toEqual(["b2"])
       })
     })
 

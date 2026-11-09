@@ -331,3 +331,39 @@ test("tells the reader how to fill and match the user properties it can query", 
   expect(doc("Customer")).toStartWith("# Customer\n")
   expect(doc("Customer")).not.toContain("User properties")
 })
+
+// Red proof: drop `renderArtifactProperties` from `renderProperties`; the note line disappears.
+test("tells the reader how to fill the artifact properties it can read", () => {
+  const Meeting = defineObjectType({
+    id: "Meeting",
+    name: "Meeting",
+    properties: [
+      prop("id", "string", { required: true, primary: true }),
+      prop("kickoffDoc", ref.artifact(), { query: { searchable: true, filterable: true } }),
+      prop("attachments", { type: "array", items: ref.artifact() }),
+    ],
+  })
+  const host = new SixbHost({ ontology: [Meeting, Customer], ...createTestRuntimeDeps() })
+
+  const rendered = renderOntologyDocs({
+    catalog: host.definitions.agent.ontologyDocs,
+    objectTypes: [Meeting, Customer],
+    valueTypesById: new Map(),
+    actionsFor: () => [],
+  })
+  const doc = (objectTypeId: string) =>
+    rendered.files.find(
+      (file) => file.path === host.definitions.agent.ontologyDocs.docPathFor(objectTypeId)
+    )?.contents ?? ""
+
+  expect(doc("Meeting")).toContain(
+    [
+      "| `kickoffDoc` | artifactRef | filter: eq, neq, in, exists |  |",
+      "| `attachments` | array of artifactRef | — |  |",
+      "",
+      'Artifact properties (`kickoffDoc`, `attachments`) hold `{"type":"artifact","id":"<artifact-id>"}`. Write the id of an artifact you can change, such as one you published (`art_k3m9q2x7tp`).',
+      "",
+    ].join("\n")
+  )
+  expect(doc("Customer")).not.toContain("Artifact properties")
+})
