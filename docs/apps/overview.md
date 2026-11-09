@@ -294,6 +294,10 @@ or set by telemetry. Selecting it shows the trail behind the value: the edit, wh
 the imported value it replaced, or the projection, the dataset version it applied and the datasets
 upstream of it. Steps the person cannot see are only counted. See [Lineage](../objects/lineage.md).
 
+An [artifact a property holds](../ontology/properties.md#reference-an-artifact) shows as a card
+with a preview of it, and opens its page. An action or workflow that takes an artifact offers the
+artifacts the person can open to choose from, and accepts a pasted link to one.
+
 What the page shows follows the person's grants: `can.view` on the type to read the object, and
 `can.apply` on an action to run it. See [Authorization](../auth/authorization.md).
 

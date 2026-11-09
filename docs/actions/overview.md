@@ -79,7 +79,8 @@ otherwise.
 Use `ref.artifact()` for an input that names an artifact. Callers pass
 `{ type: "artifact", id: "art_k3m9q2x7tp" }`, and Sixb rejects the request when the caller cannot
 change that artifact, as it does when it does not exist. The handler may then store it in an
-[artifact property](../ontology/properties.md#reference-an-artifact).
+[artifact property](../ontology/properties.md#reference-an-artifact). In the app, the action form
+lists the artifacts the person can change, and takes a pasted link to one.
 
 Other input types use the [property schemas](../ontology/properties.md#choose-a-schema), including
 enums and structured values. Date and timestamp inputs arrive in handlers as `Date` values.
