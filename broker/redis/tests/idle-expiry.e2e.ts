@@ -151,6 +151,31 @@ describe("RedisBroker idle stream expiry", () => {
     })
   })
 
+  test("numbers a recreated stream key's records after the last id", async () => {
+    // A recreated key forgets its last id. Within the same millisecond, or after the server clock
+    // steps back, Redis would reuse an id at or below the boundary and the record would read as
+    // trimmed. A last id in the future stands in for both. To see this fail, always pass "*" to
+    // XADD in APPEND_RECORDS_SCRIPT.
+    await withBroker(async ({ broker, projectId, keys, redis }) => {
+      await broker.ensureStream({ projectId, stream: run })
+      await broker.append({ projectId, streamId: run.id, records: [{ payload: "old" }] })
+      await redis.del(keys.streamKey)
+      const future = `${Date.now() + 60_000}-4`
+      await redis.hset(keys.metaKey, { lastId: future })
+
+      const [first, second] = await broker.append({
+        projectId,
+        streamId: run.id,
+        records: [{ payload: "one" }, { payload: "two" }],
+      })
+      expect(first!.cursor).toBe(future.replace(/-4$/, "-5"))
+      expect((await broker.read({ projectId, streamId: run.id })).records).toEqual([
+        first!,
+        second!,
+      ])
+    })
+  })
+
   test("counts no bytes for the records an expired stream key took", async () => {
     await withBroker(async ({ broker, projectId, prefix, redis }) => {
       const stream = { id: "__bytes", retention: { maxAgeMs: TWO_HOURS_MS, maxBytes: 1_024 } }

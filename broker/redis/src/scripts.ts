@@ -373,12 +373,20 @@ local function advance_boundary(candidate)
 end
 
 -- An expired stream key took its records without a trim recording them. The
--- recreated key also forgets its last id, so new ids come from the server clock
--- alone; they stay above the boundary unless the clock steps back further than
--- the time the key took to expire.
+-- recreated key also forgets its last id, and Redis would number its first
+-- record from the server clock alone, so that id continues after lastId instead
+-- whenever the clock has not moved past it.
+local next_id = "*"
 if redis.call("EXISTS", stream_key) == 0 then
-  advance_boundary(redis.call("HGET", meta_key, "lastId"))
+  local last_id = redis.call("HGET", meta_key, "lastId")
+  advance_boundary(last_id)
   redis.call("HSET", meta_key, "retainedBytes", "0")
+  if last_id then
+    local last_ms, last_seq = string.match(last_id, "^(%d+)%-(%d+)$")
+    if server_time_ms() <= tonumber(last_ms) then
+      next_id = last_ms .. "-" .. string.format("%.0f", tonumber(last_seq) + 1)
+    end
+  end
 end
 
 local replies = {}
@@ -410,7 +418,8 @@ for index = 1, record_count do
     end
     replies[#replies + 1] = { "duplicate", existing_id, existing_body }
   else
-    local id = redis.call("XADD", stream_key, "*", "body", body)
+    local id = redis.call("XADD", stream_key, next_id, "body", body)
+    next_id = "*"
     if has_idempotency_key == "1" then
       redis.call("SET", dedupe_key, id, "PX", dedupe_ttl_ms)
     end
