@@ -68,3 +68,16 @@ export function collectArtifactRefIds(
   visitPrimitiveValues(schema, "artifactRef", value, valueTypesById, collect, seenValueTypeIds)
   return into
 }
+
+/**
+ * Why `path` cannot newly reference artifact `id`. A missing artifact and one the writer may not
+ * change get this same message, so a write never tells them apart.
+ */
+export function artifactReferenceProblem(path: string, id: string): string {
+  return `[Sixb] ${path} references artifact '${id}', which does not exist.`
+}
+
+/** Why `path` cannot reference artifacts at all: this runtime has nowhere to look them up. */
+export function artifactsUnverifiableProblem(path: string, id: string): string {
+  return `[Sixb] ${path} references artifact '${id}', but this runtime has no artifact storage to verify it. Configure storage with artifacts to write artifact references.`
+}

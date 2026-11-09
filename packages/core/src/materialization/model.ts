@@ -136,6 +136,16 @@ interface AtomicOntologyEditCommit extends BaseOntologyEditCommit {
   readonly expectedUnclaimedValues?: readonly UniqueValueRef[]
 }
 
+/** What a runtime commit's author could not see, which its operations must not reveal. */
+interface RuntimeEditCommitAuthor {
+  /**
+   * Artifacts the commit's author may not change. An operation that gives one to an object it did
+   * not hold is refused exactly as if the artifact did not exist, so a write never tells such an
+   * artifact from a missing one. A value the object already holds is kept.
+   */
+  readonly unchangeableArtifactIds?: readonly string[]
+}
+
 export type OntologyEditCommit =
   | (AtomicOntologyEditCommit & {
       readonly source: {
@@ -152,27 +162,29 @@ export type OntologyEditCommit =
        */
       readonly run: RecordActionRunInput
     })
-  | (AtomicOntologyEditCommit & {
-      readonly source: { readonly kind: "runtime"; readonly requestId: string }
-    })
-  | (BaseOntologyEditCommit & {
-      readonly mode: "continue"
-      readonly source: { readonly kind: "runtime"; readonly requestId: string }
-      /**
-       * Operation ids that apply as one unit, listed in application order.
-       *
-       * Continue mode isolates failures per operation, which would let one caller item commit its
-       * earlier operations after a later one failed. Grouping restores the per-item promise: a
-       * failure inside a group rolls back that group's earlier operations and reports every id in
-       * it as failed. Ungrouped operations keep per-operation isolation.
-       */
-      readonly operationGroups?: readonly (readonly string[])[]
-      /**
-       * Objects as the commit's author read them. One that changed since fails the whole commit
-       * with an `expectation` conflict, as in an atomic commit, rather than one operation.
-       */
-      readonly expectedObjects?: readonly ExpectedObjectRevision[]
-    })
+  | (AtomicOntologyEditCommit &
+      RuntimeEditCommitAuthor & {
+        readonly source: { readonly kind: "runtime"; readonly requestId: string }
+      })
+  | (BaseOntologyEditCommit &
+      RuntimeEditCommitAuthor & {
+        readonly mode: "continue"
+        readonly source: { readonly kind: "runtime"; readonly requestId: string }
+        /**
+         * Operation ids that apply as one unit, listed in application order.
+         *
+         * Continue mode isolates failures per operation, which would let one caller item commit its
+         * earlier operations after a later one failed. Grouping restores the per-item promise: a
+         * failure inside a group rolls back that group's earlier operations and reports every id in
+         * it as failed. Ungrouped operations keep per-operation isolation.
+         */
+        readonly operationGroups?: readonly (readonly string[])[]
+        /**
+         * Objects as the commit's author read them. One that changed since fails the whole commit
+         * with an `expectation` conflict, as in an atomic commit, rather than one operation.
+         */
+        readonly expectedObjects?: readonly ExpectedObjectRevision[]
+      })
 
 export type ProjectionEntityRef =
   | { readonly kind: "object"; readonly ref: OntologyObjectRef }

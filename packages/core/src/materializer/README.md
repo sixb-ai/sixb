@@ -170,6 +170,11 @@ value. An object change drops the rows its properties give up and adds those the
 delete drops every row and an object a projection brings back takes its rows again. No row ever
 conflicts, and the index is no plan input.
 
+An object only takes an artifact that exists (`edits/artifact-refs.ts`): the commit looks every
+artifact its operations name up before its transaction, and the edit pass refuses one an object did
+not already hold. A runtime commit also names the artifacts its writer may not change, which the
+pass refuses with the same error, so a write never tells them from missing ones.
+
 Action-backed edits carry the run's terminal record. The commit validates the trusted Action
 execution and the record's `executionId`, then inserts the record in its own transaction before new
 work, so edits never land without the run that made them and a run id commits once: a second insert

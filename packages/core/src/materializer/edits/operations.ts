@@ -15,6 +15,7 @@ import {
 } from "../effective/validate"
 import type { TimedCommitIdentity } from "../shared/identity"
 import { applyLinkEdit, applyObjectEdit } from "./apply"
+import { assertIntroducedArtifactsReachable, type ReferencedArtifacts } from "./artifact-refs"
 import { linkCardinality } from "./read-set"
 import { assertIntroducedUsersActive, type ReferencedUsers } from "./user-refs"
 import {
@@ -41,6 +42,12 @@ interface EditUndoEntry {
   readonly restore: () => void
 }
 
+/** What a commit read before its transaction about the users and artifacts it references. */
+export interface ReferencedValues {
+  readonly users: ReferencedUsers
+  readonly artifacts: ReferencedArtifacts
+}
+
 /** Collects undo records while a grouped item applies. */
 export type EditUndoJournal = EditUndoEntry[]
 
@@ -55,12 +62,12 @@ export function applyEditOperation(
   state: EditWorkingState,
   operation: OntologyEditOperation,
   identity: TimedCommitIdentity,
-  users: ReferencedUsers,
+  references: ReferencedValues,
   journal?: EditUndoJournal
 ): OntologyOperationOutcome {
   validateOperationRef(context, operation)
   if (isObjectOperation(operation)) {
-    return applyObjectOperation(context, state, operation, identity, users, journal)
+    return applyObjectOperation(context, state, operation, identity, references, journal)
   }
   return applyLinkOperation(
     context,
@@ -87,7 +94,7 @@ function applyObjectOperation(
   state: EditWorkingState,
   operation: ObjectOperation,
   identity: TimedCommitIdentity,
-  users: ReferencedUsers,
+  references: ReferencedValues,
   journal?: EditUndoJournal
 ): OntologyOperationOutcome {
   const working = requireWorkingObject(state, operation)
@@ -104,17 +111,26 @@ function applyObjectOperation(
   })
 
   // Restore brings back values the object already held; only caller-written values are new.
-  const assertUsers =
+  const assertReferences =
     operation.kind === "object.restore"
       ? undefined
-      : (resolved: ResolvedObjectValue) =>
+      : (resolved: ResolvedObjectValue) => {
           assertIntroducedUsersActive(
             context.ontology,
             operation.ref.objectTypeId,
             currentEffective?.properties,
             resolved.properties,
-            users
+            references.users
           )
+          assertIntroducedArtifactsReachable(
+            context.ontology,
+            operation.ref.objectTypeId,
+            currentEffective?.properties,
+            resolved.properties,
+            references.artifacts
+          )
+        }
+
   applyObjectTransition(
     context,
     state,
@@ -123,7 +139,7 @@ function applyObjectOperation(
     transition.next,
     transition.editedAt,
     journal,
-    assertUsers
+    assertReferences
   )
 
   return objectOperationOutcome(operation, working, transition.changed, context, identity)

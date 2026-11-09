@@ -9,6 +9,7 @@ import { createPrimitiveExecutionRecord } from "../execution/durable"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
+import { assertParamArtifactsUpdatable } from "../shared/params/artifact-refs"
 import { assertParamUsersActive } from "../shared/params/user-refs"
 import type { CreateExecutionInput, Storage, WorkflowRunRecord } from "../storage"
 import { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "../storage"
@@ -57,6 +58,12 @@ interface DispatchWorkflowRunInput {
   readonly input?: Readonly<Record<string, unknown>>
   readonly source?: WorkflowRunSource
   readonly metadata?: Readonly<Record<string, string>>
+  /**
+   * The artifacts among these that the run's requester may change, to check a new run's input as
+   * them.
+   * Automatic runs have no requester: their input is stored data, never checked against a reader.
+   */
+  readonly updatableArtifacts?: (artifactIds: ReadonlySet<string>) => Promise<ReadonlySet<string>>
   /** Automatic callers own publication retries; validate provenance before any replay effect. */
   readonly validateExistingRun?: (run: WorkflowRunRecord) => Promise<void>
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
@@ -181,6 +188,18 @@ async function persistWorkflowRun(
     describe: (fieldId) => `Workflow "${input.workflow.id}" input '${fieldId}'`,
     invalid: (message) => new WorkflowValidationError(message),
   })
+
+  if (input.updatableArtifacts) {
+    await assertParamArtifactsUpdatable({
+      updatable: input.updatableArtifacts,
+      schemas: input.workflow.input as Readonly<Record<string, SchemaOrRef>>,
+      values: request.snapshot,
+      valueTypesById: input.valueTypesById,
+      describe: (fieldId) => `Workflow "${input.workflow.id}" input '${fieldId}'`,
+      invalid: (message) => new WorkflowValidationError(message),
+    })
+  }
+
   const execution = await input.createExecution(`exec_${randomUUID()}`, request.runId)
   const queuedAt = new Date()
   try {

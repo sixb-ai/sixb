@@ -1,3 +1,4 @@
+import { updatableArtifactIds } from "../artifacts/execution"
 import { AuthorizationError, assertAuthorized } from "../authorization"
 import {
   getAuthorizationRef,
@@ -16,6 +17,7 @@ import { OntologyValidationError } from "../ontology/errors"
 import { isObjectRefSchema } from "../ontology/refs"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
+import { assertParamArtifactsUpdatable } from "../shared/params/artifact-refs"
 import { assertParamUsersActive } from "../shared/params/user-refs"
 import { type ActionRunRecord, ObjectNotFoundError, objectBatchKey } from "../storage"
 import type { ActionRunParams } from "../storage/action-runs/types"
@@ -90,6 +92,11 @@ export async function requestAction(
   request.signal?.throwIfAborted()
 
   const payload = { actionId, subject, params: actionParams }
+  const paramSchemas = Object.fromEntries(
+    Object.entries(action.params).map(([paramId, param]) => [paramId, param.schema])
+  )
+  const describeParam = (paramId: string) => `Action param '${pathPrefix}.${paramId}'`
+
   const assertCanReuse = (run: ExistingActionRun) =>
     assertCallerMayHaveRun({
       storage: runtime.storage,
@@ -105,18 +112,28 @@ export async function requestAction(
       runId,
       payload,
       assertCanReuse,
-      assertNewRun: () =>
-        assertParamUsersActive({
+      assertNewRun: async () => {
+        await assertParamUsersActive({
           auth: runtime.storage.auth,
           projectId,
-          schemas: Object.fromEntries(
-            Object.entries(action.params).map(([paramId, param]) => [paramId, param.schema])
-          ),
+          schemas: paramSchemas,
           values: actionParams,
           valueTypesById: runtime.ontology.getValueTypesById(),
-          describe: (paramId) => `Action param '${pathPrefix}.${paramId}'`,
+          describe: describeParam,
           invalid: (message) => new OntologyValidationError(message),
-        }),
+        })
+
+        // The run's edits are trusted code: its requester may only hand it artifacts they may
+        // change.
+        await assertParamArtifactsUpdatable({
+          updatable: (artifactIds) => updatableArtifactIds(runtime, artifactIds),
+          schemas: paramSchemas,
+          values: actionParams,
+          valueTypesById: runtime.ontology.getValueTypesById(),
+          describe: describeParam,
+          invalid: (message) => new OntologyValidationError(message),
+        })
+      },
       createExecution: async (executionId, runId) => {
         const caller = await ensureExecutionRecord(
           runtime.storage.executions,

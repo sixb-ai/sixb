@@ -1,3 +1,4 @@
+import { updatableArtifactIds } from "../artifacts/execution"
 import { assertAuthorized } from "../authorization"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import {
@@ -58,6 +59,7 @@ export async function requestWorkflowRun(
     runId: options.runId,
     input: options.input,
     source: options.source,
+    updatableArtifacts: (artifactIds) => updatableArtifactIds(runtime, artifactIds),
     createExecution: async (executionId, runId) => {
       const caller = await ensureExecutionRecord(
         runtime.storage.executions,
