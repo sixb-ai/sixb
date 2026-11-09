@@ -12,11 +12,19 @@ import {
   observeMetaResponses,
   readJson,
 } from "./http"
+import { createMetaInstagramAuthentication, discoverMetaInstagramAccounts } from "./instagram-login"
 import { createMetaAuthentication, discoverMetaPages } from "./oauth"
-import type { MetaClient, MetaConnectedPage, MetaPageClient } from "./types/client"
+import type {
+  MetaClient,
+  MetaConnectedInstagramAccount,
+  MetaConnectedPage,
+  MetaInstagramAccountClient,
+  MetaPageClient,
+} from "./types/client"
 import type { MetaRetryContext } from "./types/common"
 import type {
   MetaConnectorOptions,
+  MetaInstagramOAuthConnectorOptions,
   MetaOAuthConnectorOptions,
   MetaTransportOptions,
 } from "./types/options"
@@ -27,6 +35,7 @@ const DEFAULT_GRAPH_VERSION = "v23.0"
 
 export type MetaConnector = ConnectorAdapter<"meta", MetaClient>
 export type MetaOAuthConnector = OAuthConnectorAdapter<"meta", MetaPageClient>
+export type MetaInstagramOAuthConnector = OAuthConnectorAdapter<"meta", MetaInstagramAccountClient>
 
 /**
  * Meta connector built on `@sixb/connector-rest`.
@@ -37,7 +46,9 @@ export type MetaOAuthConnector = OAuthConnectorAdapter<"meta", MetaPageClient>
  * token via `client.facebook(id, { accessToken })`.
  *
  * Pass `appId` and `appSecret` instead of `accessToken` to let users sign in with Facebook:
- * each connection is then one Page, and its client defaults to that Page's token.
+ * each connection is then one Page, and its client defaults to that Page's token. Add
+ * `accounts: "instagram"` with a Unified Login `configId` to connect Instagram professional
+ * accounts without a Page: each connection is then one Instagram account.
  *
  * Register it from a project's `connectors/` directory:
  *
@@ -49,13 +60,16 @@ export type MetaOAuthConnector = OAuthConnectorAdapter<"meta", MetaPageClient>
  */
 export function meta(options: MetaConnectorOptions): MetaConnector
 export function meta(options: MetaOAuthConnectorOptions): MetaOAuthConnector
+export function meta(options: MetaInstagramOAuthConnectorOptions): MetaInstagramOAuthConnector
 export function meta(
-  options: MetaConnectorOptions | MetaOAuthConnectorOptions
-): MetaConnector | MetaOAuthConnector
+  options: MetaConnectorOptions | MetaOAuthConnectorOptions | MetaInstagramOAuthConnectorOptions
+): MetaConnector | MetaOAuthConnector | MetaInstagramOAuthConnector
 export function meta(
-  options: MetaConnectorOptions | MetaOAuthConnectorOptions
-): MetaConnector | MetaOAuthConnector {
-  if (options.appId !== undefined) return metaOAuth(options)
+  options: MetaConnectorOptions | MetaOAuthConnectorOptions | MetaInstagramOAuthConnectorOptions
+): MetaConnector | MetaOAuthConnector | MetaInstagramOAuthConnector {
+  if (options.appId !== undefined && options.accounts === "instagram")
+    return metaInstagramOAuth(options)
+  if (options.appId !== undefined) return metaOAuth(options as MetaOAuthConnectorOptions)
 
   const { accessToken } = options
   assertNonEmpty(accessToken, "accessToken")
@@ -88,6 +102,56 @@ function metaOAuth(options: MetaOAuthConnectorOptions): MetaOAuthConnector {
         account: await readConnectedPage(http, context.account.id, context.account.label),
       }
     },
+  }
+}
+
+function metaInstagramOAuth(
+  options: MetaInstagramOAuthConnectorOptions
+): MetaInstagramOAuthConnector {
+  const transport = createMetaTransport(options)
+  const authentication = createMetaInstagramAuthentication(options, {
+    graphBaseUrl: transport.baseUrl,
+    graphVersion: transport.version,
+  })
+
+  return {
+    type: "meta",
+    authentication,
+    discoverAccounts: (_context, credentials) => discoverMetaInstagramAccounts(credentials),
+    async connect(context) {
+      const http = await transport.connect(context, context.tokenSource)
+      const {
+        pages: _pages,
+        facebook: _facebook,
+        facebookVideo: _video,
+        ...client
+      } = createMetaClient(http)
+      return {
+        ...client,
+        account: await readConnectedInstagramAccount(
+          http,
+          context.account.id,
+          context.account.label
+        ),
+      }
+    },
+  }
+}
+
+/** Read the Instagram account's username and name when the client connects. */
+async function readConnectedInstagramAccount(
+  http: MetaHttpContext,
+  instagramAccountId: string,
+  label: string
+): Promise<MetaConnectedInstagramAccount> {
+  const account = await readJson<{ readonly username?: string; readonly name?: string }>(
+    await http.http.get(`${encodeURIComponent(instagramAccountId)}?fields=username,name`)
+  )
+  const username = account.username ?? (label.startsWith("@") ? label.slice(1) : undefined)
+  return {
+    instagramAccountId,
+    ...(username ? { username } : {}),
+    ...(account.name ? { name: account.name } : {}),
   }
 }
 

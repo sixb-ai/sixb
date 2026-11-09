@@ -170,6 +170,11 @@ reach.
   blocked.
 - Delete Pipedrive persons and organizations with `persons.delete(id)` and
   `organizations.delete(id)`.
+- Connect Instagram professional accounts without a Facebook Page with `@sixb/connector-meta`'s
+  `meta({ appId, appSecret, configId, accounts: "instagram" })` (Instagram API with Unified
+  Login): each connection is one shared account, published and read with the grant's system user
+  token. Give Facebook videos and reels a custom thumbnail with `videos.create({ thumb })` and
+  `facebookVideo(id).thumbnails.create({ source })`.
 
 ### Upgrade notes
 
