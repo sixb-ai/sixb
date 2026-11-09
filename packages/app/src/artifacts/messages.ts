@@ -40,6 +40,10 @@ export const en = {
     notShared: "This artifact isn't shared with you",
     notSharedDescription:
       "It belongs to someone else, and no conversation or object you can see shares it.",
+    belongsTo: "Belongs to",
+    belongsToMany: (count: number, more: boolean) =>
+      `Belongs to ${number(count)}${more ? "+" : ""} objects`,
+    andMore: (count: number) => `+${number(count)}`,
     storageUnavailable: "Artifact storage is not available.",
     loadFailed: "This artifact could not be loaded.",
     you: "You",
@@ -663,6 +667,9 @@ export const fr: Translation<ArtifactMessages> = {
     notShared: "Cet artefact n’est pas partagé avec vous",
     notSharedDescription:
       "Il appartient à quelqu’un d’autre, et aucune conversation ni aucun objet que vous voyez ne le partage.",
+    belongsTo: "Appartient à",
+    belongsToMany: (count, more) => `Appartient à ${numberFr(count)}${more ? "+" : ""} objets`,
+    andMore: (count) => `+${numberFr(count)}`,
     storageUnavailable: "Le stockage des artefacts n’est pas disponible.",
     loadFailed: "Impossible de charger cet artefact.",
     you: "Vous",
