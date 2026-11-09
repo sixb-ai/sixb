@@ -24,8 +24,11 @@ export interface RelationshipEdge {
 }
 
 export interface ActionParam {
-  /** `userRef` params take a user reference `{ type: "user", id }`. */
-  type: "string" | "number" | "boolean" | "fileRef" | "userRef"
+  /**
+   * `userRef` params take a user reference `{ type: "user", id }`, and `artifactRef` params an
+   * artifact reference `{ type: "artifact", id }`.
+   */
+  type: "string" | "number" | "boolean" | "fileRef" | "userRef" | "artifactRef"
   required?: boolean
   nullable?: boolean
   description?: string
@@ -159,6 +162,7 @@ function inferPrimitiveType(schema: unknown): ActionParam["type"] {
     if (schema === "boolean") return "boolean"
     if (schema === "fileRef") return "fileRef"
     if (schema === "userRef") return "userRef"
+    if (schema === "artifactRef") return "artifactRef"
     return "string"
   }
 
