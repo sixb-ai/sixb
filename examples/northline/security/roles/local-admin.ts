@@ -1,4 +1,5 @@
 import { agent, can, defineRole, every, project } from "@sixb/core"
+import { contractOnboardingShare } from "../../shares/contract-onboarding"
 import { localAdmins } from "../groups/local-admins"
 
 // Local only: everything a signed-in admin needs to use the agent, the Console and Settings.
@@ -22,5 +23,6 @@ export const localAdmin = defineRole("local-admin", {
     can.observe(agent.usage),
     can.manage(agent.usage),
     can.observe(agent.threads),
+    can.share(contractOnboardingShare),
   ],
 })
