@@ -104,14 +104,15 @@ describe("a recorded value", () => {
     expect(markup).toContain("room-1")
   })
 
-  // The artifact card arrives with the object page's artifacts; until then the value reads as the
-  // record it is.
-  test("draws an artifact reference as its record", () => {
+  // An artifact is drawn from what it is, read by its id; the id itself is never shown.
+  test("draws an artifact only where one is declared", () => {
+    const plan = { type: "artifact", id: "art_k3m9q2x7tp" }
     const schema = fieldRecordSchema({ kickoffDoc: "artifactRef" })
-    const markup = render({ kickoffDoc: { type: "artifact", id: "art_k3m9q2x7tp" } }, schema)
-    expect(markup).toContain("art_k3m9q2x7tp")
-    expect(markup).not.toContain(userMarker)
-    expect(markup).not.toContain(objectMarker)
+    const declared = render({ kickoffDoc: plan }, schema)
+    expect(declared).not.toContain("art_k3m9q2x7tp")
+    expect(declared).not.toContain(userMarker)
+    expect(declared).not.toContain(objectMarker)
+    expect(render({ kickoffDoc: plan })).toContain("art_k3m9q2x7tp")
   })
 
   test("names a user from the member directory, and shows the id until it can", () => {

@@ -598,6 +598,17 @@ export const en = {
     pdfUnavailable: "This browser can't show the PDF here",
     pdfDescription: "Open it in a new tab, or download it.",
   },
+  /** An artifact an object holds in one of its properties, as its page shows it. */
+  held: {
+    open: (title: string) => `Open ${title}`,
+    loading: "Loading…",
+    gone: "No longer available",
+    goneDescription: "It may have been deleted.",
+    notShared: "Not shared with you",
+    notSharedDescription: "Ask whoever made it to share it with you.",
+    loadFailed: "Couldn't load this artifact",
+    retry: "Try again",
+  },
 } satisfies MessageTree
 
 export type ArtifactMessages = typeof en
@@ -1201,6 +1212,16 @@ export const fr: Translation<ArtifactMessages> = {
     emptyFile: "Le fichier est vide.",
     pdfUnavailable: "Ce navigateur ne peut pas afficher le PDF ici",
     pdfDescription: "Ouvrez-le dans un nouvel onglet, ou téléchargez-le.",
+  },
+  held: {
+    open: (title) => `Ouvrir ${title}`,
+    loading: "Chargement…",
+    gone: "N’est plus disponible",
+    goneDescription: "Il a peut-être été supprimé.",
+    notShared: "Non partagé avec vous",
+    notSharedDescription: "Demandez à la personne qui l’a créé de le partager avec vous.",
+    loadFailed: "Impossible de charger cet artefact",
+    retry: "Réessayer",
   },
 }
 

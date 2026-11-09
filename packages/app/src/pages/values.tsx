@@ -33,6 +33,7 @@ import {
   useState,
 } from "react"
 import { Link } from "react-router-dom"
+import { HeldArtifactCards, HeldArtifactChip } from "../artifacts/held-artifact"
 import { objectHref } from "./routes"
 import { CopyButton } from "./section-ui"
 
@@ -82,7 +83,7 @@ export interface ValueSchema {
 }
 
 type ValueSchemaNode =
-  | { readonly kind: "unknown" | "fileRef" | "userRef" }
+  | { readonly kind: "unknown" | "fileRef" | "userRef" | "artifactRef" }
   /** `type` is the declared one: `"timestamp"`, `"double"`, `"enum"`. */
   | { readonly kind: "primitive"; readonly type: string }
   | { readonly kind: "objectRef"; readonly objectTypeId: string }
@@ -180,7 +181,9 @@ function describe({ schema, valueTypes }: ValueSchema): ValueSchemaNode {
     seen.add(id)
     resolved = resolved._resolved !== undefined ? resolved._resolved : valueTypes.get(id)
   }
-  if (resolved === "fileRef" || resolved === "userRef") return { kind: resolved }
+  if (resolved === "fileRef" || resolved === "userRef" || resolved === "artifactRef") {
+    return { kind: resolved }
+  }
   if (typeof resolved === "string") {
     return primitives.has(resolved) ? { kind: "primitive", type: resolved } : { kind: "unknown" }
   }
@@ -230,6 +233,8 @@ interface Position {
   readonly objectRef: ObjectRefValue | null
   readonly fileRef: FileRef | null
   readonly userRef: UserRef | null
+  /** The id of the artifact a `ref.artifact()` value holds. */
+  readonly artifactRef: string | null
   /** The declared primitive type, which decides how a date or a number reads. */
   readonly primitive: string | null
   /** The schema of a child; `undefined` (open) below an open value. */
@@ -237,13 +242,14 @@ interface Position {
 }
 
 // With a schema only the schema decides; without one, the value's shape is all there is. A user
-// is never guessed: `{ type: "user", id }` is too common a shape.
+// or an artifact is never guessed: `{ type: "user", id }` is too common a shape.
 function readPosition(value: unknown, schema: ValueSchema | undefined): Position {
   if (!schema) {
     return {
       objectRef: isObjectRefShape(value) ? value : null,
       fileRef: isFileRef(value) ? value : null,
       userRef: null,
+      artifactRef: null,
       primitive: null,
       child: () => undefined,
     }
@@ -266,6 +272,7 @@ function readPosition(value: unknown, schema: ValueSchema | undefined): Position
       value.id.length > 0
         ? { type: "user", id: value.id }
         : null,
+    artifactRef: node.kind === "artifactRef" ? heldArtifactId(value) : null,
     primitive: node.kind === "primitive" ? node.type : null,
     child: (key) => childSchema(node, key),
   }
@@ -440,7 +447,7 @@ export function ValueTree({
   const position = readPosition(value, schema)
   const entries = Array.isArray(value)
     ? value.map((item, index) => [String(index), item] as const)
-    : isRecord(value) && !position.objectRef && !position.fileRef && !position.userRef
+    : isRecord(value) && !isReference(position)
       ? Object.entries(value)
       : null
 
@@ -490,8 +497,9 @@ function Field({
   readonly path: readonly string[]
 }) {
   const messages = useValueMessages()
+  const cards = useContext(ArtifactCardsContext)
   const position = readPosition(value, schema)
-  const plain = !position.objectRef && !position.fileRef && !position.userRef
+  const plain = !isReference(position)
   const count = !plain
     ? null
     : Array.isArray(value)
@@ -500,6 +508,24 @@ function Field({
         ? Object.keys(value).length
         : null
   const long = typeof value === "string" && (value.length > 80 || value.includes("\n"))
+
+  // A list of artifacts lines its cards up rather than numbering them.
+  const heldArtifacts = cards ? heldArtifactList(value, schema) : null
+  if (heldArtifacts) {
+    return (
+      <div className="py-2.5 first:pt-0 last:pb-0">
+        <dt className="flex items-baseline gap-2">
+          <span className="font-medium">{label}</span>
+          <span className="text-xs text-muted-foreground">
+            {messages.items(heldArtifacts.length)}
+          </span>
+        </dt>
+        <dd className="mt-2">
+          <HeldArtifactCards artifactIds={heldArtifacts} />
+        </dd>
+      </div>
+    )
+  }
 
   if (count !== null) {
     return (
@@ -522,7 +548,9 @@ function Field({
     <div
       className={cn(
         "grid gap-x-4 gap-y-1 py-2.5 first:pt-0 last:pb-0",
-        long || position.fileRef ? "" : "sm:grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)]"
+        long || position.fileRef || (cards && position.artifactRef)
+          ? ""
+          : "sm:grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)]"
       )}
     >
       <dt className="min-w-0 font-medium break-words">{label}</dt>
@@ -539,6 +567,13 @@ function Field({
  */
 export const ObjectRefLinksContext = createContext(true)
 
+/**
+ * Whether an artifact shows as a card with a preview of it, as an object's page shows the
+ * artifacts its properties hold. Elsewhere, such as in a run's input, it is a chip among the
+ * other values.
+ */
+export const ArtifactCardsContext = createContext(false)
+
 function Leaf({
   value,
   position,
@@ -552,6 +587,7 @@ function Leaf({
 }) {
   const locale = useLocale()
   const objectLinks = useContext(ObjectRefLinksContext)
+  const artifactCards = useContext(ArtifactCardsContext)
   if (position.objectRef) {
     const { objectTypeId, primaryId } = position.objectRef
     if (!objectLinks) {
@@ -576,6 +612,13 @@ function Leaf({
   }
   if (position.userRef) {
     return <UserRefChip user={position.userRef} />
+  }
+  if (position.artifactRef) {
+    return artifactCards ? (
+      <HeldArtifactCards artifactIds={[position.artifactRef]} />
+    ) : (
+      <HeldArtifactChip artifactId={position.artifactRef} link={objectLinks} />
+    )
   }
   if (position.fileRef) {
     return <FileValue file={position.fileRef} links={fileLinks?.(path, position.fileRef) ?? null} />
@@ -787,6 +830,29 @@ function isObjectRefShape(value: unknown): value is ObjectRefValue {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** A position drawn as what it points to, rather than as the record it is stored as. */
+function isReference(position: Position): boolean {
+  return !!(position.objectRef || position.fileRef || position.userRef || position.artifactRef)
+}
+
+/** The artifact `{ type: "artifact", id }` holds, or `null` for any other value. */
+function heldArtifactId(value: unknown): string | null {
+  return isRecord(value) && value.type === "artifact" && typeof value.id === "string" && value.id
+    ? value.id
+    : null
+}
+
+/** The artifacts a declared list of them holds; `null` for any other value, or an empty list. */
+function heldArtifactList(value: unknown, schema: ValueSchema | undefined): string[] | null {
+  if (!schema || !Array.isArray(value) || value.length === 0) return null
+
+  const node = describe(schema)
+  if (node.kind !== "array" || describe(node.items).kind !== "artifactRef") return null
+
+  const ids = value.map(heldArtifactId)
+  return ids.every((id): id is string => id !== null) ? ids : null
 }
 
 /** Nothing recorded: no value, or an empty record or list. */
