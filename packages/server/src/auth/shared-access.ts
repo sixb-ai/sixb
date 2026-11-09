@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import type { SixbHostView } from "@sixb/core"
+import { ARTIFACT_LIVE_ROUTE } from "@sixb/core/artifacts/live"
 import {
   generateCsrfToken,
   getCookie,
@@ -7,7 +8,11 @@ import {
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
 import { matchesPathPattern, normalizeRoutePath, SIXB_API_ROUTES } from "@sixb/core/internal/http"
-import { type SharedSessionContext, SharedSessionProtocol } from "@sixb/core/internal/shares"
+import {
+  guestName,
+  type SharedSessionContext,
+  SharedSessionProtocol,
+} from "@sixb/core/internal/shares"
 import { hasForegroundSessionActivity } from "./session-activity"
 
 export const SHARED_ACCESS_GRANT_HEADER_NAME = "x-sixb-share-grant"
@@ -15,14 +20,38 @@ const SHARED_ACCESS_GRANT_QUERY_PARAM = "shareGrant"
 
 const SHARED_SESSION_COOKIE_PREFIX = "sixb_share_session_"
 const SHARED_CSRF_COOKIE_PREFIX = "sixb_share_csrf_"
-const SHARED_COOKIE_PATH = "/api"
+/**
+ * The session cookie reaches the API and its sockets, whose upgrade a browser sends with cookies
+ * but no header of ours. It stays `SameSite=Strict` and `HttpOnly`, and every request, an upgrade
+ * included, must come from an allowed origin: another site's page cannot ride it. The CSRF cookie
+ * is only ever needed beside a mutation, so it stays under `/api`.
+ */
+const SHARED_SESSION_COOKIE_PATH = "/"
+const SHARED_CSRF_COOKIE_PATH = "/api"
+/** Where session cookies were set before they reached sockets: cleared with the current ones. */
+const LEGACY_SHARED_SESSION_COOKIE_PATH = "/api"
 const STORED_IDENTIFIER_MAX_LENGTH = 128
 
 const SHARED_SESSION_ROUTES = SIXB_API_ROUTES.filter((route) => route.sharedSession)
-const SHARED_FILE_CONTENT_ROUTES = SHARED_SESSION_ROUTES.filter(
-  (route) =>
-    (route.method === "GET" || route.method === "HEAD") && route.path.endsWith("/files/content")
-)
+
+/**
+ * The sockets a shared link's session may open: the live artifacts it reads, which it watches,
+ * and the event stream, which passes it only those artifacts' events.
+ */
+const SHARED_SESSION_SOCKETS: readonly string[] = [ARTIFACT_LIVE_ROUTE, "/ws/events"]
+
+/**
+ * Where the grant may be named in the query: what `<img>`, `<video>` and download links load, and
+ * the sockets, none of which can send a header.
+ */
+const SHARED_QUERY_SELECTOR_ROUTES = [
+  ...SHARED_SESSION_ROUTES.filter(
+    (route) =>
+      (route.method === "GET" || route.method === "HEAD") &&
+      (route.path.endsWith("/content") || route.path.endsWith("/preview"))
+  ),
+  ...SHARED_SESSION_SOCKETS.map((path) => ({ method: "GET", path })),
+]
 
 export interface SixbSharedAccessOptions {
   /** Sliding inactivity window, always bounded by the grant's absolute expiration. */
@@ -54,6 +83,12 @@ export type SharedAccessSignOutResult =
   | { readonly kind: "csrf" }
   | { readonly kind: "signedOut"; readonly setCookies: readonly string[] }
 
+export type SharedAccessGuestNameResult =
+  | { readonly kind: "invalid"; readonly setCookies: readonly string[] }
+  | { readonly kind: "csrf" }
+  | { readonly kind: "unnamed" }
+  | ({ readonly kind: "named" } & ResolvedSharedAccess)
+
 /**
  * Selects shared authority before ambient browser or bearer authentication.
  *
@@ -64,6 +99,7 @@ export class SharedAccessBoundary {
   private readonly host: SixbHostView
   private readonly options: SixbSharedAccessOptions
   private protocol: SharedSessionProtocol | undefined
+  private readonly guestNamed = new Set<(sessionId: string) => void>()
 
   constructor(host: SixbHostView, options: SixbSharedAccessOptions = {}) {
     this.host = host
@@ -176,6 +212,7 @@ export class SharedAccessBoundary {
                     serializeSharedCookie({
                       request,
                       name: names.csrf,
+                      path: SHARED_CSRF_COOKIE_PATH,
                       value: csrfToken,
                       expiresAt: context.expiresAt,
                       maxAge: cookieMaxAge(context.expiresAt),
@@ -208,6 +245,47 @@ export class SharedAccessBoundary {
     return { kind: "signedOut", setCookies: clearCookies }
   }
 
+  /**
+   * Keeps the name the session's visitor gives, which their comments and presence carry. Like
+   * sign-out, it needs the session and its CSRF token; `unnamed` for a name that will not do.
+   */
+  async setGuestName(
+    request: Request,
+    grantId: string,
+    name: string
+  ): Promise<SharedAccessGuestNameResult> {
+    if (!isStoredIdentifier(grantId)) return { kind: "invalid", setCookies: [] }
+
+    const resolved = await this.resolveSession(request, grantId)
+    if (!resolved) return { kind: "invalid", setCookies: this.clearCookieHeaders(request, grantId) }
+
+    if (!verifyDoubleSubmitCsrf(request, { cookieName: sharedCookieNames(grantId).csrf })) {
+      return { kind: "csrf" }
+    }
+
+    const kept = guestName(name)
+    if (kept === null) return { kind: "unnamed" }
+
+    const context = await this.getProtocol().setGuestName(resolved.context, kept)
+    if (!context) return { kind: "invalid", setCookies: this.clearCookieHeaders(request, grantId) }
+
+    for (const listener of this.guestNamed) listener(context.sessionId)
+    return { kind: "named", context, cookies: resolved.cookies }
+  }
+
+  /** Hears each session whose visitor gave a name through this server. */
+  onGuestNamed(listener: (sessionId: string) => void): void {
+    this.guestNamed.add(listener)
+  }
+
+  /**
+   * The session a socket authenticated when it opened, as it is now: null once it is revoked or
+   * expired, or its grant is. Reading it renews nothing.
+   */
+  current(context: Pick<SharedSessionContext, "grantId" | "sessionId">) {
+    return this.getProtocol().current(context)
+  }
+
   clearCookieHeaders(request: Request, grantId: string): readonly string[] {
     if (!isStoredIdentifier(grantId)) return []
     const names = sharedCookieNames(grantId)
@@ -215,6 +293,16 @@ export class SharedAccessBoundary {
       serializeSharedCookie({
         request,
         name: names.session,
+        path: SHARED_SESSION_COOKIE_PATH,
+        value: "",
+        expiresAt: new Date(0),
+        maxAge: 0,
+        httpOnly: true,
+      }),
+      serializeSharedCookie({
+        request,
+        name: names.session,
+        path: LEGACY_SHARED_SESSION_COOKIE_PATH,
         value: "",
         expiresAt: new Date(0),
         maxAge: 0,
@@ -223,6 +311,7 @@ export class SharedAccessBoundary {
       serializeSharedCookie({
         request,
         name: names.csrf,
+        path: SHARED_CSRF_COOKIE_PATH,
         value: "",
         expiresAt: new Date(0),
         maxAge: 0,
@@ -245,6 +334,7 @@ export class SharedAccessBoundary {
         serializeSharedCookie({
           request: input.request,
           name: names.session,
+          path: SHARED_SESSION_COOKIE_PATH,
           value: input.sessionValue,
           expiresAt: input.expiresAt,
           maxAge,
@@ -253,6 +343,7 @@ export class SharedAccessBoundary {
         serializeSharedCookie({
           request: input.request,
           name: names.csrf,
+          path: SHARED_CSRF_COOKIE_PATH,
           value: input.csrfToken,
           expiresAt: input.expiresAt,
           maxAge,
@@ -291,22 +382,24 @@ export function isSharedAccessPublicPath(pathname: string, requestMethod: string
         ? "session"
         : method === "POST" && normalizedPathname.endsWith("/sign-out")
           ? "sign-out"
-          : null
+          : method === "PUT" && normalizedPathname.endsWith("/name")
+            ? "name"
+            : null
   if (!suffix) return false
   return matchesPathPattern(normalizedPathname, `/api/shared-access/:grantId/${suffix}`)
 }
 
 /**
- * The header selects the grant. File GET/HEAD routes also accept the selector in the query, because
- * `<img>`, `<video>`, and download links cannot send headers. Either way it only names which
- * grant cookie to read; the HttpOnly cookie remains the credential.
+ * The header selects the grant. File GET/HEAD routes and the sockets also accept the selector in
+ * the query, because `<img>`, `<video>`, download links and WebSockets cannot send headers. Either
+ * way it only names which grant cookie to read; the HttpOnly cookie remains the credential.
  */
 function selectSharedAccessGrant(request: Request): SharedAccessGrantSelection {
   const header = request.headers.get(SHARED_ACCESS_GRANT_HEADER_NAME)
   const url = new URL(request.url)
   const method = request.method.toUpperCase()
   const pathname = normalizeRoutePath(url.pathname)
-  const queryValues = SHARED_FILE_CONTENT_ROUTES.some(
+  const queryValues = SHARED_QUERY_SELECTOR_ROUTES.some(
     (route) => route.method === method && matchesPathPattern(pathname, route.path)
   )
     ? url.searchParams.getAll(SHARED_ACCESS_GRANT_QUERY_PARAM)
@@ -323,6 +416,8 @@ function selectSharedAccessGrant(request: Request): SharedAccessGrantSelection {
 export function isSharedSessionRoute(request: Request): boolean {
   const method = request.method.toUpperCase()
   const pathname = normalizeRoutePath(new URL(request.url).pathname)
+  if (method === "GET" && SHARED_SESSION_SOCKETS.includes(pathname)) return true
+
   return SHARED_SESSION_ROUTES.some(
     (route) => route.method === method && matchesPathPattern(pathname, route.path)
   )
@@ -376,6 +471,7 @@ function sharedCookieNames(grantId: string): { readonly session: string; readonl
 function serializeSharedCookie(input: {
   readonly request: Request
   readonly name: string
+  readonly path: string
   readonly value: string
   readonly expiresAt: Date
   readonly maxAge: number
@@ -383,7 +479,7 @@ function serializeSharedCookie(input: {
 }): string {
   const parts = [
     `${input.name}=${input.value}`,
-    `Path=${SHARED_COOKIE_PATH}`,
+    `Path=${input.path}`,
     "SameSite=Strict",
     `Max-Age=${Math.trunc(input.maxAge)}`,
     `Expires=${input.expiresAt.toUTCString()}`,

@@ -592,6 +592,9 @@ import type {
   SetArtifactStateData,
   SetArtifactStateErrors,
   SetArtifactStateResponses,
+  SetSharedAccessGuestNameData,
+  SetSharedAccessGuestNameErrors,
+  SetSharedAccessGuestNameResponses,
   SignFileUploadPartData,
   SignFileUploadPartErrors,
   SignFileUploadPartResponses,
@@ -2402,6 +2405,28 @@ export const getSharedAccessSession = <ThrowOnError extends boolean = false>(
   >({ url: "/api/shared-access/{grantId}/session", ...options })
 
 /**
+ * Name a shared-access session's visitor
+ *
+ * The visitor of a shared link has no account: they give their name once, and their comments and live presence carry it, marked as a guest's. Giving it again replaces it for what comes next; comments keep the name they were written under.
+ */
+export const setSharedAccessGuestName = <ThrowOnError extends boolean = false>(
+  options: Options<SetSharedAccessGuestNameData, ThrowOnError>
+) =>
+  (options.client ?? client).put<
+    SetSharedAccessGuestNameResponses,
+    SetSharedAccessGuestNameErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/shared-access/{grantId}/name",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
  * Sign out a shared-access session
  */
 export const signOutSharedAccess = <ThrowOnError extends boolean = false>(
@@ -3836,6 +3861,7 @@ export const getArtifact = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}",
     ...options,
@@ -3857,6 +3883,7 @@ export const listArtifactHolders = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/holders",
     ...options,
@@ -4007,6 +4034,7 @@ export const listArtifactComments = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/comments",
     ...options,
@@ -4015,7 +4043,7 @@ export const listArtifactComments = <ThrowOnError extends boolean = false>(
 /**
  * Comment on an artifact
  *
- * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
+ * Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.
  */
 export const addArtifactComment = <ThrowOnError extends boolean = false>(
   options: Options<AddArtifactCommentData, ThrowOnError>
@@ -4029,6 +4057,7 @@ export const addArtifactComment = <ThrowOnError extends boolean = false>(
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/comments",
     ...options,
@@ -4041,7 +4070,7 @@ export const addArtifactComment = <ThrowOnError extends boolean = false>(
 /**
  * Resolve an artifact's comment
  *
- * Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.
+ * Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed. A guest's comment is resolved only by whoever may update the artifact.
  */
 export const resolveArtifactComment = <ThrowOnError extends boolean = false>(
   options: Options<ResolveArtifactCommentData, ThrowOnError>
@@ -4186,6 +4215,7 @@ export const createArtifactFrame = <ThrowOnError extends boolean = false>(
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/frame",
     ...options,
@@ -4207,6 +4237,7 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}",
     ...options,
@@ -4228,6 +4259,7 @@ export const getArtifactBoardPreview = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview",
     ...options,
@@ -4245,6 +4277,7 @@ export const getArtifactQuery = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/queries/{name}",
     ...options,
@@ -4264,6 +4297,7 @@ export const getArtifactFileContent = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/content",
     ...options,
@@ -4283,6 +4317,7 @@ export const headArtifactFileContent = <ThrowOnError extends boolean = false>(
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}/content",
     ...options,

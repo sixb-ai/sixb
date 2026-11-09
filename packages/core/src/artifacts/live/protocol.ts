@@ -72,9 +72,12 @@ export type ArtifactLiveServerMessage =
  */
 export interface ArtifactLiveUser {
   readonly id: string
+  /** Their profile's name, or the one a guest gave; empty for someone who gave none. */
   readonly name: string
   /** A color for the person's cursor and selection, the same wherever they connect. */
   readonly color: string
+  /** A shared link's visitor, without an account: the name is only what they typed. */
+  readonly guest?: true
 }
 
 /** The awareness field that names who an awareness state is. */

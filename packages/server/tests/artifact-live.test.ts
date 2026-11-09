@@ -123,6 +123,14 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
       },
     })
   const marie = as("marie")
+  // Marie gave her profile a name; Bob only has his email.
+  await storage.auth.users.create({
+    id: "marie",
+    projectId,
+    email: "marie@example.com",
+    displayName: "Marie Curie",
+  })
+  await storage.auth.users.create({ id: "bob", projectId, email: "bob@example.com" })
 
   await storage.agents.threads.create({
     projectId,
@@ -362,7 +370,11 @@ describe("an artifact edited live", () => {
       artifactId: context.artifactId,
       access: "edit",
       revision: context.revision,
-      user: { id: "user:marie", name: "marie", color: expect.stringMatching(/^#[0-9a-f]{6}$/) },
+      user: {
+        id: "user:marie",
+        name: "Marie Curie",
+        color: expect.stringMatching(/^#[0-9a-f]{6}$/),
+      },
     })
     expect(documentFiles(bob.doc).get("boards/welcome.html")).toEqual({ text: WELCOME })
 
@@ -706,7 +718,7 @@ describe("an artifact edited live", () => {
 
   // Guard proof: in vouchedAwareness, keep a client's own `user` and `sixbAgent`; Bob then sees
   // Marie as Bob, and an Agent at work.
-  test("names each person as the server knows them, and lets nobody speak for another or the Agent", async () => {
+  test("names each person as the server knows them, never by email, and lets nobody speak for another or the Agent", async () => {
     jest.useFakeTimers()
     const context = await setup()
     const rooms = context.rooms()
@@ -736,10 +748,12 @@ describe("an artifact edited live", () => {
     })
     await marie.settle()
 
-    const marieUser = { id: "user:marie", name: "marie", color: expect.any(String) }
+    const marieUser = { id: "user:marie", name: "Marie Curie", color: expect.any(String) }
     expect(others(bob)).toEqual([{ cursor: { x: 5, y: 5 }, user: marieUser }])
+    // Bob gave no name: everyone in the room, a shared link's guest included, sees none, never his
+    // email. Guard proof: let liveUserOf fall back to the email again; Marie then reads it.
     expect(others(marie)).toEqual([
-      { cursor: { x: 1, y: 1 }, user: { id: "user:bob", name: "bob", color: expect.any(String) } },
+      { cursor: { x: 1, y: 1 }, user: { id: "user:bob", name: "", color: expect.any(String) } },
     ])
   })
 
