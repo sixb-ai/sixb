@@ -2,6 +2,7 @@ import type { Client } from "./generated/client"
 import type { SixbSessionOptions } from "./session"
 
 const sharedAuthorityClients = new WeakMap<Client, string>()
+const sharedEndedHandlers = new WeakMap<Client, () => void>()
 const sessionAuthorityClients = new WeakMap<Client, SixbSessionOptions>()
 
 export const SHARED_ACCESS_REALTIME_UNAVAILABLE =
@@ -61,4 +62,15 @@ export function markClientSessionAuthority(
 
 export function getClientSessionAuthority(client: Client): SixbSessionOptions | null {
   return sessionAuthorityClients.get(client) ?? null
+}
+
+/** Who hears that a shared client's session ended while the page was open; `null` stops it. */
+export function onClientSharedAccessEnded(client: Client, handler: (() => void) | null): void {
+  if (handler) sharedEndedHandlers.set(client, handler)
+  else sharedEndedHandlers.delete(client)
+}
+
+/** Says that a shared client's session ended: its link was revoked, or the session expired. */
+export function endClientSharedAccess(client: Client): void {
+  sharedEndedHandlers.get(client)?.()
 }
