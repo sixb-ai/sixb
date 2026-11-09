@@ -1,3 +1,4 @@
+export { GUEST_NAME_MAX_LENGTH, guestName } from "./guest-name"
 export type {
   SharedSessionContext,
   SharedSessionCredential,

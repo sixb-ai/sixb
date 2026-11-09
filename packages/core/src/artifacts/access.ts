@@ -36,8 +36,9 @@ export type HolderAccess = "update" | "read" | null
  *   artifact, and may update it when they may also edit the object's type. Every credential
  *   reaches what objects hold, an access token included.
  *
- * The artifact is shared whole, at every version, whatever published each one. A caller that
- * reaches no artifact, such as a shared link's, gets `none`.
+ * A shared link's visitor, a guest, reaches only what the objects their link shares hold, and only
+ * reads it: their link shows objects, it never lets them change one. The artifact is shared whole,
+ * at every version, whatever published each one. A caller that reaches no artifact gets `none`.
  *
  * A rule reads how the caller reaches each conversation and each artifact's holders once, so it
  * lives for one operation.
@@ -60,8 +61,11 @@ export interface ArtifactAccessRule {
 export function createArtifactAccessRule(input: {
   readonly storage: ArtifactStorage
   readonly projectId: string
-  /** `system` for code without a caller, `null` for a caller that reaches no artifact. */
-  readonly caller: Principal | "system" | null
+  /**
+   * `system` for code without a caller, `guest` for a shared link's visitor, `null` for a caller
+   * that reaches no artifact.
+   */
+  readonly caller: Principal | "system" | "guest" | null
   /** `false` unless the caller signed in with a session: anything else reaches no conversation. */
   readonly sharing: boolean
   /** How the caller reads a conversation, by the thread-access rule. */
@@ -74,7 +78,7 @@ export function createArtifactAccessRule(input: {
   const holders = new Map<string, Promise<HolderAccess>>()
 
   const conversation = (threadId: string): Promise<ConversationAccess> => {
-    if (caller === null || !input.sharing) return Promise.resolve(null)
+    if (caller === null || caller === "guest" || !input.sharing) return Promise.resolve(null)
 
     let reads = conversations.get(threadId)
     if (!reads) {
@@ -87,7 +91,10 @@ export function createArtifactAccessRule(input: {
   const throughObjects = (artifact: ArtifactRecord): Promise<HolderAccess> => {
     let reaches = holders.get(artifact.id)
     if (!reaches) {
-      reaches = input.holders(artifact)
+      // A guest only reads, whatever their objects' type would let a member do.
+      reaches = input
+        .holders(artifact)
+        .then((access) => (caller === "guest" && access !== null ? "read" : access))
       holders.set(artifact.id, reaches)
     }
     return reaches
@@ -96,6 +103,7 @@ export function createArtifactAccessRule(input: {
   /** `owner` or `none` when the answer needs no other source; `undefined` when it does. */
   const ownAccess = (artifact: ArtifactRecord): ArtifactAccess | undefined => {
     if (caller === null) return "none"
+    if (caller === "guest") return undefined
     if (caller === "system" || principalsEqual(caller, artifact.owner)) return "owner"
     return undefined
   }

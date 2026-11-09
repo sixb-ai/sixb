@@ -9,6 +9,7 @@ export type ArtifactRequestErrorCode =
   | "invalid_artifact"
   | "invalid_comment"
   | "invalid_state"
+  | "name_required"
   | "state_full"
   | "not_allowed"
   | "not_shared"
