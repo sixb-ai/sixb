@@ -476,6 +476,48 @@ describe("DuckLakeStorage remote catalogs", () => {
     }
   })
 
+  test("releasing idle memory drops the files DuckDB cached from S3", async () => {
+    // Red check: remove the enable_external_file_cache toggle from releaseMemory(); the cached
+    // ranges stay.
+    const dataset = defineDataset(`raw.pg.s3.cache.${randomId()}`, {
+      schema: [col("orderId", "string")],
+    })
+    const storage = new DuckLakeStorage({
+      catalog: postgresCatalog(),
+      dataPath: `s3://${s3Bucket()}/lake/${randomId()}`,
+      secrets: [s3Secret()],
+      duckdb: { releaseMemoryAfterIdleMs: false },
+    })
+    const rows = Array.from({ length: 100 }, (_, i) => ({ orderId: `ord_${i}` }))
+    const cachedRanges = async (runtime: DuckDbRuntime) => {
+      const [row] = await runtime.query(
+        "SELECT count(*)::INTEGER AS ranges FROM duckdb_external_file_cache()"
+      )
+      return row?.ranges
+    }
+
+    try {
+      await storage.createDataset(dataset)
+      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
+      await write.writeRows(rows)
+      await write.commit()
+      expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toHaveLength(100)
+
+      const runtime = await (
+        storage as unknown as { connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+      ).connections.attachedRuntime()
+      expect(await cachedRanges(runtime)).toBeGreaterThan(0)
+
+      await runtime.releaseMemory()
+      expect(await cachedRanges(runtime)).toBe(0)
+      // The cache is back on for the next read.
+      expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toHaveLength(100)
+      expect(await cachedRanges(runtime)).toBeGreaterThan(0)
+    } finally {
+      await storage.close()
+    }
+  })
+
   describe("a version commits on the version it read", () => {
     const events = () =>
       defineDataset(`raw.pg.events.${randomId()}`, {

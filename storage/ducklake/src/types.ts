@@ -41,7 +41,17 @@ export interface PostgresDuckLakeCatalogOptions {
  */
 export interface DuckDbRuntimeOptions {
   readonly path?: string
+  /**
+   * DuckDB settings, applied over the provider's defaults. The provider sets
+   * `allocator_bulk_deallocation_flush_threshold` to `"32MB"` (DuckDB: 512 MB); everything else is
+   * DuckDB's default.
+   */
   readonly config?: Readonly<Record<string, string>>
+  /**
+   * After this long without DuckDB work, drop DuckDB's cache of remote files and hand the memory
+   * DuckDB freed back to the system. `false` keeps both until the process ends. Default: 10000.
+   */
+  readonly releaseMemoryAfterIdleMs?: number | false
 }
 
 /**
