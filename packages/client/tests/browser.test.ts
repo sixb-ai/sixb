@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
+import { afterEach, describe, expect, jest, setSystemTime, test } from "bun:test"
 import { takeActivityArrival } from "../src/activity-attribution"
 import {
   createSixbAgentsWebSocketUrl,
@@ -14,6 +14,7 @@ import {
   type SixbBrowserClientOptions,
   type SixbBrowserRuntimeConfig,
 } from "../src/browser"
+import { endClientSharedAccess } from "../src/client-authority"
 import { createSixbEventsWebSocketUrl } from "../src/events-transport"
 import { objectFileContentUrl } from "../src/file"
 import { client } from "../src/generated/client.gen"
@@ -87,7 +88,18 @@ async function observeSyncRequest(headers?: Record<string, string>): Promise<Req
   return observedRequests[0]
 }
 
+/**
+ * Lets the requests in flight answer until `done` holds. Bounded: they answer in microtasks, which
+ * a loop that never ends would keep the test's own timeout from interrupting.
+ */
+async function until(done: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 10_000 && !done(); turn += 1) {
+    await new Promise<void>(queueMicrotask)
+  }
+}
+
 afterEach(() => {
+  jest.useRealTimers()
   while (controllers.length > 0) controllers.pop()?.dispose()
   setSystemTime()
   if (originalDocument) {
@@ -283,6 +295,86 @@ describe("shared browser client", () => {
     controller.dispose()
     expect(client.getConfig().fetch).toBeUndefined()
     expect(fileUrl().searchParams.has("shareGrant")).toBe(false)
+  })
+
+  // Guard proof: drop `onEnded` from the controller's 401 branch, or from its registration for
+  // sockets; a page whose link was revoked then stays as it was.
+  test("says when the session ends while the page is open", async () => {
+    let ended = 0
+    const controller = configureSixbSharedBrowserClient(runtimeConfig, {
+      grantId: "shr_1",
+      fetch: Object.assign(async () => Response.json({ error: "ended" }, { status: 401 }), {
+        preconnect: fetch.preconnect,
+      }),
+      onEnded: () => {
+        ended += 1
+      },
+    })
+    controllers.push(controller)
+
+    await requestAction({ path: { actionId: "approve" }, body: { subject: { kind: "none" } } })
+    expect(ended).toBe(1)
+
+    // A live socket the server closed for good says so through the same client.
+    endClientSharedAccess(client)
+    expect(ended).toBe(2)
+
+    controller.dispose()
+    endClientSharedAccess(client)
+    expect(ended).toBe(2)
+  })
+
+  // Guard proof: drop the keep-alive timer from configureSixbSharedBrowserClient, or
+  // `visibleIsActivity` from its activity; a visitor who only watches is then signed out after the
+  // server's inactivity window, with renewals that never count as activity.
+  test("keeps the session of a visible page that only watches, and lets a hidden one lapse", async () => {
+    jest.useFakeTimers()
+    const testDocument = installDocument("visible")
+    const renewals: Request[] = []
+    const session = {
+      grantId: "shr_1",
+      destinationPath: "/meetings/m1",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      absoluteExpiresAt: "2099-01-01T00:00:00.000Z",
+      csrfToken: "C".repeat(43),
+      guestId: "shs_1",
+    }
+    const controller = configureSixbSharedBrowserClient(runtimeConfig, {
+      grantId: "shr_1",
+      fetch: Object.assign(
+        async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+          const request = input instanceof Request && !init ? input : new Request(input, init)
+          if (new URL(request.url).pathname.endsWith("/session")) renewals.push(request)
+          return Response.json(session)
+        },
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    controllers.push(controller)
+
+    // Nothing renews before the session opened.
+    jest.advanceTimersByTime(2 * 60_000)
+    expect(renewals).toHaveLength(0)
+
+    await controller.establish("S".repeat(43))
+    renewals.length = 0
+
+    // An hour of watching, without a pointer moving: each renewal counts as activity.
+    for (let minute = 0; minute < 60; minute += 2) jest.advanceTimersByTime(2 * 60_000)
+    await until(() => renewals.length === 30)
+    expect(
+      renewals.every((request) => request.headers.get("x-sixb-session-activity") === "1")
+    ).toBe(true)
+
+    // Hidden, the page renews nothing, and the server lets the session lapse.
+    testDocument.setVisibility("hidden")
+    jest.advanceTimersByTime(20 * 60_000)
+    expect(renewals).toHaveLength(30)
+
+    controller.dispose()
+    testDocument.setVisibility("visible")
+    jest.advanceTimersByTime(10 * 60_000)
+    expect(renewals).toHaveLength(30)
   })
 
   test("rejects malformed secrets before making a request", async () => {

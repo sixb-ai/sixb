@@ -8,6 +8,7 @@
  * nothing here may import it.
  */
 import {
+  endClientSharedAccess,
   getClientSessionAuthority,
   getClientSharedGrantId,
   SHARED_ACCESS_ENDED,
@@ -239,6 +240,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
         stopped = true
         sink.reportError(SHARED_ACCESS_ENDED)
         setState({ connected: false, reconnecting: false, error: SHARED_ACCESS_ENDED })
+        endClientSharedAccess(client)
         return
       }
 
