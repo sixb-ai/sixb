@@ -62,11 +62,13 @@ export function createFacebookPublishingApi(
           "description",
           "published",
           "scheduled_publish_time",
+          "thumb",
         ])
         validateSource(input, "file_url")
         optionalText(input.title, "title")
         optionalText(input.description, "description")
         validatePublication(input)
+        if (input.thumb !== undefined) thumbnailImage(input.thumb, "thumb")
         return write(context, `${page}/videos`, mediaBody(input))
       },
     },
@@ -186,7 +188,34 @@ export function createFacebookVideoApi(
           })
         )
         .then(readJson<MetaFacebookVideo>),
+    thumbnails: {
+      create(input) {
+        allowedKeys(input, ["source", "is_preferred"])
+        thumbnailImage(input.source, "source")
+        if (input.is_preferred !== undefined && typeof input.is_preferred !== "boolean") {
+          throw new Error("[SixbMeta] is_preferred must be a boolean.")
+        }
+        return write(
+          scoped,
+          `${path}/thumbnails`,
+          mediaBody({ source: input.source, is_preferred: input.is_preferred ?? true }),
+          "success"
+        )
+      },
+    },
   }
+}
+
+/** Meta takes thumbnails of 10 MB at most. */
+const MAX_THUMBNAIL_BYTES = 10 * 1024 * 1024
+
+function thumbnailImage(value: unknown, key: string): void {
+  if (!(value instanceof Blob) || value.size === 0) {
+    throw new Error(`[SixbMeta] ${key} must be a non-empty image Blob.`)
+  }
+  if (value.size > MAX_THUMBNAIL_BYTES) throw new Error(`[SixbMeta] ${key} must be 10 MB or less.`)
+  if (value.type && !value.type.startsWith("image/"))
+    throw new Error(`[SixbMeta] ${key} must be an image.`)
 }
 
 function validateSource(

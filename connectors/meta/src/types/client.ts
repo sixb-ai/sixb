@@ -37,6 +37,22 @@ export interface MetaConnectedPage {
   readonly instagram?: MetaInstagramAccount
 }
 
+/** The Instagram professional account a Unified Login connection was granted for. */
+export interface MetaConnectedInstagramAccount {
+  readonly instagramAccountId: string
+  readonly username?: string
+  readonly name?: string
+}
+
+/**
+ * Client for one Instagram account connected through Unified Login. Every request defaults to
+ * the grant's token. Pages are absent: the account needs none, and the token reaches none.
+ */
+export interface MetaInstagramAccountClient
+  extends Omit<MetaClient, "pages" | "facebook" | "facebookVideo"> {
+  readonly account: MetaConnectedInstagramAccount
+}
+
 /**
  * Client for one Page connected through Facebook Login. Every request defaults to the Page access
  * token. `pages` is absent: it needs the user token, which Meta expires after about 60 days.
