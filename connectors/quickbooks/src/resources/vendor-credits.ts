@@ -54,7 +54,7 @@ export function createVendorCreditsResource(
     },
     delete: async (input, options) => deleteEntity(http, "VendorCredit", input, options),
     get: (id) => readEntity(http, "VendorCredit", `vendorcredit/${pathId(id)}`, id),
-    list: (options) => listTransactions(http, "VendorCredit", options),
+    list: (options) => listTransactions(http, "VendorCredit", options, { party: "vendor" }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource

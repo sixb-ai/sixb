@@ -14,3 +14,12 @@ export function realmId(value: unknown): string {
   }
   return value
 }
+
+/** The single template inside a `{ EntityName: template }` wrapper, if there is exactly one. */
+export function templateOf(value: unknown): Record<string, unknown> | undefined {
+  const templates = isRecord(value)
+    ? Object.entries(value).filter(([key, entry]) => /^[A-Z]/.test(key) && isRecord(entry))
+    : []
+  const template = templates.length === 1 ? templates[0]?.[1] : undefined
+  return isRecord(template) ? template : undefined
+}

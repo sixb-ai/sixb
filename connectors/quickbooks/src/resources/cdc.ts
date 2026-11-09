@@ -1,20 +1,47 @@
 import type { QuickBooksReadHttp } from "../query"
-import type { QuickBooksCdcOptions, QuickBooksCdcResponse } from "../types/cdc"
-import { isRecord } from "../validation"
+import type { QuickBooksCdcEntity, QuickBooksCdcOptions, QuickBooksCdcResponse } from "../types/cdc"
+import { isRecord, templateOf } from "../validation"
 
-const ENTITIES = new Set([
-  "Account",
-  "Customer",
-  "Item",
-  "Term",
-  "Vendor",
-  "Invoice",
-  "Payment",
-  "CreditMemo",
-  "Bill",
-  "BillPayment",
-  "VendorCredit",
-])
+// Accepted by QuickBooks CDC in the sandbox. Excluded: TaxAgency and TaxClassification (the
+// provider fails with 4001), TaxPayment (5030 in US companies), Exchangerate (no entity IDs),
+// and CompanyInfo/Preferences (read directly).
+const CDC_ENTITIES = {
+  Account: true,
+  Attachable: true,
+  Budget: true,
+  Class: true,
+  CompanyCurrency: true,
+  Customer: true,
+  CustomerType: true,
+  Department: true,
+  Employee: true,
+  Item: true,
+  PaymentMethod: true,
+  TaxCode: true,
+  TaxRate: true,
+  Term: true,
+  Vendor: true,
+  Bill: true,
+  BillPayment: true,
+  CreditCardPaymentTxn: true,
+  CreditMemo: true,
+  Deposit: true,
+  Estimate: true,
+  InventoryAdjustment: true,
+  Invoice: true,
+  JournalEntry: true,
+  Payment: true,
+  Purchase: true,
+  PurchaseOrder: true,
+  RecurringTransaction: true,
+  RefundReceipt: true,
+  ReimburseCharge: true,
+  SalesReceipt: true,
+  TimeActivity: true,
+  Transfer: true,
+  VendorCredit: true,
+} as const satisfies Record<QuickBooksCdcEntity, true>
+const ENTITIES = new Set<string>(Object.keys(CDC_ENTITIES))
 const LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000
 
 export class QuickBooksCdcLimitError extends Error {
@@ -77,11 +104,13 @@ export function createCdcResource(http: QuickBooksReadHttp): QuickBooksCdcResour
             if (!entities.some((entity) => entity === key) || !Array.isArray(records))
               throw new Error("[SixbQuickBooks] CDC returned an unexpected entity or fault.")
             for (const record of records) {
+              // Recurring changes are wrapped under their template entity name.
+              const target = key === "RecurringTransaction" ? templateOf(record) : record
               if (
-                !isRecord(record) ||
-                typeof record.Id !== "string" ||
-                !record.Id.trim() ||
-                (record.status !== undefined && record.status !== "Deleted")
+                !isRecord(target) ||
+                typeof target.Id !== "string" ||
+                !target.Id.trim() ||
+                (target.status !== undefined && target.status !== "Deleted")
               )
                 throw new Error("[SixbQuickBooks] Invalid CDC record.")
             }
