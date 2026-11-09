@@ -1,5 +1,5 @@
-import type { Canvas, CanvasArrow, CanvasEnd, CanvasItem } from "@sixb/core/artifacts"
-import { ARTIFACT_LIMITS, CANVAS_TEXT_PIXELS } from "@sixb/core/artifacts"
+import type { Canvas, CanvasArrow, CanvasEnd, CanvasItem, CanvasNote } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, CANVAS_TEXT_PIXELS, canvasNoteFontSize } from "@sixb/core/artifacts"
 import type { Edge, Node } from "@xyflow/react"
 
 /** What a node on the board draws: one of the canvas's items, or an arrow's end at a point. */
@@ -122,7 +122,8 @@ function itemGraph(
 
 /**
  * The extent of every item with a size, for a picture of the whole canvas. Notes without a
- * height count as square, and texts as a line of their size, near enough for a thumbnail.
+ * height count as tall as their words, and texts as a line of their size, near enough for a
+ * thumbnail.
  */
 export function canvasExtent(canvas: Canvas): Box {
   let left = Number.POSITIVE_INFINITY
@@ -157,8 +158,27 @@ export function approximateBox(item: CanvasItem): Box | null {
       }
     }
     case "note":
-      return { x: item.x, y: item.y, width: item.w, height: item.h ?? item.w }
+      return { x: item.x, y: item.y, width: item.w, height: item.h ?? noteHeight(item) }
     default:
       return { x: item.x, y: item.y, width: item.w, height: item.h }
   }
+}
+
+/** Roughly how wide a character of a note's words is, against its type's size. */
+const NOTE_CHARACTER_WIDTH = 0.55
+
+/**
+ * How tall a note without a height draws: as many lines as its words take at its width, inside
+ * its padding, and never shorter than the least a note is. A thumbnail can't measure it.
+ */
+function noteHeight(note: CanvasNote): number {
+  const size = canvasNoteFontSize(note.w)
+
+  // The note's own padding: 1em on each side, 0.85em above and below.
+  const perLine = Math.max(1, Math.floor((note.w - size * 2) / (size * NOTE_CHARACTER_WIDTH)))
+  const lines = note.text
+    .split("\n")
+    .reduce((count, paragraph) => count + Math.max(1, Math.ceil(paragraph.length / perLine)), 0)
+
+  return Math.max(Math.min(note.w, 112), lines * size * 1.4 + size * 1.7)
 }
