@@ -822,6 +822,10 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(await session.artifacts.updatable(published.artifact.id)).toMatchObject({
         id: published.artifact.id,
       })
+      expect(await session.artifacts.get(published.artifact.id)).toMatchObject({
+        id: published.artifact.id,
+        createdAt: expect.any(Date),
+      })
       session.close()
     })
 

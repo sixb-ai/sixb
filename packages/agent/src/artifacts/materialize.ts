@@ -63,6 +63,8 @@ interface ManifestEntry {
    * another conversation, or the project's code. An update starts from it and keeps its changes.
    */
   readonly edited?: true
+  /** The requester reads it, through an object that holds it, and cannot change it. */
+  readonly readOnly?: true
 }
 
 /**
@@ -111,6 +113,11 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     return this.#entries.find((entry) => entry.id === artifactId)?.revision
   }
 
+  /** Whether the artifact was installed for the requester to read only. */
+  readOnly(artifactId: string): boolean {
+    return this.#entries.find((entry) => entry.id === artifactId)?.readOnly === true
+  }
+
   /** Where an artifact's copy is installed, as the agent names it; none when it is not. */
   directoryOf(artifactId: string): string | undefined {
     return this.#entries.find((entry) => entry.id === artifactId)?.directory
@@ -146,7 +153,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     published: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
-    options: { readonly edited?: boolean } = {}
+    options: { readonly edited?: boolean; readonly readOnly?: boolean } = {}
   ): Promise<string | undefined> {
     const update = this.#updates.then(() =>
       this.#replace(sandbox, published, files, signal, options)
@@ -163,7 +170,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     }: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
     files: readonly PublishedArtifactFile[],
     signal: AbortSignal,
-    options: { readonly edited?: boolean }
+    options: { readonly edited?: boolean; readonly readOnly?: boolean }
   ): Promise<string | undefined> {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
@@ -385,7 +392,10 @@ function manifestEntry(
   artifact: Pick<ArtifactRecord, "id" | "kind">,
   version: ArtifactVersionRecord,
   directory: string | undefined,
-  { edited = false }: { readonly edited?: boolean } = {}
+  {
+    edited = false,
+    readOnly = false,
+  }: { readonly edited?: boolean; readonly readOnly?: boolean } = {}
 ): ManifestEntry {
   // Only a frozen version is pinned: an open one changes with every update.
   const pinnedAt = version.frozenAt ? version.version : undefined
@@ -404,6 +414,7 @@ function manifestEntry(
     ...(directory === undefined ? {} : { directory }),
     files: version.files.map((file) => file.path),
     ...(edited ? { edited: true as const } : {}),
+    ...(readOnly ? { readOnly: true as const } : {}),
   }
 }
 

@@ -94,6 +94,7 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     session.threads.messages(input as Parameters<AgentRunSession["threads"]["messages"]>[0]),
   "artifacts.list": (session, [input]) =>
     session.artifacts.list(input as Parameters<AgentRunSession["artifacts"]["list"]>[0]),
+  "artifacts.get": (session, [artifactId]) => session.artifacts.get(artifactId as string),
   "artifacts.getVersion": (session, args) =>
     session.artifacts.getVersion(
       ...(args as Parameters<AgentRunSession["artifacts"]["getVersion"]>)

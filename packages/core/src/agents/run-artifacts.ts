@@ -53,6 +53,8 @@ import { conversationThreadId } from "./thread-access"
 export interface AgentRunArtifacts {
   /** The artifacts the conversation shares, most recently updated first. */
   list(input: { readonly limit: number }): Promise<readonly ArtifactRecord[]>
+  /** Any artifact the requester reads, such as one an object holds; `null` for another. */
+  get: ArtifactsRuntime["get"]
   getVersion: ArtifactsRuntime["getVersion"]
   listVersions: ArtifactsRuntime["listVersions"]
   query: ArtifactsRuntime["query"]
@@ -186,6 +188,7 @@ export function agentRunArtifacts(
       const [{ threadId }, { artifacts }] = await Promise.all([publisherOf(), sdk()])
       return (await artifacts.list({ threadId, limit })).artifacts
     },
+    get: async (...args) => (await sdk()).artifacts.get(...args),
     getVersion: async (...args) => (await sdk()).artifacts.getVersion(...args),
     listVersions: async (...args) => (await sdk()).artifacts.listVersions(...args),
     query: async (...args) => (await sdk()).artifacts.query(...args),

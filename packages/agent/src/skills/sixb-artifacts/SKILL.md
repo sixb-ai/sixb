@@ -93,6 +93,20 @@ install together, or its files could not be read. Rebuild it in a working direct
 in its `files`, then update it. An update keeps the artifact's kind; the title may change. Call
 `publish_artifact` again only for a different deliverable.
 
+## Artifacts that objects hold
+
+A project's object can hold an artifact in a property, such as a meeting's kick-off document,
+written `{"type":"artifact","id":"art_k3m9q2x7tp"}`. Whoever reads the object reads it, and whoever
+may edit the object may change it.
+
+- To read or revise one that `$SIXB_ARTIFACTS` does not list, call `open_artifact` with its id: it
+  installs its current version under `$SIXB_ARTIFACTS_DIR/<id>/` and publishes nothing. Its entry
+  says `"readOnly": true` when the user may only read it.
+- Revise one the user may change from that copy, as above; your update then shares it in this
+  conversation.
+- To attach one you published to an object, run the project's action that sets the property, with
+  the artifact's id in that shape. Say which object now holds it.
+
 ## Rules
 
 - A version holds at most 500 files, 25 MB per file, and 250 MB in all.

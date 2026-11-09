@@ -172,6 +172,7 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
     callTool: (toolCall, { signal, ...options }) => call("callTool", [toolCall, options], signal),
     artifacts: {
       list: (query) => call("artifacts.list", [query]),
+      get: (artifactId) => call("artifacts.get", [artifactId]),
       getVersion: (...args) => call("artifacts.getVersion", args),
       listVersions: (...args) => call("artifacts.listVersions", args),
       query: (...args) => call("artifacts.query", args),

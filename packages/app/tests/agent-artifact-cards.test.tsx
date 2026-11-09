@@ -15,6 +15,7 @@ import { AssistantBody } from "../src/agent/components/message-parts"
 import type { NormalizedPart, NormalizedTool } from "../src/agent/parts"
 import { turnArtifacts, unpublishedTitles } from "../src/agent/publish-artifact/interpret"
 import { PublishArtifactToolView } from "../src/agent/publish-artifact/publish-artifact-tool-view"
+import { builtInToolView } from "../src/agent/tool-views/built-in"
 import { versionChanges, versionSummary } from "../src/artifacts/card-details"
 import { documentOpening, previewColumns } from "../src/artifacts/card-preview"
 import { en as artifactsEn } from "../src/artifacts/messages"
@@ -125,6 +126,30 @@ describe("what a turn published", () => {
       "document.md shows the image &#x27;chart.svg&#x27;, which is not one of the artifact&#x27;s files."
     )
     expect(failed).not.toContain("[SixbAgentWorker]")
+  })
+})
+
+describe("an artifact the Agent opens", () => {
+  test("is a calm step once opened, and says why when it could not be", () => {
+    const opened: NormalizedTool = {
+      toolName: "open_artifact",
+      state: "output-available",
+      input: { id: "art_brief00001" },
+      output: { artifactId: "art_brief00001", title: "Kick-off", readOnly: true },
+    }
+    const refused: NormalizedTool = {
+      toolName: "open_artifact",
+      state: "output-error",
+      input: { id: "art_brief00001" },
+      errorText:
+        "[SixbAgent] open_artifact refused: there is no artifact 'art_brief00001' you can read.",
+    }
+
+    expect(render(builtInToolView(opened))).toContain("Opened Kick-off")
+    const failed = render(builtInToolView(refused))
+    expect(failed).toContain("Couldn&#x27;t open an artifact")
+    expect(failed).toContain("there is no artifact &#x27;art_brief00001&#x27; you can read.")
+    expect(failed).not.toContain("[SixbAgent]")
   })
 })
 

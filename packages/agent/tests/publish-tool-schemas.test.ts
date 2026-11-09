@@ -3,6 +3,7 @@ import { anthropicOutputSchema } from "../../../models/anthropic/src/structured-
 import { foundryOutputSchema } from "../../../models/azure-ai-foundry/src/structured-output"
 import { isStrictGatewaySchema } from "../../../models/vercel-ai-gateway/src/structured-output"
 import {
+  OPEN_ARTIFACT_TOOL_SPEC,
   PUBLISH_ARTIFACT_TOOL_SPEC,
   UPDATE_ARTIFACT_TOOL_SPEC,
 } from "../src/artifacts/publish-tool"
@@ -13,6 +14,7 @@ import {
 test.each([
   PUBLISH_ARTIFACT_TOOL_SPEC,
   UPDATE_ARTIFACT_TOOL_SPEC,
+  OPEN_ARTIFACT_TOOL_SPEC,
 ])("$name is strict for every model adapter", (spec) => {
   expect(isStrictGatewaySchema(spec.inputSchema)).toBe(true)
   expect(anthropicOutputSchema(spec.inputSchema)).toBeDefined()

@@ -13,6 +13,7 @@ import { dirname, join } from "node:path"
 import {
   AgentToolPublicError,
   AuthorizationError,
+  artifactRef,
   type BlobStorage,
   defineMarking,
   defineObjectType,
@@ -25,6 +26,7 @@ import {
   link,
   type Principal,
   prop,
+  ref,
   SixbHost,
 } from "@sixb/core"
 import { documentFiles } from "@sixb/core/artifacts/live"
@@ -76,6 +78,16 @@ const Invoice = defineObjectType({
     prop("paid", "double"),
   ],
   links: [link("customer", Customer, { cardinality: "one" })],
+})
+
+/** A brief holds the document it was written from. */
+const Brief = defineObjectType({
+  id: "Brief",
+  name: "Brief",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("doc", ref.artifact(), { nullable: true }),
+  ],
 })
 
 /** What reading the invoices takes. */
@@ -192,7 +204,7 @@ beforeEach(async () => {
   blobStorage = new InMemoryBlobStorage()
   host = new SixbHost({
     id: projectId,
-    ontology: [Customer, Invoice],
+    ontology: [Customer, Invoice, Brief],
     markings: [financial],
     storage,
     blobStorage,
@@ -247,12 +259,16 @@ type ToolOptions = {
 
 /** What a run installs in its sandbox before it publishes. */
 function install(
-  options: { readonly maxBytes?: number; readonly requester?: Principal } = {}
+  options: {
+    readonly maxBytes?: number
+    readonly requester?: Principal
+    readonly grants?: Partial<GrantIndex>
+  } = {}
 ): Promise<InstalledArtifacts> {
-  const { requester, ...rest } = options
+  const { requester, grants, ...rest } = options
   return materializeThreadArtifacts({
     threadId: run.threadId,
-    artifacts: runArtifactsFor({ user: requester ?? owner }),
+    artifacts: runArtifactsFor({ user: requester ?? owner, ...(grants ? { grants } : {}) }),
     blobStorage,
     directory: ".sixb/agent/artifacts",
     manifestPath: ".sixb/agent/context/artifacts.json",
@@ -336,7 +352,7 @@ const canvasCheck: Check = (output) => {
 }
 
 function tools(options: ToolOptions = {}) {
-  const [create, version] = createPublishArtifactTools({
+  const [create, version, open] = createPublishArtifactTools({
     artifacts: runArtifactsFor({ ...options, user: options.author ?? owner }),
     threadId: (options.run ?? run).threadId,
     owner,
@@ -348,7 +364,13 @@ function tools(options: ToolOptions = {}) {
     }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
   })
-  return { create, version }
+  return { create, version, open }
+}
+
+/** `open_artifact`: installs one the conversation does not list. */
+async function openArtifact(id: string, options?: ToolOptions): Promise<JsonValue> {
+  const { open } = tools(options)
+  return open.execute(open.parseInput({ id }), context)
 }
 
 /** `publish_artifact`: a new artifact. */
@@ -364,6 +386,17 @@ async function publishVersion(
 ): Promise<JsonValue> {
   const { version } = tools(options)
   return version.execute(version.parseInput(input), context)
+}
+
+/** A Markdown file, stored. */
+function documentFile(markdown: string) {
+  const body = new TextEncoder().encode(markdown)
+  return blobStorage.put({
+    body,
+    expectedSizeBytes: body.byteLength,
+    fileName: "document.md",
+    mediaType: "text/markdown",
+  })
 }
 
 function read(path: string): string {
@@ -826,13 +859,116 @@ describe("publish_artifact", () => {
     expect(await readerFor(bob).access(artifactId)).toBe("none")
 
     // Revising it in a conversation Bob takes part in shows it to him, with its history: that is
-    // how a conversation starts sharing an artifact.
-    await publishVersion({ id: artifactId, path: "work/notes", title: "Notes" })
+    // how a conversation starts sharing an artifact. The turn opens it first, never writing blind.
+    const installed = install()
+    const blind = await publishVersion(
+      { id: artifactId, path: "work/notes", title: "Notes" },
+      { installed }
+    ).catch((error: unknown) => tools().version.errorText(error))
+    expect(blind).toBe(
+      `[SixbAgent] update_artifact refused: artifact '${artifactId}' is not open in this conversation, so nothing was published: call open_artifact with its id, then revise its copy and update it.`
+    )
+
+    expect(await openArtifact(artifactId, { installed })).toMatchObject({
+      artifactId,
+      revision: 1,
+      readOnly: false,
+    })
+    expect(read(`.sixb/agent/artifacts/${artifactId}/document.md`)).toBe("# Notes\n\nPrivate.\n")
+    expect(await readerFor(bob).access(artifactId)).toBe("none")
+
+    await publishVersion({ id: artifactId, path: "work/notes", title: "Notes" }, { installed })
     expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
       run.threadId,
       ownersThread.threadId,
     ])
     expect(await readerFor(bob).access(artifactId)).toBe("update")
+  })
+
+  // Guard proof: drop the refusal of an artifact the manifest does not list from publish(); the
+  // turn then writes over Carol's brief without having read it.
+  test("revises an artifact an object its requester edits holds, from what it holds", async () => {
+    const carol = { type: "user", id: "usr_carol" } as const
+    const editor = { "view:object": new Set([Brief.id]), "edit:object": new Set([Brief.id]) }
+    const { artifact } = await readerFor(carol).create({
+      kind: "document",
+      title: "Brief",
+      files: [{ path: "document.md", file: await documentFile("# Brief\n\nCarol's.\n") }],
+    })
+    await createTestSixb(host)
+      .objects(Brief)
+      .upsert({ properties: { id: "b1", doc: artifactRef(artifact.id) } })
+
+    const installed = install()
+    write("work/brief/document.md", "# Brief\n\nWritten blind.\n")
+    const blind = await publishVersion(
+      { id: artifact.id, path: "work/brief", title: "Brief" },
+      { installed, grants: editor }
+    ).catch((error: unknown) => tools().version.errorText(error))
+    expect(blind).toContain("is not open in this conversation")
+    expect((await storage.artifacts.get({ projectId, id: artifact.id }))?.revision).toBe(1)
+
+    expect(await openArtifact(artifact.id, { installed, grants: editor })).toMatchObject({
+      title: "Brief",
+      readOnly: false,
+      directory: `.sixb/agent/artifacts/${artifact.id}`,
+    })
+    const copy = `.sixb/agent/artifacts/${artifact.id}/document.md`
+    write(copy, "# Brief\n\nCarol's, revised.\n")
+    expect(
+      await publishVersion(
+        { id: artifact.id, path: `.sixb/agent/artifacts/${artifact.id}`, title: "Brief" },
+        { installed, grants: editor }
+      )
+    ).toMatchObject({ artifactId: artifact.id, revision: 2 })
+    expect(await storage.artifacts.listThreadIds({ projectId, id: artifact.id })).toEqual([
+      run.threadId,
+    ])
+  })
+
+  // Guard proof: install every opened artifact as changeable in `open` (publish-tool.ts); the
+  // manifest then offers Carol's brief for revision, and the update is refused as if it were gone.
+  test("opens to read an artifact an object its requester reads holds, and changes nothing", async () => {
+    const carol = { type: "user", id: "usr_carol" } as const
+    const reader = { "view:object": new Set([Brief.id]) }
+    const { artifact } = await readerFor(carol).create({
+      kind: "document",
+      title: "Brief",
+      files: [{ path: "document.md", file: await documentFile("# Brief\n\nCarol's.\n") }],
+    })
+    await createTestSixb(host)
+      .objects(Brief)
+      .upsert({ properties: { id: "b1", doc: artifactRef(artifact.id) } })
+
+    const installed = install()
+    const opened = await openArtifact(artifact.id, { installed, grants: reader })
+    expect(opened).toMatchObject({ artifactId: artifact.id, title: "Brief", readOnly: true })
+    expect(await tools().open.toModelOutput?.(opened, context)).toEqual({
+      type: "text",
+      value: `Opened "Brief": artifact ${artifact.id}, version 1 at revision 1, installed under .sixb/agent/artifacts/${artifact.id}/. The user may read it but not change it: do not update it.`,
+    })
+    expect(read(`.sixb/agent/artifacts/${artifact.id}/document.md`)).toBe("# Brief\n\nCarol's.\n")
+    expect(JSON.parse(read(".sixb/agent/context/artifacts.json")).artifacts).toEqual([
+      expect.objectContaining({ id: artifact.id, revision: 1, edited: true, readOnly: true }),
+    ])
+
+    // Updating it from there is refused as a reader's change, and nothing shares it.
+    const refused = await publishVersion(
+      { id: artifact.id, path: `.sixb/agent/artifacts/${artifact.id}`, title: "Brief" },
+      { installed, grants: reader }
+    ).catch((error: unknown) => tools().version.errorText(error))
+    expect(refused).toBe(
+      `[SixbAgent] update_artifact refused: you can read artifact '${artifact.id}' but not change it, so nothing was published.`
+    )
+    expect(await storage.artifacts.listThreadIds({ projectId, id: artifact.id })).toEqual([])
+
+    // One the requester cannot read, or that does not exist, opens nothing.
+    const unread = await openArtifact(artifact.id).catch((error: unknown) =>
+      tools().open.errorText(error)
+    )
+    expect(unread).toBe(
+      `[SixbAgent] open_artifact refused: there is no artifact '${artifact.id}' you can read.`
+    )
   })
 
   // Guard proof: let `updatableArtifact` accept "read"; the observer's turn then reads the sandbox
@@ -846,13 +982,14 @@ describe("publish_artifact", () => {
       title: "Q3 review",
     })) as { artifactId: string }
 
+    const observes = { "observe:agentThreads": true }
     const [, version] = createPublishArtifactTools({
-      artifacts: runArtifactsFor({ user: olivia, grants: { "observe:agentThreads": true } }),
+      artifacts: runArtifactsFor({ user: olivia, grants: observes }),
       threadId: run.threadId,
       owner,
       blobStorage,
       budget: new AgentFileBudget(),
-      installed: install({ requester: olivia }),
+      installed: install({ requester: olivia, grants: observes }),
       resolveSandbox: async () => ({
         sandbox: sandbox(),
         contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
