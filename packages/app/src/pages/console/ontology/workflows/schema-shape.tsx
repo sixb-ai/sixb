@@ -9,6 +9,7 @@ import {
   FileText,
   Fingerprint,
   Hash,
+  Layers,
   List,
   Paperclip,
   Tag,
@@ -171,6 +172,8 @@ function describePrimitive(primitive: string): DescribedSchema {
       return { label: "file", icon: Paperclip }
     case "userRef":
       return { label: "user", icon: UserRound }
+    case "artifactRef":
+      return { label: "artifact", icon: Layers }
     default:
       return { label: primitive, icon: FileText, iconClass: "text-muted-foreground" }
   }

@@ -28,6 +28,7 @@ export type ActionParamInputDescriptor =
   | { kind: "boolean" }
   | { kind: "fileRef" }
   | { kind: "userRef" }
+  | { kind: "artifactRef" }
   | { kind: "json" }
   | { kind: "enum"; values: readonly unknown[]; valueType: "string" | "integer" }
   | { kind: "objectRef"; objectTypeId: string }
@@ -119,6 +120,7 @@ export function describeActionParamInput(schema: unknown): ActionParamInputDescr
     return { kind: "fileRef" }
   }
   if (resolved === "userRef") return { kind: "userRef" }
+  if (resolved === "artifactRef") return { kind: "artifactRef" }
   if (isRecord(resolved)) {
     if (resolved.type === "objectRef" && typeof resolved.objectTypeId === "string") {
       return { kind: "objectRef", objectTypeId: resolved.objectTypeId }
@@ -157,6 +159,7 @@ function parseObjectActionParamValue(param: ObjectActionParam, rawValue: string)
     return fileRef
   }
   if (param.type === "userRef") return userRefFromId(rawValue)
+  if (param.type === "artifactRef") return artifactRefFromId(rawValue)
   return rawValue
 }
 
@@ -198,6 +201,8 @@ function parseActionParamValue(param: ActionParam, rawValue: string): unknown {
       return { objectTypeId: input.objectTypeId, primaryId: rawValue }
     case "userRef":
       return userRefFromId(rawValue)
+    case "artifactRef":
+      return artifactRefFromId(rawValue)
     case "text":
       return rawValue
   }
@@ -206,6 +211,11 @@ function parseActionParamValue(param: ActionParam, rawValue: string): unknown {
 /** The form holds a user id; the request carries the reference. */
 function userRefFromId(id: string): { type: "user"; id: string } {
   return { type: "user", id }
+}
+
+/** The form holds an artifact id, as the picker chose it; the request carries the reference. */
+function artifactRefFromId(id: string): { type: "artifact"; id: string } {
+  return { type: "artifact", id }
 }
 
 function parseIntegerEnumValue(rawValue: string, values: readonly unknown[]): number {

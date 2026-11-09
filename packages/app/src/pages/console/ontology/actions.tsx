@@ -58,6 +58,7 @@ import {
 import { CardSkeleton, CountSkeleton } from "../skeletons"
 import { ActionRuns } from "./action-runs"
 import { ActionParamNullControl } from "./components/action-param-null-control"
+import { ArtifactPicker } from "./components/artifact-picker"
 import { CollectionToolbar } from "./components/collection-toolbar"
 import {
   FileRefUploadField,
@@ -707,6 +708,15 @@ function ActionParamFields({
                 disabled={fieldDisabled}
                 placeholder='{"objectTypeId":"Customer","primaryId":"cus_1"}'
                 className="min-h-24 font-mono text-xs"
+              />
+            ) : input.kind === "artifactRef" ? (
+              <ArtifactPicker
+                id={fieldId}
+                value={value}
+                onChange={(artifactId) => onChange(param.id, artifactId)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+                aria-describedby={errors[param.id] ? `${fieldId}-error` : undefined}
               />
             ) : input.kind === "userRef" ? (
               <UserPicker

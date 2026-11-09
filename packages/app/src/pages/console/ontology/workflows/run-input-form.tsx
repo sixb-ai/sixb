@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@sixb/ui/components"
 import { useInfiniteQuery } from "@tanstack/react-query"
+import { ArtifactPicker } from "../components/artifact-picker"
 import {
   FileRefUploadField,
   parseFileRefFormValue,
@@ -258,6 +259,17 @@ function WorkflowInputControl({
         id={id}
         value={value}
         onChange={(userId) => onChange(path, userId)}
+        aria-describedby={errorId}
+      />
+    )
+  }
+
+  if (schema === "artifactRef") {
+    return (
+      <ArtifactPicker
+        id={id}
+        value={value}
+        onChange={(artifactId) => onChange(path, artifactId)}
         aria-describedby={errorId}
       />
     )
@@ -602,6 +614,11 @@ function parseFieldValue({
     // The field holds a user id; the input carries the reference.
     if (schema === "userRef") return { present: true, value: { type: "user", id: trimmed } }
 
+    // The field holds an artifact id, as the picker chose it; the input carries the reference.
+    if (schema === "artifactRef") {
+      return { present: true, value: { type: "artifact", id: trimmed } }
+    }
+
     if (schema === "timestamp") {
       const timestamp = new Date(trimmed)
       if (Number.isNaN(timestamp.getTime())) {
@@ -752,7 +769,7 @@ function initialFormValueForSchema(schema: unknown, value: unknown): string | nu
     return isFileRef(value) ? JSON.stringify(value) : null
   }
 
-  if (schema === "userRef") {
+  if (schema === "userRef" || schema === "artifactRef") {
     return isRecord(value) && typeof value.id === "string" ? value.id : null
   }
 
@@ -829,6 +846,7 @@ type PrimitiveSchema =
   | "uuid"
   | "fileRef"
   | "userRef"
+  | "artifactRef"
 
 type EnumSchema = {
   readonly type: "enum"
@@ -873,7 +891,8 @@ function isPrimitiveSchema(value: unknown): value is PrimitiveSchema {
     value === "timestamp" ||
     value === "uuid" ||
     value === "fileRef" ||
-    value === "userRef"
+    value === "userRef" ||
+    value === "artifactRef"
   )
 }
 

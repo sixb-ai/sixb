@@ -33,6 +33,7 @@ import {
   buildObjectActionParams,
 } from "../lib/action-params"
 import { ActionParamNullControl } from "./action-param-null-control"
+import { ArtifactPicker } from "./artifact-picker"
 import {
   FileRefUploadField,
   parseFileRefFormValue,
@@ -203,6 +204,15 @@ function ActionParamsDialog({
                     logicalPathPrefix={`actions/${actionId}/${key}`}
                     disabled={fieldDisabled}
                     onPendingChange={(pending) => handleFileUploadPendingChange(key, pending)}
+                  />
+                ) : def.type === "artifactRef" ? (
+                  <ArtifactPicker
+                    id={`action-param-${key}`}
+                    value={value}
+                    onChange={(artifactId) => setParamValue(key, artifactId)}
+                    required={fieldRequired}
+                    disabled={fieldDisabled}
+                    aria-describedby={errors[key] ? `action-param-${key}-error` : undefined}
                   />
                 ) : def.type === "userRef" ? (
                   <UserPicker
