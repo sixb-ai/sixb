@@ -3,6 +3,7 @@
 
 import type { Canvas, CanvasArrow, CanvasBoard as CanvasBoardItem } from "@sixb/core/artifacts"
 import { CANVAS_FIT_PADDING } from "@sixb/core/artifacts"
+import { cn } from "@sixb/ui/lib/utils"
 import {
   Background,
   BackgroundVariant,
@@ -28,6 +29,7 @@ import {
 import type { LiveArtifact } from "../../live/session"
 import { useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
+import type { ArtifactThemeAttributes } from "../../theme"
 import { useArtifactView } from "../../view-context"
 import { CANVAS_EDGE_TYPES } from "./arrows"
 import { LiveBoardsProvider, useLiveSet } from "./board"
@@ -58,6 +60,7 @@ export default memo(function CanvasBoard({
   focus,
   edit,
   live,
+  theme,
 }: {
   readonly canvas: Canvas
   /** The version the canvas is, whose frames its boards run in; none draws boards as tiles. */
@@ -74,6 +77,11 @@ export default memo(function CanvasBoard({
   readonly edit?: CanvasEditor
   /** The live artifact the canvas is drawn from: who else is on it shows over it. */
   readonly live?: LiveArtifact
+  /**
+   * The artifact's own theme, for the board alone: its comments beside it are the app's, and keep
+   * the app's mode.
+   */
+  readonly theme?: ArtifactThemeAttributes
 }) {
   return (
     <ReactFlowProvider>
@@ -85,6 +93,7 @@ export default memo(function CanvasBoard({
         {...(focus ? { focus } : {})}
         {...(edit ? { edit } : {})}
         {...(live ? { liveArtifact: live } : {})}
+        {...(theme ? { theme } : {})}
       />
     </ReactFlowProvider>
   )
@@ -98,6 +107,7 @@ function Board({
   focus,
   edit,
   liveArtifact,
+  theme,
 }: {
   readonly canvas: Canvas
   readonly version?: ArtifactVersion
@@ -106,6 +116,7 @@ function Board({
   readonly focus?: string
   readonly edit?: CanvasEditor
   readonly liveArtifact?: LiveArtifact
+  readonly theme?: ArtifactThemeAttributes
 }) {
   const messages = useArtifactMessages().canvas
   const boards = useMemo(
@@ -326,7 +337,13 @@ function Board({
         if (id && boards.some((board) => board.id === id)) live.open(id)
       }}
     >
-      <div className="relative h-full min-w-0 flex-1">
+      <div
+        className={cn(
+          "relative h-full min-w-0 flex-1 bg-background text-foreground",
+          theme?.className
+        )}
+        style={theme?.style}
+      >
         <LiveBoardsProvider value={live}>
           <CanvasEditingProvider value={board.editing ? board.items : null}>
             <ReactFlow

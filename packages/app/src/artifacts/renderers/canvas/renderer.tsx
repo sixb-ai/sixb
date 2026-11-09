@@ -1,6 +1,5 @@
 import { CANVAS_FILE, type Canvas, parseCanvas } from "@sixb/core/artifacts"
 import { useOptionalTheme } from "@sixb/ui/hooks"
-import { cn } from "@sixb/ui/lib/utils"
 import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useArtifactEditing, useReportDraft } from "../../edit-session"
 import { type History, recordChange, redoChange, startHistory, undoChange } from "../../history"
@@ -82,11 +81,7 @@ export function CanvasRenderer({
   if (canvas === undefined) return loading
   if (canvas === null) return <ViewerNotice title={messages.canvas.loadFailed} />
   return (
-    <div
-      data-sixb-artifact=""
-      className={cn("flex min-h-0 flex-1 flex-col", theme.className)}
-      style={theme.style}
-    >
+    <div data-sixb-artifact="" className="flex min-h-0 flex-1 flex-col">
       <Suspense fallback={loading}>
         <CanvasBoard
           canvas={draft.canvas ?? canvas}
@@ -95,6 +90,7 @@ export function CanvasRenderer({
           version={version}
           title={version.title}
           mode={mode}
+          theme={theme}
           {...(part ? { focus: part } : {})}
         />
       </Suspense>
