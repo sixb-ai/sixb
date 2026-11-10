@@ -96,11 +96,13 @@ describe("messagesStrictTools", () => {
 })
 
 test("isStrictToolLimitError knows Anthropic's refusals of strict tools, and only those", () => {
+  // As Anthropic sent them, November 2026; the grammar one is the documented wording.
   for (const message of [
-    "The compiled grammar is too large, which would cause performance issues.",
-    "Too many strict tools (21). The maximum number of strict tools supported is 20.",
-    "Schemas contains too many parameters with union types (17 parameters with type arrays or anyOf).",
+    "Too many strict tools (21). The maximum number of strict tools supported is 20. Try reducing the number of tools marked as strict.",
+    "Schemas contains too many optional parameters (25), which would make grammar compilation inefficient. Reduce the number of optional parameters in your tool schemas (limit: 24).",
+    "Schemas contains too many parameters with union types (17 parameters with type arrays or anyOf). This causes exponential compilation cost. Reduce the number of nullable or union-typed parameters (limit: 16 parameters with unions).",
     "Schema is too complex for compilation.",
+    "The compiled grammar is too large, which would cause performance issues.",
   ]) {
     expect(isStrictToolLimitError({ status: 400, message })).toBe(true)
   }
