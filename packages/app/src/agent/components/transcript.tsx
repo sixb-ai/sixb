@@ -27,7 +27,7 @@ import {
 import { heldInCard } from "../delegation/model"
 import { useAgentMessages } from "../i18n"
 import { principalKey } from "../message-authors"
-import { openQuestionMessageKey } from "../questions/interpret"
+import { openQuestion } from "../questions/interpret"
 import { type QuestionTurn, QuestionTurnContext } from "../questions/question-card"
 import { CONTEXT_LIMIT_EXCEEDED } from "../run-presentation"
 import { ApprovalCards } from "./approval-card"
@@ -77,8 +77,8 @@ export interface TranscriptProps {
    */
   readonly background?: TranscriptBackground
   /**
-   * Send the reader's answer to the Agent's questions as their next message. Without it, as for an
-   * observer, the question cards only read.
+   * Send the reader's answer to the Agent's questions as their next message: the composer becomes
+   * the question. Without it, as for an observer, the question reads as waiting.
    */
   readonly onAnswer?: (text: string) => void
 }
@@ -180,11 +180,8 @@ function TranscriptView({
     : lastKey(messages, (message) => message.status === "pending")
   const newestSavedKey = lastKey(messages, (message) => message.id !== null)
   // The reply whose questions are the conversation's last word, which its cards answer.
-  const openQuestionKey = openQuestionMessageKey(messages, turn)
-  const openQuestion = useMemo(
-    () => ({ open: true, ...(onAnswer ? { answer: onAnswer } : {}) }),
-    [onAnswer]
-  )
+  const openQuestionKey = openQuestion(messages, turn)?.messageKey ?? null
+  const asking = useMemo(() => ({ open: true, answering: onAnswer !== undefined }), [onAnswer])
 
   // A call is answered on the card under the work that made it. One whose command output does not
   // name it, such as output sent elsewhere, still gets a card, after its turn's saved answer, and
@@ -251,7 +248,7 @@ function TranscriptView({
                 <Fragment key={message.key}>
                   {index === trailingAt ? trailingCards : null}
                   <QuestionTurnContext.Provider
-                    value={message.key === openQuestionKey ? openQuestion : CLOSED_QUESTION}
+                    value={message.key === openQuestionKey ? asking : CLOSED_QUESTION}
                   >
                     <TranscriptMessage
                       message={message}

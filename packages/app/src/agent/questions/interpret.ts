@@ -59,22 +59,30 @@ export function answerText(
   return answered.map(({ question, answer }) => `${question} ${answer}`).join("\n")
 }
 
+/** The questions the conversation's last word asks the user, and the reply that asked them. */
+export interface OpenQuestion {
+  readonly messageKey: string
+  readonly questions: readonly AskedQuestion[]
+}
+
 /**
- * The message whose question still waits for the user: the conversation's last message, a reply
- * that asked, once its turn ended. A later message answers it, and a running turn has not asked
- * yet.
+ * What still waits for the user: the questions of the conversation's last message, a reply that
+ * asked, once its turn ended. A later message answers it, and a running turn has not asked yet.
  */
-export function openQuestionMessageKey(
+export function openQuestion(
   messages: readonly AgentConversationMessage[],
   turn: AgentConversationTurn
-): string | null {
+): OpenQuestion | null {
   if (turn.kind === "responding") return null
   const last = messages.at(-1)
   if (last?.role !== "assistant") return null
-  const asked = last.parts.some(
+  const asked = last.parts.filter(
     (part) => part.type === "tool" && part.toolName === "ask" && part.state === "output-available"
   )
-  return asked ? last.key : null
+  const questions = asked.flatMap((part) =>
+    part.type === "tool" ? askedQuestions(part.input) : []
+  )
+  return questions.length > 0 ? { messageKey: last.key, questions } : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
