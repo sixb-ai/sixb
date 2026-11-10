@@ -92,7 +92,7 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   before its next step, or answers again when it came as it answered, and `wait_agent` lists in
   `unread` what a child has not read, which a paused child reads if it continues (see
   [messages to a child](../agent/docs/runtime-design.md#messages-to-a-child)). Children get
-  `ask_parent`, which waits for the parent's answer: `wait_agent` returns as soon as a child of
+  `ask`, which waits for the parent's answer: `wait_agent` returns as soon as a child of
   the turn asks, with its question in `questions`, and `message_agent` to that child is the
   answer. Before a turn records its end, each child still waiting pauses `awaiting_answer`, the
   next turn reads which children wait, and its `message_agent` to the key continues it with the

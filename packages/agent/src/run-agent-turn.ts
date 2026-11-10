@@ -19,6 +19,7 @@ import {
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
+import { stepAskedUser } from "./ask-tool"
 import { createAgentContextGuard } from "./context-guard"
 import { conversationModelMessages, conversationModelSettings } from "./conversation-messages"
 import { AgentContextCompactionError, throwIfExecutionLost } from "./errors"
@@ -245,6 +246,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   try {
     let chunkIndex = 0
     let result: PausableModelLoopResult
+    let askedUser = false
     try {
       result = await runModelLoop({
         model: plan.model,
@@ -276,8 +278,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         },
         // The approval records decide, never the tool output: the model can send a command's
         // output elsewhere, or print one of its own. A held call waits for the children still
-        // at work: pausing ends the turn, and that would cancel them.
-        pauseAfterStep: () => input.session.heldCalls.pausesAfterStep(),
+        // at work: pausing ends the turn, and that would cancel them. A question to the user ends
+        // the turn too: the answer is the user's next message.
+        pauseAfterStep: async (step) => {
+          if (stepAskedUser(step)) askedUser = true
+          return (await input.session.heldCalls.pausesAfterStep()) || askedUser
+        },
       })
     } catch (error) {
       const interrupted = await finalizeIfInterrupted(error)
@@ -340,10 +346,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     const interruptedWhileWaiting = await finalizeIfInterrupted()
     if (interruptedWhileWaiting) return interruptedWhileWaiting
 
+    // A turn that stopped on its question alone simply ends: nothing waits for a decision.
+    const held = await input.session.heldCalls.holdsRun()
     const finishReason =
-      result.status === "paused" || (await input.session.heldCalls.holdsRun())
+      held || (result.status === "paused" && !askedUser)
         ? "awaiting_approval"
-        : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
+        : result.status === "paused"
+          ? "stop"
+          : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
     const diagnostics = [
       outputLimitDiagnostic(finishReason),

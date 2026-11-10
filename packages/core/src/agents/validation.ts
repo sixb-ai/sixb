@@ -19,6 +19,8 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "spawn_agent",
   "wait_agent",
   "message_agent",
+  "ask",
+  // What `ask` was called for a sub-agent: earlier threads hold calls to it.
   "ask_parent",
   "publish_artifact",
   "update_artifact",

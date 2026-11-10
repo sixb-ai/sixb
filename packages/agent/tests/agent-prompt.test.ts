@@ -435,23 +435,21 @@ describe("agent system prompt", () => {
   })
 
   test("tells a child when to ask its parent, and the Agent how to answer it", () => {
-    // Removal proof: drop the ask_parent rule from SUBAGENT_RULES, or the question rule from
+    // Removal proof: drop the ask rule from SUBAGENT_RULES, or the question rule from
     // CONVERSATION_RULES; its line fails.
     const child = renderPrompt({ mode: "subagent", skills: [] })
     const parent = renderPrompt({ mode: "conversation", skills: [] })
 
     expect(child).toContain(
-      "When an ambiguity blocks your task and only your parent or the user can settle it, ask your parent with ask_parent"
+      "When an ambiguity blocks your task and only your parent or the user can settle it, ask your parent with ask"
     )
     expect(child).toContain("otherwise make a reasonable assumption, say it in your result")
     expect(child).toContain("continue later with its answer as a <sixb_parent_answer> block")
     expect(parent).toContain(
       "Answer it with message_agent and its key from what you know, the conversation and the project's data"
     )
-    expect(parent).toContain(
-      "Only when the answer is the user's to give, ask the user in your answer and end your turn"
-    )
-    expect(parent).not.toContain("ask_parent")
+    expect(parent).toContain("Only when the answer is the user's to give, ask the user with ask")
+    expect(parent).not.toContain("ask your parent")
   })
 
   test("tells the Agent when to delegate and when one generation is enough", () => {
