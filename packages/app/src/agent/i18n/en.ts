@@ -466,6 +466,20 @@ export const en = {
     failed: (name: string) => `Couldn't view ${name || "a file"}`,
     open: (name: string) => `Open ${name}`,
   },
+  /** The Agent's questions to the user, from its `ask` tool. */
+  questions: {
+    card: (count: number): string =>
+      count === 1 ? "The agent's question" : "The agent's questions",
+    asked: "Asked you",
+    /** For someone who reads the conversation but cannot answer in it. */
+    waiting: "Waiting for an answer",
+    running: "Asking you",
+    send: "Send answer",
+    sending: "Sending…",
+    pickAny: "Pick any",
+    typeAnswer: "Type an answer",
+    typeOther: "Or type another answer",
+  },
   /** The edit tool, for a change to part of a file (`name` may be empty). */
   edit: {
     title: (name: string) => `Edited ${name || "a file"}`,

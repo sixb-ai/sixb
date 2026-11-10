@@ -2,6 +2,7 @@ import type { AgentChild } from "@sixb/client"
 import { type AgentConversationMessage, normalizedTool } from "../conversation"
 import type { AgentMessages } from "../i18n/en"
 import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
+import { askedText, isAskTool } from "../questions/interpret"
 
 // What the parent's own parts say about the sub-agents it delegated to: which it spawned, what it
 // told or answered each, and what each asked. A reader of the thread always has them, even without
@@ -273,14 +274,13 @@ export function childTitle(key: string): string {
   return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : key
 }
 
-/** The question a child at work waits on, from its live parts: its `ask_parent` call in flight. */
+/** The question a child at work waits on, from its live parts: its `ask` call in flight. */
 export function liveQuestion(parts: readonly NormalizedPart[]): string | null {
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index]
-    if (part?.kind !== "tool" || part.tool.toolName !== "ask_parent") continue
+    if (part?.kind !== "tool" || !isAskTool(part.tool.toolName)) continue
     if (part.tool.state !== "input-available") return null
-    const input = isRecord(part.tool.input) ? part.tool.input : {}
-    return typeof input.question === "string" ? input.question.trim() : null
+    return askedText(part.tool.input) || null
   }
   return null
 }
@@ -330,10 +330,8 @@ export function describeDelegationTool(
     }
   }
 
-  if (tool.toolName === "ask_parent") {
-    const input = isRecord(tool.input) ? tool.input : {}
-    const question = typeof input.question === "string" ? input.question.trim() : ""
-    return { title: labels.askedAgent(question), running: labels.states.asking }
+  if (isAskTool(tool.toolName)) {
+    return { title: labels.askedAgent(askedText(tool.input)), running: labels.states.asking }
   }
 
   if (tool.toolName === "wait_agent") {

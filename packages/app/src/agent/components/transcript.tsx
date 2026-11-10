@@ -27,6 +27,8 @@ import {
 import { heldInCard } from "../delegation/model"
 import { useAgentMessages } from "../i18n"
 import { principalKey } from "../message-authors"
+import { openQuestionMessageKey } from "../questions/interpret"
+import { type QuestionTurn, QuestionTurnContext } from "../questions/question-card"
 import { CONTEXT_LIMIT_EXCEEDED } from "../run-presentation"
 import { ApprovalCards } from "./approval-card"
 import {
@@ -74,9 +76,17 @@ export interface TranscriptProps {
    * that started it. Without it, a command its turn no longer runs reads as last seen running.
    */
   readonly background?: TranscriptBackground
+  /**
+   * Send the reader's answer to the Agent's questions as their next message. Without it, as for an
+   * observer, the question cards only read.
+   */
+  readonly onAnswer?: (text: string) => void
 }
 
 const NO_OUTCOMES: ReadonlyMap<string, ReportedApprovalOutcome> = new Map()
+
+/** A reply whose questions the conversation has moved past. */
+const CLOSED_QUESTION: QuestionTurn = { open: false }
 
 /** Nothing said of where the commands run: no card claims how one ended that nobody saw. */
 const UNKNOWN_BACKGROUND: TranscriptBackground = {
@@ -143,6 +153,7 @@ function TranscriptView({
   onNewThread,
   approvals,
   moved,
+  onAnswer,
 }: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
   // Messages one person sends in a row name them once; an answer in between names them again.
   const continuedKeys = useMemo(() => continuedUserMessages(messages), [messages])
@@ -168,6 +179,12 @@ function TranscriptView({
     ? currentTurnAnchor(messages, turn.kind === "responding" ? turn.runId : liveReply?.runId)
     : lastKey(messages, (message) => message.status === "pending")
   const newestSavedKey = lastKey(messages, (message) => message.id !== null)
+  // The reply whose questions are the conversation's last word, which its cards answer.
+  const openQuestionKey = openQuestionMessageKey(messages, turn)
+  const openQuestion = useMemo(
+    () => ({ open: true, ...(onAnswer ? { answer: onAnswer } : {}) }),
+    [onAnswer]
+  )
 
   // A call is answered on the card under the work that made it. One whose command output does not
   // name it, such as output sent elsewhere, still gets a card, after its turn's saved answer, and
@@ -233,38 +250,42 @@ function TranscriptView({
               return (
                 <Fragment key={message.key}>
                   {index === trailingAt ? trailingCards : null}
-                  <TranscriptMessage
-                    message={message}
-                    continued={continuedKeys.has(message.key)}
-                    scrollAnchor={message.key === anchoredKey}
-                    // Only the newest answer can be continued; older ones keep their notice alone.
-                    {...(message.key === newestSavedKey && onContinue
-                      ? { onContinue, continuing: turn.continuing }
-                      : {})}
-                    {...(message === liveReply
-                      ? {
-                          after: (
-                            <TurnEnd
-                              turn={turn}
-                              message={message}
-                              onRetry={onRetry}
-                              onContinue={onContinue}
-                            />
-                          ),
-                        }
-                      : message.unfinished
+                  <QuestionTurnContext.Provider
+                    value={message.key === openQuestionKey ? openQuestion : CLOSED_QUESTION}
+                  >
+                    <TranscriptMessage
+                      message={message}
+                      continued={continuedKeys.has(message.key)}
+                      scrollAnchor={message.key === anchoredKey}
+                      // Only the newest answer can be continued; older ones keep their notice alone.
+                      {...(message.key === newestSavedKey && onContinue
+                        ? { onContinue, continuing: turn.continuing }
+                        : {})}
+                      {...(message === liveReply
                         ? {
                             after: (
-                              <UnfinishedMarker
-                                unfinished={message.unfinished}
-                                {...(message.key === newestSavedKey && onContinue
-                                  ? { onContinue, continuing: turn.continuing }
-                                  : {})}
+                              <TurnEnd
+                                turn={turn}
+                                message={message}
+                                onRetry={onRetry}
+                                onContinue={onContinue}
                               />
                             ),
                           }
-                        : {})}
-                  />
+                        : message.unfinished
+                          ? {
+                              after: (
+                                <UnfinishedMarker
+                                  unfinished={message.unfinished}
+                                  {...(message.key === newestSavedKey && onContinue
+                                    ? { onContinue, continuing: turn.continuing }
+                                    : {})}
+                                />
+                              ),
+                            }
+                          : {})}
+                    />
+                  </QuestionTurnContext.Provider>
                   {calls ? (
                     <MessageScrollerItem messageId={`approvals:${message.key}`}>
                       <ApprovalCards calls={calls} />
