@@ -51,12 +51,31 @@ export interface ConnectorAccountCandidate {
   readonly avatarUrl?: string
 }
 
-/** V1 intentionally supports project-owned connector connections only. */
+/** A connection the project shares. Managing it requires `can.manage(connector)`. */
 export interface ProjectConnectorConnectionOwner {
   readonly type: "project"
 }
 
-export type ConnectorConnectionOwner = ProjectConnectorConnectionOwner
+/**
+ * A connection one person made with their own account. Only they manage it. Syncs and webhooks
+ * read it, and `sixb.connector()` opens it in a run they requested or one no one requested.
+ */
+export interface UserConnectorConnectionOwner {
+  readonly type: "user"
+  readonly id: string
+}
+
+export type ConnectorConnectionOwner =
+  | ProjectConnectorConnectionOwner
+  | UserConnectorConnectionOwner
+
+export function sameConnectorConnectionOwner(
+  left: ConnectorConnectionOwner,
+  right: ConnectorConnectionOwner
+): boolean {
+  if (left.type === "project" || right.type === "project") return left.type === right.type
+  return left.id === right.id
+}
 
 /** Stable application-defined lookup key for one connector connection. */
 export interface ConnectorConnectionSelector {
@@ -179,9 +198,25 @@ export interface ConnectorDefinition<
   readonly kind: "connector"
   readonly id: TId
   readonly adapter: TAdapter
+  /** Who may own an OAuth connector's connections. Omitted, only the project. */
+  readonly owners?: readonly ConnectorConnectionOwner["type"][]
+}
+
+export interface ConnectorDefinitionOptions {
+  /**
+   * Who may own this OAuth connector's connections: `"project"` (the default) for accounts the
+   * project shares, `"user"` for each person's own account. Syncs read both.
+   */
+  readonly owners?: readonly ConnectorConnectionOwner["type"][]
 }
 
 export type StaticConnectorDefinition = ConnectorDefinition<string, ConnectorAdapter>
+
+export function connectorConnectionOwners(
+  definition: ConnectorDefinition
+): readonly ConnectorConnectionOwner["type"][] {
+  return definition.owners ?? ["project"]
+}
 
 /** Infer the connected client type returned by a connector adapter. */
 export type ConnectorClient<TAdapter extends AnyConnectorAdapter> = Awaited<

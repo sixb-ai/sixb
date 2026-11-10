@@ -14905,6 +14905,15 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["project", "me"]
+            }
           }
         ],
         "responses": {
@@ -14924,15 +14933,33 @@
                         "type": "string"
                       },
                       "owner": {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": ["project"]
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["project"]
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user"]
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
                           }
-                        },
-                        "required": ["type"],
-                        "additionalProperties": false
+                        ]
                       },
                       "slot": {
                         "type": "string"
@@ -15279,15 +15306,33 @@
                             "type": "string"
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -15531,15 +15576,33 @@
                             "enum": ["connect", "reauthorize"]
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -15593,15 +15656,33 @@
                             "enum": ["connect", "reauthorize"]
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -15645,15 +15726,33 @@
                             "enum": ["connect", "reauthorize"]
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -15726,15 +15825,33 @@
                             "enum": ["connect", "reauthorize"]
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -15763,15 +15880,33 @@
                                   "type": "string"
                                 },
                                 "owner": {
-                                  "type": "object",
-                                  "properties": {
-                                    "type": {
-                                      "type": "string",
-                                      "enum": ["project"]
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "enum": ["project"]
+                                        }
+                                      },
+                                      "required": ["type"],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "enum": ["user"]
+                                        },
+                                        "id": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["type", "id"],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": ["type"],
-                                  "additionalProperties": false
+                                  ]
                                 },
                                 "slot": {
                                   "type": "string"
@@ -15845,15 +15980,33 @@
                             "enum": ["connect", "reauthorize"]
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -15972,15 +16125,33 @@
                             "enum": ["connect", "reauthorize"]
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -16139,6 +16310,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -16156,6 +16332,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -16173,6 +16354,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -16215,15 +16401,33 @@
                             "type": "string"
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -16474,15 +16678,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -16536,15 +16758,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -16588,15 +16828,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -16669,15 +16927,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -16706,15 +16982,33 @@
                                 "type": "string"
                               },
                               "owner": {
-                                "type": "object",
-                                "properties": {
-                                  "type": {
-                                    "type": "string",
-                                    "enum": ["project"]
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["project"]
+                                      }
+                                    },
+                                    "required": ["type"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": ["type"],
-                                "additionalProperties": false
+                                ]
                               },
                               "slot": {
                                 "type": "string"
@@ -16781,15 +17075,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -16908,15 +17220,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17085,6 +17415,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -17098,6 +17433,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -17111,6 +17451,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "owner": {
+                    "type": "string",
+                    "enum": ["project", "me"],
+                    "default": "project"
+                  },
                   "slot": {
                     "type": "string",
                     "minLength": 1
@@ -17143,15 +17488,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17205,15 +17568,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17257,15 +17638,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17338,15 +17737,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17375,15 +17792,33 @@
                                 "type": "string"
                               },
                               "owner": {
-                                "type": "object",
-                                "properties": {
-                                  "type": {
-                                    "type": "string",
-                                    "enum": ["project"]
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["project"]
+                                      }
+                                    },
+                                    "required": ["type"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": ["type"],
-                                "additionalProperties": false
+                                ]
                               },
                               "slot": {
                                 "type": "string"
@@ -17450,15 +17885,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17577,15 +18030,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17849,15 +18320,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17911,15 +18400,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -17963,15 +18470,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -18044,15 +18569,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -18081,15 +18624,33 @@
                                 "type": "string"
                               },
                               "owner": {
-                                "type": "object",
-                                "properties": {
-                                  "type": {
-                                    "type": "string",
-                                    "enum": ["project"]
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["project"]
+                                      }
+                                    },
+                                    "required": ["type"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": ["type"],
-                                "additionalProperties": false
+                                ]
                               },
                               "slot": {
                                 "type": "string"
@@ -18156,15 +18717,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -18283,15 +18862,33 @@
                           "enum": ["connect", "reauthorize"]
                         },
                         "owner": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["project"]
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["project"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id"],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": ["type"],
-                          "additionalProperties": false
+                          ]
                         },
                         "slot": {
                           "type": "string"
@@ -18552,15 +19149,33 @@
                             "type": "string"
                           },
                           "owner": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["project"]
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": ["type"],
-                            "additionalProperties": false
+                            ]
                           },
                           "slot": {
                             "type": "string"
@@ -72351,7 +72966,7 @@
                             "type": "object",
                             "additionalProperties": {
                               "type": "string",
-                              "enum": ["email"]
+                              "enum": ["email", "id"]
                             }
                           },
                           "links": {
@@ -74311,7 +74926,7 @@
                           "type": "object",
                           "additionalProperties": {
                             "type": "string",
-                            "enum": ["email"]
+                            "enum": ["email", "id"]
                           }
                         },
                         "links": {

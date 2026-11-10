@@ -1,18 +1,25 @@
 import type { ConnectorAuthorizationRecord, ConnectorConnectionRecord } from "../../storage"
 import { createConnectorCodedError } from "../errors"
-import type { ConnectorConnectionSelector } from "../types"
+import type { ConnectorConnectionOwner, ConnectorConnectionSelector } from "../types"
 import type { ConnectorConnectionView } from "./contracts"
 import { nonblank } from "./validation"
 
-/** V1 accepts only project-owned slots; future owner kinds remain explicit extensions. */
+/** Checks a selector's shape. Who may use it is decided in `access.ts`. */
 export function assertConnectorConnectionSelector(selector: ConnectorConnectionSelector): void {
-  if (selector.owner.type !== "project") {
+  if (!isConnectorConnectionOwner(selector.owner)) {
     throw createConnectorCodedError(
       "connector.configuration_invalid",
-      "Connector connections only support project ownership in V1."
+      'Connector connection owner must be { type: "project" } or { type: "user", id }.'
     )
   }
   nonblank(selector.slot, "connection slot")
+}
+
+function isConnectorConnectionOwner(value: unknown): value is ConnectorConnectionOwner {
+  if (typeof value !== "object" || value === null) return false
+  const { type, id } = value as Record<string, unknown>
+  if (type === "project") return id === undefined
+  return type === "user" && typeof id === "string" && id.trim() !== ""
 }
 
 export function connectorConnectionView(

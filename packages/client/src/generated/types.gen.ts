@@ -4920,7 +4920,9 @@ export type ListConnectorConnectionsData = {
   path: {
     connectorId: string
   }
-  query?: never
+  query?: {
+    owner?: "project" | "me"
+  }
   url: "/api/connectors/{connectorId}/connections"
 }
 
@@ -4973,9 +4975,14 @@ export type ListConnectorConnectionsResponses = {
   200: Array<{
     id: string
     connectorId: string
-    owner: {
-      type: "project"
-    }
+    owner:
+      | {
+          type: "project"
+        }
+      | {
+          type: "user"
+          id: string
+        }
     slot: string
     account: {
       id: string
@@ -5164,9 +5171,14 @@ export type RevokeConnectorConnectionResponses = {
     affectedConnections: Array<{
       id: string
       connectorId: string
-      owner: {
-        type: "project"
-      }
+      owner:
+        | {
+            type: "project"
+          }
+        | {
+            type: "user"
+            id: string
+          }
       slot: string
       account: {
         id: string
@@ -5242,9 +5254,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5256,9 +5273,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5268,9 +5290,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5287,9 +5314,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5297,9 +5329,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -5315,9 +5352,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5359,9 +5401,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5376,6 +5423,7 @@ export type ListPendingConnectorConnectionRunsResponse =
 
 export type StartConnectorConnectionRunData = {
   body: {
+    owner?: "project" | "me"
     slot: string
     returnTo: string
   }
@@ -5473,9 +5521,14 @@ export type StartConnectorConnectionRunResponses = {
     affectedConnections: Array<{
       id: string
       connectorId: string
-      owner: {
-        type: "project"
-      }
+      owner:
+        | {
+            type: "project"
+          }
+        | {
+            type: "user"
+            id: string
+          }
       slot: string
       account: {
         id: string
@@ -5552,9 +5605,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5566,9 +5624,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5578,9 +5641,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5597,9 +5665,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5607,9 +5680,14 @@ export type GetConnectorConnectionRunResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -5625,9 +5703,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5669,9 +5752,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5685,6 +5773,7 @@ export type GetConnectorConnectionRunResponse =
 
 export type AddConnectorConnectionData = {
   body: {
+    owner?: "project" | "me"
     slot: string
   }
   path: {
@@ -5761,9 +5850,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5775,9 +5869,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5787,9 +5886,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5806,9 +5910,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5816,9 +5925,14 @@ export type AddConnectorConnectionResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -5834,9 +5948,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5878,9 +5997,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5971,9 +6095,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5985,9 +6114,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5997,9 +6131,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6016,9 +6155,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6026,9 +6170,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -6044,9 +6193,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6088,9 +6242,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6201,9 +6360,14 @@ export type ReauthorizeConnectorConnectionResponses = {
     affectedConnections: Array<{
       id: string
       connectorId: string
-      owner: {
-        type: "project"
-      }
+      owner:
+        | {
+            type: "project"
+          }
+        | {
+            type: "user"
+            id: string
+          }
       slot: string
       account: {
         id: string
@@ -25009,7 +25173,7 @@ export type ListProjectionsResponses = {
         [key: string]: string
       }
       users?: {
-        [key: string]: "email"
+        [key: string]: "email" | "id"
       }
       links: {
         [key: string]: {
@@ -25613,7 +25777,7 @@ export type GetProjectionResponses = {
           [key: string]: string
         }
         users?: {
-          [key: string]: "email"
+          [key: string]: "email" | "id"
         }
         links: {
           [key: string]: {

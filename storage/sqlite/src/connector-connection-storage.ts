@@ -3,13 +3,16 @@ import {
   type ConnectorConnectionPersistence,
   type ConnectorConnectionPersistenceBackend,
   type ConnectorConnectionPersistenceScope,
+  connectorConnectionOwnerFromColumns,
   DurableConnectorConnectionStorage,
+  connectorConnectionOwnerColumns as ownerColumns,
 } from "@sixb/core/internal/connector-connection-storage-provider"
 import type {
   ConnectorAuthorizationAttemptRecord,
   ConnectorAuthorizationRecord,
   ConnectorConnectionRecord,
   ConnectorConnectionRunRecord,
+  ConnectorConnectionSelector,
   ConnectorCredentialMutation,
 } from "@sixb/core/storage"
 import { isUniqueConstraintError } from "./storage-errors"
@@ -68,22 +71,25 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
   }
 
   async insertAuthorizationAttempt(record: ConnectorAuthorizationAttemptRecord): Promise<boolean> {
+    const owner = ownerColumns(record.owner)
     try {
       this.db
         .query(
           `
           INSERT INTO connector_authorization_attempts (
-            project_id, connector_id, id, slot, initiated_by_execution_id,
+            project_id, connector_id, id, owner_type, owner_id, slot, initiated_by_execution_id,
             state_hash, code_verifier, redirect_uri, connection_run_id, return_to,
             callback_binding_hash, reauthorization_id, reauthorization_revision,
             reauthorization_connection_ids, created_at, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
           record.projectId,
           record.connectorId,
           record.id,
+          owner.ownerType,
+          owner.ownerId,
           record.slot,
           record.initiatedByExecutionId,
           record.stateHash,
@@ -164,7 +170,8 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
       .query(
         `
         UPDATE connector_connection_runs
-        SET kind = ?, slot = ?, initiated_by_execution_id = ?, status = ?,
+        SET kind = ?, owner_type = ?, owner_id = ?, slot = ?, initiated_by_execution_id = ?,
+            status = ?,
             waiting_for = ?, processing_id = ?,
             callback_started_at = ?, expires_at = ?, authorization_id = ?,
             cleanup_authorization_id = ?, connections = ?, error = ?, updated_at = ?, finished_at = ?
@@ -208,14 +215,15 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
   }
 
   async insertConnection(record: ConnectorConnectionRecord): Promise<boolean> {
+    const owner = ownerColumns(record.owner)
     try {
       this.db
         .query(
           `
           INSERT INTO connector_connections (
-            project_id, connector_id, id, authorization_id, slot, account,
+            project_id, connector_id, id, authorization_id, owner_type, owner_id, slot, account,
             account_id, status, disconnected_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -223,6 +231,8 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
           record.connectorId,
           record.id,
           record.authorizationId,
+          owner.ownerType,
+          owner.ownerId,
           record.slot,
           json(record.account),
           record.account.id,
@@ -243,19 +253,25 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
     return row ? connectionFromRow(row) : null
   }
 
-  async getConnectionBySelector(input: {
-    readonly owner: { readonly type: "project" }
-    readonly slot: string
-  }): Promise<ConnectorConnectionRecord | null> {
+  async getConnectionBySelector(
+    input: ConnectorConnectionSelector
+  ): Promise<ConnectorConnectionRecord | null> {
     if (!this.scope.connectorId) return null
+    const owner = ownerColumns(input.owner)
     const row = this.db
       .query(
         `
         SELECT * FROM connector_connections
-        WHERE project_id = ? AND connector_id = ? AND slot = ?
+        WHERE project_id = ? AND connector_id = ? AND owner_type = ? AND owner_id = ? AND slot = ?
       `
       )
-      .get(this.scope.projectId, this.scope.connectorId, input.slot) as SqliteConnectionRow | null
+      .get(
+        this.scope.projectId,
+        this.scope.connectorId,
+        owner.ownerType,
+        owner.ownerId,
+        input.slot
+      ) as SqliteConnectionRow | null
     return row ? connectionFromRow(row) : null
   }
 
@@ -310,17 +326,20 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
   }
 
   async updateConnection(record: ConnectorConnectionRecord): Promise<void> {
+    const owner = ownerColumns(record.owner)
     const result = this.db
       .query(
         `
         UPDATE connector_connections
-        SET authorization_id = ?, slot = ?, account = ?, account_id = ?,
-            status = ?, disconnected_at = ?, updated_at = ?
+        SET authorization_id = ?, owner_type = ?, owner_id = ?, slot = ?, account = ?,
+            account_id = ?, status = ?, disconnected_at = ?, updated_at = ?
         WHERE project_id = ? AND connector_id = ? AND id = ?
       `
       )
       .run(
         record.authorizationId,
+        owner.ownerType,
+        owner.ownerId,
         record.slot,
         json(record.account),
         record.account.id,
@@ -340,11 +359,11 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
       .query(
         `
         INSERT INTO connector_connection_runs (
-          project_id, connector_id, id, kind, slot, initiated_by_execution_id,
+          project_id, connector_id, id, kind, owner_type, owner_id, slot, initiated_by_execution_id,
           status, waiting_for, processing_id, callback_started_at,
           expires_at, authorization_id, cleanup_authorization_id, connections, error,
           created_at, updated_at, finished_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
       .run(
@@ -417,7 +436,7 @@ function authorizationAttemptFromRow(
     id: row.id,
     projectId: row.project_id,
     connectorId: row.connector_id,
-    owner: { type: "project" },
+    owner: connectorConnectionOwnerFromColumns(row.owner_type, row.owner_id),
     slot: row.slot,
     initiatedByExecutionId: row.initiated_by_execution_id,
     stateHash: row.state_hash,
@@ -458,8 +477,11 @@ function runValues(record: ConnectorConnectionRunRecord): readonly SQLQueryBindi
     record.status === "expired"
       ? iso(record.finishedAt)
       : null
+  const owner = ownerColumns(record.owner)
   return [
     record.kind,
+    owner.ownerType,
+    owner.ownerId,
     record.slot,
     record.initiatedByExecutionId,
     record.status,
@@ -482,7 +504,7 @@ function connectionRunFromRow(row: SqliteConnectionRunRow): ConnectorConnectionR
     projectId: row.project_id,
     connectorId: row.connector_id,
     kind: row.kind,
-    owner: { type: "project" as const },
+    owner: connectorConnectionOwnerFromColumns(row.owner_type, row.owner_id),
     slot: row.slot,
     initiatedByExecutionId: row.initiated_by_execution_id,
     createdAt: new Date(row.created_at),
@@ -648,7 +670,7 @@ function connectionFromRow(row: SqliteConnectionRow): ConnectorConnectionRecord 
     projectId: row.project_id,
     connectorId: row.connector_id,
     authorizationId: row.authorization_id,
-    owner: { type: "project" },
+    owner: connectorConnectionOwnerFromColumns(row.owner_type, row.owner_id),
     slot: row.slot,
     account: parseJson(row.account),
     status: row.status,
@@ -713,6 +735,8 @@ interface SqliteAuthorizationAttemptRow {
   readonly project_id: string
   readonly connector_id: string
   readonly id: string
+  readonly owner_type: string
+  readonly owner_id: string
   readonly slot: string
   readonly initiated_by_execution_id: string
   readonly state_hash: string
@@ -733,6 +757,8 @@ interface SqliteConnectionRunRow {
   readonly connector_id: string
   readonly id: string
   readonly kind: ConnectorConnectionRunRecord["kind"]
+  readonly owner_type: string
+  readonly owner_id: string
   readonly slot: string
   readonly initiated_by_execution_id: string
   readonly status: ConnectorConnectionRunRecord["status"]
@@ -780,6 +806,8 @@ interface SqliteConnectionRow {
   readonly connector_id: string
   readonly id: string
   readonly authorization_id: string
+  readonly owner_type: string
+  readonly owner_id: string
   readonly slot: string
   readonly account: string
   readonly account_id: string

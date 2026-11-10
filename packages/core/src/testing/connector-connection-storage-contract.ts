@@ -3,6 +3,7 @@ import type {
   ClaimConnectorConnectionRunCallbackInput,
   ClaimConnectorCredentialMutationResult,
   ConnectorAuthorizationRecord,
+  ConnectorConnectionOwner,
   ConnectorConnectionStorage,
   ConnectorCredentialMutationKind,
   CreateConnectorAuthorizationAttemptInput,
@@ -29,6 +30,8 @@ export interface ConnectorConnectionStorageContractSuiteOptions<
 
 const projectId = "project-a"
 const connectorId = "social"
+const userAda = { type: "user", id: "user-ada" } as const
+const userBen = { type: "user", id: "user-ben" } as const
 const credentials = {
   version: 1,
   algorithm: "A256GCM",
@@ -37,7 +40,7 @@ const credentials = {
   tag: "tag",
 } as const
 
-/** Runs the atomicity, fencing, slot uniqueness and project-isolation storage contract. */
+/** Runs the atomicity, fencing, owner-and-slot uniqueness and project-isolation storage contract. */
 export function runConnectorConnectionStorageContractSuite<
   TStorage extends ConnectorConnectionStorageContractStorage,
 >(label: string, options: ConnectorConnectionStorageContractSuiteOptions<TStorage>): void {
@@ -410,6 +413,88 @@ export function runConnectorConnectionStorageContractSuite<
             slot: "default",
           })
         ).toMatchObject({ authorizationId: second.id, account: { id: "account-b" } })
+      })
+    })
+
+    test("keeps project and personal connections apart in the same slot", async () => {
+      // Removal proof: drop owner_type/owner_id from a provider's unique key or selector lookup;
+      // the personal connections then collide with the project's.
+      await withStorage(async (storage) => {
+        const project = await createAuthorization(storage, "authorization-a", "account-a")
+        const ada = await createAuthorization(storage, "authorization-b", "account-b")
+        const ben = await createAuthorization(storage, "authorization-c", "account-c")
+        await connect(storage, project, "connection-a", "account-a")
+        await connect(storage, ada, "connection-b", "account-b", userAda)
+        await connect(storage, ben, "connection-c", "account-c", userBen)
+
+        for (const [owner, accountId] of [
+          [{ type: "project" }, "account-a"],
+          [userAda, "account-b"],
+          [userBen, "account-c"],
+        ] as const) {
+          expect(
+            await storage.getConnection({ projectId, connectorId, owner, slot: "default" })
+          ).toMatchObject({ owner, account: { id: accountId } })
+        }
+        expect(
+          (await storage.listConnections({ projectId, connectorId })).map(({ id, owner }) => ({
+            id,
+            owner,
+          }))
+        ).toEqual([
+          { id: "connection-a", owner: { type: "project" } },
+          { id: "connection-b", owner: userAda },
+          { id: "connection-c", owner: userBen },
+        ])
+
+        const another = await createAuthorization(storage, "authorization-d", "account-d")
+        await expect(
+          connect(storage, another, "connection-d", "account-d", userAda)
+        ).rejects.toThrow("explicit replacement is required")
+      })
+    })
+
+    test("carries a run's owner into its attempt and connection", async () => {
+      // Removal proof: compare only slots when an attempt joins its run; the project attempt below
+      // then joins Ada's run.
+      await withStorage(async (storage) => {
+        await storage.createConnectionRun(connectionRun({ owner: userAda }))
+        await expect(
+          storage.createAuthorizationAttempt(
+            authorizationAttempt({
+              connectionRunId: "run-a",
+              returnTo: "https://app.example.com/connectors",
+              callbackBindingHash: "binding-hash",
+            })
+          )
+        ).rejects.toThrow("does not match its connection run")
+
+        const pending = await createAuthorization(storage, "authorization-a", "account-a")
+        await createSelectionRun(storage, pending, userAda, { runExists: true })
+        expect(
+          await storage.getConnectionRun({ projectId, connectorId, runId: "run-a" })
+        ).toMatchObject({ owner: userAda, status: "waiting" })
+
+        const selected = await storage.putConnectionFromRun({
+          id: "connection-a",
+          projectId,
+          connectorId,
+          runId: "run-a",
+          account: { id: "account-a", label: "Account A" },
+          replace: false,
+        })
+        expect(selected.connection.owner).toEqual(userAda)
+        expect(
+          await storage.getConnection({ projectId, connectorId, owner: userAda, slot: "default" })
+        ).toMatchObject({ id: "connection-a" })
+        expect(
+          await storage.getConnection({
+            projectId,
+            connectorId,
+            owner: { type: "project" },
+            slot: "default",
+          })
+        ).toBeNull()
       })
     })
 
@@ -917,11 +1002,14 @@ function connectionRun(
 
 async function createSelectionRun(
   storage: ConnectorConnectionStorage,
-  authorization: ConnectorAuthorizationRecord
+  authorization: ConnectorAuthorizationRecord,
+  owner: ConnectorConnectionOwner = { type: "project" },
+  options: { readonly runExists?: boolean } = {}
 ): Promise<void> {
-  await storage.createConnectionRun(connectionRun())
+  if (!options.runExists) await storage.createConnectionRun(connectionRun({ owner }))
   await storage.createAuthorizationAttempt(
     authorizationAttempt({
+      owner,
       connectionRunId: "run-a",
       returnTo: "https://app.example.com/connectors",
       callbackBindingHash: "binding-hash",
@@ -1026,14 +1114,15 @@ function connect(
   storage: ConnectorConnectionStorage,
   authorization: ConnectorAuthorizationRecord,
   connectionId: string,
-  accountId: string
+  accountId: string,
+  owner: ConnectorConnectionOwner = { type: "project" }
 ) {
   return storage.putConnection({
     id: connectionId,
     projectId,
     connectorId,
     authorizationId: authorization.id,
-    owner: { type: "project" },
+    owner,
     slot: "default",
     account: { id: accountId, label: "ignored" },
     replace: false,

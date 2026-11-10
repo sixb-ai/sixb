@@ -83,6 +83,13 @@ export class ConnectorService {
     return this.requireConnections().listExecutionConnections(definition)
   }
 
+  assertExecutionConnectionUsable<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    connection: ConnectorConnectionRecord
+  ): Promise<void> {
+    return this.requireConnections().assertExecutionConnectionUsable(definition, connection)
+  }
+
   connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     connection: ConnectorConnectionRecord,

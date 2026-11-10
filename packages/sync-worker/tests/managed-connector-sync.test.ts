@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { defineSync } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { SyncConnectorSource } from "@sixb/core/internal/syncs"
 import {
   createFixture,
@@ -11,6 +12,98 @@ import {
 } from "./managed-connector-sync.fixture"
 
 describe("managed connector Sync fan-out", () => {
+  test("skips a person's account that needs reconnecting and keeps its checkpoint", async () => {
+    // Removal proof: rethrow in readManagedSource's connect catch; the second run fails.
+    let runNumber = 1
+    const sync = defineSync("sync-social-skip", { mode: "append" })
+      .checkpoint<{ cursor: string }>()
+      .from(social)
+      .read((_client, context) => {
+        context.setCheckpoint({ cursor: String(runNumber) })
+        return { id: `${context.connection.id}:${runNumber}` }
+      })
+      .intoDataset(socialRows)
+    let needsReconnect = false
+    const ben: SyncConnectorSource = {
+      ...source("connection-b", "account-b", "default", { type: "user", id: "usr_ben" }),
+      async connect() {
+        if (needsReconnect) {
+          throw createSixbError("connector.authorization_required", "Reconnect Ben's account.")
+        }
+        return { accountId: "account-b" }
+      },
+    }
+    const fixture = createFixture(sync, () => [
+      source("connection-a", "account-a", "default", { type: "user", id: "usr_ada" }),
+      ben,
+    ])
+    await run(fixture, sync.id, "run-skip-1")
+
+    runNumber = 2
+    needsReconnect = true
+    const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      expect((await run(fixture, sync.id, "run-skip-2")).rowsRead).toBe(1)
+      expect(warn.mock.calls.flat().join(" ")).toContain("skipped connection 'connection-b'")
+    } finally {
+      warn.mockRestore()
+    }
+
+    const second = await fixture.runtime.syncRunsStorage.getById({
+      projectId: fixture.runtime.id,
+      id: "run-skip-2",
+    })
+    expect(second?.checkpoint).toMatchObject({
+      value: {
+        entries: [
+          { connectionId: "connection-a", checkpoint: { cursor: "2" } },
+          { connectionId: "connection-b", checkpoint: { cursor: "1" } },
+        ],
+      },
+    })
+    expect((await rows(fixture.lakeStorage)).map(({ id }) => id).sort()).toEqual([
+      "connection-a:1",
+      "connection-a:2",
+      "connection-b:1",
+    ])
+  })
+
+  test("a project connection that needs reconnecting still fails the run", async () => {
+    // Removal proof: drop the owner check in skipsUnauthorizedConnection; the run succeeds empty.
+    const sync = defineSync("sync-social-project-reconnect", { mode: "append" })
+      .from(social)
+      .read((client) => ({ id: client.accountId }))
+      .intoDataset(socialRows)
+    const fixture = createFixture(sync, () => [
+      {
+        ...source("connection-p", "account-p", "default"),
+        async connect() {
+          throw createSixbError("connector.authorization_required", "Reconnect the project.")
+        },
+      },
+    ])
+    const failed = await run(fixture, sync.id, "run-project-reconnect").catch((error) => error)
+    expect(String(failed)).toContain("Reconnect the project.")
+  })
+
+  test("a snapshot sync still fails when an account needs reconnecting", async () => {
+    const sync = defineSync("sync-social-snapshot-skip")
+      .from(social)
+      .read((client) => ({ id: client.accountId }))
+      .intoDataset(socialRows)
+    const fixture = createFixture(sync, () => [
+      source("connection-a", "account-a", "default"),
+      {
+        ...source("connection-b", "account-b", "default"),
+        async connect() {
+          throw createSixbError("connector.authorization_required", "Reconnect Ben's account.")
+        },
+      },
+    ])
+    const failed = await run(fixture, sync.id, "run-snapshot-skip").catch((error) => error)
+    expect(String(failed)).toContain("Reconnect Ben's account.")
+  })
+
   test("reads every connection into one snapshot and clears it when none remain", async () => {
     const seen: string[] = []
     const sync = defineSync("sync-social-accounts")

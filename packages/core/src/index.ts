@@ -47,6 +47,7 @@ export type {
   SixbObjectTypeMap,
   SixbValueTypeMap,
   UserEmailColumn,
+  UserIdColumn,
   UserRef,
   ValueType,
   ValueTypeRefSchema,
@@ -687,6 +688,7 @@ export type {
   ConnectorConnectionSelector,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorDefinitionOptions,
   ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
   ConnectorOAuthErrorKind,
@@ -697,6 +699,7 @@ export type {
   OAuthConnectorCodeExchangeInput,
   ProjectConnectorConnectionOwner,
   StaticConnectorDefinition,
+  UserConnectorConnectionOwner,
 } from "./connectors"
 export { ConnectorOAuthError, defineConnector } from "./connectors"
 

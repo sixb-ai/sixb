@@ -53,7 +53,7 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 | `can.apply(markPaid)` | Request an action. |
 | `can.run(invoiceReview)` | Run a workflow, sync, or pipeline. `can.run(agent)` grants access to the built-in agent. |
 | `can.run(project.models)` | Call every model in the catalog directly, through the API or `sixb models`. |
-| `can.manage(accounting)` | Manage a connector's OAuth accounts. `can.manage(agent.usage)` manages AI limits; `can.manage(agent.memory)` deletes the agent's memory shared by the whole project, which everyone who can run the agent reads and adds to. |
+| `can.manage(accounting)` | Manage a connector's OAuth accounts. Members connect [their own](../connectors/authentication.md#let-people-connect-their-own-accounts) without it. `can.manage(agent.usage)` manages AI limits; `can.manage(agent.memory)` deletes the agent's memory shared by the whole project, which everyone who can run the agent reads and adds to. |
 | `can.observe(project.logs)` | Read captured logs. `can.observe(agent.usage)` reads AI usage. |
 | `can.observe(project.activity)` | Read the app's [visits and page views](../apps/activity.md). |
 | `can.observe(project.console)` | Open the app's [Console](../apps/overview.md#choose-who-sees-the-console). Each of its pages still takes its own grants. |

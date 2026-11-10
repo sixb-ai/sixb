@@ -23,12 +23,20 @@ import type {
   ConnectorDefinition,
   OAuthConnectorAdapter,
 } from "../types"
-import { isOAuthConnectorDefinition } from "../types"
+import { isOAuthConnectorDefinition, sameConnectorConnectionOwner } from "../types"
+import {
+  assertConnectorConnectionCommandAccess,
+  assertConnectorConnectionSelectorAccess,
+  canSeeConnectorConnection,
+} from "./access"
 import {
   assertConnectorAuthorizationActor,
   DefaultConnectorAuthorizationLifecycle,
 } from "./authorizations"
-import { requireConnectorConnectionCommandActor } from "./command-context"
+import {
+  type ConnectorConnectionCommandActor,
+  requireConnectorConnectionCommandActor,
+} from "./command-context"
 import type {
   AddConnectorConnectionInput,
   CompleteConnectorAuthorizationInput,
@@ -163,7 +171,9 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     if (!connection) {
       throw createConnectorCodedError(
         "connector.not_found",
-        `Connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
+        selector.owner.type === "user"
+          ? `Connector '${definition.id}' has no connection for user '${selector.owner.id}' in slot '${selector.slot}'.`
+          : `Connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
       )
     }
 
@@ -186,6 +196,25 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     return connections
       .filter((connection) => connection.status === "connected")
       .sort((left, right) => left.id.localeCompare(right.id))
+  }
+
+  /**
+   * Fails with `connector.authorization_required` when a connection's grant can no longer give a
+   * token, refreshing it if due. Syncs call it before reading, so a dead grant is skipped before
+   * any of its rows are read.
+   */
+  async assertExecutionConnectionUsable<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    connection: ConnectorConnectionRecord
+  ): Promise<void> {
+    this.assertOAuthRegistered(definition)
+    const authorization = await this.authorizations.requireStableActiveAuthorization(
+      definition,
+      connection.authorizationId
+    )
+    await this.authorizations
+      .createTokenSource(definition, authorization.id, connection.account)
+      .get()
   }
 
   /** Resolve a client from an immutable connection snapshot captured for one execution. */
@@ -250,14 +279,15 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     command: ConnectorConnectionCommandContext,
     connectorId: string
   ): Promise<readonly ConnectorConnectionView[]> {
-    const definition = this.requireOAuthDefinition(connectorId)
-    requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    const { definition, actor } = this.commandAccess(command, connectorId)
     let connections: readonly ConnectorConnectionRecord[]
     try {
-      connections = await this.connectionStorage.listConnections({
-        projectId: this.projectId,
-        connectorId: definition.id,
-      })
+      connections = (
+        await this.connectionStorage.listConnections({
+          projectId: this.projectId,
+          connectorId: definition.id,
+        })
+      ).filter((connection) => canSeeConnectorConnection(command, actor, connection))
     } catch (error) {
       throw storageBoundaryError(error, "Connector connections could not be listed.")
     }
@@ -286,6 +316,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     input: StartConnectorConnectionRunInput
   ): Promise<StartConnectorConnectionRunResult> {
+    this.selectorAccess(command, connectorId, input)
     return this.runs.start(command, connectorId, input)
   }
 
@@ -294,9 +325,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     input: AddConnectorConnectionInput
   ): Promise<ConnectorConnectionRunView> {
-    const definition = this.requireOAuthDefinition(connectorId)
-    const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
-    assertConnectorConnectionSelector(input)
+    const { definition, actor } = this.selectorAccess(command, connectorId, input)
     const source = await withConnectorStorageBoundary(
       "Source connector connection could not be read.",
       () =>
@@ -320,6 +349,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       source.authorizationId
     )
     assertConnectorAuthorizationActor(authorization, actor.principal)
+    await this.assertAuthorizationOwner(definition, authorization.id, input.owner)
     return this.runs.startSelection(command, definition.id, {
       owner: input.owner,
       slot: input.slot,
@@ -328,7 +358,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   }
 
   listPendingConnectionRuns(command: ConnectorConnectionCommandContext, connectorId: string) {
-    this.requireOAuthDefinition(connectorId)
+    this.commandAccess(command, connectorId)
     return this.runs.listPending(command, connectorId)
   }
 
@@ -337,7 +367,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     runId: string
   ): Promise<ConnectorConnectionRunView | null> {
-    this.requireOAuthDefinition(connectorId)
+    this.commandAccess(command, connectorId)
     return this.runs.get(command, connectorId, runId)
   }
 
@@ -346,6 +376,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     input: SelectConnectorConnectionRunAccountInput
   ): Promise<ConnectorConnectionRunView> {
+    this.commandAccess(command, connectorId)
     return this.runs.selectAccount(command, connectorId, input)
   }
 
@@ -355,20 +386,9 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectionId: string,
     input: Pick<StartConnectorConnectionRunInput, "redirectUri" | "returnTo">
   ): Promise<StartConnectorConnectionRunResult> {
-    const definition = this.requireOAuthDefinition(connectorId)
-    requireConnectorConnectionCommandActor(command.execution, this.projectId)
-    const connection = await withConnectorStorageBoundary(
-      "Connector connection could not be read.",
-      () =>
-        this.connectionStorage.getConnectionById({
-          projectId: this.projectId,
-          connectorId: definition.id,
-          connectionId: nonblank(connectionId, "connection id"),
-        })
-    )
-    if (!connection) {
-      throw createConnectorCodedError("connector.not_found", "Connector connection was not found.")
-    }
+    const { definition, actor } = this.commandAccess(command, connectorId)
+    const connection = await this.requireVisibleConnection(command, actor, definition, connectionId)
+    assertConnectorConnectionSelectorAccess(definition, command, actor, connection)
     if (connection.status !== "connected") {
       throw createConnectorCodedError(
         "connector.authorization_required",
@@ -389,8 +409,8 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     connectionId: string
   ): Promise<RevokeConnectorAuthorizationResult> {
-    const definition = this.requireOAuthDefinition(connectorId)
-    requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    const { definition, actor } = this.commandAccess(command, connectorId)
+    await this.requireVisibleConnection(command, actor, definition, connectionId)
     const authorization = await withConnectorStorageBoundary(
       "Connector authorization could not be resolved from its connection.",
       () =>
@@ -417,6 +437,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     input: StartConnectorAuthorizationInput
   ): Promise<StartConnectorAuthorizationResult> {
+    this.selectorAccess(command, connectorId, input)
     return this.requests.startAuthorization(command, connectorId, input)
   }
 
@@ -425,6 +446,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     input: CompleteConnectorAuthorizationInput
   ): Promise<CompleteConnectorAuthorizationResult> {
+    this.commandAccess(command, connectorId)
     return this.requests.completeAuthorization(command, connectorId, input)
   }
 
@@ -433,9 +455,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     input: SelectConnectorAccountInput
   ): Promise<ConnectorConnectionView> {
-    const definition = this.requireOAuthDefinition(connectorId)
-    const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
-    assertConnectorConnectionSelector(input)
+    const { definition, actor } = this.selectorAccess(command, connectorId, input)
     const authorization = await this.authorizations.requireAuthorization(
       definition.id,
       input.authorizationId
@@ -444,6 +464,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       throw connectorAuthorizationStatusError(authorization.status)
     }
     assertConnectorAuthorizationActor(authorization, actor.principal)
+    await this.assertAuthorizationOwner(definition, authorization.id, input.owner)
     const account = authorization.accounts.find((candidate) => candidate.id === input.accountId)
     if (!account) {
       throw createConnectorCodedError(
@@ -488,14 +509,49 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     return connectorConnectionView(result.connection, result.authorization.status)
   }
 
+  /**
+   * A grant serves one owner, so revoking a person's grant never disconnects the project's slots,
+   * and a project grant never reads as anyone's own.
+   */
+  private async assertAuthorizationOwner(
+    definition: ConnectorDefinition,
+    authorizationId: string,
+    owner: ConnectorConnectionSelector["owner"]
+  ): Promise<void> {
+    const connections = await withConnectorStorageBoundary(
+      "Connector connections could not be read from their authorization.",
+      () =>
+        this.connectionStorage.listConnectionsByAuthorization({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          authorizationId,
+        })
+    )
+    if (connections.some((connection) => !sameConnectorConnectionOwner(connection.owner, owner))) {
+      throw createConnectorCodedError(
+        "connector.operation_conflict",
+        "This account is connected for another owner; connect it again for this one."
+      )
+    }
+  }
+
   async disconnect(
     command: ConnectorConnectionCommandContext,
     connectorId: string,
     connectionId: string
   ): Promise<ConnectorConnectionView | null> {
-    const definition = this.requireOAuthDefinition(connectorId)
-    requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    const { definition, actor } = this.commandAccess(command, connectorId)
     const normalizedConnectionId = nonblank(connectionId, "connection id")
+    const connection = await withConnectorStorageBoundary(
+      "Connector connection could not be read.",
+      () =>
+        this.connectionStorage.getConnectionById({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          connectionId: normalizedConnectionId,
+        })
+    )
+    if (!connection || !canSeeConnectorConnection(command, actor, connection)) return null
     try {
       const disconnected = await this.connectionStorage.disconnectConnection({
         projectId: this.projectId,
@@ -527,8 +583,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     connectorId: string,
     authorizationId: string
   ): Promise<RevokeConnectorAuthorizationResult> {
-    const definition = this.requireOAuthDefinition(connectorId)
-    const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    const { definition, actor } = this.commandAccess(command, connectorId)
     const revoked = await this.authorizations.revokeAuthorization({
       definition,
       authorizationId: nonblank(
@@ -561,6 +616,48 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
         `Connector '${definition.id}' is not the registered definition instance.`
       )
     }
+  }
+
+  /** Resolves one management command's definition and caller once the caller may use it. */
+  private commandAccess(command: ConnectorConnectionCommandContext, connectorId: string) {
+    const definition = this.requireOAuthDefinition(connectorId)
+    const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    assertConnectorConnectionCommandAccess(definition, command)
+    return { definition, actor }
+  }
+
+  /** Like `commandAccess`, for a command that fills `selector`. */
+  private selectorAccess(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    selector: ConnectorConnectionSelector
+  ) {
+    const access = this.commandAccess(command, connectorId)
+    assertConnectorConnectionSelector(selector)
+    assertConnectorConnectionSelectorAccess(access.definition, command, access.actor, selector)
+    return access
+  }
+
+  /** A connection the caller may see. One they may not see reads as missing. */
+  private async requireVisibleConnection(
+    command: ConnectorConnectionCommandContext,
+    actor: ConnectorConnectionCommandActor,
+    definition: ConnectorDefinition,
+    connectionId: string
+  ): Promise<ConnectorConnectionRecord> {
+    const connection = await withConnectorStorageBoundary(
+      "Connector connection could not be read.",
+      () =>
+        this.connectionStorage.getConnectionById({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          connectionId: nonblank(connectionId, "connection id"),
+        })
+    )
+    if (!connection || !canSeeConnectorConnection(command, actor, connection)) {
+      throw createConnectorCodedError("connector.not_found", "Connector connection was not found.")
+    }
+    return connection
   }
 
   private requireOAuthDefinition(

@@ -286,8 +286,8 @@ export function validateTelemetryProjectionFieldMapping(
  * 5. The primary property is included in the property mapping.
  * 6. FK link descriptors reference valid links, valid source properties (present in mapping),
  *    and valid target types with primaries.
- * 7. User references come only from `userRef.fromEmail`: an optional `ref.user()` property mapped
- *    from a string column.
+ * 7. User references come only from `userRef.fromEmail` or `userRef.fromId`: an optional
+ *    `ref.user()` property mapped from a string column.
  *
  * For link projections:
  * 1. `datasetId` exists in the dataset registry.
@@ -411,7 +411,7 @@ export function validateProjectionsAtStartup(
         )
       ) {
         throw new ProjectionValidationError(
-          `[Sixb] ${prefix}: property "${projection.objectTypeId}.${propId}" holds user references (ref.user()), which a dataset column cannot hold. Map a ref.user() property from a column of member emails with userRef.fromEmail(column), or set it from an Action or a runtime edit.`
+          `[Sixb] ${prefix}: property "${projection.objectTypeId}.${propId}" holds user references (ref.user()), which a dataset column cannot hold. Map a ref.user() property from a column of member emails with userRef.fromEmail(column) or of member ids with userRef.fromId(column), or set it from an Action or a runtime edit.`
         )
       }
       // Nor can it prove that the artifact it names exists, or that anyone may read it.
@@ -624,25 +624,27 @@ function validateUserMapping(
   columnName: string
 ): void {
   const subject = `property "${objectTypeId}.${property.id}"`
-  if (userKey !== "email") {
+  if (userKey !== "email" && userKey !== "id") {
     throw new ProjectionValidationError(
-      `[Sixb] ${prefix}: ${subject} matches members by unknown key "${userKey}". Use userRef.fromEmail(column).`
+      `[Sixb] ${prefix}: ${subject} matches members by unknown key "${userKey}". Use userRef.fromEmail(column) or userRef.fromId(column).`
     )
   }
+
+  const builder = userKey === "email" ? "userRef.fromEmail()" : "userRef.fromId()"
   if (property.schema !== "userRef") {
     throw new ProjectionValidationError(
-      `[Sixb] ${prefix}: userRef.fromEmail() maps ${subject}, which is not a single ref.user() property.`
+      `[Sixb] ${prefix}: ${builder} maps ${subject}, which is not a single ref.user() property.`
     )
   }
   if (property.required === true) {
     throw new ProjectionValidationError(
-      `[Sixb] ${prefix}: userRef.fromEmail() cannot map required ${subject}: a row whose email no member has would leave it empty.`
+      `[Sixb] ${prefix}: ${builder} cannot map required ${subject}: a row whose ${userKey} no member has would leave it empty.`
     )
   }
   const column = dataset.schema.columns.find((candidate) => candidate.name === columnName)
   if (column?.type !== "string") {
     throw new ProjectionValidationError(
-      `[Sixb] ${prefix}: userRef.fromEmail() maps ${subject} from column "${columnName}", which must be a string column.`
+      `[Sixb] ${prefix}: ${builder} maps ${subject} from column "${columnName}", which must be a string column.`
     )
   }
 }

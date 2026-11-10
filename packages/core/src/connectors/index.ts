@@ -15,6 +15,7 @@ export type {
   ConnectorConnectionSelector,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorDefinitionOptions,
   ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
   ConnectorTokenSource,
@@ -24,6 +25,7 @@ export type {
   OAuthConnectorCodeExchangeInput,
   ProjectConnectorConnectionOwner,
   StaticConnectorDefinition,
+  UserConnectorConnectionOwner,
 } from "./types"
 export {
   isConnectorDefinition,

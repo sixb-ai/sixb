@@ -2,6 +2,7 @@ import { expect } from "bun:test"
 import {
   type AuthorizationContext,
   type ConnectorAccountCandidate,
+  type ConnectorDefinitionOptions,
   type ConnectorOAuth2Authentication,
   type ConnectorOAuthCredentials,
   defineConnector,
@@ -64,6 +65,7 @@ export type HarnessOptions = Pick<
     credentials: ConnectorOAuthCredentials
   ) => readonly ConnectorAccountCandidate[] | Promise<readonly ConnectorAccountCandidate[]>
   readonly accountAccessToken?: ConnectorOAuth2Authentication["accountAccessToken"]
+  readonly owners?: ConnectorDefinitionOptions["owners"]
 }
 
 export function createHarness(options: HarnessOptions = {}) {
@@ -86,92 +88,96 @@ export function createHarness(options: HarnessOptions = {}) {
   const refreshInputs: ConnectorOAuthCredentials[] = []
   const connectionSignals: AbortSignal[] = []
 
-  const connector = defineConnector("social", {
-    type: "fake-oauth",
-    authentication: {
-      type: "oauth2",
-      pkce: options.pkce,
-      callbackParameters: options.callbackParameters,
-      accountAccessToken: options.accountAccessToken,
-      async authorizationUrl(_context, input) {
-        await authorizationUrlGate
-        const url = new URL("https://provider.test/oauth/authorize")
-        url.searchParams.set("state", input.state)
-        if (input.codeChallenge !== undefined && input.codeChallengeMethod !== undefined) {
-          url.searchParams.set("code_challenge", input.codeChallenge)
-          url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
-        }
-        return url
-      },
-      async exchangeCode(_context, input) {
-        await exchangeGate
-        exchangedVerifiers.push(input.codeVerifier)
-        exchangeCount += 1
-        if (options.exchange) return options.exchange(input)
-        return {
-          accessToken: `access-secret-${exchangeCount}`,
-          refreshToken: `refresh-secret-${exchangeCount}`,
-          tokenType: "Bearer",
-          scopes: ["accounts.read"],
-          expiresAt: new Date(now.getTime() + 30_000),
-        }
-      },
-      async refresh(_context, credentials) {
-        refreshCount += 1
-        refreshInputs.push(structuredClone(credentials))
-        await refreshGate
-        if (refreshError) throw refreshError
-        if (options.refresh) return options.refresh(credentials)
-        if (omitRefreshMetadata) {
-          return {
-            accessToken: `rotated-access-${refreshCount}`,
-            expiresAt: new Date(now.getTime() + 60 * 60_000),
+  const connector = defineConnector(
+    "social",
+    {
+      type: "fake-oauth",
+      authentication: {
+        type: "oauth2",
+        pkce: options.pkce,
+        callbackParameters: options.callbackParameters,
+        accountAccessToken: options.accountAccessToken,
+        async authorizationUrl(_context, input) {
+          await authorizationUrlGate
+          const url = new URL("https://provider.test/oauth/authorize")
+          url.searchParams.set("state", input.state)
+          if (input.codeChallenge !== undefined && input.codeChallengeMethod !== undefined) {
+            url.searchParams.set("code_challenge", input.codeChallenge)
+            url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
           }
-        }
-        return {
-          accessToken: `rotated-access-${refreshCount}`,
-          refreshToken: `rotated-refresh-${refreshCount}`,
-          tokenType: credentials.tokenType,
-          scopes: credentials.scopes,
-          expiresAt: new Date(now.getTime() + 60 * 60_000),
-        }
-      },
-      async revoke() {
-        revokeCount += 1
-        await revokeGate
-        if (providerRevoked) return
-        if (revokeError) throw revokeError
-        providerRevoked = true
-        if (revokeAfterEffectError) throw revokeAfterEffectError
-      },
-    },
-    async discoverAccounts(_context, credentials) {
-      await discoverGate
-      if (options.discover) return options.discover(credentials)
-      return [
-        { id: "account-a", label: "Account A" },
-        { id: "account-b", label: "Account B" },
-      ]
-    },
-    async connect(context) {
-      connectionSignals.push(context.signal)
-      await connectGate
-      let latestToken: Awaited<ReturnType<typeof context.tokenSource.get>> | undefined
-      return {
-        accountId: context.account.id,
-        aborted: () => context.signal.aborted,
-        async token() {
-          latestToken = await context.tokenSource.get()
+          return url
+        },
+        async exchangeCode(_context, input) {
+          await exchangeGate
+          exchangedVerifiers.push(input.codeVerifier)
+          exchangeCount += 1
+          if (options.exchange) return options.exchange(input)
           return {
-            accessToken: latestToken.accessToken,
-            ...(latestToken.tokenType === undefined ? {} : { tokenType: latestToken.tokenType }),
+            accessToken: `access-secret-${exchangeCount}`,
+            refreshToken: `refresh-secret-${exchangeCount}`,
+            tokenType: "Bearer",
+            scopes: ["accounts.read"],
+            expiresAt: new Date(now.getTime() + 30_000),
           }
         },
-        tokenHandle: () => context.tokenSource.get(),
-        invalidate: () => latestToken?.invalidate(),
-      }
+        async refresh(_context, credentials) {
+          refreshCount += 1
+          refreshInputs.push(structuredClone(credentials))
+          await refreshGate
+          if (refreshError) throw refreshError
+          if (options.refresh) return options.refresh(credentials)
+          if (omitRefreshMetadata) {
+            return {
+              accessToken: `rotated-access-${refreshCount}`,
+              expiresAt: new Date(now.getTime() + 60 * 60_000),
+            }
+          }
+          return {
+            accessToken: `rotated-access-${refreshCount}`,
+            refreshToken: `rotated-refresh-${refreshCount}`,
+            tokenType: credentials.tokenType,
+            scopes: credentials.scopes,
+            expiresAt: new Date(now.getTime() + 60 * 60_000),
+          }
+        },
+        async revoke() {
+          revokeCount += 1
+          await revokeGate
+          if (providerRevoked) return
+          if (revokeError) throw revokeError
+          providerRevoked = true
+          if (revokeAfterEffectError) throw revokeAfterEffectError
+        },
+      },
+      async discoverAccounts(_context, credentials) {
+        await discoverGate
+        if (options.discover) return options.discover(credentials)
+        return [
+          { id: "account-a", label: "Account A" },
+          { id: "account-b", label: "Account B" },
+        ]
+      },
+      async connect(context) {
+        connectionSignals.push(context.signal)
+        await connectGate
+        let latestToken: Awaited<ReturnType<typeof context.tokenSource.get>> | undefined
+        return {
+          accountId: context.account.id,
+          aborted: () => context.signal.aborted,
+          async token() {
+            latestToken = await context.tokenSource.get()
+            return {
+              accessToken: latestToken.accessToken,
+              ...(latestToken.tokenType === undefined ? {} : { tokenType: latestToken.tokenType }),
+            }
+          },
+          tokenHandle: () => context.tokenSource.get(),
+          invalidate: () => latestToken?.invalidate(),
+        }
+      },
     },
-  })
+    options.owners === undefined ? {} : { owners: options.owners }
+  )
 
   const storage = new InMemoryStorage({
     connectorConnections: {
@@ -292,6 +298,7 @@ export function managementCommand(
       execution: scope.execution,
       runtimeAuthorization: scope.authorization,
     }),
+    canManage: options.manage !== false,
   }
 }
 
@@ -314,6 +321,7 @@ export function accessTokenCommand(accessTokenId: string): ConnectorConnectionCo
       execution: scope.execution,
       runtimeAuthorization: scope.authorization,
     }),
+    canManage: true,
   }
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
-import { AuthorizationError, SixbHost } from "../src"
+import { AuthorizationError, ConnectorOAuthError, SixbHost } from "../src"
 import { createConnectorRuntime } from "../src/connectors/execution"
 import { ConnectorService } from "../src/connectors/service"
 import { createTrustedPrimitiveRuntimeAuthorization } from "../src/execution/authorization"
@@ -196,6 +196,70 @@ describe("connector connection execution boundary", () => {
     await expect(resolveSyncConnectorSources(request.connector, harness.connector)).rejects.toThrow(
       AuthorizationError
     )
+  })
+
+  test("refuses a Sync connection whose grant can no longer refresh before reading it", async () => {
+    // Removal proof: drop assertExecutionConnectionUsable from the source resolver's connect; the
+    // client opens and the dead grant only fails once the sync starts reading.
+    const harness = createHarness()
+    const dependencies = createTestRuntimeDeps()
+    await seedConnectorActors(dependencies.storage, "default", harness.now())
+    const management = requireConnectionProcess(
+      new ConnectorService("default", [harness.connector], {
+        storage: dependencies.storage,
+        credentialProtector: harness.protector,
+      })
+    )
+    const command = managementCommand("session-a", { projectId: "default" })
+    const started = await management.startAuthorization(command, harness.connector.id, {
+      owner: projectOwner,
+      slot: "default",
+      redirectUri: callbackUrl,
+    })
+    const { authorizationId } = await management.completeAuthorization(
+      command,
+      harness.connector.id,
+      {
+        state: new URL(started.authorizationUrl).searchParams.get("state")!,
+        code: "authorization-code",
+        redirectUri: callbackUrl,
+      }
+    )
+    await management.selectAccount(command, harness.connector.id, {
+      authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "default",
+    })
+    const host = new SixbHost({
+      ontology: [],
+      connectors: [harness.connector],
+      connectorConnections: { encryptionKey },
+      ...dependencies,
+    })
+    const primitive = { kind: "sync" as const, id: "sync-social", runId: "run-social" }
+    const executionId = await createTestSyncExecution(dependencies.storage.executions, {
+      projectId: "default",
+      syncId: primitive.id,
+      runId: primitive.runId,
+    })
+    const execution = await dependencies.storage.executions.getById({
+      projectId: "default",
+      id: executionId,
+    })
+    if (!execution) throw new Error("Expected the Sync execution fixture.")
+    const trusted = bindDurablePrimitiveExecution(host, { execution, primitive }).sixb
+
+    // The exchanged token expired long ago, so opening the client must refresh it first.
+    harness.setRefreshError(new ConnectorOAuthError("terminal", "The grant was revoked."))
+    const [source] = await resolveSyncConnectorSources(trusted.connector, harness.connector)
+    expectSixbError(
+      await rejectionOf(source!.connect(new AbortController().signal)),
+      "connector.authorization_required"
+    )
+    expect(await management.listConnections(command, harness.connector.id)).toMatchObject([
+      { status: "needs_reauthorization" },
+    ])
   })
 
   test("cancels and bounds managed client creation", async () => {

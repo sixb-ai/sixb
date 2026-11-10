@@ -9,6 +9,10 @@ export type {
   ConnectorConnectionPersistenceBackend,
   ConnectorConnectionPersistenceScope,
 } from "./provider/shared"
+export {
+  connectorConnectionOwnerColumns,
+  connectorConnectionOwnerFromColumns,
+} from "./provider/shared"
 
 /**
  * Shared durable implementation of the Connector connection lifecycle.

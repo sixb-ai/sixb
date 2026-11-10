@@ -217,6 +217,7 @@ const shippedMigrationIds = [
   "095-artifact-comments",
   "096-object-artifact-refs",
   "097-shared-link-guests",
+  "098-connector-connection-owners",
 ]
 
 afterEach(async () => {
@@ -2655,10 +2656,15 @@ describe("SQLite storage migrations", () => {
       expect(readMemoryTableColumns(db, "connector_connection_runs")).not.toContain(
         "authorization_attempt_id"
       )
-      expect(readMemoryTableColumns(db, "connector_authorization_attempts")).not.toContain(
-        "owner_type"
-      )
-      expect(readMemoryTableColumns(db, "connector_connections")).not.toContain("owner_type")
+      for (const table of [
+        "connector_connection_runs",
+        "connector_authorization_attempts",
+        "connector_connections",
+      ]) {
+        expect(readMemoryTableColumns(db, table)).toEqual(
+          expect.arrayContaining(["owner_type", "owner_id"])
+        )
+      }
       expect(readMemoryUniqueIndexes(db, "connector_authorization_attempts")).toContainEqual([
         "project_id",
         "connector_id",
@@ -2670,6 +2676,8 @@ describe("SQLite storage migrations", () => {
       expect(readMemoryUniqueIndexes(db, "connector_connections")).toContainEqual([
         "project_id",
         "connector_id",
+        "owner_type",
+        "owner_id",
         "slot",
       ])
     } finally {

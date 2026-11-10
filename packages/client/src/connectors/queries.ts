@@ -33,13 +33,16 @@ export interface ConnectorConnectionsOptions
     "queryKey" | "queryFn"
   > {
   readonly connectorId: string
+  /** Only the project's connections, or only the signed-in user's own. Omitted, all the caller sees. */
+  readonly owner?: "project" | "me"
   /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
   readonly client?: Client
 }
 
 export function connectorConnectionsQueryOptions(options: ConnectorConnectionsOptions) {
-  const { connectorId, client, ...queryOptionsInput } = options
+  const { connectorId, owner, client, ...queryOptionsInput } = options
   const path = { connectorId: nonblank(connectorId, "connectorId") }
+  const query = owner === undefined ? undefined : { owner }
 
   return queryOptions<
     ListConnectorConnectionsResponse,
@@ -48,11 +51,12 @@ export function connectorConnectionsQueryOptions(options: ConnectorConnectionsOp
     ConnectorConnectionsQueryKey
   >({
     ...queryOptionsInput,
-    queryKey: listConnectorConnectionsQueryKey({ path }),
+    queryKey: listConnectorConnectionsQueryKey({ path, query }),
     queryFn: async ({ signal }) => {
       const { data } = await listConnectorConnections<true>({
         client,
         path,
+        query,
         signal,
         throwOnError: true,
       })
