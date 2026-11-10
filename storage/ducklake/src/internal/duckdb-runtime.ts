@@ -113,9 +113,11 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
   // Operations accepted and not yet settled, on the main connection.
   private active = 0
   private idleTimer: ReturnType<typeof setTimeout> | undefined
-  // The limit releaseMemory() re-applies, read once: DuckDB reports it rounded to a tenth of a unit,
-  // so reading it again after each SET would lower it step by step.
+  // The limit releaseMemory() re-applies, and what DuckDB reported once it was applied. DuckDB
+  // reports the limit rounded to a tenth of a unit, so re-applying what it reports would lower it
+  // step by step. A report that differs from the last one is a limit set since, and replaces it.
   private memoryLimit: string | undefined
+  private reportedMemoryLimit: string | undefined
 
   constructor(
     private readonly instance: DuckDBInstance,
@@ -215,12 +217,29 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
       )
       const [settings] = reader.convertRowObjects(sixbDuckDbValueConverter)
       if (settings?.cache === true) {
-        await this.connection.run("SET GLOBAL enable_external_file_cache = false")
-        await this.connection.run("SET GLOBAL enable_external_file_cache = true")
+        try {
+          await this.connection.run("SET GLOBAL enable_external_file_cache = false")
+        } finally {
+          // A cache left off would read as the project's own setting on every later release.
+          await this.connection.run("SET GLOBAL enable_external_file_cache = true")
+        }
       }
-      this.memoryLimit ??= String(settings?.memory_limit)
-      await this.connection.run(`SET GLOBAL memory_limit = ${quoteSqlString(this.memoryLimit)}`)
+
+      const reported = String(settings?.memory_limit)
+      if (reported !== this.reportedMemoryLimit) this.memoryLimit = reported
+      await this.connection.run(
+        `SET GLOBAL memory_limit = ${quoteSqlString(this.memoryLimit ?? reported)}`
+      )
+      this.reportedMemoryLimit = await this.currentMemoryLimit()
     }, false)
+  }
+
+  private async currentMemoryLimit(): Promise<string> {
+    const reader = await this.connection.runAndReadAll(
+      "SELECT current_setting('memory_limit') AS memory_limit"
+    )
+    const [settings] = reader.convertRowObjects(sixbDuckDbValueConverter)
+    return String(settings?.memory_limit)
   }
 
   close(): Promise<void> {

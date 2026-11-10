@@ -176,6 +176,28 @@ describe("DuckDB runtime memory", () => {
     }
   })
 
+  test("a release keeps a memory limit set after an earlier release", async () => {
+    // Red check: re-apply the limit the first release read (memoryLimit ??= reported); the second
+    // release puts DuckDB's default back.
+    const runtime = await createDuckDbRuntime({
+      config: { temp_directory: "" },
+      releaseMemoryAfterIdleMs: false,
+    })
+    try {
+      await runtime.releaseMemory()
+      await runtime.run("SET memory_limit = '1.85GiB'")
+      await runtime.releaseMemory()
+      const limit = await setting(runtime, "memory_limit")
+      expect(limit).toMatch(/^1\.[78] GiB$/)
+
+      await runtime.releaseMemory()
+      await runtime.releaseMemory()
+      expect(await setting(runtime, "memory_limit")).toBe(limit)
+    } finally {
+      await runtime.close()
+    }
+  })
+
   test("rejects an invalid idle delay before opening the engine", () => {
     for (const releaseMemoryAfterIdleMs of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(
