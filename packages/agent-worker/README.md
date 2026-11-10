@@ -147,12 +147,11 @@ Earlier files in the retained conversation are discoverable through the sandbox'
 `$SIXB_ATTACHMENTS` manifest and readable with `read` when materialized. Current user
 attachments and file-producing tool results retain their model-input projections.
 
-`publish_artifact` creates an artifact and `update_artifact` writes its latest version
-(`../agent/src/artifacts/publish-tool.ts`): the open version's content is replaced, or the next
-version opens after one the user created; only people create versions. They are two tools so that
-every argument of each is required: a mode carried by an optional or null argument is where models
-differ, and with every property required each model adapter sends both schemas strict. Offered only
-to conversations whose storage holds artifacts, each reads a file or directory from the sandbox,
+`publish_artifact` creates an artifact by its `kind`, or writes the latest version of one by its
+`id` (`../agent/src/artifacts/publish-tool.ts`): the open version's content is replaced, or the
+next version opens after one the user created; only people create versions. An empty id, or
+"null", is no id, which a model sends for nothing. Offered only
+to conversations whose storage holds artifacts, it reads a file or directory from the sandbox,
 stores its bytes against the run's file budget, which counts identical content once, and publishes
 it with the thread and run as its origin, authored by whoever asked for the turn: a new artifact
 for the thread's owner, or an update of one the requester owns or this conversation already

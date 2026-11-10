@@ -3,7 +3,7 @@ import { useArtifactMessages } from "../../artifacts/messages"
 import { ActivityStatusText } from "../components/activity-status"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
-import { isUpdateTool, publishedArtifact, publishTitle } from "./interpret"
+import { isUpdate, publishedArtifact, publishTitle } from "./interpret"
 
 /**
  * A publish in the work trace: what it published, with any warnings, or why it was refused. The
@@ -18,7 +18,7 @@ export function PublishArtifactToolView({ tool }: { tool: NormalizedTool }) {
   const published = publishedArtifact(tool)
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const failed = tool.state === "output-error"
-  const update = isUpdateTool(tool.toolName)
+  const update = isUpdate(tool)
   const label = failed
     ? (update ? messages.updateFailed : messages.publishFailed)(title)
     : running

@@ -382,7 +382,7 @@ function renderRuntimeContext(
           "Attachment metadata is internal context, not reply content. Do not reproduce attachment metadata blocks, internal URLs, or sandbox paths in replies.",
           mode === "conversation"
             ? "Deliver a report, table of data, or file the user should keep by publishing it with publish_artifact; read the sixb-artifacts skill before the first publish. To show a published chart or range in a reply, write ![caption](address), copying from $SIXB_ARTIFACTS its pinned address when it lists one, for a version the user created, and its address otherwise, or the address a child agent reported. Never describe a deliverable that was not published as ready."
-            : "Return your result as text. Publish with publish_artifact or update_artifact only when the task asks for a deliverable, after reading the sixb-artifacts skill: it lands in the parent's conversation. Name each one you wrote in your result by its address, artifact:<id>. Files outside out/ are lost when the task ends.",
+            : "Return your result as text. Publish with publish_artifact only when the task asks for a deliverable, after reading the sixb-artifacts skill: it lands in the parent's conversation. Name each one you wrote in your result by its address, artifact:<id>. Files outside out/ are lost when the task ends.",
         ]
       : [
           "Workflow input files, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow.",

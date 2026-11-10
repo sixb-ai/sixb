@@ -2,11 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { defineAgentTool } from "@sixb/core"
 import { type AgentRunWebPlan, agentToolSpec } from "@sixb/core/internal/agents"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
-import {
-  OPEN_ARTIFACT_TOOL_SPEC,
-  PUBLISH_ARTIFACT_TOOL_SPEC,
-  UPDATE_ARTIFACT_TOOL_SPEC,
-} from "../src/artifacts/publish-tool"
+import { OPEN_ARTIFACT_TOOL_SPEC, PUBLISH_ARTIFACT_TOOL_SPEC } from "../src/artifacts/publish-tool"
 import { STOP_TOOL_SPEC, WAIT_TOOL_SPEC } from "../src/tools/background"
 import { BASH_TOOL_SPEC } from "../src/tools/bash"
 import { EDIT_TOOL_SPEC } from "../src/tools/edit"
@@ -43,7 +39,6 @@ describe("agent model tool specifications", () => {
       WAIT_TOOL_SPEC,
       STOP_TOOL_SPEC,
       PUBLISH_ARTIFACT_TOOL_SPEC,
-      UPDATE_ARTIFACT_TOOL_SPEC,
       OPEN_ARTIFACT_TOOL_SPEC,
     ])
   })

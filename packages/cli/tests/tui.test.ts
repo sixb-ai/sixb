@@ -420,6 +420,21 @@ describe("a call as one line", () => {
     })
   })
 
+  test("reads publish_artifact with an artifact's id as an update", () => {
+    const publish = (input: Record<string, unknown>) =>
+      toolLine({
+        kind: "tool",
+        id: "c",
+        name: "publish_artifact",
+        state: "done",
+        input: { path: "work/review", title: "Q3 review", ...input },
+        output: { artifactId: "art_k3m9q2x7tp" },
+      })
+    expect(publish({ kind: "document" })).toMatchObject({ verb: "publish", detail: "Q3 review" })
+    expect(publish({ id: "art_k3m9q2x7tp" })).toMatchObject({ verb: "update" })
+    expect(publish({ id: "null", kind: "document" })).toMatchObject({ verb: "publish" })
+  })
+
   // Guard proof: in toolLine (src/tui/format.ts), drop the `timedOut` branch of the note, or read
   // stderr whole; the line then says `exit 137`, or previews the sentence meant for the model.
   test("says how long a timed-out command had, not its exit code or the model's notice", () => {
