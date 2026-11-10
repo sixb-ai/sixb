@@ -9,6 +9,7 @@ import {
   elapsed,
   fittedContextText,
   friendlyPath,
+  pickedAnswer,
   runFailureText,
   shortPath,
   toolLine,
@@ -224,6 +225,43 @@ describe("a file the agent read or changed", () => {
     expect(
       toolLine(call("read", { path: "out/chart.png" }, { kind: "agentToolResult", content: [] }))
     ).toEqual({ verb: "view", detail: "out/chart.png" })
+  })
+})
+
+describe("the Agent's question", () => {
+  const asked = (questions: unknown[]): Extract<Part, { kind: "tool" }> => ({
+    kind: "tool",
+    id: "c",
+    name: "ask",
+    state: "done",
+    input: { questions },
+    output: { status: "asked" },
+  })
+  const year = { question: "Which year?", choices: ["2025", "2026"] }
+
+  test("reads on its line, its choices numbered under it", () => {
+    expect(toolLine(asked([year]))).toEqual({
+      verb: "ask",
+      detail: "Which year?",
+      preview: ["1. 2025 · 2. 2026"],
+    })
+    expect(toolLine(asked([year, { question: "Which regions?" }]))).toEqual({
+      verb: "ask",
+      detail: "2 questions",
+      preview: ["Which year?  1. 2025 · 2. 2026", "Which regions?"],
+    })
+  })
+
+  // Removal proof: return `text` at once from pickedAnswer; "2" then reaches the model alone.
+  test("a number answers with the choice under it, only for one question with choices", () => {
+    const reply = (questions: unknown[]) => [
+      { role: "assistant", parts: [asked(questions)] as readonly Part[] },
+    ]
+    expect(pickedAnswer(reply([year]), " 2 ")).toBe("2026")
+    expect(pickedAnswer(reply([year]), "3")).toBe("3")
+    expect(pickedAnswer(reply([year]), "2026 please")).toBe("2026 please")
+    expect(pickedAnswer(reply([year, year]), "1")).toBe("1")
+    expect(pickedAnswer([{ role: "user", parts: [] }], "1")).toBe("1")
   })
 })
 
