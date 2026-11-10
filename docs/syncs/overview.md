@@ -81,8 +81,8 @@ Incremental checkpoints are saved separately for each connection and account.
 
 [Personal connections](../connectors/authentication.md#let-people-connect-their-own-accounts) are
 read too. `connection.owner` is `{ type: "user", id }` for one and `{ type: "project" }`
-otherwise. To show each person only their own rows, write the account's email on each row, map it
-to a [`ref.user()`](../projections/overview.md#point-to-members) property, and grant
+otherwise. To show each person only their own rows, write the owner's id on each row, map it to a
+`ref.user()` property with [`userRef.fromId`](../projections/overview.md#point-to-members), and grant
 `can.view(Type).where((row) => row.p.owner.eq(currentUser()))`. Grant a workflow's group
 `can.view(Type)` without the condition when it needs to see everyone's.
 
