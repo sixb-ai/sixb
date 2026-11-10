@@ -306,6 +306,40 @@ describe("background tools", () => {
     await commands.stop(running.id)
   })
 
+  // Removal proof: await the children's wait before the commands' in wait's execute, as it did;
+  // the turn's stop rejects both, nothing handles the commands' rejection, and it goes unhandled.
+  test("wait, stopped with the turn, rejects once and leaves no rejection unhandled", async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on("unhandledRejection", onUnhandled)
+    const turn = new AbortController()
+    const wait = createWaitTool(async () => handle, commands, {
+      // A child at work: its wait ends only with the turn.
+      wait: (_ids, waitSignal) =>
+        new Promise((_resolve, reject) =>
+          waitSignal.addEventListener("abort", () => reject(waitSignal.reason), { once: true })
+        ),
+      stop: async () => ({ results: [], files: [] }),
+    })
+    const running = await commands.start({ handle, command: "sleep 30" })
+    try {
+      const waiting = wait.execute(wait.parseInput({ ids: [running.id, "west"] }), {
+        signal: turn.signal,
+        callId: "call",
+        toolCallId: "tool",
+      })
+      turn.abort(new Error("stopped"))
+      expect(String(await waiting.catch((error: unknown) => error))).toContain("stopped")
+      // Rejections are reported once the loop turns.
+      await new Promise((resolve) => setImmediate(resolve))
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+      await commands.stop(running.id)
+    }
+  })
+
   test("wait and stop report a command's state to the notices, as bash and the old tools did", () => {
     const state = { id: "bg_aaaaaa", command: "serve", status: "running" }
     expect(reportedCommands("bash", state)).toEqual([state])
