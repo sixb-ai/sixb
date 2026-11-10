@@ -9,7 +9,11 @@ export interface EnsuredStream {
   readonly projectId: string
   readonly streamId: string
   readonly keys: RedisStreamKeys
-  /** What to ensure the stream with again once Redis has expired its keys. */
+  /**
+   * What to ensure the stream with again once Redis has expired its keys: the stored retention
+   * when this process found the stream, or what it asked `ensureStream()` for, which may differ
+   * from what an earlier runtime stored.
+   */
   readonly retention: NormalizedRetention
 }
 
@@ -109,7 +113,10 @@ export class StreamManager {
     return ensured
   }
 
-  /** Ensures a stream again, with the retention it had, after Redis expired its keys. */
+  /**
+   * Ensures a stream again after Redis expired its keys, with the retention this process knows
+   * it by. The old metadata is gone, so this is what a first `ensureStream()` would store.
+   */
   async restore(ensured: EnsuredStream): Promise<EnsuredStream> {
     this.knownStreams.delete(ensured.keys.metaKey)
     return this.ensureStream(ensured.projectId, {

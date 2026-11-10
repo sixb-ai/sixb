@@ -153,6 +153,12 @@ expire.
 Streams written by a version without idle expiry get theirs the next time they
 are read. One nobody reads again keeps its keys until they are deleted.
 
+Run the broker's Redis with `maxmemory-policy noeviction`. Every stream with
+`maxAgeMs` has a key expiry, so a `volatile-*` policy may evict its keys under
+memory pressure, live streams included. Losing the metadata that way loses the
+stream's trim boundary, so a reader with an older cursor no longer gets
+`BrokerCursorExpiredError`, and its byte count for `maxBytes`.
+
 ## Local Development
 
 Start the test Redis server:
