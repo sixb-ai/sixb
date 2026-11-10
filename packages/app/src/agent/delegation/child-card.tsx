@@ -3,13 +3,14 @@ import { cancelAgentRunByIdMutation } from "@sixb/client/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ArrowDown, ChevronRight } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useContext, useEffect, useState } from "react"
 import { childFileSource } from "../../artifacts/file-source"
 import { latestWorkLabel } from "../activity-label"
 import { heldCallOf } from "../approvals"
 import { ApprovalCard } from "../components/approval-card"
 import { FileAttachmentCard } from "../components/file-attachment-card"
 import { useAgentMessages } from "../i18n"
+import { QuestionTurnContext } from "../questions/question-card"
 import {
   AgentAvatar,
   Exchanges,
@@ -220,10 +221,15 @@ export function ChildAttention({
 }) {
   const labels = useAgentMessages().delegation
   const cards = useDelegationCards()
+  const questionTurn = useContext(QuestionTurnContext)
   const { child, view, live, state, needsReader } = model
   const exchanges = cards?.delegation.exchanges.get(child.id) ?? []
-  const openQuestion =
-    view?.awaiting?.type === "answer"
+  // When the Agent asks the reader in the composer, it asks this child's question there: the card
+  // keeps its line, not a second copy of the question.
+  const askedInComposer = questionTurn.open && questionTurn.answering === true
+  const openQuestion = askedInComposer
+    ? null
+    : view?.awaiting?.type === "answer"
       ? view.awaiting.question.text
       : state === "asking" && live
         ? liveQuestion(live.parts)
@@ -245,7 +251,7 @@ export function ChildAttention({
             openQuestion={openQuestion}
             urgent={needsReader || state === "asking"}
           />
-          {state === "answer" && !observed ? (
+          {state === "answer" && !observed && !askedInComposer ? (
             <p className="mt-1 text-xs text-muted-foreground">{labels.answerHint}</p>
           ) : null}
         </div>

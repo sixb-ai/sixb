@@ -453,6 +453,11 @@ export const fr: Translation<AgentMessages> = {
     pickAny: "Plusieurs choix possibles",
     typeAnswer: "Saisir une réponse",
     typeOther: "Ou saisir une autre réponse",
+    somethingElse: "Autre chose…",
+    next: "Question suivante",
+    back: "Question précédente",
+    step: (step, total) => `Question ${step} sur ${total}`,
+    dismiss: "Répondre dans la conversation",
   },
   edit: {
     title: (name) => (name ? `${name} modifié` : "Fichier modifié"),

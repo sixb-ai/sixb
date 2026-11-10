@@ -479,6 +479,12 @@ export const en = {
     pickAny: "Pick any",
     typeAnswer: "Type an answer",
     typeOther: "Or type another answer",
+    somethingElse: "Something else…",
+    next: "Next question",
+    back: "Previous question",
+    step: (step: number, total: number): string => `Question ${step} of ${total}`,
+    /** Close the question, to reply in the composer instead. */
+    dismiss: "Reply in chat",
   },
   /** The edit tool, for a change to part of a file (`name` may be empty). */
   edit: {

@@ -1,9 +1,11 @@
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Plus } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
+import { openQuestion } from "../questions/interpret"
+import { QuestionComposer } from "../questions/question-composer"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
 import { Composer, type ComposerProps } from "./composer"
 import { ThreadsButton } from "./threads-button"
@@ -66,18 +68,36 @@ export function ConversationPanel({
     transcript.messages.some((message) => message.id === null)
   const showWelcome =
     !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
+  // The Agent's questions take the composer's place until answered, or set aside to reply in words.
+  const asked = transcript.onAnswer ? openQuestion(transcript.messages, transcript.turn) : null
+  const [setAside, setSetAside] = useState<string | null>(null)
+  const asking = asked !== null && setAside !== asked.messageKey ? asked : null
   const renderComposer = (wideClassName?: string) =>
     readOnly ? (
       // Where the composer would end, so the notice keeps its place at the foot of the pane.
       <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
     ) : (
-      <Composer
-        {...composer}
-        placeholder={composerPlaceholder}
-        className={compact ? "px-4 pt-2 pb-4" : wideClassName}
-        ambientContext={ambientContext}
-        compact={compact}
-      />
+      <>
+        {asking && transcript.onAnswer ? (
+          <QuestionComposer
+            key={asking.messageKey}
+            questions={asking.questions}
+            onAnswer={transcript.onAnswer}
+            onDismiss={() => setSetAside(asking.messageKey)}
+            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+          />
+        ) : null}
+        {/* Kept while the question asks, so a draft written before it is still there after. */}
+        <div className={asking ? "hidden" : "contents"}>
+          <Composer
+            {...composer}
+            placeholder={composerPlaceholder}
+            className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+            ambientContext={ambientContext}
+            compact={compact}
+          />
+        </div>
+      </>
     )
 
   const threadsButton = onOpenThreads ? (
