@@ -138,11 +138,12 @@ export function createWaitTool(
         ).catch((error: unknown) => {
           if (!settled.signal.aborted || signal.aborted) throw error
         })
-        const waited =
+        const childrenWaited =
           children && childIds.length > 0
-            ? await children.wait(childIds, signal).finally(stopWaiting)
+            ? children.wait(childIds, signal).finally(stopWaiting)
             : undefined
-        await commandsEnded
+        // Awaited together: the turn's stop rejects both, and one wait for both handles each.
+        const [waited] = await Promise.all([childrenWaited, commandsEnded])
         signal.throwIfAborted()
         return await output(
           await readCommands(commandIds, commands, resolveSandbox, signal),
