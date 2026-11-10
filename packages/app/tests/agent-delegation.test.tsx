@@ -585,8 +585,8 @@ describe("a sub-agent in the Agent's reply", () => {
       expect((await rowOf(view, key, state)).textContent).toContain(label)
     }
     expect((await lineOf(view)).textContent).toContain("Answer has a question for you")
-    expect(within(attentionOf(view, "answer")).getByText("Calendar or fiscal year?")).toBeDefined()
-    expect(attentionOf(view, "answer").textContent).toContain("Your next message answers it.")
+    // Its question reads in its panel; the reply keeps only its line.
+    expect(view.container.querySelector("[data-child-key='answer']")).toBeNull()
   })
 
   // Removal proofs: drop the live label from the thread's status, and it says only "Working…".
@@ -720,8 +720,24 @@ describe("a sub-agent in the Agent's reply", () => {
     expect(stops).toEqual(["apr_pay"])
   })
 
-  // Removal proof: drop the `asked` lines from readThreadDelegation, and the question is gone.
-  test("shows what the Agent told it, what it asked, and the answer", async () => {
+  // Removal proofs: render a child's `ask` among its work in AssistantBody, and the question goes
+  // into the collapsed steps; drop the mail parts from RunWork, and the Agent's side is gone.
+  test("reads in its panel as a conversation with the Agent, and stays out of the reply", async () => {
+    const asked = (output: Record<string, unknown>, question: string) => ({
+      type: "tool-call",
+      toolCallId: `ask_${question.length}`,
+      toolName: "ask",
+      state: "output-available",
+      input: { questions: [{ question, choices: ["calendar", "fiscal"] }] },
+      output,
+    })
+    const mail = (kind: string, text: string) => ({
+      type: "mail",
+      id: text,
+      from: "parent",
+      kind,
+      text,
+    })
     const { view } = show(
       [
         spawn("terms"),
@@ -732,20 +748,59 @@ describe("a sub-agent in the Agent's reply", () => {
           ],
         }),
         message("terms", "The fiscal year.", "answer"),
-        message("terms", "Skip Globex.", "next-step"),
       ],
-      { children: [running("terms")] }
+      {
+        children: [
+          child("terms", {
+            runs: [
+              childRun("run_terms", { finishReason: "awaiting_answer" }),
+              childRun("run_terms_2"),
+            ],
+          }),
+        ],
+        threads: {
+          thr_terms: [
+            {
+              runId: "run_terms",
+              role: "user",
+              parts: [{ type: "text", text: "Look into terms." }],
+            },
+            {
+              runId: "run_terms",
+              role: "assistant",
+              parts: [asked({ answer: "The fiscal year." }, "Calendar or fiscal year?")],
+            },
+            { runId: "run_terms", role: "user", parts: [mail("message", "Skip Globex.")] },
+            {
+              runId: "run_terms",
+              role: "assistant",
+              parts: [asked({ status: "deferred", question: "q2" }, "Include Q4?")],
+            },
+            { runId: "run_terms_2", role: "user", parts: [mail("answer", "Yes, include Q4.")] },
+            { runId: "run_terms_2", role: "assistant", parts: [{ type: "text", text: "Net 30." }] },
+          ],
+        },
+      }
     )
 
-    await lineSays(view, "Terms is working…")
-    const lines = [...attentionOf(view, "terms").querySelectorAll("li")].map(
-      (line) => line.textContent
-    )
-    expect(lines).toEqual([
-      "Asked · Calendar or fiscal year?",
-      "Agent answered · The fiscal year.",
-      "Agent said · Skip Globex.",
-    ])
+    await lineSays(view, "Terms finished")
+    expect(view.container.querySelector("[data-child-key='terms']")).toBeNull()
+
+    const thread = await detailOf(view, "terms")
+    await waitFor(() => expect(thread.textContent).toContain("Net 30."))
+    const text = thread.textContent ?? ""
+    const order = [
+      "Calendar or fiscal year?",
+      "The fiscal year.",
+      "Skip Globex.",
+      "Include Q4?",
+      "Yes, include Q4.",
+      "Net 30.",
+    ].map((said) => text.indexOf(said))
+    expect(order.every((at) => at >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    // The Agent's side: its answer, its message, and the answer a later run brought.
+    expect(thread.querySelectorAll("[data-agent-note]")).toHaveLength(3)
   })
 
   // Removal proof: build the line from a count instead of lineClauses, and the names are gone.

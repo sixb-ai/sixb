@@ -1,7 +1,7 @@
 import { listModelsOptions } from "@sixb/client/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { Bot, Check, CornerDownRight, MessageCircleQuestion } from "lucide-react"
+import { Bot } from "lucide-react"
 import { useEffect, useState } from "react"
 import { latestWorkLabel } from "../activity-label"
 import { ProviderLogo } from "../components/provider-logo"
@@ -10,7 +10,6 @@ import type { AgentMessages } from "../i18n/en"
 import {
   type AgentChild,
   activeRun,
-  type ChildExchange,
   type ChildState,
   formatWorked,
   isActive,
@@ -184,88 +183,6 @@ export function ModelChip({
         {name}
       </span>
     </span>
-  )
-}
-
-/**
- * What the Agent told the child, what the child asked, and what the Agent answered. The question
- * it waits on reads in full, in amber when the reader is the one to answer.
- */
-export function Exchanges({
-  exchanges,
-  openQuestion,
-  urgent,
-}: {
-  readonly exchanges: readonly ChildExchange[]
-  readonly openQuestion: string | null
-  readonly urgent: boolean
-}) {
-  const labels = useAgentMessages().delegation
-  const shown = [...exchanges]
-  if (openQuestion && !shown.some((each) => each.kind === "asked" && each.text === openQuestion)) {
-    shown.push({ kind: "asked", text: openQuestion })
-  }
-
-  let lastAsked = -1
-  shown.forEach((each, index) => {
-    if (each.kind === "asked" && each.text === openQuestion) lastAsked = index
-  })
-
-  return (
-    <ul className="flex flex-col gap-1.5">
-      {shown.map((exchange, index) => {
-        const open = index === lastAsked
-        const amber = open && urgent
-        // The question waiting on the reader: its card says so already, so it reads as itself.
-        if (amber) {
-          return (
-            <li key={`${exchange.kind}:${index}`} className="text-sm leading-5 text-foreground">
-              <span className="sr-only">{labels.asks} · </span>
-              {exchange.text}
-            </li>
-          )
-        }
-        const Icon =
-          exchange.kind === "asked"
-            ? MessageCircleQuestion
-            : exchange.kind === "answered"
-              ? Check
-              : CornerDownRight
-        const label =
-          exchange.kind === "asked"
-            ? labels.asks
-            : exchange.kind === "answered"
-              ? labels.answer
-              : labels.fromAgent
-
-        return (
-          <li
-            key={`${exchange.kind}:${index}`}
-            className={cn(
-              "flex min-w-0 items-start gap-2 text-[13px] leading-5",
-              exchange.kind === "answered" && "pl-5"
-            )}
-          >
-            <Icon
-              className={cn(
-                "mt-0.5 size-3.5 shrink-0",
-                amber ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
-              )}
-              aria-hidden="true"
-            />
-            <p className={cn("min-w-0 break-words", !open && "line-clamp-3")} title={exchange.text}>
-              <span
-                className={cn("font-medium", amber ? NEEDS_READER_TEXT : "text-muted-foreground")}
-              >
-                {label}
-              </span>
-              <span className="text-muted-foreground"> · </span>
-              <span className="text-foreground">{exchange.text}</span>
-            </p>
-          </li>
-        )
-      })}
-    </ul>
   )
 }
 
