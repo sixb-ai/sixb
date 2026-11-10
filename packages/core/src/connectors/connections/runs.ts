@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { captureSixbFailure, isSixbError } from "../../errors/internal"
+import type { AuthorizablePrincipal } from "../../execution"
 import { ensureExecutionRecord } from "../../execution/durable"
 import {
   CONNECTOR_CONNECTION_RUN_FAILURE_CODES,
@@ -202,7 +203,14 @@ export class ConnectorConnectionRunService {
     }
 
     let authorizationId = run.authorizationId
+    let finished: ConnectorConnectionRunRecord
     try {
+      if (await this.isSuspended(principal)) {
+        throw createConnectorCodedError(
+          "connector.authorization_invalid",
+          "A suspended member can't connect an account."
+        )
+      }
       const definition = this.resolveDefinition(attempt.connectorId)
       const authorization = await this.requests.completeAuthorizationAttempt({
         definition,
@@ -232,12 +240,16 @@ export class ConnectorConnectionRunService {
           }
         },
       })
-      const finished = await this.finalizeCompletedRun(run, authorization)
-      return { runId: finished.id, connectorId: finished.connectorId, returnTo }
+      finished = await this.finalizeCompletedRun(run, authorization)
     } catch (error) {
       const failed = await this.failRun(run, error, authorizationId)
       return { runId: failed.id, connectorId: failed.connectorId, returnTo }
     }
+
+    if (authorizationId !== undefined) {
+      await this.revokeIfSuspended(attempt.connectorId, authorizationId, principal)
+    }
+    return { runId: finished.id, connectorId: finished.connectorId, returnTo }
   }
 
   async listPending(
@@ -400,6 +412,43 @@ export class ConnectorConnectionRunService {
       if (isSixbError(error) && error.code === "connector.replacement_required") return
       console.warn(
         "[Sixb] Connecting the only connector account failed; the user can still select it.",
+        error
+      )
+    }
+  }
+
+  private async isSuspended(principal: AuthorizablePrincipal): Promise<boolean> {
+    const users = this.storage.auth?.users
+    if (principal.type !== "user" || !users) return false
+
+    const user = await withConnectorStorageBoundary(
+      "The member who started the connector connection could not be read.",
+      () => users.getById({ projectId: this.projectId, id: principal.id })
+    )
+    return user?.status === "suspended"
+  }
+
+  /**
+   * A suspension during the exchange revokes only the connections it finds, so it can miss the
+   * grant this run just stored. Reading the status again afterwards closes that gap.
+   */
+  private async revokeIfSuspended(
+    connectorId: string,
+    authorizationId: string,
+    principal: AuthorizablePrincipal
+  ): Promise<void> {
+    try {
+      if (!(await this.isSuspended(principal))) return
+
+      await this.authorizations.revokeAuthorization({
+        definition: this.resolveDefinition(connectorId),
+        authorizationId,
+        principal,
+      })
+    } catch (error) {
+      // Syncs and actions already skip a suspended member's connections.
+      console.error(
+        `[Sixb] Could not revoke connector grant '${authorizationId}' of a member suspended while connecting. Disconnect it from the connections page to delete its tokens.`,
         error
       )
     }

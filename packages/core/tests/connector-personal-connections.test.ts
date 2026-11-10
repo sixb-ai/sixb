@@ -48,6 +48,53 @@ async function connectOwn(harness: ReturnType<typeof createHarness>, userId: Use
   })
 }
 
+const oneAccount = () => [{ id: "account-a", label: "Account A" }]
+
+/** One person starts the browser flow for their own `default` slot. */
+function startOwnRun(harness: ReturnType<typeof createHarness>, userId: User) {
+  return harness.process.startConnectionRun(member(userId), connectorId, {
+    owner: userOwner(userId),
+    slot: "default",
+    redirectUri: callbackUrl,
+    returnTo: "https://app.test/connections",
+  })
+}
+
+/** The provider redirects back to the callback, which needs no session. */
+function finishOwnRun(
+  harness: ReturnType<typeof createHarness>,
+  started: Awaited<ReturnType<typeof startOwnRun>>
+) {
+  return harness.process.callbackProcess.completeConnectionRun({
+    state: new URL(started.authorizationUrl).searchParams.get("state")!,
+    code: "authorization-code",
+    redirectUri: callbackUrl,
+    callbackBinding: started.callbackBinding.secret,
+  })
+}
+
+/** Suspended in storage, as an admin or the directory would. */
+function suspend(harness: ReturnType<typeof createHarness>, userId: User) {
+  return harness.storage.auth.suspendUserAndRevokeSessions({
+    projectId: "project",
+    userId,
+    suspendedAt: harness.now(),
+  })
+}
+
+async function runStatus(harness: ReturnType<typeof createHarness>, runId: string) {
+  const run = await harness.connectionStorage.getConnectionRun({
+    projectId: "project",
+    connectorId,
+    runId,
+  })
+  return run?.status
+}
+
+function listConnections(harness: ReturnType<typeof createHarness>) {
+  return harness.connectionStorage.listConnections({ projectId: "project", connectorId })
+}
+
 describe("personal connector connections", () => {
   test("defineConnector checks who may own an OAuth connector's connections", () => {
     const { adapter } = createHarness().connector
@@ -367,6 +414,38 @@ describe("personal connections in actions and workflows", () => {
 
     const read = await harness.service.listExecutionConnections(harness.connector)
     expect(read.map(({ id }) => id)).toEqual([ben.id])
+  })
+
+  // Removal proof: drop the first `isSuspended` check from `complete`; the exchange runs.
+  test("a connection started before a suspension doesn't finish after it", async () => {
+    const harness = createHarness({ owners: ["user"], discover: oneAccount })
+    const started = await startOwnRun(harness, "user-a")
+    await suspend(harness, "user-a")
+
+    await finishOwnRun(harness, started)
+
+    expect(harness.counts().exchangeCount).toBe(0)
+    expect(await runStatus(harness, started.runId)).toBe("failed")
+    expect(await listConnections(harness)).toEqual([])
+  })
+
+  // Removal proof: drop the `revokeIfSuspended` call from `complete`; the new grant stays active.
+  test("a suspension during the exchange still revokes the new grant", async () => {
+    const harness: ReturnType<typeof createHarness> = createHarness({
+      owners: ["user"],
+      discover: oneAccount,
+      async exchange() {
+        await suspend(harness, "user-a")
+        return { accessToken: "access", refreshToken: "refresh", scopes: ["accounts.read"] }
+      },
+    })
+    const started = await startOwnRun(harness, "user-a")
+
+    await finishOwnRun(harness, started)
+
+    const [connection] = await listConnections(harness)
+    expect(connection?.status).toBe("disconnected")
+    expect(harness.counts().revokeCount).toBe(1)
   })
 
   // Removal proof: drop the `withoutSuspendedOwners` check from `connectConnection`.
