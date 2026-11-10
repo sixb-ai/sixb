@@ -171,10 +171,11 @@ execution token stays `running` on 0.2.2, whose workers skip it.
   the same wait, until you roll forward.
 - DuckLake compacts a dataset on its own, in the process that wrote, after the commits that need
   it. Compaction never creates a dataset version, and time travel reads the same rows after it.
-- DuckLake hands memory back between bursts of work: after 10 seconds without DuckDB work, each
-  process drops DuckDB's cache of remote files and returns what DuckDB freed to the system
-  (`duckdb.releaseMemoryAfterIdleMs`), and DuckDB flushes its allocator from 32 MB instead of
-  512 MB. A project's own `duckdb.config` still wins. See _Memory_ in the `@sixb/ducklake` README.
+- DuckLake hands memory back between bursts of work: DuckDB returns what its queries freed to the
+  system within seconds (`allocator_background_threads`, and an allocator flush from 32 MB instead
+  of 512 MB), and after a minute without DuckDB work each process drops DuckDB's cache of remote
+  files (`duckdb.releaseMemoryAfterIdleMs`). A project's own `duckdb.config` still wins. See
+  _Memory_ in the `@sixb/ducklake` README.
 - A pipeline step that replaces a keyed output now stores only the rows that changed, so projections
   of it apply only those. A version that changes no row is still recorded, and fires no
   `updated()`.

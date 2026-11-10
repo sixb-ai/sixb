@@ -19,13 +19,20 @@ describe("DuckDB runtime memory", () => {
     jest.useRealTimers()
   })
 
-  test("flushes the allocator at 32 MB unless duckdb.config sets a threshold", async () => {
-    // Red check: drop DUCKDB_CONFIG_DEFAULTS from createDuckDbRuntime; DuckDB reports 488.2 MiB (512 MB).
+  test("applies the allocator defaults unless duckdb.config sets them", async () => {
+    // Red check: drop DUCKDB_CONFIG_DEFAULTS from createDuckDbRuntime; DuckDB reports 488.2 MiB
+    // (512 MB) and no background threads.
     const defaults = await createDuckDbRuntime({ config: { temp_directory: "" } })
     const configured = await createDuckDbRuntime({
-      config: { temp_directory: "", allocator_bulk_deallocation_flush_threshold: "256MB" },
+      config: {
+        temp_directory: "",
+        allocator_background_threads: "false",
+        allocator_bulk_deallocation_flush_threshold: "256MB",
+      },
     })
     try {
+      expect(await setting(defaults, "allocator_background_threads")).toBe(true)
+      expect(await setting(configured, "allocator_background_threads")).toBe(false)
       expect(await setting(defaults, "allocator_bulk_deallocation_flush_threshold")).toBe(
         "30.5 MiB"
       )

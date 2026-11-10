@@ -92,16 +92,27 @@ const warnedDuckLakeBuilds = new Set<string>()
 /**
  * Settings the provider changes from DuckDB's defaults; `duckdb.config` overrides each.
  *
- * DuckDB flushes its allocator (`malloc_trim(0)` with glibc) when it reserves more than this in
- * one piece. At DuckDB's 512 MB that rarely happens, so a query's freed memory stayed in malloc's
- * arenas and the next query grew on top of it; at 32 MB a burst of queries peaked about a third
- * lower, no slower. The flush is throttled to once per 100 ms per process.
+ * With `allocator_background_threads`, DuckDB's worker threads flush the allocator
+ * (`malloc_trim` with glibc) when they run out of work. Without it, what a burst of queries freed
+ * stayed in malloc's arenas: a process idled near 1 GB after a burst that settles near 0.3 GB
+ * with it, within seconds, no slower and with the file cache intact.
+ *
+ * DuckDB also flushes when it frees more than `allocator_bulk_deallocation_flush_threshold` in
+ * one piece. At DuckDB's 512 MB that rarely happens, so the next query grew on top of what the
+ * last one freed; at 32 MB a burst of queries peaked lower, no slower. The flush is throttled to
+ * once per 100 ms per process.
  */
 const DUCKDB_CONFIG_DEFAULTS: Readonly<Record<string, string>> = {
+  allocator_background_threads: "true",
   allocator_bulk_deallocation_flush_threshold: "32MB",
 }
 
-const DEFAULT_RELEASE_MEMORY_AFTER_IDLE_MS = 10_000
+/**
+ * The first read after a release fetches from object storage again, several times slower than a
+ * cached one. A minute keeps a person's session and back-to-back pipeline steps on the cache, and
+ * still returns it long before a worker's next scheduled run.
+ */
+const DEFAULT_RELEASE_MEMORY_AFTER_IDLE_MS = 60_000
 
 class NodeDuckDbRuntime implements DuckDbRuntime {
   private closing = false
