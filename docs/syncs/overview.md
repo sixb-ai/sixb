@@ -86,9 +86,10 @@ to a [`ref.user()`](../projections/overview.md#point-to-members) property, and g
 `can.view(Type).where((row) => row.p.owner.eq(currentUser()))`. Grant a workflow's group
 `can.view(Type)` without the condition when it needs to see everyone's.
 
-When an account needs reconnecting, a `merge` or `append` sync skips it: the run succeeds, the
-account keeps its checkpoint and rows, and the next run after it reconnects resumes from there. A
-`snapshot` sync fails instead, because leaving the account out would drop its rows.
+When a person's account needs reconnecting, a `merge` or `append` sync skips it: the run
+succeeds, the account keeps its checkpoint and rows, and the next run after it reconnects resumes
+from there. A `snapshot` sync fails instead, because leaving the account out would drop its rows.
+A project connection that needs reconnecting fails the run in every mode.
 
 ## Import files
 

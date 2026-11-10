@@ -153,7 +153,7 @@ async function* readManagedSource(
     try {
       client = await runAbortable(options.signal, () => source.connect(options.signal))
     } catch (error) {
-      if (!skipsUnauthorizedConnection(options.sync, error)) throw error
+      if (!skipsUnauthorizedConnection(options.sync, connection, error)) throw error
       // The connection keeps its checkpoint and its rows; its owner sees it needs reconnecting.
       console.warn(
         `[SixbSyncWorker] Sync '${options.sync.id}' skipped connection '${connection.id}' (${connection.account.label}): it needs reconnecting.`
@@ -207,12 +207,18 @@ async function* readManagedSource(
 }
 
 /**
- * One account that needs reconnecting must not fail everyone's run. A snapshot run still fails:
- * leaving the account out would drop its rows from the dataset.
+ * One person's account that needs reconnecting must not fail everyone's run. A snapshot run still
+ * fails: leaving the account out would drop its rows from the dataset. A project connection still
+ * fails the run, so the project's own expired grant reaches `onError` as it always has.
  */
-function skipsUnauthorizedConnection(sync: SyncDefinition, error: unknown): boolean {
+function skipsUnauthorizedConnection(
+  sync: SyncDefinition,
+  connection: SyncConnectorConnection,
+  error: unknown
+): boolean {
   return (
     sync.config.mode !== "snapshot" &&
+    connection.owner.type === "user" &&
     isSixbError(error) &&
     error.code === "connector.authorization_required"
   )
