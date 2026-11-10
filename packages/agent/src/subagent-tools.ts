@@ -7,7 +7,6 @@ import {
   type AgentMessagePart,
   type AgentReasoning,
   AgentToolPublicError,
-  type AgentToolResult,
   type LanguageModelRef,
   type LanguageModelTier,
 } from "@sixb/core"
@@ -22,9 +21,9 @@ import {
   createSubagentRunId,
   createSubagentThreadId,
   deferredChildQuestion,
-  isAgentToolResult,
   isAwaitingAnswerRun,
   isPausedSubagentRun,
+  SUBAGENT_RUN_ID_PREFIX,
 } from "@sixb/core/internal/agents"
 import { formatLanguageModelTiers, isLanguageModelTier } from "@sixb/core/internal/model-execution"
 import {
@@ -58,6 +57,7 @@ import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
 import type { TurnChildren } from "./run-agent-turn"
 import { continuationTrigger } from "./subagent-continuation"
+import type { WaitableChildren } from "./tools/background"
 import type { AgentRunFiles, AgentRunSettings } from "./types"
 
 /**
@@ -183,7 +183,7 @@ export interface WaitedQuestion extends QuestionRef {
 
 export interface WaitForSubagentsOutput {
   readonly results: readonly WaitedSubagentResult[]
-  /** Every question a child of this turn waits on: `wait_agent` returns as soon as one comes. */
+  /** Every question a child of this turn waits on: `wait` returns as soon as one comes. */
   readonly questions?: readonly WaitedQuestion[]
   /** The files no earlier result held, in the order of `results`. */
   readonly files: readonly InstalledChildFile[]
@@ -213,7 +213,7 @@ export class SubagentCoordinator {
   readonly #sent = new Map<string, SentMessage[]>()
   /** What the turn and its children say to each other, in their runner. */
   readonly #family = new FamilyMailbox()
-  /** The questions a `wait_agent` returned: one alone no longer stops a wait for other children. */
+  /** The questions a `wait` returned: one alone no longer stops a wait for other children. */
   readonly #reported = new Set<string>()
   /** What each `message_agent` that answered a question returned, by its mail id, for a replay. */
   readonly #answers = new Map<string, MessageSubagentOutput>()
@@ -378,7 +378,7 @@ export class SubagentCoordinator {
         renderSubagentModelGuide(this.models),
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
-        `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait_agent's result when it finishes, which lists where each file is.`,
+        `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait's result when it finishes, which lists where each file is.`,
         `A child that has not answered after ${this.models.maxSteps} steps (model calls) stops and fails with agent.step_limit_reached; pass maxSteps to stop it sooner.`,
         `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
@@ -391,49 +391,14 @@ export class SubagentCoordinator {
       },
       errorText: agentToolErrorText,
     }
-    const wait: ModelTool<WaitForSubagentsInput> = {
-      name: "wait_agent",
-      strict: true,
-      description: [
-        "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, each with its path in your sandbox. Pass every run id whose result is needed.",
-        "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
-        "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides, unless the user sends a new message or stops instead.",
-        "A message you sent a child that it has not read is listed in its unread. When one came as it answered, earlierAnswer holds what it answered before, and text what it wrote after.",
-        "A child that failed with agent.step_limit_reached did not finish: partialAnswer holds the last text it wrote.",
-        "It returns as soon as a child of this turn asks you a question, listed in questions with its key, whichever children you wait for: the child waits for your answer, which you give with message_agent.",
-      ].join("\n"),
-      inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
-      parseInput: (value) => parseWaitInput(value, this.context.subagentConcurrencyPerRun),
-      // A rich result, so its files reach later turns through $SIXB_ATTACHMENTS and the work trace.
-      execute: async (value, { signal }) => {
-        const { files, ...answer } = await this.wait(value, signal)
-        const output: AgentToolResult = {
-          kind: "agentToolResult",
-          content: [
-            { type: "text", text: JSON.stringify(answer) },
-            ...files.map(({ fileRef }) => ({ type: "file" as const, fileRef })),
-          ],
-        }
-        assertJsonValue(output)
-        return output
-      },
-      // The answer lists each file's path this turn; the Agent reads the ones it needs.
-      toModelOutput: (output) => ({
-        type: "text",
-        value: isAgentToolResult(output)
-          ? output.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
-          : JSON.stringify(output),
-      }),
-      errorText: agentToolErrorText,
-    }
     const message: ModelTool<MessageSubagentInput> = {
       name: "message_agent",
       strict: true,
       description: [
         "Send a message to a child agent still at work, by the key you spawned it with. It reads the message before its next step, or before its first while it is queued, and its answer accounts for it.",
-        "Use it to correct its course, add information it needs, or narrow its task, instead of waiting for an answer you would discard. Then collect its answer with wait_agent as usual.",
+        "Use it to correct its course, add information it needs, or narrow its task, instead of waiting for an answer you would discard. Then collect its answer with wait as usual.",
         "A child that finished, or paused for the user's approval, cannot read one.",
-        "While a child waits on the question it asked you, your message is its answer. A child that wait_agent listed as awaiting_answer, paused on its question when an earlier turn ended, continues where it stopped with your message as its answer.",
+        "While a child waits on the question it asked you, your message is its answer. A child that wait listed as awaiting_answer, paused on its question when an earlier turn ended, continues where it stopped with your message as its answer.",
       ].join("\n"),
       inputSchema: messageInputSchema(),
       parseInput: parseMessageInput,
@@ -444,7 +409,44 @@ export class SubagentCoordinator {
       },
       errorText: agentToolErrorText,
     }
-    return [spawn, wait, message]
+    return [spawn, message]
+  }
+
+  /** The turn's children as `wait` and `stop` reach them, by key or run id. */
+  waitable(): WaitableChildren {
+    return {
+      wait: (ids, signal) => this.wait({ runIds: ids }, signal),
+      stop: (id, signal) => this.stop(id, signal),
+    }
+  }
+
+  /**
+   * Stop one of this turn's children, then return what `wait` returns for it once it ended: its
+   * answer so far, the files it wrote, the messages it did not read.
+   */
+  async stop(id: string, signal: AbortSignal): Promise<WaitForSubagentsOutput> {
+    const { children } = this.session
+    const runId = this.childRunId(requireNonEmpty("stop", id, "id"))
+    const child = await children.get(runId)
+    if (child?.kind !== "subagent" || child.parentRunId !== this.parentRun.id) {
+      throw new AgentToolPublicError(
+        `[SixbAgent] stop has no background command or child agent of this turn '${id}': pass the id bash returned, or the key you spawned the child with.`
+      )
+    }
+    await children.cancel(runId)
+    for (;;) {
+      // Taken before the read, so an end that comes during it wakes the wait.
+      const changed = this.#family.changed()
+      const run = await children.get(runId)
+      if (run?.kind !== "subagent" || isTerminalSubagent(run)) break
+      await delay(CHILD_WAIT_RECHECK_MS, signal, changed)
+    }
+    return this.wait({ runIds: [id] }, signal)
+  }
+
+  /** The run a key names: this turn's child under it. A run id names itself. */
+  private childRunId(id: string): string {
+    return id.startsWith(SUBAGENT_RUN_ID_PREFIX) ? id : createSubagentRunId(this.parentRun.id, id)
   }
 
   /**
@@ -597,7 +599,7 @@ export class SubagentCoordinator {
     const admitted = await this.admitInTurn(async () => {
       if (await this.subagentRun(runId)) {
         throw new AgentToolPublicError(
-          `[SixbAgent] '${key}' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent.`
+          `[SixbAgent] '${key}' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait.`
         )
       }
       await this.clearDeadAttempts(paused, signal)
@@ -797,8 +799,8 @@ export class SubagentCoordinator {
         const after = (await this.continuesAfterAnswer(existing)) ? "your answer" : "the approval"
         throw new AgentToolPublicError(
           isTerminalSubagent(existing)
-            ? `[SixbAgent] '${key}' already continued after ${after}, and wait_agent returns how it ended. To run it again, spawn it with a new key.`
-            : `[SixbAgent] '${key}' is the sub-agent that continues after ${after}; wait for it with wait_agent.`
+            ? `[SixbAgent] '${key}' already continued after ${after}, and wait returns how it ended. To run it again, spawn it with a new key.`
+            : `[SixbAgent] '${key}' is the sub-agent that continues after ${after}; wait for it with wait.`
         )
       }
       if (existing.kind === "subagent" && existing.parentRunId === this.parentRun.id) {
@@ -940,7 +942,9 @@ export class SubagentCoordinator {
     const passedIds = normalizeRunIds(input.runIds, this.context.subagentConcurrencyPerRun)
     // A child of an earlier turn is waited for as the child of this one that continues it, else
     // as it ended.
-    const runIds = await Promise.all(passedIds.map((runId) => this.continuedChildId(runId)))
+    const runIds = await Promise.all(
+      passedIds.map((id) => this.continuedChildId(this.childRunId(id)))
+    )
     const earlierTurns = await this.earlierTurnsOf(runIds)
     for (;;) {
       signal.throwIfAborted()
@@ -956,7 +960,7 @@ export class SubagentCoordinator {
           (run.parentRunId !== this.parentRun.id && !earlierTurns.has(run.parentRunId))
         ) {
           throw new AgentToolPublicError(
-            `[SixbAgent] '${passedIds[index]}' is not a child of the current Agent run.`
+            `[SixbAgent] wait has no background command or child agent '${passedIds[index]}': pass the id bash returned, or the key you spawned the child with.`
           )
         }
         return run
@@ -1395,38 +1399,21 @@ function messageInputSchema(): JsonObject {
   }
 }
 
-function waitInputSchema(maxRunIds: number): JsonObject {
-  return {
-    type: "object",
-    properties: {
-      runIds: {
-        type: "array",
-        minItems: 1,
-        maxItems: maxRunIds,
-        uniqueItems: true,
-        items: { type: "string", minLength: 1 },
-      },
-    },
-    required: ["runIds"],
-    additionalProperties: false,
-  }
-}
-
 function normalizeRunIds(value: readonly string[], maxRunIds: number): readonly string[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > maxRunIds) {
     throw new AgentToolPublicError(
-      `[SixbAgent] wait_agent requires between 1 and ${maxRunIds} child run ids.`
+      `[SixbAgent] wait takes between 1 and ${maxRunIds} child agents at once.`
     )
   }
-  const runIds = value.map((runId) => requireNonEmpty("wait_agent", runId, "runId"))
+  const runIds = value.map((runId) => requireNonEmpty("wait", runId, "id"))
   if (new Set(runIds).size !== runIds.length) {
-    throw new AgentToolPublicError("[SixbAgent] wait_agent run ids must be unique.")
+    throw new AgentToolPublicError("[SixbAgent] wait ids must be unique.")
   }
   return runIds
 }
 
 function requireNonEmpty(
-  toolName: "spawn_agent" | "wait_agent" | "message_agent",
+  toolName: "spawn_agent" | "wait" | "stop" | "message_agent",
   value: unknown,
   field: string,
   maxLength?: number
@@ -1665,22 +1652,10 @@ function parseMessageInput(value: unknown): MessageSubagentInput {
   }
 }
 
-function parseWaitInput(value: unknown, maxRunIds: number): WaitForSubagentsInput {
-  if (
-    !isJsonObject(value) ||
-    Object.keys(value).some((key) => key !== "runIds") ||
-    !Array.isArray(value.runIds) ||
-    !value.runIds.every((id) => typeof id === "string")
-  ) {
-    throw new AgentToolPublicError("[SixbAgent] wait_agent expects an array of child run ids.")
-  }
-  return { runIds: normalizeRunIds(value.runIds, maxRunIds) }
-}
-
 /** A child that stopped reading as the turn sent to it: it paused or ended just then. */
 function stoppedReading(error: unknown, key: string): unknown {
   if (!(error instanceof ChildMailClosedError)) return error
   return new AgentToolPublicError(
-    `[SixbAgent] '${key}' stopped as you sent this, so it will not read it: it paused or ended. Wait for it with wait_agent to see which.`
+    `[SixbAgent] '${key}' stopped as you sent this, so it will not read it: it paused or ended. Wait for it with wait to see which.`
   )
 }

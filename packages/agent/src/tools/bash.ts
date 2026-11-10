@@ -34,7 +34,7 @@ export const BASH_TOOL_SPEC = {
       run_in_background: {
         type: "boolean",
         description:
-          "Run it in the background, returning at once with its id and output file: for servers, watchers, long builds. You are told when it ends; read it with bash_output, stop it with bash_stop. No timeout. It ends with the run, a pause for approval too, and its file with it; in the user's folder on their computer it runs until it exits, is stopped, or sixb quits.",
+          "Run it in the background, returning at once with its id and output file: for servers, watchers, long builds. You are told when it ends; wait for it with wait, stop it with stop, or read its file. No timeout. It ends with the run, a pause for approval too, and its file with it; in the user's folder on their computer it runs until it exits, is stopped, or sixb quits.",
       },
     },
     required: ["command"],

@@ -509,7 +509,7 @@ function realLoopTurn(): Promise<void> {
   })
 }
 
-/** Drive fake time, `wait_agent`'s polling included, until `check` holds. */
+/** Drive fake time, `wait`'s polling included, until `check` holds. */
 async function underFakeTime<T>(
   check: () => T | null | undefined | false | Promise<T | null | undefined | false>,
   label: string
@@ -595,7 +595,7 @@ function toolOutput(request: LanguageModelRequest | undefined, toolCallId: strin
   return undefined
 }
 
-/** What wait_agent answered in a turn, as the thread keeps it. */
+/** What wait answered in a turn, as the thread keeps it. */
 async function storedWait(agents: AgentStorage, threadId: string, toolCallId: string) {
   const { messages } = await agents.messages.list({ projectId, threadId })
   for (const message of messages) {
@@ -616,7 +616,7 @@ async function storedWait(agents: AgentStorage, threadId: string, toolCallId: st
 function pausingParent(next: Script = () => answer("INV-2041 is paid.")): Script {
   return (request, call) => {
     if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(PAY)])
-    if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [payRunIdOf(request)] }])
+    if (call === 2) return toolCalls(["wait", "wait", { ids: [payRunIdOf(request)] }])
     return next(request, call)
   }
 }
@@ -722,14 +722,14 @@ describe("a child whose call waits for approval", () => {
           )
         }
         if (call === 2) {
-          return toolCalls(["wait", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          return toolCalls(["wait", "wait", { ids: [payRunIdOf(request)] }])
         }
         if (call === 3) {
           releaseCollect()
           const collect = toolOutput(harness.parentRequests[1], "spawn-collect") as {
             readonly runId: string
           }
-          return toolCalls(["wait-collect", "wait_agent", { runIds: [collect.runId] }])
+          return toolCalls(["wait-collect", "wait", { ids: [collect.runId] }])
         }
         return answer("INV-2041 waits for you; three invoices are open.")
       },
@@ -866,12 +866,12 @@ describe("a turn that ends holding a call", () => {
 })
 
 describe("a paused child, once its requester decides", () => {
-  // Removal proofs: skip `continuePausedChildren` in the worker, and the resumed turn's wait_agent
-  // finds no child of its own for Pay's run id; drop `continuedChildId` from wait_agent, and it
+  // Removal proofs: skip `continuePausedChildren` in the worker, and the resumed turn's wait
+  // finds no child of its own for Pay's run id; drop `continuedChildId` from wait, and it
   // returns Pay as it paused, awaiting_approval; read only the thread's first message in
   // runSubagent, and the continuation starts from its task alone, without the paused child's
   // request as its prefix.
-  test("continues in its thread in the resumed turn, and wait_agent returns its answer", async () => {
+  test("continues in its thread in the resumed turn, and wait returns its answer", async () => {
     let continuationAtResume: SubagentRunRecord | null = null
     const harness = setup({
       parent: pausingParent(async (request, call) => {
@@ -890,7 +890,7 @@ describe("a paused child, once its requester decides", () => {
           return toolCalls(["spawn-again", "spawn_agent", spawn(PAY)])
         }
         if (call === 4) {
-          return toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          return toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
         }
         return answer("INV-2041 is paid.")
       }),
@@ -959,7 +959,7 @@ describe("a paused child, once its requester decides", () => {
       )
       expect(modelText(harness.parentRequests[2])).toContain("It continues with this outcome")
       expect(JSON.stringify(toolOutput(harness.parentRequests[3], "spawn-again"))).toContain(
-        "'pay' is the sub-agent that continues after the approval; wait for it with wait_agent."
+        "'pay' is the sub-agent that continues after the approval; wait for it with wait."
       )
       expect(toolOutput(harness.parentRequests[4], "wait-again")).toMatchObject({
         results: [{ runId: pay.id, status: "succeeded", text: "I marked INV-2041 paid." }],
@@ -979,7 +979,7 @@ describe("a paused child, once its requester decides", () => {
     const harness = setup({
       parent: pausingParent((request, call) =>
         call === 3
-          ? toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          ? toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
           : answer("INV-2041 stays open.")
       ),
       children: {
@@ -1015,7 +1015,7 @@ describe("a paused child, once its requester decides", () => {
     const harness = setup({
       parent: pausingParent((request, call) => {
         if (call === 3 || call === 5) {
-          return toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          return toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
         }
         if (call === 4) {
           failed = true
@@ -1103,13 +1103,13 @@ describe("a paused child, once its requester decides", () => {
   })
 
   // Removal proofs: report `continues` without the caller's state in reportSettledAgentApprovals,
-  // and the parent reads that Pay continues; drop `earlierTurnsOf` from wait_agent, and it refuses
+  // and the parent reads that Pay continues; drop `earlierTurnsOf` from wait, and it refuses
   // Pay's run id instead of saying how Pay ended.
-  test("a child that ended before it could pause does not continue, and wait_agent says how it ended", async () => {
+  test("a child that ended before it could pause does not continue, and wait says how it ended", async () => {
     const harness = setup({
       parent: pausingParent((request, call) =>
         call === 3
-          ? toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          ? toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
           : answer("INV-2041 is paid, but the summary was lost.")
       ),
       children: {
@@ -1169,7 +1169,7 @@ describe("a paused child, once its requester decides", () => {
     const harness = setup({
       parent: pausingParent((request, call) =>
         call === 3
-          ? toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          ? toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
           : answer("INV-2041 is paid.")
       ),
       children: {
@@ -1211,7 +1211,7 @@ describe("a paused child, once its requester decides", () => {
     const harness = setup({
       parent: pausingParent((request, call) =>
         call === 3
-          ? toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          ? toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
           : answer("INV-2041 is paid; the summary is attached.")
       ),
       children: {
@@ -1258,9 +1258,7 @@ describe("a paused child, once its requester decides", () => {
 /** The turn waits for Pay again once the requester decides, then answers. */
 function waitsAgain(text: string): Script {
   return pausingParent((request, call) =>
-    call === 3
-      ? toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
-      : answer(text)
+    call === 3 ? toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }]) : answer(text)
   )
 }
 
@@ -1288,9 +1286,9 @@ describe("a paused child, on a provider that keeps sandboxes", () => {
         if (call === 2) {
           return toolCalls(["spawn", "spawn_agent", { ...spawn(PAY), files: ["brief.md", TERMS] }])
         }
-        if (call === 3) return toolCalls(["wait", "wait_agent", { runIds: [payRunIdOf(request)] }])
+        if (call === 3) return toolCalls(["wait", "wait", { ids: [payRunIdOf(request)] }])
         if (call === 4) {
-          return toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          return toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
         }
         return answer("INV-2041 is paid.")
       },
@@ -1361,7 +1359,7 @@ describe("a paused child, on a provider that keeps sandboxes", () => {
           const runIds = ["spawn-collect", "spawn-pay"].map(
             (id) => (toolOutput(request, id) as { readonly runId: string }).runId
           )
-          return toolCalls(["wait", "wait_agent", { runIds }])
+          return toolCalls(["wait", "wait", { ids: runIds }])
         }
         return answer("Three invoices are open; paying failed.")
       },
@@ -1403,7 +1401,7 @@ describe("a paused child, on a provider that keeps sandboxes", () => {
         persistent: {},
         parent: pausingParent((request, call) => {
           if (call === 3 || call === 5) {
-            return toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+            return toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
           }
           if (call === 4) throw new Error("The parent's model is unavailable.")
           return answer("INV-2041 is paid.")
@@ -1510,7 +1508,7 @@ describe("a paused child, on a provider that keeps sandboxes", () => {
         if (call === 1) return toolCalls(["spawn-collect", "spawn_agent", spawn(COLLECT)])
         if (call === 2) {
           const collect = toolOutput(request, "spawn-collect") as { readonly runId: string }
-          return toolCalls(["wait", "wait_agent", { runIds: [collect.runId] }])
+          return toolCalls(["wait", "wait", { ids: [collect.runId] }])
         }
         return answer("Three invoices are open.")
       },
@@ -1599,12 +1597,12 @@ interface ChildWait {
 
 const WAITS: ChildWait[] = [
   {
-    name: "wait_agent",
+    name: "wait",
     parent: (request, call) => {
       if (call === 1) return toolCalls(["spawn-collect", "spawn_agent", spawn(COLLECT)])
       if (call === 2) {
         const collect = toolOutput(request, "spawn-collect") as { readonly runId: string }
-        return toolCalls(["wait", "wait_agent", { runIds: [collect.runId] }])
+        return toolCalls(["wait", "wait", { ids: [collect.runId] }])
       }
       return answer("Three invoices are open.")
     },
@@ -1735,7 +1733,7 @@ describe("a retried resume whose earlier attempt's continuation is still stoppin
           throw new Error("The parent's model is unavailable.")
         }
         if (call === 4) {
-          return toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+          return toolCalls(["wait-again", "wait", { ids: [payRunIdOf(request)] }])
         }
         return answer("INV-2041 is paid.")
       }),
@@ -1802,7 +1800,7 @@ describe("a wait for a child of an earlier turn still stopping", () => {
           await reachedBlock
           return answer("Pay is on it.")
         }
-        if (call === 3) return toolCalls(["wait", "wait_agent", { runIds: [payRunIdOf(request)] }])
+        if (call === 3) return toolCalls(["wait", "wait", { ids: [payRunIdOf(request)] }])
         return answer("Pay was stopped.")
       },
       children: {
