@@ -357,11 +357,14 @@ export class RedisBroker implements Broker {
     assertStreamId(params.streamId)
 
     const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
-    if (ensured === null || (await this.retainedRange(ensured)) === null) {
+    if (ensured === null) {
       return undefined
     }
 
     return this.connectionManager.useCommandClient(async (client) => {
+      if (!(await this.enforceAgeRetention(client, ensured))) {
+        return undefined
+      }
       const entries = await this.readReverseRange(client, ensured, "+", "-", 1)
       return entries[0]?.id
     })
@@ -559,26 +562,35 @@ export class RedisBroker implements Broker {
     ensured: EnsuredStream
   ): Promise<{ readonly lastTrimmedId?: string } | null> {
     return this.connectionManager.useCommandClient(async (client) => {
-      let reply: unknown
-      try {
-        // Age retention is a Sixb-level policy. Redis Streams only trim when a
-        // command asks them to, so reads/replays must also trim idle streams.
-        reply = await client.send("EVAL", [
-          ENFORCE_AGE_RETENTION_SCRIPT,
-          "2",
-          ensured.keys.streamKey,
-          ensured.keys.metaKey,
-        ])
-      } catch (error) {
-        throw new RedisBrokerError(`Failed to enforce retention for stream "${ensured.streamId}"`, {
-          cause: error,
-        })
-      }
-      if (reply === 0) {
+      if (!(await this.enforceAgeRetention(client, ensured))) {
         return null
       }
       return { lastTrimmedId: await this.readLastTrimmedId(client, ensured) }
     })
+  }
+
+  /** Enforces age retention; false once Redis has expired the stream's keys. */
+  private async enforceAgeRetention(
+    client: RedisBrokerCommandClient,
+    ensured: EnsuredStream
+  ): Promise<boolean> {
+    let reply: unknown
+    try {
+      // Age retention is a Sixb-level policy. Redis Streams only trim when a
+      // command asks them to, so reads/replays must also trim idle streams.
+      reply = await client.send("EVAL", [
+        ENFORCE_AGE_RETENTION_SCRIPT,
+        "2",
+        ensured.keys.streamKey,
+        ensured.keys.metaKey,
+      ])
+    } catch (error) {
+      throw new RedisBrokerError(`Failed to enforce retention for stream "${ensured.streamId}"`, {
+        cause: error,
+      })
+    }
+    // The script answers 0 when the stream's metadata is gone.
+    return reply !== 0
   }
 
   private async subscriptionStartCursor(
