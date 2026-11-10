@@ -1,3 +1,4 @@
+import type { Broker } from "../broker"
 import { createInheritedAgentExecutionRecord } from "../execution/agent"
 import { ensureExecutionRecord } from "../execution/durable"
 import type { Storage } from "../storage"
@@ -13,6 +14,7 @@ import type {
   SubagentRunRecord,
 } from "../storage/agents"
 import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
+import { cancelQueuedRun, requestAgentRunCancel } from "./cancel"
 import { createSubagentExecutionId, createSubagentRunId, createSubagentThreadId } from "./ids"
 import { AgentRunRefusedError, fenced } from "./run-fence"
 import { listSubagentThreadRuns } from "./subagent-runs"
@@ -54,6 +56,12 @@ export interface AgentRunChildren {
    * so the turn can continue the child again. Refused once the turn no longer owns its run.
    */
   clearAttempt(input: { readonly threadId: string; readonly runId: string }): Promise<void>
+  /**
+   * Stop one of this turn's children: a queued one ends at once, a running one hears the cancel
+   * and ends at its next step. One that already ended is returned as it is. Refused for any run
+   * but this turn's own children.
+   */
+  cancel(runId: string): Promise<SubagentRunRecord>
 }
 
 /**
@@ -136,6 +144,8 @@ export function agentRunThreads(
 export interface AgentRunChildrenHost {
   readonly projectId: string
   readonly storage: Storage & { readonly agents: AgentStorage }
+  /** Where a cancel reaches the child's runner at once. */
+  readonly broker: Broker
   /** How many children one turn may have queued or running at once. */
   readonly maxActiveChildren?: number
 }
@@ -231,6 +241,24 @@ export function agentRunChildren(
         })
       )
     },
+    async cancel(runId) {
+      const child = await get(runId)
+      if (child?.kind !== "subagent" || child.parentRunId !== run.id) {
+        throw new AgentRunRefusedError(
+          `[Sixb] Agent run '${run.id}' stops only its own children, not '${runId}'.`
+        )
+      }
+      if (child.status === "queued") {
+        const queued = await cancelQueuedRun(host, agents, child)
+        if (queued.cancelled) return requireSubagent(queued.run)
+        // A worker started it meanwhile: it is stopped as a running one.
+        if (queued.run?.status !== "running") return requireSubagent(queued.run ?? child)
+      } else if (child.status !== "running") {
+        return child
+      }
+      await requestAgentRunCancel({ projectId, broker: host.broker, storage: agents }, child.id)
+      return child
+    },
     async clearAttempt({ threadId, runId }) {
       // Only an attempt that ended, of a child of this conversation, in that child's thread.
       const attempt = await get(runId)
@@ -254,6 +282,11 @@ export function agentRunChildren(
       )
     },
   }
+}
+
+function requireSubagent(run: AgentRunRecord): SubagentRunRecord {
+  if (run.kind !== "subagent") throw new Error(`[Sixb] Agent run '${run.id}' changed kind.`)
+  return run
 }
 
 function assertDelegable(

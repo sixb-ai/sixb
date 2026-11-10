@@ -89,6 +89,7 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     session.children.clearAttempt(
       input as Parameters<AgentRunSession["children"]["clearAttempt"]>[0]
     ),
+  "children.cancel": (session, [runId]) => session.children.cancel(runId as string),
   "threads.message": (session, [messageId]) => session.threads.message(messageId as string),
   "threads.messages": (session, [input]) =>
     session.threads.messages(input as Parameters<AgentRunSession["threads"]["messages"]>[0]),
