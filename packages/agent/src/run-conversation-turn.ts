@@ -120,6 +120,7 @@ export async function runConversationTurn(input: {
     environment = await createConversationAgentEnvironment({
       session,
       frameworkTools,
+      children: delegation.waitable(),
       thread: prepared.thread,
       ...(prepared.execution.requestedBy === undefined
         ? {}

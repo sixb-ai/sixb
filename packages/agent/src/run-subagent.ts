@@ -262,7 +262,7 @@ async function settleSubagent(
 
 /**
  * Keep the child's outcome: its answer, what it wrote under `out/`, and what it did as its thread's
- * next message. A paused child keeps its files too, for the run that continues it; `wait_agent`
+ * next message. A paused child keeps its files too, for the run that continues it; `wait`
  * hands over only a finished child's, as an unfinished one's would pass for complete. Its `out/`
  * is stored even when its workspace is kept: a continuation that finds it lost gets it back.
  */

@@ -219,7 +219,7 @@ export class LocalRunner {
   }
 
   /**
-   * Stop a background command, and everything it started, as the agent's `bash_stop` does. False
+   * Stop a background command, and everything it started, as the agent's `stop` does. False
    * when it ended already, or is not this `sixb`'s.
    */
   async stopBackground(ref: ComputerBackgroundCommandRef): Promise<boolean> {

@@ -152,6 +152,7 @@ export {
   createSubagentExecutionId,
   createSubagentRunId,
   createSubagentThreadId,
+  SUBAGENT_RUN_ID_PREFIX,
 } from "./ids"
 export { AGENT_IMAGE_INPUT_TOKENS, AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
 export {

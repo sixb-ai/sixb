@@ -14,8 +14,8 @@ export function approvalOutcomeInstruction(part: AgentApprovalOutcomePart): stri
       ? text
       : `Your sub-agent '${part.caller.key}' made this request. ${text} ${
           part.caller.continues
-            ? "It continues with this outcome, and wait_agent with its run id returns its answer."
-            : "It does not continue: wait_agent with its run id returns how it ended, and you can spawn it again with a new key if its work is still needed."
+            ? "It continues with this outcome, and wait with its key returns its answer."
+            : "It does not continue: wait with its key returns how it ended, and you can spawn it again with a new key if its work is still needed."
         }`
   return `<sixb_approval id="${part.approvalId}" status="${part.status}">${body}</sixb_approval>`
 }

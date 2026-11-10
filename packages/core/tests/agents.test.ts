@@ -189,6 +189,8 @@ describe("defineAgentTool", () => {
     }
     for (const name of [
       "bash",
+      "wait",
+      "stop",
       "bash_output",
       "bash_stop",
       "read",

@@ -285,7 +285,7 @@ export interface AgentRunsRuntime {
    * this returns; a running one is still running, with the stop signal sent to its worker. A turn
    * paused for approval stays as it ended, with its held calls cancelled: it never resumes. A
    * sub-agent's run stops as its turn would: whoever asked for that turn, or the conversation's
-   * owner, can, and its parent's `wait_agent` reads that it was stopped.
+   * owner, can, and its parent's `wait` reads that it was stopped.
    */
   cancel(runId: string): Promise<AgentRunView>
   /** A turn, or a sub-agent's run, read through its thread. */
