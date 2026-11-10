@@ -16,6 +16,7 @@ import { isPublishTool, publishTitle } from "./publish-artifact/interpret"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./read/interpret"
 import { webFetchQuestion, webFetchUrl } from "./utils/web-fetch"
 import { describeViewFile } from "./view-file/interpret"
+import { waitsForCommandsOnly } from "./waits"
 
 /** A short, present-tense label for the newest visible step in a live work group. */
 export function latestWorkLabel(
@@ -48,7 +49,7 @@ function toolProgressLabel(
     if (tool.state === "output-available") return messages.web.reviewingResults
     return messages.web.searching
   }
-  if (tool.toolName === "bash_output" || tool.toolName === "bash_stop" || isBackgroundStart(tool)) {
+  if (waitsForCommandsOnly(tool) || isBackgroundStart(tool)) {
     return backgroundRowLabel(tool, messages)
   }
   if (tool.toolName === "bash") {

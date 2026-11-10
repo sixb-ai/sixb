@@ -366,6 +366,9 @@ export const fr: Translation<AgentMessages> = {
     heardFrom: (key) => `Réponse de ${key}`,
     heardFromCount: (agents) => `Réponses de ${count(agents, "sous-agent")}`,
     waitFailed: "Impossible d’attendre les sous-agents",
+    stoppingAgent: (key) => `Arrêt de ${key}`,
+    stoppedAgent: (key) => `${key} arrêté`,
+    stopAgentFailed: (key) => `Impossible d’arrêter ${key}`,
     line: {
       names: (names) =>
         names.length <= 1

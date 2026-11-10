@@ -317,6 +317,27 @@ describe("a background command", () => {
         )
       )
     ).toEqual({ verb: "stop", detail: "bg_1a2b3c  bun test", note: "stopped" })
+
+    // wait and stop, which took their place, list what they named.
+    expect(
+      toolLine(
+        call(
+          "wait",
+          { ids: ["bg_1a2b3c"] },
+          { commands: [{ ...read, status: "exited", exitCode: 1, output: "1 fail\n" }] }
+        )
+      )
+    ).toMatchObject({ verb: "wait", detail: "bg_1a2b3c  bun test", note: "exit 1", failed: true })
+    const stopped = { results: [{ runId: "terms", status: "cancelled" }], files: [] }
+    expect(
+      toolLine(
+        call(
+          "stop",
+          { id: "terms" },
+          { kind: "agentToolResult", content: [{ type: "text", text: JSON.stringify(stopped) }] }
+        )
+      )
+    ).toEqual({ verb: "stop", detail: "terms", note: "stopped" })
   })
 
   test("ticks by the second while it runs", () => {

@@ -3,6 +3,7 @@ import { type AgentConversationMessage, normalizedTool } from "../conversation"
 import type { AgentMessages } from "../i18n/en"
 import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
 import { askedText, isAskTool } from "../questions/interpret"
+import { isCommandId, isStop, namedIds, waitsForChildren } from "../waits"
 
 // What the parent's own parts say about the sub-agents it delegated to: which it spawned, what it
 // told or answered each, and what each asked. A reader of the thread always has them, even without
@@ -25,7 +26,7 @@ export interface SpawnedChild {
   readonly pending: boolean
 }
 
-/** What `wait_agent` last said about one of a child's runs. */
+/** What `wait`, or a `stop`, last said about one of a child's runs. */
 export interface WaitedChild {
   readonly status: string
   readonly text?: string
@@ -87,7 +88,8 @@ export interface DelegationTurn {
   readonly tools: readonly NormalizedTool[]
 }
 
-const DELEGATION_TOOLS = new Set(["spawn_agent", "wait_agent", "message_agent"])
+/** Earlier threads hold `wait_agent`; a `wait` or a `stop` for commands alone is left out. */
+const DELEGATION_TOOLS = new Set(["spawn_agent", "message_agent", "wait", "stop", "wait_agent"])
 
 /** The delegation calls of each reply, oldest first, the one streaming last. */
 export function delegationTurns(
@@ -120,14 +122,15 @@ export function readThreadDelegation(turns: readonly DelegationTurn[]): ThreadDe
       return
     }
 
-    if (tool.toolName !== "wait_agent" || tool.state !== "output-available") return
+    if (!waitsForChildren(tool) || tool.state !== "output-available") return
     const output = toolResultValue(tool.output)
     if (!isRecord(output)) return
 
     for (const result of Array.isArray(output.results) ? output.results : []) {
       if (!isRecord(result) || typeof result.runId !== "string") continue
       if (typeof result.status !== "string") continue
-      waited.set(result.runId, {
+      // Named by its key, as `wait` takes it, or by its run id, as `wait_agent` did.
+      waited.set(owners.get(result.runId) ?? result.runId, {
         status: result.status,
         ...(typeof result.text === "string" ? { text: result.text } : {}),
         ...(isRecord(result.error) && typeof result.error.message === "string"
@@ -259,11 +262,14 @@ export function formatWorked(ms: number, messages: AgentMessages["delegation"]):
   return messages.hours(Math.floor(minutes / 60), minutes % 60)
 }
 
-/** The children a `wait_agent` call waits for, by key when the parts named them. */
+/**
+ * The children a `wait` or a `stop` names, by title: `wait` takes their keys, `wait_agent` took
+ * run ids, titled when the parts spawned them. Its background commands are not children.
+ */
 function waitedKeys(tool: NormalizedTool, keys: ReadonlyMap<string, string>): readonly string[] {
-  const input = isRecord(tool.input) ? tool.input : {}
-  const ids = Array.isArray(input.runIds) ? input.runIds : []
-  return ids.flatMap((id) => (typeof id === "string" ? [keys.get(id) ?? ""] : []))
+  return namedIds(tool)
+    .filter((id) => !isCommandId(id))
+    .map((id) => keys.get(id) ?? (tool.toolName === "wait_agent" ? "" : childTitle(id)))
 }
 
 /**
@@ -299,7 +305,7 @@ export function describeDelegationTool(
     return { title: labels.askedAgent(askedText(tool.input)), running: labels.states.asking }
   }
 
-  if (tool.toolName === "wait_agent") {
+  if (waitsForChildren(tool)) {
     const keys = new Map<string, string>()
     for (const part of parts) {
       if (part.kind !== "tool") continue
@@ -308,6 +314,16 @@ export function describeDelegationTool(
     }
     const waitedFor = waitedKeys(tool, keys)
     const named = waitedFor.every(Boolean) ? waitedFor : []
+    if (isStop(tool)) {
+      const name = named[0] ?? ""
+      if (tool.state === "output-error") {
+        const failed = labels.stopAgentFailed(name)
+        return { title: failed, running: failed }
+      }
+      return tool.state === "output-available"
+        ? { title: labels.stoppedAgent(name), running: labels.stoppedAgent(name) }
+        : { title: labels.stoppingAgent(name), running: labels.stoppingAgent(name) }
+    }
     const waiting =
       named.length === 1
         ? labels.waitingFor(named[0] ?? "")

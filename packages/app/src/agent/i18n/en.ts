@@ -384,6 +384,9 @@ export const en = {
     heardFrom: (key: string) => `Heard back from ${key}`,
     heardFromCount: (agents: number) => `Heard back from ${count(agents, "sub-agent")}`,
     waitFailed: "Couldn't wait for the sub-agents",
+    stoppingAgent: (key: string) => `Stopping ${key}`,
+    stoppedAgent: (key: string) => `Stopped ${key}`,
+    stopAgentFailed: (key: string) => `Couldn't stop ${key}`,
     askedAgent: (question: string) => `Asked the agent: ${question}`,
     /** The reply's line: the sub-agents by name, and how they stand. */
     line: {
