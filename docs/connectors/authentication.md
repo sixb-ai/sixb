@@ -142,7 +142,8 @@ A personal connection belongs to the member who connected it:
 | Members with `can.manage(gmail)` | See every connection and its owner, and disconnect any of them |
 | Other members | Nothing. To them, it doesn't exist |
 
-Only the owner can reconnect or revoke a connection, because both act on their own sign-in.
+Only the owner can reconnect or revoke a connection, because both act on their own sign-in. A
+personal connection's account can't fill a project slot; connect it again for the project.
 
 ### Bring each person's data in
 

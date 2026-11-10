@@ -94,6 +94,49 @@ describe("personal connector connections", () => {
     expect(await start(userOwner("user-b"))).toBeInstanceOf(AuthorizationError)
   })
 
+  test("a person's grant never fills a project slot", async () => {
+    // Removal proof: return early from assertAuthorizationOwner; both project slots fill.
+    const harness = createHarness({ owners: ["project", "user"] })
+    const ada = await connectOwn(harness, "user-a")
+    const grant = await harness.connectionStorage.getAuthorizationByConnectionId({
+      projectId: "project",
+      connectorId,
+      connectionId: ada.id,
+    })
+
+    // Ada manages the connector, so only the grant's owner stops her.
+    expectSixbError(
+      await rejectionOf(
+        harness.process.addConnection(manager(), connectorId, {
+          fromConnectionId: ada.id,
+          owner: projectOwner,
+          slot: "shared",
+        })
+      ),
+      "connector.operation_conflict"
+    )
+    expectSixbError(
+      await rejectionOf(
+        harness.process.selectAccount(manager(), connectorId, {
+          authorizationId: grant!.id,
+          accountId: "account-a",
+          owner: projectOwner,
+          slot: "shared",
+        })
+      ),
+      "connector.operation_conflict"
+    )
+
+    // Her own second slot can still share it.
+    expect(
+      await harness.process.addConnection(member("user-a"), connectorId, {
+        fromConnectionId: ada.id,
+        owner: userOwner("user-a"),
+        slot: "work",
+      })
+    ).toMatchObject({ owner: userOwner("user-a"), slot: "work" })
+  })
+
   test("only the owner reconnects or revokes; a manager can disconnect", async () => {
     const harness = createHarness({ owners: ["user"] })
     const ben = await connectOwn(harness, "user-b")
