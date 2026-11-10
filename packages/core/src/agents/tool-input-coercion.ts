@@ -6,8 +6,9 @@ import type { JsonObject, JsonValue } from "../json"
  *
  * ```text
  * null for an optional property that does not allow null   left out
- * "42" for a number or an integer                          42
+ * "42" for a number or an integer, when it fits exactly     42
  * "true" / "false" for a boolean                           true / false
+ * an array as JSON text                                    the array
  * one value for an array                                   [value]
  * ```
  *
@@ -29,16 +30,35 @@ function coerce(schema: JsonValue | undefined, value: unknown): unknown {
 
   if (typeof value === "string") {
     const text = value.trim()
-    if (types.includes("integer") && /^-?\d+$/.test(text)) return Number(text)
-    if (types.includes("number") && /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(text)) {
+    // An integer past what a number holds exactly would change: an id would name its neighbour.
+    if (types.includes("integer") && /^-?\d+$/.test(text) && Number.isSafeInteger(Number(text))) {
+      return Number(text)
+    }
+    if (
+      types.includes("number") &&
+      /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(text) &&
+      Number.isFinite(Number(text))
+    ) {
       return Number(text)
     }
     if (types.includes("boolean") && (text === "true" || text === "false")) return text === "true"
+    if (types.includes("array") && text.startsWith("[")) {
+      const parsed = parseJson(text)
+      if (Array.isArray(parsed)) return coerceInside(schema, parsed)
+    }
   }
   if (types.includes("array") && value !== null && value !== undefined && !Array.isArray(value)) {
     return [coerce(schema.items, value)]
   }
   return value
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
 }
 
 function coerceInside(schema: JsonObject, value: unknown): unknown {

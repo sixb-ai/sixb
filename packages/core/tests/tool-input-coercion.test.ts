@@ -49,6 +49,24 @@ describe("coerceToolInput", () => {
     expect(coerceToolInput(schema, input)).toEqual(input)
   })
 
+  // Removal proofs: drop the isSafeInteger check in coerce; the id past 2^53 becomes its
+  // neighbour. Drop the JSON branch; the array's text is wrapped as one string.
+  test("leaves an integer a number cannot hold exactly, and reads an array sent as JSON text", () => {
+    expect(coerceToolInput(schema, { path: "a", offset: "9007199254740993" })).toEqual({
+      path: "a",
+      offset: "9007199254740993",
+    })
+    expect(coerceToolInput(schema, { path: "a", files: '["b.ts", "c.ts"]' })).toEqual({
+      path: "a",
+      files: ["b.ts", "c.ts"],
+    })
+    // Text that is not an array is one value.
+    expect(coerceToolInput(schema, { path: "a", files: "[draft].md" })).toEqual({
+      path: "a",
+      files: ["[draft].md"],
+    })
+  })
+
   test("wraps one value sent for an array", () => {
     expect(coerceToolInput(schema, { path: "a", files: "b.ts" })).toEqual({
       path: "a",
