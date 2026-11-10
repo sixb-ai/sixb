@@ -15,6 +15,7 @@ const MAX_QUERY_CHARACTERS = 2_000
 
 export const WEB_SEARCH_TOOL_SPEC = {
   name: "web_search",
+  strict: true,
   description:
     "Search the web for current or external information. Returns up to 8 results, each a title, URL, date and snippet.",
   inputSchema: {

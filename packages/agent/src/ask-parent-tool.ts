@@ -57,6 +57,7 @@ export function unansweredQuestion<TMessage extends Pick<AgentMessage, "parts">>
 export function createAskParentTool(inbox: SubagentInbox): ModelTool<AskParentInput> {
   return {
     name: "ask_parent",
+    strict: true,
     description: [
       "Ask your parent agent a question and wait for its answer, which this tool returns.",
       "Ask only when you cannot go on without a decision that only your parent or the user can make, never what the project's data or your task answers. One question at a time.",

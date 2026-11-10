@@ -80,6 +80,7 @@ const TITLE_PROPERTY = {
 
 export const PUBLISH_ARTIFACT_TOOL_SPEC = {
   name: CREATE_TOOL,
+  strict: true,
   description:
     "Publish a new artifact from a file or directory in the sandbox: a deliverable the user opens beside the conversation. Read the sixb-artifacts skill before the first publish. To change an artifact you already published, use update_artifact. Returns the artifact's id and version; a refusal says what to fix.",
   inputSchema: {
@@ -96,6 +97,7 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
 
 export const UPDATE_ARTIFACT_TOOL_SPEC = {
   name: UPDATE_TOOL,
+  strict: true,
   description:
     "Update an artifact of this conversation, or one an object the user may edit holds, from a file or directory in the sandbox: your files replace its current version's, which stays open, and its kind stays. Versions the user created stay as they are. $SIXB_ARTIFACTS lists this conversation's artifacts, each with its current version under $SIXB_ARTIFACTS_DIR/<id>/; open one it does not list with open_artifact first. Returns the version and revision it wrote; a refusal says what to fix.",
   inputSchema: {
@@ -112,6 +114,7 @@ export const UPDATE_ARTIFACT_TOOL_SPEC = {
 
 export const OPEN_ARTIFACT_TOOL_SPEC = {
   name: OPEN_TOOL,
+  strict: true,
   description:
     "Open an artifact $SIXB_ARTIFACTS does not list, such as one a project object holds: its current version is installed under $SIXB_ARTIFACTS_DIR/<id>/ and listed in $SIXB_ARTIFACTS, to read it, or to revise it with update_artifact when the user may change it. Publishes nothing. Returns its title, revision, and whether the user may only read it.",
   inputSchema: {

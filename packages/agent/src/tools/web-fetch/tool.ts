@@ -54,6 +54,7 @@ const ANSWER_INSTRUCTIONS = [
 
 export const WEB_FETCH_TOOL_SPEC = {
   name: "web_fetch",
+  strict: true,
   description:
     "Read a web page, PDF or image by URL. A large page is saved to a file. Pass a question to get an answer from the page.",
   inputSchema: {
