@@ -1005,3 +1005,32 @@ describe("stopping a child", () => {
     }
   })
 })
+
+describe("waiting in the step that spawns", () => {
+  // Removal proof: drop awaitSpawned from SubagentCoordinator.wait; the wait runs before the spawn
+  // is admitted, and is refused: "wait has no background command or child agent 'compare'".
+  test("waits for the child that step spawns, by its key", async () => {
+    const harness = setup({
+      parent: async (_request, call) => {
+        if (call === 1) {
+          return toolCalls(
+            ["spawn", "spawn_agent", spawn(COMPARE)],
+            ["wait", "wait", { ids: [COMPARE.key] }]
+          )
+        }
+        return answer("Payment terms compared.")
+      },
+      children: { [COMPARE.key]: async () => answer("Compared payment terms.") },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      await requestTurn(harness)
+      expect(toolOutput(harness.parentRequests[1], "wait")).toMatchObject({
+        results: [{ runId: COMPARE.key, status: "succeeded", text: "Compared payment terms." }],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})

@@ -74,6 +74,14 @@ export const CHILD_WAIT_RECHECK_MS = 5_000
  * short, so a short poll costs little.
  */
 export const OTHER_TURN_RECHECK_MS = 250
+
+/**
+ * How a wait or a stop looks again for a child it cannot find yet, spawned in the same step: a
+ * spawn's call starts once it is published, a moment after the wait's may. A second at most, then
+ * the id is refused as unknown.
+ */
+const SPAWN_RECHECK_MS = 100
+const SPAWN_RECHECKS = 10
 const OMIT_MODEL = "Omit model to use the project default."
 
 /** With tiers, the model guide says how to choose, so only a list adds advice. */
@@ -209,6 +217,8 @@ export class SubagentCoordinator {
   readonly #installed = new Map<string, readonly InstalledChildFile[]>()
   /** The spawn being admitted: only this turn adds children to it. */
   #admissions: Promise<unknown> = Promise.resolve()
+  /** Spawns this turn has started and not settled, by the child's run id. */
+  readonly #spawning = new Map<string, Promise<unknown>>()
   /** What this turn sent each child, by its run id, in order. */
   readonly #sent = new Map<string, SentMessage[]>()
   /** What the turn and its children say to each other, in their runner. */
@@ -427,6 +437,7 @@ export class SubagentCoordinator {
   async stop(id: string, signal: AbortSignal): Promise<WaitForSubagentsOutput> {
     const { children } = this.session
     const runId = this.childRunId(requireNonEmpty("stop", id, "id"))
+    await this.awaitSpawned([runId], signal)
     const child = await children.get(runId)
     if (child?.kind !== "subagent" || child.parentRunId !== this.parentRun.id) {
       throw new AgentToolPublicError(
@@ -732,6 +743,36 @@ export class SubagentCoordinator {
   }
 
   async spawn(input: SpawnSubagentInput, signal: AbortSignal): Promise<SpawnSubagentOutput> {
+    // Known as on its way from its start, so a wait of the same step finds it once it is admitted.
+    const runId = createSubagentRunId(this.parentRun.id, input.key?.trim() ?? "")
+    const spawning = this.admitSpawn(input, signal)
+    this.#spawning.set(runId, spawning)
+    try {
+      return await spawning
+    } finally {
+      if (this.#spawning.get(runId) === spawning) this.#spawning.delete(runId)
+    }
+  }
+
+  /**
+   * Wait for the children these runs name to exist. Calls of one step run together, each starting
+   * after its call is published, so a wait may begin before the spawn beside it: it waits for the
+   * spawns on their way, and for one not yet started, a few short rechecks. A run still missing
+   * then is refused by the caller.
+   */
+  private async awaitSpawned(runIds: readonly string[], signal: AbortSignal): Promise<void> {
+    for (let check = 0; ; check += 1) {
+      await Promise.allSettled(runIds.flatMap((runId) => this.#spawning.get(runId) ?? []))
+      const found = await this.session.children.getMany(runIds)
+      if (found.length === new Set(runIds).size || check === SPAWN_RECHECKS) return
+      await delay(SPAWN_RECHECK_MS, signal)
+    }
+  }
+
+  private async admitSpawn(
+    input: SpawnSubagentInput,
+    signal: AbortSignal
+  ): Promise<SpawnSubagentOutput> {
     signal.throwIfAborted()
     const key = requireNonEmpty("spawn_agent", input.key, "key", 128)
     const task = requireNonEmpty("spawn_agent", input.task, "task")
@@ -942,6 +983,10 @@ export class SubagentCoordinator {
     const passedIds = normalizeRunIds(input.runIds, this.context.subagentConcurrencyPerRun)
     // A child of an earlier turn is waited for as the child of this one that continues it, else
     // as it ended.
+    await this.awaitSpawned(
+      passedIds.map((id) => this.childRunId(id)),
+      signal
+    )
     const runIds = await Promise.all(
       passedIds.map((id) => this.continuedChildId(this.childRunId(id)))
     )
