@@ -936,14 +936,14 @@ function publishSummary(output: JsonValue, tool: ArtifactToolName): string {
       const directory = posix.dirname(screenshots[0] ?? "")
       lines.push(
         kind === "page"
-          ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and update the artifact.`
+          ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with read, fix what the warnings name, and update the artifact.`
           : kind === "canvas"
-            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with view_file, fix what the warnings name, and update the artifact.${
+            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with read, fix what the warnings name, and update the artifact.${
                 typeof check.overview === "string"
                   ? ` Open ${check.overview} to see the canvas as it opens, fitted to a 1440×900 window, and check that it reads at that zoom.`
                   : ""
               }`
-            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and update the artifact.`
+            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with read, fix what the warnings name, and update the artifact.`
       )
     }
   }

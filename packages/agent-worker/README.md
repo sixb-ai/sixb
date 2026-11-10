@@ -139,11 +139,11 @@ the inference or accounting path.
 
 ## Attachments and artifacts
 
-A file a tool returns, from a project tool or `view_file`, stays in that tool's result and shows in
+A file a tool returns, from a project tool or `read`, stays in that tool's result and shows in
 the work trace. What the user receives is what the Agent publishes.
 
 Earlier files in the retained conversation are discoverable through the sandbox's
-`$SIXB_ATTACHMENTS` manifest and inspectable using `view_file` when materialized. Current user
+`$SIXB_ATTACHMENTS` manifest and readable with `read` when materialized. Current user
 attachments and file-producing tool results retain their model-input projections.
 
 `publish_artifact` creates an artifact and `update_artifact` writes its latest version

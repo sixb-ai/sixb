@@ -267,7 +267,7 @@ function savedNote(output: WebFetchToolOutput): string {
   if (/\.(?:md|txt)$/.test(output.path ?? "")) {
     return `The page (${size} sent) is saved as text at ${output.path}: read it in pieces with the read tool, or search it with grep.`
   }
-  return `The file (${output.contentType || "unknown type"}, ${size}) is saved at ${output.path}: open it with view_file.`
+  return `The file (${output.contentType || "unknown type"}, ${size}) is saved at ${output.path}: open it with read.`
 }
 
 function truncatedAnswerNote(output: WebFetchToolOutput): string {

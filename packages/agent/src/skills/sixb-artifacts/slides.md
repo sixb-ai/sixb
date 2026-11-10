@@ -122,7 +122,7 @@ an image that did not load; or an error while the deck loaded. Each warning name
 element as CSS names it (`p.kicker`), and where it is on the 1280×720 slide. The result names
 the screenshots, one per slide, under `$SIXB_CONTEXT_DIR/checks/`.
 
-1. Open the screenshots with `view_file`, at least the slides a warning names, and look at each
+1. Open the screenshots with `read`, at least the slides a warning names, and look at each
    as the reader will: is anything crowded, misaligned, or unreadable?
 2. Fix what the warnings name and what you see, in the deck's files.
 3. Update the artifact with `update_artifact`, and check again.

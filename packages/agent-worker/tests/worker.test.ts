@@ -1187,7 +1187,7 @@ function toolFileThenAnswerModel(
           {
             type: "tool-call",
             toolCallId: "view-image-call-1",
-            toolName: "view_file",
+            toolName: "read",
             input: JSON.stringify({ path: sandboxPath }),
           },
           finish("tool-calls"),
@@ -1230,7 +1230,7 @@ function bashImageThenViewModel(captureViewed: (prompt: unknown) => void): Worke
           {
             type: "tool-call",
             toolCallId: "view-bash-image-call-1",
-            toolName: "view_file",
+            toolName: "read",
             input: JSON.stringify({ path: "scratch/bash-image.png" }),
           },
           finish("tool-calls"),
@@ -4249,7 +4249,15 @@ describe("AgentWorker", () => {
     try {
       await completion.wait()
       expect(toolNames).toEqual(
-        expect.arrayContaining(["echo", "read", "view_file", "bash", "spawn_agent", "wait_agent"])
+        expect.arrayContaining([
+          "echo",
+          "read",
+          "edit",
+          "write",
+          "bash",
+          "spawn_agent",
+          "wait_agent",
+        ])
       )
       expect(
         await agentStorageOf(sixb).runs.getById({
@@ -8866,7 +8874,7 @@ describe("AgentWorker", () => {
       ).toBe(true)
 
       const viewedPromptJson = JSON.stringify(viewedPrompt)
-      expect(viewedPromptJson).toContain("view_file")
+      expect(viewedPromptJson).toContain('"toolName":"read"')
       if (typeof Bun.Image === "function") {
         expect(viewedPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
       }
@@ -8874,12 +8882,10 @@ describe("AgentWorker", () => {
       const replayAssistant = replayMessages.find(
         (message) =>
           message.runId === followup.run.id &&
-          message.parts.some((part) => part.type === "tool-call" && part.toolName === "view_file")
+          message.parts.some((part) => part.type === "tool-call" && part.toolName === "read")
       )
       expect(
-        replayAssistant?.parts.find(
-          (part) => part.type === "tool-call" && part.toolName === "view_file"
-        )
+        replayAssistant?.parts.find((part) => part.type === "tool-call" && part.toolName === "read")
       ).toMatchObject({
         state: "output-available",
         output: {
@@ -9182,7 +9188,9 @@ describe("AgentWorker", () => {
       expect(childCalls).toHaveLength(1)
       expect(childCalls[0]?.reasoning).toBe("high")
       const childToolNames = childCalls[0]?.tools?.map((entry) => entry.name) ?? []
-      expect(childToolNames).toEqual(expect.arrayContaining(["echo", "view_file", "read", "bash"]))
+      expect(childToolNames).toEqual(
+        expect.arrayContaining(["echo", "read", "edit", "write", "bash"])
+      )
       expect(childToolNames).not.toContain("spawn_agent")
       expect(childToolNames).not.toContain("wait_agent")
       const childPrompt = JSON.stringify(childCalls[0]?.messages)
@@ -12051,14 +12059,14 @@ describe("AgentWorker", () => {
         (message) => message.role === "assistant"
       )
       const viewCall = assistant?.parts.find(
-        (part) => part.type === "tool-call" && part.toolName === "view_file"
+        (part) => part.type === "tool-call" && part.toolName === "read"
       )
       const viewed =
         viewCall?.type === "tool-call" && viewCall.state === "output-available"
           ? viewCall.output
           : undefined
       if (!isAgentToolResult(viewed) || viewed.content[1]?.type !== "file") {
-        throw new Error("Expected the viewed image in the view_file result.")
+        throw new Error("Expected the viewed image in the read result.")
       }
       expect(
         new Uint8Array(
@@ -15326,7 +15334,8 @@ class ReadingSandboxFactory extends RecordingSandboxFactory {
       command === "bash" && args.includes("sixb-read")
         ? {
             exitCode: 0,
-            stdout: Buffer.from("quarter,revenue\nQ3,1100\n").toString("base64"),
+            // The fingerprint and the real path, then the page as base64.
+            stdout: `1:24\n/workspace/file\n${Buffer.from("quarter,revenue\nQ3,1100\n").toString("base64")}`,
             stderr: "",
             durationMs: 1,
           }
@@ -15352,8 +15361,8 @@ describe("a later turn's request", () => {
   // How each guard is proven, by removing it and watching this test fail:
   // - serialize tool JSON with JSON.stringify in models/protocols (responses, messages): the bash
   //   and read outputs, reordered by the jsonb double, print other bytes;
-  // - drop the stored modelOutput branch from toModelMessages' toolResultOutput: view_file,
-  //   create_image, publish_artifact and wait_agent replay another text;
+  // - drop the stored modelOutput branch from toModelMessages' toolResultOutput: read showing an
+  //   image, create_image, publish_artifact and wait_agent replay another text;
   // - return no images from replayToolFiles: the images after a step vanish;
   // - inline only the newest user message's files in fileWorkItems: the attachments turn into
   //   metadata on the next turn.
@@ -15383,8 +15392,7 @@ describe("a later turn's request", () => {
             ])
           case 2:
             return toolCallsStream([
-              ["view-doc", "view_file", { path: "work/q3-review/document.md" }],
-              ["view-image", "view_file", { path: "scratch/bash-image.png" }],
+              ["view-image", "read", { path: "scratch/bash-image.png" }],
               ["create", "create_image", {}],
             ])
           case 3:
@@ -15475,7 +15483,7 @@ describe("a later turn's request", () => {
       for (const text of [
         "quarter,revenue,margin",
         '"startLine":1',
-        '<tool_file name=\\"document.md\\"',
+        '<tool_file name=\\"bash-image.png\\"',
         "<sixb_tool_files",
         "Created an image.",
         'Published \\"Q3 review\\"',

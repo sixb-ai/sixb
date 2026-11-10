@@ -12,7 +12,6 @@ import { BASH_TOOL_SPEC } from "../src/tools/bash"
 import { EDIT_TOOL_SPEC } from "../src/tools/edit"
 import { agentModelToolSpecs } from "../src/tools/model-spec"
 import { READ_TOOL_SPEC } from "../src/tools/read"
-import { VIEW_FILE_TOOL_SPEC } from "../src/tools/view-file"
 import { WEB_FETCH_TOOL_SPEC } from "../src/tools/web-fetch/tool"
 import { WEB_SEARCH_TOOL_SPEC } from "../src/tools/web-search"
 import { WRITE_TOOL_SPEC } from "../src/tools/write"
@@ -37,7 +36,6 @@ describe("agent model tool specifications", () => {
           additionalProperties: false,
         },
       },
-      VIEW_FILE_TOOL_SPEC,
       READ_TOOL_SPEC,
       EDIT_TOOL_SPEC,
       WRITE_TOOL_SPEC,
@@ -61,7 +59,6 @@ describe("agent model tool specifications", () => {
     expect(names()).not.toContain("web_search")
     expect(names({})).not.toContain("web_search")
     expect(names({ search: { provider: "p", modelId: "m" } })).toEqual([
-      VIEW_FILE_TOOL_SPEC.name,
       READ_TOOL_SPEC.name,
       EDIT_TOOL_SPEC.name,
       WRITE_TOOL_SPEC.name,

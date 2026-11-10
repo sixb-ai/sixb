@@ -509,7 +509,7 @@ describe("publish_artifact", () => {
         'Updated "Fleet planner": artifact art_fl33tpl4n0, version 2 at revision 5.',
         "The version is open: each update replaces it until the user creates a version. To change it, call update_artifact with this id.",
         "Warning (phone): On a phone (390px): table “Region” runs past the screen's right edge.",
-        "Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_fl33tpl4n0-r5/desktop.png at 1280px and .sixb/agent/checks/art_fl33tpl4n0-r5/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and update the artifact.",
+        "Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_fl33tpl4n0-r5/desktop.png at 1280px and .sixb/agent/checks/art_fl33tpl4n0-r5/phone.png at 390px, each its top 4000px. Open them with read, fix what the warnings name, and update the artifact.",
       ].join("\n"),
     })
   })

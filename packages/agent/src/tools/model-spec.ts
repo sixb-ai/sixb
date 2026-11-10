@@ -9,7 +9,6 @@ import { BASH_OUTPUT_TOOL_SPEC, BASH_STOP_TOOL_SPEC } from "./background"
 import { BASH_TOOL_SPEC } from "./bash"
 import { EDIT_TOOL_SPEC } from "./edit"
 import { READ_TOOL_SPEC } from "./read"
-import { VIEW_FILE_TOOL_SPEC } from "./view-file"
 import { WEB_FETCH_TOOL_SPEC } from "./web-fetch/tool"
 import { WEB_SEARCH_TOOL_SPEC } from "./web-search"
 import { WRITE_TOOL_SPEC } from "./write"
@@ -30,7 +29,6 @@ export function agentModelToolSpecs(
 ): readonly AgentToolSpec[] {
   return [
     ...projectTools,
-    VIEW_FILE_TOOL_SPEC,
     READ_TOOL_SPEC,
     EDIT_TOOL_SPEC,
     WRITE_TOOL_SPEC,
