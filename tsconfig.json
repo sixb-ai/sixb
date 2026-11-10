@@ -14,6 +14,7 @@
       "@sixb/app/server": ["./packages/app/src/server.ts"],
       "@sixb/auth-magic-link": ["./auth/magic-link/src/index.ts"],
       "@sixb/auth-oidc": ["./auth/oidc/src/index.ts"],
+      "@sixb/auth-oidc/entra": ["./auth/oidc/src/entra.ts"],
       "@sixb/blob-azure": ["./storage/blob-azure/src/index.ts"],
       "@sixb/blob-local": ["./storage/blob-local/src/index.ts"],
       "@sixb/blob-s3": ["./storage/blob-s3/src/index.ts"],

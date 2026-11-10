@@ -4,6 +4,7 @@ import type {
   AuthStorage,
   CompleteAuthSessionInput,
   CompleteSignInResult,
+  DirectoryVerdict,
   InvitationRecord,
   InvitationStatus,
   ServiceAccountGroupMembershipRecord,
@@ -50,6 +51,49 @@ export interface AuthStrategy {
    * `identity`, so people cannot edit them in Sixb. Omitted, the strategy manages none.
    */
   providerProfileFields?(identity: UserIdentityRecord): readonly ProfileField[]
+  /**
+   * Checks the people this strategy signed in against the identity provider's directory on a
+   * schedule, so someone who leaves is suspended without waiting for an administrator.
+   */
+  readonly directory?: AuthStrategyDirectory
+}
+
+/**
+ * The identity provider's directory, as a strategy reads it. The orchestrator's maintenance loop
+ * runs `check` every `intervalMs` and applies the verdicts:
+ *
+ * Suspending or reactivating someone takes two reads that agree, `confirmAfterMs` apart.
+ *
+ * - `inactive` suspends the person and ends their sessions, unless more than a quarter of the
+ *   active members checked (and more than two) would be suspended at once. That pass applies
+ *   nothing and fails, since it looks like a misconfigured directory rather than a wave of
+ *   departures.
+ * - `active` lifts a suspension the directory made (never an administrator's) and, with
+ *   `groupIds`, syncs the person's directory groups as sign-in does.
+ */
+export interface AuthStrategyDirectory {
+  /** How often to check, at least one minute. Defaults to one hour. */
+  readonly intervalMs?: number
+  /**
+   * How long after a change the directory may still answer from before it. A pass that would
+   * suspend or reactivate someone reads again this long after its first read, and applies only
+   * the changes both reads agree on. Defaults to one minute; at most five. Use 0 for a directory
+   * that always answers with its latest state.
+   */
+  readonly confirmAfterMs?: number
+  /**
+   * The directory's verdict on each identity, keyed by subject. Leave out an identity the
+   * directory cannot answer for, and nothing changes for it. Throw when the check as a whole
+   * fails; nothing is applied, and the next pass tries again.
+   */
+  check(input: AuthDirectoryCheckInput): Promise<ReadonlyMap<string, DirectoryVerdict>>
+}
+
+export interface AuthDirectoryCheckInput {
+  /** Every identity the strategy linked, with the claims of its last sign-in. */
+  readonly identities: readonly UserIdentityRecord[]
+  /** Aborted when the pass runs out of time or the server stops. */
+  readonly signal: AbortSignal
 }
 
 export interface InvitationRecipientInput {

@@ -2,6 +2,11 @@ import type { AccessTokenKind, Principal } from "../../auth"
 import type { AuthorizablePrincipal } from "../../execution/types"
 
 export type UserStatus = "active" | "suspended"
+/**
+ * Who suspended a user: `manual` for an administrator or server code, `directory` for the
+ * identity provider's directory. The directory may lift only its own suspensions.
+ */
+export type UserSuspensionSource = "manual" | "directory"
 export type ServiceAccountStatus = "active" | "suspended"
 export type InvitationStatus = "pending" | "accepted" | "revoked"
 /** `directory`: owned by the identity provider, and synced to its groups on every sign-in. */
@@ -16,6 +21,8 @@ export interface UserRecord {
   readonly displayName?: string
   readonly avatarUrl?: string
   readonly status: UserStatus
+  /** Present exactly when `status` is `suspended`. */
+  readonly suspensionSource?: UserSuspensionSource
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -205,6 +212,7 @@ export interface UpdateAuthUserResult {
   readonly previousUser: UserRecord
 }
 
+/** Suspending this way is `manual`; reactivating clears the suspension, whoever made it. */
 export interface UpdateAuthUserStatusInput {
   readonly projectId: string
   readonly id: string
@@ -511,6 +519,21 @@ export interface SuspendUserAndRevokeSessionsInput {
   readonly suspendedAt: Date
 }
 
+/**
+ * What the identity provider's directory says about one person: still `active` there, with the
+ * groups it grants them when it knows them, or `inactive` (disabled, deleted, or unassigned).
+ */
+export type DirectoryVerdict =
+  | { readonly status: "active"; readonly groupIds?: readonly string[] }
+  | { readonly status: "inactive" }
+
+export interface ApplyDirectoryVerdictInput {
+  readonly projectId: string
+  readonly userId: string
+  readonly verdict: DirectoryVerdict
+  readonly appliedAt: Date
+}
+
 export interface AuthUserStore {
   create(input: CreateAuthUserInput): Promise<UserRecord>
   getById(params: { readonly projectId: string; readonly id: string }): Promise<UserRecord | null>
@@ -542,6 +565,11 @@ export interface AuthUserIdentityStore {
   listForUser(params: {
     readonly projectId: string
     readonly userId: string
+  }): Promise<readonly UserIdentityRecord[]>
+  /** Every identity one strategy linked, in subject order. */
+  listForStrategy(params: {
+    readonly projectId: string
+    readonly strategyId: string
   }): Promise<readonly UserIdentityRecord[]>
 }
 
@@ -797,7 +825,17 @@ export interface AuthStorage {
   completeDeviceAuthorization(
     input: CompleteDeviceAuthorizationInput
   ): Promise<CompleteDeviceAuthorizationResult>
+  /** Suspends the user as `manual` and revokes their sessions in one step. */
   suspendUserAndRevokeSessions(
     input: SuspendUserAndRevokeSessionsInput
   ): Promise<UpdateAuthUserResult>
+  /**
+   * Applies the directory's verdict on one user in one step:
+   *
+   * - `inactive` suspends an active user as `directory` and revokes their sessions.
+   * - `active` reactivates a user the directory suspended, then, when `groupIds` is present, makes
+   *   their `directory` memberships exactly those groups, as sign-in does.
+   * - A `manual` suspension is never changed, and its user's groups are left alone.
+   */
+  applyDirectoryVerdict(input: ApplyDirectoryVerdictInput): Promise<UpdateAuthUserResult>
 }

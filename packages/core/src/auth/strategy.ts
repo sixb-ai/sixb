@@ -7,17 +7,19 @@
  * entry plus the storage contracts from `@sixb/core/storage`.
  */
 
-export type { UserIdentityRecord } from "../storage/auth"
+export type { DirectoryVerdict, UserIdentityRecord } from "../storage/auth"
 export type { SignInRefusalReason } from "./errors"
 export { SignInRefusedError } from "./errors"
 export { signInAvatarUrl, signInDisplayName } from "./profile"
 export type {
+  AuthDirectoryCheckInput,
   AuthEmailDeliveryStatus,
   AuthInvitationRecipientInput,
   AuthInvitationRecipientResult,
   AuthInvitationRecipientStatus,
   AuthRequestResult,
   AuthStrategy,
+  AuthStrategyDirectory,
   AuthStrategyKind,
   InvitationDeliveryAuthStrategy,
   InvitationDeliveryInput,

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { isSixbError } from "../../errors/internal"
 import type {
+  AuthUserStore,
   ConnectorConnectionRecord,
   ConnectorConnectionStorage,
   PutConnectorConnectionResult,
@@ -23,7 +24,11 @@ import type {
   ConnectorDefinition,
   OAuthConnectorAdapter,
 } from "../types"
-import { isOAuthConnectorDefinition, sameConnectorConnectionOwner } from "../types"
+import {
+  connectorConnectionOwners,
+  isOAuthConnectorDefinition,
+  sameConnectorConnectionOwner,
+} from "../types"
 import {
   assertConnectorConnectionCommandAccess,
   assertConnectorConnectionSelectorAccess,
@@ -88,6 +93,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   private readonly definitionsById: ReadonlyMap<string, ConnectorDefinition>
   private abortController = new AbortController()
   private readonly connectionStorage: ConnectorConnectionStorage
+  private readonly users?: AuthUserStore
   private readonly providerOperationTimeoutMs: number
   private readonly authorizations: DefaultConnectorAuthorizationLifecycle
   private readonly requests: ConnectorAuthorizationRequestHandler
@@ -102,6 +108,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     this.definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
     const storage = requireConnectionStorage(options.storage)
     this.connectionStorage = storage.connectorConnections
+    this.users = storage.root.auth?.users
     const credentialProtector = credentialProtectorFor(storage.connectorConnections, options)
     const resolveDefinition = (connectorId: string) => this.requireOAuthDefinition(connectorId)
     const hostSignal = () => this.abortController.signal
@@ -176,8 +183,16 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
           : `Connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
       )
     }
+    // Like syncs, never open a suspended person's connection, even while its revocation is unfinished.
+    const [readable] = await this.withoutSuspendedOwners([connection])
+    if (!readable) {
+      throw createConnectorCodedError(
+        "connector.not_found",
+        `Connector '${definition.id}' does not open the connections of a suspended member.`
+      )
+    }
 
-    return this.connectExecutionConnection(definition, connection)
+    return this.connectExecutionConnection(definition, readable)
   }
 
   /** Snapshot the connected records that one trusted primitive execution may consume. */
@@ -193,9 +208,50 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
           connectorId: definition.id,
         })
     )
-    return connections
-      .filter((connection) => connection.status === "connected")
-      .sort((left, right) => left.id.localeCompare(right.id))
+    const connected = connections.filter((connection) => connection.status === "connected")
+    const readable = await this.withoutSuspendedOwners(connected)
+    return [...readable].sort((left, right) => left.id.localeCompare(right.id))
+  }
+
+  /**
+   * Revokes the grant behind every connection one person owns, as their suspension does. The
+   * connections stay, revoked, so their syncs keep what they already read. Throws once every
+   * grant was tried when any could not be revoked.
+   */
+  async revokeUserConnections(userId: string): Promise<void> {
+    const principal = { type: "user", id: nonblank(userId, "user id") } as const
+    const failures: unknown[] = []
+    for (const definition of this.definitionsById.values()) {
+      if (!isOAuthConnectorDefinition(definition)) continue
+      if (!connectorConnectionOwners(definition).includes("user")) continue
+
+      const connections = await withConnectorStorageBoundary(
+        "Connector connections could not be listed.",
+        () =>
+          this.connectionStorage.listConnections({
+            projectId: this.projectId,
+            connectorId: definition.id,
+          })
+      )
+      const authorizationIds = new Set(
+        connections
+          .filter(({ owner }) => owner.type === "user" && owner.id === principal.id)
+          .map((connection) => connection.authorizationId)
+      )
+      for (const authorizationId of authorizationIds) {
+        try {
+          await this.authorizations.revokeAuthorization({ definition, authorizationId, principal })
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `[Sixb] ${failures.length} connector grants of user '${principal.id}' could not be revoked.`
+      )
+    }
   }
 
   /**
@@ -636,6 +692,20 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     assertConnectorConnectionSelector(selector)
     assertConnectorConnectionSelectorAccess(access.definition, command, access.actor, selector)
     return access
+  }
+
+  // A suspended person's connections are never read, even while their revocation is unfinished.
+  private async withoutSuspendedOwners(
+    connections: readonly ConnectorConnectionRecord[]
+  ): Promise<readonly ConnectorConnectionRecord[]> {
+    const ownerIds = [
+      ...new Set(connections.flatMap(({ owner }) => (owner.type === "user" ? [owner.id] : []))),
+    ]
+    if (ownerIds.length === 0 || !this.users) return connections
+
+    const users = await this.users.getByIds({ projectId: this.projectId, ids: ownerIds })
+    const active = new Set(users.filter((user) => user.status === "active").map((user) => user.id))
+    return connections.filter(({ owner }) => owner.type === "project" || active.has(owner.id))
   }
 
   /** A connection the caller may see. One they may not see reads as missing. */

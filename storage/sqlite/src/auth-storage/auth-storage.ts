@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type {
+  ApplyDirectoryVerdictInput,
   AuthStorage,
   CompleteDeviceAuthorizationInput,
   CompleteDeviceAuthorizationResult,
@@ -441,6 +442,7 @@ export class SqliteAuthStorage implements AuthStorage {
           `
           UPDATE auth_users
           SET status = 'suspended',
+              suspension_source = 'manual',
               updated_at = ?
           WHERE project_id = ?
             AND id = ?
@@ -456,9 +458,82 @@ export class SqliteAuthStorage implements AuthStorage {
       const user = rowToUserRecord({
         ...existing,
         status: "suspended",
+        suspension_source: "manual",
         updated_at: toIso(input.suspendedAt),
       })
       return { user, previousUser: rowToUserRecord(existing) }
+    })
+  }
+
+  async applyDirectoryVerdict(input: ApplyDirectoryVerdictInput): Promise<UpdateAuthUserResult> {
+    return runImmediateTransaction(this.db, () => {
+      const existing = getUserRowById(this.db, { projectId: input.projectId, id: input.userId })
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.userId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const previousUser = rowToUserRecord(existing)
+      // Only the directory lifts its own suspensions; anyone else's stands.
+      if (existing.status === "suspended" && existing.suspension_source !== "directory") {
+        return { user: previousUser, previousUser }
+      }
+
+      const appliedAt = toIso(input.appliedAt)
+      if (input.verdict.status === "inactive") {
+        if (existing.status === "suspended") return { user: previousUser, previousUser }
+        this.db
+          .query(
+            `
+            UPDATE auth_users
+            SET status = 'suspended',
+                suspension_source = 'directory',
+                updated_at = ?
+            WHERE project_id = ?
+              AND id = ?
+          `
+          )
+          .run(appliedAt, input.projectId, input.userId)
+        revokeActiveSessionsForUser(this.db, {
+          projectId: input.projectId,
+          userId: input.userId,
+          revokedAt: input.appliedAt,
+        })
+        const user = rowToUserRecord({
+          ...existing,
+          status: "suspended",
+          suspension_source: "directory",
+          updated_at: appliedAt,
+        })
+        return { user, previousUser }
+      }
+
+      let row = existing
+      if (existing.status === "suspended") {
+        this.db
+          .query(
+            `
+            UPDATE auth_users
+            SET status = ?,
+                suspension_source = NULL,
+                updated_at = ?
+            WHERE project_id = ?
+              AND id = ?
+          `
+          )
+          .run("active", appliedAt, input.projectId, input.userId)
+        row = { ...existing, status: "active", suspension_source: null, updated_at: appliedAt }
+      }
+      this.syncDirectoryGroups({
+        completedAt: input.appliedAt,
+        existing: [],
+        groupIds: input.verdict.groupIds,
+        projectId: input.projectId,
+        userId: input.userId,
+      })
+      return { user: rowToUserRecord(row), previousUser }
     })
   }
 

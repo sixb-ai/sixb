@@ -1,4 +1,5 @@
 import type {
+  ApplyDirectoryVerdictInput,
   AuthStorage,
   CompleteDeviceAuthorizationInput,
   CompleteDeviceAuthorizationResult,
@@ -431,6 +432,7 @@ export class PgAuthStorage implements AuthStorage {
             display_name: user.displayName ?? null,
             avatar_url: user.avatarUrl ?? null,
             status: user.status,
+            suspension_source: null,
             created_at: user.createdAt,
             updated_at: user.updatedAt,
           }
@@ -516,6 +518,7 @@ export class PgAuthStorage implements AuthStorage {
       const [updated] = await tx<PgAuthUserRow[]>`
         UPDATE auth_users
         SET status = 'suspended',
+            suspension_source = 'manual',
             updated_at = ${input.suspendedAt}
         WHERE project_id = ${input.projectId}
           AND id = ${input.userId}
@@ -529,6 +532,69 @@ export class PgAuthStorage implements AuthStorage {
       })
 
       return { user: rowToUserRecord(updated), previousUser: rowToUserRecord(existing) }
+    })
+  }
+
+  async applyDirectoryVerdict(input: ApplyDirectoryVerdictInput): Promise<UpdateAuthUserResult> {
+    return runPgTransaction(this.sql, async (tx) => {
+      await lockAdvisoryKeys(tx, [authLockKey("sessions", input.projectId, input.userId)])
+      const existing = await getUserRowById(
+        tx,
+        { projectId: input.projectId, id: input.userId },
+        { forUpdate: true }
+      )
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.userId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const previousUser = rowToUserRecord(existing)
+      // Only the directory lifts its own suspensions; anyone else's stands.
+      if (existing.status === "suspended" && existing.suspension_source !== "directory") {
+        return { user: previousUser, previousUser }
+      }
+
+      if (input.verdict.status === "inactive") {
+        if (existing.status === "suspended") return { user: previousUser, previousUser }
+        const [suspended] = await tx<PgAuthUserRow[]>`
+          UPDATE auth_users
+          SET status = 'suspended',
+              suspension_source = 'directory',
+              updated_at = ${input.appliedAt}
+          WHERE project_id = ${input.projectId}
+            AND id = ${input.userId}
+          RETURNING *
+        `
+        await revokeActiveSessionsForUser(tx, {
+          projectId: input.projectId,
+          userId: input.userId,
+          revokedAt: input.appliedAt,
+        })
+        return { user: rowToUserRecord(suspended), previousUser }
+      }
+
+      let row = existing
+      if (existing.status === "suspended") {
+        ;[row] = await tx<PgAuthUserRow[]>`
+          UPDATE auth_users
+          SET status = ${"active"},
+              suspension_source = NULL,
+              updated_at = ${input.appliedAt}
+          WHERE project_id = ${input.projectId}
+            AND id = ${input.userId}
+          RETURNING *
+        `
+      }
+      await this.syncDirectoryGroups(tx, {
+        completedAt: input.appliedAt,
+        existing: [],
+        groupIds: input.verdict.groupIds,
+        projectId: input.projectId,
+        userId: input.userId,
+      })
+      return { user: rowToUserRecord(row), previousUser }
     })
   }
 

@@ -15,13 +15,15 @@ export interface UserJoinedEvent extends EventEnvelope {
   }
 }
 
+/** A member was suspended: they can no longer sign in, and their sessions ended. */
 export interface UserSuspendedEvent extends EventEnvelope {
   type: "user.suspended"
   topic: "users"
   partitionKey: string
   payload: {
     user: UserProfile
-    requestedBy: AuthorizablePrincipal
+    /** Who asked. Absent when the identity provider's directory or server code did it. */
+    requestedBy?: AuthorizablePrincipal
   }
 }
 
@@ -31,7 +33,8 @@ export interface UserReactivatedEvent extends EventEnvelope {
   partitionKey: string
   payload: {
     user: UserProfile
-    requestedBy: AuthorizablePrincipal
+    /** Who asked. Absent when the identity provider's directory or server code did it. */
+    requestedBy?: AuthorizablePrincipal
   }
 }
 

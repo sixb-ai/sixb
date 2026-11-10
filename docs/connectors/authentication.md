@@ -145,6 +145,11 @@ A personal connection belongs to the member who connected it:
 Only the owner can reconnect or revoke a connection, because both act on their own sign-in. A
 personal connection's account can't fill a project slot; connect it again for the project.
 
+When a member is [suspended](../auth/members.md#when-someone-leaves), Sixb revokes the grants
+behind their connections, and syncs and actions stop using them at once. The connections stay,
+revoked, and the member connects again if they are reactivated. A revocation the provider refuses
+is logged, and Sixb still never uses the connection; disconnect it to delete its tokens.
+
 ### Bring each person's data in
 
 [Syncs](../syncs/overview.md#sync-connected-accounts) read every connected account, personal

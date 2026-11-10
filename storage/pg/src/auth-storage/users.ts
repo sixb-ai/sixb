@@ -58,6 +58,7 @@ export class PgAuthUserStore implements AuthUserStore {
           display_name,
           avatar_url,
           status,
+          suspension_source,
           created_at,
           updated_at
         ) VALUES (
@@ -67,6 +68,7 @@ export class PgAuthUserStore implements AuthUserStore {
           ${input.displayName ?? null},
           ${input.avatarUrl ?? null},
           ${input.status ?? "active"},
+          ${input.status === "suspended" ? "manual" : null},
           ${createdAt},
           ${updatedAt}
         )
@@ -185,6 +187,7 @@ export class PgAuthUserStore implements AuthUserStore {
       const [row] = await tx<PgAuthUserRow[]>`
         UPDATE auth_users
         SET status = ${input.status},
+            suspension_source = ${input.status === "suspended" ? "manual" : null},
             updated_at = ${updatedAt}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}

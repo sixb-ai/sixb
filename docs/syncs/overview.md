@@ -91,6 +91,11 @@ succeeds, the account keeps its checkpoint and rows, and the next run after it r
 from there. A `snapshot` sync fails instead, because leaving the account out would drop its rows.
 A project connection that needs reconnecting fails the run in every mode.
 
+A [suspended](../auth/members.md#when-someone-leaves) member's connections are never read. A
+`merge` or `append` sync keeps the rows it already read from them, still owned by that member; a
+`snapshot` sync no longer lists them, so its next run drops their rows. To delete or reassign kept
+rows, start a workflow from `events.users().suspended()`.
+
 ## Import files
 
 Use `blobs.put()` to store a file and include its returned reference in a `fileRef` column.

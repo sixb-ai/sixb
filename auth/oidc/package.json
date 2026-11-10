@@ -28,6 +28,12 @@
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./entra": {
+      "types": "./dist/entra.d.ts",
+      "bun": "./src/entra.ts",
+      "import": "./dist/entra.js",
+      "default": "./dist/entra.js"
     }
   },
   "scripts": {

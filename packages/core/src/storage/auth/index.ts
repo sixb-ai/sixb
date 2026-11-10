@@ -3,6 +3,7 @@ export { AuthStorageError } from "./errors"
 export { InMemoryAuthStorage } from "./in-memory"
 export type {
   AccessTokenRecord,
+  ApplyDirectoryVerdictInput,
   AuthAccessTokenStore,
   AuthDeviceAuthorizationStore,
   AuthGroupMembershipStore,
@@ -32,6 +33,7 @@ export type {
   CreateOrUpdateAuthInvitationInput,
   DeviceAuthorizationRecord,
   DeviceAuthorizationStatus,
+  DirectoryVerdict,
   GroupMembershipRecord,
   GroupMembershipSource,
   InvitationRecord,
@@ -65,5 +67,6 @@ export type {
   UserIdentityRecord,
   UserRecord,
   UserStatus,
+  UserSuspensionSource,
 } from "./types"
 export { MAX_PENDING_DEVICE_AUTHORIZATIONS } from "./types"
