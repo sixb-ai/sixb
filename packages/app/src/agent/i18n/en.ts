@@ -818,7 +818,7 @@ export const en = {
     publishing: (title: string) => `Publishing ${title || "an artifact"}`,
     published: (title: string) => `Published ${title || "an artifact"}`,
     publishFailed: (title: string) => `Couldn't publish ${title || "an artifact"}`,
-    /** An `update_artifact` call, which changes an artifact's current version. */
+    /** A `publish_artifact` call with an id, which changes an artifact's current version. */
     updating: (title: string) => `Updating ${title || "an artifact"}`,
     updated: (title: string) => `Updated ${title || "an artifact"}`,
     updateFailed: (title: string) => `Couldn't update ${title || "an artifact"}`,

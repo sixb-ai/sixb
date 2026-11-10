@@ -348,7 +348,7 @@ describe("agent system prompt", () => {
     // A child publishes only what its task asks for, and names it for the parent to show.
     expect(prompt).toContain("Return your result as text")
     expect(prompt).toContain(
-      "Publish with publish_artifact or update_artifact only when the task asks for a deliverable"
+      "Publish with publish_artifact only when the task asks for a deliverable"
     )
     expect(prompt).toContain(
       "Name each one you wrote in your result by its address, artifact:<id>."

@@ -1,6 +1,6 @@
 ---
 name: sixb-artifacts
-description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, or a file they asked for, as an artifact, and revise it with update_artifact.
+description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, or a file they asked for, as an artifact, and revise it by publishing it again with its id.
 ---
 
 # Artifacts
@@ -56,7 +56,7 @@ go beside each picture.
 
 ## Revise
 
-Your changes go to the artifact's current version, which stays open: each `update_artifact`
+Your changes go to the artifact's current version, which stays open: each publish with its `id`
 replaces it. Only the user creates a version, which freezes it; your next update then opens a new
 one, and the created version stays as it was.
 
@@ -71,7 +71,7 @@ rm -rf work/q3-review && cp -r "$SIXB_ARTIFACTS_DIR/art_k3m9q2x7tp" work/q3-revi
 Edit the copy, then update the artifact from it:
 
 ```text
-update_artifact({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: "Q3 operations review" })
+publish_artifact({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: "Q3 operations review" })
 → Updated "Q3 operations review": artifact art_k3m9q2x7tp, version 1 at revision 2.
 ```
 
@@ -80,18 +80,18 @@ edit in the app, such as a sheet's cells or columns or a canvas's notes and layo
 another conversation or the project's code. Start from it as it is, and keep its changes in yours
 unless the user asks you to undo them; say what you built on when you reply.
 
-When others changed a canvas while you worked, `update_artifact` merges your changes with theirs
+When others changed a canvas while you worked, the update merges your changes with theirs
 and writes the merged result into the folder you updated from: keep editing it.
 
-If another kind of artifact changes while you work, `update_artifact` refuses rather than write
+If another kind of artifact changes while you work, the update refuses rather than write
 over what it never saw, says who changed it, and installs it in place of your copy and in the
 folder you published it from. What your sub-agents wrote reaches both the same way. Start again from that copy,
 keep its changes, make yours again, and update it.
 
 An entry without a `directory` is not installed: the conversation's artifacts were too large to
 install together, or its files could not be read. Rebuild it in a working directory with the paths
-in its `files`, then update it. An update keeps the artifact's kind; the title may change. Call
-`publish_artifact` again only for a different deliverable.
+in its `files`, then update it. An update keeps the artifact's kind; the title may change. Leave
+out `id`, and pass a `kind`, only for a different deliverable.
 
 ## Artifacts that objects hold
 

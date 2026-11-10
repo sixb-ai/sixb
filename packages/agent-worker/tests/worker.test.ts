@@ -12124,14 +12124,14 @@ describe("AgentWorker", () => {
         call += 1
         if (call === 1) return toolCallStream("bob-1", "bash", { command: "write-q3-review" })
         if (call === 2) {
-          return toolCallStream("bob-2", "update_artifact", {
+          return toolCallStream("bob-2", "publish_artifact", {
             id: ids.notes,
             path: "work/q3-review",
             title: "Taken over",
           })
         }
         if (call === 3) {
-          return toolCallStream("bob-3", "update_artifact", {
+          return toolCallStream("bob-3", "publish_artifact", {
             id: ids.shared,
             path: "work/q3-review",
             title: "Q3 review, Bob's",
@@ -12290,7 +12290,7 @@ describe("AgentWorker", () => {
         if (call === 4) {
           // The next turn starts from what was published, installed in its sandbox.
           const artifact = await onlyArtifact(host.sixb)
-          return toolCallStream("publish-4", "update_artifact", {
+          return toolCallStream("publish-4", "publish_artifact", {
             id: artifact.id,
             path: `.sixb/agent/artifacts/${artifact.id}`,
             title: "Q3 review, final",
