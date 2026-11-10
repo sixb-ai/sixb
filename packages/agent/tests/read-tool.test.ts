@@ -174,7 +174,9 @@ describe("read tool", () => {
     const encoded = Buffer.from("one\ntwo")
       .toString("base64")
       .replace(/(.{4})/g, "$1\n")
-    const { read } = await createHarness(undefined, commandResult({ stdout: ` \t${encoded}\r\n` }))
+    // The fingerprint and the real path come first, one line each.
+    const stdout = `123:7\n/root/file.txt\n \t${encoded}\r\n`
+    const { read } = await createHarness(undefined, commandResult({ stdout }))
 
     await expect(read({ path: "file.txt" })).resolves.toEqual({
       path: "file.txt",

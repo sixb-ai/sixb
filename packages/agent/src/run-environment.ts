@@ -89,6 +89,8 @@ import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { createBashOutputTool, createBashStopTool } from "./tools/background"
 import { createBashTool } from "./tools/bash"
+import { createEditTool } from "./tools/edit"
+import { FileReadLedger } from "./tools/file-writes"
 import { agentModelToolSpecs, fetchesWeb } from "./tools/model-spec"
 import { createReadTool } from "./tools/read"
 import {
@@ -106,6 +108,7 @@ import {
 import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
 import { createWebFetchTool } from "./tools/web-fetch/tool"
 import { createWebSearchTool } from "./tools/web-search"
+import { createWriteTool } from "./tools/write"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
@@ -918,7 +921,11 @@ async function startAgentEnvironment(
       console.error("[SixbAgent] Could not stop the run's background commands:", error)
     })
   }
-  appendBuiltInTool(tools, createReadTool(resolveSandbox))
+  // One per run: `edit` and `write` change only files this run read, as it read them.
+  const fileReads = new FileReadLedger()
+  appendBuiltInTool(tools, createReadTool(resolveSandbox, fileReads))
+  appendBuiltInTool(tools, createEditTool(resolveSandbox, fileReads))
+  appendBuiltInTool(tools, createWriteTool(resolveSandbox, fileReads))
   appendBuiltInTool(tools, createBashTool(resolveSandbox, background))
   appendBuiltInTool(tools, createBashOutputTool(resolveSandbox, background))
   appendBuiltInTool(tools, createBashStopTool(resolveSandbox, background))

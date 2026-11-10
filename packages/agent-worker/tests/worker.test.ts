@@ -12520,9 +12520,9 @@ describe("AgentWorker", () => {
             actionsFor: () => [],
           }).index,
           budget: {
-            // The framework's prompt and tools take about 4,000 tokens; the index, 3,300 more.
+            // The framework's prompt and tools take about 4,450 tokens; the index, 3,300 more.
             windowTokens: 8_000,
-            inputBudgetTokens: 4_500,
+            inputBudgetTokens: 5_000,
             reserveTokens: 2_000,
             keepRecentTokens: 1_000,
             source: "model",
@@ -15735,13 +15735,14 @@ describe("context within a turn", () => {
         chapterResults(sent).some((output) => output.value === cleared.value)
       )
       expect(first).toBeGreaterThan(0)
-      // Oldest first; the three most recent it read stay, and so does the one it has not read.
+      // Oldest first; the most recent it read stay (two, beside the built-in tools' definitions),
+      // and so does the one it has not read.
       const results = chapterResults(requests[first]!)
       const kept = results.findIndex((output) => output.type === "json")
       expect(kept).toBeGreaterThan(0)
       expect(results.slice(0, kept)).toEqual(Array(kept).fill(cleared))
       expect(results.slice(kept).every((output) => output.type === "json")).toBe(true)
-      expect(results.length - kept).toBeGreaterThanOrEqual(4)
+      expect(results.length - kept).toBeGreaterThanOrEqual(3)
       // The call after a clearing reads its request through: only the step it adds is new.
       // Reproduce: aim the clearing at the limit instead of 60 % of it in ContextGuard.reduce; the
       // call after the clearing then clears one more result, and rewrites the cache from it.

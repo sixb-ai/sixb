@@ -4,6 +4,7 @@ import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import { AgentToolExecutionError } from "../errors"
 import { agentToolErrorText } from "../model-adapters"
 import { type AgentSandboxHandle, contextPath } from "../sandbox-handle"
+import { FINGERPRINT_FUNCTIONS, type FileReadLedger, isFingerprint } from "./file-writes"
 
 const DEFAULT_LIMIT = 2_000
 const MAX_BYTES = 50 * 1024
@@ -52,7 +53,9 @@ export interface ReadToolOutput {
 
 /** Build the bounded UTF-8 file reader from the run's lazy sandbox resolver. */
 export function createReadTool(
-  resolveSandbox: () => Promise<AgentSandboxHandle>
+  resolveSandbox: () => Promise<AgentSandboxHandle>,
+  /** Where each read is recorded, so `edit` and `write` change only a file the run has read. */
+  ledger?: FileReadLedger
 ): ModelTool<ReadToolInput> {
   return {
     ...READ_TOOL_SPEC,
@@ -93,7 +96,9 @@ export function createReadTool(
       signal.throwIfAborted()
       if (result.exitCode !== 0) throwReadError(path, result.exitCode, result.stderr)
 
-      const page = paginate(decodeBase64(result.stdout), path, offset, limit)
+      const [fingerprint = "", realPath = "", ...pageLines] = result.stdout.split("\n")
+      if (isFingerprint(fingerprint) && realPath) ledger?.record(realPath, fingerprint)
+      const page = paginate(decodeBase64(pageLines.join("\n")), path, offset, limit)
       const endLine = offset + page.lineCount - 1
       return {
         path,
@@ -249,7 +254,11 @@ case "$target" in "$root"|"$root"/*|"$context"/*) ;; *) exit 11 ;; esac
 [ ! -d "$target" ] || exit 12
 [ -f "$target" ] || exit 13
 [ -r "$target" ] || exit 14
+cksum_bin="$(command -v cksum)" || exit 20
+${FINGERPRINT_FUNCTIONS}
 export LC_ALL=C
+fingerprint "$target" || printf '\\n'
+print_path "$target"
 "$tail_bin" -n "+$2" -- "$target" | "$head_bin" -n "$(($3 + 1))" | "$head_bin" -c "$4" | "$base64_bin"
 for status in "\${PIPESTATUS[@]}"; do
   case "$status" in 0|141) ;; *) exit 19 ;; esac
@@ -260,4 +269,5 @@ const READ_COMMAND_BY_EXIT_CODE: Readonly<Record<number, string>> = {
   16: "tail",
   17: "head",
   18: "base64",
+  20: "cksum",
 }
