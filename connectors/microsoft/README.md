@@ -111,18 +111,23 @@ export const outlook = defineConnector(
 
 `scopes` lists delegated Graph permissions by name. Sign-in (`openid profile`, which names the
 account) and `offline_access` (for the refresh token) are always requested. A sync reads each person's
-data through their own connection; pass the account's id where a method takes a mailbox or user:
+data through their own connection; pass the account's id where a method takes a mailbox or user, and
+record whose row it is:
 
 ```ts
 export const syncInbox = defineSync("inbox", { mode: "merge" })
   .from(outlook)
   .read(async function* (graph, { connection }) {
+    const owner = connection.owner.type === "user" ? connection.owner.id : null
     for await (const message of graph.mail.messages.listAll(connection.account.id)) {
-      yield change.upsert({ ...toRow(message), owner_email: connection.account.label })
+      yield change.upsert({ ...toRow(message), owner_id: owner, slot: connection.slot })
     }
   })
   .intoDataset(inbox)
 ```
+
+A projection maps `owner_id` with `userRef.fromId`; see
+[Bring each person's data in](../../docs/connectors/authentication.md#bring-each-persons-data-in).
 
 Administrator setup:
 
