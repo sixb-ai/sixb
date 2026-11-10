@@ -1007,7 +1007,7 @@ describe("stopping a child", () => {
 })
 
 describe("waiting in the step that spawns", () => {
-  // Removal proof: drop awaitSpawned from SubagentCoordinator.wait; the wait runs before the spawn
+  // Removal proof: drop the spawn wait from resolveChildren (SubagentCoordinator); the wait runs before the spawn
   // is admitted, and is refused: "wait has no background command or child agent 'compare'".
   test("waits for the child that step spawns, by its key", async () => {
     const harness = setup({
@@ -1027,6 +1027,33 @@ describe("waiting in the step that spawns", () => {
     try {
       await requestTurn(harness)
       expect(toolOutput(harness.parentRequests[1], "wait")).toMatchObject({
+        results: [{ runId: COMPARE.key, status: "succeeded", text: "Compared payment terms." }],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+describe("waiting by key for a child of an earlier turn", () => {
+  // Removal proof: drop the latestChildUnder fallback from resolveChildren; the key names this
+  // turn's child, which does not exist, and the wait is refused after its rechecks.
+  test("finds the conversation's latest child under the key, as message_agent does", async () => {
+    const harness = setup({
+      parent: async (request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
+        if (call === 2) return toolCalls(["wait", "wait", { ids: [spawnedRunId(request)] }])
+        if (call === 4) return toolCalls(["wait-earlier", "wait", { ids: [COMPARE.key] }])
+        return answer("Payment terms compared.")
+      },
+      children: { [COMPARE.key]: async () => answer("Compared payment terms.") },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run } = await requestTurn(harness)
+      await requestTurn(harness, run.threadId)
+      expect(toolOutput(harness.parentRequests[4], "wait-earlier")).toMatchObject({
         results: [{ runId: COMPARE.key, status: "succeeded", text: "Compared payment terms." }],
       })
     } finally {

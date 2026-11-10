@@ -436,12 +436,19 @@ export class SubagentCoordinator {
    */
   async stop(id: string, signal: AbortSignal): Promise<WaitForSubagentsOutput> {
     const { children } = this.session
-    const runId = this.childRunId(requireNonEmpty("stop", id, "id"))
-    await this.awaitSpawned([runId], signal)
+    const [resolved = ""] = await this.resolveChildren([requireNonEmpty("stop", id, "id")], signal)
+    // A child of an earlier turn is stopped as the child of this one that continues it.
+    const runId = await this.continuedChildId(resolved)
     const child = await children.get(runId)
     if (child?.kind !== "subagent" || child.parentRunId !== this.parentRun.id) {
       throw new AgentToolPublicError(
         `[SixbAgent] stop has no background command or child agent of this turn '${id}': pass the id bash returned, or the key you spawned the child with.`
+      )
+    }
+    // Its held calls are the user's to decide; stopping it would not stop them.
+    if (isPausedSubagentRun(child)) {
+      throw new AgentToolPublicError(
+        `[SixbAgent] stop cannot end '${id}': it is paused on calls that wait for the user's approval, and continues only once they decide. If its work is no longer needed, say so in your answer.`
       )
     }
     await children.cancel(runId)
@@ -755,16 +762,25 @@ export class SubagentCoordinator {
   }
 
   /**
-   * Wait for the children these runs name to exist. Calls of one step run together, each starting
-   * after its call is published, so a wait may begin before the spawn beside it: it waits for the
-   * spawns on their way, and for one not yet started, a few short rechecks. A run still missing
-   * then is refused by the caller.
+   * The runs these ids name. A run id names itself. A key names this turn's child under it, the one
+   * a spawn of this same step is admitting, or else the conversation's latest child under it, as
+   * `message_agent` finds one. Calls of one step run together, each starting once its call is
+   * published, so a wait may begin before the spawn beside it: a key that names nothing yet is
+   * looked up again a few times, a second at most. What is still missing the caller refuses.
    */
-  private async awaitSpawned(runIds: readonly string[], signal: AbortSignal): Promise<void> {
+  private async resolveChildren(ids: readonly string[], signal: AbortSignal): Promise<string[]> {
+    const resolved = ids.map((id) => this.childRunId(id))
     for (let check = 0; ; check += 1) {
-      await Promise.allSettled(runIds.flatMap((runId) => this.#spawning.get(runId) ?? []))
-      const found = await this.session.children.getMany(runIds)
-      if (found.length === new Set(runIds).size || check === SPAWN_RECHECKS) return
+      await Promise.allSettled(resolved.flatMap((runId) => this.#spawning.get(runId) ?? []))
+      const found = new Set((await this.session.children.getMany(resolved)).map((run) => run.id))
+      let missing = false
+      for (const [index, id] of ids.entries()) {
+        if (found.has(resolved[index] ?? "") || id.startsWith(SUBAGENT_RUN_ID_PREFIX)) continue
+        const earlier = await this.latestChildUnder(id)
+        if (earlier) resolved[index] = earlier.id
+        else missing = true
+      }
+      if (!missing || check === SPAWN_RECHECKS) return resolved
       await delay(SPAWN_RECHECK_MS, signal)
     }
   }
@@ -983,13 +999,8 @@ export class SubagentCoordinator {
     const passedIds = normalizeRunIds(input.runIds, this.context.subagentConcurrencyPerRun)
     // A child of an earlier turn is waited for as the child of this one that continues it, else
     // as it ended.
-    await this.awaitSpawned(
-      passedIds.map((id) => this.childRunId(id)),
-      signal
-    )
-    const runIds = await Promise.all(
-      passedIds.map((id) => this.continuedChildId(this.childRunId(id)))
-    )
+    const resolved = await this.resolveChildren(passedIds, signal)
+    const runIds = await Promise.all(resolved.map((runId) => this.continuedChildId(runId)))
     const earlierTurns = await this.earlierTurnsOf(runIds)
     for (;;) {
       signal.throwIfAborted()

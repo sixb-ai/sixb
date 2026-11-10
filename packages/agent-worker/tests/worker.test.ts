@@ -10019,6 +10019,57 @@ describe("AgentWorker", () => {
     return { sandbox, runFiles }
   }
 
+  // Removal proof: drop the isPausedSubagentRun refusal from SubagentCoordinator.stop; stop returns
+  // the child as awaiting_approval, as though it stopped, and it continues once the user decides.
+  test("stop refuses a child paused on its held calls, which only the user's decision ends", async () => {
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const { children: spawned, coordinator } = await spawnChildOfRunningTurn(
+      sixb,
+      { text: "Pay INV-2041." },
+      { keys: ["pay"] }
+    )
+    const [pay] = spawned
+    if (!pay) throw new Error("Expected the spawned child.")
+    const execution = freshTestExecution()
+    const started = await storage.runs.start({ projectId: PROJECT_ID, id: pay.runId, execution })
+    if (started?.kind !== "subagent") throw new Error("Expected the child's run.")
+    // Its call waits for approval, so it finishes paused on it.
+    await storage.approvals.request({
+      id: "apr-pay",
+      projectId: PROJECT_ID,
+      runId: started.parentRunId,
+      callerRunId: pay.runId,
+      executionToken: execution.token,
+      requestedBy: { type: "user", id: "usr_alice" },
+      mode: "manual",
+      call: {
+        kind: "action",
+        actionId: "mark-paid",
+        subject: { kind: "object", objectTypeId: "invoice", primaryId: "INV-2041" },
+        params: {},
+        actionRunId: "act-pay",
+        effect: "ontology",
+      },
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    await storage.runs.finish({
+      projectId: PROJECT_ID,
+      id: pay.runId,
+      executionToken: execution.token,
+      status: "succeeded",
+      finishReason: "awaiting_approval",
+      result: { text: "" },
+    })
+
+    const refused = await coordinator
+      .stop("pay", new AbortController().signal)
+      .catch((error: unknown) => error)
+    expect(String(refused)).toContain(
+      "stop cannot end 'pay': it is paused on calls that wait for the user's approval"
+    )
+  })
+
   test("wait holds each child's files once, a result's worth, and says what it could not", async () => {
     // Removal proofs: attach a child's installed files on every wait in deliverFiles, and the
     // second result holds a's chart again; drop its `fits` check, and d's 30 files join b's 30;
