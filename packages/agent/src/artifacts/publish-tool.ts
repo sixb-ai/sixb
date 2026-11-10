@@ -64,9 +64,10 @@ const SANDBOX_TIMEOUT_MS = 30_000
 const PUBLISHABLE_KINDS = ARTIFACT_KINDS
 type PublishableKind = ArtifactKind
 
-// One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise. Every
-// adapter sends the optional fields as it can (strict where it may), and an empty id or "null",
-// which a model sends for nothing, is no id: ids start `art_`.
+// One tool creates and revises: `kind` names a new artifact's, `id` the artifact to revise, whose
+// kind stays, so a kind sent with an id is ignored. Every adapter sends the optional fields as it
+// can (strict where it may), and an empty id or "null", which a model sends for nothing, is no id:
+// ids start `art_`.
 const PATH_PROPERTY = {
   type: "string",
   description: "A file or a directory in the sandbox, relative to the working directory.",
@@ -92,7 +93,7 @@ export const PUBLISH_ARTIFACT_TOOL_SPEC = {
       kind: {
         type: "string",
         enum: [...PUBLISHABLE_KINDS],
-        description: "A new artifact's kind. Leave it out to update one by id.",
+        description: "A new artifact's kind. With an id it is ignored: an update keeps its kind.",
       },
       id: {
         type: "string",
@@ -185,8 +186,6 @@ interface PublishRequest {
   readonly title: string
   /** A new artifact of this kind, or this artifact's latest version. */
   readonly target: { readonly kind: PublishableKind } | { readonly artifactId: string }
-  /** The kind sent with an id: an update checks it is the artifact's. */
-  readonly kind?: PublishableKind
 }
 
 async function publish(
@@ -217,13 +216,7 @@ async function publish(
     "kind" in request.target
       ? request.target.kind
       : (await updatableArtifact(input, request.target.artifactId, tool, installed)).kind
-  // Both named: the kind must be the artifact's, which an update keeps.
-  if ("artifactId" in request.target && request.kind !== undefined && request.kind !== kind) {
-    throw publishError(
-      tool,
-      `${request.target.artifactId} is a ${kind}, not a ${request.kind}, so nothing was published: leave out kind to update it, or leave out id to publish a new ${request.kind}`
-    )
-  }
+
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
@@ -954,13 +947,11 @@ function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   }
   const path = pathInput(input.path, CREATE_TOOL)
   const title = titleInput(input.title, CREATE_TOOL)
-  if (noId) return { path, title, target: { kind: kind as PublishableKind } }
-  return {
-    path,
-    title,
-    target: { artifactId: id },
-    ...(kind === undefined ? {} : { kind: kind as PublishableKind }),
-  }
+  // With an id, a kind is ignored: an update keeps the artifact's, and a model that sends every
+  // field, as strict mode has it, fills one in.
+  return noId
+    ? { path, title, target: { kind: kind as PublishableKind } }
+    : { path, title, target: { artifactId: id } }
 }
 
 function parseOpenArtifactInput(value: unknown): OpenArtifactToolInput {
