@@ -782,6 +782,10 @@ describe("publish_artifact", () => {
     for (const id of ["new", "0", ".sixb-new"]) {
       expect(await refusal({ id, path: "work/review", title: "Q3" }, "version")).toBe(shape)
     }
+    // An id that is not text is refused, never read as no id: a new artifact would be created.
+    expect(await refusal({ id: 123, kind: "page", path: "work/review", title: "Q3" })).toBe(
+      "[SixbAgent] publish_artifact refused: id must be an artifact id such as art_k3m9q2x7tp."
+    )
     // What a model sends when it means "no artifact yet" is no id: without a kind, nothing.
     for (const id of [" ", "", "null", null]) {
       expect(await refusal({ id, path: "work/review", title: "Q3" }, "version")).toBe(

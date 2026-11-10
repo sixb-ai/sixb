@@ -930,6 +930,9 @@ function parsePublishArtifactInput(value: unknown): PublishArtifactToolInput {
   if (kind !== undefined && !PUBLISHABLE_KINDS.includes(kind as PublishableKind)) {
     throw publishError(CREATE_TOOL, `kind must be one of ${PUBLISHABLE_KINDS.join(", ")}`)
   }
+  if (input.id !== undefined && input.id !== null && typeof input.id !== "string") {
+    throw publishError(CREATE_TOOL, "id must be an artifact id such as art_k3m9q2x7tp")
+  }
   // What a model sends for "no id": nothing, an empty string, or the word.
   const id = typeof input.id === "string" ? input.id.trim() : ""
   const noId = id === "" || /^(null|none|undefined)$/i.test(id)
