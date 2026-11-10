@@ -24,7 +24,11 @@ import type {
   ConnectorDefinition,
   OAuthConnectorAdapter,
 } from "../types"
-import { connectorConnectionOwners, isOAuthConnectorDefinition } from "../types"
+import {
+  connectorConnectionOwners,
+  isOAuthConnectorDefinition,
+  sameConnectorConnectionOwner,
+} from "../types"
 import {
   assertConnectorConnectionCommandAccess,
   assertConnectorConnectionSelectorAccess,
@@ -401,6 +405,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       source.authorizationId
     )
     assertConnectorAuthorizationActor(authorization, actor.principal)
+    await this.assertAuthorizationOwner(definition, authorization.id, input.owner)
     return this.runs.startSelection(command, definition.id, {
       owner: input.owner,
       slot: input.slot,
@@ -515,6 +520,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       throw connectorAuthorizationStatusError(authorization.status)
     }
     assertConnectorAuthorizationActor(authorization, actor.principal)
+    await this.assertAuthorizationOwner(definition, authorization.id, input.owner)
     const account = authorization.accounts.find((candidate) => candidate.id === input.accountId)
     if (!account) {
       throw createConnectorCodedError(
@@ -557,6 +563,32 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       await this.continuePendingRevocation(definition, result.revocationPendingAuthorizationId)
     }
     return connectorConnectionView(result.connection, result.authorization.status)
+  }
+
+  /**
+   * A grant serves one owner, so revoking a person's grant never disconnects the project's slots,
+   * and a project grant never reads as anyone's own.
+   */
+  private async assertAuthorizationOwner(
+    definition: ConnectorDefinition,
+    authorizationId: string,
+    owner: ConnectorConnectionSelector["owner"]
+  ): Promise<void> {
+    const connections = await withConnectorStorageBoundary(
+      "Connector connections could not be read from their authorization.",
+      () =>
+        this.connectionStorage.listConnectionsByAuthorization({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          authorizationId,
+        })
+    )
+    if (connections.some((connection) => !sameConnectorConnectionOwner(connection.owner, owner))) {
+      throw createConnectorCodedError(
+        "connector.operation_conflict",
+        "This account is connected for another owner; connect it again for this one."
+      )
+    }
   }
 
   async disconnect(

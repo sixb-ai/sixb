@@ -125,7 +125,7 @@ export function assertProjectionCompatibleWithDataset(input: {
 
       const column = requireColumn(columnsByName, columnName, context)
       const compatible =
-        projection.users?.[propertyId] === "email"
+        projection.users?.[propertyId] !== undefined
           ? column.type === "string"
           : isDatasetColumnCompatibleWithSchema(
               column.type,

@@ -330,6 +330,73 @@ describe("userRef.fromEmail", () => {
   })
 })
 
+describe("userRef.fromId", () => {
+  const tasks = defineDataset("tasks", {
+    schema: [
+      col("task_id", "string"),
+      col("assignee_id", "string"),
+      col("assignee_count", "int64"),
+    ],
+  })
+
+  function register(
+    properties: Readonly<Record<string, string>>,
+    ontology: ObjectTypeWithPropertyTokens = Task
+  ) {
+    const userProperty = Object.keys(properties).find((propertyId) => propertyId !== "id")!
+    const projection = {
+      _tag: "ObjectProjectionDefinition" as const,
+      id: "tasks",
+      objectTypeId: ontology.id,
+      datasetId: tasks.id,
+      properties,
+      users: { [userProperty]: "id" as const },
+      links: {},
+    }
+    return () =>
+      new ProjectionRegistry({
+        projections: [projection],
+        ontology: new OntologyRegistry({ sources: [ontology] }),
+        datasetsById: new Map([[tasks.id, tasks]]),
+      })
+  }
+
+  test("lowers to the id column and the key members are matched by", () => {
+    const projection = defineProjection("tasks", Task)
+      .fromDataset(tasks)
+      .properties({ id: "task_id", assignee: userRef.fromId("assignee_id") })
+
+    expect(projection.properties).toEqual({ id: "task_id", assignee: "assignee_id" })
+    expect(projection.users).toEqual({ assignee: "id" })
+    expect(register(projection.properties)).not.toThrow()
+    expect(() => userRef.fromId(" ")).toThrow(
+      "[Sixb] userRef.fromId() needs a dataset column name."
+    )
+  })
+
+  // Guard: `validateUserMapping` in `projections/validation.ts`; without it each one registers.
+  test("maps only an optional ref.user() property from a string column", () => {
+    const RequiredTask = defineObjectType({
+      id: "RequiredTask",
+      name: "Required task",
+      properties: [
+        prop("id", "string", { primary: true, required: true }),
+        prop("assignee", ref.user(), { required: true }),
+      ],
+    })
+
+    expect(register({ id: "task_id", title: "assignee_id" })).toThrow(
+      '[Sixb] Projection "tasks": userRef.fromId() maps property "Task.title", which is not a single ref.user() property.'
+    )
+    expect(register({ id: "task_id", assignee: "assignee_count" })).toThrow(
+      '[Sixb] Projection "tasks": userRef.fromId() maps property "Task.assignee" from column "assignee_count", which must be a string column.'
+    )
+    expect(register({ id: "task_id", assignee: "assignee_id" }, RequiredTask)).toThrow(
+      '[Sixb] Projection "tasks": userRef.fromId() cannot map required property "RequiredTask.assignee": a row whose id no member has would leave it empty.'
+    )
+  })
+})
+
 describe("userRef writes", () => {
   const assignTask = defineAction("assignTask")
     .on(Task)

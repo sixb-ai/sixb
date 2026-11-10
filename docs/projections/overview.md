@@ -92,6 +92,10 @@ export const calendarEventProjection = defineProjection("calendar-events", Calen
 - A row is matched when a run projects it. Someone who joins later is matched the next time a
   dataset version changes their row.
 
+When the column holds member user ids instead, such as the owner of a
+[personal connection](../connectors/authentication.md#bring-each-persons-data-in), map it with
+`userRef.fromId(column)`. The same rules apply, and an id no member has leaves the property empty.
+
 ## Project relationships from a separate dataset
 
 For many-to-many relationships, target a link instead of an object type. Each row identifies the

@@ -22,6 +22,15 @@ export interface UserEmailColumn<TColumn extends string = string> {
   readonly column: TColumn
 }
 
+/**
+ * A dataset column that names a member by user id, mapped to a `ref.user()` property of a
+ * projection. Built with `userRef.fromId(column)`.
+ */
+export interface UserIdColumn<TColumn extends string = string> {
+  readonly kind: "userIdColumn"
+  readonly column: TColumn
+}
+
 export const userRef: {
   /**
    * Build a reference to one user, for writes and query predicates:
@@ -35,6 +44,13 @@ export const userRef: {
    * The match ignores case. A row whose email no member has leaves the property empty.
    */
   fromEmail<const TColumn extends string>(column: TColumn): UserEmailColumn<TColumn>
+  /**
+   * Map a `ref.user()` property of a projection from a string column holding the member's user id:
+   * `.properties({ owner: userRef.fromId("owner_id") })`.
+   *
+   * A row whose id no member has leaves the property empty.
+   */
+  fromId<const TColumn extends string>(column: TColumn): UserIdColumn<TColumn>
 } = Object.assign(
   (id: string): UserRef => {
     if (typeof id !== "string" || !id.trim()) {
@@ -49,6 +65,13 @@ export const userRef: {
       }
       return Object.freeze({ kind: "userEmailColumn" as const, column })
     },
+
+    fromId<const TColumn extends string>(column: TColumn): UserIdColumn<TColumn> {
+      if (typeof column !== "string" || !column.trim()) {
+        throw new OntologyValidationError("[Sixb] userRef.fromId() needs a dataset column name.")
+      }
+      return Object.freeze({ kind: "userIdColumn" as const, column })
+    },
   }
 )
 
@@ -56,6 +79,12 @@ export function isUserEmailColumn(value: unknown): value is UserEmailColumn {
   if (typeof value !== "object" || value === null) return false
   const record = value as Record<string, unknown>
   return record.kind === "userEmailColumn" && typeof record.column === "string"
+}
+
+export function isUserIdColumn(value: unknown): value is UserIdColumn {
+  if (typeof value !== "object" || value === null) return false
+  const record = value as Record<string, unknown>
+  return record.kind === "userIdColumn" && typeof record.column === "string"
 }
 
 /** Exactly `{ type: "user", id }` with a nonblank id and no other field. */

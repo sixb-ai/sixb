@@ -12,7 +12,7 @@ import {
 } from "./managed-connector-sync.fixture"
 
 describe("managed connector Sync fan-out", () => {
-  test("skips an account that needs reconnecting and keeps its checkpoint", async () => {
+  test("skips a person's account that needs reconnecting and keeps its checkpoint", async () => {
     // Removal proof: rethrow in readManagedSource's connect catch; the second run fails.
     let runNumber = 1
     const sync = defineSync("sync-social-skip", { mode: "append" })
@@ -25,7 +25,7 @@ describe("managed connector Sync fan-out", () => {
       .intoDataset(socialRows)
     let needsReconnect = false
     const ben: SyncConnectorSource = {
-      ...source("connection-b", "account-b", "default"),
+      ...source("connection-b", "account-b", "default", { type: "user", id: "usr_ben" }),
       async connect() {
         if (needsReconnect) {
           throw createSixbError("connector.authorization_required", "Reconnect Ben's account.")
@@ -33,7 +33,10 @@ describe("managed connector Sync fan-out", () => {
         return { accountId: "account-b" }
       },
     }
-    const fixture = createFixture(sync, () => [source("connection-a", "account-a", "default"), ben])
+    const fixture = createFixture(sync, () => [
+      source("connection-a", "account-a", "default", { type: "user", id: "usr_ada" }),
+      ben,
+    ])
     await run(fixture, sync.id, "run-skip-1")
 
     runNumber = 2
@@ -63,6 +66,24 @@ describe("managed connector Sync fan-out", () => {
       "connection-a:2",
       "connection-b:1",
     ])
+  })
+
+  test("a project connection that needs reconnecting still fails the run", async () => {
+    // Removal proof: drop the owner check in skipsUnauthorizedConnection; the run succeeds empty.
+    const sync = defineSync("sync-social-project-reconnect", { mode: "append" })
+      .from(social)
+      .read((client) => ({ id: client.accountId }))
+      .intoDataset(socialRows)
+    const fixture = createFixture(sync, () => [
+      {
+        ...source("connection-p", "account-p", "default"),
+        async connect() {
+          throw createSixbError("connector.authorization_required", "Reconnect the project.")
+        },
+      },
+    ])
+    const failed = await run(fixture, sync.id, "run-project-reconnect").catch((error) => error)
+    expect(String(failed)).toContain("Reconnect the project.")
   })
 
   test("a snapshot sync still fails when an account needs reconnecting", async () => {

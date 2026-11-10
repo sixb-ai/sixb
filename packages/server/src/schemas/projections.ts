@@ -96,8 +96,8 @@ export const ObjectProjectionSchema = z.object({
   objectTypeId: z.string(),
   datasetId: z.string(),
   properties: z.record(z.string()),
-  /** The `ref.user()` properties whose column holds a member's email. */
-  users: z.record(z.literal("email")).optional(),
+  /** The `ref.user()` properties whose column names a member, and whether by email or by id. */
+  users: z.record(z.enum(["email", "id"])).optional(),
   links: z.record(ForeignKeyDescriptorSchema),
   conflictResolution: SourceEditConflictResolutionSchema,
   latestRun: ProjectionRunSchema.nullable(),
