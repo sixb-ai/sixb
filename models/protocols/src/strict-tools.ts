@@ -55,7 +55,7 @@ function nullable(property: JsonValue): JsonValue {
  * schema: past any of them it refuses the whole request.
  * https://platform.claude.com/docs/en/build-with-claude/structured-outputs
  */
-export const MESSAGES_STRICT_LIMITS = { tools: 20, optional: 24, unions: 16 } as const
+const MESSAGES_STRICT_LIMITS = { tools: 20, optional: 24, unions: 16 } as const
 
 export interface MessagesStrictCandidate {
   /** The tool asked for strict arguments. */
