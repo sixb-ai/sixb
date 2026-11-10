@@ -59,8 +59,14 @@ export {
 } from "./authority"
 export { defineAgentTool } from "./builders"
 export { requestAgentRunCancel } from "./cancel"
-export type { AgentChildQuestion } from "./child-question"
-export { deferredChildQuestion, isAwaitingAnswerRun } from "./child-question"
+export type { AgentChildQuestion, AgentQuestion } from "./child-question"
+export {
+  AGENT_QUESTION_LIMITS,
+  agentQuestionsText,
+  deferredChildQuestion,
+  isAwaitingAnswerRun,
+  isChildAskTool,
+} from "./child-question"
 export type {
   AgentContextEntryInput,
   AgentContextInput,

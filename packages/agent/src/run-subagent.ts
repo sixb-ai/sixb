@@ -17,7 +17,7 @@ import {
   type SubagentRunRecord,
 } from "@sixb/core/storage"
 import { renderCurrentTime, sentSettings } from "./agent-prompt"
-import { unansweredQuestion } from "./ask-parent-tool"
+import { unansweredQuestion } from "./ask-tool"
 import { storeChildOutputs } from "./child-files"
 import { createAgentContextGuard } from "./context-guard"
 import { throwIfExecutionLost } from "./errors"
@@ -84,7 +84,7 @@ export async function runSubagent(input: {
   readonly runFiles: AgentRunFiles
   /**
    * What its parent sends it while it runs, read before its next step, and the questions it asks,
-   * through the inbox's `ask_parent` among its tools.
+   * through the inbox's `ask` among its tools.
    */
   readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
