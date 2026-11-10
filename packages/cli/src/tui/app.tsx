@@ -41,6 +41,7 @@ import {
   contextStatus,
   elapsed,
   fittedContextText,
+  pickedAnswer,
   shortPath,
 } from "./format"
 import { Palette, type PaletteItem } from "./palette"
@@ -1013,7 +1014,7 @@ function ThreadView(
       client,
       path: { threadId },
       body: {
-        text,
+        text: pickedAnswer(messages, text),
         // The thread's mode applies, unless one chosen here has not reached it yet.
         ...(props.approval?.chosen && props.approval.mode
           ? { approvalMode: props.approval.mode }
