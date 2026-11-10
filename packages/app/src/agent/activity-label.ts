@@ -8,6 +8,7 @@ import {
   humanize,
 } from "./bash/interpret"
 import { describeDelegationTool } from "./delegation/interpret"
+import { describeEdit, describeWrite } from "./file-edits/interpret"
 import { type AgentMessages, en } from "./i18n/en"
 import { childQuestions, describeMessageAgent } from "./message-agent/interpret"
 import type { NormalizedPart, NormalizedTool } from "./parts"
@@ -70,6 +71,9 @@ function toolProgressLabel(
     )
     return description.runningTitle
   }
+
+  if (tool.toolName === "edit") return describeEdit(tool, messages).runningTitle
+  if (tool.toolName === "write") return describeWrite(tool, messages).runningTitle
 
   if (tool.toolName === "view_file") return messages.viewFile.running(describeViewFile(tool).target)
   if (tool.toolName === "message_agent") return describeMessageAgent(tool, messages).running

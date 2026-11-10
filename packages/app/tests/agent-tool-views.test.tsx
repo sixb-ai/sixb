@@ -6,7 +6,9 @@ import { MemoryRouter } from "react-router-dom"
 import { type AgentToolView, defineAgentToolView } from "../src"
 import { BashToolView } from "../src/agent/bash/bash-tool-view"
 import { AssistantBody } from "../src/agent/components/message-parts"
+import { EditToolView, WriteToolView } from "../src/agent/file-edits/file-edit-tool-view"
 import type { NormalizedPart, NormalizedTool } from "../src/agent/parts"
+import { ReadToolView } from "../src/agent/read/read-tool-view"
 import { agentToolViews } from "../src/agent/tool-views/define"
 import { AgentToolViewsProvider } from "../src/agent/tool-views/registry"
 import { installDom } from "./helpers/dom"
@@ -302,6 +304,110 @@ describe("a command in the chat", () => {
       fireEvent.click(line)
       expect(view.getByText("warning: slow")).toBeDefined()
       expect(view.container.textContent).not.toContain("[SixbAgent]")
+    } finally {
+      view.unmount()
+    }
+  })
+})
+
+describe("a file the agent changed", () => {
+  // Removal proof: drop "edit" or "write" from BUILT_IN_TOOL_VIEWS; the generic row then names the
+  // tool instead of the file.
+  test("edit and write keep their own rows in the work", async () => {
+    const view = renderBody([
+      tool({
+        toolName: "edit",
+        state: "output-available",
+        input: { path: "src/app.ts" },
+        output: { path: "src/app.ts", replaced: 1, diff: "@@ -1 +1 @@\n-a\n+b\n" },
+      }),
+      tool({
+        toolName: "write",
+        state: "output-available",
+        input: { path: "notes/plan.md", content: "x" },
+        output: { path: "notes/plan.md", created: true, lines: 1, bytes: 1 },
+      }),
+    ])
+    await openWork(view)
+
+    expect(workText(view)).toContain("Edited app.ts")
+    expect(workText(view)).toContain("Created plan.md")
+  })
+
+  test("an edit says what it changed, +added −removed, and opens to the diff", () => {
+    const view = mount(
+      <EditToolView
+        tool={{
+          toolName: "edit",
+          state: "output-available",
+          input: { path: "src/app.ts", old_string: "3", new_string: "5" },
+          output: {
+            path: "src/app.ts",
+            replaced: 1,
+            diff: "@@ -1,2 +1,2 @@\n-const retries = 3\n+const retries = 5\n \n",
+          },
+        }}
+      />
+    )
+    try {
+      const line = view.getByRole("button", { name: /Edited app\.ts/ })
+      expect(line.textContent).toContain("+1")
+      expect(line.textContent).toContain("−1")
+
+      fireEvent.click(line)
+      expect(view.getByText("const retries = 3")).toBeDefined()
+      expect(view.getByText("const retries = 5")).toBeDefined()
+      expect(view.getByText("src/app.ts")).toBeDefined()
+    } finally {
+      view.unmount()
+    }
+  })
+
+  test("a write says whether it created or rewrote the file, and opens to what it wrote", () => {
+    const write = (created: boolean) =>
+      mount(
+        <WriteToolView
+          tool={{
+            toolName: "write",
+            state: "output-available",
+            input: { path: "notes/plan.md", content: "# Plan\n\nShip it.\n" },
+            output: { path: "notes/plan.md", created, lines: 3, bytes: 17 },
+          }}
+        />
+      )
+    const created = write(true)
+    try {
+      const line = created.getByRole("button", { name: /Created plan\.md/ })
+      expect(line.textContent).toContain("3 lines")
+      fireEvent.click(line)
+      expect(created.getByText("Ship it.")).toBeDefined()
+    } finally {
+      created.unmount()
+    }
+    const rewritten = write(false)
+    try {
+      expect(rewritten.getByRole("button", { name: /Rewrote plan\.md/ })).toBeDefined()
+    } finally {
+      rewritten.unmount()
+    }
+  })
+
+  test("a read of a folder lists its entries", () => {
+    const view = mount(
+      <ReadToolView
+        tool={{
+          toolName: "read",
+          state: "output-available",
+          input: { path: "src" },
+          output: { path: "src", entries: ["index.ts", "lib/"] },
+        }}
+      />
+    )
+    try {
+      const line = view.getByRole("button", { name: /Listed src/ })
+      expect(line.textContent).toContain("2 entries")
+      fireEvent.click(line)
+      expect(view.container.textContent).toContain("index.ts\nlib/")
     } finally {
       view.unmount()
     }
