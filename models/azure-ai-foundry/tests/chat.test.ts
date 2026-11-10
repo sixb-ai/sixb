@@ -248,7 +248,7 @@ test("requires explicit capabilities and preserves strict schemas without enabli
     },
   })
   const model = provider.chat("deployment", { definition })
-  const tools = [{ name: "answer", description: "Answer", inputSchema: schema }]
+  const tools = [{ name: "answer", description: "Answer", inputSchema: schema, strict: true }]
   await collect(
     (
       await model.stream(

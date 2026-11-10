@@ -252,7 +252,7 @@ test("applies Azure strict output and tool policy without weakening schemas", as
       return completed()
     },
   })("deployment", { definition })
-  const tools = [{ name: "answer", description: "Answer", inputSchema: schema }]
+  const tools = [{ name: "answer", description: "Answer", inputSchema: schema, strict: true }]
   await collect(
     (
       await model.stream(
@@ -273,6 +273,29 @@ test("applies Azure strict output and tool policy without weakening schemas", as
     tools: [{ strict: false, parameters: loose }],
     parallel_tool_calls: true,
   })
+  // A tool that does not ask stays unconstrained, however strict its schema could be.
+  await collect((await model.stream(request({ tools: [{ ...tools[0]!, strict: false }] }))).events)
+  expect(bodies[2]).toMatchObject({
+    tools: [{ strict: false, parameters: schema }],
+    parallel_tool_calls: true,
+  })
+  // An optional property goes required and nullable: left optional, strict mode fills it.
+  const optional = { ...schema, required: [] }
+  await collect(
+    (await model.stream(request({ tools: [{ ...tools[0]!, inputSchema: optional }] }))).events
+  )
+  expect(bodies[3]).toMatchObject({
+    tools: [
+      {
+        strict: true,
+        parameters: {
+          ...schema,
+          properties: { answer: { type: ["string", "null"] } },
+          required: ["answer"],
+        },
+      },
+    ],
+  })
   await expect(
     model.stream(request({ responseFormat: { type: "json", name: "bad", schema: loose } }))
   ).rejects.toThrow("Azure-compatible")
@@ -280,7 +303,7 @@ test("applies Azure strict output and tool policy without weakening schemas", as
     "not supported"
   )
   await expect(model.stream(request({ reasoning: "max" }))).rejects.toThrow("not supported")
-  expect(bodies).toHaveLength(2)
+  expect(bodies).toHaveLength(4)
 })
 
 test("requires explicit capabilities for optional model features", async () => {

@@ -4,10 +4,11 @@ import {
   type LanguageModelDefinition,
   type LanguageModelRequest,
   type ModelMessage,
+  type ModelToolSpecification,
   modelReasoningSupportIssue,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { responsesInput } from "@sixb/model-protocols/responses"
+import { requiredNullableSchema, responsesInput } from "@sixb/model-protocols/responses"
 import type { AzureAIFoundryDeployment } from "./discovery"
 import { foundryOutputSchema } from "./structured-output"
 import { object, PREFIX, positiveInteger } from "./util"
@@ -118,14 +119,16 @@ export function responsesRequest(
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Reasoning summaries require a declared reasoning capability.`
     )
-  const tools = request.tools.map((tool) => ({
-    type: "function",
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.inputSchema,
-    strict:
-      caps.nativeStructuredOutput === true && foundryOutputSchema(tool.inputSchema) !== undefined,
-  }))
+  const tools = request.tools.map((tool) => {
+    const schema = caps.nativeStructuredOutput === true ? foundryStrictTool(tool) : undefined
+    return {
+      type: "function",
+      name: tool.name,
+      description: tool.description,
+      parameters: schema ?? tool.inputSchema,
+      strict: schema !== undefined,
+    }
+  })
   return {
     ...options.request,
     model: definition.modelId,
@@ -263,4 +266,14 @@ function checkScope(data: unknown, scope: string): void {
       `${PREFIX} Replay state belongs to a different endpoint, deployment, or protocol.`
     )
   }
+}
+
+/**
+ * A tool that asked for strict arguments, in the form OpenAI's strict mode takes (every property
+ * required, an optional one nullable), when it fits Azure's strict subset.
+ */
+export function foundryStrictTool(tool: ModelToolSpecification): JsonObject | undefined {
+  if (!tool.strict) return undefined
+  const schema = requiredNullableSchema(tool.inputSchema)
+  return foundryOutputSchema(schema) === undefined ? undefined : schema
 }
