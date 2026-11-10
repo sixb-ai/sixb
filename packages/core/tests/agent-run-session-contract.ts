@@ -799,6 +799,47 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       turn.close()
       child.close()
     })
+
+    // Removal proof: drop the parent check in agentRunChildren.cancel; a turn stops another
+    // turn's child, or itself. Drop the requestAgentRunCancel call; the running child runs on.
+    test("stops only the turn's own children: a queued one at once, a running one at its renewal", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const turn = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!turn) throw new Error("Expected the run to be claimed.")
+      const spawned = await spawnChild(storage, turn)
+
+      expect(await turn.children.cancel(run.id).catch((error: Error) => error.message)).toMatch(
+        /stops only its own children/
+      )
+      // A child of an earlier turn of the same conversation is not this turn's to stop.
+      const conversation = await seedConversation(claim)
+      const earlier = await conversation.open(await conversation.turn("run-a", "m1"))
+      const earlierChild = await spawnChild(conversation.storage, earlier)
+      await earlier.finish({ status: "succeeded", finishReason: "stop" })
+      const later = await conversation.open(await conversation.turn("run-b", "m2"))
+      expect(
+        await later.children.cancel(earlierChild.id).catch((error: Error) => error.message)
+      ).toMatch(/stops only its own children/)
+      earlier.close()
+      later.close()
+
+      const child = await claim(host, { run: spawned, leaseExpiresAt: LEASE, cancelWith: [run.id] })
+      if (!child) throw new Error("Expected the child to be claimed.")
+      expect((await turn.children.cancel(spawned.id)).status).toBe("running")
+      await child.renewLease(LEASE)
+      expect(child.cancelled.aborted).toBe(true)
+      turn.close()
+      child.close()
+
+      const { host: other, storage: otherStorage, run: otherRun } = await seedAgentRun()
+      const otherTurn = await claim(other, { run: otherRun, leaseExpiresAt: LEASE })
+      if (!otherTurn) throw new Error("Expected the run to be claimed.")
+      const queued = await spawnChild(otherStorage, otherTurn)
+      expect((await otherTurn.children.cancel(queued.id)).status).toBe("cancelled")
+      // Ended already: returned as it is.
+      expect((await otherTurn.children.cancel(queued.id)).status).toBe("cancelled")
+      otherTurn.close()
+    })
   })
 
   describe("a run's artifacts", () => {
