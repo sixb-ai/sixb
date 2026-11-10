@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { renderToStaticMarkup } from "react-dom/server"
+import { BackgroundToolRow } from "../src/agent/background/background-tool-row"
 import { describeDelegationTool, readThreadDelegation } from "../src/agent/delegation/interpret"
 import { en } from "../src/agent/i18n/en"
 import type { NormalizedTool } from "../src/agent/parts"
@@ -59,5 +61,13 @@ describe("a wait or a stop", () => {
     )
     expect(label(call("stop", { id: "terms" }))).toBe("Stopping Terms")
     expect(label(call("stop", { id: "terms" }, rich({ results: [] })))).toBe("Stopped Terms")
+  })
+
+  // Removal proof: read only `input.id` in BackgroundToolRow's commandNamed; a wait, which names
+  // its commands in `ids`, reads with no command.
+  test("for commands, names each by what it runs", () => {
+    const build = { id: "bg_4f1a2c", command: "bun run build", status: "exited", exitCode: 0 }
+    const waited = call("wait", { ids: ["bg_4f1a2c"] }, { commands: [build] })
+    expect(renderToStaticMarkup(<BackgroundToolRow tool={waited} />)).toContain("bun run build")
   })
 })
