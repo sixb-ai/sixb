@@ -44,6 +44,7 @@ const meetings = defineDataset("meetings", {
     col("id", "string"),
     col("title", "string"),
     col("organizer_email", "string", { nullable: true }),
+    col("organizer_id", "string", { nullable: true }),
   ],
 })
 
@@ -51,14 +52,18 @@ const meetingsProjection = defineProjection("meetings", Meeting)
   .fromDataset(meetings)
   .properties({ id: "id", title: "title", organizer: userRef.fromEmail("organizer_email") })
 
-function fixture() {
+const meetingsByOrganizerId = defineProjection("meetings-by-organizer-id", Meeting)
+  .fromDataset(meetings)
+  .properties({ id: "id", title: "title", organizer: userRef.fromId("organizer_id") })
+
+function fixture(projection = meetingsProjection) {
   const lake = new InMemoryLakeStorage()
   const storage = new InMemoryStorage()
   const host = new SixbHost({
     id: PROJECT_ID,
     ontology: [Meeting],
     datasets: [meetings],
-    projections: [meetingsProjection],
+    projections: [projection],
     broker: new InMemoryBroker(),
     queues: new InMemoryQueues(),
     blobStorage: new InMemoryBlobStorage(),
@@ -89,9 +94,7 @@ function fixture() {
   ) => {
     const version = await lake.getVersion(meetings.id, versionId)
     if (!version) throw new Error("Missing meetings version")
-    const { datasetId, ...dispatch } = getProjectionRegistry(host).resolveDispatch(
-      meetingsProjection.id
-    )
+    const { datasetId, ...dispatch } = getProjectionRegistry(host).resolveDispatch(projection.id)
     const identity = {
       ...dispatch,
       datasetVersion: { datasetId, versionId, createdAt: version.createdAt.toISOString() },
@@ -108,7 +111,7 @@ function fixture() {
     const execution = await storage.executions.getById({ projectId: host.id, id: run!.executionId })
     const bound = bindDurablePrimitiveExecution(host, {
       execution: execution!,
-      primitive: { kind: "projection", id: meetingsProjection.id, runId: id },
+      primitive: { kind: "projection", id: projection.id, runId: id },
     })
     const users = options.users === undefined ? storage.auth.users : options.users
     const runtime: ProjectionWorkerContext = {
@@ -164,6 +167,36 @@ test("stores the member each row's email names, ignoring case", async () => {
   expect(await f.organizer("m2")).toEqual(userRef("usr_ben"))
   expect(await f.organizer("m3")).toBeUndefined()
   expect(await f.organizer("m4")).toBeUndefined()
+})
+
+// Removal proof: make `resolveMember` return `undefined` for the id key; usr_ava stays empty.
+test("stores the member each row's user id names", async () => {
+  const f = fixture(meetingsByOrganizerId)
+  await f.join("usr_ava", "ava@acme.com")
+  await f.join("usr_ben", "ben@acme.com")
+  await f.storage.auth.users.updateStatus({
+    projectId: PROJECT_ID,
+    id: "usr_ben",
+    status: "suspended",
+  })
+
+  // The connected account's address can differ from the member's: the id still names them.
+  const version = await f.write([
+    {
+      id: "m1",
+      title: "Kickoff",
+      organizer_email: "ada.martin@gmail.com",
+      organizer_id: "usr_ava",
+    },
+    { id: "m2", title: "Retro", organizer_id: "usr_ben" },
+    { id: "m3", title: "Interview", organizer_id: "usr_gone" },
+  ])
+  const result = await f.run(version.versionId)
+
+  expect(result.run.status).toBe("succeeded")
+  expect(await f.organizer("m1")).toEqual(userRef("usr_ava"))
+  expect(await f.organizer("m2")).toEqual(userRef("usr_ben"))
+  expect(await f.organizer("m3")).toBeUndefined()
 })
 
 // Red proof: drop `members` from the plan in `prepareIncrementalReplacement`; the delta run fails.

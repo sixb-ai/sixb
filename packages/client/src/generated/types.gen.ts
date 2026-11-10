@@ -25173,7 +25173,7 @@ export type ListProjectionsResponses = {
         [key: string]: string
       }
       users?: {
-        [key: string]: "email"
+        [key: string]: "email" | "id"
       }
       links: {
         [key: string]: {
@@ -25777,7 +25777,7 @@ export type GetProjectionResponses = {
           [key: string]: string
         }
         users?: {
-          [key: string]: "email"
+          [key: string]: "email" | "id"
         }
         links: {
           [key: string]: {

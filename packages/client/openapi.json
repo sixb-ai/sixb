@@ -72966,7 +72966,7 @@
                             "type": "object",
                             "additionalProperties": {
                               "type": "string",
-                              "enum": ["email"]
+                              "enum": ["email", "id"]
                             }
                           },
                           "links": {
@@ -74926,7 +74926,7 @@
                           "type": "object",
                           "additionalProperties": {
                             "type": "string",
-                            "enum": ["email"]
+                            "enum": ["email", "id"]
                           }
                         },
                         "links": {

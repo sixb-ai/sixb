@@ -1,4 +1,4 @@
-import type { DatasetRow, JsonValue, SyncDefinition } from "@sixb/core"
+import type { ConnectorConnectionOwner, DatasetRow, JsonValue, SyncDefinition } from "@sixb/core"
 import {
   col,
   defineConnector,
@@ -79,12 +79,17 @@ export function createFixture(
   }
 }
 
-export function source(connectionId: string, accountId: string, slot: string): SyncConnectorSource {
+export function source(
+  connectionId: string,
+  accountId: string,
+  slot: string,
+  owner: ConnectorConnectionOwner = { type: "project" }
+): SyncConnectorSource {
   return {
     connection: {
       id: connectionId,
       connectorId: social.id,
-      owner: { type: "project" },
+      owner,
       slot,
       account: { id: accountId, label: accountId },
     },

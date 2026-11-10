@@ -142,13 +142,18 @@ A personal connection belongs to the member who connected it:
 | Members with `can.manage(gmail)` | See every connection and its owner, and disconnect any of them |
 | Other members | Nothing. To them, it doesn't exist |
 
-Only the owner can reconnect or revoke a connection, because both act on their own sign-in.
+Only the owner can reconnect or revoke a connection, because both act on their own sign-in. A
+personal connection's account can't fill a project slot; connect it again for the project.
 
 ### Bring each person's data in
 
 [Syncs](../syncs/overview.md#sync-connected-accounts) read every connected account, personal
 ones included, and [webhooks](webhooks.md) receive their events. Everyone's rows land in the same
-dataset, so record each row's owner from `connection.owner` and use
+dataset, so have the sync write each row's owner and slot. `connection.owner` is
+`{ type: "user", id }` for a personal connection and `{ type: "project" }` otherwise; write its `id`
+and `connection.slot` on each row. Map the id to a
+[`ref.user()`](../ontology/properties.md#reference-a-user) property with
+[`userRef.fromId`](../projections/overview.md#point-to-members), and use
 [roles](../auth/authorization.md#grant-only-some-objects) to show each person only their own.
 
 ### Act with a person's account
@@ -161,8 +166,8 @@ that person.
 
 A row that came from someone's account names the account to write to. This action labels a
 message in the mailbox it came from. Its `Message` type has an `owner` property, a
-[`ref.user()`](../ontology/properties.md#reference-a-user) that the sync fills, and the connector
-has the `gmail.modify` scope:
+[`ref.user()`](../ontology/properties.md#reference-a-user), and a `slot` string property, both
+filled by the sync. The connector has the `gmail.modify` scope:
 
 ```ts
 export const labelMessage = defineAction("labelMessage")
@@ -171,7 +176,7 @@ export const labelMessage = defineAction("labelMessage")
   .writeback(async ({ target, params, sixb }) => {
     const client = await sixb.connector(gmail, {
       owner: target.properties.owner,
-      slot: "default",
+      slot: target.properties.slot,
     })
 
     await client.gmail.messages.modify("me", target.properties.gmailId, {
