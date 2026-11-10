@@ -117,7 +117,7 @@ const syncManagedAccounts = defineSync("sync-managed-accounts")
     const _connectorId: string = context.connection.connectorId
     const _slot: string = context.connection.slot
     const _accountId: string = context.connection.account.id
-    const _ownerType: "project" = context.connection.owner.type
+    const _ownerType: "project" | "user" = context.connection.owner.type
     const _checkpoint: { cursor: string } | undefined = context.checkpoint
     context.setCheckpoint({ cursor: "next" })
     return [{ id: 1 }]

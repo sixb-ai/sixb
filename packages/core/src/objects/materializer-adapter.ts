@@ -59,12 +59,14 @@ export interface RuntimeBatchCommit {
  *
  * A fresh request id per call keeps each runtime mutation its own commit; the Materializer's
  * idempotency replay then only collapses a retry of the very same request. The commit fails with an
- * `expectation` conflict when an object it expects changed since it was read.
+ * `expectation` conflict when an object it expects changed since it was read, and refuses to give
+ * an object an artifact its writer may not change, as if that artifact were missing.
  */
 export async function commitRuntimeOperations(
   ctx: RuntimeMaterializerContext,
   operations: readonly OntologyEditOperation[],
-  expectedObjects: readonly ExpectedObjectRevision[] = []
+  expectedObjects: readonly ExpectedObjectRevision[] = [],
+  unchangeableArtifactIds: readonly string[] = []
 ): Promise<EditCommitResult> {
   const mutations = getOntologyMutationRuntime(ctx)
   try {
@@ -75,6 +77,7 @@ export async function commitRuntimeOperations(
       expectedObjects,
       expectedLinks: [],
       expectedLinkScopes: [],
+      unchangeableArtifactIds,
     })
   } catch (error) {
     throw uniqueViolationError(error) ?? error
@@ -93,7 +96,8 @@ export async function commitRuntimeOperations(
 export async function commitRuntimeBatch(
   ctx: RuntimeMaterializerContext,
   groups: readonly RuntimeBatchGroup[],
-  expectedObjects: readonly ExpectedObjectRevision[] = []
+  expectedObjects: readonly ExpectedObjectRevision[] = [],
+  unchangeableArtifactIds: readonly string[] = []
 ): Promise<RuntimeBatchCommit> {
   const operations = groups.flatMap((group) => group.operations)
   if (operations.length === 0) {
@@ -115,6 +119,7 @@ export async function commitRuntimeBatch(
       operations,
       ...(operationGroups.length > 0 ? { operationGroups } : {}),
       ...(expectedObjects.length > 0 ? { expectedObjects } : {}),
+      unchangeableArtifactIds,
     })
   } catch (error) {
     throw uniqueViolationError(error) ?? error

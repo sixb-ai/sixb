@@ -31,6 +31,7 @@ interface SentComment {
   readonly anchor: Parameters<typeof quoteArtifactComment>[0]["anchor"]
   readonly body: string
   readonly authorName?: string | null
+  readonly author?: { readonly type: string }
 }
 
 /** Room left in the context for what its id, label and description take. */
@@ -58,7 +59,7 @@ export function commentsContext(input: {
     const body = cut(comment.body)
     const entry: ContextComment = {
       id: comment.id,
-      quote: quoteArtifactComment({ ...comment, body }),
+      quote: quoteArtifactComment({ ...comment, body, guest: comment.author?.type === "guest" }),
       author: comment.authorName ?? null,
       body,
       replies: replies.map((reply) => cut(reply.body)),

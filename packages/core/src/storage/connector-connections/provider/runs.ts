@@ -1,3 +1,4 @@
+import { sameConnectorConnectionOwner } from "../../../connectors/types"
 import { parseSixbFailure } from "../../../errors/internal"
 import { ConnectorConnectionStorageError } from "../errors"
 import type {
@@ -45,6 +46,7 @@ export class DurableConnectorConnectionRuns extends ConnectorConnectionOperation
           existingAttempt ||
           run.status !== "waiting" ||
           run.waitingFor !== "provider_authorization" ||
+          !sameConnectorConnectionOwner(run.owner, input.owner) ||
           run.slot !== input.slot ||
           run.initiatedByExecutionId !== input.initiatedByExecutionId
         ) {
@@ -217,6 +219,7 @@ export class DurableConnectorConnectionRuns extends ConnectorConnectionOperation
           !run ||
           run.status !== "waiting" ||
           run.waitingFor !== "provider_authorization" ||
+          !sameConnectorConnectionOwner(run.owner, attempt.owner) ||
           run.slot !== attempt.slot ||
           run.initiatedByExecutionId !== attempt.initiatedByExecutionId
         ) {

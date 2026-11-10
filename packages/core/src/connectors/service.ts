@@ -83,6 +83,18 @@ export class ConnectorService {
     return this.requireConnections().listExecutionConnections(definition)
   }
 
+  /** Revokes every connection one person owns. Nothing to do without OAuth connectors. */
+  async revokeUserConnections(userId: string): Promise<void> {
+    await this.connections?.revokeUserConnections(userId)
+  }
+
+  assertExecutionConnectionUsable<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    connection: ConnectorConnectionRecord
+  ): Promise<void> {
+    return this.requireConnections().assertExecutionConnectionUsable(definition, connection)
+  }
+
   connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     connection: ConnectorConnectionRecord,

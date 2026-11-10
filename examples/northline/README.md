@@ -138,6 +138,16 @@ bun run demo:approve-quote  # approve a pending source-system quote
 bun run demo:artifacts      # publish sample artifacts and print their links
 ```
 
+`demo:artifacts` also gives the Cold Chain Priority contract (`/contracts/contract-camden-priority`)
+its onboarding plan: a canvas held in `ServiceContract.onboardingPlan`, shown live on the contract's
+page. **Attach onboarding plan** on the contract's page in the Console attaches another.
+
+To review it with the customer, run Northline signed in (`NORTHLINE_AUTH=magic-link bun run
+dev:runtime`, after `demo:artifacts` with sign-in off) and press **Share with customer** on the
+contract's page: it copies a link, valid 14 days, that opens the contract without an account
+(`shares/contract-onboarding.ts`). The customer follows the plan live and comments on its boards
+as a guest, under the name they give.
+
 Mutable source state lives under `.sixb/demo-sources/` and survives ordinary restarts. Only
 `demo:reset` replaces it.
 

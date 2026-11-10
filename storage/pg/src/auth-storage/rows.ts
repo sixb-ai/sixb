@@ -15,6 +15,7 @@ import type {
   UserIdentityRecord,
   UserRecord,
   UserStatus,
+  UserSuspensionSource,
 } from "@sixb/core/storage"
 
 type PgDate = Date | string
@@ -26,6 +27,7 @@ export interface PgAuthUserRow {
   readonly display_name: string | null
   readonly avatar_url: string | null
   readonly status: UserStatus
+  readonly suspension_source: UserSuspensionSource | null
   readonly created_at: PgDate
   readonly updated_at: PgDate
 }
@@ -177,6 +179,7 @@ export function rowToUserRecord(row: PgAuthUserRow): UserRecord {
     displayName: row.display_name ?? undefined,
     avatarUrl: row.avatar_url ?? undefined,
     status: row.status,
+    ...(row.suspension_source === null ? {} : { suspensionSource: row.suspension_source }),
     createdAt: toDate(row.created_at),
     updatedAt: toDate(row.updated_at),
   }

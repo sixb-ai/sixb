@@ -98,7 +98,7 @@ const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS update
 const COMMENT_COLUMNS = `
   project_id AS projectId, artifact_id AS artifactId, id, parent_id AS parentId, anchor, body,
   author_principal_type AS authorPrincipalType, author_principal_id AS authorPrincipalId,
-  created_at AS createdAt, resolved_at AS resolvedAt,
+  author_name AS authorName, created_at AS createdAt, resolved_at AS resolvedAt,
   resolved_by_principal_type AS resolvedByPrincipalType,
   resolved_by_principal_id AS resolvedByPrincipalId,
   origin_thread_id AS originThreadId, origin_run_id AS originRunId
@@ -733,11 +733,21 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       // In the write transaction: two comments at once cannot both pass the limit.
       const counted = this.db
         .query(
-          "SELECT count(*) AS total FROM artifact_comments WHERE project_id = ? AND artifact_id = ?"
+          `SELECT count(*) AS total, count(*) FILTER (WHERE author_principal_type = 'guest') AS guests
+           FROM artifact_comments WHERE project_id = ? AND artifact_id = ?`
         )
-        .get(input.projectId, input.artifactId) as { readonly total: number }
+        .get(input.projectId, input.artifactId) as {
+        readonly total: number
+        readonly guests: number
+      }
       if (counted.total >= ARTIFACT_COMMENT_LIMITS.maxComments) {
         throw artifactStorageErrors.commentsFull(input.artifactId)
+      }
+      if (
+        input.author.type === "guest" &&
+        counted.guests >= ARTIFACT_COMMENT_LIMITS.maxGuestComments
+      ) {
+        throw artifactStorageErrors.guestCommentsFull(input.artifactId)
       }
 
       const anchor = {
@@ -753,8 +763,8 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         .query(
           `INSERT INTO artifact_comments (
             project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
-            author_principal_id, created_at, origin_thread_id, origin_run_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            author_principal_id, author_name, created_at, origin_thread_id, origin_run_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           RETURNING ${COMMENT_COLUMNS}`
         )
         .get(
@@ -766,6 +776,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.body,
           input.author.type,
           input.author.id,
+          input.author.type === "guest" ? input.author.name : null,
           input.createdAt.toISOString(),
           input.origin?.threadId ?? null,
           input.origin?.runId ?? null

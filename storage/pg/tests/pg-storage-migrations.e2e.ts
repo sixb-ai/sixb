@@ -137,6 +137,10 @@ const SHIPPED_MIGRATIONS = [
   "096-artifact-documents",
   "097-artifact-frame-files",
   "098-artifact-comments",
+  "099-object-artifact-refs",
+  "100-shared-link-guests",
+  "101-connector-connection-owners",
+  "102-user-suspension-source",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1779,10 +1783,15 @@ describe("Postgres storage migrations", () => {
       expect(await readTableColumns(sql, "connector_connection_runs")).not.toContain(
         "authorization_attempt_id"
       )
-      expect(await readTableColumns(sql, "connector_authorization_attempts")).not.toContain(
-        "owner_type"
-      )
-      expect(await readTableColumns(sql, "connector_connections")).not.toContain("owner_type")
+      for (const table of [
+        "connector_connection_runs",
+        "connector_authorization_attempts",
+        "connector_connections",
+      ]) {
+        expect(await readTableColumns(sql, table)).toEqual(
+          expect.arrayContaining(["owner_type", "owner_id"])
+        )
+      }
       expect(await readUniqueConstraints(sql, "connector_authorization_attempts")).toContainEqual([
         "project_id",
         "connector_id",
@@ -1797,6 +1806,8 @@ describe("Postgres storage migrations", () => {
       expect(await readUniqueConstraints(sql, "connector_connections")).toContainEqual([
         "project_id",
         "connector_id",
+        "owner_type",
+        "owner_id",
         "slot",
       ])
     })

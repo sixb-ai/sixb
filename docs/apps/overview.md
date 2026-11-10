@@ -294,8 +294,47 @@ or set by telemetry. Selecting it shows the trail behind the value: the edit, wh
 the imported value it replaced, or the projection, the dataset version it applied and the datasets
 upstream of it. Steps the person cannot see are only counted. See [Lineage](../objects/lineage.md).
 
+An [artifact a property holds](../ontology/properties.md#reference-an-artifact) shows as a card
+with a preview of it, and opens its page, which names the objects it belongs to and leads back to
+them. An action or workflow that takes an artifact offers the
+artifacts the person can open to choose from, and accepts a pasted link to one.
+
 What the page shows follows the person's grants: `can.view` on the type to read the object, and
 `can.apply` on an action to run it. See [Authorization](../auth/authorization.md).
+
+## Show an artifact
+
+`ArtifactViewer` shows an artifact on a page of your own, such as the plan an object holds. It is
+the viewer of the artifact's own page: live as people edit it, with its versions, its comments, and
+a button to open it full page.
+
+```tsx
+import { ArtifactViewer } from "@sixb/app"
+
+const plan = contract.properties.onboardingPlan
+
+{plan ? <ArtifactViewer artifactId={plan.id} className="h-[40rem]" /> : null}
+```
+
+| Prop | Default | Purpose |
+| --- | --- | --- |
+| `artifactId` | required | The artifact, shown at its latest version |
+| `className` | none | Sizes the frame, which is `34rem` tall otherwise |
+
+On a phone it shows as the artifact's card, which opens its page. A person who cannot open the
+artifact sees why in its place. Through a
+[shared link](../auth/shared-access.md#share-an-objects-artifacts), the visitor follows it live and
+comments as a guest, with nothing to edit.
+
+`useSharedGuest()` returns the visitor of a shared link, `{ grantId, destinationPath, id, name? }`,
+or `null` for anyone else. Use it to leave out what a visitor cannot open, such as your navigation:
+
+```tsx
+import { useSharedGuest } from "@sixb/app"
+
+const guest = useSharedGuest()
+if (guest) return <main>{children}</main>
+```
 
 ## Choose who sees the Console
 

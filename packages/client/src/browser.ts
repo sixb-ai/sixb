@@ -9,6 +9,7 @@ import {
   assertSharedAccessGrantId,
   getClientSharedGrantId,
   markClientSharedAuthority,
+  onClientSharedAccessEnded,
 } from "./client-authority"
 import { client } from "./generated/client.gen"
 
@@ -34,6 +35,11 @@ const SESSION_ACTIVITY_HEADER_VALUE = "1"
 const SESSION_ACTIVITY_WINDOW_MS = 5 * 60_000
 const SESSION_ACTIVITY_EVENT_TYPES = ["pointerdown", "keydown", "touchstart"] as const
 const SESSION_ACTIVITY_LISTENER_OPTIONS = { capture: true, passive: true } as const
+/**
+ * How often an open, visible shared page renews its session: well within the server's inactivity
+ * window, so a visitor who only watches, through a meeting, keeps it.
+ */
+const SHARED_SESSION_KEEPALIVE_MS = 2 * 60_000
 
 export interface SixbBrowserRuntimeConfig {
   readonly api: {
@@ -63,6 +69,11 @@ export interface SixbBrowserClientOptions {
 export interface SixbSharedBrowserClientOptions {
   readonly grantId: string
   readonly fetch?: typeof fetch
+  /**
+   * Called when the session ends while the page is open: a request refused as unauthenticated, or
+   * a live socket closed because the link was revoked or the session expired.
+   */
+  readonly onEnded?: () => void
 }
 
 export type SixbSharedAccessSession = ExchangeSharedAccessResponse
@@ -226,14 +237,21 @@ export function configureSixbSharedBrowserClient(
     fetch: options.fetch,
   })
 
-  const disposeActivity = installVisibleSessionActivity()
+  // A shared link's visitor may only watch, as a canvas reviewed live through a meeting: the page
+  // open and visible is their activity. A hidden page lets the session lapse.
+  const disposeActivity = installVisibleSessionActivity({ visibleIsActivity: true })
   const responseInterceptorId = client.interceptors.response.use((response) => {
     const responseCsrfToken = response.headers.get(SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME)
     if (responseCsrfToken) csrfToken = responseCsrfToken
-    if (response.status === 401) csrfToken = null
+    if (response.status === 401) {
+      csrfToken = null
+      options.onEnded?.()
+    }
     return response
   })
+  onClientSharedAccessEnded(client, options.onEnded ?? null)
 
+  let established = false
   const acceptSession = (session: SixbSharedAccessSession): SixbSharedAccessSession => {
     try {
       assertSharedAccessSession(session, options.grantId)
@@ -242,8 +260,16 @@ export function configureSixbSharedBrowserClient(
       throw error
     }
     csrfToken = session.csrfToken
+    established = true
     return session
   }
+
+  // A page that sends nothing still renews its session while visible. Its CSRF token stays meanwhile,
+  // so nothing in flight goes without it.
+  const keepAlive = setInterval(() => {
+    if (!established || browserDocumentVisibility() !== "visible") return
+    void getSharedSession(options.grantId).then(acceptSession, () => undefined)
+  }, SHARED_SESSION_KEEPALIVE_MS)
 
   const controller: SixbSharedBrowserClientController = {
     grantId: options.grantId,
@@ -275,8 +301,10 @@ export function configureSixbSharedBrowserClient(
       disposed = true
       stopSixbActivityCapture()
       csrfToken = null
+      clearInterval(keepAlive)
       disposeActivity()
       client.interceptors.response.eject(responseInterceptorId)
+      onClientSharedAccessEnded(client, null)
       if (activeBrowserController === controller) {
         activeBrowserController = null
         client.setConfig({
@@ -294,7 +322,18 @@ export function configureSixbSharedBrowserClient(
   return controller
 }
 
-function installVisibleSessionActivity(): () => void {
+function browserDocumentVisibility(): DocumentVisibilityState | null {
+  return typeof document === "undefined" ? null : document.visibilityState
+}
+
+/**
+ * Marks the requests a person's activity makes: those sent within five minutes of their last
+ * pointer, key or touch on the visible page, or, with `visibleIsActivity`, any sent while it is
+ * visible.
+ */
+function installVisibleSessionActivity(
+  options: { readonly visibleIsActivity?: boolean } = {}
+): () => void {
   const browserDocument = typeof document === "undefined" ? null : document
   let lastActivityAt = browserDocument?.visibilityState === "visible" ? Date.now() : null
   const recordVisibleActivity = () => {
@@ -317,8 +356,7 @@ function installVisibleSessionActivity(): () => void {
       lastActivityAt === null ? Number.POSITIVE_INFINITY : Date.now() - lastActivityAt
     const hasRecentVisibleActivity =
       browserDocument?.visibilityState === "visible" &&
-      activityAge >= 0 &&
-      activityAge < SESSION_ACTIVITY_WINDOW_MS
+      (options.visibleIsActivity || (activityAge >= 0 && activityAge < SESSION_ACTIVITY_WINDOW_MS))
 
     if (hasRecentVisibleActivity) {
       request.headers.set(SESSION_ACTIVITY_HEADER_NAME, SESSION_ACTIVITY_HEADER_VALUE)

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { SixbApiError } from "@sixb/client"
+import { configureSixbSharedBrowserClient } from "@sixb/client/browser"
 import { LocaleProvider } from "@sixb/ui/lib/i18n"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -11,6 +12,7 @@ import {
   useFileName,
 } from "../src/artifacts/file-source"
 import { fileLoadError } from "../src/artifacts/file-view"
+import { boardPreviewUrl } from "../src/artifacts/renderers/canvas/previews"
 
 function FileName({ source }: { readonly source: FileSource }) {
   return useFileName(source)
@@ -76,6 +78,51 @@ describe("file sources", () => {
     expect(source.inlineUrl).toBe(
       `https://example.test/api/artifacts/art_0123456789/versions/3/content?path=figures%2Frevenue+chart.png&disposition=inline&v=${encodeURIComponent(fileRef.digest)}`
     )
+  })
+
+  // An `<img>`, a `<video>` or a download link sends no header. Guard proof: drop
+  // `withSharedAccess` from contentUrl (file-source.ts) or boardPreviewUrl (previews.ts); a shared
+  // link's guest then sees every picture blank, refused by the API.
+  test("name a shared link's grant in what a browser loads by itself", () => {
+    const controller = configureSixbSharedBrowserClient(
+      { api: { baseUrl: "https://api.example.test" }, auth: { enabled: true } },
+      { grantId: "shr_1" }
+    )
+    const grant = (url: string) => new URL(url).searchParams.getAll("shareGrant")
+    try {
+      const source = artifactFileSource({
+        artifactId: "art_0123456789",
+        version: 3,
+        path: "figures/revenue chart.png",
+        fileRef,
+      })
+      expect(grant(source.inlineUrl)).toEqual(["shr_1"])
+      expect(grant(source.downloadUrl)).toEqual(["shr_1"])
+
+      const preview = boardPreviewUrl(
+        {
+          artifactId: "art_0123456789",
+          version: 3,
+          revision: 7,
+          outline: { kind: "canvas", items: [] },
+        },
+        "welcome",
+        "light"
+      )
+      expect(grant(preview)).toEqual(["shr_1"])
+    } finally {
+      controller.dispose()
+    }
+
+    // Anyone else's address names no grant.
+    const member = artifactFileSource({
+      artifactId: "art_0123456789",
+      version: 3,
+      path: "a.png",
+      fileRef,
+      baseUrl: "https://example.test",
+    })
+    expect(grant(member.inlineUrl)).toEqual([])
   })
 
   test("name why a file could not load in the reader's words, not the API's", () => {

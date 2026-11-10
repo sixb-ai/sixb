@@ -313,6 +313,7 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
       ...(input.expectedObjects !== undefined
         ? { expectedObjects: normalizeExpectedObjects(input.expectedObjects) }
         : {}),
+      ...normalizeUnchangeableArtifactIds(input.unchangeableArtifactIds),
     })
   }
 
@@ -369,7 +370,20 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
       kind: "runtime" as const,
       requestId: normalizeNonblank(input.source.requestId, "Runtime request id"),
     }),
+    ...normalizeUnchangeableArtifactIds(
+      "unchangeableArtifactIds" in input ? input.unchangeableArtifactIds : undefined
+    ),
   })
+}
+
+/** Sorted and distinct, and only when there are some: commits without keep their intent. */
+function normalizeUnchangeableArtifactIds(ids: readonly string[] | undefined): {
+  readonly unchangeableArtifactIds?: readonly string[]
+} {
+  if (!ids?.length) return {}
+
+  const normalized = ids.map((id) => normalizeNonblank(id, "Unreadable artifact id"))
+  return { unchangeableArtifactIds: Object.freeze([...new Set(normalized)].sort()) }
 }
 
 export function normalizeProjectionSourceRef(source: ProjectionSourceRef): ProjectionSourceRef {

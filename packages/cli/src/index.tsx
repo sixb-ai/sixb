@@ -398,7 +398,7 @@ async function main(): Promise<void> {
       const dev = getFlag("dev")
       const prod = getFlag("prod")
       await runEnvInit({
-        project: positionals[0] ?? "",
+        ...(positionals[0] === undefined ? {} : { project: positionals[0] }),
         ...(dev === undefined ? {} : { dev }),
         ...(prod === undefined ? {} : { prod }),
       })

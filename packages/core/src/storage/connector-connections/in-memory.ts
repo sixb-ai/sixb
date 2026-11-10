@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto"
+import { sameConnectorConnectionOwner } from "../../connectors/types"
 import { createSixbError, parseSixbFailure, toSixbFailure } from "../../errors/internal"
 import { ConnectorConnectionStorageError } from "./errors"
 import type {
@@ -129,6 +130,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
         run.connectorId !== input.connectorId ||
         run.status !== "waiting" ||
         run.waitingFor !== "provider_authorization" ||
+        !sameConnectorConnectionOwner(run.owner, input.owner) ||
         run.slot !== input.slot ||
         run.initiatedByExecutionId !== input.initiatedByExecutionId
       ) {
@@ -286,6 +288,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       run.connectorId !== attempt.connectorId ||
       run.status !== "waiting" ||
       run.waitingFor !== "provider_authorization" ||
+      !sameConnectorConnectionOwner(run.owner, attempt.owner) ||
       run.slot !== attempt.slot ||
       run.initiatedByExecutionId !== attempt.initiatedByExecutionId
     ) {
@@ -1107,7 +1110,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       if (
         connection.projectId === input.projectId &&
         connection.connectorId === input.connectorId &&
-        connection.owner.type === input.owner.type &&
+        sameConnectorConnectionOwner(connection.owner, input.owner) &&
         connection.slot === input.slot
       ) {
         return connection

@@ -327,6 +327,10 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("093-artifact-documents", artifactDocumentsSql),
     sqliteSql("094-artifact-frame-files", artifactFrameFilesSql),
     sqliteSql("095-artifact-comments", artifactCommentsSql),
+    sqliteSql("096-object-artifact-refs", objectArtifactRefsSql),
+    sqliteSql("097-shared-link-guests", sharedLinkGuestsSql),
+    sqliteSql("098-connector-connection-owners", connectorConnectionOwnersSql),
+    sqliteSql("099-user-suspension-source", userSuspensionSourceSql),
   ],
 })
 
@@ -755,3 +759,11 @@ import artifactOpenVersionsSql from "./migrations/092-artifact-open-versions.sql
 import artifactDocumentsSql from "./migrations/093-artifact-documents.sql" with { type: "text" }
 import artifactFrameFilesSql from "./migrations/094-artifact-frame-files.sql" with { type: "text" }
 import artifactCommentsSql from "./migrations/095-artifact-comments.sql" with { type: "text" }
+import objectArtifactRefsSql from "./migrations/096-object-artifact-refs.sql" with { type: "text" }
+import sharedLinkGuestsSql from "./migrations/097-shared-link-guests.sql" with { type: "text" }
+import connectorConnectionOwnersSql from "./migrations/098-connector-connection-owners.sql" with {
+  type: "text",
+}
+import userSuspensionSourceSql from "./migrations/099-user-suspension-source.sql" with {
+  type: "text",
+}

@@ -34,6 +34,7 @@ import {
 } from "./access-tokens"
 import { getRequestClientAddress } from "./client-address"
 import { getCookie, type ResolvedAuthCookieOptions } from "./cookies"
+import { type DirectorySchedule, directorySchedule, planDirectoryPass } from "./directory"
 import { AuthRuntimeError } from "./errors"
 import {
   invitedEvents,
@@ -150,6 +151,12 @@ export interface AuthRuntimeOptions {
   readonly config?: SixbAuthConfig
   /** Where member events go: joined, suspended, reactivated, invited, profile updated. */
   readonly events: DomainEventLog
+  /**
+   * Runs after any suspension, by an administrator, server code or the directory, to end what the
+   * person still holds outside auth: the host revokes their own connector connections. A failure
+   * is logged; it never undoes the suspension.
+   */
+  readonly onUserSuspended?: (userId: string) => Promise<void>
 }
 
 export class AuthRuntime {
@@ -159,13 +166,18 @@ export class AuthRuntime {
   private readonly config: ResolvedAuthConfig
   private readonly sessionCache: SessionCache | null
   private readonly events: DomainEventLog
+  private readonly onUserSuspended?: (userId: string) => Promise<void>
+  private readonly directorySchedule?: DirectorySchedule
 
   constructor(options: AuthRuntimeOptions) {
     this.projectId = options.projectId
     this.storage = options.storage
     this.security = options.security
     this.events = options.events
+    this.onUserSuspended = options.onUserSuspended
     this.config = resolveAuthConfig(options.config)
+    const directory = this.config.strategy?.directory
+    if (directory && this.isEnabled()) this.directorySchedule = directorySchedule(directory)
     this.sessionCache =
       this.config.session.cacheTtlMs > 0 ? new SessionCache(this.config.session.cacheTtlMs) : null
 
@@ -1229,18 +1241,106 @@ export class AuthRuntime {
       )
     }
 
-    const { user: suspended, previousUser } = await storage.suspendUserAndRevokeSessions({
+    const suspended = await this.suspend(user.id, caller)
+    return { user: suspended, groupIds, managedGroupIds }
+  }
+
+  /** Suspends a member for server code. Trusted code decides who may ask. */
+  suspendUser(userId: string): Promise<UserRecord> {
+    this.requireAuthStorage()
+    return this.suspend(assertNonEmpty(userId, "User id"))
+  }
+
+  /** Reactivates a member for server code, whoever suspended them. Sessions stay ended. */
+  async reactivateUser(userId: string): Promise<UserRecord> {
+    const { user, previousUser } = await this.requireAuthStorage().users.updateStatus({
       projectId: this.projectId,
-      userId: user.id,
+      id: assertNonEmpty(userId, "User id"),
+      status: "active",
+      updatedAt: new Date(),
+    })
+    await this.afterStatusChange(previousUser, user)
+    return user
+  }
+
+  private async suspend(
+    userId: string,
+    caller?: AuthenticatedUserRequestSession
+  ): Promise<UserRecord> {
+    const { user, previousUser } = await this.requireAuthStorage().suspendUserAndRevokeSessions({
+      projectId: this.projectId,
+      userId,
       suspendedAt: new Date(),
     })
-    // Storage revoked the user's sessions; drop cached copies so the suspended
-    // user stops authenticating immediately.
+    await this.afterStatusChange(previousUser, user, caller)
+    return user
+  }
+
+  /** How often the orchestrator checks the directory. Undefined when the strategy has none. */
+  get directoryIntervalMs(): number | undefined {
+    return this.directorySchedule?.intervalMs
+  }
+
+  /**
+   * Runs one pass of the directory check (see `planDirectoryPass`) and applies what it decided.
+   * Throws, once every other member is updated, when any could not be.
+   */
+  async checkDirectory(signal: AbortSignal): Promise<void> {
+    const strategy = this.config.strategy
+    const directory = strategy?.directory
+    if (!strategy || !directory || !this.directorySchedule) return
+
+    const storage = this.requireAuthStorage()
+    const changes = await planDirectoryPass({
+      projectId: this.projectId,
+      storage,
+      strategyId: strategy.id,
+      directory,
+      confirmAfterMs: this.directorySchedule.confirmAfterMs,
+      signal,
+    })
+
+    const failures: unknown[] = []
+    for (const { user, verdict } of changes) {
+      signal.throwIfAborted()
+      try {
+        const applied = await storage.applyDirectoryVerdict({
+          projectId: this.projectId,
+          userId: user.id,
+          verdict,
+          appliedAt: new Date(),
+        })
+        await this.afterStatusChange(applied.previousUser, applied.user)
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `[Sixb] Directory check could not update ${failures.length} of ${changes.length} members.`
+      )
+    }
+  }
+
+  // Ends what a changed status leaves behind: cached sessions, which carry the old status and
+  // groups, and, for a suspension, the person's own connections. Then tells the project.
+  private async afterStatusChange(
+    previousUser: UserRecord,
+    user: UserRecord,
+    caller?: AuthenticatedUserRequestSession
+  ): Promise<void> {
     this.sessionCache?.invalidateUser(user.id)
-
-    await this.emitMemberEvents(statusChangedEvents(caller, previousUser, suspended))
-
-    return { user: suspended, groupIds, managedGroupIds }
+    if (previousUser.status === "active" && user.status === "suspended") {
+      await this.onUserSuspended?.(user.id).catch((error: unknown) => {
+        console.error(
+          `[Sixb] Could not revoke the connections of suspended member '${user.id}'. Syncs ` +
+            "already skip them; disconnect them from the connections page to delete their tokens.",
+          error
+        )
+      })
+    }
+    await this.emitMemberEvents(statusChangedEvents(previousUser, user, caller))
   }
 
   async reactivateMember(
@@ -1265,7 +1365,7 @@ export class AuthRuntime {
       updatedAt: new Date(),
     })
 
-    await this.emitMemberEvents(statusChangedEvents(caller, previousUser, reactivated))
+    await this.afterStatusChange(previousUser, reactivated, caller)
 
     return { user: reactivated, groupIds, managedGroupIds }
   }

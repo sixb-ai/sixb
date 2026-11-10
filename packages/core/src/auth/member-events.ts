@@ -48,17 +48,24 @@ export function profileUpdatedEvents(
   ]
 }
 
+/**
+ * A member was suspended or reactivated. Without a caller, no one asked: the identity provider's
+ * directory or server code did it, and the event carries no `requestedBy`.
+ */
 export function statusChangedEvents(
-  caller: AuthenticatedUserRequestSession,
   previousUser: UserRecord,
-  user: UserRecord
+  user: UserRecord,
+  caller?: AuthenticatedUserRequestSession
 ): readonly EventDraft[] {
   if (previousUser.status === user.status) return []
 
   return [
     {
       type: user.status === "suspended" ? "user.suspended" : "user.reactivated",
-      payload: { user: toUserProfile(user), requestedBy: requester(caller) },
+      payload: {
+        user: toUserProfile(user),
+        ...(caller === undefined ? {} : { requestedBy: requester(caller) }),
+      },
     },
   ]
 }

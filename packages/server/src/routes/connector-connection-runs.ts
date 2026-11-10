@@ -8,6 +8,7 @@ import {
 } from "../auth/connector-callback-cookie"
 import { requireRequestSixb } from "../auth/scope"
 import {
+  connectorConnectionOwner,
   connectorRouteRuntime,
   handleConnectorRouteError,
   serializeConnectorConnection,
@@ -83,14 +84,11 @@ export function registerConnectorConnectionRunRoutes(
       async (context) => {
         const { params, body, request, set } = context
         try {
-          const runtime = connectorRouteRuntime(
-            host,
-            requireRequestSixb(context),
-            params.connectorId
-          )
+          const sixb = requireRequestSixb(context)
+          const runtime = connectorRouteRuntime(host, sixb, params.connectorId)
           const parsed = StartConnectorConnectionRunBodySchema.parse(body)
           const started = await runtime.startConnectionRun(params.connectorId, {
-            owner: { type: "project" },
+            owner: connectorConnectionOwner(sixb, params.connectorId, parsed.owner),
             slot: parsed.slot,
             returnTo: options.resolveReturnTo(request, parsed.returnTo),
             redirectUri: options.resolveCallbackUrl(request),
@@ -177,15 +175,12 @@ export function registerConnectorConnectionRunRoutes(
       async (context) => {
         const { params, body, set } = context
         try {
-          const runtime = connectorRouteRuntime(
-            host,
-            requireRequestSixb(context),
-            params.connectorId
-          )
+          const sixb = requireRequestSixb(context)
+          const runtime = connectorRouteRuntime(host, sixb, params.connectorId)
           const parsed = AddConnectorConnectionBodySchema.parse(body)
           const run = await runtime.addConnection(params.connectorId, {
             fromConnectionId: params.connectionId,
-            owner: { type: "project" },
+            owner: connectorConnectionOwner(sixb, params.connectorId, parsed.owner),
             slot: parsed.slot,
           })
           set.status = 201

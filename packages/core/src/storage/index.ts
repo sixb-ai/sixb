@@ -290,12 +290,14 @@ export type {
   ArtifactBoardPreviewRecord,
   ArtifactBoardPreviewSize,
   ArtifactCommentAnchor,
+  ArtifactCommentAuthor,
   ArtifactCommentKey,
   ArtifactCommentRecord,
   ArtifactDocument,
   ArtifactFile,
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
+  ArtifactGuest,
   ArtifactKind,
   ArtifactLatestVersion,
   ArtifactOrigin,
@@ -342,6 +344,7 @@ export type {
 } from "./artifacts"
 export type {
   AccessTokenRecord,
+  ApplyDirectoryVerdictInput,
   AuthAccessTokenStore,
   AuthDeviceAuthorizationStore,
   AuthGroupMembershipStore,
@@ -372,6 +375,7 @@ export type {
   CreateOrUpdateAuthInvitationInput,
   DeviceAuthorizationRecord,
   DeviceAuthorizationStatus,
+  DirectoryVerdict,
   GroupMembershipRecord,
   GroupMembershipSource,
   InvitationRecord,
@@ -405,6 +409,7 @@ export type {
   UserIdentityRecord,
   UserRecord,
   UserStatus,
+  UserSuspensionSource,
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage, MAX_PENDING_DEVICE_AUTHORIZATIONS } from "./auth"
 export type {
@@ -466,6 +471,7 @@ export type {
   RenewConnectorCredentialMutationInput,
   StageConnectorCredentialMutationCredentialsInput,
   StageConnectorCredentialMutationRevocationInput,
+  UserConnectorConnectionOwner,
   WaitForConnectorConnectionRunSelectionInput,
 } from "./connector-connections"
 export {
@@ -650,6 +656,7 @@ export type {
   AppliedMaterialization,
   ApplyMaterializationInput,
   ApplyMaterializationResult,
+  ArtifactHolder,
   AssertSourceMaterializationExecution,
   AssertSourceMaterializationExecutionInput,
   BeginSourceMaterializationInput,
@@ -659,6 +666,7 @@ export type {
   CleanupTerminalSourceMaterializationsResult,
   CompleteOntologyOutboxLeaseInput,
   EditOntologyCommitIntent,
+  ExactArtifactHolderWrite,
   ExactEffectiveLinkDelete,
   ExactEffectiveLinkWrite,
   ExactEffectiveObjectDelete,
@@ -876,6 +884,7 @@ export type {
   GetShareSessionByIdInput,
   RenewShareSessionIfValidInput,
   RevokeShareSessionInput,
+  SetShareSessionGuestNameInput,
   ShareSessionRecord,
   ShareSessionStorage,
   ShareSessionStorageErrorCode,

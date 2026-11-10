@@ -11,6 +11,7 @@ import type {
 } from "../../materializer"
 import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectType, Property } from "../../ontology"
+import type { ArtifactRef } from "../../ontology/artifact-ref"
 import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/inference"
 import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type { UserRef } from "../../ontology/user-ref"
@@ -51,9 +52,13 @@ type InferActionSnapshotSchemaValue<TSchema> = TSchema extends keyof ActionPrimi
     ? UserRef
     : TSchema extends { readonly type: "array"; readonly items: "userRef" }
       ? readonly UserRef[]
-      : TSchema extends { readonly type: "enum"; readonly values: readonly (infer TValue)[] }
-        ? TValue
-        : unknown
+      : TSchema extends "artifactRef"
+        ? ArtifactRef
+        : TSchema extends { readonly type: "array"; readonly items: "artifactRef" }
+          ? readonly ArtifactRef[]
+          : TSchema extends { readonly type: "enum"; readonly values: readonly (infer TValue)[] }
+            ? TValue
+            : unknown
 
 export type ActionSubject = { readonly kind: "none" } | ActionObjectSubject
 

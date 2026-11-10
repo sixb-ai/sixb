@@ -74,6 +74,7 @@ import {
 import { type MaintenanceFailure, MaintenanceLoop, type MaintenancePass } from "../maintenance/loop"
 import { OntologyMaintenance } from "../maintenance/ontology-maintenance"
 import { cronPass } from "../maintenance/passes/cron-pass"
+import { directoryPass } from "../maintenance/passes/directory-pass"
 import { lakeRetentionPass } from "../maintenance/passes/lake-retention-pass"
 import { ontologyPass } from "../maintenance/passes/ontology-pass"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
@@ -293,6 +294,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       security: definitions.security,
       config: options.auth,
       events: this.eventService,
+      onUserSuspended: (userId) => this.connectorService.revokeUserConnections(userId),
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
@@ -479,8 +481,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   }
 
   /**
-   * Run the project's upkeep on one loop: ontology maintenance, cron schedules, lake retention, and
-   * `passes`. The orchestrator is what hosts it.
+   * Run the project's upkeep on one loop: ontology maintenance, cron schedules, lake retention, the
+   * auth strategy's directory check, and `passes`. The orchestrator is what hosts it.
    */
   startMaintenance(passes: readonly MaintenancePass[]): OntologyMaintenanceHandle {
     const loop = new MaintenanceLoop({
@@ -488,6 +490,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         ontologyPass(this.ontologyMaintenance),
         this.cron,
         ...this.lakeRetentionPasses(),
+        ...this.directoryPasses(),
         ...passes,
       ],
       heartbeat: storageHeartbeat(this.projectId, "orchestrator", this.storage),
@@ -496,6 +499,15 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     loop.start()
 
     return { stop: () => loop.stop() }
+  }
+
+  private directoryPasses(): readonly MaintenancePass[] {
+    const intervalMs = this.auth.directoryIntervalMs
+    if (intervalMs === undefined) return []
+
+    return [
+      directoryPass({ intervalMs, checkDirectory: (signal) => this.auth.checkDirectory(signal) }),
+    ]
   }
 
   private lakeRetentionPasses(): readonly MaintenancePass[] {
@@ -567,6 +579,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       logging: this.logging,
       activity: this.activity,
       connectorService: this.connectorService,
+      members: this.auth,
       ...(this.connectorService.connectionProcess === undefined
         ? {}
         : { connectorConnections: this.connectorService.connectionProcess }),

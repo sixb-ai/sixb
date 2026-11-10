@@ -103,7 +103,7 @@ const FRAME_GRANT_COLUMNS = `
 const COMMENT_COLUMNS = `
   project_id AS "projectId", artifact_id AS "artifactId", id, parent_id AS "parentId", anchor,
   body, author_principal_type AS "authorPrincipalType", author_principal_id AS "authorPrincipalId",
-  created_at AS "createdAt", resolved_at AS "resolvedAt",
+  author_name AS "authorName", created_at AS "createdAt", resolved_at AS "resolvedAt",
   resolved_by_principal_type AS "resolvedByPrincipalType",
   resolved_by_principal_id AS "resolvedByPrincipalId",
   origin_thread_id AS "originThreadId", origin_run_id AS "originRunId"
@@ -723,22 +723,31 @@ export class PgArtifactStorage implements ArtifactStorage {
         `
         if (!parent) throw artifactStorageErrors.commentNotFound(input.artifactId, input.parentId)
       }
-      const [counted] = await tx<{ total: number }[]>`
-        SELECT COUNT(*)::int AS total FROM artifact_comments
+      const [counted] = await tx<{ total: number; guests: number }[]>`
+        SELECT COUNT(*)::int AS total,
+          (COUNT(*) FILTER (WHERE author_principal_type = 'guest'))::int AS guests
+        FROM artifact_comments
         WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
       `
       if ((counted?.total ?? 0) >= ARTIFACT_COMMENT_LIMITS.maxComments) {
         throw artifactStorageErrors.commentsFull(input.artifactId)
       }
+      if (
+        input.author.type === "guest" &&
+        (counted?.guests ?? 0) >= ARTIFACT_COMMENT_LIMITS.maxGuestComments
+      ) {
+        throw artifactStorageErrors.guestCommentsFull(input.artifactId)
+      }
 
       const [row] = await tx<PgRow[]>`
         INSERT INTO artifact_comments (
           project_id, artifact_id, id, parent_id, anchor, body, author_principal_type,
-          author_principal_id, created_at, origin_thread_id, origin_run_id
+          author_principal_id, author_name, created_at, origin_thread_id, origin_run_id
         ) VALUES (
           ${input.projectId}, ${input.artifactId}, ${input.id}, ${input.parentId ?? null},
           ${JSON.stringify(commentAnchor(input.anchor))}::text::jsonb, ${input.body},
-          ${input.author.type}, ${input.author.id}, ${input.createdAt},
+          ${input.author.type}, ${input.author.id},
+          ${input.author.type === "guest" ? input.author.name : null}, ${input.createdAt},
           ${input.origin?.threadId ?? null}, ${input.origin?.runId ?? null}
         )
         RETURNING ${tx.unsafe(COMMENT_COLUMNS)}

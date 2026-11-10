@@ -9,9 +9,11 @@
  * back to a per-builder socket otherwise.
  */
 import { createContext, createElement, type ReactNode, useContext, useEffect, useMemo } from "react"
+import { hasClientSharedAuthority, SHARED_ACCESS_REALTIME_UNAVAILABLE } from "./client-authority"
 import type { SixbEvent } from "./events"
 import { buildEventPredicate, type EventsFilterSpec } from "./events-builder"
 import { createEventSocket, type EventSocket, type EventSocketState } from "./events-transport"
+import { client as generatedClient } from "./generated/client.gen"
 
 const DISCONNECTED: EventSocketState = { connected: false, reconnecting: false, error: null }
 
@@ -109,6 +111,17 @@ export function createEventsRegistry(
 
   return {
     register(filter, handler, registrationOptions) {
+      // A shared link's session follows its artifacts live, and nothing else.
+      if (hasClientSharedAuthority(generatedClient) && filter.topic !== "artifacts") {
+        registrationOptions?.onError?.(SHARED_ACCESS_REALTIME_UNAVAILABLE)
+        registrationOptions?.onStateChange?.({
+          connected: false,
+          reconnecting: false,
+          error: SHARED_ACCESS_REALTIME_UNAVAILABLE,
+        })
+        return () => undefined
+      }
+
       cancelPendingClose()
       const subscriber: Subscriber = {
         matches: buildEventPredicate(filter),

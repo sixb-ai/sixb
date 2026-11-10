@@ -7,9 +7,13 @@ import {
   memo,
   type ReactNode,
   useCallback,
+  useId,
   useState,
 } from "react"
+import { useGiveGuestName, useSharedGuest } from "../../../shared-session"
+import { GuestBadge } from "../../guest-badge"
 import { useArtifactMessages } from "../../messages"
+import { PersonAvatar } from "../../person-avatar"
 import { CommentActionError, type CommentFailure } from "./comments"
 
 // Where comments sit: a pin on its board, at the point its author clicked, numbered as the panel
@@ -106,7 +110,8 @@ export function CommentPin({
 
 /**
  * Where a comment is written: its words, posted with ↩ or the arrow, a new line with ⇧↩, given
- * up with Esc. A failure says why, and keeps the words.
+ * up with Esc. A failure says why, and keeps the words. A shared link's guest who gave no name yet
+ * gives it here, once, above their first comment: their session keeps it for the next ones.
  */
 export function CommentComposer({
   placeholder,
@@ -125,16 +130,27 @@ export function CommentComposer({
   readonly className?: string
 }) {
   const messages = useArtifactMessages().canvas.comments
+  const guest = useSharedGuest()
+  const giveName = useGiveGuestName()
   const [body, setBody] = useState("")
+  const [name, setName] = useState("")
   const [sending, setSending] = useState(false)
   const [failure, setFailure] = useState<CommentFailure | null>(null)
-  const ready = body.trim().length > 0 && !sending
+
+  // Asked once: the name stays with the session, whichever composer it was given in.
+  const naming = guest !== null && guest.name === undefined
+  const ready = body.trim().length > 0 && (!naming || name.trim().length > 0) && !sending
 
   const submit = async () => {
     if (!ready) return
     setSending(true)
     setFailure(null)
     try {
+      if (naming) {
+        await giveName(name).catch(() => {
+          throw new CommentActionError("name")
+        })
+      }
       await onSubmit(body.trim())
       setBody("")
     } catch (error) {
@@ -144,7 +160,7 @@ export function CommentComposer({
     }
   }
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     // The canvas's keys stay out of the words.
     event.stopPropagation()
     // Not the Enter that ends a word typed through an input method: Safari sends it as 229.
@@ -161,9 +177,18 @@ export function CommentComposer({
 
   return (
     <div className={cn("flex flex-col gap-1.5", className)} data-board-tools="">
+      {naming ? (
+        <GuestNameField
+          value={name}
+          onChange={setName}
+          autoFocus={autoFocus}
+          invalid={failure === "name"}
+          onKeyDown={onKeyDown}
+        />
+      ) : null}
       <div className="flex items-end gap-1.5 rounded-xl border border-border bg-background px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring/40">
         <textarea
-          autoFocus={autoFocus}
+          autoFocus={autoFocus && !naming}
           value={body}
           rows={1}
           maxLength={4000}
@@ -197,6 +222,56 @@ export function CommentComposer({
     </div>
   )
 }
+
+/**
+ * Who a guest comments as, asked before their first comment: their name, which everyone reads
+ * beside their comments with a guest's badge.
+ */
+function GuestNameField({
+  value,
+  onChange,
+  autoFocus,
+  invalid,
+  onKeyDown,
+}: {
+  readonly value: string
+  readonly onChange: (value: string) => void
+  readonly autoFocus: boolean
+  readonly invalid: boolean
+  readonly onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
+}) {
+  const messages = useArtifactMessages().canvas.comments
+  const id = useId()
+
+  return (
+    <div className="flex flex-col gap-1 px-1 pt-0.5">
+      <div className="flex items-center gap-2">
+        <PersonAvatar name={value.trim() || messages.guest} size="xs" />
+        <input
+          id={id}
+          autoFocus={autoFocus}
+          value={value}
+          maxLength={GUEST_NAME_INPUT_LENGTH}
+          autoComplete="name"
+          aria-label={messages.guestName}
+          aria-invalid={invalid}
+          aria-describedby={`${id}-hint`}
+          placeholder={messages.guestName}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
+          className="h-7 min-w-0 flex-1 bg-transparent text-sm font-medium text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground"
+        />
+        <GuestBadge />
+      </div>
+      <p id={`${id}-hint`} className="m-0 pl-7 text-[11px] leading-4 text-muted-foreground">
+        {messages.guestNameHint}
+      </p>
+    </div>
+  )
+}
+
+/** A name a little past what the server keeps, so it says why rather than cutting it short. */
+const GUEST_NAME_INPUT_LENGTH = 80
 
 /** The card a new comment is written in, by its pin: what it is about, then its words. */
 export function DraftCard({

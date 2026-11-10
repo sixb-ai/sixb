@@ -76,6 +76,12 @@ or compare it with one. In the app, the action form lets you pick the member by 
 read the [member directory](../auth/members.md#read-the-member-directory), and asks for the user ID
 otherwise.
 
+Use `ref.artifact()` for an input that names an artifact. Callers pass
+`{ type: "artifact", id: "art_k3m9q2x7tp" }`, and Sixb rejects the request when the caller cannot
+change that artifact, as it does when it does not exist. The handler may then store it in an
+[artifact property](../ontology/properties.md#reference-an-artifact). In the app, the action form
+lists the artifacts the person can change, and takes a pasted link to one.
+
 Other input types use the [property schemas](../ontology/properties.md#choose-a-schema), including
 enums and structured values. Date and timestamp inputs arrive in handlers as `Date` values.
 
@@ -202,6 +208,9 @@ export const recordPayment = defineAction("recordPayment")
     })
   })
 ```
+
+To call a service with a person's own account, open their
+[personal connection](../connectors/authentication.md#act-with-a-persons-account) instead.
 
 Return JSON-compatible values or no value from `.writeback()`. For example, return an ID or a
 string timestamp rather than an SDK client or `Date` instance. An action can use `.writeback()`

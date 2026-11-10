@@ -84,6 +84,9 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
   return createReconnectingSocket({
     url: createSixbEventsWebSocketUrl(options.baseUrl ?? options.client?.getConfig().baseUrl),
     client: options.client,
+    // A shared link's session receives its artifacts' events, and nothing else: its callers open
+    // the stream for those alone.
+    sharedAccess: true,
     reconnect: options.reconnect,
     reconnectDelayMs: options.reconnectDelayMs,
     readyTimeoutMs: options.handshakeTimeoutMs,

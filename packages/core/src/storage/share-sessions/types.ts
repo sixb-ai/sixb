@@ -11,9 +11,11 @@ export interface ShareSessionRecord {
   /** Immutable upper bound, normally inherited from the Share grant expiry. */
   readonly absoluteExpiresAt: Date
   readonly revokedAt?: Date
+  /** The name the session's visitor gave, which their comments and presence carry. */
+  readonly guestName?: string
 }
 
-export type CreateShareSessionInput = Omit<ShareSessionRecord, "revokedAt">
+export type CreateShareSessionInput = Omit<ShareSessionRecord, "revokedAt" | "guestName">
 
 export interface GetShareSessionByIdInput {
   readonly projectId: string
@@ -29,6 +31,16 @@ export interface RenewShareSessionIfValidInput {
   readonly now: Date
   /** Requested sliding inactivity deadline. Storage clamps it to the absolute deadline. */
   readonly expiresAt: Date
+}
+
+export interface SetShareSessionGuestNameInput {
+  readonly projectId: string
+  readonly id: string
+  readonly grantId: string
+  /** As `guestName()` keeps it. */
+  readonly name: string
+  /** Explicit clock keeps expiry semantics deterministic across providers. */
+  readonly now: Date
 }
 
 export interface RevokeShareSessionInput {
@@ -51,6 +63,12 @@ export interface ShareSessionStorage {
    * `absoluteExpiresAt`.
    */
   renewIfValid(input: RenewShareSessionIfValidInput): Promise<ShareSessionRecord | null>
+
+  /**
+   * Keep the name the visitor of an active session gave, replacing one given before. A missing,
+   * mismatched, expired, or revoked session returns null and keeps nothing.
+   */
+  setGuestName(input: SetShareSessionGuestNameInput): Promise<ShareSessionRecord | null>
 
   /** Preserve and return the first revocation; a missing session returns null. */
   revoke(input: RevokeShareSessionInput): Promise<ShareSessionRecord | null>

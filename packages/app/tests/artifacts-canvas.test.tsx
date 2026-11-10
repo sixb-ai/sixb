@@ -23,7 +23,7 @@ import {
 } from "../src/artifacts/renderers/canvas/board"
 import { BoardFocus, followedArrow } from "../src/artifacts/renderers/canvas/focus"
 import { FAR_BELOW_ZOOM, zoomMarks, zoomOf } from "../src/artifacts/renderers/canvas/items"
-import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
+import { approximateBox, canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 import {
   boardPreviewSize,
   boardPreviewsQuery,
@@ -218,6 +218,17 @@ describe("a canvas's layout", () => {
 
   test("measures everything it holds", () => {
     expect(canvasExtent(CANVAS)).toMatchObject({ x: -40, y: expect.any(Number), width: 1460 })
+  })
+
+  // Regression proof: count a note as square again and the first note runs 160 pixels into the
+  // one under it, as a card drew a plan's rows of notes on top of each other.
+  test("counts a note as tall as its words, for a picture drawn before anything is measured", () => {
+    const note = (text: string) =>
+      approximateBox({ id: "n", type: "note", x: 0, y: 0, w: 300, text })?.height ?? 0
+
+    expect(note("Walk the halls")).toBe(112)
+    expect(note("Owen wants a call, not a text, for any alarm after 22:00")).toBeLessThan(140)
+    expect(note("One\nTwo\nThree\nFour\nFive")).toBeGreaterThan(note("One"))
   })
 })
 

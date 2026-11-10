@@ -268,7 +268,9 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       projectId: commit.projectId,
       commitId: commit.id,
       committedAt: commit.committedAt,
-      ...(session.plan ? {} : { uniqueWork: session.uniqueWork }),
+      ...(session.plan
+        ? {}
+        : { uniqueWork: session.uniqueWork, artifactHolderWork: session.artifactHolderWork }),
     })
     // Below this no type can reach the statistics threshold, so the work table stays unread.
     if (applied.objectWrites >= STATISTICS_MINIMUM_CHANGES) {

@@ -8,7 +8,7 @@ import {
   type SyncDefinition,
 } from "@sixb/core"
 import { isOAuthConnectorDefinition } from "@sixb/core/internal/connector-connections"
-import { createSixbError, summarizeErrorMessage } from "@sixb/core/internal/errors"
+import { createSixbError, isSixbError, summarizeErrorMessage } from "@sixb/core/internal/errors"
 import type { SyncConnectorSource } from "@sixb/core/internal/syncs"
 import {
   ConnectionCheckpoints,
@@ -149,7 +149,17 @@ async function* readManagedSource(
   const { connection } = source
   try {
     throwIfAborted(options.signal)
-    const client = await runAbortable(options.signal, () => source.connect(options.signal))
+    let client: unknown
+    try {
+      client = await runAbortable(options.signal, () => source.connect(options.signal))
+    } catch (error) {
+      if (!skipsUnauthorizedConnection(options.sync, connection, error)) throw error
+      // The connection keeps its checkpoint and its rows; its owner sees it needs reconnecting.
+      console.warn(
+        `[SixbSyncWorker] Sync '${options.sync.id}' skipped connection '${connection.id}' (${connection.account.label}): it needs reconnecting.`
+      )
+      return
+    }
     throwIfAborted(options.signal)
     const previous = checkpoints.get(connection)
     const readResult = await runAbortable(options.signal, () =>
@@ -194,6 +204,24 @@ async function* readManagedSource(
       }
     )
   }
+}
+
+/**
+ * One person's account that needs reconnecting must not fail everyone's run. A snapshot run still
+ * fails: leaving the account out would drop its rows from the dataset. A project connection still
+ * fails the run, so the project's own expired grant reaches `onError` as it always has.
+ */
+function skipsUnauthorizedConnection(
+  sync: SyncDefinition,
+  connection: SyncConnectorConnection,
+  error: unknown
+): boolean {
+  return (
+    sync.config.mode !== "snapshot" &&
+    connection.owner.type === "user" &&
+    isSixbError(error) &&
+    error.code === "connector.authorization_required"
+  )
 }
 
 function sourceInvariant(syncId: string, message: string): Error {

@@ -63,4 +63,20 @@ export class InMemoryAuthUserIdentityStore implements AuthUserIdentityStore {
       })
       .map(cloneRecord)
   }
+
+  async listForStrategy(params: {
+    readonly projectId: string
+    readonly strategyId: string
+  }): Promise<readonly UserIdentityRecord[]> {
+    return [...this.state.identities.values()]
+      .filter((identity) => identity.projectId === params.projectId)
+      .filter((identity) => identity.strategyId === params.strategyId)
+      .sort((a, b) => compareText(a.subject, b.subject))
+      .map(cloneRecord)
+  }
+}
+
+// Code-unit order, as SQL's `COLLATE "C"` and SQLite's default BINARY sort.
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }

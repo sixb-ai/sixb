@@ -686,6 +686,7 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
           "uuid",
           "fileRef",
           "userRef",
+          "artifactRef",
           "enum",
           "array",
           "object",

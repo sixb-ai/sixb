@@ -12,8 +12,8 @@ import {
   createInput,
   deleteEntity,
   type QuickBooksWriteHttp,
-  revision,
   updateEntity,
+  voidByUpdate,
   writeEntity,
 } from "../write"
 import { billPayment } from "../write-validation"
@@ -52,18 +52,9 @@ export function createBillPaymentsResource(
       return updateEntity(http, "BillPayment", input, options)
     },
     delete: async (input, options) => deleteEntity(http, "BillPayment", input, options),
-    async void(input, options) {
-      return writeEntity(
-        http,
-        "BillPayment",
-        "billpayment?operation=update&include=void",
-        { ...revision(input), sparse: true },
-        options,
-        { id: input.Id }
-      )
-    },
+    void: async (input, options) => voidByUpdate(http, "BillPayment", input, options),
     get: (id) => readEntity(http, "BillPayment", `billpayment/${pathId(id)}`, id),
-    list: (options) => listTransactions(http, "BillPayment", options),
+    list: (options) => listTransactions(http, "BillPayment", options, { party: "vendor" }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource

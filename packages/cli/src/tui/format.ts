@@ -121,6 +121,13 @@ export function toolLine(
         ...(output?.artifactId ? { note: `artifact:${text(output.artifactId)}` } : {}),
         ...error,
       }
+    case "open_artifact":
+      return {
+        verb: "open",
+        detail: text(output?.title) || text(input?.id),
+        ...(output?.artifactId ? { note: `artifact:${text(output.artifactId)}` } : {}),
+        ...error,
+      }
     case "spawn_agent":
       return {
         verb: "agent",

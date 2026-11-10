@@ -148,6 +148,49 @@ export function runShareSessionStorageContractSuite<TStorage extends ShareSessio
       })
     })
 
+    test("keeps the name an active session's visitor gives, and only theirs", async () => {
+      await withStorage(async (storage) => {
+        await storage.create(sessionInput())
+        await storage.create(sessionInput({ id: "shs_2", tokenHash: "b".repeat(64) }))
+        const naming = { projectId, id: "shs_1", grantId: "shr_1", now: new Date(createdAt) }
+
+        await expect(
+          storage.setGuestName({ ...naming, name: "Ava Martin" })
+        ).resolves.toMatchObject({ guestName: "Ava Martin" })
+        await expect(storage.setGuestName({ ...naming, name: "Ava M." })).resolves.toMatchObject({
+          guestName: "Ava M.",
+        })
+        expect(await storage.getById({ projectId, id: "shs_1" })).toMatchObject({
+          guestName: "Ava M.",
+        })
+        expect(await storage.getById({ projectId, id: "shs_2" })).not.toHaveProperty("guestName")
+
+        // Another grant's, an expired, a revoked, or a missing session keeps nothing.
+        const refused = [
+          { ...naming, grantId: "shr_other" },
+          { ...naming, now: new Date(expiresAt) },
+          { ...naming, id: "missing" },
+        ]
+        for (const input of refused) {
+          await expect(storage.setGuestName({ ...input, name: "Mallory" })).resolves.toBeNull()
+        }
+        await storage.revoke({ projectId, id: "shs_2", revokedAt: new Date(createdAt) })
+        await expect(
+          storage.setGuestName({ ...naming, id: "shs_2", name: "Mallory" })
+        ).resolves.toBeNull()
+        expect(await storage.getById({ projectId, id: "shs_1" })).toMatchObject({
+          guestName: "Ava M.",
+        })
+
+        // A name is kept as `guestName()` keeps it: never on two lines, empty, or untrimmed.
+        for (const name of ["", " Ava", "Ava\nMartin", "x".repeat(61)]) {
+          await expect(storage.setGuestName({ ...naming, name })).rejects.toMatchObject({
+            code: "invalid_input",
+          })
+        }
+      })
+    })
+
     test("rejects malformed inputs and impossible timestamps consistently", async () => {
       await withStorage(async (storage) => {
         const invalid: CreateShareSessionInput[] = [

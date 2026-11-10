@@ -506,7 +506,9 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   // Artifacts are reachable with an access token, so the CLI and integrations can publish them. A
-  // run token reads them as the run's requester, and publishes into the run's conversation.
+  // run token reads them as the run's requester, and publishes into the run's conversation. A
+  // shared link's session reads those its objects hold and comments on them, as a guest: it never
+  // writes one, lists the gallery, keeps page state, or resolves and deletes comments.
   {
     operationId: "listArtifacts",
     method: "GET",
@@ -528,6 +530,15 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
+  },
+  {
+    operationId: "listArtifactHolders",
+    method: "GET",
+    path: "/api/artifacts/:artifactId/holders",
+    accessToken: true,
+    agentApi: false,
+    sharedSession: true,
   },
   {
     operationId: "deleteArtifact",
@@ -615,6 +626,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/comments",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "addArtifactComment",
@@ -623,6 +635,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: true,
     agentEffect: "artifact",
+    sharedSession: true,
   },
   {
     operationId: "resolveArtifactComment",
@@ -645,6 +658,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/versions/:version",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getArtifactBoardPreview",
@@ -652,6 +666,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/versions/:version/boards/:board/preview",
     accessToken: true,
     agentApi: false,
+    sharedSession: true,
   },
   {
     operationId: "getArtifactQuery",
@@ -659,6 +674,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/versions/:version/queries/:name",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "createArtifactFrame",
@@ -666,6 +682,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/versions/:version/frame",
     accessToken: true,
     agentApi: false,
+    sharedSession: true,
   },
   {
     operationId: "getArtifactFileContent",
@@ -673,6 +690,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/versions/:version/content",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "headArtifactFileContent",
@@ -680,6 +698,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/artifacts/:artifactId/versions/:version/content",
     accessToken: true,
     agentApi: false,
+    sharedSession: true,
   },
   {
     operationId: "searchObjects",

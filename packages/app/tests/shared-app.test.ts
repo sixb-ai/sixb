@@ -178,7 +178,7 @@ describe("generated shared application bootstrap", () => {
     const configure = sharedMain.indexOf("configureSixbSharedBrowserClient(runtimeConfig")
     const establish = sharedMain.indexOf("await controller.establish(secret)")
     const appImport = sharedMain.indexOf('await import("./app-runtime")')
-    const start = sharedMain.indexOf("startApp({ basename })")
+    const start = sharedMain.indexOf("startApp({ basename, sharedSession: session })")
 
     expect(configure).toBeGreaterThan(-1)
     expect(establish).toBeGreaterThan(configure)
@@ -218,8 +218,12 @@ describe("generated shared application bootstrap", () => {
     expect(runtime).toContain(
       "if (options.session) queryClient.setQueryData(getAuthSessionQueryKey(), options.session)"
     )
-    // A shared link has no member session to hand over.
-    expect(sharedMain).toContain("startApp({ basename })")
+    // A shared link has no member session to hand over: the guest's session goes instead, and
+    // nothing asks for a member's.
+    expect(sharedMain).toContain("startApp({ basename, sharedSession: session })")
+    expect(runtime).toContain(
+      "if (options.sharedSession) keepSharedSession(queryClient, options.sharedSession)"
+    )
   })
 
   test("keeps the shared transport in a distinct generic shell and document boundary", async () => {

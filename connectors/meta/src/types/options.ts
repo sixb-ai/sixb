@@ -20,6 +20,7 @@ export interface MetaConnectorOptions extends MetaTransportOptions {
   /** Long-lived User or System-User access token. Required. */
   readonly accessToken: string
   readonly appId?: never
+  readonly accounts?: never
 }
 
 interface MetaOAuthBaseOptions extends MetaTransportOptions {
@@ -34,8 +35,7 @@ interface MetaOAuthBaseOptions extends MetaTransportOptions {
  * Sign in with Facebook and connect the Pages the user grants. Pass `configId` for Facebook Login
  * for Business (Business apps) or `scopes` for Facebook Login.
  */
-export type MetaOAuthConnectorOptions = MetaOAuthBaseOptions &
-  (
+export type MetaOAuthConnectorOptions = MetaOAuthBaseOptions & { readonly accounts?: "pages" } & (
     | {
         /** Facebook Login for Business configuration, of the "User access token" type. */
         readonly configId: string
@@ -47,3 +47,16 @@ export type MetaOAuthConnectorOptions = MetaOAuthBaseOptions &
         readonly configId?: never
       }
   )
+
+/**
+ * Instagram API with Unified Login: the client logs in with Instagram or Facebook, picks a
+ * business portfolio and the Instagram professional accounts to share, without a Facebook Page.
+ * Each connection is one shared account, read and published through `graph.facebook.com` with
+ * the grant's Business Integration System User token.
+ */
+export interface MetaInstagramOAuthConnectorOptions extends MetaOAuthBaseOptions {
+  /** Facebook Login for Business configuration of the "System-user access token" type (Unified login). */
+  readonly configId: string
+  readonly accounts: "instagram"
+  readonly scopes?: never
+}

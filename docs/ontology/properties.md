@@ -28,12 +28,14 @@ for additional context. Without a name, Sixb uses the ID.
 | `"date"`, `"timestamp"` | A calendar date or timestamp. Writes accept `Date` values or ISO strings. |
 | `ref.file()` | A reference to an uploaded file. The string `"fileRef"` is equivalent. |
 | `ref.user()` | A [reference to a Sixb user](#reference-a-user), such as an assignee. |
+| `ref.artifact()` | A [reference to an artifact](#reference-an-artifact), such as a meeting's kick-off canvas. |
 | `stringEnum([...])`, `integerEnum([...])` | A fixed set of string or integer values. |
 | `array`, `object`, `map` | Structured values, shown below. |
 | `valueTypeRef(ValueType)` | A [reusable schema](value-types.md). |
 
 Scalar schemas are strings. Schemas that point somewhere else are built with `ref`: `ref.file()`,
-`ref.user()`, and `ref(ObjectType)` for [action parameters](../actions/overview.md#parameters). To
+`ref.user()`, `ref.artifact()`, and `ref(ObjectType)` for
+[action parameters](../actions/overview.md#parameters). To
 point from one object to another, use a [link](links.md) instead; `ref(ObjectType)` on a property is
 rejected.
 
@@ -176,6 +178,53 @@ User references are set by your code, actions, and workflows, or by a projection
 properties, and action parameters of a [share](../auth/shared-access.md) cannot use them yet. For a
 person who is part of your domain rather than a project member, such as a customer contact, define
 an object type.
+
+## Reference an artifact
+
+Use `ref.artifact()` when a property holds an [artifact](../artifacts/overview.md), such as the
+canvas a meeting is prepared in:
+
+```ts
+import { prop, ref } from "@sixb/core/ontology"
+
+prop("kickoffDoc", ref.artifact(), {
+  nullable: true,
+  query: { searchable: true, filterable: true },
+})
+prop("attachments", { type: "array", items: ref.artifact() })
+```
+
+The value is `{ type: "artifact", id }` and follows the artifact's latest version. Build one with
+`artifactRef(id)`:
+
+```ts
+import { artifactRef } from "@sixb/core"
+
+const { artifact } = await sixb.artifacts.create({ kind: "canvas", title: "Kick-off", files })
+await sixb.objects(Meeting).upsert({
+  properties: { id: "meeting-1", kickoffDoc: artifactRef(artifact.id) },
+})
+```
+
+| Who writes | May set |
+| --- | --- |
+| A signed-in user or a service account | An artifact they can change |
+| An action's parameters, a workflow's input | An artifact whoever requested the run can change |
+| An action's edits, server code running as the system | Any existing artifact |
+
+- Whoever reads the object and the property reads the artifact; whoever may also edit the
+  object changes it. See [Hold an artifact in an object](../artifacts/overview.md#hold-an-artifact-in-an-object).
+- Putting an artifact in a property shares it with that object's readers and editors, whoever set
+  it. Like a file, the artifact does not take the property's markings: whoever reaches it another
+  way, such as through another object, still reads it.
+- An artifact that does not exist, and one the writer cannot change, are refused with the same
+  error. Reading an artifact is not enough to put it in a property.
+- Values an object already holds stay valid, even after the artifact is deleted.
+- Deleting the object leaves the artifact as it is.
+- Queries match an artifact with `eq`, `neq`, `in`, and `exists`, and find one in an array with
+  `contains`. Artifact references cannot be sorted, grouped, searched as text, or unique.
+- Telemetry properties, link properties, projections, and action parameters of a
+  [share](../auth/shared-access.md) cannot use them.
 
 ## Enable queries
 

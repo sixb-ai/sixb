@@ -1,10 +1,11 @@
 import { QuickBooksWriteError } from "./errors"
+import type { createQuickBooksHttp } from "./http"
 import type { QuickBooksReadHttp } from "./query"
 import { pathId } from "./query"
 import type {
   QuickBooksDeleteResult,
-  QuickBooksInvoiceSendOptions,
   QuickBooksRevision,
+  QuickBooksSendOptions,
   QuickBooksWriteOptions,
 } from "./types/writes"
 import { isRecord, nonEmpty } from "./validation"
@@ -12,6 +13,10 @@ import { isRecord, nonEmpty } from "./validation"
 export interface QuickBooksWriteHttp extends QuickBooksReadHttp {
   post(path: string, body: unknown, requestId: string, send?: boolean): Promise<unknown>
 }
+
+/** Write transport that can also download form PDFs. */
+export type QuickBooksPdfHttp = QuickBooksWriteHttp &
+  Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
 
 export function revision(input: QuickBooksRevision): QuickBooksRevision {
   nonEmpty(input.Id, "Id")
@@ -54,11 +59,29 @@ export function deleteEntity(
   })
 }
 
+/** Void by sparse update with include=void (Payment, BillPayment, SalesReceipt). */
+export function voidByUpdate<T>(
+  http: QuickBooksWriteHttp,
+  entity: string,
+  input: QuickBooksRevision,
+  options?: QuickBooksWriteOptions
+): Promise<T> {
+  const identity = revision(input)
+  return writeEntity(
+    http,
+    entity,
+    `${entity.toLowerCase()}?operation=update&include=void`,
+    { ...identity, sparse: true },
+    options,
+    { id: identity.Id }
+  )
+}
+
 export function sendEntity<T>(
   http: QuickBooksWriteHttp,
   entity: string,
   id: string,
-  options: QuickBooksInvoiceSendOptions = {}
+  options: QuickBooksSendOptions = {}
 ): Promise<T> {
   let path = `${entity.toLowerCase()}/${pathId(id)}/send`
   if (options.sendTo !== undefined) {

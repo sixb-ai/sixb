@@ -2,6 +2,7 @@
 
 export type {
   ArraySchema,
+  ArtifactRef,
   ComplexSchema,
   CurrentUserRef,
   DirectLinkResult,
@@ -46,11 +47,13 @@ export type {
   SixbObjectTypeMap,
   SixbValueTypeMap,
   UserEmailColumn,
+  UserIdColumn,
   UserRef,
   ValueType,
   ValueTypeRefSchema,
 } from "./ontology"
 export {
+  artifactRef,
   currentUser,
   defineInterface,
   defineObjectType,
@@ -685,6 +688,7 @@ export type {
   ConnectorConnectionSelector,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorDefinitionOptions,
   ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
   ConnectorOAuthErrorKind,
@@ -695,6 +699,7 @@ export type {
   OAuthConnectorCodeExchangeInput,
   ProjectConnectorConnectionOwner,
   StaticConnectorDefinition,
+  UserConnectorConnectionOwner,
 } from "./connectors"
 export { ConnectorOAuthError, defineConnector } from "./connectors"
 
@@ -974,6 +979,8 @@ export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"
 export type {
   ArtifactContentInput,
+  ArtifactHolderObject,
+  ArtifactHolders,
   ArtifactQueryInput,
   ArtifactStateRuntime,
   ArtifactStateValue,

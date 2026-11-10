@@ -25,6 +25,7 @@ import {
 } from "../../materialization/refs"
 import type { OntologyCommitWrite } from "./commits"
 import {
+  type ExactArtifactHolderWrite,
   type ExactEffectiveLinkDelete,
   type ExactEffectiveLinkWrite,
   type ExactEffectiveObjectDelete,
@@ -74,6 +75,8 @@ export function materializationChunkRows(chunk: MaterializationPlanChunk): numbe
     chunk.timeseries.pointUpserts.length +
     chunk.unique.releases.length +
     chunk.unique.claims.length +
+    chunk.artifactHolders.deletes.length +
+    chunk.artifactHolders.inserts.length +
     chunk.outbox.length
   )
 }
@@ -112,12 +115,19 @@ export interface ExactUniqueValueWrites {
   readonly claims: readonly ExactUniqueValueClaim[]
 }
 
+/** The rows of the artifact holder index a chunk drops and adds, each in its own phase. */
+export interface ExactArtifactHolderWrites {
+  readonly deletes: readonly ExactArtifactHolderWrite[]
+  readonly inserts: readonly ExactArtifactHolderWrite[]
+}
+
 /** Plan items and outbox writes of one bounded provider write, grouped by table. */
 export interface MaterializationPlanChunk {
   readonly overrides: ExactOverrideWrites
   readonly effective: ExactEffectiveWrites
   readonly timeseries: ExactTimeseriesWrites
   readonly unique: ExactUniqueValueWrites
+  readonly artifactHolders: ExactArtifactHolderWrites
   readonly outbox: readonly OntologyOutboxWrite[]
 }
 
@@ -153,6 +163,10 @@ export function materializationPlanChunk(
     unique: {
       releases: [] as ExactUniqueValueWrite[],
       claims: [] as ExactUniqueValueClaim[],
+    },
+    artifactHolders: {
+      deletes: [] as ExactArtifactHolderWrite[],
+      inserts: [] as ExactArtifactHolderWrite[],
     },
     outbox,
   }
@@ -196,6 +210,12 @@ export function materializationPlanChunk(
         break
       case "unique-value-claim":
         chunk.unique.claims.push(item.value)
+        break
+      case "artifact-holder-delete":
+        chunk.artifactHolders.deletes.push(item.value)
+        break
+      case "artifact-holder-insert":
+        chunk.artifactHolders.inserts.push(item.value)
         break
     }
   }
@@ -569,6 +589,10 @@ export function materializationPlanKindRank(kind: MaterializationPlanWorkItem["k
       return 11
     case "unique-value-claim":
       return 12
+    case "artifact-holder-delete":
+      return 13
+    case "artifact-holder-insert":
+      return 14
   }
 }
 
@@ -666,6 +690,21 @@ function assertPlanItemCorrelation(
         invalidCorrelation("Unique value claim must name how its key was computed.")
       }
       return
+    case "artifact-holder-delete":
+    case "artifact-holder-insert":
+      assertArtifactHolderWrite(item.value)
+      return
+  }
+}
+
+function assertArtifactHolderWrite(value: ExactArtifactHolderWrite): void {
+  if (
+    !isNonblank(value.artifactId) ||
+    !isNonblank(value.objectTypeId) ||
+    !isNonblank(value.primaryId) ||
+    !isNonblank(value.propertyId)
+  ) {
+    invalidCorrelation("Artifact holder write must name its artifact, object and property.")
   }
 }
 

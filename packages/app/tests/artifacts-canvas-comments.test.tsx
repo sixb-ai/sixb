@@ -22,6 +22,7 @@ import type { ArtifactComment } from "../src/artifacts/renderers/canvas/comments
 import { commentThreads } from "../src/artifacts/renderers/canvas/comments"
 import { type AgentDraft, AgentDraftContext } from "../src/artifacts/view-context"
 import { Viewer } from "../src/artifacts/viewer"
+import { keepSharedSession } from "../src/shared-session"
 import { installDom } from "./helpers/dom"
 import { canvasOf, FakeServer, settle } from "./helpers/live-server"
 
@@ -118,16 +119,38 @@ const comment = (
   ...extra,
 })
 
-/** Alice's canvas, which Bob reads, or may change, as the viewer reads it. */
-function seeded(access: "read" | "update" = "read"): QueryClient {
+/** The session of Owen, who opened a shared link to the object that holds Alice's canvas. */
+const GUEST_SESSION = {
+  grantId: "shr_owen",
+  destinationPath: "/meetings/m1",
+  expiresAt: "2099-01-01T00:00:00.000Z",
+  absoluteExpiresAt: "2099-01-01T00:00:00.000Z",
+  csrfToken: "c".repeat(43),
+  guestId: "shs_owen",
+}
+const owen = { type: "guest", id: GUEST_SESSION.guestId } as const
+
+/**
+ * Alice's canvas, which Bob reads, or may change, as the viewer reads it; or, with `guest`, which
+ * Owen reads through a shared link, without having given his name yet. In the mode its
+ * `theme.json` pins, when `pinned` names one.
+ */
+function seeded(
+  access: "read" | "update" = "read",
+  { guest = false, pinned }: { readonly guest?: boolean; readonly pinned?: "light" | "dark" } = {}
+): QueryClient {
   const queries = new QueryClient({
     defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
   })
-  queries.setQueryData(getAuthSessionQueryKey(), {
-    authenticated: true,
-    authEnabled: true,
-    user: { id: bob.id, email: "bob@example.com", displayName: "Bob", groupIds: [] },
-  })
+  if (guest) {
+    keepSharedSession(queries, GUEST_SESSION)
+  } else {
+    queries.setQueryData(getAuthSessionQueryKey(), {
+      authenticated: true,
+      authEnabled: true,
+      user: { id: bob.id, email: "bob@example.com", displayName: "Bob", groupIds: [] },
+    })
+  }
   queries.setQueryData(getArtifactQueryKey({ path: { artifactId: ARTIFACT_ID } }), {
     artifact: {
       id: ARTIFACT_ID,
@@ -159,6 +182,12 @@ function seeded(access: "read" | "update" = "read"): QueryClient {
     sizeBytes: 10,
     mediaType: "application/json",
   }
+  const theme = {
+    blobId: "blob_theme",
+    digest: `sha256:${"1".repeat(64)}`,
+    sizeBytes: 20,
+    mediaType: "application/json",
+  }
   queries.setQueryData(
     getArtifactVersionQueryKey({ path: { artifactId: ARTIFACT_ID, version: "1" } }),
     {
@@ -166,7 +195,10 @@ function seeded(access: "read" | "update" = "read"): QueryClient {
       version: 1,
       title: "Onboarding",
       entry: "canvas.json",
-      files: [{ path: "canvas.json", file }],
+      files: [
+        { path: "canvas.json", file },
+        ...(pinned ? [{ path: "theme.json", file: theme }] : []),
+      ],
       outline: { kind: "canvas", items: [] },
       references: [],
       author: alice,
@@ -183,6 +215,17 @@ function seeded(access: "read" | "update" = "read"): QueryClient {
     fileRef: file,
   })
   queries.setQueryData([...source.queryKey, "text"], formatCanvas(CANVAS))
+
+  if (pinned) {
+    const themeSource = artifactFileSource({
+      artifactId: ARTIFACT_ID,
+      version: 1,
+      path: "theme.json",
+      fileRef: theme,
+    })
+    queries.setQueryData([...themeSource.queryKey, "text"], JSON.stringify({ mode: pinned }))
+  }
+
   return queries
 }
 
@@ -260,6 +303,10 @@ async function open(
     readonly edits?: boolean
     /** The app's event socket is open, as the app opens it, and the test plays the server. */
     readonly events?: boolean
+    /** Owen reads it through a shared link. */
+    readonly guest?: boolean
+    /** The mode the canvas's `theme.json` pins. */
+    readonly pinned?: "light" | "dark"
   } = {}
 ) {
   const server = new FakeServer(ARTIFACT_ID, CANVAS)
@@ -280,7 +327,12 @@ async function open(
     </MemoryRouter>
   )
   const ui = render(
-    <QueryClientProvider client={seeded(options.edits ? "update" : "read")}>
+    <QueryClientProvider
+      client={seeded(options.edits ? "update" : "read", {
+        ...(options.guest ? { guest: true } : {}),
+        ...(options.pinned ? { pinned: options.pinned } : {}),
+      })}
+    >
       {options.events ? <SixbEventsProvider>{viewer}</SixbEventsProvider> : viewer}
     </QueryClientProvider>
   )
@@ -346,6 +398,27 @@ const thread = (panel: HTMLElement, id: string) => {
 }
 
 describe("comments on a canvas", () => {
+  // A canvas that pins light mode keeps it on its board; the comments beside it are the app's, in
+  // the app's mode, or their sheet stays light under a dark app's light words.
+  // Guard proof: put the pinned mode back on CanvasRenderer's root; the panel is then inside it.
+  test("are the app's, in its mode, beside a canvas that pins its own", async () => {
+    document.documentElement.classList.add("dark")
+    try {
+      serveComments([comment("cmt_1", alice, "Warmer colors")])
+      const { ui } = await open({ pinned: "light" })
+      const panel = await openPanel(ui)
+
+      // The board, and only the board, is light.
+      const canvas = ui.getByRole("region", { name: "Canvas Onboarding" })
+      expect(canvas.querySelector(":scope > .light")).toBeTruthy()
+      expect(canvas.closest(".light")).toBeNull()
+      expect(panel.closest(".light")).toBeNull()
+      ui.unmount()
+    } finally {
+      document.documentElement.classList.remove("dark")
+    }
+  })
+
   // Guard proof: return true from canManageComment for anyone; Alice's thread then offers Bob
   // Resolve.
   test("are resolved and deleted by their author, the reader's others left alone", async () => {
@@ -580,6 +653,117 @@ describe("comments on a canvas", () => {
     const panel = await openPanel(ui)
     await waitFor(() => expect(within(panel).getByText("No open comments")).toBeTruthy())
     expect(within(panel).queryByText("No comments yet")).toBeNull()
+    ui.unmount()
+  })
+})
+
+describe("comments through a shared link", () => {
+  /** The comments API as Owen reaches it, and the route that keeps his name. */
+  function serveGuest(initial: readonly ArtifactComment[]) {
+    const state = { comments: [...initial], requests: [] as string[], name: null as string | null }
+    client.setConfig({
+      fetch: Object.assign(
+        async (input: Request) => {
+          const url = new URL(input.url)
+          state.requests.push(`${input.method} ${url.pathname}`)
+
+          if (url.pathname === `/api/shared-access/${GUEST_SESSION.grantId}/name`) {
+            state.name = ((await input.json()) as { name: string }).name.trim()
+            return Response.json({ ...GUEST_SESSION, guestName: state.name })
+          }
+          if (input.method === "GET") return Response.json({ comments: state.comments })
+
+          const body = (await input.json()) as { body: string; parentId?: string }
+          const parent = state.comments.find((each) => each.id === body.parentId)
+          const created = comment(`cmt_${state.comments.length + 1}`, owen, body.body, {
+            authorName: state.name,
+            ...(parent ? { parentId: parent.id, anchor: parent.anchor } : {}),
+          })
+          state.comments.push(created)
+          return Response.json(created, { status: 201 })
+        },
+        { preconnect: globalThis.fetch.preconnect }
+      ) as unknown as typeof fetch,
+    })
+    return state
+  }
+
+  // Guard proof: drop `naming` from CommentComposer; Owen's reply then goes without a name, which
+  // the API refuses.
+  test("ask a guest's name once, before their first, and carry it as a guest's", async () => {
+    const api = serveGuest([comment("cmt_1", alice, "Warmer colors")])
+    const { ui } = await open({ guest: true })
+    const panel = await openPanel(ui)
+    await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
+
+    await act(async () => {
+      fireEvent.click(within(thread(panel, "cmt_1")).getByRole("button", { name: "Reply" }))
+    })
+    type(within(thread(panel, "cmt_1")).getByRole("textbox", { name: "Your name" }), "Owen Reed")
+    const input = within(thread(panel, "cmt_1")).getByRole("textbox", { name: "Reply" })
+    type(input, "Could we start at 8:30?")
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" })
+    })
+
+    await until(() => thread(panel, "cmt_1").textContent?.includes("8:30") === true)
+    // The name goes first: the API refuses a guest's comment without one.
+    expect(api.requests.filter((request) => !request.startsWith("GET"))).toEqual([
+      `PUT /api/shared-access/${GUEST_SESSION.grantId}/name`,
+      `POST /api/artifacts/${ARTIFACT_ID}/comments`,
+    ])
+
+    // His own, as theirs to him, marked as a guest's; and nothing to resolve.
+    const reply = thread(panel, "cmt_1")
+    expect(within(reply).getByText("You")).toBeTruthy()
+    expect(within(reply).getByText("Guest")).toBeTruthy()
+    expect(within(reply).queryByRole("button", { name: "Resolve" })).toBeNull()
+
+    // Named once: the next reply asks for nothing more.
+    await act(async () => {
+      fireEvent.click(within(reply).getByRole("button", { name: "1 reply" }))
+    })
+    expect(within(thread(panel, "cmt_1")).queryByRole("textbox", { name: "Your name" })).toBeNull()
+    ui.unmount()
+  })
+
+  // Guard proof: drop the guest branch from useCommentAuthors; Owen's comment then reads to Bob
+  // as a member's.
+  test("mark a guest's comment as a guest's for members too", async () => {
+    serveComments([comment("cmt_1", owen, "Could we start at 8:30?", { authorName: "Owen Reed" })])
+    const { ui } = await open()
+    const panel = await openPanel(ui)
+    await waitFor(() => expect(thread(panel, "cmt_1")).toBeTruthy())
+
+    expect(within(thread(panel, "cmt_1")).getByText("Owen Reed")).toBeTruthy()
+    expect(within(thread(panel, "cmt_1")).getByText("Guest")).toBeTruthy()
+    ui.unmount()
+  })
+
+  // A customer knows no shortcut. Guard proof: put "Press C" back in the empty hint; it then
+  // names a key instead of the control Owen sees.
+  test("lead to the first comment by the control the reader sees", async () => {
+    serveGuest([])
+    const { ui } = await open({ guest: true })
+    const panel = await openPanel(ui)
+
+    await waitFor(() => expect(within(panel).getByText("No comments yet")).toBeTruthy())
+    expect(panel.textContent).toContain("Click")
+    expect(panel.textContent).toContain("then a board to leave the first one.")
+    expect(panel.textContent).not.toContain("Press C")
+    expect(within(panel).getByLabelText("Comment")).toBeTruthy()
+    ui.unmount()
+  })
+
+  // Guard proof: drop `guest` from the copy link's condition in ArtifactHeader; Owen is then
+  // offered a link that opens nothing for anyone else.
+  test("give a guest nothing to edit, and no link to pass on", async () => {
+    serveGuest([])
+    const { ui } = await open({ guest: true })
+    await waitFor(() => expect(ui.getByRole("button", { name: /^Comments/ })).toBeTruthy())
+
+    expect(ui.queryByRole("button", { name: "Copy link" })).toBeNull()
+    expect(ui.queryByRole("button", { name: "Edit" })).toBeNull()
     ui.unmount()
   })
 })

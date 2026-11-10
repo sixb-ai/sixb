@@ -459,6 +459,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         })
         expect(suspended.user).toMatchObject({
           status: "suspended",
+          suspensionSource: "manual",
           updatedAt: at("2026-05-14T10:01:00.000Z"),
         })
         expect(suspended.previousUser).toEqual(ava)
@@ -470,6 +471,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           updatedAt: at("2026-05-14T10:02:00.000Z"),
         })
         expect(reactivated.previousUser).toEqual(suspended.user)
+        expect(reactivated.user).toEqual({ ...ava, updatedAt: at("2026-05-14T10:02:00.000Z") })
 
         await expectAuthError(
           storage.users.updateStatus({ projectId, id: "usr_missing", status: "active" }),
@@ -2509,7 +2511,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           suspendedAt: at("2026-05-14T10:05:00.000Z"),
         })
 
-        expect(suspended.user.status).toBe("suspended")
+        expect(suspended.user).toMatchObject({ status: "suspended", suspensionSource: "manual" })
         expect(suspended.previousUser).toEqual(ava)
         await expect(storage.sessions.getById({ projectId, id: "ses_1" })).resolves.toMatchObject({
           revokedAt: at("2026-05-14T10:05:00.000Z"),
@@ -2519,6 +2521,231 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             revokedAt: at("2026-05-14T10:05:00.000Z"),
           }
         )
+      })
+    })
+
+    test("lists the identities one strategy linked, in subject order", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await createUser(storage, { id: "usr_2", email: "ben@acme.com" })
+        const link = (strategyId: string, subject: string, userId: string) =>
+          storage.identities.upsert({
+            projectId,
+            strategyId,
+            subject,
+            userId,
+            claims: { oid: subject },
+            createdAt: at("2026-05-14T10:01:00.000Z"),
+          })
+        await link("oidc", "sub-b", "usr_2")
+        await link("oidc", "sub-a", "usr_1")
+        await link("magic-link", "sub-c", "usr_1")
+
+        const identities = await storage.identities.listForStrategy({
+          projectId,
+          strategyId: "oidc",
+        })
+        expect(identities.map(({ subject, userId }) => ({ subject, userId }))).toEqual([
+          { subject: "sub-a", userId: "usr_1" },
+          { subject: "sub-b", userId: "usr_2" },
+        ])
+        expect(identities[0]?.claims).toEqual({ oid: "sub-a" })
+        await expect(
+          storage.identities.listForStrategy({ projectId: otherProjectId, strategyId: "oidc" })
+        ).resolves.toEqual([])
+      })
+    })
+
+    // To see this fail, skip the session revocation in `applyDirectoryVerdict`.
+    test("an inactive directory verdict suspends the user and revokes their sessions", async () => {
+      await withStorage(async (storage) => {
+        const ava = await createUser(storage)
+        await storage.sessions.create({
+          id: "ses_1",
+          projectId,
+          userId: "usr_1",
+          strategyId: "oidc",
+          tokenHash: "hash-1",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+        })
+
+        const suspended = await storage.applyDirectoryVerdict({
+          projectId,
+          userId: "usr_1",
+          verdict: { status: "inactive" },
+          appliedAt: at("2026-05-14T10:05:00.000Z"),
+        })
+        expect(suspended.previousUser).toEqual(ava)
+        expect(suspended.user).toEqual({
+          ...ava,
+          status: "suspended",
+          suspensionSource: "directory",
+          updatedAt: at("2026-05-14T10:05:00.000Z"),
+        })
+        await expect(storage.sessions.getById({ projectId, id: "ses_1" })).resolves.toMatchObject({
+          revokedAt: at("2026-05-14T10:05:00.000Z"),
+        })
+
+        // The same verdict again changes nothing.
+        const again = await storage.applyDirectoryVerdict({
+          projectId,
+          userId: "usr_1",
+          verdict: { status: "inactive" },
+          appliedAt: at("2026-05-14T11:05:00.000Z"),
+        })
+        expect(again).toEqual({ user: suspended.user, previousUser: suspended.user })
+
+        await expectAuthError(
+          storage.applyDirectoryVerdict({
+            projectId,
+            userId: "usr_missing",
+            verdict: { status: "inactive" },
+            appliedAt: at("2026-05-14T10:05:00.000Z"),
+          }),
+          "missing_user"
+        )
+      })
+    })
+
+    // To see this fail, drop the `manual` check at the top of `applyDirectoryVerdict`.
+    test("the directory lifts only its own suspensions", async () => {
+      await withStorage(async (storage) => {
+        const ava = await createUser(storage)
+        const ben = await createUser(storage, { id: "usr_2", email: "ben@acme.com" })
+        await storage.applyDirectoryVerdict({
+          projectId,
+          userId: "usr_1",
+          verdict: { status: "inactive" },
+          appliedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        const benSuspended = await storage.suspendUserAndRevokeSessions({
+          projectId,
+          userId: "usr_2",
+          suspendedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+
+        const active = { status: "active", groupIds: ["members"] } as const
+        const avaBack = await storage.applyDirectoryVerdict({
+          projectId,
+          userId: "usr_1",
+          verdict: active,
+          appliedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+        expect(avaBack.user).toEqual({ ...ava, updatedAt: at("2026-05-14T10:02:00.000Z") })
+
+        const benStill = await storage.applyDirectoryVerdict({
+          projectId,
+          userId: "usr_2",
+          verdict: active,
+          appliedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+        expect(benStill).toEqual({ user: benSuspended.user, previousUser: benSuspended.user })
+        expect(benSuspended.user).toEqual({
+          ...ben,
+          status: "suspended",
+          suspensionSource: "manual",
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        // A manual suspension also keeps the directory away from the user's groups.
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_2" })
+        ).resolves.toEqual([])
+
+        // Neither does an inactive verdict turn a manual suspension into the directory's.
+        await storage.applyDirectoryVerdict({
+          projectId,
+          userId: "usr_2",
+          verdict: { status: "inactive" },
+          appliedAt: at("2026-05-14T10:03:00.000Z"),
+        })
+        await expect(storage.users.getById({ projectId, id: "usr_2" })).resolves.toEqual(
+          benSuspended.user
+        )
+      })
+    })
+
+    test("an active directory verdict syncs only directory memberships", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        const grant = (groupId: string, source: "manual" | "directory") =>
+          storage.groupMemberships.upsert({
+            projectId,
+            userId: "usr_1",
+            groupId,
+            source,
+            createdAt: at("2026-05-14T10:00:00.000Z"),
+          })
+        await grant("security-admins", "manual")
+        await grant("members", "directory")
+        await grant("finance", "directory")
+        const memberships = async () =>
+          (await storage.groupMemberships.listForUser({ projectId, userId: "usr_1" }))
+            .map(({ groupId, source }) => ({ groupId, source }))
+            .sort((a, b) => a.groupId.localeCompare(b.groupId))
+        const apply = (groupIds?: readonly string[]) =>
+          storage.applyDirectoryVerdict({
+            projectId,
+            userId: "usr_1",
+            verdict: groupIds ? { status: "active", groupIds } : { status: "active" },
+            appliedAt: at("2026-05-14T10:05:00.000Z"),
+          })
+
+        const unchanged = await apply(["members", "security-admins", "operations"])
+        expect(unchanged.user).toEqual(unchanged.previousUser)
+        await expect(memberships()).resolves.toEqual([
+          { groupId: "members", source: "directory" },
+          { groupId: "operations", source: "directory" },
+          { groupId: "security-admins", source: "manual" },
+        ])
+
+        // A verdict that knows no groups leaves them alone.
+        await apply()
+        await expect(memberships()).resolves.toHaveLength(3)
+
+        await apply([])
+        await expect(memberships()).resolves.toEqual([
+          { groupId: "security-admins", source: "manual" },
+        ])
+      })
+    })
+
+    // On PostgreSQL, the `sessions` advisory lock and the row lock in `applyDirectoryVerdict` each
+    // prevent this. To see it fail, drop both: the directory then reactivates Ava over the manual
+    // suspension.
+    test("never lifts a manual suspension that races a directory reactivation", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.applyDirectoryVerdict({
+          projectId,
+          userId: "usr_1",
+          verdict: { status: "inactive" },
+          appliedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+
+        // The suspension queues first, so a reactivation that read Ava without waiting for it
+        // would write over it.
+        await race(
+          storage,
+          () =>
+            storage.suspendUserAndRevokeSessions({
+              projectId,
+              userId: "usr_1",
+              suspendedAt: at("2026-05-14T10:02:00.000Z"),
+            }),
+          () =>
+            storage.applyDirectoryVerdict({
+              projectId,
+              userId: "usr_1",
+              verdict: { status: "active" },
+              appliedAt: at("2026-05-14T10:02:00.000Z"),
+            })
+        )
+
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toMatchObject({
+          status: "suspended",
+          suspensionSource: "manual",
+        })
       })
     })
   })

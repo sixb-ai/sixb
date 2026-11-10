@@ -1,15 +1,20 @@
 import { resolve } from "node:path"
 import { apiBaseUrl, apiRequest, isRecord } from "./api"
+import {
+  onboardingPlanContractId,
+  onboardingPlanFiles,
+  onboardingPlanTitle,
+} from "./onboarding-plan"
 
 // Publishes artifacts that exercise the viewer: documents with every element the document page
 // shapes, a second version, artifact themes, sheets with charts and a long one to scroll, and one
-// file artifact per way a file can show.
+// file artifact per way a file can show, and the onboarding plan a contract holds.
 // Run it while Northline is up; each run publishes a new set.
 
 const appUrl = (process.env.SIXB_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "")
 
 type FileRef = Record<string, unknown>
-type Kind = "document" | "sheet" | "file"
+type Kind = "document" | "sheet" | "canvas" | "file"
 
 async function upload(name: string, body: BlobPart, mediaType: string): Promise<FileRef> {
   const form = new FormData()
@@ -673,6 +678,37 @@ const files = [
   ],
 ] as const
 
+// --- Onboarding plan -------------------------------------------------------------------------
+
+// The canvas the Camden contract starts with, attached to the contract by its action as someone in
+// Northline would: the contract's page shows it.
+const onboardingPlanUploads: Record<string, FileRef> = {}
+for (const file of await onboardingPlanFiles()) {
+  onboardingPlanUploads[file.path] = await upload(file.path, file.body, file.mediaType)
+}
+
+const onboardingPlan = await publish({
+  kind: "canvas",
+  title: onboardingPlanTitle,
+  files: onboardingPlanUploads,
+})
+
+const attached = await apiRequest("/actions/attach-onboarding-plan", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    subject: {
+      kind: "object",
+      objectTypeId: "ServiceContract",
+      primaryId: onboardingPlanContractId,
+    },
+    params: { plan: { type: "artifact", id: onboardingPlan.id } },
+  }),
+})
+if (!isRecord(attached) || attached.status !== "succeeded") {
+  throw new Error("[Northline] Attaching the onboarding plan to its contract did not succeed.")
+}
+
 // --- Report ----------------------------------------------------------------------------------
 
 const page = (id: string, query = "") => `${appUrl}/artifacts/${id}${query}`
@@ -696,6 +732,8 @@ const rows: (readonly [string, string])[] = [
   ["  at a chart", page(metrics.id, "?part=chart=revenue")],
   ["Parts inventory (sheet, own chart colors)", page(inventory.id, "?part=Spend")],
   ["Q3 visit log (sheet, 5,000 rows)", page(visits.id)],
+  ["Camden onboarding plan (canvas, on its contract)", page(onboardingPlan.id)],
+  ["  on the contract's page", `${appUrl}/contracts/${onboardingPlanContractId}`],
   ...files.map(([label, artifact]) => [label, page(artifact.id)] as const),
   [
     "Beside a conversation",
@@ -705,5 +743,5 @@ const rows: (readonly [string, string])[] = [
   ],
 ]
 const width = Math.max(...rows.map(([label]) => label.length))
-console.log(`[Northline] Published ${7 + files.length} artifacts:\n`)
+console.log(`[Northline] Published ${8 + files.length} artifacts:\n`)
 for (const [label, url] of rows) console.log(`  ${label.padEnd(width)}  ${url}`)

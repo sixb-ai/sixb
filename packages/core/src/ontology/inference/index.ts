@@ -12,6 +12,7 @@ import type {
   ValueType,
   ValueTypeRefSchema,
 } from ".."
+import type { ArtifactRef } from "../artifact-ref"
 import type { DecimalValue } from "../decimal"
 import type { RegisteredValueTypes } from "../registered"
 import type { QuantitativeTypeId, UnitsOf } from "../units"
@@ -76,6 +77,7 @@ type InferObjectFields<
 interface PrimitiveSchemaValueMap {
   fileRef: FileRef
   userRef: UserRef
+  artifactRef: ArtifactRef
   string: string
   uuid: string
   boolean: boolean

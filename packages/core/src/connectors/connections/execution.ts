@@ -1,4 +1,4 @@
-import { AuthorizationError, assertCanManageConnector } from "../../authorization"
+import { AuthorizationError, isAllowed } from "../../authorization"
 import { resolveExecutionScopeAuthorization } from "../../execution/authorization"
 import { executionRecordInputFromRuntime } from "../../execution/durable"
 import type { ExecutionContext } from "../../execution/types"
@@ -129,7 +129,6 @@ function commandContext(
     )
   }
 
-  assertCanManageConnector(runtime, connectorId)
   return Object.freeze({
     execution: Object.freeze(
       executionRecordInputFromRuntime({
@@ -137,5 +136,6 @@ function commandContext(
         runtimeAuthorization: runtime.runtimeAuthorization,
       })
     ),
+    canManage: isAllowed(resolved.context, { kind: "connector.manage", connectorId }),
   })
 }

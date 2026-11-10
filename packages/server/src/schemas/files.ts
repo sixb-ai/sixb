@@ -83,6 +83,18 @@ export const CompleteFileUploadBodySchema = z.object({
   parts: z.array(FileUploadPartSchema).optional(),
 })
 
+/**
+ * The grant a shared link's session names in the query of what a browser loads by itself, such as
+ * an `<img>`, which cannot send the header. The boundary reads it before routing; a route declares
+ * it to keep it in the OpenAPI contract and through query validation.
+ */
+export const ShareGrantQuerySchema = z.object({
+  shareGrant: z
+    .string()
+    .optional()
+    .describe("Share grant selector for elements that cannot send the x-sixb-share-grant header"),
+})
+
 export const FileContentQuerySchema = z.object({
   path: z.string().min(1),
   disposition: z.enum(["inline", "attachment"]).optional(),

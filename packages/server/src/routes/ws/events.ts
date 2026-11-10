@@ -6,6 +6,7 @@ import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"
 import type { SixbServer } from "../../server"
 import { decodeWsMessage, safeSend, wsRequestSixb, wsStateKey } from "../../utils/ws"
+import type { SharedSockets } from "./shared-sockets"
 import { SubscriptionHub } from "./subscription-hub"
 
 const DEFAULT_READ_LIMIT = 200
@@ -58,7 +59,7 @@ export function parseSubscriptionMessage(payload: unknown):
   return { ok: true, data: parsed.data }
 }
 
-export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
+export function registerEventStreamRoutes(app: Elysia, server: SixbServer, shared: SharedSockets) {
   const events = server.getHost().events
   const states = new WeakMap<object, EventSocketState>()
   const hub = new SubscriptionHub<StoredDomainEvent>({
@@ -94,7 +95,9 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
   return app.ws("/ws/events", {
     async open(ws) {
       // Any authenticated principal may connect; events are filtered per-event
-      // by grants as they stream (see `view` below).
+      // by grants as they stream (see `view` below). A shared link's session receives the events
+      // of the artifacts it reads, while the session holds.
+      shared.open(ws)
       const state: EventSocketState = {
         replayFrom: null,
         initialized: Promise.resolve(),
@@ -109,6 +112,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
     },
 
     async message(ws, message) {
+      if (!(await shared.holds(ws))) return
       const decoded = await decodeWsMessage(message)
       const parsed = parseSubscriptionMessage(decoded)
       if (!parsed.ok) {
@@ -196,6 +200,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
     },
 
     close(ws) {
+      shared.close(ws)
       hub.unsubscribe(wsStateKey(ws))
       states.delete(wsStateKey(ws))
     },

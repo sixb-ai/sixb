@@ -3,12 +3,16 @@ import { type Principal, SYSTEM_PRINCIPAL } from "../auth"
 import { isRuntimeAllowed } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import { type AuthorizedObjectReader, objectReadersIn } from "../execution/authorized-object-reader"
+import type { SharedAccessDelegationRef } from "../execution/types"
 import type { ObjectQuery } from "../objects/query/ir"
 import type { PropertyToken } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
+  ArtifactCommentAuthor,
   ArtifactFile,
+  ArtifactGuest,
   ArtifactRecord,
   ArtifactRestorePointRecord,
   ArtifactStorage,
@@ -23,12 +27,14 @@ import {
   type ArtifactAccessRule,
   assertUpdatable,
   createArtifactAccessRule,
+  type HolderAccess,
 } from "./access"
 import { type ArtifactCommentsRuntime, createArtifactCommentsRuntime } from "./comments"
 import { ArtifactRequestError } from "./errors"
 import { announceArtifactUpdates } from "./events"
+import { type ArtifactHolding, readableHoldings } from "./holders"
 import type { ArtifactKind } from "./kinds"
-import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+import { ARTIFACT_HOLDERS_LIMIT, ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 import { firstArtifactDocument, keepsDocument } from "./live/state"
 import { invalidArtifact, readArtifactText } from "./publish/files"
 import { type ArtifactWrite, withDocumentHolding, withMergedWrite } from "./publish/merge"
@@ -138,9 +144,9 @@ export interface ListArtifactsRuntimeInput {
 }
 
 /**
- * The artifacts the caller reaches: its own, and those shared in a conversation it reads, as
- * {@link ArtifactAccess} says. System code reaches every artifact in the project, and an access
- * token only its own.
+ * The artifacts the caller reaches: its own, those shared in a conversation it reads, and those
+ * held by an object it reads, as {@link ArtifactAccess} says. System code reaches every artifact in
+ * the project, and an access token no conversation's.
  */
 export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
   /** Creates an artifact owned by the caller, with its first version. */
@@ -178,8 +184,17 @@ export interface ArtifactsRuntime extends ArtifactCommentsRuntime {
   access(artifactId: string): Promise<ArtifactAccess | null>
   /** `null` when the caller cannot read it. */
   get(artifactId: string): Promise<ArtifactRecord | null>
-  /** Most recently updated first. */
+  /**
+   * The caller's own artifacts, or a conversation's, most recently updated first. One the caller
+   * reaches only through an object is opened from that object: see `holders`.
+   */
   list(input?: ListArtifactsRuntimeInput): Promise<ListArtifactsResult>
+  /**
+   * The objects that hold the artifact in a property, among those the caller reads with that
+   * property: the first {@link ARTIFACT_HOLDERS_LIMIT}, in a stable order. `null` when the caller
+   * cannot read the artifact.
+   */
+  holders(artifactId: string): Promise<ArtifactHolders | null>
   getVersion(artifactId: string, version: number | "latest"): Promise<ArtifactVersionRecord | null>
   /**
    * Runs the version's query `queries/<name>.json` as the caller, with their rights: a type they
@@ -228,6 +243,22 @@ export interface ArtifactStateRuntime {
   clear(): Promise<number>
 }
 
+/** The objects that hold an artifact, as the caller reads them. */
+export interface ArtifactHolders {
+  readonly holders: readonly ArtifactHolderObject[]
+  /** More objects the caller reads hold it. */
+  readonly hasMore: boolean
+}
+
+/** An object property that holds the artifact. */
+export interface ArtifactHolderObject {
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly propertyId: string
+  /** The object's value of its type's `search.title`, when it has one the caller reads. */
+  readonly title?: string
+}
+
 export interface ArtifactStateValue {
   readonly key: string
   readonly value: unknown
@@ -235,7 +266,7 @@ export interface ArtifactStateValue {
 }
 
 /** Where an access rule reads: the project's storage, or a transaction's to decide inside it. */
-export type ArtifactAccessStorage = Pick<Storage, "artifacts" | "agents">
+export type ArtifactAccessStorage = Pick<Storage, "artifacts" | "agents" | "objects">
 
 /**
  * What each runtime's caller publishes by, for this repo's packages: an Agent turn publishes with
@@ -244,7 +275,8 @@ export type ArtifactAccessStorage = Pick<Storage, "artifacts" | "agents">
 const publishers = new WeakMap<
   object,
   {
-    readonly rule: (storage?: ArtifactAccessStorage) => ArtifactAccessRule
+    readonly rule: () => ArtifactAccessRule
+    readonly transactionRules: () => Promise<TransactionAccessRules>
     readonly checkQuery: ArtifactQueryChecker
     readonly requestPreviews: BoardPreviewRequester
     readonly writeLive: (artifactId: string, write: LiveArtifactWrite) => Promise<PublishedArtifact>
@@ -257,15 +289,16 @@ function publisherOf(artifacts: Partial<ArtifactsRuntime>) {
   return publisher
 }
 
-/**
- * The access rule of the caller `artifacts` acts for, reading from `storage`: a transaction's, to
- * check inside it. Each call returns a rule of its own.
- */
-export function artifactAccessRule(
-  artifacts: Partial<ArtifactsRuntime>,
-  storage: ArtifactAccessStorage
-): ArtifactAccessRule {
-  return publisherOf(artifacts).rule(storage)
+/** The access rule of the caller `artifacts` acts for. Each call returns a rule of its own. */
+export function artifactAccessRule(artifacts: Partial<ArtifactsRuntime>): ArtifactAccessRule {
+  return publisherOf(artifacts).rule()
+}
+
+/** {@link transactionArtifactAccessRules} for the caller `artifacts` acts for. */
+export function artifactTransactionRules(
+  artifacts: Partial<ArtifactsRuntime>
+): Promise<TransactionAccessRules> {
+  return publisherOf(artifacts).transactionRules()
 }
 
 /** What checks a version's queries as the caller `artifacts` acts for. */
@@ -296,10 +329,32 @@ export function writeLiveArtifact(
   return publisherOf(artifacts).writeLive(artifactId, write)
 }
 
-/** The access rule for the runtime's caller, reading from `storage`. */
-export function createRuntimeArtifactAccessRule(
+/** The access rule for the runtime's caller, reading the project's storage. */
+export function createRuntimeArtifactAccessRule(runtime: SixbRuntimeContext): ArtifactAccessRule {
+  return accessRuleIn(runtime, runtime.storage, runtime.objectReader)
+}
+
+/** The runtime caller's access rule for a transaction's storage, deciding inside it. */
+export type TransactionAccessRules = (tx: ArtifactAccessStorage) => ArtifactAccessRule
+
+/**
+ * The access rule for the runtime's caller in a storage transaction: its threads, its holders and
+ * its objects are the transaction's, so a participant removed or an object changed meanwhile is
+ * seen. What the caller is cleared for is resolved now, before the transaction opens: resolving it
+ * may read the project's storage, which a transaction's callback cannot.
+ */
+export async function transactionArtifactAccessRules(
+  runtime: SixbRuntimeContext
+): Promise<TransactionAccessRules> {
+  const readerIn = await objectReadersIn(runtime.objectReader)
+  return (tx) => accessRuleIn(runtime, tx, readerIn(tx.objects))
+}
+
+/** The rule reading `storage`, with `reader` reading its objects as the caller. */
+function accessRuleIn(
   runtime: SixbRuntimeContext,
-  storage: ArtifactAccessStorage = runtime.storage
+  storage: ArtifactAccessStorage,
+  reader: AuthorizedObjectReader
 ): ArtifactAccessRule {
   const artifacts = storage.artifacts
   if (!artifacts) {
@@ -315,19 +370,63 @@ export function createRuntimeArtifactAccessRule(
   return createArtifactAccessRule({
     storage: artifacts,
     projectId: runtime.projectId,
-    // Shared-link sessions and unresolved authority reach no artifact.
+    // A shared link's session reaches artifacts as a guest; unresolved authority reaches none.
     caller:
       authority.type === "unrestricted"
         ? "system"
         : authority.type === "principal"
           ? authority.context.principal
-          : null,
+          : authority.type === "delegated"
+            ? "guest"
+            : null,
     sharing: authority.type === "principal" && authority.ref.credential?.type === "session",
     conversation: async (threadId) => {
       if (await threads.read(threadId)) return "update"
       return isRuntimeAllowed(runtime, { kind: "agentThreads.observe" }) ? "read" : null
     },
+    holders: async (artifact) => {
+      let access: HolderAccess = null
+      const holdings = readableHoldings({
+        runtime,
+        reader,
+        objects: storage.objects,
+        artifactId: artifact.id,
+      })
+
+      for await (const holding of holdings) {
+        if (holding.access === "update") return "update"
+        access = "read"
+      }
+      return access
+    },
   })
+}
+
+/**
+ * The artifacts among `artifactIds` that the runtime's caller may change, as its owner or with
+ * `update`, as its access rule decides now. One that does not exist is not among them, and
+ * without artifact storage none is.
+ */
+export async function updatableArtifactIds(
+  runtime: SixbRuntimeContext,
+  artifactIds: Iterable<string>
+): Promise<ReadonlySet<string>> {
+  const ids = [...new Set(artifactIds)]
+  const storage = runtime.storage.artifacts
+  if (ids.length === 0 || !storage) return new Set()
+
+  const rule = createRuntimeArtifactAccessRule(runtime)
+  const updatable = await Promise.all(
+    ids.map(async (id) => {
+      const artifact = await storage.get({ projectId: runtime.projectId, id })
+      if (!artifact) return []
+
+      const access = await rule.accessTo(artifact)
+      return access === "owner" || access === "update" ? [id] : []
+    })
+  )
+
+  return new Set(updatable.flat())
 }
 
 export function createArtifactsRuntime(
@@ -339,7 +438,7 @@ export function createArtifactsRuntime(
   } = {}
 ): ArtifactsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
-  // Shared-link sessions and unresolved authority reach no artifact.
+  // A shared link's session writes nothing but comments, as a guest; unresolved authority, nothing.
   const caller: Principal | null =
     authority.type === "principal"
       ? authority.context.principal
@@ -359,13 +458,23 @@ export function createArtifactsRuntime(
   }
   const requireCaller = (): Principal => {
     if (!caller) {
-      throw new ArtifactRequestError("not_allowed", "[Sixb] This caller cannot publish artifacts.")
+      throw new ArtifactRequestError(
+        "not_allowed",
+        authority.type === "delegated"
+          ? "[Sixb] A shared link's guest reads its artifacts and comments on them, nothing more."
+          : "[Sixb] This caller cannot publish artifacts."
+      )
     }
     return caller
   }
 
-  const rule = (storage?: ArtifactAccessStorage): ArtifactAccessRule =>
-    createRuntimeArtifactAccessRule(runtime, storage)
+  /** Who writes a comment: the caller, or a shared link's guest under the name they gave. */
+  const commentAuthor = async (): Promise<ArtifactCommentAuthor> => {
+    if (authority.type !== "delegated" || !authority.delegation) return requireCaller()
+    return sharedLinkGuest(runtime, authority.delegation)
+  }
+
+  const rule = (): ArtifactAccessRule => createRuntimeArtifactAccessRule(runtime)
   const checkQuery = createArtifactQueryChecker(runtime)
   const requestPreviews: BoardPreviewRequester = async (version, requestOptions) => {
     const storage = runtime.storage.artifacts
@@ -422,31 +531,35 @@ export function createArtifactsRuntime(
   }
 
   /**
-   * Stores in one transaction, which checks again what the caller may do: a participant removed
-   * while the files were checked publishes nothing.
+   * Stores in one transaction, which checks again what the caller may do: a participant removed,
+   * or an object that no longer holds the artifact, while the files were checked publishes nothing.
    */
-  const store = (prepared: PreparedArtifactVersion) =>
-    runtime.storage.transaction(async (tx) => {
+  const store = async (prepared: PreparedArtifactVersion) => {
+    const ruleIn = await transactionArtifactAccessRules(runtime)
+
+    return runtime.storage.transaction(async (tx) => {
       const storage = tx.artifacts
       if (!storage) throw new Error("[Sixb] Storage transactions hold no artifacts.")
 
       return storeArtifactVersion(
         { projectId: runtime.projectId, storage, blobStorage },
         prepared,
-        (artifact) => rule(tx).publishAccess(artifact)
+        (artifact) => ruleIn(tx).publishAccess(artifact)
       )
     })
+  }
 
   /**
    * Changes an artifact the caller may update, in one transaction that decides it there, so a
-   * participant removed meanwhile changes nothing.
+   * participant removed, or an object changed, meanwhile changes nothing.
    */
-  const change = (
+  const change = async (
     artifactId: string,
     write: (storage: ArtifactStorage, author: Principal) => Promise<PublishedArtifactVersion>
   ) => {
     const author = requireCaller()
     requireStorage()
+    const ruleIn = await transactionArtifactAccessRules(runtime)
 
     return runtime.storage.transaction(async (tx) => {
       const storage = tx.artifacts
@@ -454,7 +567,7 @@ export function createArtifactsRuntime(
 
       const artifact = await storage.get({ projectId: runtime.projectId, id: artifactId })
       if (!artifact) throw notFound(artifactId)
-      assertUpdatable(artifactId, await rule(tx).publishAccess(artifact))
+      assertUpdatable(artifactId, await ruleIn(tx).publishAccess(artifact))
 
       try {
         return await write(storage, author)
@@ -544,7 +657,8 @@ export function createArtifactsRuntime(
       projectId: runtime.projectId,
       storage: requireStorage,
       events: runtime.events,
-      caller: requireCaller,
+      author: commentAuthor,
+      manager: requireCaller,
       reach,
     }),
 
@@ -678,6 +792,25 @@ export function createArtifactsRuntime(
       })
     },
 
+    async holders(artifactId) {
+      if (!(await getReadable(artifactId))) return null
+
+      const holders: ArtifactHolderObject[] = []
+      const holdings = readableHoldings({
+        runtime,
+        reader: runtime.objectReader,
+        objects: runtime.storage.objects,
+        artifactId,
+      })
+
+      // One past the page says whether there are more.
+      for await (const holding of holdings) {
+        if (holders.length === ARTIFACT_HOLDERS_LIMIT) return { holders, hasMore: true }
+        holders.push(holderObject(runtime, holding))
+      }
+      return { holders, hasMore: false }
+    },
+
     async getVersion(artifactId, version) {
       return (await readVersion(artifactId, version))?.version ?? null
     },
@@ -763,7 +896,13 @@ export function createArtifactsRuntime(
     },
   }
 
-  publishers.set(artifacts, { rule, checkQuery, requestPreviews, writeLive })
+  publishers.set(artifacts, {
+    rule,
+    transactionRules: () => transactionArtifactAccessRules(runtime),
+    checkQuery,
+    requestPreviews,
+    writeLive,
+  })
   return artifacts
 }
 
@@ -813,6 +952,40 @@ function queryFile(query: ArtifactQueryInput): unknown {
     query: query.query.ir,
     facets: query.facets.map((facet) => ({ propertyId: facet.property.id, limit: facet.limit })),
   }
+}
+
+/** A holding as `holders` returns it: where it is, with the object's title when it has one. */
+function holderObject(runtime: SixbRuntimeContext, holding: ArtifactHolding): ArtifactHolderObject {
+  const { objectTypeId, primaryId, propertyId, object } = holding
+  const titleId = runtime.ontology.getObjectTypeById(objectTypeId)?.search?.title
+  const value = titleId === undefined ? undefined : object.properties[titleId]
+  const title = typeof value === "string" || typeof value === "number" ? String(value).trim() : ""
+
+  return { objectTypeId, primaryId, propertyId, ...(title ? { title } : {}) }
+}
+
+/**
+ * The guest a shared link's session comments as: the name its visitor gave, kept by the session.
+ * Refused with `name_required` until they give one.
+ */
+async function sharedLinkGuest(
+  runtime: SixbRuntimeContext,
+  delegation: SharedAccessDelegationRef
+): Promise<ArtifactGuest> {
+  const session = await runtime.storage.shareSessions?.getById({
+    projectId: runtime.projectId,
+    id: delegation.sessionId,
+  })
+
+  const name = session?.grantId === delegation.grantId ? session.guestName : undefined
+  if (!name) {
+    throw new ArtifactRequestError(
+      "name_required",
+      "[Sixb] A shared link's guest gives their name before they comment."
+    )
+  }
+
+  return { type: "guest", id: delegation.sessionId, name }
 }
 
 function notFound(artifactId: string): ArtifactRequestError {

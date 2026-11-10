@@ -663,9 +663,8 @@ const commandTree: readonly CommandNode[] = [
     children: [
       command("env:init", "Move a project's values to its source and write sixb.env.ts", {
         path: ["env", "init"],
-        usage: "sixb env init <project> [--dev <file>] [--prod <file>]",
+        usage: "sixb env init [doppler-project] [--dev <file>] [--prod <file>]",
         options: ["dev", "prod"],
-        minimumPositionals: 1,
         maximumPositionals: 1,
       }),
       command("env:pull", "Write .env from the project's source", {

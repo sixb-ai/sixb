@@ -2,6 +2,7 @@ import type {
   QuickBooksBill,
   QuickBooksBillPayment,
   QuickBooksCreditMemo,
+  QuickBooksEstimate,
   QuickBooksInvoice,
   QuickBooksPayment,
   QuickBooksVendorCredit,
@@ -152,3 +153,38 @@ export const vendorCredit = {
     },
   ],
 } as const satisfies QuickBooksVendorCredit
+
+export const estimate = {
+  Id: "42",
+  SyncToken: "2",
+  TxnDate: "2026-09-01",
+  DocNumber: "EST-42",
+  TxnStatus: "Accepted",
+  AcceptedBy: "Example Customer",
+  AcceptedDate: "2026-09-05",
+  ExpirationDate: "2026-10-01",
+  CustomerRef: { value: "9", name: "Example" },
+  BillEmail: { Address: "billing@example.test" },
+  TotalAmt: 350,
+  LinkedTxn: [{ TxnId: "77", TxnType: "Invoice" }],
+  Line: [
+    {
+      Id: "1",
+      LineNum: 1,
+      DetailType: "SalesItemLineDetail",
+      Amount: 300,
+      Description: "Patio installation",
+      SalesItemLineDetail: { ItemRef: { value: "3" }, Qty: 3, UnitPrice: 100 },
+    },
+    {
+      Id: "2",
+      LineNum: 2,
+      DetailType: "SalesItemLineDetail",
+      Amount: 50,
+      SalesItemLineDetail: { ItemRef: { value: "4" }, Qty: 1, UnitPrice: 50 },
+    },
+    { DetailType: "SubTotalLineDetail", Amount: 350, SubTotalLineDetail: {} },
+  ],
+  TxnTaxDetail: { TotalTax: 0 },
+  MetaData: { LastUpdatedTime: "2026-09-05T12:00:00Z" },
+} as const satisfies QuickBooksEstimate

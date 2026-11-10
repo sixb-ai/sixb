@@ -32,12 +32,18 @@ import {
   type TimedCommitIdentity,
 } from "../shared/identity"
 import { normalizeOntologyEditCommit } from "../shared/normalize"
+import { loadReferencedArtifacts } from "./artifact-refs"
 import { compileEditExecutionUnits, type EditExecutionUnit } from "./execution-units"
 import { loadEditWorkingState } from "./load-state"
-import { applyEditOperation, type EditUndoJournal, undoEditJournal } from "./operations"
+import {
+  applyEditOperation,
+  type EditUndoJournal,
+  type ReferencedValues,
+  undoEditJournal,
+} from "./operations"
 import { stageEditPlan } from "./plan"
 import { assertValuesUnclaimed } from "./unique-values"
-import { loadReferencedUsers, type ReferencedUsers } from "./user-refs"
+import { loadReferencedUsers } from "./user-refs"
 import { authorizeVectorIndexingCommit } from "./vector-authority"
 import { commitVectorWrites } from "./vectors"
 import type { EditWorkingState } from "./working-state"
@@ -49,8 +55,8 @@ interface PreparedEditCommit {
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
   readonly execution: MaterializerExecution
-  /** Read before the transaction opens; see `user-refs.ts`. */
-  readonly users: ReferencedUsers
+  /** Read before the transaction opens; see `user-refs.ts` and `artifact-refs.ts`. */
+  readonly references: ReferencedValues
 }
 
 export async function commitEdits(
@@ -78,7 +84,14 @@ async function prepareEditCommit(
     identity,
     origin: input.source,
     execution: prepareMaterializerExecution(context.projectId, raw.scope),
-    users: await loadReferencedUsers(context, input.operations),
+    references: {
+      users: await loadReferencedUsers(context, input.operations),
+      artifacts: await loadReferencedArtifacts(
+        context,
+        input.operations,
+        "unchangeableArtifactIds" in input ? input.unchangeableArtifactIds : undefined
+      ),
+    },
   }
 }
 
@@ -316,7 +329,7 @@ function applyOneEditOperation(
       state,
       operation,
       command.identity,
-      command.users,
+      command.references,
       journal
     )
     if (command.input.mode === "continue") state.uniqueValues.assertDistinct()
@@ -352,7 +365,7 @@ function applyEditOperationGroup(
         state,
         operation,
         command.identity,
-        command.users,
+        command.references,
         journal
       )
     } catch (error) {

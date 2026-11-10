@@ -19,7 +19,7 @@ export interface ProjectionWorkerContext {
   readonly ontology: OntologyDefinitionCatalog
   readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage
-  /** The member directory, for projections that resolve members by email. */
+  /** The member directory, for projections that resolve members by email or id. */
   readonly users?: Pick<AuthUserStore, "list">
   readonly datasets: Pick<SixbDefinitions["datasets"], "getById">
   readonly projections: Pick<SixbDefinitions["projections"], "getById">

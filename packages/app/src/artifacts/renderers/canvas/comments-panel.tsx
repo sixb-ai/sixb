@@ -19,13 +19,22 @@ import {
   Check,
   CornerDownRight,
   MessageSquare,
+  MessageSquarePlus,
   MoreHorizontal,
   RotateCcw,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react"
-import { type ComponentPropsWithoutRef, forwardRef, useEffect, useRef, useState } from "react"
+import {
+  type ComponentPropsWithoutRef,
+  forwardRef,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
+import { GuestBadge } from "../../guest-badge"
 import { useArtifactMessages } from "../../messages"
 import { PersonAvatar } from "../../person-avatar"
 import { CommentComposer } from "./comment-pins"
@@ -130,7 +139,7 @@ export function CommentsPanel({
       data-comments-panel=""
       className={cn(
         // A sheet over the canvas's foot while it is narrow, a column beside it once it is wide.
-        "absolute inset-x-0 bottom-0 z-30 flex max-h-[68%] flex-col rounded-t-2xl border-t border-border bg-background shadow-[0_-12px_32px_-18px_rgb(0_0_0/0.35)]",
+        "absolute inset-x-0 bottom-0 z-30 flex max-h-[68%] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-[0_-12px_32px_-18px_rgb(0_0_0/0.35)]",
         "motion-safe:animate-in motion-safe:slide-in-from-bottom-4 motion-safe:fade-in-0",
         "@3xl/canvas:relative @3xl/canvas:inset-auto @3xl/canvas:z-auto @3xl/canvas:h-full @3xl/canvas:max-h-none @3xl/canvas:w-[22rem] @3xl/canvas:shrink-0 @3xl/canvas:rounded-none @3xl/canvas:border-t-0 @3xl/canvas:border-l @3xl/canvas:shadow-none @3xl/canvas:slide-in-from-right-4 @3xl/canvas:slide-in-from-bottom-0"
       )}
@@ -217,7 +226,19 @@ export function CommentsPanel({
             resolved.length > 0 ? (
               <Empty title={messages.emptyOpen} />
             ) : (
-              <Empty title={messages.empty} hint={messages.emptyHint} />
+              <Empty
+                title={messages.empty}
+                hint={
+                  <>
+                    {messages.emptyHint.before}{" "}
+                    <MessageSquarePlus
+                      className="inline size-3.5 align-[-0.2em] text-foreground"
+                      aria-label={messages.tool}
+                    />{" "}
+                    {messages.emptyHint.after}
+                  </>
+                }
+              />
             )
           ) : (
             <Empty title={messages.emptyResolved} />
@@ -495,6 +516,7 @@ function Message({
           <PersonAvatar name={author?.name || name} size="xs" />
         )}
         <span className="truncate font-medium text-foreground">{name}</span>
+        {author?.guest ? <GuestBadge /> : null}
         <time dateTime={comment.createdAt} className="shrink-0 text-muted-foreground">
           {when(comment.createdAt)}
         </time>
@@ -520,7 +542,7 @@ function useWhen(): (iso: string) => string {
   }
 }
 
-function Empty({ title, hint }: { readonly title: string; readonly hint?: string }) {
+function Empty({ title, hint }: { readonly title: string; readonly hint?: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
       <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">

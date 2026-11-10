@@ -116,7 +116,8 @@ function touchAppliedWorkStatement(workTable: string): string {
     FROM ${workTable}
     WHERE work_id = $workId AND lane = 'apply'
   )
-  -- Unique values are no plan input: a stale claim fails when it applies.
+  -- Unique values are no plan input: a stale claim fails when it applies. Nor are the artifacts
+  -- objects hold, which follow the objects.
   WHERE kind IS NOT NULL`
 }
 

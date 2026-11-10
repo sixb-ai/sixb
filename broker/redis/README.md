@@ -141,6 +141,24 @@ Supplied limits must be positive safe integers; omitted limits keep the runtime'
 `XTRIM MINID`. Trimming happens during append. Existing metadata is not rewritten
 by later `ensureStream()` calls with different retention options.
 
+A stream with `maxAgeMs` also expires once idle, so one nobody writes or reads
+again, such as a finished agent run's, does not hold memory. Each append sets the
+stream key to expire `maxAgeMs` plus a minute later, when every record in it has
+left retention, and the metadata a day after that. Until the metadata expires, a
+reader with an older cursor still gets `BrokerCursorExpiredError`; after it, the
+stream reads as missing. A process that ensured the stream still writes to it: the
+append ensures it again with the same retention. Streams without `maxAgeMs` never
+expire.
+
+Streams written by a version without idle expiry get theirs the next time they
+are read. One nobody reads again keeps its keys until they are deleted.
+
+Run the broker's Redis with `maxmemory-policy noeviction`. Every stream with
+`maxAgeMs` has a key expiry, so a `volatile-*` policy may evict its keys under
+memory pressure, live streams included. Losing the metadata that way loses the
+stream's trim boundary, so a reader with an older cursor no longer gets
+`BrokerCursorExpiredError`, and its byte count for `maxBytes`.
+
 ## Local Development
 
 Start the test Redis server:

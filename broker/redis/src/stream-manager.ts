@@ -2,13 +2,19 @@ import type { BrokerStreamDefinition } from "@sixb/core/broker"
 import type { RedisBrokerCommandClient, RedisConnectionManager } from "./connection"
 import { RedisBrokerError } from "./errors"
 import { assertStreamId, type RedisStreamKeys, streamKeysFor, validateProjectId } from "./keys"
-import { assertStream, normalizeRetention } from "./retention"
+import { assertStream, type NormalizedRetention, normalizeRetention } from "./retention"
 import { ENSURE_STREAM_SCRIPT } from "./scripts"
 
 export interface EnsuredStream {
   readonly projectId: string
   readonly streamId: string
   readonly keys: RedisStreamKeys
+  /**
+   * What to ensure the stream with again once Redis has expired its keys: the stored retention
+   * when this process found the stream, or what it asked `ensureStream()` for, which may differ
+   * from what an earlier runtime stored.
+   */
+  readonly retention: NormalizedRetention
 }
 
 /**
@@ -17,6 +23,9 @@ export interface EnsuredStream {
  * Redis creates Stream keys on first XADD, so `ensureStream()` cannot create an
  * empty stream without adding a fake record. The metadata hash is therefore the
  * source of truth for "this broker stream has been ensured".
+ *
+ * A stream with age retention expires once idle, so the cache can outlive its
+ * keys. It stays ensured here: writers `restore()` it, and readers find it empty.
  */
 export class StreamManager {
   private readonly connectionManager: RedisConnectionManager
@@ -46,7 +55,8 @@ export class StreamManager {
         // production retention if a later runtime starts with different options.
         await client.send("EVAL", [
           ENSURE_STREAM_SCRIPT,
-          "1",
+          "2",
+          keys.streamKey,
           keys.metaKey,
           projectId,
           stream.id,
@@ -60,7 +70,7 @@ export class StreamManager {
       }
     })
 
-    const ensured = { projectId, streamId: stream.id, keys }
+    const ensured = { projectId, streamId: stream.id, keys, retention }
     this.knownStreams.set(keys.metaKey, ensured)
     return ensured
   }
@@ -75,21 +85,44 @@ export class StreamManager {
       return cached
     }
 
-    const exists = await this.connectionManager.useCommandClient(async (client) => {
-      try {
-        return await client.exists(keys.metaKey)
-      } catch (error) {
-        throw new RedisBrokerError(`Failed to inspect stream "${streamId}"`, { cause: error })
-      }
-    })
+    const [ensuredId, maxAgeMs, maxRecords, maxBytes] =
+      await this.connectionManager.useCommandClient(async (client) => {
+        try {
+          return await client.hmget(keys.metaKey, [
+            "streamId",
+            "maxAgeMs",
+            "maxRecords",
+            "maxBytes",
+          ])
+        } catch (error) {
+          throw new RedisBrokerError(`Failed to inspect stream "${streamId}"`, { cause: error })
+        }
+      })
 
-    if (!exists) {
+    if (ensuredId === null || ensuredId === undefined) {
       return null
     }
 
-    const ensured = { projectId, streamId, keys }
+    const retention = {
+      maxAgeMs: optionalNumber(maxAgeMs),
+      maxRecords: optionalNumber(maxRecords),
+      maxBytes: optionalNumber(maxBytes),
+    }
+    const ensured = { projectId, streamId, keys, retention }
     this.knownStreams.set(keys.metaKey, ensured)
     return ensured
+  }
+
+  /**
+   * Ensures a stream again after Redis expired its keys, with the retention this process knows
+   * it by. The old metadata is gone, so this is what a first `ensureStream()` would store.
+   */
+  async restore(ensured: EnsuredStream): Promise<EnsuredStream> {
+    this.knownStreams.delete(ensured.keys.metaKey)
+    return this.ensureStream(ensured.projectId, {
+      id: ensured.streamId,
+      retention: ensured.retention,
+    })
   }
 
   async requireStream(projectId: string, streamId: string): Promise<EnsuredStream> {
@@ -125,4 +158,8 @@ export class StreamManager {
     }
     return values
   }
+}
+
+function optionalNumber(value: string | null | undefined): number | undefined {
+  return value === null || value === undefined ? undefined : Number(value)
 }

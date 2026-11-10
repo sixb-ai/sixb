@@ -143,6 +143,8 @@ export type CreateFacebookVideoInput = (
   readonly description?: string
   readonly published?: boolean
   readonly scheduled_publish_time?: number
+  /** Custom thumbnail image, sent with the upload (multipart). */
+  readonly thumb?: Blob
 }
 
 export interface MetaFacebookReelSession {
@@ -188,8 +190,19 @@ export interface MetaFacebookVideo extends MetaCreatedObject {
   }
 }
 
+/** `POST /{video-id}/thumbnails`: an image of 10 MB at most. */
+export interface CreateFacebookVideoThumbnailInput {
+  readonly source: Blob
+  /** Show this thumbnail on the video. Defaults to true. */
+  readonly is_preferred?: boolean
+}
+
 export interface FacebookVideoApi {
   get(options?: { readonly fields?: readonly string[] }): Promise<MetaFacebookVideo>
+  readonly thumbnails: {
+    /** Add a custom thumbnail to a Page video or reel; a preferred one is shown on it. */
+    create(input: CreateFacebookVideoThumbnailInput): Promise<MetaUploadResult>
+  }
 }
 
 export interface FacebookPublishingApi {

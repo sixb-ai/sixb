@@ -6,6 +6,7 @@ import { BashToolView } from "../bash/bash-tool-view"
 import { WebFetchToolView } from "../components/web-fetch-tool-view"
 import { WebSearchToolView } from "../components/web-search-tool-view"
 import type { NormalizedTool } from "../parts"
+import { OpenArtifactToolView } from "../publish-artifact/open-artifact-tool-view"
 import { PublishArtifactToolView } from "../publish-artifact/publish-artifact-tool-view"
 import { ReadToolView } from "../read/read-tool-view"
 import { coerceWebFetchOutput } from "../utils/web-fetch"
@@ -50,6 +51,7 @@ const BUILT_IN_TOOL_VIEWS: ReadonlyMap<string, BuiltInToolView> = new Map([
   ["publish_artifact", publishArtifact],
   ["update_artifact", publishArtifact],
   ["publish_artifact_version", publishArtifact],
+  ["open_artifact", (tool) => <OpenArtifactToolView tool={tool} />],
   [
     "web_fetch",
     (tool) =>

@@ -200,6 +200,37 @@ describe("Meta publishing contracts", () => {
     })
   })
 
+  test("Facebook videos and reels take a custom thumbnail image", async () => {
+    const api = await client({ graphVersion: "v25.0" })
+    const image = new Blob(["jpeg"], { type: "image/jpeg" })
+    await api
+      .facebook("page")
+      .videos.create({ file_url: "https://cdn.example/a.mp4", thumb: image })
+    const upload = requests[0]?.init.body as FormData
+    expect(upload).toBeInstanceOf(FormData)
+    expect(upload.get("file_url")).toBe("https://cdn.example/a.mp4")
+    expect(upload.get("thumb")).toBeInstanceOf(Blob)
+
+    respond = () => json({ success: true })
+    expect(
+      await api
+        .facebookVideo("reel", { accessToken: "page-token" })
+        .thumbnails.create({ source: image })
+    ).toEqual({ success: true })
+    const thumbnail = requests[1]!
+    expect(thumbnail.url.href).toBe("https://graph.facebook.com/v25.0/reel/thumbnails")
+    expect(new Headers(thumbnail.init.headers).get("authorization")).toBe("Bearer page-token")
+    expect((thumbnail.init.body as FormData).get("is_preferred")).toBe("true")
+
+    const thumbnails = api.facebookVideo("reel").thumbnails
+    expect(() => thumbnails.create({ source: new Blob([]) })).toThrow("non-empty image")
+    expect(() => thumbnails.create({ source: new Blob(["x"], { type: "video/mp4" }) })).toThrow(
+      "image"
+    )
+    respond = () => json({ success: false })
+    await expect(thumbnails.create({ source: image })).rejects.toBeInstanceOf(MetaApiError)
+  })
+
   test("Facebook Reel start/upload/finish use different contracts and hosts", async () => {
     respond = (url) =>
       url.hostname === "rupload.facebook.com" || requests.length > 1

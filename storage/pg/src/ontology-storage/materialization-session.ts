@@ -38,6 +38,8 @@ export class PgMaterializationSessionState extends ProviderMaterializationSessio
   changedUniqueValues = 0
   /** What unique value items this session staged, known without reading its work back. */
   readonly uniqueWork = { releases: false, claims: false }
+  /** What artifact holder items this session staged, likewise. */
+  readonly artifactHolderWork = { deletes: false, inserts: false }
   workAnalyzed = false
   /** Work staged on the session lives in a temp table; a plan-bound session reads its plan's. */
   readonly workTable: string
@@ -172,6 +174,8 @@ export class PgMaterializationSessions {
       if (record.kind !== "plan") continue
       if (record.item.kind === "unique-value-release") session.uniqueWork.releases = true
       if (record.item.kind === "unique-value-claim") session.uniqueWork.claims = true
+      if (record.item.kind === "artifact-holder-delete") session.artifactHolderWork.deletes = true
+      if (record.item.kind === "artifact-holder-insert") session.artifactHolderWork.inserts = true
     }
   }
 

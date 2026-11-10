@@ -827,6 +827,10 @@ export const fr: Translation<AgentMessages> = {
     updated: (title) => (title ? `${title} mis à jour` : "Artefact mis à jour"),
     updateFailed: (title) =>
       title ? `Impossible de mettre à jour ${title}` : "Impossible de mettre à jour l’artefact",
+    opening: (title) => (title ? `Ouverture de ${title}` : "Ouverture d’un artefact"),
+    opened: (title) => (title ? `${title} ouvert` : "Artefact ouvert"),
+    openFailed: (title) =>
+      title ? `Impossible d’ouvrir ${title}` : "Impossible d’ouvrir l’artefact",
     changed: "Mis à jour",
     open: (title) => `Ouvrir ${title}`,
     cards: "Publié dans cette réponse",

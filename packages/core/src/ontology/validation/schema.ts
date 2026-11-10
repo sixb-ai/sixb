@@ -1,6 +1,7 @@
 import { isFileRef, isValidFileRef } from "../../blob-storage/validation"
 import { withFailureMessage } from "../../errors/failure-message"
 import type { ObjectFieldSchema, Schema, ValueType, ValueTypeRefSchema } from ".."
+import { isArtifactRef } from "../artifact-ref"
 import { isDecimalString } from "../decimal"
 import { OntologyValidationError } from "../errors"
 import { currentUserNotStorableMessage, isCurrentUser, isUserRef } from "../user-ref"
@@ -95,6 +96,17 @@ export function validateSchemaValue(
               `[Sixb] Property ${path} must be a user reference { type: "user", id }`
             ),
             `Property ${diagnosticPath} must be a user reference.`
+          )
+        }
+        return
+      }
+      case "artifactRef": {
+        if (!isArtifactRef(value)) {
+          throw withFailureMessage(
+            new OntologyValidationError(
+              `[Sixb] Property ${path} must be an artifact reference { type: "artifact", id }`
+            ),
+            `Property ${diagnosticPath} must be an artifact reference.`
           )
         }
         return

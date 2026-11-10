@@ -549,6 +549,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       write("unique.claim", () => {
         getInMemoryObjectMaterializerAdapter(this.objects).claimUniqueValue(projectId, item)
       })
+    for (const item of chunk.artifactHolders.deletes)
+      write("artifact-holder.delete", () => {
+        getInMemoryObjectMaterializerAdapter(this.objects).deleteArtifactHolder(projectId, item)
+      })
+    for (const item of chunk.artifactHolders.inserts)
+      write("artifact-holder.insert", () => {
+        getInMemoryObjectMaterializerAdapter(this.objects).insertArtifactHolder(projectId, item)
+      })
     for (const item of chunk.timeseries.pointUpserts)
       write("timeseries.point.upsert", () => {
         this.assertPoint(item.expected, projectId)

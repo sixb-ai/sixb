@@ -13,9 +13,10 @@ import {
 } from "./errors"
 import type { ObjectTypeWithPropertyTokens } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
-import type { ObjectType, Schema, ValueType } from "./types"
+import type { ObjectType, Property, Schema, ValueType } from "./types"
 import { type UniquePropertyDefinition, uniquePropertiesOf } from "./unique-values"
 import {
+  findPrimitiveSchema,
   validatePrimaryProperties,
   validatePropertyDefinitions,
   validateQueryMetadata,
@@ -181,6 +182,7 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
   private readonly subTypesById = new Map<string, Set<string>>()
   private readonly primaryByTypeId: Map<string, string>
   private readonly uniqueByTypeId = new Map<string, readonly UniquePropertyDefinition[]>()
+  private readonly artifactRefsByTypeId = new Map<string, readonly Property[]>()
 
   constructor(options: OntologyRegistryOptions) {
     const { objectTypes, valueTypes } = collectOntology(options.sources)
@@ -212,6 +214,7 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
     }
     this.primaryByTypeId = validatePrimaryProperties(this.objectTypesById)
     this.indexUniqueProperties()
+    this.indexArtifactRefProperties()
   }
 
   // ── Public read API ──────────────────────────────────────
@@ -250,6 +253,14 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
   /** The unique properties of a type, its inherited ones included. Empty for an unknown type. */
   listUniqueProperties(objectTypeId: string): readonly UniquePropertyDefinition[] {
     return this.uniqueByTypeId.get(objectTypeId) ?? []
+  }
+
+  /**
+   * The properties of a type that can hold artifact references, however deeply nested, its
+   * inherited ones included. Empty for an unknown type.
+   */
+  listArtifactRefProperties(objectTypeId: string): readonly Property[] {
+    return this.artifactRefsByTypeId.get(objectTypeId) ?? []
   }
 
   /** Collect all transitive sub-types of the given object type id. */
@@ -327,6 +338,20 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
     for (const [typeId, objectType] of this.objectTypesById) {
       const unique = uniquePropertiesOf(objectType, this.valueTypesById)
       if (unique.length > 0) this.uniqueByTypeId.set(typeId, unique)
+    }
+  }
+
+  /** Every object write records the artifacts its type's properties hold: find those once. */
+  private indexArtifactRefProperties(): void {
+    for (const [typeId, objectType] of this.objectTypesById) {
+      const properties = objectType.properties.filter((property) =>
+        findPrimitiveSchema(
+          property.schema,
+          this.valueTypesById,
+          (schema) => schema === "artifactRef"
+        )
+      )
+      if (properties.length > 0) this.artifactRefsByTypeId.set(typeId, properties)
     }
   }
 

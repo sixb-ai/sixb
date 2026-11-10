@@ -15,6 +15,7 @@ import {
   ref,
   type Sixb,
   type UserEmailColumn,
+  type UserIdColumn,
   type UserRef,
   userRef,
 } from "../src"
@@ -101,6 +102,7 @@ const tasks = defineDataset("tasks", {
     col("task_id", "string"),
     col("title", "string"),
     col("assignee_email", "string", { nullable: true }),
+    col("assignee_id", "string", { nullable: true }),
     col("assignee_count", "int64"),
   ],
 })
@@ -144,4 +146,34 @@ export function userEmailMappings(): void {
     .fromDataset(tasks)
     // @ts-expect-error an email no member has would leave a required property empty
     .properties({ id: "task_id", assignee: userRef.fromEmail("assignee_email") })
+}
+
+export type UserIdColumnInference = [
+  Expect<Equal<ReturnType<typeof userRef.fromId<"assignee_id">>, UserIdColumn<"assignee_id">>>,
+]
+
+export function userIdMappings(): void {
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    .properties({ id: "task_id", title: "title", assignee: userRef.fromId("assignee_id") })
+
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    // @ts-expect-error member ids come from a string column
+    .properties({ id: "task_id", assignee: userRef.fromId("assignee_count") })
+
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    // @ts-expect-error only a ref.user() property resolves a member
+    .properties({ id: "task_id", title: userRef.fromId("assignee_id") })
+
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    // @ts-expect-error a list of user references has no id column form
+    .properties({ id: "task_id", reviewers: userRef.fromId("assignee_id") })
+
+  defineProjection("tasks", AssignedTask)
+    .fromDataset(tasks)
+    // @ts-expect-error an id no member has would leave a required property empty
+    .properties({ id: "task_id", assignee: userRef.fromId("assignee_id") })
 }

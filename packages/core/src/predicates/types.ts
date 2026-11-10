@@ -79,8 +79,9 @@ interface PrimitivePredicateValues {
   decimal: { equality: DecimalValue; ordered: DecimalValue }
   boolean: { equality: boolean; ordered: never }
   fileRef: { equality: never; ordered: never }
-  // Rule predicates compare scalar values; a user reference supports presence checks only.
+  // Rule predicates compare scalar values; a reference supports presence checks only.
   userRef: { equality: never; ordered: never }
+  artifactRef: { equality: never; ordered: never }
 }
 
 type SerializableSchemaPredicateValue<TSchema extends Schema> = TSchema extends PrimitiveSchema

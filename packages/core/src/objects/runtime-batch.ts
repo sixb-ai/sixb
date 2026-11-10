@@ -39,6 +39,8 @@ export interface RuntimeItemBatch<TItem, TValue> {
   value(outcomes: readonly OntologyOperationOutcome[]): TValue
   /** Objects as the batch's author read them: one that changed fails the whole batch. */
   readonly expectedObjects?: readonly ExpectedObjectRevision[]
+  /** Artifacts the batch's author may not change: no item gives one to an object. */
+  readonly unchangeableArtifactIds?: readonly string[]
 }
 
 interface PlannedItem {
@@ -94,7 +96,12 @@ export async function runRuntimeItemBatch<TItem, TValue>(
     planned.push({ index, operations: plan.operations })
   }
 
-  const commit = await commitRuntimeBatch(batch.ctx, planned, batch.expectedObjects)
+  const commit = await commitRuntimeBatch(
+    batch.ctx,
+    planned,
+    batch.expectedObjects,
+    batch.unchangeableArtifactIds
+  )
 
   for (const { index } of planned) {
     const outcomes = requireItemOutcomes(commit, index)

@@ -61,6 +61,7 @@ export type {
   RenewConnectorCredentialMutationInput,
   StageConnectorCredentialMutationCredentialsInput,
   StageConnectorCredentialMutationRevocationInput,
+  UserConnectorConnectionOwner,
   WaitForConnectorConnectionRunSelectionInput,
 } from "./types"
 export { CONNECTOR_CONNECTION_RUN_FAILURE_CODES } from "./types"

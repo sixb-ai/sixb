@@ -7,6 +7,7 @@
 import { stableJsonStringify } from "../../json"
 import type { BatchItemResult } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
+import { unchangeableArtifactIds } from "../artifact-refs"
 import {
   assertCanEditType,
   expectSeen,
@@ -52,6 +53,11 @@ export async function upsertObjectBatch(
     }
   })
 
+  const unchangeable = await unchangeableArtifactIds(
+    ctx,
+    normalized.flatMap((object) => ("error" in object ? [] : [object.properties]))
+  )
+
   const found = ctx.objectReader.viewsThroughCondition(objectType.id)
     ? await findWrittenObjects(
         ctx,
@@ -64,6 +70,7 @@ export async function upsertObjectBatch(
     ctx,
     items,
     ...(found === undefined ? {} : { expectedObjects: expectSeen(found.values()) }),
+    unchangeableArtifactIds: unchangeable,
     plan(_item, index) {
       const object = normalized[index]!
       if ("error" in object) throw object.error

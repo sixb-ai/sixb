@@ -44,12 +44,14 @@ import {
 import { type ReactNode, useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { useCurrentUser } from "../session"
+import { useSharedGuest } from "../shared-session"
 import { useCopyFeedback } from "./copy-feedback"
 import { DownloadMenu } from "./downloads"
 import { type ArtifactDraft, EditSessionProvider, saveDraft } from "./edit-session"
 import { formatFileSize } from "./file-size"
 import { useFileName } from "./file-source"
 import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
+import { ArtifactHolders } from "./holders"
 import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
 import { LiveAvatars, LiveNotice, LiveSaveStatus } from "./live/header"
 import { LiveArtifactProvider } from "./live/hooks"
@@ -622,6 +624,8 @@ function ArtifactHeader({
   readonly onVersionChange: (version: number) => void
 }) {
   const messages = useArtifactMessages()
+  // A shared link's guest has no link to pass on: the artifact's page opens nothing for anyone else.
+  const guest = useSharedGuest() !== null
   const { artifact } = detail
   const live = holdsQueries(version)
   // A canvas held live is edited live, not as a draft the header saves: until its document holds
@@ -723,6 +727,7 @@ function ArtifactHeader({
             onVersionChange={onVersionChange}
             onRestored={() => onVersionChange(artifact.latestVersion)}
           />
+          <ArtifactHolders artifactId={artifact.id} />
           {live ? <LiveStatus version={version} /> : null}
           {heldLive && liveView.state.connection === "offline" ? (
             <LiveSaveStatus state={liveView.state} />
@@ -766,7 +771,7 @@ function ArtifactHeader({
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
       <ArtifactMenu detail={detail} chrome={chrome} />
-      {chrome.withoutPageLink ? null : (
+      {chrome.withoutPageLink || guest ? null : (
         <CopyLinkButton
           link={() => artifactLink(target, artifact.latestVersion, location.origin)}
         />

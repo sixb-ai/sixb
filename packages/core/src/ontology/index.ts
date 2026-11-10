@@ -11,6 +11,8 @@
 // ── Types ───────────────────────────────────────────────────
 
 export type { EmbeddingModelDefinition, EmbeddingModelRef } from "../models/embedding-model"
+export type { ArtifactRef } from "./artifact-ref"
+export { artifactRef } from "./artifact-ref"
 export type { DecimalValue } from "./decimal"
 export {
   compareDecimalValues,
@@ -64,7 +66,7 @@ export type {
   ValueType,
   ValueTypeRefSchema,
 } from "./types"
-export type { CurrentUserRef, UserEmailColumn, UserRef } from "./user-ref"
+export type { CurrentUserRef, UserEmailColumn, UserIdColumn, UserRef } from "./user-ref"
 export { currentUser, userRef } from "./user-ref"
 
 // ── Registry ──────────────────────────────────────────────

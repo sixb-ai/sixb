@@ -5,6 +5,7 @@
 
 import type { ActionDescriptor, ActionParamDescriptor } from "../actions/descriptor"
 import type { AgentProjectFile } from "../agents/skills"
+import { isArtifactRefPropertySchema } from "./artifact-ref"
 import type { OntologyDoc, OntologyDocsCatalog } from "./docs"
 import {
   type PropertyQueryOperator,
@@ -127,6 +128,11 @@ function renderProperties(
   const userPropertyIds = objectType.properties
     .filter((property) => !restricted.has(property.id) && isUserRefPropertySchema(property.schema))
     .map((property) => code(property.id))
+  const artifactPropertyIds = objectType.properties
+    .filter(
+      (property) => !restricted.has(property.id) && isArtifactRefPropertySchema(property.schema)
+    )
+    .map((property) => code(property.id))
   return [
     "## Properties",
     "",
@@ -150,6 +156,9 @@ function renderProperties(
       ])
     ),
     ...(userPropertyIds.length === 0 ? [] : ["", renderUserProperties(userPropertyIds)]),
+    ...(artifactPropertyIds.length === 0
+      ? []
+      : ["", renderArtifactProperties(artifactPropertyIds)]),
   ].join("\n")
 }
 
@@ -159,6 +168,14 @@ function renderUserProperties(propertyIds: readonly string[]): string {
     `User properties (${propertyIds.join(", ")}) hold \`{"type":"user","id":"<user-id>"}\`.`,
     "Find a member's id with `sixb users search <name>` or `sixb users get <email>`.",
     'In a query, `{"type":"currentUser"}` matches the requesting user.',
+  ].join(" ")
+}
+
+/** How to fill the properties that hold artifacts: with an artifact the writer may change. */
+function renderArtifactProperties(propertyIds: readonly string[]): string {
+  return [
+    `Artifact properties (${propertyIds.join(", ")}) hold \`{"type":"artifact","id":"<artifact-id>"}\`.`,
+    "Write the id of an artifact you can change, such as one you published (`art_k3m9q2x7tp`).",
   ].join(" ")
 }
 

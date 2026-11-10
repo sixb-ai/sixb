@@ -27,6 +27,7 @@ import {
 export interface EventsRuntime {
   /**
    * The events this execution may read, in order: hidden events are dropped, the others redacted.
+   * A shared link's session reads only the events of the artifacts it reads.
    * Markings apply as they are now, with those of the versions an object event's values came from:
    * the version a projection's event applied, and every marking a column declares for projected
    * values that came from earlier versions.
@@ -69,8 +70,12 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
   ): Promise<readonly StoredDomainEvent[]> => {
     switch (authority.type) {
       case "denied":
-      case "delegated":
         return []
+      case "delegated": {
+        // A shared link's session follows the artifacts its objects hold, and nothing else.
+        const readable = await readableArtifactEvents(runtime, events)
+        return events.filter((event) => readable.has(event))
+      }
       case "unrestricted":
         return events
       case "principal": {

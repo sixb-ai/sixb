@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "@sixb/core/blob-storage"
-import { buildWorkflowInput } from "../src/pages/console/ontology/workflows/run-input-form"
+import {
+  buildWorkflowInput,
+  createInitialWorkflowInputFormValues,
+} from "../src/pages/console/ontology/workflows/run-input-form"
 
 const fileRef = {
   blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -40,6 +43,19 @@ describe("WorkflowRunInputForm", () => {
     expect(buildWorkflowInput({ assignee: "userRef" }, { assignee: " usr_1 " })).toEqual({
       input: { assignee: { type: "user", id: "usr_1" } },
       errors: {},
+    })
+  })
+
+  // Regression proof: drop the `artifactRef` branch from buildWorkflowInput and the id is sent as a
+  // plain string, which the workflow's input refuses.
+  test("sends an artifact id as an artifact reference, and fills the form back with the id", () => {
+    const plan = { type: "artifact", id: "art_k3m9q2x7tp" }
+    expect(buildWorkflowInput({ plan: "artifactRef" }, { plan: " art_k3m9q2x7tp " })).toEqual({
+      input: { plan },
+      errors: {},
+    })
+    expect(createInitialWorkflowInputFormValues({ plan: "artifactRef" }, { plan })).toEqual({
+      plan: "art_k3m9q2x7tp",
     })
   })
 

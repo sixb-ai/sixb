@@ -2,7 +2,10 @@ import { writeFile } from "node:fs/promises"
 import { QuickBooksApiError, type QuickBooksRevision, quickbooks } from "../src"
 
 const mode = process.env.QUICKBOOKS_LIVE
-if (mode && !["read", "mutate", "webhook", "writes", "remaining-writes"].includes(mode))
+if (
+  mode &&
+  !["read", "mutate", "webhook", "writes", "remaining-writes", "accounting-writes"].includes(mode)
+)
   throw new Error("[QuickBooksLive] Invalid QUICKBOOKS_LIVE mode. See tests/README.md.")
 
 export function required(name: string) {

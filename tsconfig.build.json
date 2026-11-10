@@ -95,6 +95,9 @@
       "path": "deploy/ssh/tsconfig.build.json"
     },
     {
+      "path": "env/azure-key-vault/tsconfig.build.json"
+    },
+    {
       "path": "env/doppler/tsconfig.build.json"
     },
     {

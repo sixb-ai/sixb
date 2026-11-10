@@ -184,6 +184,56 @@ describe("SharedSessionProtocol", () => {
     await expect(protocol.resolve("shr_one", replacement.cookieValue)).resolves.toBeNull()
   })
 
+  // Guard proof: drop the revocation or expiry check from `current`; a socket that authenticated
+  // once then stays open after its link is revoked or its session idles out.
+  test("says whether a session a connection authenticated once still holds", async () => {
+    const host = hostWith([BroadShare])
+    await seedGrant(host)
+    let now = new Date(start)
+    const protocol = new SharedSessionProtocol({
+      host,
+      inactivityTtlMs: 10 * 60_000,
+      now: () => now,
+    })
+
+    const idle = (await protocol.exchange("shr_one", linkSecret))!.context
+    const revoked = (await protocol.exchange("shr_one", linkSecret))!.context
+    expect(await protocol.current(idle)).toMatchObject({ sessionId: idle.sessionId })
+    expect(await protocol.current({ ...idle, grantId: "other-grant" })).toBeNull()
+
+    await protocol.revoke(revoked)
+    expect(await protocol.current(revoked)).toBeNull()
+
+    // Reading it is no activity: the session still idles out.
+    now = new Date(start.getTime() + 10 * 60_000)
+    expect(await protocol.current(idle)).toBeNull()
+  })
+
+  // Guard proof: answer `setGuestName` without the grant's check; a revoked link's session then
+  // still takes a name.
+  test("keeps the name a session's visitor gives, and gives it back with the session", async () => {
+    const host = hostWith([BroadShare])
+    await seedGrant(host)
+    const protocol = new SharedSessionProtocol({ host, now: () => start })
+    const credential = (await protocol.exchange("shr_one", linkSecret))!
+    expect(credential.context).not.toHaveProperty("guestName")
+
+    expect(await protocol.setGuestName(credential.context, "Ava Martin")).toMatchObject({
+      guestName: "Ava Martin",
+    })
+    expect(await protocol.resolve("shr_one", credential.cookieValue)).toMatchObject({
+      guestName: "Ava Martin",
+    })
+
+    await host.storage.shareGrants!.revoke({
+      projectId: host.id,
+      id: "shr_one",
+      revokedAt: start,
+      revokedBy: { type: "user", id: "manager" },
+    })
+    expect(await protocol.setGuestName(credential.context, "Mallory")).toBeNull()
+  })
+
   test("intersects with the definition registered now and treats a missing definition as empty", async () => {
     const deps = createTestRuntimeDeps()
     const broadHost = hostWith([BroadShare], deps)

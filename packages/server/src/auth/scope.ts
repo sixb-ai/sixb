@@ -2,6 +2,7 @@ import { type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
 import { type AgentExecutionAuthorization, agentServiceAccountId } from "@sixb/core/internal/agents"
 import type { AuthenticatedRequestAuthSession } from "@sixb/core/internal/auth"
 import type { Sixb } from "@sixb/core/internal/request-execution"
+import type { SharedSessionContext } from "@sixb/core/internal/shares"
 import type { ConversationAgentRunRecord, ExecutionRecord } from "@sixb/core/storage"
 import type { ServerAuthGuardDecision } from "./guard"
 
@@ -13,6 +14,8 @@ import type { ServerAuthGuardDecision } from "./guard"
  */
 export interface RequestAuthState {
   readonly sixb: Sixb | null
+  /** The shared link's session a request speaks for: a guest, without an account. */
+  readonly sharedSession?: SharedSessionContext | null
   /** Present for a conversation run's run-token requests. */
   readonly agentRun?: ConversationAgentRunRecord
   /**
@@ -47,9 +50,15 @@ export interface AgentRunRequestExecution {
  * point until route registration carries the derived context type.
  */
 export function requestAuthState(context: unknown): RequestAuthState {
-  const { sixb = null, agentRun, agentExecution } = context as Partial<RequestAuthState>
+  const {
+    sixb = null,
+    sharedSession,
+    agentRun,
+    agentExecution,
+  } = context as Partial<RequestAuthState>
   return {
     sixb,
+    ...(sharedSession ? { sharedSession } : {}),
     ...(agentRun === undefined ? {} : { agentRun }),
     ...(agentExecution === undefined ? {} : { agentExecution }),
   }

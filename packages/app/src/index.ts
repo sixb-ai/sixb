@@ -98,6 +98,7 @@ export type {
   AgentThreadSandboxParams,
   LanguageModel,
 } from "./agent/types"
+export { ArtifactViewer, type ArtifactViewerProps } from "./artifacts/artifact-viewer"
 export type { ArtifactTarget } from "./artifacts/target"
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
@@ -110,6 +111,7 @@ export {
   useSections,
 } from "./sections/sections"
 export { type CurrentUser, useCurrentUser, useSignOut } from "./session"
+export { type SharedGuest, useSharedGuest } from "./shared-session"
 export type { SharedUnavailableProps } from "./shared-unavailable"
 export { AgentDock } from "./shell/agent-dock"
 export {

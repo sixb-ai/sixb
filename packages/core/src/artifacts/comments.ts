@@ -4,6 +4,7 @@ import type { DomainEventLog } from "../events/service"
 import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
   ArtifactCommentAnchor,
+  ArtifactCommentAuthor,
   ArtifactCommentRecord,
   ArtifactOrigin,
   ArtifactRecord,
@@ -15,8 +16,9 @@ import { announceArtifactComment } from "./events"
 import { createArtifactCommentId } from "./ids"
 import { ARTIFACT_COMMENT_LIMITS } from "./limits"
 
-// Comments on an artifact: whoever reads it reads and adds them; their author, or whoever may
-// change the artifact, resolves or deletes them. Each change is announced to its readers.
+// Comments on an artifact: whoever reads it reads and adds them, a shared link's guest included;
+// their author, or whoever may change the artifact, resolves or deletes them, and only the latter a
+// guest's. Each change is announced to its readers.
 
 /** A comment to add, or a reply. */
 export interface ArtifactCommentInput {
@@ -39,14 +41,15 @@ export interface ArtifactCommentsRuntime {
   /** Every comment and reply, oldest first; `null` when the caller cannot read the artifact. */
   listComments(artifactId: string): Promise<ArtifactCommentRecord[] | null>
   /**
-   * Adds a comment, or a reply, authored by the caller, who must read the artifact. Throws
-   * `invalid_comment` for words or an anchor that will not do, `comment_not_found` for a reply to
-   * no comment, and `comments_full`.
+   * Adds a comment, or a reply, authored by the caller, who must read the artifact. A shared link's
+   * guest writes it under the name they gave, and is refused with `name_required` until they give
+   * one. Throws `invalid_comment` for words or an anchor that will not do, `comment_not_found` for
+   * a reply to no comment, and `comments_full`.
    */
   addComment(artifactId: string, input: ArtifactCommentInput): Promise<ArtifactCommentRecord>
   /**
    * Marks a comment resolved, or opens it again. Its author or whoever may change the artifact
-   * may: anyone else is refused with `not_allowed`.
+   * may: anyone else, and every guest, is refused with `not_allowed`.
    */
   resolveComment(
     artifactId: string,
@@ -65,7 +68,10 @@ export function createArtifactCommentsRuntime(input: {
   readonly projectId: string
   readonly storage: () => ArtifactStorage
   readonly events: Pick<DomainEventLog, "emit">
-  readonly caller: () => Principal
+  /** Who writes a comment the caller adds. */
+  readonly author: () => Promise<ArtifactCommentAuthor>
+  /** Who resolves or deletes one; throws `not_allowed` for a caller who never may. */
+  readonly manager: () => Principal
   readonly reach: (
     artifactId: string
   ) => Promise<{ readonly artifact: ArtifactRecord; readonly access: ArtifactAccess } | null>
@@ -79,7 +85,7 @@ export function createArtifactCommentsRuntime(input: {
     if (reached.access === "none") {
       throw new ArtifactRequestError(
         "not_shared",
-        `[Sixb] Artifact '${artifactId}' is not shared in a conversation you read.`
+        `[Sixb] Artifact '${artifactId}' is not shared with you.`
       )
     }
     return reached
@@ -88,11 +94,14 @@ export function createArtifactCommentsRuntime(input: {
   /** A comment the caller may resolve or delete: theirs, or one on an artifact they may change. */
   const managed = async (artifactId: string, commentId: string) => {
     const { access } = await readable(artifactId)
+    const manager = input.manager()
     const comment = await input.storage().getComment({ projectId, artifactId, id: commentId })
     if (!comment) throw commentNotFound(artifactId, commentId)
 
+    // A guest's comment is managed by those who may change the artifact, never by a guest.
     const changes = access === "owner" || access === "update"
-    if (!changes && !principalsEqual(comment.author, input.caller())) {
+    const authored = comment.author.type !== "guest" && principalsEqual(comment.author, manager)
+    if (!changes && !authored) {
       throw new ArtifactRequestError(
         "not_allowed",
         "[Sixb] Only a comment's author, or whoever may change the artifact, resolves or deletes it."
@@ -109,8 +118,8 @@ export function createArtifactCommentsRuntime(input: {
     },
 
     async addComment(artifactId, comment) {
-      const author = input.caller()
       const { artifact } = await readable(artifactId)
+      const author = await input.author()
       const storage = input.storage()
 
       const body = comment.body.trim()
@@ -155,7 +164,7 @@ export function createArtifactCommentsRuntime(input: {
         projectId,
         artifactId,
         id: commentId,
-        resolved: resolved ? { at: new Date(), by: input.caller() } : null,
+        resolved: resolved ? { at: new Date(), by: input.manager() } : null,
       })
       if (!changed) throw commentNotFound(artifactId, commentId)
 

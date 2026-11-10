@@ -55,6 +55,23 @@ export function objectFileContentUrl(input: ObjectFileContentUrlInput): string {
   })
 }
 
+/**
+ * A file's content URL, or a board preview's, as an `<img>`, a `<video>` or a download link loads
+ * it without the client: a shared client names its grant in the query, as `objectFileContentUrl`
+ * does, because such a request cannot send the header. The grant's HttpOnly session cookie stays
+ * the credential. Only those routes read the grant from the query: any other URL passed here is
+ * still refused to a shared link's visitor. Any other client's URL is unchanged.
+ */
+export function withSharedAccess(url: string, client: SixbClient = sharedClient): string {
+  const grantId = getClientSharedGrantId(client)
+  if (grantId === null) return url
+
+  const absolute = /^[a-z][a-z0-9+.-]*:/i.test(url)
+  const shared = new URL(url, "http://sixb.invalid")
+  shared.searchParams.set("shareGrant", grantId)
+  return absolute ? shared.toString() : `${shared.pathname}${shared.search}${shared.hash}`
+}
+
 export type SixbFileUploadStage =
   | "hash"
   | "create"

@@ -23,6 +23,7 @@ import type { QuantitativeTypeId } from "./units"
  * - `"timestamp"` for `lastObservedAt`.
  * - `"fileRef"` for blob-backed documents, images, and attachments.
  * - `"userRef"` for a Sixb user, such as a task's assignee (author it with `ref.user()`).
+ * - `"artifactRef"` for an artifact, such as a meeting's kick-off canvas (`ref.artifact()`).
  * - `"double"` for telemetry such as temperature or humidity.
  */
 export type PrimitiveSchema =
@@ -36,6 +37,7 @@ export type PrimitiveSchema =
   | "uuid"
   | "fileRef"
   | "userRef"
+  | "artifactRef"
 
 export interface ValueTypeRefSchema {
   type: "valueTypeRef"

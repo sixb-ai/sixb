@@ -26,12 +26,13 @@ type MetaGrantPage = {
   readonly instagramUsername?: string
 }
 
-type OAuthOperation =
+export type OAuthOperation =
   | "code exchange"
   | "token exchange"
   | "user read"
   | "permissions read"
   | "Pages read"
+  | "Instagram accounts read"
   | "revoke"
 
 export interface MetaOAuthEndpoints {
@@ -318,9 +319,9 @@ interface GraphRequest {
   readonly accessToken?: string
 }
 
-async function graphRequest(
+export async function graphRequest(
   context: ConnectorContext,
-  options: MetaOAuthConnectorOptions,
+  options: Pick<MetaOAuthConnectorOptions, "timeoutMs">,
   endpoints: MetaOAuthEndpoints,
   operation: OAuthOperation,
   request: GraphRequest
@@ -378,7 +379,7 @@ async function graphRequest(
   return body
 }
 
-function accessTokenOf(body: Record<string, unknown>, operation: OAuthOperation): string {
+export function accessTokenOf(body: Record<string, unknown>, operation: OAuthOperation): string {
   if (!nonEmptyString(body.access_token)) {
     throw new ConnectorOAuthError(
       "ambiguous",
@@ -388,17 +389,17 @@ function accessTokenOf(body: Record<string, unknown>, operation: OAuthOperation)
   return body.access_token
 }
 
-function nextCursor(body: Record<string, unknown>): string | undefined {
+export function nextCursor(body: Record<string, unknown>): string | undefined {
   const paging = isRecord(body.paging) ? body.paging : undefined
   if (!nonEmptyString(paging?.next)) return undefined
   const cursors = isRecord(paging.cursors) ? paging.cursors : undefined
   return nonEmptyString(cursors?.after) ? cursors.after : undefined
 }
 
-function nonEmptyString(value: unknown): value is string {
+export function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }

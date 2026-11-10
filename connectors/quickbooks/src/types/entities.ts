@@ -239,3 +239,96 @@ export interface QuickBooksEmailMessage {
   readonly Subject?: string
   readonly Message?: string
 }
+
+export interface QuickBooksCustomerType extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+}
+
+/** Read-only planning data. Detail rows exist per account, period and optional dimension. */
+export interface QuickBooksBudget extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly StartDate?: string
+  readonly EndDate?: string
+  readonly BudgetType?: "ProfitAndLoss" | "BalanceSheet" | (string & {})
+  readonly BudgetEntryType?: "Monthly" | "Quarterly" | "Annually" | (string & {})
+  readonly BudgetDetail?: readonly {
+    readonly BudgetDate?: string
+    readonly Amount?: number
+    readonly AccountRef?: QuickBooksReference
+    readonly CustomerRef?: QuickBooksReference
+    readonly ClassRef?: QuickBooksReference
+    readonly DepartmentRef?: QuickBooksReference
+  }[]
+}
+
+/** Present only when multicurrency is enabled for the company. */
+export interface QuickBooksCompanyCurrency extends QuickBooksEntity {
+  readonly Code: string
+  readonly Name?: string
+  readonly Active?: boolean
+  readonly CustomField?: readonly QuickBooksCustomField[]
+}
+
+/** Keyed by source currency and date; exchange rates have no entity ID. */
+export interface QuickBooksExchangeRate {
+  readonly SourceCurrencyCode: string
+  readonly TargetCurrencyCode?: string
+  readonly Rate?: number
+  readonly AsOfDate?: string
+  readonly SyncToken?: string
+  readonly MetaData?: { readonly CreateTime?: string; readonly LastUpdatedTime?: string }
+  readonly domain?: string
+  readonly sparse?: boolean
+}
+
+export interface QuickBooksEmployee extends QuickBooksEntity {
+  readonly DisplayName?: string
+  readonly Active?: boolean
+  readonly Title?: string
+  readonly GivenName?: string
+  readonly MiddleName?: string
+  readonly FamilyName?: string
+  readonly Suffix?: string
+  readonly PrintOnCheckName?: string
+  readonly PrimaryPhone?: { readonly FreeFormNumber?: string }
+  readonly Mobile?: { readonly FreeFormNumber?: string }
+  readonly PrimaryEmailAddr?: { readonly Address?: string }
+  readonly PrimaryAddr?: QuickBooksAddress
+  readonly EmployeeNumber?: string
+  /** Masked by QuickBooks on read. */
+  readonly SSN?: string
+  readonly BillableTime?: boolean
+  readonly BillRate?: number
+  readonly CostRate?: number
+  readonly BirthDate?: string
+  readonly Gender?: "Male" | "Female" | (string & {})
+  readonly HiredDate?: string
+  readonly ReleasedDate?: string
+  readonly Organization?: boolean
+  readonly V4IDPseudonym?: string
+}
+
+export interface QuickBooksClass extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly FullyQualifiedName?: string
+  readonly SubClass?: boolean
+  readonly ParentRef?: QuickBooksReference
+}
+
+/** Called Location (or Division, Territory, ...) in the QuickBooks UI. */
+export interface QuickBooksDepartment extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly FullyQualifiedName?: string
+  readonly SubDepartment?: boolean
+  readonly ParentRef?: QuickBooksReference
+}
+
+export interface QuickBooksPaymentMethod extends QuickBooksEntity {
+  readonly Name: string
+  readonly Active?: boolean
+  readonly Type?: "CREDIT_CARD" | "NON_CREDIT_CARD" | (string & {})
+}

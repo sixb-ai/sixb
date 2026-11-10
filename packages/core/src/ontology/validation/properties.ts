@@ -202,6 +202,15 @@ export function validatePropertyDefinitions(
             `[Sixb] ${path} cannot use ref.user(). User references are supported on object properties only.`
           )
         }
+
+        // Nor that referenced artifacts exist, and no index records the links that hold one.
+        if (
+          findPrimitiveSchema(property.schema, valueTypesById, (schema) => schema === "artifactRef")
+        ) {
+          throw new OntologyValidationError(
+            `[Sixb] ${path} cannot use ref.artifact(). Artifact references are supported on object properties only.`
+          )
+        }
       }
     }
   }

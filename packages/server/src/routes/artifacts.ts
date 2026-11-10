@@ -21,6 +21,7 @@ import {
   boardPreview,
   boardPreviewStatuses,
   boardPreviews,
+  boardsReadLiveData,
 } from "@sixb/core/internal/artifacts/publish"
 import type {
   ArtifactCommentRecord,
@@ -48,6 +49,7 @@ import {
   ArtifactCommentSchema,
   ArtifactErrorResponseSchema,
   ArtifactFrameResponseSchema,
+  ArtifactHolderListResponseSchema,
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
@@ -73,11 +75,14 @@ import {
   SetArtifactStateResponseSchema,
   UpdateArtifactBodySchema,
 } from "../schemas/artifacts"
-import { FileContentQuerySchema } from "../schemas/files"
+import { FileContentQuerySchema, ShareGrantQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 import { handleObjectQueryError } from "./objects"
 
 type RouteSet = { status?: number | string }
+
+/** A version's file, as an `<img>` loads it too: a shared link's session names its grant. */
+const ArtifactFileContentQuerySchema = FileContentQuerySchema.extend(ShareGrantQuerySchema.shape)
 
 // The two below build response bodies; each route parses its whole response once.
 function artifactBody(artifact: ArtifactRecord) {
@@ -115,15 +120,22 @@ function versionBody(version: ArtifactVersionRecord) {
 }
 
 /**
- * Names the authors of these comments, each read once, as the live canvas names who is on it.
+ * Names the authors of these comments, each read once, as the live canvas names who is on it: a
+ * guest by the name they gave. A shared link's guest reads them too, and never learns a member's
+ * email from them.
  */
-function commentAuthors(host: SixbHostView) {
+function commentAuthors(host: SixbHostView, context: unknown) {
+  const email = !requestAuthState(context).sharedSession
   const names = new Map<string, Promise<string | null>>()
+
   return (comment: ArtifactCommentRecord) => {
-    const key = `${comment.author.type}:${comment.author.id}`
+    const { author } = comment
+    if (author.type === "guest") return Promise.resolve(author.name)
+
+    const key = `${author.type}:${author.id}`
     let name = names.get(key)
     if (!name) {
-      name = principalName(host.storage, host.projectId, comment.author)
+      name = principalName(host.storage, host.projectId, author, { email })
       names.set(key, name)
     }
     return name
@@ -142,7 +154,7 @@ async function commentBody(
     ...(comment.parentId === undefined ? {} : { parentId: comment.parentId }),
     anchor: comment.anchor,
     body: comment.body,
-    author: comment.author,
+    author: { type: comment.author.type, id: comment.author.id },
     createdAt: toIsoString(comment.createdAt),
     ...(comment.resolvedAt ? { resolvedAt: toIsoString(comment.resolvedAt) } : {}),
     ...(comment.resolvedBy ? { resolvedBy: comment.resolvedBy } : {}),
@@ -169,15 +181,25 @@ function restorePointSummary(point: ArtifactRestorePointRecord) {
  * A version as one is answered alone, or just written: a canvas's boards say whether their
  * previews are worth waiting for, so a viewer seeded from either asks for them alike.
  */
-async function versionResponse(host: SixbHostView, version: ArtifactVersionRecord) {
+async function versionResponse(
+  host: SixbHostView,
+  version: ArtifactVersionRecord,
+  options: { readonly previews?: boolean } = {}
+) {
   const storage = host.storage.artifacts
-  const statuses =
+  const stored =
     storage && version.outline.kind === "canvas"
       ? await boardPreviewStatuses(storage, version, {
           renders: host.sandboxes !== undefined,
           now: new Date(),
         })
       : undefined
+
+  // A reader shown no pictures sees each board's outline, until they open it.
+  const statuses =
+    stored && options.previews === false
+      ? new Map([...stored.keys()].map((board) => [board, "none" as const]))
+      : stored
 
   return {
     ...versionBody(version),
@@ -281,7 +303,7 @@ function notFound(set: RouteSet) {
 
 /**
  * Why a read found nothing: 404 when there is no such artifact, 403 `not_shared` when there is one
- * the caller cannot read, so a page can say it is not shared in this conversation.
+ * the caller cannot read, so a page can say it is not shared with them.
  */
 async function refusal(context: unknown, artifactId: string, set: RouteSet) {
   return refusalFor(await requireRequestSixb(context).artifacts.access(artifactId), set)
@@ -302,7 +324,7 @@ function refusalFor(access: ArtifactAccess | null, set: RouteSet) {
 
   set.status = 403
   return {
-    error: "Artifact not shared in a conversation you read",
+    error: "Artifact not shared with you",
     code: "not_shared" as const,
   }
 }
@@ -324,6 +346,7 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
       case "invalid_artifact":
       case "invalid_comment":
       case "invalid_state":
+      case "name_required":
         set.status = 400
         break
       case "comments_full":
@@ -489,6 +512,11 @@ async function artifactBoardPreviewResponse(
 
     const version = await requireRequestSixb(context).artifacts.getVersion(artifactId, number)
     if (!version) return await refusal(context, artifactId, context.set)
+    if (!seesBoardPreviews(context, version)) {
+      context.set.status = 404
+      context.set.headers["cache-control"] = "no-store"
+      return { error: "Board preview not found", code: "preview_not_found" as const }
+    }
 
     // A picture of a revision the version moved past, or of what the board showed before, is not
     // this one's.
@@ -538,6 +566,16 @@ async function artifactBoardPreviewResponse(
   } catch (error) {
     return handleArtifactRouteError(error, context.set)
   }
+}
+
+/**
+ * Whether the caller sees the pictures of a version's boards. A version that holds queries has its
+ * boards pictured with its author's answers, which a shared link's guest, whose link grants its
+ * objects alone, must not see: their boards show their outlines, and an opened board runs its
+ * queries with the guest's own rights.
+ */
+function seesBoardPreviews(context: unknown, version: ArtifactVersionRecord): boolean {
+  return !requestAuthState(context).sharedSession || !boardsReadLiveData(version)
 }
 
 /** The render key a canvas version's outline gives one of its boards. */
@@ -663,6 +701,37 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifact",
           security: accessTokenSecurityRequirement("getArtifact"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/holders",
+      async (context) => {
+        try {
+          const { artifactId } = context.params
+          const holders = await requireRequestSixb(context).artifacts.holders(artifactId)
+          if (!holders) return await refusal(context, artifactId, context.set)
+
+          return ArtifactHolderListResponseSchema.parse(holders)
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ArtifactHolderListResponseSchema,
+          403: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "List the objects that hold an artifact",
+          description:
+            "The objects whose property holds the artifact, among those you read with that property, in a stable order. Whoever reads such an object reads the artifact.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "listArtifactHolders",
+          security: accessTokenSecurityRequirement("listArtifactHolders"),
         },
       }
     )
@@ -864,7 +933,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Update an artifact",
           description:
-            "Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares or its requester owns; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.",
+            "Writes the artifact's latest version: its content is replaced while the version is open, and the next version opens when it is frozen. Either way the revision grows. The kind must be the artifact's. With baseRevision, it is refused with 409 artifact_moved when the artifact changed since. With a run token, only an artifact the run's conversation shares, its requester owns, or an object its requester edits holds; it is shared in that conversation, and the turn's first write to it keeps a restore point. A run that lost its execution gets 409 execution_lost.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "updateArtifact",
           security: accessTokenSecurityRequirement("updateArtifact"),
@@ -914,7 +983,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const comments = await requireRequestSixb(context).artifacts.listComments(artifactId)
           if (!comments) return await refusal(context, artifactId, context.set)
 
-          const nameOf = commentAuthors(host)
+          const nameOf = commentAuthors(host, context)
           return ArtifactCommentListResponseSchema.parse({
             comments: await Promise.all(comments.map((comment) => commentBody(comment, nameOf))),
           })
@@ -956,7 +1025,9 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             }
           )
           context.set.status = 201
-          return ArtifactCommentSchema.parse(await commentBody(comment, commentAuthors(host)))
+          return ArtifactCommentSchema.parse(
+            await commentBody(comment, commentAuthors(host, context))
+          )
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -975,7 +1046,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Comment on an artifact",
           description:
-            "Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may. A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.",
+            "Adds a comment, or a reply with parentId, as the caller. Whoever reads the artifact may, a shared link's guest included, under the name they gave its session (400 name_required until they give one). A canvas's comment can be about one of its boards, or an element of a board by its address. Readers receive artifact.commented.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "addArtifactComment",
           security: accessTokenSecurityRequirement("addArtifactComment"),
@@ -992,7 +1063,9 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             context.params.commentId,
             body.resolved
           )
-          return ArtifactCommentSchema.parse(await commentBody(comment, commentAuthors(host)))
+          return ArtifactCommentSchema.parse(
+            await commentBody(comment, commentAuthors(host, context))
+          )
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -1010,7 +1083,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Resolve an artifact's comment",
           description:
-            "Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed.",
+            "Marks the comment resolved, or, with resolved false, opens it again. Its author, or whoever may update the artifact, may; anyone else is refused with 403 not_allowed. A guest's comment is resolved only by whoever may update the artifact.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "resolveArtifactComment",
           security: accessTokenSecurityRequirement("resolveArtifactComment"),
@@ -1231,7 +1304,11 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           )
           if (!version) return await refusal(context, context.params.artifactId, context.set)
 
-          return ArtifactVersionSchema.parse(await versionResponse(host, version))
+          return ArtifactVersionSchema.parse(
+            await versionResponse(host, version, {
+              previews: seesBoardPreviews(context, version),
+            })
+          )
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -1341,7 +1418,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => artifactFileContentResponse(host, context),
       {
         params: ArtifactVersionParamsSchema,
-        query: FileContentQuerySchema,
+        query: ArtifactFileContentQuerySchema,
         detail: {
           summary: "Get a file of an artifact version",
           tags: [OPENAPI_TAGS.artifacts.name],
@@ -1356,7 +1433,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => artifactFileContentResponse(host, context, { head: true }),
       {
         params: ArtifactVersionParamsSchema,
-        query: FileContentQuerySchema,
+        query: ArtifactFileContentQuerySchema,
         detail: {
           summary: "Head a file of an artifact version",
           tags: [OPENAPI_TAGS.artifacts.name],

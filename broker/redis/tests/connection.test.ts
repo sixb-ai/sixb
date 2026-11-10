@@ -235,6 +235,7 @@ test("bounds the latest-cursor lookup on the subscription client", async () => {
     projectId: "project",
     streamId: "events",
     keys: streamKeysFor("sixb:broker", "project", "events"),
+    retention: {},
   }
   let clientCount = 0
   const manager = new RedisConnectionManager(

@@ -6,14 +6,44 @@ import { createAttachmentsResource } from "./resources/attachments"
 import { createBillPaymentsResource } from "./resources/bill-payments"
 import { createBillsResource } from "./resources/bills"
 import { createCdcResource } from "./resources/cdc"
+import { createClassesResource } from "./resources/classes"
 import { createCreditMemosResource } from "./resources/credit-memos"
 import { createCustomersResource } from "./resources/customers"
+import { createDepartmentsResource } from "./resources/departments"
+import { createDepositsResource } from "./resources/deposits"
+import { createEmployeesResource } from "./resources/employees"
+import { createEstimatesResource } from "./resources/estimates"
+import { createExchangeRatesResource } from "./resources/exchange-rates"
 import { createInvoicesResource } from "./resources/invoices"
 import { createItemsResource } from "./resources/items"
+import { createJournalEntriesResource } from "./resources/journal-entries"
+import { createPaymentMethodsResource } from "./resources/payment-methods"
 import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
+import { createPurchaseOrdersResource } from "./resources/purchase-orders"
+import { createPurchasesResource } from "./resources/purchases"
+import {
+  createBudgetsResource,
+  createCompanyCurrenciesResource,
+  createCustomerTypesResource,
+  createTaxAgenciesResource,
+  createTaxCodesResource,
+  createTaxRatesResource,
+} from "./resources/read-only-lists"
+import {
+  createCreditCardPaymentsResource,
+  createInventoryAdjustmentsResource,
+  createReimburseChargesResource,
+  createTaxPaymentsResource,
+} from "./resources/read-only-transactions"
+import { createRecurringTransactionsResource } from "./resources/recurring-transactions"
+import { createRefundReceiptsResource } from "./resources/refund-receipts"
 import { createReportsResource } from "./resources/reports"
+import { createSalesReceiptsResource } from "./resources/sales-receipts"
+import { createTaxClassificationsResource } from "./resources/tax-classifications"
 import { createTermsResource } from "./resources/terms"
+import { createTimeActivitiesResource } from "./resources/time-activities"
+import { createTransfersResource } from "./resources/transfers"
 import { createVendorCreditsResource } from "./resources/vendor-credits"
 import { createVendorsResource } from "./resources/vendors"
 import type { QuickBooksClient, QuickBooksCompanyInfo, QuickBooksConnectorOptions } from "./types"
@@ -70,21 +100,47 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
             return updateEntity(http, "CompanyInfo", input, options)
           },
         },
-        cdc: createCdcResource(http),
-        attachments: createAttachmentsResource(http),
-        reports: createReportsResource(http),
         preferences: createPreferencesResource(http),
         customers: createCustomersResource(http),
         vendors: createVendorsResource(http),
+        employees: createEmployeesResource(http),
         accounts: createAccountsResource(http),
         items: createItemsResource(http),
         terms: createTermsResource(http),
+        classes: createClassesResource(http),
+        departments: createDepartmentsResource(http),
+        customerTypes: createCustomerTypesResource(http),
+        paymentMethods: createPaymentMethodsResource(http),
+        budgets: createBudgetsResource(http),
+        companyCurrencies: createCompanyCurrenciesResource(http),
+        taxCodes: createTaxCodesResource(http),
+        taxRates: createTaxRatesResource(http),
+        taxAgencies: createTaxAgenciesResource(http),
+        taxClassifications: createTaxClassificationsResource(http),
+        taxPayments: createTaxPaymentsResource(http),
+        exchangeRates: createExchangeRatesResource(http),
+        estimates: createEstimatesResource(http),
         invoices: createInvoicesResource(http),
+        salesReceipts: createSalesReceiptsResource(http),
+        refundReceipts: createRefundReceiptsResource(http),
         payments: createPaymentsResource(http),
         creditMemos: createCreditMemosResource(http),
         bills: createBillsResource(http),
         billPayments: createBillPaymentsResource(http),
         vendorCredits: createVendorCreditsResource(http),
+        purchases: createPurchasesResource(http),
+        purchaseOrders: createPurchaseOrdersResource(http),
+        deposits: createDepositsResource(http),
+        transfers: createTransfersResource(http),
+        journalEntries: createJournalEntriesResource(http),
+        creditCardPayments: createCreditCardPaymentsResource(http),
+        timeActivities: createTimeActivitiesResource(http),
+        inventoryAdjustments: createInventoryAdjustmentsResource(http),
+        reimburseCharges: createReimburseChargesResource(http),
+        recurringTransactions: createRecurringTransactionsResource(http),
+        cdc: createCdcResource(http),
+        attachments: createAttachmentsResource(http),
+        reports: createReportsResource(http),
       }
     },
   }

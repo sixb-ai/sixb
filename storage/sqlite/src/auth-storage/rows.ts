@@ -15,6 +15,7 @@ import type {
   UserIdentityRecord,
   UserRecord,
   UserStatus,
+  UserSuspensionSource,
 } from "@sixb/core/storage"
 
 export interface SqliteAuthUserRow {
@@ -24,6 +25,7 @@ export interface SqliteAuthUserRow {
   readonly display_name: string | null
   readonly avatar_url: string | null
   readonly status: UserStatus
+  readonly suspension_source: UserSuspensionSource | null
   readonly created_at: string
   readonly updated_at: string
 }
@@ -172,6 +174,7 @@ export function rowToUserRecord(row: SqliteAuthUserRow): UserRecord {
     displayName: row.display_name ?? undefined,
     avatarUrl: row.avatar_url ?? undefined,
     status: row.status,
+    ...(row.suspension_source === null ? {} : { suspensionSource: row.suspension_source }),
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   }

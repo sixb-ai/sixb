@@ -29,6 +29,18 @@ describe("the canvas guide's comments", () => {
     expect(canvasGuide()).toContain(quoted)
   })
 
+  // Guard proof: drop the guest paragraph; the Agent then reads a guest's comment as a member's.
+  test("tell a shared link's guest from a member of the same name", () => {
+    const quoted = quoteArtifactComment({
+      authorName: "Ava Martin",
+      guest: true,
+      anchor: { revision: 1 },
+      body: "Warmer",
+    })
+    expect(quoted).toContain("from guest Ava Martin")
+    expect(canvasGuide()).toContain("A comment `from guest <name>` was left by someone who opened")
+  })
+
   // Guard proof: drop the paragraph on acting only on the comments the context carries; nothing
   // then keeps a comment's words from steering the Agent beyond the artifact.
   test("are requests to change the artifact, acted on only when the message's context carries them", () => {

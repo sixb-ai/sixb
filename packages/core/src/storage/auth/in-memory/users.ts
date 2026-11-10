@@ -13,7 +13,6 @@ import type {
 import type { AuthStorageState } from "./shared"
 import {
   assertNonEmpty,
-  cloneDate,
   cloneOptionalRecord,
   cloneRecord,
   compareByCreatedAt,
@@ -21,6 +20,7 @@ import {
   getUserByEmail,
   normalizeEmail,
   userKey,
+  withUserStatus,
 } from "./shared"
 
 export class InMemoryAuthUserStore implements AuthUserStore {
@@ -47,16 +47,21 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     }
 
     const createdAt = dateOrNow(input.createdAt)
-    const user: UserRecord = {
-      id,
-      projectId,
-      email,
-      displayName: input.displayName,
-      avatarUrl: input.avatarUrl,
-      status: input.status ?? "active",
-      createdAt,
-      updatedAt: input.updatedAt ? cloneDate(input.updatedAt) : cloneDate(createdAt),
-    }
+    const user = withUserStatus(
+      {
+        id,
+        projectId,
+        email,
+        displayName: input.displayName,
+        avatarUrl: input.avatarUrl,
+        status: "active",
+        createdAt,
+        updatedAt: createdAt,
+      },
+      input.status ?? "active",
+      "manual",
+      input.updatedAt ?? createdAt
+    )
 
     this.state.users.set(key, cloneRecord(user))
     return cloneRecord(user)
@@ -125,11 +130,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
       )
     }
 
-    const next: UserRecord = {
-      ...existing,
-      status: input.status,
-      updatedAt: dateOrNow(input.updatedAt),
-    }
+    const next = withUserStatus(existing, input.status, "manual", dateOrNow(input.updatedAt))
     this.state.users.set(key, cloneRecord(next))
     return { user: cloneRecord(next), previousUser: cloneRecord(existing) }
   }

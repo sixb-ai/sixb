@@ -2,7 +2,9 @@ import { ConnectorError, createConnectorCodedError } from "./errors"
 import type {
   AnyConnectorAdapter,
   ConnectorAdapter,
+  ConnectorConnectionOwner,
   ConnectorDefinition,
+  ConnectorDefinitionOptions,
   OAuthConnectorAdapter,
 } from "./types"
 import { isOAuthConnectorAdapter } from "./types"
@@ -22,7 +24,8 @@ function assertNonEmpty(value: string, field: string): void {
  */
 export function defineConnector<TId extends string, TAdapter extends OAuthConnectorAdapter>(
   id: TId,
-  adapter: TAdapter
+  adapter: TAdapter,
+  options?: ConnectorDefinitionOptions
 ): ConnectorDefinition<TId, TAdapter>
 export function defineConnector<TId extends string, TAdapter extends ConnectorAdapter>(
   id: TId,
@@ -30,7 +33,8 @@ export function defineConnector<TId extends string, TAdapter extends ConnectorAd
 ): ConnectorDefinition<TId, TAdapter>
 export function defineConnector<TId extends string, TAdapter extends AnyConnectorAdapter>(
   id: TId,
-  adapter: TAdapter
+  adapter: TAdapter,
+  options: ConnectorDefinitionOptions = {}
 ): ConnectorDefinition<TId, TAdapter> {
   assertNonEmpty(id, "id")
   assertNonEmpty(adapter.type, "type")
@@ -58,5 +62,33 @@ export function defineConnector<TId extends string, TAdapter extends AnyConnecto
     kind: "connector",
     id,
     adapter,
+    ...(options.owners === undefined
+      ? {}
+      : { owners: connectorOwners(id, adapter, options.owners) }),
   }
+}
+
+function connectorOwners(
+  id: string,
+  adapter: AnyConnectorAdapter,
+  owners: readonly unknown[]
+): readonly ConnectorConnectionOwner["type"][] {
+  if (!isOAuthConnectorAdapter(adapter)) {
+    throw new ConnectorError(
+      `Connector '${id}' has no OAuth connections to own; remove its owners option.`
+    )
+  }
+  const valid = owners.filter(
+    (owner): owner is ConnectorConnectionOwner["type"] => owner === "project" || owner === "user"
+  )
+  if (
+    owners.length === 0 ||
+    valid.length !== owners.length ||
+    new Set(valid).size !== valid.length
+  ) {
+    throw new ConnectorError(
+      `Connector '${id}' owners must list "project", "user" or both, each once.`
+    )
+  }
+  return Object.freeze([...valid])
 }

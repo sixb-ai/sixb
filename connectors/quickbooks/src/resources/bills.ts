@@ -47,7 +47,7 @@ export function createBillsResource(http: QuickBooksWriteHttp): QuickBooksBillsR
     },
     delete: async (input, options) => deleteEntity(http, "Bill", input, options),
     get: (id) => readEntity(http, "Bill", `bill/${pathId(id)}`, id),
-    list: (options) => listTransactions(http, "Bill", options),
+    list: (options) => listTransactions(http, "Bill", options, { party: "vendor" }),
     listAll: (options) => listAll(resource.list, options),
   }
   return resource

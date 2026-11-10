@@ -27,6 +27,8 @@ export type {
   AppliedMaterialization,
   ApplyMaterializationInput,
   ApplyMaterializationResult,
+  ArtifactHolder,
+  ExactArtifactHolderWrite,
   ExactEffectiveLinkDelete,
   ExactEffectiveLinkWrite,
   ExactEffectiveObjectDelete,

@@ -7,6 +7,7 @@ import {
 import type { Principal } from "../auth"
 import type { FileRef } from "../blob-storage"
 import {
+  type ArtifactCommentAuthor,
   type ArtifactFrameGrantRecord,
   type ArtifactStorage,
   ArtifactStorageError,
@@ -1439,6 +1440,45 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           await comment(`cmt_${index}`)
         }
         expect(await code(comment("cmt_over"))).toBe("artifact_comments_full")
+      })
+    })
+
+    // Regression proof: drop the guests' count from a provider's createComment; the guest past
+    // the cap is then stored.
+    test("keeps a guest's comment under the name they gave, up to what guests may write", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const guest = { type: "guest" as const, id: "shs_visitor", name: "Ava Martin" }
+        const comment = (id: string, author: ArtifactCommentAuthor) =>
+          artifacts.createComment({
+            projectId,
+            artifactId: "art_report",
+            id,
+            anchor: { revision: 1 },
+            body: "Hm",
+            author,
+            createdAt: at(1),
+          })
+
+        expect((await comment("cmt_guest_0", guest)).author).toEqual(guest)
+        expect(
+          await artifacts.getComment({ projectId, artifactId: "art_report", id: "cmt_guest_0" })
+        ).toMatchObject({ author: guest })
+
+        for (let index = 1; index < ARTIFACT_COMMENT_LIMITS.maxGuestComments; index += 1) {
+          await comment(`cmt_guest_${index}`, { ...guest, id: `shs_visitor_${index % 3}` })
+        }
+        const refused = await comment("cmt_guest_over", guest).then(
+          () => null,
+          (error: unknown) => (error instanceof ArtifactStorageError ? error.code : error)
+        )
+        expect(refused).toBe("artifact_comments_full")
+
+        // Members keep their room.
+        expect((await comment("cmt_member", owner)).author).toEqual(owner)
+        expect(await artifacts.listComments({ projectId, id: "art_report" })).toHaveLength(
+          ARTIFACT_COMMENT_LIMITS.maxGuestComments + 1
+        )
       })
     })
 

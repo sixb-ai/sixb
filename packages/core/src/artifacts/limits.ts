@@ -63,10 +63,18 @@ export const ARTIFACT_STATE_LIMITS = {
  */
 export const ARTIFACT_RESTORE_POINTS = 20
 
+/** How many of the objects that hold an artifact one read lists. */
+export const ARTIFACT_HOLDERS_LIMIT = 20
+
 /** What an artifact's comments may hold. */
 export const ARTIFACT_COMMENT_LIMITS = {
   /** Comments and replies, together. */
   maxComments: 1_000,
+  /**
+   * Those of them shared links' guests wrote, together: a visitor opens as many sessions as they
+   * like, so only a cap on all guests keeps room for the members.
+   */
+  maxGuestComments: 200,
   /** A comment's words, in characters. */
   maxBodyLength: 4_000,
   /** The words that name the element it is about. */

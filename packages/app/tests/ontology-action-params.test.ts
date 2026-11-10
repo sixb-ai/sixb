@@ -147,4 +147,31 @@ describe("action params", () => {
       errors: {},
     })
   })
+
+  // Regression proof: drop the `artifactRef` case from describeActionParamInput and the id is sent
+  // as a plain string, which the action refuses.
+  test("sends an artifact id as an artifact reference", () => {
+    const action = actionWithParam({
+      id: "plan",
+      name: "Plan",
+      schema: { type: "valueTypeRef", valueTypeId: "Plan", _resolved: "artifactRef" },
+      required: true,
+    })
+    const plan = { type: "artifact", id: "art_k3m9q2x7tp" }
+
+    expect(describeActionParamInput("artifactRef")).toEqual({ kind: "artifactRef" })
+    expect(buildActionParams(action, { plan: " art_k3m9q2x7tp " })).toEqual({
+      params: { plan },
+      errors: {},
+    })
+
+    const objectAction: ObjectAction = {
+      id: "attachPlan",
+      params: { plan: { type: "artifactRef", required: true } },
+    }
+    expect(buildObjectActionParams(objectAction, { plan: "art_k3m9q2x7tp" })).toEqual({
+      params: { plan },
+      errors: {},
+    })
+  })
 })

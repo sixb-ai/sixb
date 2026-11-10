@@ -469,6 +469,10 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("096-artifact-documents", artifactDocumentsSql),
     pgSql("097-artifact-frame-files", artifactFrameFilesSql),
     pgSql("098-artifact-comments", artifactCommentsSql),
+    pgSql("099-object-artifact-refs", objectArtifactRefsSql),
+    pgSql("100-shared-link-guests", sharedLinkGuestsSql),
+    pgSql("101-connector-connection-owners", connectorConnectionOwnersSql),
+    pgSql("102-user-suspension-source", userSuspensionSourceSql),
   ],
 })
 
@@ -563,3 +567,11 @@ import artifactOpenVersionsSql from "./migrations/095-artifact-open-versions.sql
 import artifactDocumentsSql from "./migrations/096-artifact-documents.sql" with { type: "text" }
 import artifactFrameFilesSql from "./migrations/097-artifact-frame-files.sql" with { type: "text" }
 import artifactCommentsSql from "./migrations/098-artifact-comments.sql" with { type: "text" }
+import objectArtifactRefsSql from "./migrations/099-object-artifact-refs.sql" with { type: "text" }
+import sharedLinkGuestsSql from "./migrations/100-shared-link-guests.sql" with { type: "text" }
+import connectorConnectionOwnersSql from "./migrations/101-connector-connection-owners.sql" with {
+  type: "text",
+}
+import userSuspensionSourceSql from "./migrations/102-user-suspension-source.sql" with {
+  type: "text",
+}

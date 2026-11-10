@@ -1,5 +1,5 @@
 import type { RestRetryPolicy } from "@sixb/connector-rest"
-import type { MicrosoftAuthOptions } from "../auth/types"
+import type { MicrosoftAuthOptions, MicrosoftOAuthOptions } from "../auth/types"
 import type { MicrosoftEventHandler } from "./webhooks"
 
 export interface MicrosoftConnectorOptions {
@@ -13,6 +13,12 @@ export interface MicrosoftConnectorOptions {
   readonly webhookSecret?: string
   /** Runs inside Sixb's webhook execution. Persist/enqueue work before returning. */
   readonly onEvent?: MicrosoftEventHandler
+}
+
+/** Connections people make with their own accounts. Change notifications stay app-only. */
+export interface MicrosoftOAuthConnectorOptions
+  extends Omit<MicrosoftConnectorOptions, "auth" | "webhookSecret" | "onEvent"> {
+  readonly auth: { readonly oauth: MicrosoftOAuthOptions }
 }
 
 export interface RequestOptions {

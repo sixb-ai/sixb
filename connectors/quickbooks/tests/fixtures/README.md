@@ -4,7 +4,7 @@ These are synthetic, deliberately partial examples of documented QuickBooks resp
 not captured sandbox responses or evidence of live API verification.
 
 - `customer-query.json`: entity-named array, provider fields, numeric balance, and pagination metadata.
-- `transactions.ts`: typed synthetic samples for all six transaction resources, including partial
+- `transactions.ts`: typed synthetic samples for the transaction resources, including partial
   payments, multi-transaction allocations, credit links, expense lines, and currency metadata.
 
 Sources: [Customer](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/customer)

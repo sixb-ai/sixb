@@ -41,7 +41,7 @@ export interface ForeignKeyDescriptor {
 }
 
 /** What a column mapped to a `ref.user()` property identifies its member by. */
-export type ProjectionUserKey = "email"
+export type ProjectionUserKey = "email" | "id"
 
 /** Resolves competing source-projection and managed-edit values for projected properties. */
 export type SourceEditConflictResolution =

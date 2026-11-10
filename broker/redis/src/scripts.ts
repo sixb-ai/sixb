@@ -1,43 +1,18 @@
-// Creates the metadata hash that represents an ensured broker stream.
-export const ENSURE_STREAM_SCRIPT = `
-local meta_key = KEYS[1]
+// A stream's records stay in Redis until a command trims them, and a finished agent run's stream
+// is never written or read again. So every key of a stream with age retention also expires: the
+// stream when its newest record leaves retention, plus a minute of slack, and the metadata a day
+// after that, so a reader returning with an old cursor still learns it fell out of range instead
+// of reading a new, empty stream.
+const STREAM_EXPIRY_SLACK_MS = 60_000
+const METADATA_GRACE_MS = 24 * 60 * 60 * 1000
 
-if redis.call("EXISTS", meta_key) == 1 then
-  return 0
-end
-
-redis.call(
-  "HSET",
-  meta_key,
-  "projectId", ARGV[1],
-  "streamId", ARGV[2],
-  "createdAt", ARGV[3],
-  "retainedBytes", "0"
-)
-
-if ARGV[4] ~= "" then
-  redis.call("HSET", meta_key, "maxAgeMs", ARGV[4])
-end
-
-if ARGV[5] ~= "" then
-  redis.call("HSET", meta_key, "maxRecords", ARGV[5])
-end
-
-if ARGV[6] ~= "" then
-  redis.call("HSET", meta_key, "maxBytes", ARGV[6])
-end
-
-return 1
-`
-
-// Enforces age retention for idle streams and keeps exact encoded-body byte
-// accounting in sync with the physical Redis Stream.
-export const ENFORCE_AGE_RETENTION_SCRIPT = `
-local stream_key = KEYS[1]
-local meta_key = KEYS[2]
-
-if redis.call("EXISTS", meta_key) == 0 then
-  return redis.error_reply("broker stream has not been ensured")
+// Helpers every script below starts with. expire_idle_stream sets the expiry of a stream whose
+// newest record was appended at newest_ms, and returns false, having deleted both keys, when the
+// metadata's grace period has already passed.
+const STREAM_HELPERS = `
+local function server_time_ms()
+  local now = redis.call("TIME")
+  return (tonumber(now[1]) * 1000) + math.floor(tonumber(now[2]) / 1000)
 end
 
 local function entry_bytes(entry)
@@ -63,21 +38,86 @@ local function id_is_newer(candidate, current)
   return candidate_ms > current_ms or (candidate_ms == current_ms and candidate_seq > current_seq)
 end
 
-local function advance_boundary(candidate)
+local function advance_boundary(meta_key, candidate)
   local current = redis.call("HGET", meta_key, "lastTrimmedId")
   if candidate and id_is_newer(candidate, current) then
     redis.call("HSET", meta_key, "lastTrimmedId", candidate)
   end
 end
 
+local function expire_idle_stream(stream_key, meta_key, max_age_ms, newest_ms, now_ms)
+  local stream_ttl = math.min(newest_ms + math.max(0, max_age_ms) + ${STREAM_EXPIRY_SLACK_MS} - now_ms, 1e15)
+  local meta_ttl = stream_ttl + ${METADATA_GRACE_MS}
+  if meta_ttl <= 0 then
+    redis.call("DEL", stream_key, meta_key)
+    return false
+  end
+  if stream_ttl > 0 then
+    redis.call("PEXPIRE", stream_key, string.format("%.0f", stream_ttl))
+  else
+    redis.call("DEL", stream_key)
+  end
+  redis.call("PEXPIRE", meta_key, string.format("%.0f", meta_ttl))
+  return true
+end
+`
+
+// Creates the metadata hash that represents an ensured broker stream.
+export const ENSURE_STREAM_SCRIPT = `
+local stream_key = KEYS[1]
+local meta_key = KEYS[2]
+${STREAM_HELPERS}
+
+if redis.call("EXISTS", meta_key) == 1 then
+  return 0
+end
+
+redis.call(
+  "HSET",
+  meta_key,
+  "projectId", ARGV[1],
+  "streamId", ARGV[2],
+  "createdAt", ARGV[3],
+  "retainedBytes", "0"
+)
+
+if ARGV[4] ~= "" then
+  redis.call("HSET", meta_key, "maxAgeMs", ARGV[4])
+  local now = server_time_ms()
+  expire_idle_stream(stream_key, meta_key, tonumber(ARGV[4]), now, now)
+end
+
+if ARGV[5] ~= "" then
+  redis.call("HSET", meta_key, "maxRecords", ARGV[5])
+end
+
+if ARGV[6] ~= "" then
+  redis.call("HSET", meta_key, "maxBytes", ARGV[6])
+end
+
+return 1
+`
+
+// Enforces age retention for idle streams and keeps exact encoded-body byte
+// accounting in sync with the physical Redis Stream. Returns 0 when the stream's
+// metadata is gone, because it expired or was never ensured, and 1 otherwise.
+export const ENFORCE_AGE_RETENTION_SCRIPT = `
+local stream_key = KEYS[1]
+local meta_key = KEYS[2]
+${STREAM_HELPERS}
+if redis.call("EXISTS", meta_key) == 0 then
+  return 0
+end
+
 local max_age_ms = redis.call("HGET", meta_key, "maxAgeMs")
 if not max_age_ms then
-  return nil
+  return 1
 end
 
 local max_age_number = tonumber(max_age_ms)
 local last_trimmed_id = nil
 local removed_bytes = 0
+local now = server_time_ms()
 
 if max_age_number <= 0 then
   local removed = redis.call("XREVRANGE", stream_key, "+", "-", "COUNT", 1)
@@ -87,9 +127,7 @@ if max_age_number <= 0 then
   redis.call("XTRIM", stream_key, "MAXLEN", "=", "0")
   redis.call("HSET", meta_key, "retainedBytes", "0")
 else
-  local now = redis.call("TIME")
-  local now_ms = (tonumber(now[1]) * 1000) + math.floor(tonumber(now[2]) / 1000)
-  local min_ms = math.max(0, now_ms - max_age_number)
+  local min_ms = math.max(0, now - max_age_number)
   local min_id = tostring(min_ms) .. "-0"
   local start = "-"
 
@@ -113,8 +151,31 @@ else
   redis.call("HSET", meta_key, "retainedBytes", tostring(retained))
 end
 
-advance_boundary(last_trimmed_id)
-return last_trimmed_id
+local last_id = redis.call("HGET", meta_key, "lastId")
+
+-- An expired stream key took its records without a trim recording them, and an
+-- empty stream retains nothing, so every record up to the last one is gone.
+if redis.call("XLEN", stream_key) == 0 then
+  last_trimmed_id = last_id or last_trimmed_id
+  redis.call("HSET", meta_key, "retainedBytes", "0")
+end
+advance_boundary(meta_key, last_trimmed_id)
+
+-- A stream appended to before its keys expired has no expiry yet: date it from
+-- its newest record. So does a stream key an older broker created after this
+-- one gave the metadata its expiry; left alone, it would outlive the metadata
+-- with nothing left to expire it. PTTL answers -2 for a missing key.
+if redis.call("PTTL", meta_key) == -1 or redis.call("PTTL", stream_key) == -1 then
+  local newest = now
+  if last_id then
+    newest = tonumber(string.match(last_id, "^(%d+)%-"))
+  end
+  if not expire_idle_stream(stream_key, meta_key, max_age_number, newest, now) then
+    return 0
+  end
+end
+
+return 1
 `
 
 // Trims physical retained history after append so blocked XREAD subscribers can
@@ -122,43 +183,13 @@ return last_trimmed_id
 export const TRIM_STREAM_RETENTION_SCRIPT = `
 local stream_key = KEYS[1]
 local meta_key = KEYS[2]
-
+${STREAM_HELPERS}
 if redis.call("EXISTS", meta_key) == 0 then
   return redis.error_reply("broker stream has not been ensured")
 end
 
-local function entry_bytes(entry)
-  local fields = entry[2]
-  for index = 1, #fields, 2 do
-    if fields[index] == "body" then
-      return string.len(fields[index + 1])
-    end
-  end
-  return 0
-end
-
 local last_trimmed_id = nil
 local retained_bytes = tonumber(redis.call("HGET", meta_key, "retainedBytes") or "0")
-
-local function id_is_newer(candidate, current)
-  if not current then
-    return true
-  end
-  local candidate_ms, candidate_seq = string.match(candidate, "^(%d+)%-(%d+)$")
-  local current_ms, current_seq = string.match(current, "^(%d+)%-(%d+)$")
-  candidate_ms = tonumber(candidate_ms)
-  candidate_seq = tonumber(candidate_seq)
-  current_ms = tonumber(current_ms)
-  current_seq = tonumber(current_seq)
-  return candidate_ms > current_ms or (candidate_ms == current_ms and candidate_seq > current_seq)
-end
-
-local function advance_boundary(candidate)
-  local current = redis.call("HGET", meta_key, "lastTrimmedId")
-  if candidate and id_is_newer(candidate, current) then
-    redis.call("HSET", meta_key, "lastTrimmedId", candidate)
-  end
-end
 
 local function record_removed(entries)
   for index = 1, #entries do
@@ -203,9 +234,7 @@ if max_age_ms then
     redis.call("XTRIM", stream_key, "MAXLEN", "=", "0")
     retained_bytes = 0
   else
-    local now = redis.call("TIME")
-    local now_ms = (tonumber(now[1]) * 1000) + math.floor(tonumber(now[2]) / 1000)
-    local min_id = tostring(math.max(0, now_ms - max_age_number)) .. "-0"
+    local min_id = tostring(math.max(0, server_time_ms() - max_age_number)) .. "-0"
     local start = "-"
     while true do
       local entries = redis.call("XRANGE", stream_key, start, "(" .. min_id, "COUNT", 256)
@@ -258,7 +287,7 @@ if max_bytes then
 end
 
 redis.call("HSET", meta_key, "retainedBytes", tostring(retained_bytes))
-advance_boundary(last_trimmed_id)
+advance_boundary(meta_key, last_trimmed_id)
 return last_trimmed_id
 `
 
@@ -270,9 +299,10 @@ local stream_key = KEYS[1]
 local meta_key = KEYS[2]
 local dedupe_ttl_ms = ARGV[1]
 local record_count = tonumber(ARGV[2])
-
+${STREAM_HELPERS}
+-- 0 tells the caller the metadata is gone: it expired, or was never ensured.
 if redis.call("EXISTS", meta_key) == 0 then
-  return redis.error_reply("broker stream has not been ensured")
+  return 0
 end
 if not record_count then
   return redis.error_reply("invalid broker record count")
@@ -281,33 +311,20 @@ if (#KEYS - 2) ~= record_count then
   return redis.error_reply("dedupe key count does not match broker record count")
 end
 
-local function entry_bytes(entry)
-  local fields = entry[2]
-  for index = 1, #fields, 2 do
-    if fields[index] == "body" then
-      return string.len(fields[index + 1])
+-- An expired stream key took its records without a trim recording them. The
+-- recreated key also forgets its last id, and Redis would number its first
+-- record from the server clock alone, so that id continues after lastId instead
+-- whenever the clock has not moved past it.
+local next_id = "*"
+if redis.call("EXISTS", stream_key) == 0 then
+  local last_id = redis.call("HGET", meta_key, "lastId")
+  advance_boundary(meta_key, last_id)
+  redis.call("HSET", meta_key, "retainedBytes", "0")
+  if last_id then
+    local last_ms, last_seq = string.match(last_id, "^(%d+)%-(%d+)$")
+    if server_time_ms() <= tonumber(last_ms) then
+      next_id = last_ms .. "-" .. string.format("%.0f", tonumber(last_seq) + 1)
     end
-  end
-  return 0
-end
-
-local function id_is_newer(candidate, current)
-  if not current then
-    return true
-  end
-  local candidate_ms, candidate_seq = string.match(candidate, "^(%d+)%-(%d+)$")
-  local current_ms, current_seq = string.match(current, "^(%d+)%-(%d+)$")
-  candidate_ms = tonumber(candidate_ms)
-  candidate_seq = tonumber(candidate_seq)
-  current_ms = tonumber(current_ms)
-  current_seq = tonumber(current_seq)
-  return candidate_ms > current_ms or (candidate_ms == current_ms and candidate_seq > current_seq)
-end
-
-local function advance_boundary(candidate)
-  local current = redis.call("HGET", meta_key, "lastTrimmedId")
-  if candidate and id_is_newer(candidate, current) then
-    redis.call("HSET", meta_key, "lastTrimmedId", candidate)
   end
 end
 
@@ -340,7 +357,8 @@ for index = 1, record_count do
     end
     replies[#replies + 1] = { "duplicate", existing_id, existing_body }
   else
-    local id = redis.call("XADD", stream_key, "*", "body", body)
+    local id = redis.call("XADD", stream_key, next_id, "body", body)
+    next_id = "*"
     if has_idempotency_key == "1" then
       redis.call("SET", dedupe_key, id, "PX", dedupe_ttl_ms)
     end
@@ -356,13 +374,19 @@ if stored_count == 0 then
 end
 redis.call("HSET", meta_key, "lastId", last_stored_id)
 
+local max_age_ms = redis.call("HGET", meta_key, "maxAgeMs")
+if max_age_ms then
+  local now = server_time_ms()
+  expire_idle_stream(stream_key, meta_key, tonumber(max_age_ms), now, now)
+end
+
 local max_records = redis.call("HGET", meta_key, "maxRecords")
 if max_records then
   local remove_count = redis.call("XLEN", stream_key) - tonumber(max_records)
   if remove_count > 0 then
     local removed = redis.call("XRANGE", stream_key, "-", "+", "COUNT", remove_count)
     if #removed > 0 then
-      advance_boundary(removed[#removed][1])
+      advance_boundary(meta_key, removed[#removed][1])
     end
   end
 end
@@ -388,7 +412,7 @@ if max_bytes and retained_bytes > tonumber(max_bytes) then
     end
     start = "(" .. entries[#entries][1]
   end
-  advance_boundary(boundary)
+  advance_boundary(meta_key, boundary)
 end
 
 return replies

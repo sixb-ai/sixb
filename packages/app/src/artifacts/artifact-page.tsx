@@ -2,6 +2,7 @@ import { getProjectInfoOptions } from "@sixb/client/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useCurrentUser } from "../session"
+import { useSharedGuest } from "../shared-session"
 import {
   type ArtifactTarget,
   artifactTargetFromSearch,
@@ -22,6 +23,7 @@ export function ArtifactPage() {
   const navigate = useNavigate()
   const queries = useQueryClient()
   const user = useCurrentUser()
+  const guest = useSharedGuest()
   if (!artifactId) return null
 
   // The artifact is the path; the version and part are parameters.
@@ -46,12 +48,15 @@ export function ArtifactPage() {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top,0px)] text-foreground">
-      <AgentDraftContext.Provider value={draftForAgent}>
+      {/* A shared link's guest has no Agent to ask. */}
+      <AgentDraftContext.Provider value={guest ? null : draftForAgent}>
         <Viewer
           target={target}
           chrome={{
-            // Back to where the link was followed from, or into the app for a link opened cold.
-            onBack: () => (canGoBack() ? navigate(-1) : navigate("/")),
+            // Back to where the link was followed from, or into the app for a link opened cold:
+            // for a guest, the page their link opens.
+            onBack: () =>
+              canGoBack() ? navigate(-1) : navigate(guest ? guest.destinationPath : "/"),
           }}
           // A version or part of this artifact replaces the address; it is the same page.
           onTargetChange={(next) => {

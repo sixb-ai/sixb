@@ -27,11 +27,18 @@ export interface PgStagedPlanTarget {
   readonly committedAt: string
   /** Whether unique value items were staged; probed in the work table when unknown. */
   readonly uniqueWork?: PgUniqueWork
+  /** Whether artifact holder items were staged; probed in the work table when unknown. */
+  readonly artifactHolderWork?: PgArtifactHolderWork
 }
 
 export interface PgUniqueWork {
   readonly releases: boolean
   readonly claims: boolean
+}
+
+export interface PgArtifactHolderWork {
+  readonly deletes: boolean
+  readonly inserts: boolean
 }
 
 export interface PgAppliedPlan {
@@ -65,12 +72,15 @@ export class PgMaterializationWriter {
     await this.applyLinkOverrides(target)
     await this.applyPoints(target)
     const uniqueWork = target.uniqueWork ?? (await this.stagedUniqueWork(target))
+    const holderWork = target.artifactHolderWork ?? (await this.stagedArtifactHolderWork(target))
     if (uniqueWork.releases) await this.releaseUniqueValues(target)
+    if (holderWork.deletes) await this.deleteArtifactHolders(target)
     let linkWrites = await this.deleteLinks(target)
     let objectWrites = await this.deleteObjects(target)
     objectWrites += await this.upsertObjects(target)
     linkWrites += await this.upsertLinks(target)
     const uniqueValueWrites = uniqueWork.claims ? await this.claimUniqueValues(target) : 0
+    if (holderWork.inserts) await this.insertArtifactHolders(target)
     const eventCount = await this.writeOutbox(target)
     await this.writeTouches(target)
     return { objectWrites, linkWrites, uniqueValueWrites, eventCount }
@@ -104,6 +114,25 @@ export class PgMaterializationWriter {
       SELECT ${probe("unique-value-release")} AS releases, ${probe("unique-value-claim")} AS claims
     `
     return { releases: row?.releases ?? false, claims: row?.claims ?? false }
+  }
+
+  /** The same probes for the artifact holder index: most commits hold no artifact. */
+  private async stagedArtifactHolderWork(
+    target: PgStagedPlanTarget
+  ): Promise<PgArtifactHolderWork> {
+    const probe = (kind: "artifact-holder-delete" | "artifact-holder-insert") => this.sql`
+      EXISTS (
+        SELECT 1 FROM ${this.sql(target.workTable)}
+        WHERE work_id = ${target.workId} AND lane = 'apply'
+          AND major_order = ${materializationApplyPhase(kind)}
+          AND minor_order = ${materializationPlanKindRank(kind)}
+      )
+    `
+    const [row] = await this.sql<{ readonly deletes: boolean; readonly inserts: boolean }[]>`
+      SELECT ${probe("artifact-holder-delete")} AS deletes,
+        ${probe("artifact-holder-insert")} AS inserts
+    `
+    return { deletes: row?.deletes ?? false, inserts: row?.inserts ?? false }
   }
 
   /** The staged values of one plan item kind, as `value`. */
@@ -417,6 +446,43 @@ export class PgMaterializationWriter {
     )
   }
 
+  /** The staged rows of the artifact holder index of one item kind, as its columns. */
+  private stagedArtifactHolders(
+    target: PgStagedPlanTarget,
+    kind: "artifact-holder-delete" | "artifact-holder-insert"
+  ) {
+    return this.sql`
+      SELECT value->>'artifactId' AS artifact_id, value->>'objectTypeId' AS object_type_id,
+        value->>'primaryId' AS primary_id, value->>'propertyId' AS property_id
+      FROM (${this.staged(target, kind)}) AS staged
+    `
+  }
+
+  /** A row already gone is no conflict: the index only follows what objects hold. */
+  private async deleteArtifactHolders(target: PgStagedPlanTarget): Promise<void> {
+    await this.sql`
+      WITH candidates AS (${this.stagedArtifactHolders(target, "artifact-holder-delete")})
+      DELETE FROM object_artifact_refs AS stored USING candidates
+      WHERE stored.project_id = ${target.projectId}
+        AND stored.artifact_id = candidates.artifact_id
+        AND stored.object_type_id = candidates.object_type_id
+        AND stored.primary_id = candidates.primary_id
+        AND stored.property_id = candidates.property_id
+    `
+  }
+
+  /** A row already there is no conflict either. */
+  private async insertArtifactHolders(target: PgStagedPlanTarget): Promise<void> {
+    await this.sql`
+      INSERT INTO object_artifact_refs (
+        project_id, artifact_id, object_type_id, primary_id, property_id
+      )
+      SELECT ${target.projectId}, artifact_id, object_type_id, primary_id, property_id
+      FROM (${this.stagedArtifactHolders(target, "artifact-holder-insert")}) AS candidates
+      ON CONFLICT DO NOTHING
+    `
+  }
+
   private async deleteLinks(target: PgStagedPlanTarget): Promise<number> {
     const candidates = this.staged(target, "link-delete")
     return this.write(
@@ -673,7 +739,8 @@ export class PgMaterializationWriter {
           END AS ref
       ) AS entity
       WHERE work.work_id = ${target.workId} AND work.lane = 'apply'
-        -- Unique values are no plan input: a stale claim fails when it applies.
+        -- Unique values are no plan input: a stale claim fails when it applies. Nor are the
+        -- artifacts objects hold, which follow the objects.
         AND entity.kind IS NOT NULL
     `
   }

@@ -543,6 +543,7 @@ export async function generateAppEntry(
   const runtimeContent = `import React from "react"
 import { createRoot, type Root } from "react-dom/client"
 import type { GetAuthSessionResponse } from "@sixb/client"
+import type { SixbSharedAccessSession } from "@sixb/client/browser"
 import {
   BrowserRouter,
   matchPath,
@@ -559,7 +560,12 @@ import {
   SixbEventsProvider,
 } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
-import { PhoneFoundations, refreshOnReturn, restoreLastScreen } from "@sixb/app/pages"
+import {
+  keepSharedSession,
+  PhoneFoundations,
+  refreshOnReturn,
+  restoreLastScreen,
+} from "@sixb/app/pages"
 ${sectionsImport}${toolViewsImport}import { activityRoutePaths, routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
@@ -573,6 +579,8 @@ export interface StartAppOptions {
   readonly basename?: string
   /** The session the bootstrap already loaded, so useCurrentUser does not fetch it again. */
   readonly session?: GetAuthSessionResponse
+  /** A shared link's session, which the bootstrap opened for its visitor. */
+  readonly sharedSession?: SixbSharedAccessSession
 }
 
 if (import.meta.hot) import.meta.hot.accept()
@@ -1045,6 +1053,7 @@ function App({ basename }: StartAppOptions) {
 
 export function startApp(options: StartAppOptions = {}) {
   if (options.session) queryClient.setQueryData(getAuthSessionQueryKey(), options.session)
+  if (options.sharedSession) keepSharedSession(queryClient, options.sharedSession)
   // The installed app reopens where it was left, and shows what changed while it was away.
   if (!options.basename) restoreLastScreen()
   refreshOnReturn(queryClient)
@@ -1274,6 +1283,11 @@ export function startSharedApp(
     const runtimeConfig = readSixbBrowserRuntimeConfig({ authEnabled: false })
     controller = configureSixbSharedBrowserClient(runtimeConfig, {
       grantId,
+      // A link revoked or a session expired while the page is open: loading it again finds no
+      // session, and shows the unavailable screen.
+      onEnded: () => {
+        if (established) window.location.reload()
+      },
     })
     activeController = controller
   } catch {
@@ -1322,7 +1336,7 @@ export function startSharedApp(
       }
 
       const { startApp } = await import("./app-runtime")
-      startApp({ basename })
+      startApp({ basename, sharedSession: session })
       // After a start that held: a failed one is retried, and must still find the arrival.
       startSixbActivityCapture()
     } catch (error) {

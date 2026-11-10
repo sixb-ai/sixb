@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import {
   type ArtifactFile,
+  artifactRef,
+  defineObjectType,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  prop,
+  ref,
   type SandboxFactory,
   type SixbErrorContext,
   SixbHost,
@@ -25,6 +29,7 @@ import { BOARD_PREVIEW_JOB } from "@sixb/core/internal/artifacts/publish"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { createTestSixb } from "@sixb/core/testing"
 import * as decoding from "lib0/decoding"
 import * as encoding from "lib0/encoding"
 import * as awarenessProtocol from "y-protocols/awareness"
@@ -45,6 +50,16 @@ import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "artifact-live"
+
+/** A meeting holds the canvas it is planned on. */
+const Meeting = defineObjectType({
+  id: "Meeting",
+  name: "Meeting",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("board", ref.artifact(), { nullable: true }),
+  ],
+})
 
 afterEach(() => {
   jest.useRealTimers()
@@ -74,7 +89,7 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
   const reported: SixbErrorContext[] = []
   const host = new SixbHost({
     id: projectId,
-    ontology: [],
+    ontology: [Meeting],
     storage,
     blobStorage,
     broker,
@@ -108,6 +123,14 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
       },
     })
   const marie = as("marie")
+  // Marie gave her profile a name; Bob only has his email.
+  await storage.auth.users.create({
+    id: "marie",
+    projectId,
+    email: "marie@example.com",
+    displayName: "Marie Curie",
+  })
+  await storage.auth.users.create({ id: "bob", projectId, email: "bob@example.com" })
 
   await storage.agents.threads.create({
     projectId,
@@ -194,6 +217,7 @@ async function setup(options: { readonly sandboxes?: boolean } = {}) {
     marie,
     bob: as("bob"),
     olivia: as("olivia", { "observe:agentThreads": true }),
+    as,
     rooms,
     put,
     read,
@@ -346,7 +370,11 @@ describe("an artifact edited live", () => {
       artifactId: context.artifactId,
       access: "edit",
       revision: context.revision,
-      user: { id: "user:marie", name: "marie", color: expect.stringMatching(/^#[0-9a-f]{6}$/) },
+      user: {
+        id: "user:marie",
+        name: "Marie Curie",
+        color: expect.stringMatching(/^#[0-9a-f]{6}$/),
+      },
     })
     expect(documentFiles(bob.doc).get("boards/welcome.html")).toEqual({ text: WELCOME })
 
@@ -556,6 +584,33 @@ describe("an artifact edited live", () => {
     expect(olivia.canvas.items.get("hi")?.get("x")).toBe(640)
   })
 
+  test("lets whoever reads an object that holds it watch, and whoever edits one edit", async () => {
+    const context = await setup()
+    await createTestSixb(context.host)
+      .objects(Meeting)
+      .upsert({ properties: { id: "m1", board: artifactRef(context.artifactId) } })
+    const rooms = context.rooms()
+
+    const reader = context.as("rita", { "view:object": new Set([Meeting.id]) })
+    const editor = context.as("ed", {
+      "view:object": new Set([Meeting.id]),
+      "edit:object": new Set([Meeting.id]),
+    })
+    const rita = new Client(rooms, reader, context.artifactId, "rita-1")
+    const ed = new Client(rooms, editor, context.artifactId, "ed-1")
+    const stranger = new Client(rooms, context.as("sam"), context.artifactId, "sam-1")
+    await rita.join()
+    await ed.join()
+    await stranger.join()
+    await rita.settle()
+
+    expect(rita.messages[0]).toMatchObject({ type: "joined", access: "watch" })
+    expect(ed.messages[0]).toMatchObject({ type: "joined", access: "edit" })
+    expect(stranger.messages).toEqual([
+      { type: "left", artifactId: context.artifactId, reason: "not_shared" },
+    ])
+  })
+
   test("refuses whoever may not read the artifact, and an artifact that is not a canvas", async () => {
     const context = await setup()
     const rooms = context.rooms()
@@ -663,7 +718,7 @@ describe("an artifact edited live", () => {
 
   // Guard proof: in vouchedAwareness, keep a client's own `user` and `sixbAgent`; Bob then sees
   // Marie as Bob, and an Agent at work.
-  test("names each person as the server knows them, and lets nobody speak for another or the Agent", async () => {
+  test("names each person as the server knows them, never by email, and lets nobody speak for another or the Agent", async () => {
     jest.useFakeTimers()
     const context = await setup()
     const rooms = context.rooms()
@@ -693,10 +748,12 @@ describe("an artifact edited live", () => {
     })
     await marie.settle()
 
-    const marieUser = { id: "user:marie", name: "marie", color: expect.any(String) }
+    const marieUser = { id: "user:marie", name: "Marie Curie", color: expect.any(String) }
     expect(others(bob)).toEqual([{ cursor: { x: 5, y: 5 }, user: marieUser }])
+    // Bob gave no name: everyone in the room, a shared link's guest included, sees none, never his
+    // email. Guard proof: let liveUserOf fall back to the email again; Marie then reads it.
     expect(others(marie)).toEqual([
-      { cursor: { x: 1, y: 1 }, user: { id: "user:bob", name: "bob", color: expect.any(String) } },
+      { cursor: { x: 1, y: 1 }, user: { id: "user:bob", name: "", color: expect.any(String) } },
     ])
   })
 

@@ -522,6 +522,7 @@ const SCALAR_KINDS: ReadonlySet<string> = new Set<QueryScalarKind>([
   "date",
   "timestamp",
   "userRef",
+  "artifactRef",
 ])
 
 /**

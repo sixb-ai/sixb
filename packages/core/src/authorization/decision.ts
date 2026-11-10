@@ -218,12 +218,13 @@ export function assertCanManageConnector(runtime: AuthorizedRuntime, connectorId
 }
 
 /**
- * Fail closed for operations that have no grant semantics yet.
+ * Fail closed for operations that have no grant semantics yet, so only trusted code may run them.
  *
- * One caller left — `listLinks`, whose rows reveal target types that no read grant covers. Object,
- * link, and telemetry writes moved to {@link assertCanEdit} / {@link assertCanAppendTelemetry}.
- * Keeps unsupported surfaces denied even if a principal-bound runtime context reaches a code path
- * the execution SDK does not expose.
+ * Its callers: `listLinks`, whose rows reveal target types that no read grant covers, and
+ * `users.suspend`/`users.reactivate`, which no grant may hand to a person or to the agent acting
+ * for one. Object, link, and telemetry writes moved to {@link assertCanEdit} /
+ * {@link assertCanAppendTelemetry}. Keeps unsupported surfaces denied even if a principal-bound
+ * runtime context reaches a code path the execution SDK does not expose.
  */
 export function assertPrivileged(runtime: AuthorizedRuntime, operation: string): void {
   const resolved = assertRuntimeAuthorizationBound(runtime)

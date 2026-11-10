@@ -153,6 +153,8 @@ interface QuickBooksSalesTransaction extends QuickBooksTransaction {
   readonly GlobalTaxCalculation?: string
   readonly BillAddr?: QuickBooksAddress
   readonly ShipAddr?: QuickBooksAddress
+  readonly ShipFromAddr?: QuickBooksAddress
+  readonly FreeFormAddress?: boolean
   readonly BillEmail?: { readonly Address?: string }
   readonly BillEmailCc?: { readonly Address?: string }
   readonly BillEmailBcc?: { readonly Address?: string }
@@ -181,9 +183,59 @@ export interface QuickBooksInvoice extends QuickBooksSalesTransaction {
   readonly RecurDataRef?: QuickBooksReference
 }
 
+/** Writable estimate statuses. */
+export type QuickBooksEstimateStatus = "Pending" | "Accepted" | "Closed" | "Rejected"
+
+export interface QuickBooksEstimate extends QuickBooksSalesTransaction {
+  /** QuickBooks sets `Converted` (observed live) when an invoice links the estimate. */
+  readonly TxnStatus?: QuickBooksEstimateStatus | "Converted" | (string & {})
+  readonly ExpirationDate?: string
+  readonly AcceptedBy?: string
+  readonly AcceptedDate?: string
+  readonly DueDate?: string
+  readonly RecurDataRef?: QuickBooksReference
+  readonly TaxExemptionRef?: QuickBooksReference
+  readonly TransactionLocationType?: string
+}
+
 export interface QuickBooksCreditMemo extends QuickBooksSalesTransaction {
   readonly RemainingCredit?: number
   readonly PaymentMethodRef?: QuickBooksReference
+}
+
+/** Opaque card-processing details retained without interpretation. */
+export interface QuickBooksCreditCardPaymentInfo {
+  readonly CreditChargeInfo?: Readonly<Record<string, unknown>>
+  readonly CreditChargeResponse?: Readonly<Record<string, unknown>>
+}
+
+/** A sale paid at the time of sale; it records money received rather than an open balance. */
+export interface QuickBooksSalesReceipt extends QuickBooksSalesTransaction {
+  readonly DepositToAccountRef?: QuickBooksReference
+  readonly PaymentMethodRef?: QuickBooksReference
+  readonly PaymentRefNum?: string
+  readonly CreditCardPayment?: QuickBooksCreditCardPaymentInfo
+  readonly TxnSource?: string
+  readonly HomeBalance?: number
+  readonly RecurDataRef?: QuickBooksReference
+}
+
+export interface QuickBooksRefundReceipt extends QuickBooksSalesTransaction {
+  readonly DepositToAccountRef?: QuickBooksReference
+  readonly PaymentMethodRef?: QuickBooksReference
+  readonly PaymentRefNum?: string
+  readonly PaymentType?: string
+  readonly CheckPayment?: {
+    readonly CheckNum?: string
+    readonly Status?: string
+    readonly NameOnAcct?: string
+    readonly AcctNum?: string
+    readonly BankName?: string
+  }
+  readonly CreditCardPayment?: QuickBooksCreditCardPaymentInfo
+  readonly TxnSource?: string
+  readonly HomeBalance?: number
+  readonly RecurDataRef?: QuickBooksReference
 }
 
 /** Accounting payment allocations can span invoices, credit memos, and other linked transactions. */
@@ -220,6 +272,43 @@ export interface QuickBooksBill extends QuickBooksPurchaseTransaction {
 
 export type QuickBooksVendorCredit = QuickBooksPurchaseTransaction
 
+/** Expense, check or credit-card charge (or card credit when `Credit` is true). */
+export interface QuickBooksPurchase extends QuickBooksTransaction {
+  readonly PaymentType?: "Cash" | "Check" | "CreditCard" | (string & {})
+  /** Bank or credit-card account the purchase was paid from. */
+  readonly AccountRef?: QuickBooksReference
+  /** Payee; `type` is Vendor, Customer or Employee. */
+  readonly EntityRef?: QuickBooksReference
+  readonly Credit?: boolean
+  readonly RemitToAddr?: QuickBooksAddress
+  readonly PrintStatus?: string
+  readonly PaymentMethodRef?: QuickBooksReference
+  readonly Line?: readonly QuickBooksExpenseLine[]
+  readonly TxnTaxDetail?: QuickBooksTaxDetail
+  readonly GlobalTaxCalculation?: string
+  readonly TxnSource?: string
+  readonly IncludeInAnnualTPAR?: boolean
+  readonly RecurDataRef?: QuickBooksReference
+  /** Opaque provider extension data, retained without interpretation. */
+  readonly PurchaseEx?: Readonly<Record<string, unknown>>
+}
+
+export interface QuickBooksPurchaseOrder extends QuickBooksPurchaseTransaction {
+  readonly POStatus?: "Open" | "Closed" | (string & {})
+  readonly POEmail?: { readonly Address?: string }
+  readonly VendorAddr?: QuickBooksAddress
+  readonly ShipAddr?: QuickBooksAddress
+  readonly ShipTo?: QuickBooksReference
+  readonly ShipMethodRef?: QuickBooksReference
+  readonly DueDate?: string
+  readonly SalesTermRef?: QuickBooksReference
+  readonly ClassRef?: QuickBooksReference
+  readonly EmailStatus?: string
+  readonly PrintStatus?: string
+  readonly Memo?: string
+  readonly RecurDataRef?: QuickBooksReference
+}
+
 export interface QuickBooksBillPayment extends QuickBooksTransaction {
   readonly VendorRef?: QuickBooksReference
   readonly VendorAddr?: QuickBooksAddress
@@ -232,3 +321,184 @@ export interface QuickBooksBillPayment extends QuickBooksTransaction {
   readonly CreditCardPayment?: { readonly CCAccountRef?: QuickBooksReference }
   readonly Line?: readonly QuickBooksPaymentLine[]
 }
+
+/** Time worked by an employee or vendor, optionally billable to a customer. */
+export interface QuickBooksTimeActivity extends QuickBooksEntity {
+  readonly TxnDate?: string
+  readonly NameOf?: "Employee" | "Vendor" | (string & {})
+  readonly EmployeeRef?: QuickBooksReference
+  readonly VendorRef?: QuickBooksReference
+  readonly CustomerRef?: QuickBooksReference
+  readonly ProjectRef?: QuickBooksReference
+  readonly ItemRef?: QuickBooksReference
+  readonly ClassRef?: QuickBooksReference
+  readonly DepartmentRef?: QuickBooksReference
+  readonly PayrollItemRef?: QuickBooksReference
+  readonly BillableStatus?: "Billable" | "NotBillable" | "HasBeenBilled" | (string & {})
+  readonly Taxable?: boolean
+  readonly HourlyRate?: number
+  readonly CostRate?: number
+  readonly Hours?: number
+  readonly Minutes?: number
+  readonly Seconds?: number
+  readonly BreakHours?: number
+  readonly BreakMinutes?: number
+  readonly BreakSeconds?: number
+  readonly StartTime?: string
+  readonly EndTime?: string
+  readonly Description?: string
+  readonly TimeChargeId?: number
+  readonly TransactionLocationType?: string
+}
+
+export interface QuickBooksDepositLine extends QuickBooksLineBase {
+  /** Absent on lines that deposit a linked payment or sales receipt (see LinkedTxn). */
+  readonly DetailType?: "DepositLineDetail"
+  readonly DepositLineDetail?: {
+    /** Received from; `type` is Customer, Vendor or Employee. */
+    readonly Entity?: QuickBooksReference
+    readonly AccountRef?: QuickBooksReference
+    readonly ClassRef?: QuickBooksReference
+    readonly PaymentMethodRef?: QuickBooksReference
+    readonly CheckNum?: string
+    readonly TxnType?: string
+    readonly TaxCodeRef?: QuickBooksReference
+    readonly TaxApplicableOn?: string
+  }
+}
+
+export interface QuickBooksDeposit extends QuickBooksTransaction {
+  readonly DepositToAccountRef?: QuickBooksReference
+  readonly CashBack?: {
+    readonly AccountRef?: QuickBooksReference
+    readonly Amount?: number
+    readonly Memo?: string
+  }
+  readonly Line?: readonly QuickBooksDepositLine[]
+  readonly TxnTaxDetail?: QuickBooksTaxDetail
+  readonly GlobalTaxCalculation?: string
+  readonly TxnSource?: string
+  readonly RecurDataRef?: QuickBooksReference
+}
+
+export interface QuickBooksTransfer extends QuickBooksTransaction {
+  readonly ClassRef?: QuickBooksReference
+  readonly FromAccountRef?: QuickBooksReference
+  readonly ToAccountRef?: QuickBooksReference
+  readonly Amount?: number
+  readonly TransactionLocationType?: string
+  readonly RecurDataRef?: QuickBooksReference
+}
+
+export interface QuickBooksJournalEntryLine extends QuickBooksLineBase {
+  readonly DetailType?: "JournalEntryLineDetail" | "DescriptionOnly" | (string & {})
+  readonly JournalEntryLineDetail?: {
+    readonly PostingType?: "Debit" | "Credit"
+    readonly AccountRef?: QuickBooksReference
+    /** Name on the line, e.g. `{ Type: "Customer", EntityRef: { value: "9" } }`. */
+    readonly Entity?: { readonly Type?: string; readonly EntityRef?: QuickBooksReference }
+    readonly ClassRef?: QuickBooksReference
+    readonly DepartmentRef?: QuickBooksReference
+    readonly TaxCodeRef?: QuickBooksReference
+    readonly TaxApplicableOn?: string
+    readonly TaxAmount?: number
+    readonly BillableStatus?: string
+  }
+}
+
+export interface QuickBooksJournalEntry extends QuickBooksTransaction {
+  readonly Adjustment?: boolean
+  readonly Line?: readonly QuickBooksJournalEntryLine[]
+  readonly TxnTaxDetail?: QuickBooksTaxDetail
+  readonly GlobalTaxCalculation?: string
+  readonly JournalCodeRef?: QuickBooksReference
+  readonly RecurDataRef?: QuickBooksReference
+}
+
+/** Billable expense waiting to be invoiced. Read-only; created by QuickBooks from expenses. */
+export interface QuickBooksReimburseCharge extends QuickBooksTransaction {
+  readonly CustomerRef?: QuickBooksReference
+  readonly HasBeenInvoiced?: boolean
+  readonly Amount?: number
+  readonly Line?: readonly (QuickBooksLineBase & {
+    readonly DetailType?: "ReimburseLineDetail" | (string & {})
+    readonly ReimburseLineDetail?: {
+      readonly ItemAccountRef?: QuickBooksReference
+      readonly TaxCodeRef?: QuickBooksReference
+    }
+  })[]
+}
+
+/** Payment from a bank account toward a credit-card balance (wire entity `CreditCardPaymentTxn`). */
+export interface QuickBooksCreditCardPayment extends QuickBooksTransaction {
+  readonly CreditCardAccountRef?: QuickBooksReference
+  readonly BankAccountRef?: QuickBooksReference
+  readonly VendorRef?: QuickBooksReference
+  readonly Amount?: number
+  readonly Memo?: string
+  readonly PrintStatus?: string
+  readonly CheckNum?: string
+}
+
+export interface QuickBooksInventoryAdjustment extends QuickBooksTransaction {
+  readonly AdjustAccountRef?: QuickBooksReference
+  readonly Line?: readonly (QuickBooksLineBase & {
+    readonly DetailType?: "ItemAdjustmentLineDetail" | (string & {})
+    readonly ItemAdjustmentLineDetail?: {
+      readonly ItemRef?: QuickBooksReference
+      readonly QtyDiff?: number
+      readonly ClassRef?: QuickBooksReference
+    }
+  })[]
+}
+
+export interface QuickBooksRecurringInfo {
+  readonly Name?: string
+  readonly RecurType?: "Automated" | "Reminded" | "Unscheduled" | (string & {})
+  readonly Active?: boolean
+  readonly ScheduleInfo?: {
+    readonly IntervalType?: string
+    readonly NumInterval?: number
+    readonly DayOfMonth?: number
+    readonly DayOfWeek?: string
+    readonly WeekOfMonth?: number
+    readonly MonthOfYear?: string
+    readonly StartDate?: string
+    readonly EndDate?: string
+    readonly NextDate?: string
+    readonly PreviousDate?: string
+    readonly MaxOccurrences?: number
+    readonly RemindDays?: number
+    readonly DaysBefore?: number
+  }
+}
+
+/** Template entities QuickBooks can schedule, keyed by the wrapper name it uses. */
+export interface QuickBooksRecurringTemplateMap {
+  readonly Bill: QuickBooksBill
+  readonly CreditMemo: QuickBooksCreditMemo
+  readonly Deposit: QuickBooksDeposit
+  readonly Estimate: QuickBooksEstimate
+  readonly Invoice: QuickBooksInvoice
+  readonly JournalEntry: QuickBooksJournalEntry
+  readonly Purchase: QuickBooksPurchase
+  readonly PurchaseOrder: QuickBooksPurchaseOrder
+  readonly RefundReceipt: QuickBooksRefundReceipt
+  readonly SalesReceipt: QuickBooksSalesReceipt
+  readonly Transfer: QuickBooksTransfer
+  readonly VendorCredit: QuickBooksVendorCredit
+}
+
+export type QuickBooksRecurringTemplateType = keyof QuickBooksRecurringTemplateMap
+
+/**
+ * One recurring template wrapped under its entity name, e.g. `{ Bill: { Id, RecurringInfo } }`.
+ * The template's own `Id` identifies the recurring transaction; it has no top-level `Id`.
+ */
+export type QuickBooksRecurringTransaction = {
+  [K in QuickBooksRecurringTemplateType]: {
+    readonly [P in K]: QuickBooksRecurringTemplateMap[K] & {
+      readonly RecurringInfo?: QuickBooksRecurringInfo
+    }
+  }
+}[QuickBooksRecurringTemplateType]

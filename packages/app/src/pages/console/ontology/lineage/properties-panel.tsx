@@ -1,13 +1,19 @@
 import { TooltipProvider } from "@sixb/ui/components"
 import { useEffect, useRef, useState } from "react"
-import { type FileLinksAt, ValuePanel, type ValueSchema } from "../../../values"
+import {
+  ArtifactCardsContext,
+  type FileLinksAt,
+  ValuePanel,
+  type ValueSchema,
+} from "../../../values"
 import { explainProperty, type ObjectLineage } from "./model"
 import { PropertySourceLabel } from "./property-source"
 import { ValueLineagePanel } from "./value-lineage-panel"
 
 /**
  * An object's properties, each name marked with where its value comes from and opening the trail
- * behind it. Until the lineage arrives, and for the primary key, names read as plain labels.
+ * behind it. Until the lineage arrives, and for the primary key, names read as plain labels. An
+ * artifact a property holds shows as a card that opens it.
  */
 export function PropertiesPanel({
   title,
@@ -45,29 +51,31 @@ export function PropertiesPanel({
   return (
     <>
       <TooltipProvider delayDuration={400}>
-        <ValuePanel
-          title={title}
-          value={properties}
-          schema={schema}
-          labels={labels}
-          fileLinks={fileLinks}
-          renderLabel={(key, text) => {
-            const property = explainProperty(lineage, key)
-            if (!property) return text
+        <ArtifactCardsContext.Provider value={true}>
+          <ValuePanel
+            title={title}
+            value={properties}
+            schema={schema}
+            labels={labels}
+            fileLinks={fileLinks}
+            renderLabel={(key, text) => {
+              const property = explainProperty(lineage, key)
+              if (!property) return text
 
-            return (
-              <PropertySourceLabel
-                label={text}
-                explained={property}
-                onOpen={(event) => {
-                  opener.current = event.currentTarget
-                  setPropertyId(key)
-                  setOpen(true)
-                }}
-              />
-            )
-          }}
-        />
+              return (
+                <PropertySourceLabel
+                  label={text}
+                  explained={property}
+                  onOpen={(event) => {
+                    opener.current = event.currentTarget
+                    setPropertyId(key)
+                    setOpen(true)
+                  }}
+                />
+              )
+            }}
+          />
+        </ArtifactCardsContext.Provider>
       </TooltipProvider>
 
       {lineage ? (

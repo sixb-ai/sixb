@@ -1,6 +1,6 @@
 {
   "name": "@sixb/auth-oidc",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "OpenID Connect authentication strategy for Sixb",
   "keywords": [
     "sixb",
@@ -28,6 +28,12 @@
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./entra": {
+      "types": "./dist/entra.d.ts",
+      "bun": "./src/entra.ts",
+      "import": "./dist/entra.js",
+      "default": "./dist/entra.js"
     }
   },
   "scripts": {

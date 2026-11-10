@@ -105,7 +105,7 @@ export type ObjectQueryFacetsResponse = {
 export type ArtifactErrorResponse = {
   error: string
   /**
-   * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+   * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
    */
   code?: string
   /**
@@ -205,6 +205,7 @@ export type ArtifactQueryProperty = {
     | "uuid"
     | "fileRef"
     | "userRef"
+    | "artifactRef"
     | "enum"
     | "array"
     | "object"
@@ -4919,7 +4920,9 @@ export type ListConnectorConnectionsData = {
   path: {
     connectorId: string
   }
-  query?: never
+  query?: {
+    owner?: "project" | "me"
+  }
   url: "/api/connectors/{connectorId}/connections"
 }
 
@@ -4972,9 +4975,14 @@ export type ListConnectorConnectionsResponses = {
   200: Array<{
     id: string
     connectorId: string
-    owner: {
-      type: "project"
-    }
+    owner:
+      | {
+          type: "project"
+        }
+      | {
+          type: "user"
+          id: string
+        }
     slot: string
     account: {
       id: string
@@ -5163,9 +5171,14 @@ export type RevokeConnectorConnectionResponses = {
     affectedConnections: Array<{
       id: string
       connectorId: string
-      owner: {
-        type: "project"
-      }
+      owner:
+        | {
+            type: "project"
+          }
+        | {
+            type: "user"
+            id: string
+          }
       slot: string
       account: {
         id: string
@@ -5241,9 +5254,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5255,9 +5273,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5267,9 +5290,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5286,9 +5314,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5296,9 +5329,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -5314,9 +5352,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5358,9 +5401,14 @@ export type ListPendingConnectorConnectionRunsResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5375,6 +5423,7 @@ export type ListPendingConnectorConnectionRunsResponse =
 
 export type StartConnectorConnectionRunData = {
   body: {
+    owner?: "project" | "me"
     slot: string
     returnTo: string
   }
@@ -5472,9 +5521,14 @@ export type StartConnectorConnectionRunResponses = {
     affectedConnections: Array<{
       id: string
       connectorId: string
-      owner: {
-        type: "project"
-      }
+      owner:
+        | {
+            type: "project"
+          }
+        | {
+            type: "user"
+            id: string
+          }
       slot: string
       account: {
         id: string
@@ -5551,9 +5605,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5565,9 +5624,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5577,9 +5641,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5596,9 +5665,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5606,9 +5680,14 @@ export type GetConnectorConnectionRunResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -5624,9 +5703,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5668,9 +5752,14 @@ export type GetConnectorConnectionRunResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5684,6 +5773,7 @@ export type GetConnectorConnectionRunResponse =
 
 export type AddConnectorConnectionData = {
   body: {
+    owner?: "project" | "me"
     slot: string
   }
   path: {
@@ -5760,9 +5850,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5774,9 +5869,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5786,9 +5886,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5805,9 +5910,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5815,9 +5925,14 @@ export type AddConnectorConnectionResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -5833,9 +5948,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5877,9 +5997,14 @@ export type AddConnectorConnectionResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5970,9 +6095,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5984,9 +6114,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -5996,9 +6131,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6015,9 +6155,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6025,9 +6170,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         connections: Array<{
           id: string
           connectorId: string
-          owner: {
-            type: "project"
-          }
+          owner:
+            | {
+                type: "project"
+              }
+            | {
+                type: "user"
+                id: string
+              }
           slot: string
           account: {
             id: string
@@ -6043,9 +6193,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6087,9 +6242,14 @@ export type SelectConnectorConnectionRunAccountResponses = {
         id: string
         connectorId: string
         kind: "connect" | "reauthorize"
-        owner: {
-          type: "project"
-        }
+        owner:
+          | {
+              type: "project"
+            }
+          | {
+              type: "user"
+              id: string
+            }
         slot: string
         createdAt: string
         updatedAt: string
@@ -6200,9 +6360,14 @@ export type ReauthorizeConnectorConnectionResponses = {
     affectedConnections: Array<{
       id: string
       connectorId: string
-      owner: {
-        type: "project"
-      }
+      owner:
+        | {
+            type: "project"
+          }
+        | {
+            type: "user"
+            id: string
+          }
       slot: string
       account: {
         id: string
@@ -10319,6 +10484,14 @@ export type ExchangeSharedAccessResponses = {
     expiresAt: string
     absoluteExpiresAt: string
     csrfToken: string
+    /**
+     * Who the visitor is in this session: the author id of the comments they write as a guest
+     */
+    guestId: string
+    /**
+     * The name the visitor gave, which their comments and live presence carry
+     */
+    guestName?: string
   }
 }
 
@@ -10362,11 +10535,87 @@ export type GetSharedAccessSessionResponses = {
     expiresAt: string
     absoluteExpiresAt: string
     csrfToken: string
+    /**
+     * Who the visitor is in this session: the author id of the comments they write as a guest
+     */
+    guestId: string
+    /**
+     * The name the visitor gave, which their comments and live presence carry
+     */
+    guestName?: string
   }
 }
 
 export type GetSharedAccessSessionResponse =
   GetSharedAccessSessionResponses[keyof GetSharedAccessSessionResponses]
+
+export type SetSharedAccessGuestNameData = {
+  body: {
+    /**
+     * The visitor's name, on one line: 1 to 60 characters once its spaces are collapsed, without control or direction marks
+     */
+    name: string
+  }
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shared-access/{grantId}/name"
+}
+
+export type SetSharedAccessGuestNameErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+  }
+}
+
+export type SetSharedAccessGuestNameError =
+  SetSharedAccessGuestNameErrors[keyof SetSharedAccessGuestNameErrors]
+
+export type SetSharedAccessGuestNameResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    grantId: string
+    destinationPath: string
+    expiresAt: string
+    absoluteExpiresAt: string
+    csrfToken: string
+    /**
+     * Who the visitor is in this session: the author id of the comments they write as a guest
+     */
+    guestId: string
+    /**
+     * The name the visitor gave, which their comments and live presence carry
+     */
+    guestName?: string
+  }
+}
+
+export type SetSharedAccessGuestNameResponse =
+  SetSharedAccessGuestNameResponses[keyof SetSharedAccessGuestNameResponses]
 
 export type SignOutSharedAccessData = {
   body?: never
@@ -17948,7 +18197,7 @@ export type ListArtifactsErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -17973,7 +18222,7 @@ export type ListArtifactsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18062,7 +18311,7 @@ export type CreateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18087,7 +18336,7 @@ export type CreateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18112,7 +18361,7 @@ export type CreateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18137,7 +18386,7 @@ export type CreateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18162,7 +18411,7 @@ export type CreateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18374,7 +18623,7 @@ export type DeleteArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18399,7 +18648,7 @@ export type DeleteArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18424,7 +18673,7 @@ export type DeleteArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18474,7 +18723,7 @@ export type GetArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18499,7 +18748,7 @@ export type GetArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18524,7 +18773,7 @@ export type GetArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18621,7 +18870,7 @@ export type GetArtifactResponses = {
       }
     }>
     /**
-     * What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it, or only read as an observer of one
+     * What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it or an editor of an object that holds it, or only read as an observer of such a conversation or a reader of such an object
      */
     access: "owner" | "update" | "read"
   }
@@ -18629,23 +18878,23 @@ export type GetArtifactResponses = {
 
 export type GetArtifactResponse = GetArtifactResponses[keyof GetArtifactResponses]
 
-export type ClearArtifactStateData = {
+export type ListArtifactHoldersData = {
   body?: never
   path: {
     artifactId: string
   }
   query?: never
-  url: "/api/artifacts/{artifactId}/state"
+  url: "/api/artifacts/{artifactId}/holders"
 }
 
-export type ClearArtifactStateErrors = {
+export type ListArtifactHoldersErrors = {
   /**
    * Response for status 403
    */
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18670,7 +18919,7 @@ export type ClearArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18695,7 +18944,126 @@ export type ClearArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type ListArtifactHoldersError = ListArtifactHoldersErrors[keyof ListArtifactHoldersErrors]
+
+export type ListArtifactHoldersResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * The first 20 objects you read that hold the artifact
+     */
+    holders: Array<{
+      objectTypeId: string
+      primaryId: string
+      /**
+       * The property whose value holds the artifact
+       */
+      propertyId: string
+      /**
+       * The object's value of its type's search title, when it has one you read
+       */
+      title?: string
+    }>
+    /**
+     * More objects you read hold it
+     */
+    hasMore: boolean
+  }
+}
+
+export type ListArtifactHoldersResponse =
+  ListArtifactHoldersResponses[keyof ListArtifactHoldersResponses]
+
+export type ClearArtifactStateData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/state"
+}
+
+export type ClearArtifactStateErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the artifact's latest version, its revision, who last wrote it, and who created it once it is frozen
+     */
+    latest?: {
+      version: number
+      revision: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      frozenBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18749,7 +19117,7 @@ export type GetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18774,7 +19142,7 @@ export type GetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18799,7 +19167,7 @@ export type GetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18863,7 +19231,7 @@ export type DeleteArtifactStateValueErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18888,7 +19256,7 @@ export type DeleteArtifactStateValueErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18913,7 +19281,7 @@ export type DeleteArtifactStateValueErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18938,7 +19306,7 @@ export type DeleteArtifactStateValueErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -18999,7 +19367,7 @@ export type SetArtifactStateErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19024,7 +19392,7 @@ export type SetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19049,7 +19417,7 @@ export type SetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19074,7 +19442,7 @@ export type SetArtifactStateErrors = {
   413: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19099,7 +19467,7 @@ export type SetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19178,7 +19546,7 @@ export type UpdateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19203,7 +19571,7 @@ export type UpdateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19228,7 +19596,7 @@ export type UpdateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19253,7 +19621,7 @@ export type UpdateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19278,7 +19646,7 @@ export type UpdateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19495,7 +19863,7 @@ export type FreezeArtifactVersionErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19520,7 +19888,7 @@ export type FreezeArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19545,7 +19913,7 @@ export type FreezeArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19570,7 +19938,7 @@ export type FreezeArtifactVersionErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19595,7 +19963,7 @@ export type FreezeArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19804,7 +20172,7 @@ export type ListArtifactCommentsErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19829,7 +20197,7 @@ export type ListArtifactCommentsErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19854,7 +20222,7 @@ export type ListArtifactCommentsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -19921,12 +20289,15 @@ export type ListArtifactCommentsResponses = {
        * Plain text
        */
       body: string
+      /**
+       * Who wrote it: a principal, or a guest, someone without an account who opened a shared link, whose id is their link's session
+       */
       author: {
-        type: "user" | "serviceAccount" | "system"
+        type: "user" | "serviceAccount" | "system" | "guest"
         id: string
       }
       /**
-       * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+       * Its author's name: a member's profile name or email, the project's for its own code, or the name a guest gave; null for anyone the project cannot name. A guest reading it never gets a member's email
        */
       authorName: string | null
       /**
@@ -20008,7 +20379,7 @@ export type AddArtifactCommentErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20033,7 +20404,7 @@ export type AddArtifactCommentErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20058,7 +20429,7 @@ export type AddArtifactCommentErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20083,7 +20454,7 @@ export type AddArtifactCommentErrors = {
   413: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20108,7 +20479,7 @@ export type AddArtifactCommentErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20171,12 +20542,15 @@ export type AddArtifactCommentResponses = {
      * Plain text
      */
     body: string
+    /**
+     * Who wrote it: a principal, or a guest, someone without an account who opened a shared link, whose id is their link's session
+     */
     author: {
-      type: "user" | "serviceAccount" | "system"
+      type: "user" | "serviceAccount" | "system" | "guest"
       id: string
     }
     /**
-     * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+     * Its author's name: a member's profile name or email, the project's for its own code, or the name a guest gave; null for anyone the project cannot name. A guest reading it never gets a member's email
      */
     authorName: string | null
     /**
@@ -20226,7 +20600,7 @@ export type ResolveArtifactCommentErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20251,7 +20625,7 @@ export type ResolveArtifactCommentErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20276,7 +20650,7 @@ export type ResolveArtifactCommentErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20301,7 +20675,7 @@ export type ResolveArtifactCommentErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20365,12 +20739,15 @@ export type ResolveArtifactCommentResponses = {
      * Plain text
      */
     body: string
+    /**
+     * Who wrote it: a principal, or a guest, someone without an account who opened a shared link, whose id is their link's session
+     */
     author: {
-      type: "user" | "serviceAccount" | "system"
+      type: "user" | "serviceAccount" | "system" | "guest"
       id: string
     }
     /**
-     * Its author's name: a member's profile name or email, or the project's for its own code; null for anyone the project cannot name
+     * Its author's name: a member's profile name or email, the project's for its own code, or the name a guest gave; null for anyone the project cannot name. A guest reading it never gets a member's email
      */
     authorName: string | null
     /**
@@ -20415,7 +20792,7 @@ export type DeleteArtifactCommentErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20440,7 +20817,7 @@ export type DeleteArtifactCommentErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20465,7 +20842,7 @@ export type DeleteArtifactCommentErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20517,7 +20894,7 @@ export type ListArtifactRestorePointsErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20542,7 +20919,7 @@ export type ListArtifactRestorePointsErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20567,7 +20944,7 @@ export type ListArtifactRestorePointsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20668,7 +21045,7 @@ export type GetArtifactRestorePointErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20693,7 +21070,7 @@ export type GetArtifactRestorePointErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20718,7 +21095,7 @@ export type GetArtifactRestorePointErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20961,7 +21338,7 @@ export type RestoreArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -20986,7 +21363,7 @@ export type RestoreArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21011,7 +21388,7 @@ export type RestoreArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21036,7 +21413,7 @@ export type RestoreArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21061,7 +21438,7 @@ export type RestoreArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21272,7 +21649,7 @@ export type CreateArtifactFrameErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21297,7 +21674,7 @@ export type CreateArtifactFrameErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21322,7 +21699,7 @@ export type CreateArtifactFrameErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21347,7 +21724,7 @@ export type CreateArtifactFrameErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21409,7 +21786,7 @@ export type GetArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21434,7 +21811,7 @@ export type GetArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21459,7 +21836,7 @@ export type GetArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, state_full, comments_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, restore_point_not_found, comment_not_found, invalid_artifact, invalid_comment, invalid_state, name_required (a shared link's guest gives their name before commenting), state_full, comments_full, not_allowed, not_shared (it exists but neither a conversation nor an object you read shares it), read_only (you only read it), query_not_found, query_invalid (the ontology no longer admits the query), preview_not_found (the board has no preview yet, or will have none), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable.
      */
     code?: string
     /**
@@ -21659,6 +22036,10 @@ export type GetArtifactBoardPreviewData = {
      * The board's render key the picture is of, as the version's outline names it, in place of revision: the picture stays the same while the board shows the same, however often the canvas around it changes. Another than the board's current one is 404 preview_not_found. One that matches is cached for good
      */
     key?: string
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
   }
   url: "/api/artifacts/{artifactId}/versions/{version}/boards/{board}/preview"
 }
@@ -21762,6 +22143,10 @@ export type GetArtifactFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
   }
   url: "/api/artifacts/{artifactId}/versions/{version}/content"
 }
@@ -21818,6 +22203,10 @@ export type HeadArtifactFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
   }
   url: "/api/artifacts/{artifactId}/versions/{version}/content"
 }
@@ -24784,7 +25173,7 @@ export type ListProjectionsResponses = {
         [key: string]: string
       }
       users?: {
-        [key: string]: "email"
+        [key: string]: "email" | "id"
       }
       links: {
         [key: string]: {
@@ -25388,7 +25777,7 @@ export type GetProjectionResponses = {
           [key: string]: string
         }
         users?: {
-          [key: string]: "email"
+          [key: string]: "email" | "id"
         }
         links: {
           [key: string]: {

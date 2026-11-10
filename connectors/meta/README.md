@@ -110,6 +110,45 @@ Granting a new Page needs a new sign-in. Revoking a connection revokes the app f
 user, so other connections from the same user's sign-ins stop working too. Disconnecting a
 connection keeps the grant.
 
+## Connect Instagram without a Page
+
+The Instagram API with Unified Login connects Instagram professional accounts that have no
+Facebook Page. The client logs in with Instagram or Facebook, picks a business portfolio, then the
+accounts to share. Pass a Unified Login configuration and `accounts: "instagram"`:
+
+```ts
+export const metaInstagram = defineConnector(
+  "meta-instagram",
+  meta({
+    appId: process.env.META_APP_ID!,
+    appSecret: process.env.META_APP_SECRET!,
+    configId: process.env.META_INSTAGRAM_LOGIN_CONFIG_ID!,
+    accounts: "instagram",
+  })
+)
+```
+
+Create the configuration in the App Dashboard under the Instagram use case, **API setup with
+Unified login** (the app must belong to a business portfolio). Its token is a Business
+Integration System User token; add `instagram_content_publish` and `instagram_manage_insights` to
+its permissions as the project needs them. The code is exchanged with the Meta app ID and secret,
+not the Instagram app's.
+
+**One connection per Instagram account.** The client is the Graph client without `pages`,
+`facebook` and `facebookVideo`, with `account`:
+
+```ts
+const ig = await sixb.connector(metaInstagram, { owner: { type: "project" }, slot: "bakery" })
+
+ig.account // { instagramAccountId, username?, name? }
+await ig.instagram(ig.account.instagramAccountId).media.list()
+```
+
+**Token lifetime.** The token never expires unless the configuration sets an expiry, which the
+connection then carries so Sixb asks to reconnect in time. It stops working when the client
+removes the app from their portfolio (Business settings → Integrations → Connected apps) or moves
+the account to another portfolio: connect again. Meta documents no API to revoke it.
+
 ## Client API
 
 ```ts
@@ -335,6 +374,10 @@ Facebook supports native scheduling: photos/posts/videos require `published: fal
 Allowed time windows vary by endpoint and are enforced by Meta. For scheduled multi-photo posts,
 upload photos with `published: false, temporary: true` and pass
 `unpublished_content_type: "SCHEDULED"` to `posts.create()`.
+
+**Thumbnails.** Send a custom thumbnail with a Page video (`videos.create({ ..., thumb: blob })`),
+or add one to a video or reel afterwards: `facebookVideo(id).thumbnails.create({ source: blob })`
+(an image of 10 MB at most, shown on the video unless `is_preferred: false`).
 
 ### Media and recovery
 

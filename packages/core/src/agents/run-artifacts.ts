@@ -6,6 +6,7 @@ import {
   artifactAccessRule,
   artifactPreviewRequester,
   artifactQueryChecker,
+  artifactTransactionRules,
 } from "../artifacts/execution"
 import type { ArtifactKind } from "../artifacts/kinds"
 import { appendArtifactLive, changedBoards } from "../artifacts/live/presence"
@@ -52,6 +53,8 @@ import { conversationThreadId } from "./thread-access"
 export interface AgentRunArtifacts {
   /** The artifacts the conversation shares, most recently updated first. */
   list(input: { readonly limit: number }): Promise<readonly ArtifactRecord[]>
+  /** Any artifact the requester reads, such as one an object holds; `null` for another. */
+  get: ArtifactsRuntime["get"]
   getVersion: ArtifactsRuntime["getVersion"]
   listVersions: ArtifactsRuntime["listVersions"]
   query: ArtifactsRuntime["query"]
@@ -176,7 +179,7 @@ export function agentRunArtifacts(
     const [{ threadId }, { artifacts: reader }] = await Promise.all([publisherOf(), sdk()])
     const artifact = await requireArtifacts(storage).get({ projectId, id: artifactId })
     if (!artifact) return null
-    const access = await artifactAccessRule(reader, storage).publishAccess(artifact, threadId)
+    const access = await artifactAccessRule(reader).publishAccess(artifact, threadId)
     return access === "owner" || access === "update" ? artifact : null
   }
 
@@ -185,6 +188,7 @@ export function agentRunArtifacts(
       const [{ threadId }, { artifacts }] = await Promise.all([publisherOf(), sdk()])
       return (await artifacts.list({ threadId, limit })).artifacts
     },
+    get: async (...args) => (await sdk()).artifacts.get(...args),
     getVersion: async (...args) => (await sdk()).artifacts.getVersion(...args),
     listVersions: async (...args) => (await sdk()).artifacts.listVersions(...args),
     query: async (...args) => (await sdk()).artifacts.query(...args),
@@ -215,7 +219,7 @@ export function agentRunArtifacts(
       // Validation reads the files back and parses them, so it runs before the transaction, which
       // checks again that the run holds its conversation and the requester may still publish.
       const context = { projectId, storage: requireArtifacts(storage), blobStorage: blobs }
-      const reading = artifactAccessRule(reader, storage)
+      const reading = artifactAccessRule(reader)
       const write = async (
         files: readonly ArtifactFile[],
         baseRevision?: number,
@@ -240,6 +244,7 @@ export function agentRunArtifacts(
           turnRunId,
           ...(document ? { document } : {}),
         })
+        const ruleIn = await artifactTransactionRules(reader)
         const stored = await storage.transaction(async (tx) => {
           await assertAgentRunOwned(requireAgents(tx), fence)
           if (run.kind === "subagent") await assertParentActive(requireAgents(tx), run)
@@ -254,7 +259,7 @@ export function agentRunArtifacts(
           return storeArtifactVersion(
             { ...context, storage: requireArtifacts(tx) },
             prepared,
-            (each) => artifactAccessRule(reader, tx).publishAccess(each, threadId)
+            (each) => ruleIn(tx).publishAccess(each, threadId)
           )
         })
         return { prepared, stored }

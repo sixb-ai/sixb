@@ -349,6 +349,7 @@ export function createSixbApi(server: SixbServer) {
         return {
           auth: { kind: "allow" as const, session: null },
           sharedAccessCookies: null,
+          sharedSession: null,
           ...agentState,
           sixb: bindAgentRunRequestExecution(host, { signal: request.signal, ...runExecution }),
         }
@@ -361,6 +362,7 @@ export function createSixbApi(server: SixbServer) {
         return {
           auth: { kind: "deny" as const, response: shared.response },
           sharedAccessCookies: null,
+          sharedSession: null,
           sixb: null,
         }
       }
@@ -368,6 +370,8 @@ export function createSixbApi(server: SixbServer) {
         return {
           auth: { kind: "allow" as const, session: null },
           sharedAccessCookies: shared.cookies,
+          // A socket keeps the session it opened under, to check it still holds.
+          sharedSession: shared.context,
           sixb: bindRequestExecution(host, {
             request,
             authorization: {
@@ -388,6 +392,7 @@ export function createSixbApi(server: SixbServer) {
         return {
           auth,
           sharedAccessCookies: null,
+          sharedSession: null,
           sixb:
             auth.kind === "allow" && !guard.isAuthEnabled()
               ? bindRequestExecution(host, {
@@ -406,6 +411,7 @@ export function createSixbApi(server: SixbServer) {
       return {
         auth,
         sharedAccessCookies: null,
+        sharedSession: null,
         sixb: bindRequestExecution(host, {
           request,
           authorization: { type: "principal", context: authz, credential },
@@ -517,7 +523,7 @@ export function createSixbApi(server: SixbServer) {
     },
   })
   registerWebhookRoutes(app, host)
-  registerWebSocketRoutes(app, server)
+  registerWebSocketRoutes(app, server, sharedAccess)
 
   return app
 }

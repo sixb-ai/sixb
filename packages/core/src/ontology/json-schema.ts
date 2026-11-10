@@ -5,6 +5,8 @@ import type { Schema, ValueType } from "./types"
 
 // A user reference carries no name, so whoever reads the schema is told how one is written.
 const USER_REF_DESCRIPTION = 'A Sixb user, written {"type":"user","id":"<user-id>"}.'
+const ARTIFACT_REF_DESCRIPTION =
+  'A Sixb artifact, written {"type":"artifact","id":"<artifact-id>"}, such as "art_k3m9q2x7tp".'
 
 type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T
 
@@ -111,6 +113,17 @@ function schemaJsonSchema(
           properties: {
             type: { type: "string", enum: ["user"] },
             id: { type: "string", minLength: 1 },
+          },
+          required: ["type", "id"],
+          additionalProperties: false,
+        }
+      case "artifactRef":
+        return {
+          type: "object",
+          description: ARTIFACT_REF_DESCRIPTION,
+          properties: {
+            type: { type: "string", enum: ["artifact"] },
+            id: { type: "string", pattern: "^art_[0-9a-z]{10}$" },
           },
           required: ["type", "id"],
           additionalProperties: false,
