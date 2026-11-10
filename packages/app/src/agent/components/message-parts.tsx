@@ -13,6 +13,7 @@ import { useArtifactPanel } from "../artifact-panel"
 import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
+import { ChildAsked } from "../delegation/agent-exchange"
 import { ChildCards } from "../delegation/child-cards"
 import { describeDelegationTool, spawnedChildren } from "../delegation/interpret"
 import { useAgentMessages } from "../i18n"
@@ -126,6 +127,13 @@ export function AssistantBody({
       flushText()
       flushWork(false)
       blocks.push(<FileBlock key={`block-${key++}`} part={part} />)
+      return
+    }
+    // In a sub-agent's panel, its question to the Agent is part of the conversation, not the work.
+    if (nested && part.kind === "tool" && isAskTool(part.tool.toolName)) {
+      flushText()
+      flushWork(false)
+      blocks.push(<ChildAsked key={`block-${key++}`} tool={part.tool} />)
       return
     }
     // reasoning | tool | step-start — buffered together into one work run.

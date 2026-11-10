@@ -25,12 +25,6 @@ export interface SpawnedChild {
   readonly pending: boolean
 }
 
-/** One line of what passed between the Agent and a child, oldest first. */
-export interface ChildExchange {
-  readonly kind: "told" | "asked" | "answered"
-  readonly text: string
-}
-
 /** What `wait_agent` last said about one of a child's runs. */
 export interface WaitedChild {
   readonly status: string
@@ -42,7 +36,6 @@ export interface WaitedChild {
 export interface ThreadDelegation {
   /** The turn that spawned each child. */
   readonly spawnedBy: ReadonlyMap<string, string | null>
-  readonly exchanges: ReadonlyMap<string, readonly ChildExchange[]>
   /** By the id of the run waited on: a child's first run, or one that continued it. */
   readonly waited: ReadonlyMap<string, WaitedChild>
   /**
@@ -110,27 +103,14 @@ export function delegationTurns(
 }
 
 /**
- * Read the thread's sub-agents from its turns, oldest first, the one streaming now last. Each
- * `message_agent` and question goes to the child its key named at that point.
+ * Read the thread's sub-agents from its turns, oldest first, the one streaming now last. What
+ * passed between the Agent and a child reads in the child's panel, from its own thread.
  */
 export function readThreadDelegation(turns: readonly DelegationTurn[]): ThreadDelegation {
   const spawnedBy = new Map<string, string | null>()
-  const exchanges = new Map<string, ChildExchange[]>()
   const waited = new Map<string, WaitedChild>()
   const owners = new Map<string, string>()
   const ownersByTurn = new Map<string, ReadonlyMap<string, string>>()
-
-  const add = (key: string, exchange: ChildExchange) => {
-    const owner = owners.get(key)
-    if (!owner) return
-    const list = exchanges.get(owner) ?? []
-    // A question is listed by every wait until it is answered: it reads once.
-    const repeated = list.some(
-      (earlier) => earlier.kind === exchange.kind && earlier.text === exchange.text
-    )
-    if (exchange.kind === "asked" && repeated) return
-    exchanges.set(owner, [...list, exchange])
-  }
 
   const read = (runId: string | null, tool: NormalizedTool) => {
     const child = spawnedChild(tool)
@@ -140,24 +120,10 @@ export function readThreadDelegation(turns: readonly DelegationTurn[]): ThreadDe
       return
     }
 
-    if (tool.toolName === "message_agent" && tool.state === "output-available") {
-      const input = isRecord(tool.input) ? tool.input : {}
-      const output = toolResultValue(tool.output)
-      if (typeof input.key !== "string" || typeof input.text !== "string") return
-      const kind = isRecord(output) && output.delivery === "answer" ? "answered" : "told"
-      add(input.key.trim(), { kind, text: input.text.trim() })
-      return
-    }
-
     if (tool.toolName !== "wait_agent" || tool.state !== "output-available") return
     const output = toolResultValue(tool.output)
     if (!isRecord(output)) return
 
-    for (const question of Array.isArray(output.questions) ? output.questions : []) {
-      if (!isRecord(question)) continue
-      if (typeof question.key !== "string" || typeof question.text !== "string") continue
-      add(question.key, { kind: "asked", text: question.text.trim() })
-    }
     for (const result of Array.isArray(output.results) ? output.results : []) {
       if (!isRecord(result) || typeof result.runId !== "string") continue
       if (typeof result.status !== "string") continue
@@ -178,7 +144,6 @@ export function readThreadDelegation(turns: readonly DelegationTurn[]): ThreadDe
 
   return {
     spawnedBy,
-    exchanges,
     waited,
     ownerOf: (key, runId) =>
       (runId ? ownersByTurn.get(runId) : undefined)?.get(key) ?? owners.get(key),
