@@ -47,6 +47,7 @@ export type {
   SixbObjectTypeMap,
   SixbValueTypeMap,
   UserEmailColumn,
+  UserIdColumn,
   UserRef,
   ValueType,
   ValueTypeRefSchema,

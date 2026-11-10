@@ -6,7 +6,7 @@ import {
   type ObjectProjectionDefinition,
 } from "@sixb/core"
 import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
-import { loadMemberEmails } from "./member-emails"
+import { loadMemberDirectory } from "./member-directory"
 import {
   buildObjectProjectionPlan,
   type ObjectProjectionPlan,
@@ -31,7 +31,7 @@ export async function mapObjectProjectionEntries(input: {
     projection,
     dataset,
     primaryPropertyId: runtime.ontology.getPrimaryPropertyId(projection.objectTypeId),
-    members: await loadMemberEmails(runtime, projection),
+    members: await loadMemberDirectory(runtime, projection),
     correlation: {
       runId: execution.run.id,
       versionId: execution.run.identity.datasetVersion.versionId,
