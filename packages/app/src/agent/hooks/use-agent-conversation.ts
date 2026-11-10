@@ -1098,6 +1098,8 @@ export function useAgentConversation({
     }
   }, [computer, backgroundCommands, runsOnComputer, threadId])
 
+  const answerQuestion = (text: string) => void send(text, [], [])
+
   const transcriptProps: TranscriptProps = {
     threadId,
     messages,
@@ -1110,6 +1112,8 @@ export function useAgentConversation({
     approvalOutcomes,
     delegation: transcriptDelegation,
     background: transcriptBackground,
+    // The Agent's questions are answered as a message, from the cards above the composer.
+    ...(threadId !== null ? { onAnswer: answerQuestion } : {}),
   }
 
   const modelControlsProps = {

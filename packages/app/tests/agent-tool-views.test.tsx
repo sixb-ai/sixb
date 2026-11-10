@@ -413,3 +413,20 @@ describe("a file the agent changed", () => {
     }
   })
 })
+
+describe("the Agent's question in its reply", () => {
+  // Removal proof: drop the ask exclusion from flushWork in AssistantBody; the question then also
+  // shows as a row in the work.
+  test("shows as a card after the work, not as a row in it", () => {
+    const view = renderBody([
+      tool({
+        toolName: "ask",
+        state: "output-available",
+        input: { questions: [{ question: "Which year?", choices: ["2025", "2026"] }] },
+        output: { status: "asked" },
+      }),
+    ])
+    // The card alone: no work line before it.
+    expect(view.container.textContent).toBe("Asked youWhich year?")
+  })
+})

@@ -24,6 +24,8 @@ import {
   toolResultValue,
 } from "../parts"
 import { turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
+import { isAskTool } from "../questions/interpret"
+import { QuestionCards } from "../questions/question-card"
 import { builtInToolView } from "../tool-views/built-in"
 import { AnswerToolViews, ProjectToolView, useAgentToolView } from "../tool-views/registry"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/web-search"
@@ -89,7 +91,8 @@ export function AssistantBody({
           part.kind === "tool" &&
           ((DELEGATION_ROW_TOOLS.has(part.tool.toolName) &&
             childQuestions(part.tool).length === 0) ||
-            (!nested && heldCallsInParts([part]).length > 0))
+            (!nested && heldCallsInParts([part]).length > 0) ||
+            (!nested && part.tool.toolName === "ask"))
         )
     )
     if (shown.some((part) => part.kind !== "step-start")) {
@@ -101,6 +104,11 @@ export function AssistantBody({
 
     const held = heldCallsInParts(work)
     if (held.length > 0) blocks.push(<ApprovalCards key={`approvals-${key++}`} calls={held} />)
+    // The Agent's questions to the user are the reply's last word, each a card to answer.
+    const asked = work.flatMap((part) =>
+      part.kind === "tool" && part.tool.toolName === "ask" ? [part.tool] : []
+    )
+    if (asked.length > 0) blocks.push(<QuestionCards key={`questions-${key++}`} tools={asked} />)
     const spawned = spawnedChildren(work)
     if (spawned.length > 0) blocks.push(<ChildCards key={`children-${key++}`} spawned={spawned} />)
   }
@@ -425,7 +433,7 @@ export function BuiltInToolRow({
             className={cn(
               "min-w-0 font-medium",
               // A sub-agent's question reads in full.
-              tool.toolName === "ask_parent" ? "text-left break-words" : "truncate"
+              isAskTool(tool.toolName) ? "text-left break-words" : "truncate"
             )}
           >
             {title}

@@ -443,6 +443,17 @@ export const fr: Translation<AgentMessages> = {
       name ? `Impossible de consulter ${name}` : "Impossible de consulter le fichier",
     open: (name) => `Ouvrir ${name}`,
   },
+  questions: {
+    card: (count) => (count === 1 ? "La question de l’agent" : "Les questions de l’agent"),
+    asked: "Vous a demandé",
+    waiting: "En attente d’une réponse",
+    running: "Vous pose une question",
+    send: "Envoyer la réponse",
+    sending: "Envoi…",
+    pickAny: "Plusieurs choix possibles",
+    typeAnswer: "Saisir une réponse",
+    typeOther: "Ou saisir une autre réponse",
+  },
   edit: {
     title: (name) => (name ? `${name} modifié` : "Fichier modifié"),
     running: (name) => (name ? `Modification de ${name}` : "Modification d’un fichier"),
