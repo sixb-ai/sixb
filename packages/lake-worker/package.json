@@ -1,6 +1,6 @@
 {
   "name": "@sixb/lake-worker",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Worker that runs Sixb lake maintenance",
   "keywords": [
     "sixb",

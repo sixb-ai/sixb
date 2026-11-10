@@ -2,7 +2,52 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## Unreleased
+## 2026-11-10 — Sixb 0.2.3
+
+0.2.3 makes the data plane run on its own: the lake is retained and compacted, webhook changes are
+stored before they are written, and every run lost by a worker comes back. Artifacts become live
+documents people edit together, comment on and attach to objects; the app becomes an installed
+phone app; and each person can connect their own accounts. The upgrade needs a plan: read the
+upgrade notes first.
+
+### Highlights
+
+- Keep the lake healthy without a cron: DuckLake compacts datasets after the commits that need
+  it, retention removes replaced versions on a built-in schedule set by `lakeMaintenance`, and
+  Console › Lake health shows what waits. The new `@sixb/lake-worker` runs it.
+- `sixb.datasets.ingest` stores changes and returns at once; a worker writes what waits as one
+  version per flush. A pipeline step that replaces a keyed output stores only the rows that
+  changed.
+- Bring back what a lost worker left: the orchestrator resumes queued and running syncs,
+  pipelines, workflows, projections and webhook deliveries, worker leases are renewed while a run
+  works, and one run of a sync runs at a time.
+- Edit a canvas live with others: who is there shows over the canvas, the Agent's changes merge
+  with yours, and edits work offline until saved. Comment on a board's words, pictures and colors,
+  and send comments to the Agent, which resolves or answers them. Each board keeps a picture.
+- Artifacts change their current version until someone creates one with
+  `sixb.artifacts.freeze(id)`, and restore points put back what an Agent turn changed.
+- Hold an artifact in an object property with `ref.artifact()`: whoever reads the object reads
+  the artifact, object pages show it, forms pick it, and a shared link's visitor follows it live
+  and comments as a guest. `ArtifactViewer` shows one in a page of your own.
+- Install the app on a phone like a native one: `AppShell` builds a top bar, a tab bar and a More
+  sheet from the nav, screens push and pop, and the installed app opens offline and resumes.
+  Loading states take the shape of what loads.
+- Start a conversation from your phone that runs on your computer, or in a sandbox from the
+  page's own picker with `newThreadSandbox` and `newThreadControls`.
+- Let each person connect their own accounts with `owners: ["user"]` on a connector: syncs bring
+  in everyone's data, each person sees only their own. Microsoft 365 connects people with OAuth,
+  and `entraDirectory()` suspends whoever leaves Entra and ends their connections, as
+  `sixb.users.suspend()` does from code.
+- Keep a project's values in Azure Key Vault with `@sixb/env-azure-key-vault`, and run
+  `sixb env init` on any source.
+- GitHub gains branches, attachments, pull requests, stacks, commits and issue tracking;
+  QuickBooks gains estimates and 26 more Accounting resources with incremental sync.
+- Connect Instagram professional accounts without a Facebook Page with `@sixb/connector-meta`'s
+  `meta({ appId, appSecret, configId, accounts: "instagram" })` (Instagram API with Unified
+  Login): each connection is one shared account, published and read with the grant's system user
+  token. Give Facebook videos and reels a custom thumbnail with `videos.create({ thumb })` and
+  `facebookVideo(id).thumbnails.create({ source })`.
+- `@sixb/broker-redis` expires idle streams once their records leave age retention.
 
 ### Upgrade notes
 
@@ -23,14 +68,19 @@ Read this first: lake retention starts on its own, and what it deletes does not 
 6. **After.** `/api/status` reads `unknown` until the first beat: a monitor on `== "ok"` alerts for up
    to one beat. Regenerate clients.
 
-To roll back to 0.2.1, stop `ingest` traffic and let the inbox drain first: 0.2.1 does not read
+To roll back to 0.2.2, stop `ingest` traffic and let the inbox drain first: 0.2.2 does not read
 `dataset_ingest_deliveries`, so what waits there stays until you roll forward. A run holding an
-execution token stays `running` on 0.2.1, whose workers skip it.
+execution token stays `running` on 0.2.2, whose workers skip it.
 
 #### What stops compiling or starting
 
 - `@sixb/ducklake`: `lakeStorage.runMaintenance()` and its `DuckLakeMaintenanceOptions` and
   `DuckLakeMaintenanceReport` types are gone. Call `lakeStorage.maintenance.applyRetention()`.
+- Artifacts: `sixb.artifacts.publish(id, input)` is now `sixb.artifacts.update(id, input)`
+  (`PublishArtifactRuntimeInput` becomes `UpdateArtifactRuntimeInput`), and
+  `POST /api/artifacts/{id}/versions` is now `PUT /api/artifacts/{id}/content`. A write replaces
+  the artifact's current version instead of adding one; `sixb.artifacts.freeze(id)` creates a
+  version. Regenerate clients.
 - `sixb.datasets.ingest` returns `{ deliveryId, changes }`: `outcome`, `version` and `rowsRead` are
   gone. See _What changes at runtime_.
 - `sixb.scheduler` and the `SchedulerController` type are gone: nothing outside tests called them.
@@ -142,6 +192,16 @@ execution token stays `running` on 0.2.1, whose workers skip it.
   and `DatasetSequenceConflictError`. `InMemoryBroker` now honors `idempotencyKey`, as Redis and NATS
   do.
 
+### Package versions
+
+- `0.2.3`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/app`, `@sixb/ui`, `@sixb/cli`,
+  `@sixb/cli-core`, `@sixb/agent`, `@sixb/orchestrator`, `@sixb/pg`, `@sixb/sqlite`,
+  `@sixb/ducklake`, `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`, `@sixb/broker-redis`,
+  `@sixb/queues-bullmq`, `@sixb/auth-oidc`, `@sixb/connector-github`, `@sixb/connector-meta`,
+  `@sixb/connector-microsoft`, `@sixb/connector-quickbooks`, and `@sixb/lake-worker` and
+  `@sixb/env-azure-key-vault` (new).
+
 ## 2026-11-07 — Sixb 0.2.2
 
 0.2.2 gives the Agent the web, background commands and the workspace's own instructions, runs it
@@ -174,11 +234,6 @@ reach.
   blocked.
 - Delete Pipedrive persons and organizations with `persons.delete(id)` and
   `organizations.delete(id)`.
-- Connect Instagram professional accounts without a Facebook Page with `@sixb/connector-meta`'s
-  `meta({ appId, appSecret, configId, accounts: "instagram" })` (Instagram API with Unified
-  Login): each connection is one shared account, published and read with the grant's system user
-  token. Give Facebook videos and reels a custom thumbnail with `videos.create({ thumb })` and
-  `facebookVideo(id).thumbnails.create({ source })`.
 
 ### Upgrade notes
 
