@@ -120,7 +120,7 @@ export class RedisBroker implements Broker {
       assertEncodableRecord(input)
     }
 
-    const ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
+    let ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
     const encodedRecords: EncodedAppendRecord[] = params.records.map((input) => {
       const publishedAt = new Date().toISOString()
       return {
@@ -130,13 +130,21 @@ export class RedisBroker implements Broker {
       }
     })
 
-    const appendResults = await this.connectionManager.useCommandClient((client) =>
-      this.appendBatch({
-        client,
-        ensured,
-        records: encodedRecords,
-      })
-    )
+    const appendRecords = (stream: EnsuredStream) =>
+      this.connectionManager.useCommandClient((client) =>
+        this.appendBatch({ client, ensured: stream, records: encodedRecords })
+      )
+    let appendResults = await appendRecords(ensured)
+    if (appendResults === null) {
+      // Redis expired the idle stream's keys after this process ensured it.
+      ensured = await this.streamManager.restore(ensured)
+      appendResults = await appendRecords(ensured)
+    }
+    if (appendResults === null) {
+      throw new RedisBrokerError(
+        `stream '${params.streamId}' has not been ensured for project '${params.projectId}'. Call ensureStream() before append or subscribe.`
+      )
+    }
 
     if (appendResults.length !== encodedRecords.length) {
       throw new RedisBrokerError(
@@ -196,16 +204,12 @@ export class RedisBroker implements Broker {
     }
 
     const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
-    if (ensured === null) {
+    const retained = ensured === null ? null : await this.retainedRange(ensured)
+    if (ensured === null || retained === null) {
       return { records: [], cursor: params.afterCursor, hasMore: false }
     }
 
-    await this.connectionManager.useCommandClient((client) =>
-      this.enforceAgeRetention(client, ensured)
-    )
-    const lastTrimmedId = await this.connectionManager.useCommandClient((client) =>
-      this.readLastTrimmedId(client, ensured)
-    )
+    const { lastTrimmedId } = retained
     this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
 
     const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
@@ -287,14 +291,12 @@ export class RedisBroker implements Broker {
     }
 
     const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
-    if (ensured === null) {
+    const retained = ensured === null ? null : await this.retainedRange(ensured)
+    if (ensured === null || retained === null) {
       return { records: [], cursor: params.beforeCursor, hasMore: false }
     }
 
-    const lastTrimmedId = await this.connectionManager.useCommandClient(async (client) => {
-      await this.enforceAgeRetention(client, ensured)
-      return this.readLastTrimmedId(client, ensured)
-    })
+    const { lastTrimmedId } = retained
     this.assertTailCursorInRetainedRange(ensured.streamId, params.beforeCursor, lastTrimmedId)
 
     const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
@@ -360,7 +362,9 @@ export class RedisBroker implements Broker {
     }
 
     return this.connectionManager.useCommandClient(async (client) => {
-      await this.enforceAgeRetention(client, ensured)
+      if (!(await this.enforceAgeRetention(client, ensured))) {
+        return undefined
+      }
       const entries = await this.readReverseRange(client, ensured, "+", "-", 1)
       return entries[0]?.id
     })
@@ -382,11 +386,14 @@ export class RedisBroker implements Broker {
     assertStreamId(params.streamId)
     assertCursor(params.afterCursor)
 
-    const ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
-    const lastTrimmedId = await this.connectionManager.useCommandClient(async (commandClient) => {
-      await this.enforceAgeRetention(commandClient, ensured)
-      return this.readLastTrimmedId(commandClient, ensured)
-    })
+    let ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
+    let retained = await this.retainedRange(ensured)
+    if (retained === null) {
+      // Redis expired the idle stream's keys after this process ensured it.
+      ensured = await this.streamManager.restore(ensured)
+      retained = {}
+    }
+    const { lastTrimmedId } = retained
     if (params.afterCursor !== undefined) {
       this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
     }
@@ -442,7 +449,7 @@ export class RedisBroker implements Broker {
     client: RedisBrokerCommandClient
     ensured: EnsuredStream
     records: readonly EncodedAppendRecord[]
-  }): Promise<readonly AppendBatchResult[]> {
+  }): Promise<readonly AppendBatchResult[] | null> {
     let reply: unknown
     try {
       const dedupeKeys = params.records.map((record) =>
@@ -475,6 +482,10 @@ export class RedisBroker implements Broker {
       )
     }
 
+    // The script answers 0 when the stream's metadata is gone.
+    if (reply === 0) {
+      return null
+    }
     const results = parseAppendBatchReply(reply)
     if (results.some((result) => !result.duplicate)) {
       await this.trimRetention(params.client, params.ensured)
@@ -542,14 +553,32 @@ export class RedisBroker implements Broker {
     return parseStreamEntries(reply)
   }
 
+  /**
+   * Enforces age retention, then answers the latest trimmed cursor, or null once
+   * Redis has expired the stream's keys. Reads answer an expired stream as a
+   * missing one; it stays ensured in this process, so a write restores it.
+   */
+  private async retainedRange(
+    ensured: EnsuredStream
+  ): Promise<{ readonly lastTrimmedId?: string } | null> {
+    return this.connectionManager.useCommandClient(async (client) => {
+      if (!(await this.enforceAgeRetention(client, ensured))) {
+        return null
+      }
+      return { lastTrimmedId: await this.readLastTrimmedId(client, ensured) }
+    })
+  }
+
+  /** Enforces age retention; false once Redis has expired the stream's keys. */
   private async enforceAgeRetention(
     client: RedisBrokerCommandClient,
     ensured: EnsuredStream
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let reply: unknown
     try {
       // Age retention is a Sixb-level policy. Redis Streams only trim when a
       // command asks them to, so reads/replays must also trim idle streams.
-      await client.send("EVAL", [
+      reply = await client.send("EVAL", [
         ENFORCE_AGE_RETENTION_SCRIPT,
         "2",
         ensured.keys.streamKey,
@@ -560,6 +589,8 @@ export class RedisBroker implements Broker {
         cause: error,
       })
     }
+    // The script answers 0 when the stream's metadata is gone.
+    return reply !== 0
   }
 
   private async subscriptionStartCursor(

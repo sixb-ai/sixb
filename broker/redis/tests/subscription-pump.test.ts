@@ -12,6 +12,7 @@ const stream: EnsuredStream = {
     metaKey: "meta-key",
     dedupeKey: (idempotencyKey) => `dedupe:${idempotencyKey ?? "_"}`,
   },
+  retention: {},
 }
 
 afterEach(() => {

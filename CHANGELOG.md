@@ -129,6 +129,10 @@ execution token stays `running` on 0.2.1, whose workers skip it.
   `packages/orchestrator/README.md` lists what can be lost.
 - A cron occurrence the broker refuses is retried until accepted, and fails the `cron` pass
   meanwhile, instead of being reported once and lost.
+- `@sixb/broker-redis` expires a stream with `maxAgeMs` once it is idle: its records `maxAgeMs`
+  plus a minute after the last append, its metadata a day later. A finished agent run's stream
+  used to keep every record until someone read it again. Streams written before the upgrade get
+  their expiry the next time they are read; one nobody reads again keeps its keys until deleted.
 - `/api/status` reads a heartbeat the orchestrator writes to storage. `status` can now be `unknown`,
   and `maintenance` holds `owner`, `beatAt`, `stale`, `passes` and `outbox` instead of the last pass
   of the process that answered.

@@ -19,12 +19,14 @@ export function requireRedisUrl(): string {
 export function createTestBroker(options: Pick<RedisBrokerOptions, "streamRetention"> = {}): {
   broker: RedisBroker
   projectId: string
+  prefix: string
   cleanup: () => Promise<void>
 } {
   const suffix = randomUUID().slice(0, 8)
+  const prefix = `sixb:test:broker:${suffix}`
   const broker = new RedisBroker({
     connection: { url: requireRedisUrl() },
-    prefix: `sixb:test:broker:${suffix}`,
+    prefix,
     subscribeBlockMs: 100,
     ...options,
   })
@@ -33,5 +35,5 @@ export function createTestBroker(options: Pick<RedisBrokerOptions, "streamRetent
     await broker.close()
   }
 
-  return { broker, projectId: `project-${suffix}`, cleanup }
+  return { broker, projectId: `project-${suffix}`, prefix, cleanup }
 }
