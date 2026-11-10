@@ -394,14 +394,17 @@ function firstLine(value: string): string {
   return value.trim().split("\n")[0]?.trim() ?? ""
 }
 
-interface AskedQuestion {
+export interface AskedQuestion {
   readonly question: string
   readonly choices: readonly string[]
+  readonly multiple: boolean
 }
 
 /** The questions of an `ask` call, or of an earlier `ask_parent` call's one question. */
 function askedQuestions(input: Record<string, unknown> | undefined): AskedQuestion[] {
-  if (typeof input?.question === "string") return [{ question: input.question.trim(), choices: [] }]
+  if (typeof input?.question === "string") {
+    return [{ question: input.question.trim(), choices: [], multiple: false }]
+  }
   if (!Array.isArray(input?.questions)) return []
   return input.questions.flatMap((value) => {
     const question = record(value)
@@ -409,8 +412,22 @@ function askedQuestions(input: Record<string, unknown> | undefined): AskedQuesti
     const choices = Array.isArray(question.choices)
       ? question.choices.filter((choice): choice is string => typeof choice === "string")
       : []
-    return [{ question: question.question.trim(), choices }]
+    return [{ question: question.question.trim(), choices, multiple: question.multiple === true }]
   })
+}
+
+/** What a reply asked the user with its last `ask`: its questions, or none. */
+export function askedInReply(
+  message: { readonly role: string; readonly parts: readonly Part[] } | null | undefined
+): readonly AskedQuestion[] {
+  if (message?.role !== "assistant") return []
+  const asked = [...message.parts]
+    .reverse()
+    .find(
+      (part): part is ToolPart =>
+        part.kind === "tool" && part.name === "ask" && part.state === "done"
+    )
+  return askedQuestions(record(asked?.input))
 }
 
 /**
@@ -421,16 +438,9 @@ export function pickedAnswer(
   messages: readonly { readonly role: string; readonly parts: readonly Part[] }[],
   text: string
 ): string {
-  const last = messages.at(-1)
   const number = text.trim()
-  if (last?.role !== "assistant" || !/^\d+$/.test(number)) return text
-  const asked = [...last.parts]
-    .reverse()
-    .find(
-      (part): part is ToolPart =>
-        part.kind === "tool" && part.name === "ask" && part.state === "done"
-    )
-  const questions = askedQuestions(record(asked?.input))
+  if (!/^\d+$/.test(number)) return text
+  const questions = askedInReply(messages.at(-1))
   if (questions.length !== 1) return text
   return questions[0]?.choices[Number(number) - 1] ?? text
 }
