@@ -34,3 +34,18 @@ export type MicrosoftAuthOptions =
       readonly clientSecret?: never
       readonly clientCertificate?: never
     }
+
+/**
+ * Each person connects their own Microsoft 365 account, and Sixb stores and refreshes their
+ * delegated grant. Requests act as that person and reach only what they can open.
+ */
+export interface MicrosoftOAuthOptions {
+  readonly tenantId: string
+  readonly clientId: string
+  readonly clientSecret: string
+  /**
+   * Delegated Microsoft Graph permissions, such as `Mail.Read` or `Files.Read.All`. Sign-in
+   * (`openid profile`) and `offline_access` are always requested.
+   */
+  readonly scopes: readonly string[]
+}
