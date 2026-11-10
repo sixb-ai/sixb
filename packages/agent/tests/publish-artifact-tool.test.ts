@@ -1627,9 +1627,9 @@ describe("publish_artifact", () => {
     )
   })
 
-  // Removal proof: drop the kind check from publish; a kind that is not the artifact's is
-  // ignored, and the document is updated as though it were a sheet.
-  test("takes a kind with an id only when it is the artifact's", async () => {
+  // Removal proof: keep a kind sent with an id in parsePublishArtifactInput and refuse a mismatch;
+  // a model that fills every field, as strict mode has it, guesses a kind and is refused.
+  test("with an id, ignores a kind: the update keeps the artifact's", async () => {
     write("work/review/document.md", "# Q3 review\n\nDraft.\n")
     const { artifactId } = (await publish({
       path: "work/review",
@@ -1638,13 +1638,8 @@ describe("publish_artifact", () => {
     })) as { artifactId: string }
 
     expect(
-      await refusal({ id: artifactId, kind: "sheet", path: "work/review", title: "Q3" }, "version")
-    ).toBe(
-      `[SixbAgent] publish_artifact refused: ${artifactId} is a document, not a sheet, so nothing was published: leave out kind to update it, or leave out id to publish a new sheet.`
-    )
-    expect(
-      await publishVersion({ id: artifactId, kind: "document", path: "work/review", title: "Q3" })
-    ).toMatchObject({ artifactId, created: false, revision: 2 })
+      await publishVersion({ id: artifactId, kind: "sheet", path: "work/review", title: "Q3" })
+    ).toMatchObject({ artifactId, created: false, kind: "document", revision: 2 })
     // "null" for no id, beside a kind: a new artifact.
     expect(
       await publish({ id: "null", kind: "document", path: "work/review", title: "Q3 copy" })
