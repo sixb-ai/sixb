@@ -124,6 +124,11 @@ interface ChangedRange {
   readonly newEnd: number
 }
 
+/** A text's lines, its final newline ending the last rather than starting an empty one. */
+function textLines(text: string): readonly string[] {
+  return (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n")
+}
+
 /** The replacements as unified-diff hunks, nearby ones merged, cut past a few thousand characters. */
 function unifiedDiff(
   before: string,
@@ -132,8 +137,9 @@ function unifiedDiff(
   oldLength: number,
   newLength: number
 ): string {
-  const oldLines = before.split("\n")
-  const newLines = after.split("\n")
+  // A file's final newline ends its last line: it starts no empty one.
+  const oldLines = textLines(before)
+  const newLines = textLines(after)
   const oldLineOf = lineIndex(before)
   const newLineOf = lineIndex(after)
   const ranges: ChangedRange[] = []
@@ -145,6 +151,9 @@ function unifiedDiff(
     let oldEnd = oldLineOf(start + oldLength)
     let newStart = newLineOf(start + shift) - 1
     let newEnd = newLineOf(start + shift + newLength)
+    // A match ending with the final newline reaches no line past the last.
+    oldEnd = Math.min(oldEnd, oldLines.length)
+    newEnd = Math.min(newEnd, newLines.length)
     while (
       oldEnd > oldStart &&
       newEnd > newStart &&

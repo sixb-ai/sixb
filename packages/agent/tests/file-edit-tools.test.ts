@@ -38,7 +38,7 @@ describe("edit", () => {
     expect(await edit({ path: "app.ts", old_string: "4", new_string: "5" })).toEqual({
       path: "app.ts",
       replaced: 1,
-      diff: "@@ -1,2 +1,2 @@\n-const retries = 4\n+const retries = 5\n \n",
+      diff: "@@ -1,1 +1,1 @@\n-const retries = 4\n+const retries = 5\n",
     })
     // Its own write counts as read: the next edit needs no read in between.
     await edit({ path: "app.ts", old_string: "retries", new_string: "attempts" })

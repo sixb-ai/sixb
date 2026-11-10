@@ -12,14 +12,14 @@ describe("editText", () => {
       ok: true,
       replaced: 1,
       text: file.replace("a + 1", "a + 2"),
+      // The final newline ends the last line: no empty line after it.
       diff: [
-        "@@ -2,5 +2,5 @@",
+        "@@ -2,4 +2,4 @@",
         " ",
         " export function f() {",
         "-  return a + 1",
         "+  return a + 2",
         " }",
-        " ",
         "",
       ].join("\n"),
     })
@@ -28,7 +28,18 @@ describe("editText", () => {
   test("shows whole removed lines once, not the line after them as changed too", () => {
     const result = editText("a\nb\nc\n", { old: "b\n", new: "", all: false })
     expect(result).toMatchObject({ ok: true, text: "a\nc\n" })
-    expect(result.ok && result.diff).toBe("@@ -1,4 +1,3 @@\n a\n-b\n c\n \n")
+    expect(result.ok && result.diff).toBe("@@ -1,3 +1,2 @@\n a\n-b\n c\n")
+  })
+
+  // Removal proof: split the text on every newline in unifiedDiff; a file ending in one gets an
+  // empty last line, counted in the hunk and shown as context.
+  test("counts a file's final newline as the end of its last line", () => {
+    const four = "one\ntwo\nthree\nfour\n"
+    const changed = editText(four, { old: "four\n", new: "4\n", all: false })
+    expect(changed.ok && changed.diff).toBe("@@ -2,3 +2,3 @@\n two\n three\n-four\n+4\n")
+    // The final newline removed with the last line: nothing past the last line shows.
+    const dropped = editText(four, { old: "\nfour\n", new: "\n", all: false })
+    expect(dropped.ok && dropped.diff).toBe("@@ -2,3 +2,2 @@\n two\n three\n-four\n")
   })
 
   test("refuses an ambiguous match unless asked for all, naming the lines", () => {
