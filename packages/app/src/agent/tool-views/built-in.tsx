@@ -14,6 +14,7 @@ import { coerceWebFetchOutput } from "../utils/web-fetch"
 import { coerceWebSearchOutput } from "../utils/web-search"
 import { describeViewFile } from "../view-file/interpret"
 import { ViewFileToolView } from "../view-file/view-file-tool-view"
+import { waitsForCommandsOnly } from "../waits"
 
 type BuiltInToolView = (tool: NormalizedTool) => ReactNode
 
@@ -39,15 +40,15 @@ const BUILT_IN_TOOL_VIEWS: ReadonlyMap<string, BuiltInToolView> = new Map([
         />
       ),
   ],
-  // A failed read or stop keeps the inspector, which says why.
-  [
-    "bash_output",
-    (tool) => (tool.state === "output-error" ? null : <BackgroundToolRow tool={tool} />),
-  ],
-  [
-    "bash_stop",
-    (tool) => (tool.state === "output-error" ? null : <BackgroundToolRow tool={tool} />),
-  ],
+  // A wait or a stop for commands alone is their row; one for a sub-agent is the sub-agent's. A
+  // failed one keeps the inspector, which says why. Earlier threads hold bash_output and bash_stop.
+  ...["wait", "stop", "bash_output", "bash_stop"].map((name): [string, BuiltInToolView] => [
+    name,
+    (tool) =>
+      tool.state === "output-error" || !waitsForCommandsOnly(tool) ? null : (
+        <BackgroundToolRow tool={tool} />
+      ),
+  ]),
   // A file read shows as itself, an image or a PDF, keeps the view view_file had.
   [
     "read",

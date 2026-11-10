@@ -30,13 +30,16 @@ import { QuestionCards } from "../questions/question-card"
 import { builtInToolView } from "../tool-views/built-in"
 import { AnswerToolViews, ProjectToolView, useAgentToolView } from "../tool-views/registry"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/web-search"
+import { waitsForChildren } from "../waits"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./activity-status"
 import { ApprovalCards } from "./approval-card"
 import { FileAttachmentCard } from "./file-attachment-card"
 import { WebSources } from "./web-sources"
 
 /** Calls a sub-agent's row stands for, in the conversation and in its thread. */
-const DELEGATION_ROW_TOOLS: ReadonlySet<string> = new Set(["spawn_agent", "wait_agent"])
+function isDelegationRow(tool: NormalizedTool): boolean {
+  return tool.toolName === "spawn_agent" || waitsForChildren(tool)
+}
 
 /**
  * Render an assistant body from normalized parts. Narration text stays on the main reading path;
@@ -90,8 +93,7 @@ export function AssistantBody({
       (part) =>
         !(
           part.kind === "tool" &&
-          ((DELEGATION_ROW_TOOLS.has(part.tool.toolName) &&
-            childQuestions(part.tool).length === 0) ||
+          ((isDelegationRow(part.tool) && childQuestions(part.tool).length === 0) ||
             (!nested && heldCallsInParts([part]).length > 0) ||
             (!nested && part.tool.toolName === "ask"))
         )
