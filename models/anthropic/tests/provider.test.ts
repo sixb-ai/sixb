@@ -1,6 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
-import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
+import type {
+  JsonObject,
+  LanguageModelRequest,
+  LanguageModelStreamEvent,
+  ModelOutput,
+} from "@sixb/core/models"
 import {
   ModelCatalogUnavailableError,
   ModelProviderError,
@@ -308,7 +313,7 @@ describe("Anthropic provider", () => {
         return sseResponse([])
       },
     })
-    const closed = (properties: Record<string, object>, required: string[]) => ({
+    const closed = (properties: JsonObject, required: string[]): JsonObject => ({
       type: "object",
       properties,
       required,
