@@ -134,10 +134,8 @@ export function foundryChatRequest(
           tool_choice: "auto",
           ...(profile === "openai"
             ? {
-                parallel_tool_calls:
-                  !schema &&
-                  !tools.some((tool) => tool.function.strict) &&
-                  caps.parallelToolCalls === true,
+                // Strict tools keep parallel calls (measured on Azure, November 2026).
+                parallel_tool_calls: !schema && caps.parallelToolCalls === true,
               }
             : {}),
         }

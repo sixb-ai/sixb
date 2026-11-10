@@ -141,8 +141,8 @@ export function responsesRequest(
       ? {
           tools,
           tool_choice: "auto",
-          parallel_tool_calls:
-            !schema && !tools.some((t) => t.strict) && caps.parallelToolCalls === true,
+          // Strict tools keep parallel calls (measured on Azure, November 2026).
+          parallel_tool_calls: !schema && caps.parallelToolCalls === true,
         }
       : {}),
     ...((reasoning !== undefined && reasoning !== "provider-default") || summary

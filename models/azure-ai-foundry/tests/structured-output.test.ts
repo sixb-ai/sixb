@@ -33,7 +33,7 @@ test("enforces Azure's property and nesting limits including referenced schemas"
   ).toBeUndefined()
 })
 
-test("preserves nullable unions and valid local recursion without accepting unsupported keywords", () => {
+test("preserves nullable unions, valid local recursion and the bounds Azure takes, not other keywords", () => {
   const schema = {
     ...closed({
       value: { type: ["string", "null"] },
@@ -47,15 +47,11 @@ test("preserves nullable unions and valid local recursion without accepting unsu
     $defs: { child: closed({ value: { type: "string" } }) },
   }
   expect(foundryOutputSchema(ref)).toBe(ref)
-  for (const keyword of [
-    "minLength",
-    "pattern",
-    "format",
-    "minimum",
-    "maxItems",
-    "oneOf",
-    "allOf",
-  ]) {
+  // Measured on Azure, November 2026. Reproduce by removing a bound from KEYWORDS.
+  for (const keyword of ["minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"]) {
+    expect(foundryOutputSchema(closed({ value: { type: "string", [keyword]: 1 } }))).toBeDefined()
+  }
+  for (const keyword of ["uniqueItems", "pattern", "format", "oneOf", "allOf"]) {
     expect(foundryOutputSchema(closed({ value: { type: "string", [keyword]: 1 } }))).toBeUndefined()
   }
   expect(foundryOutputSchema(closed({ missing: { $ref: "#/missing" } }))).toBeUndefined()

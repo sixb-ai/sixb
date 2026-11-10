@@ -284,7 +284,10 @@ test("applies Azure strict output and tool policy without weakening schemas", as
   await collect(
     (await model.stream(request({ tools: [{ ...tools[0]!, inputSchema: optional }] }))).events
   )
+  // Strict tools keep parallel calls: Azure takes both (measured November 2026). Reproduce by
+  // turning parallel_tool_calls off when a tool is strict in responsesRequest.
   expect(bodies[3]).toMatchObject({
+    parallel_tool_calls: true,
     tools: [
       {
         strict: true,
