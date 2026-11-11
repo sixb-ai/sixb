@@ -19,16 +19,22 @@ const SUBTITLE = "a receipt, not a recommendation"
 const FOOTER = "Verified by no one. Trusted by both of us."
 const PAD = "  "
 const RULE = "─"
+const MODULUS = 2 ** 32
+const SEAL_LENGTH = 8
 
 const encoder = new TextEncoder()
 
-/** FNV-1a over UTF-8 bytes: small, stable, and short enough to fit on a receipt. */
+/** djb2 over the subject's UTF-8 bytes: small, stable, and short enough to fit on a receipt. */
 export function seal(text: string): string {
-  let hash = 0x811c9dc5
+  let hash = 5381
   for (const byte of encoder.encode(text)) {
-    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0
+    hash = (hash * 33 + byte) % MODULUS
   }
-  return hash.toString(16).padStart(8, "0")
+  return hash.toString(16).padStart(SEAL_LENGTH, "0")
+}
+
+function row(label: string, value: string, labelWidth: number): string {
+  return `${PAD}${label.padEnd(labelWidth)}${PAD}${value}`
 }
 
 /**
@@ -38,8 +44,6 @@ export function seal(text: string): string {
 export function handshake(subject: string, fields: readonly HandshakeField[] = []): string {
   const rows: HandshakeField[] = [["subject", subject], ...fields]
   const labelWidth = rows.reduce((width, [label]) => Math.max(width, label.length), 0)
-  const format = (label: string, value: string) =>
-    `${PAD}${label.padEnd(labelWidth)}${PAD}${value}`
 
   const layout: (string | null)[] = [
     "",
@@ -47,18 +51,26 @@ export function handshake(subject: string, fields: readonly HandshakeField[] = [
     `${PAD}${SUBTITLE}`,
     "",
     null,
-    ...rows.map(([label, value]) => format(label, value)),
-    format("seal", seal(subject)),
+    ...rows.map(([label, value]) => row(label, value, labelWidth)),
+    row("seal", seal(subject), labelWidth),
     null,
     `${PAD}${FOOTER}`,
     "",
   ]
 
   // Every line keeps a trailing gap, so the text never touches its own frame.
-  const width = layout.reduce((widest, line) => Math.max(widest, line?.length ?? 0), 0) + PAD.length
+  const contentWidth = layout.reduce((widest, line) => Math.max(widest, line?.length ?? 0), 0)
+  const width = contentWidth + PAD.length
   const rule = `├${RULE.repeat(width)}┤`
-  const body = layout.map((line) => (line === null ? rule : `│${line.padEnd(width)}│`))
 
+  function draw(line: string | null): string {
+    if (line === null) {
+      return rule
+    }
+    return `│${line.padEnd(width)}│`
+  }
+
+  const body = layout.map(draw)
   return [`┌${RULE.repeat(width)}┐`, ...body, `└${RULE.repeat(width)}┘`].join("\n")
 }
 

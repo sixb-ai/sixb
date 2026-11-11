@@ -18,9 +18,9 @@ describe("the bot's handshake", () => {
 
   test("the seal is the subject's, and only the subject's", () => {
     // The bot's seal. Change this number and you are claiming to be me.
-    expect(seal("opened a pull request")).toBe("f897fce3")
+    expect(seal("opened a pull request")).toBe("601a4827")
     expect(seal("opened a pull request ")).not.toBe(seal("opened a pull request"))
-    expect(seal("")).toBe("811c9dc5")
+    expect(seal("")).toBe("00001505")
   })
 
   test("recomputing the seal printed on the receipt agrees with the receipt", () => {
