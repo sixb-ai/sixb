@@ -38,6 +38,11 @@
  * first `edit` request, taken before the page's scripts run: they cannot post on it. Once it holds
  * that port, the frame also sends the reader's pinches, ⌘-wheel turns and ⌘ +, − and 0 through
  * it, for the app to zoom the opened board instead of the browser zooming everything.
+ *
+ * A board running on the canvas is handed its port with `canvas` instead: the reader uses its page
+ * in place, and the frame sends through the port what moves the canvas, their wheel turns unless
+ * the page scrolls them, a finger's drag, Space held to drag, and the zooming above, and the words
+ * of what they press, for the canvas to follow the arrow they label.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -83,6 +88,12 @@ export function frameRuntime(): void {
     "[data-sixb-commenting] [data-sixb-hover] { outline: 2px dashed #0a84ff; outline-offset: 3px; }",
     "[data-sixb-commenting] [data-sixb-picked] { outline: 2px solid #0a84ff; outline-offset: 3px; }",
   ].join(" ")
+  /**
+   * A board running on the canvas: the page takes no touch gesture of its own, which the canvas
+   * takes instead, and its scrolling never carries on to the app around it.
+   */
+  const CANVAS_CSS =
+    "html { overscroll-behavior: none; } html, html * { touch-action: none !important; }"
   const root = document.documentElement
   // Only set while the runtime itself runs, so kept for what reads it later.
   const script = document.currentScript as HTMLScriptElement | null
@@ -223,14 +234,15 @@ export function frameRuntime(): void {
 
   // ── Editing a board ─────────────────────────────────────────────────
 
-  // What editing reports goes to the app through the port its first `edit` request hands over,
-  // never through the window, where the page's own scripts post too. The port, and the way to
-  // post on it, are taken before any of the page's scripts run, which cannot reach either.
+  // What editing reports goes to the app through the port its first `edit` request hands over, as
+  // a board running on the canvas is handed one with `canvas`, never through the window, where the
+  // page's own scripts post too. The port, and the way to post on it, are taken before any of the
+  // page's scripts run, which cannot reach either.
   const portPost = typeof MessagePort === "function" ? MessagePort.prototype.postMessage : undefined
   const apply = Reflect.apply
-  let editPort: MessagePort | null = null
-  const postEdit = (message: Record<string, unknown>) => {
-    if (editPort && portPost) apply(portPost, editPort, [{ protocol: PROTOCOL, ...message }])
+  let appPort: MessagePort | null = null
+  const postPort = (message: Record<string, unknown>) => {
+    if (appPort && portPost) apply(portPost, appPort, [{ protocol: PROTOCOL, ...message }])
   }
 
   let editing = false
@@ -392,7 +404,7 @@ export function frameRuntime(): void {
       picked = mark("data-sixb-picked", picked, commentable(element, event.target))
       // Where the reader clicked, for a comment's pin.
       const at = { x: event.clientX, y: event.clientY }
-      postEdit({ event: "edit.select", params: { target, at } })
+      postPort({ event: "edit.select", params: { target, at } })
       if (typable && element instanceof HTMLElement && target.kind === "text") {
         typing = element
         typedFrom = element.textContent ?? ""
@@ -408,13 +420,13 @@ export function frameRuntime(): void {
     const shown = commentable(element, event.target)
     if (shown === pointed && shown !== null) return
     pointed = mark("data-sixb-hover", pointed, shown)
-    postEdit({ event: "edit.hover", params: { target } })
+    postPort({ event: "edit.hover", params: { target } })
   })
   // The pointer gone from the page, nothing is under it: it left for nothing of the page.
   document.addEventListener("mouseout", (event) => {
     if (!editing || !event.isTrusted || event.relatedTarget !== null || pointed === null) return
     pointed = mark("data-sixb-hover", pointed, null)
-    postEdit({ event: "edit.hover", params: { target: null } })
+    postPort({ event: "edit.hover", params: { target: null } })
   })
   document.addEventListener("input", (event) => {
     if (!editing || !event.isTrusted || !typing || !typing.contains(event.target as Node | null)) {
@@ -423,7 +435,7 @@ export function frameRuntime(): void {
     const text = typing.textContent ?? ""
     // Its words are the reader's now: still theirs to type in.
     typing.setAttribute(WORDS, wordsHash(text))
-    postEdit({
+    postPort({
       event: "edit.text",
       params: { address: typing.getAttribute(AT), base: typedFrom, text },
     })
@@ -444,26 +456,102 @@ export function frameRuntime(): void {
     if (typing && event.target === typing) stopTyping()
   })
 
-  // ── Zooming an opened board ─────────────────────────────────────────
+  // ── The reader's gestures over a canvas's board ─────────────────────
 
-  // A canvas's opened board is zoomed by the app around it, never by the browser: once the app has
-  // handed the port over, a pinch, the wheel with ⌘ or Ctrl, and ⌘ or Ctrl with +, − or 0 go to
-  // the app through it, the reader's own alone. Without a port, as a document's or a deck's frame
-  // is, they stay the browser's.
+  // A canvas's board is zoomed by the app around it, never by the browser: once the app has handed
+  // the port over, a pinch, the wheel with ⌘ or Ctrl, and ⌘ or Ctrl with +, − or 0 go to the app
+  // through it, the reader's own alone. Without a port, as a document's or a deck's frame is, they
+  // stay the browser's.
+  //
+  // A board running on the canvas, handed its port with `canvas`, is a page the reader uses in
+  // place among the others: its clicks, keys and text stay its own, and what moves the canvas goes
+  // to the app. The wheel pans the canvas unless the page scrolls under the pointer; a finger
+  // dragging pans it, while a tap stays the page's; Space held outside a field lets the reader
+  // drag the canvas.
   const mac = /Mac|iPhone|iPad/.test(window.navigator?.platform ?? "")
-  const zoom = (params: Record<string, unknown>) => postEdit({ event: "zoom", params })
-  const zooming = (event: Event) => editPort !== null && event.isTrusted
+  const zoom = (params: Record<string, unknown>) => postPort({ event: "zoom", params })
+  const pan = (x: number, y: number, by: "wheel" | "touch") =>
+    postPort({ event: "pan", params: { x, y, by } })
+  const forwards = (event: Event) => appPort !== null && event.isTrusted
+  let onCanvas = false
+  /** The canvas is panning by the wheel, as the app last said. */
+  let canvasMoving = false
+
+  /** How long a wheel's turns are one gesture apart: React Flow's own pause before a pan ends. */
+  const WHEEL_GESTURE_MS = 150
+  /** Less overflow than this is a page's margins, not content to scroll. */
+  const MIN_OVERFLOW = 16
+  let wheeledAt = Number.NEGATIVE_INFINITY
+  let wheelScrolls = false
+
+  /** Whether what is under `target`, or the page, scrolls further by `x`, `y`. */
+  const scrollsUnder = (target: EventTarget | null, x: number, y: number): boolean => {
+    const vertical = Math.abs(y) >= Math.abs(x)
+    const delta = vertical ? y : x
+    if (delta === 0) return false
+
+    const overflowOf = (element: Element) =>
+      getComputedStyle(element)[vertical ? "overflowY" : "overflowX"]
+    const scrolls = (size: number, shown: number, at: number) =>
+      size - shown >= MIN_OVERFLOW && (delta > 0 ? at + shown < size - 1 : at > 0)
+
+    for (
+      let element = target instanceof Element ? target : null;
+      element && element !== root && element !== document.body;
+      element = element.parentElement
+    ) {
+      if (!/auto|scroll/.test(overflowOf(element))) continue
+      const scrolled = vertical
+        ? scrolls(element.scrollHeight, element.clientHeight, element.scrollTop)
+        : scrolls(element.scrollWidth, element.clientWidth, element.scrollLeft)
+      if (scrolled) return true
+    }
+
+    const page = document.scrollingElement
+    if (
+      !page ||
+      [root, document.body].some((each) => each && /hidden|clip/.test(overflowOf(each)))
+    ) {
+      return false
+    }
+    return vertical
+      ? scrolls(page.scrollHeight, window.innerHeight, window.scrollY)
+      : scrolls(page.scrollWidth, window.innerWidth, window.scrollX)
+  }
 
   window.addEventListener(
     "wheel",
     (event) => {
-      if (!zooming(event) || !(event.ctrlKey || event.metaKey)) return
-      event.preventDefault()
+      if (!forwards(event)) return
 
-      // As the canvas zooms by the wheel: a trackpad's pinch is the wheel with Ctrl, in small steps.
-      const unit = event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002
-      const factor = 2 ** (-event.deltaY * unit * (event.ctrlKey && mac ? 10 : 1))
-      zoom({ factor, at: { x: event.clientX, y: event.clientY } })
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        // As the canvas zooms by the wheel: a trackpad's pinch is the wheel with Ctrl, in small steps.
+        const unit = event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002
+        const factor = 2 ** (-event.deltaY * unit * (event.ctrlKey && mac ? 10 : 1))
+        zoom({ factor, at: { x: event.clientX, y: event.clientY } })
+        return
+      }
+      if (!onCanvas) return
+
+      // Lines, as Firefox turns, count as React Flow counts them; Shift turns the wheel sideways
+      // where the system doesn't already.
+      const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? window.innerHeight : 1
+      const x = (!mac && event.shiftKey ? event.deltaY : event.deltaX) * unit
+      const y = !mac && event.shiftKey ? 0 : event.deltaY * unit
+
+      // A gesture goes one way from its first turn, as a browser keeps scrolling what it started
+      // on. The page scrolls it when something under the pointer scrolls that way and the canvas
+      // was not panning: a canvas panned under a still pointer keeps panning as a page comes under
+      // it, and a page scrolled to its end lets the next gesture pan.
+      if (event.timeStamp - wheeledAt > WHEEL_GESTURE_MS) {
+        wheelScrolls = !canvasMoving && scrollsUnder(event.target, x, y)
+      }
+      wheeledAt = event.timeStamp
+      if (wheelScrolls) return
+
+      event.preventDefault()
+      pan(x, y, "wheel")
     },
     { passive: false }
   )
@@ -472,22 +560,51 @@ export function frameRuntime(): void {
   // follows them, so in its own pixels they would seem to close. Safari also tells of a pinch as a
   // gesture of its own, which is only stopped here; on a Mac's trackpad, where no finger touches
   // the page, the gesture is it.
+  //
+  // On the canvas, one finger dragging past a few pixels pans it, and two pan it by their middle as
+  // they pinch: the page takes no touch gesture of its own (`touch-action`), and a tap, which
+  // moves less, stays a click on the page.
+  const TOUCH_SLOP = 6
   let spread = 0
+  /** Where the fingers are on screen, one or two's middle, and whether they drag the canvas yet. */
+  let touched: { x: number; y: number; dragging: boolean } | null = null
   const spreadOf = (touches: TouchList) => {
     const [one, two] = [touches[0], touches[1]]
     return one && two ? Math.hypot(one.screenX - two.screenX, one.screenY - two.screenY) : 0
   }
+  const middleOf = (touches: TouchList) => {
+    const fingers = [touches[0], touches[1]].filter((touch) => touch !== undefined)
+    const sum = (axis: "screenX" | "screenY") =>
+      fingers.reduce((total, touch) => total + touch[axis], 0) / Math.max(1, fingers.length)
+    return { x: sum("screenX"), y: sum("screenY") }
+  }
   window.addEventListener(
     "touchstart",
     (event) => {
-      spread = zooming(event) && event.touches.length === 2 ? spreadOf(event.touches) : 0
+      const ours = forwards(event)
+      spread = ours && event.touches.length === 2 ? spreadOf(event.touches) : 0
+      touched =
+        ours && onCanvas ? { ...middleOf(event.touches), dragging: event.touches.length > 1 } : null
     },
     { passive: true }
   )
   window.addEventListener(
     "touchmove",
     (event) => {
-      if (!zooming(event) || event.touches.length !== 2 || spread === 0) return
+      if (!forwards(event)) return
+
+      if (touched && event.touches.length <= 2) {
+        // As far as a page would scroll: the other way the fingers move.
+        const middle = middleOf(event.touches)
+        const x = touched.x - middle.x
+        const y = touched.y - middle.y
+        if (!touched.dragging && Math.hypot(x, y) < TOUCH_SLOP) return
+
+        event.preventDefault()
+        touched = { ...middle, dragging: true }
+        if (x !== 0 || y !== 0) pan(x, y, "touch")
+      }
+      if (event.touches.length !== 2 || spread === 0) return
       event.preventDefault()
 
       const [one, two] = [event.touches[0], event.touches[1]]
@@ -501,13 +618,18 @@ export function frameRuntime(): void {
     },
     { passive: false }
   )
-  window.addEventListener("touchend", (event) => {
+  const untouch = (event: TouchEvent) => {
     if (event.touches.length < 2) spread = 0
-  })
+    // A finger lifted: the others drag on from where they are, with no jump.
+    if (touched)
+      touched = event.touches.length > 0 ? { ...middleOf(event.touches), dragging: true } : null
+  }
+  window.addEventListener("touchend", untouch)
+  window.addEventListener("touchcancel", untouch)
 
   let gestured = 1
   const onGesture = (event: Event) => {
-    if (!zooming(event)) return
+    if (!forwards(event)) return
     event.preventDefault()
 
     const gesture = event as Event & { scale?: number; clientX?: number; clientY?: number }
@@ -526,7 +648,7 @@ export function frameRuntime(): void {
   window.addEventListener(
     "keydown",
     (event) => {
-      if (!zooming(event) || !(event.metaKey || event.ctrlKey) || event.altKey) return
+      if (!forwards(event) || !(event.metaKey || event.ctrlKey) || event.altKey) return
       const step =
         event.key === "=" || event.key === "+"
           ? "in"
@@ -542,6 +664,52 @@ export function frameRuntime(): void {
     },
     true
   )
+
+  // Space, held on the canvas, lets the reader drag it, as anywhere else on it, unless what has the
+  // focus takes Space itself: a field types it, a checkbox or a switch toggles. A button or a link
+  // the reader clicked keeps Enter: Space let go over it would press it again after the drag.
+  const SPACE_TAKERS = [
+    "input:not([type=button], [type=submit], [type=reset], [type=image])",
+    "textarea",
+    "select",
+    ...[
+      "checkbox",
+      "radio",
+      "switch",
+      "option",
+      "menuitemcheckbox",
+      "menuitemradio",
+      "textbox",
+      "searchbox",
+      "combobox",
+      "slider",
+      "spinbutton",
+    ].map((role) => `[role=${role}]`),
+  ].join(", ")
+  let spaceHeld = false
+  const holdSpace = (down: boolean) => {
+    if (spaceHeld === down) return
+    spaceHeld = down
+    postPort({ event: "space", params: { down } })
+  }
+  const onSpace = (event: KeyboardEvent) => {
+    if (!onCanvas || !forwards(event) || event.key !== " ") return
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+
+    const down = event.type === "keydown"
+    const focused = document.activeElement
+    if (down && focused instanceof HTMLElement) {
+      if (focused.isContentEditable || focused.matches(SPACE_TAKERS)) return
+    }
+    if (!down && !spaceHeld) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    holdSpace(down)
+  }
+  window.addEventListener("keydown", onSpace, true)
+  window.addEventListener("keyup", onSpace, true)
+  window.addEventListener("blur", () => holdSpace(false))
 
   const handle = (method: string, params: Record<string, unknown>) => {
     switch (method) {
@@ -596,6 +764,16 @@ export function frameRuntime(): void {
       }
       case "edit":
         startEditing(params.on === true, params.typing !== false)
+        return
+      case "canvas":
+        onCanvas = true
+        canvasMoving = params.moving === true
+        if (!document.getElementById("sixb-canvas")) {
+          const style = document.createElement("style")
+          style.id = "sixb-canvas"
+          style.textContent = CANVAS_CSS
+          document.head.append(style)
+        }
         return
       case "edit.patch": {
         const patches = Array.isArray(params.patches) ? params.patches : []
@@ -750,7 +928,7 @@ export function frameRuntime(): void {
       if (typeof data.method !== "string") return
       event.stopImmediatePropagation()
       const port = event.ports?.[0]
-      if (data.method === "edit" && port) editPort = port
+      if ((data.method === "edit" || data.method === "canvas") && port) appPort = port
       try {
         handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
         post({ id: data.id })
@@ -778,7 +956,11 @@ export function frameRuntime(): void {
     // arrow they label.
     const pressed = target?.closest<HTMLElement>('button, [role="button"], a[href^="#"]')
     const words = (pressed?.innerText ?? pressed?.textContent ?? "").replace(/\s+/g, " ").trim()
-    if (words && words.length <= MAX_LABEL_LENGTH) post({ event: "press", params: { text: words } })
+    if (words && words.length <= MAX_LABEL_LENGTH) {
+      post({ event: "press", params: { text: words } })
+      // On the canvas, the reader's own press also goes through the port, where no script posts.
+      if (onCanvas && event.isTrusted) postPort({ event: "press", params: { text: words } })
+    }
 
     const link = target?.closest<HTMLAnchorElement>("a[href]")
     if (link) {

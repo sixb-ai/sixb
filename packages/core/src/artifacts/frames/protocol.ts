@@ -64,6 +64,14 @@ export type FrameRequest =
    * element the reader is typing in takes its patch once they leave it.
    */
   | FrameRequestOf<"edit.patch", { readonly patches: readonly BoardFramePatch[] }>
+  /**
+   * A canvas's board running on the canvas, where the reader uses its page in place. The first
+   * request after the frame loads transfers a `MessagePort`: the frame then sends through it alone
+   * the reader's gestures the canvas takes (`zoom`, `pan`, `space`) and the words of what they
+   * press. `moving` says the canvas is panning by the wheel: a page coming under a still pointer
+   * then keeps panning the canvas rather than scrolling itself.
+   */
+  | FrameRequestOf<"canvas", { readonly moving: boolean }>
 
 interface FrameRequestOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
@@ -104,8 +112,9 @@ export type FrameEvent =
   /** A page's height as laid out at the frame's width, so a document can size the frame to it. */
   | FrameEventOf<"size", { readonly height: number }>
   /**
-   * The reader pressed a button, or a link within the page, that reads `text`: a canvas's opened
-   * board follows the arrow that leaves it with that label. At most a label's length.
+   * The reader pressed a button, or a link within the page, that reads `text`: a canvas's board
+   * follows the arrow that leaves it with that label. At most a label's length. A board running on
+   * the canvas also sends it through its port, for the reader's own presses alone.
    */
   | FrameEventOf<"press", { readonly text: string }>
   /** Editing, the reader points at an element, or at none. */
@@ -131,12 +140,35 @@ export type FrameEvent =
       { readonly address: string; readonly base: string; readonly text: string }
     >
   /**
-   * The reader zoomed over a canvas's opened board, which the app zooms instead of the browser: a
-   * pinch or the wheel with ⌘ or Ctrl, `factor` times around `at`, in the frame's pixels; or ⌘ or
-   * Ctrl with +, − or 0, a `step`. Only a frame handed a port with `edit` reports it, through that
-   * port, and only for the reader's own gestures and keys; any other leaves them to the browser.
+   * The reader zoomed over a canvas's board, opened or running on the canvas, which the app zooms
+   * instead of the browser: a pinch or the wheel with ⌘ or Ctrl, `factor` times around `at`, in
+   * the frame's pixels; or ⌘ or Ctrl with +, − or 0, a `step`. Only a frame handed a port with
+   * `edit` or `canvas` reports it, through that port, and only for the reader's own gestures and
+   * keys; any other leaves them to the browser.
    */
   | FrameEventOf<"zoom", FrameZoom>
+  /**
+   * The reader turned the wheel or dragged a finger over a board running on the canvas, which pans
+   * the canvas instead of scrolling the page. Only a frame handed a port with `canvas` reports it,
+   * through that port, for the reader's own gestures.
+   */
+  | FrameEventOf<"pan", FramePan>
+  /**
+   * The reader pressed or let go of Space over a board running on the canvas, outside a field:
+   * while it is held, dragging pans the canvas. Through the port, as `pan` is.
+   */
+  | FrameEventOf<"space", { readonly down: boolean }>
+
+/**
+ * How far the reader scrolled, as a wheel's deltas say it: `x` right and `y` down, in pixels. A
+ * finger dragging scrolls the opposite way it moves, as it would scroll a page; the wheel's turns
+ * pan the canvas at its own speed for them, as React Flow's do.
+ */
+export interface FramePan {
+  readonly x: number
+  readonly y: number
+  readonly by: "wheel" | "touch"
+}
 
 /** How the reader zoomed: by a gesture, or by a key. */
 export type FrameZoom =
@@ -405,6 +437,17 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
         at,
       })
     }
+    case "pan": {
+      const { x, y, by } = params
+      if (!Number.isFinite(x) || !Number.isFinite(y) || (by !== "wheel" && by !== "touch")) {
+        return null
+      }
+
+      const bounded = (delta: number) => Math.min(MAX_PAN, Math.max(-MAX_PAN, delta))
+      return event("pan", { x: bounded(Number(x)), y: bounded(Number(y)), by })
+    }
+    case "space":
+      return typeof params.down === "boolean" ? event("space", { down: params.down }) : null
     case "press":
       return typeof params.text === "string" &&
         params.text.length > 0 &&
@@ -425,6 +468,9 @@ const ZOOM_STEPS: readonly string[] = ["in", "out", "actual"] satisfies FrameZoo
 
 /** The most one gesture zooms by, either way: a wheel's notch is far less. */
 const MAX_ZOOM_FACTOR = 4
+
+/** The most one wheel's turn or one finger's move pans by, either way: a screen's width. */
+const MAX_PAN = 4000
 
 /** The longest label a frame reports for an element: the runtime cuts its own at 80. */
 const MAX_EDIT_LABEL_LENGTH = 200
