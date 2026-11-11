@@ -130,6 +130,21 @@ export type FrameEvent =
       "edit.text",
       { readonly address: string; readonly base: string; readonly text: string }
     >
+  /**
+   * The reader zoomed over a canvas's opened board, which the app zooms instead of the browser: a
+   * pinch or the wheel with ⌘ or Ctrl, `factor` times around `at`, in the frame's pixels; or ⌘ or
+   * Ctrl with +, − or 0, a `step`. Only a frame handed a port with `edit` reports it, through that
+   * port, and only for the reader's own gestures and keys; any other leaves them to the browser.
+   */
+  | FrameEventOf<"zoom", FrameZoom>
+
+/** How the reader zoomed: by a gesture, or by a key. */
+export type FrameZoom =
+  | { readonly factor: number; readonly at: FramePoint }
+  | { readonly step: FrameZoomStep }
+
+/** ⌘ or Ctrl with +, − or 0: in, out, or the page at its own size. */
+export type FrameZoomStep = "in" | "out" | "actual"
 
 /**
  * An element of a board being edited. One a script built, or whose words a script rewrote, is
@@ -374,6 +389,22 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
         params.base.length <= MAX_EDIT_TEXT_LENGTH
         ? event("edit.text", { address: params.address, base: params.base, text: params.text })
         : null
+    case "zoom": {
+      if (params.step !== undefined) {
+        return ZOOM_STEPS.includes(String(params.step))
+          ? event("zoom", { step: params.step as FrameZoomStep })
+          : null
+      }
+
+      const at = parsePoint(params.at)
+      const factor = Number(params.factor)
+      if (!at || !Number.isFinite(params.factor) || factor <= 0) return null
+
+      return event("zoom", {
+        factor: Math.min(MAX_ZOOM_FACTOR, Math.max(1 / MAX_ZOOM_FACTOR, factor)),
+        at,
+      })
+    }
     case "press":
       return typeof params.text === "string" &&
         params.text.length > 0 &&
@@ -389,6 +420,11 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
 const MAX_EDIT_TEXT_LENGTH = ARTIFACT_LIMITS.maxBoardBytes
 
 const EDIT_KINDS: readonly string[] = ["text", "image", "whole", "box"]
+
+const ZOOM_STEPS: readonly string[] = ["in", "out", "actual"] satisfies FrameZoomStep[]
+
+/** The most one gesture zooms by, either way: a wheel's notch is far less. */
+const MAX_ZOOM_FACTOR = 4
 
 /** The longest label a frame reports for an element: the runtime cuts its own at 80. */
 const MAX_EDIT_LABEL_LENGTH = 200

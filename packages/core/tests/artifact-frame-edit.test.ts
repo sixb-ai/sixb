@@ -334,3 +334,130 @@ describe("a board's frame, editing", () => {
     expect(heading.hasAttribute("contenteditable")).toBe(false)
   })
 })
+
+describe("an opened board's frame, zooming", () => {
+  /** A wheel turn or a key, as the reader's own, or as a page's script's. */
+  const dispatch = (
+    target: unknown,
+    event: InstanceType<Window["WheelEvent"]> | InstanceType<Window["KeyboardEvent"]>,
+    trusted = true
+  ) => {
+    Object.defineProperty(event, "isTrusted", { value: trusted })
+    ;(target as { dispatchEvent(event: unknown): boolean }).dispatchEvent(event)
+    return event.defaultPrevented
+  }
+  // happy-dom's wheel takes only its deltas: the keys held and the pointer are set on it.
+  const wheel = (
+    window: Window,
+    init: { deltaY: number; ctrlKey?: boolean; metaKey?: boolean }
+  ) => {
+    const event = new window.WheelEvent("wheel", { cancelable: true, deltaY: init.deltaY })
+    for (const [name, value] of Object.entries({
+      ctrlKey: init.ctrlKey ?? false,
+      metaKey: init.metaKey ?? false,
+      clientX: 120,
+      clientY: 340,
+    })) {
+      Object.defineProperty(event, name, { value })
+    }
+    return event
+  }
+  const key = (window: Window, init: Record<string, unknown>) =>
+    new window.KeyboardEvent("keydown", { cancelable: true, ...init })
+
+  // Guard proof: drop the wheel handler's `preventDefault`; the browser zooms the whole app, as it
+  // did before. Drop the handler itself; nothing reaches the app.
+  test("sends a pinch or a ⌘-wheel turn through the port, and keeps the browser from zooming", () => {
+    const { window, request, events } = frame(BOARD)
+    request("edit", { on: false })
+
+    expect(dispatch(window, wheel(window, { ctrlKey: true, deltaY: -50 }))).toBe(true)
+    expect(dispatch(window, wheel(window, { metaKey: true, deltaY: 100 }))).toBe(true)
+    const [closer, farther] = events("zoom").map((event) => event?.params)
+    expect(closer).toMatchObject({ at: { x: 120, y: 340 } })
+    expect((closer as { factor: number }).factor).toBeGreaterThan(1)
+    expect((farther as { factor: number }).factor).toBeLessThan(1)
+
+    // A wheel turn alone scrolls the page, as ever.
+    expect(dispatch(window, wheel(window, { deltaY: 100 }))).toBe(false)
+    expect(events("zoom")).toHaveLength(2)
+  })
+
+  // Guard proof: drop `editPort !== null` from `zooming`; a document's frame then takes ⌘-wheel
+  // from the browser and zooms nothing. Drop `event.isTrusted`; the page's script zooms the app.
+  test("leaves zooming to the browser in a frame handed no port, and hears no page script", () => {
+    const { window, request, events, posted } = frame(BOARD)
+
+    expect(dispatch(window, wheel(window, { ctrlKey: true, deltaY: -50 }))).toBe(false)
+    expect(dispatch(window, key(window, { metaKey: true, key: "=" }))).toBe(false)
+    expect(posted.some((message) => message.event === "zoom")).toBe(false)
+
+    request("edit", { on: false })
+    expect(dispatch(window, wheel(window, { ctrlKey: true, deltaY: -50 }), false)).toBe(false)
+    expect(dispatch(window, key(window, { metaKey: true, key: "=" }), false)).toBe(false)
+    expect(events("zoom")).toEqual([])
+  })
+
+  // Guard proof: drop the key handler's `capture`; while the reader types in a text, the typing
+  // handler stops the key first, and the browser zooms.
+  test("sends ⌘ +, − and 0 as steps, even while the reader types in a text", () => {
+    const { window, request, events, at, fire } = frame(BOARD)
+    request("edit", { on: true })
+    const heading = at("body>main:0>h1:0")
+    fire(heading, "click")
+    expect(heading.getAttribute("contenteditable")).toBe("plaintext-only")
+
+    const press = (init: Record<string, unknown>) =>
+      dispatch(heading, key(window, { bubbles: true, ...init }))
+    expect(press({ metaKey: true, key: "=" })).toBe(true)
+    expect(press({ ctrlKey: true, key: "-" })).toBe(true)
+    expect(press({ metaKey: true, key: "0" })).toBe(true)
+    // Without ⌘ or Ctrl, the keys are the text's.
+    expect(press({ key: "0" })).toBe(false)
+    expect(events("zoom").map((event) => event?.params)).toEqual([
+      { step: "in" },
+      { step: "out" },
+      { step: "actual" },
+    ])
+  })
+
+  // Guard proof: measure the spread in the frame's pixels; the second move, after the frame grew
+  // with the first, zooms out as the fingers spread, and a real pinch shakes.
+  test("zooms by a pinch measured on the screen, as the frame grows under the fingers", () => {
+    const { window, request, events } = frame(BOARD)
+    request("edit", { on: false })
+
+    // Fingers on the screen, and in the frame's pixels, the frame drawn `scale` times its size.
+    const pinch = (type: string, scale: number, ...xs: number[]) => {
+      const touches: Record<number | "length", unknown> = { length: xs.length }
+      xs.forEach((x, index) => {
+        touches[index] = { screenX: x, screenY: 100, clientX: x / scale, clientY: 100 / scale }
+      })
+      const event = new window.Event(type, { cancelable: true })
+      Object.defineProperty(event, "touches", { value: touches })
+      return dispatch(window, event as never)
+    }
+    pinch("touchstart", 2, 100, 200)
+    expect(pinch("touchmove", 2, 90, 210)).toBe(true)
+    // The app zoomed 1.2 times: the frame is drawn larger.
+    pinch("touchmove", 2.4, 80, 220)
+
+    const factors = events("zoom").map((event) => (event?.params as { factor: number }).factor)
+    expect(factors[0]).toBeCloseTo(1.2)
+    expect(factors[1]).toBeCloseTo(140 / 120)
+    expect(events("zoom")[0]?.params).toMatchObject({ at: { x: 75, y: 50 } })
+  })
+
+  test("takes a zoom as the app can use it: a step it knows, or a finite factor kept in bounds", () => {
+    const parse = (params: unknown) =>
+      parseFrameEvent({ protocol: FRAME_PROTOCOL, event: "zoom", params })?.params
+
+    expect(parse({ step: "in" })).toEqual({ step: "in" })
+    expect(parse({ step: "page" })).toBeUndefined()
+    expect(parse({ factor: 1.5, at: { x: 1, y: 2 } })).toEqual({ factor: 1.5, at: { x: 1, y: 2 } })
+    expect(parse({ factor: 1000, at: { x: 1, y: 2 } })).toEqual({ factor: 4, at: { x: 1, y: 2 } })
+    expect(parse({ factor: 0, at: { x: 1, y: 2 } })).toBeUndefined()
+    expect(parse({ factor: Number.NaN, at: { x: 1, y: 2 } })).toBeUndefined()
+    expect(parse({ factor: 2 })).toBeUndefined()
+  })
+})

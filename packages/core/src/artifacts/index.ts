@@ -74,6 +74,8 @@ export {
   type FrameRequest,
   type FrameResponse,
   type FrameStart,
+  type FrameZoom,
+  type FrameZoomStep,
   frameStartHash,
   parseFrameCall,
   parseFrameEvent,
