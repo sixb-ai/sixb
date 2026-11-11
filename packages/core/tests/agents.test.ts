@@ -196,6 +196,8 @@ describe("defineAgentTool", () => {
       "read",
       "edit",
       "write",
+      "glob",
+      "grep",
       "view_file",
       "spawn_agent",
       "wait_agent",

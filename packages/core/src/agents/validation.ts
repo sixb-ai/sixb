@@ -18,6 +18,8 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "read",
   "edit",
   "write",
+  "glob",
+  "grep",
   "view_file",
   "spawn_agent",
   "message_agent",

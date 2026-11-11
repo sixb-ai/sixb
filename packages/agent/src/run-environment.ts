@@ -91,6 +91,8 @@ import { createStopTool, createWaitTool, type WaitableChildren } from "./tools/b
 import { createBashTool } from "./tools/bash"
 import { createEditTool } from "./tools/edit"
 import { FileReadLedger } from "./tools/file-writes"
+import { createGlobTool } from "./tools/glob"
+import { createGrepTool } from "./tools/grep"
 import { agentModelToolSpecs, fetchesWeb } from "./tools/model-spec"
 import { createReadTool, READ_TOOL_SPEC } from "./tools/read"
 import {
@@ -929,6 +931,8 @@ async function startAgentEnvironment(
   appendBuiltInTool(tools, createReadTool(resolveSandbox, fileReads, fileViewer))
   appendBuiltInTool(tools, createEditTool(resolveSandbox, fileReads))
   appendBuiltInTool(tools, createWriteTool(resolveSandbox, fileReads))
+  appendBuiltInTool(tools, createGlobTool(resolveSandbox))
+  appendBuiltInTool(tools, createGrepTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox, background))
   appendBuiltInTool(tools, createWaitTool(resolveSandbox, background, input.children))
   appendBuiltInTool(tools, createStopTool(resolveSandbox, background, input.children))
