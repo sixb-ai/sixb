@@ -1,0 +1,114 @@
+/* The paper: US Letter with its margins. Pages and the PDF are cut from it. */
+@page { size: letter; margin: 0.72in 0.84in; }
+
+:root {
+  --accent: #0f766e;
+  --ink: #18181b;
+  --muted: #71717a;
+  --rule: #e4e4e7;
+  --wash: #f0fdfa;
+}
+
+body {
+  color: var(--ink);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 10pt;
+  line-height: 1.6;
+}
+
+h1, h2, h3 { margin: 0; letter-spacing: -0.02em; break-after: avoid; }
+h2 { margin-bottom: 12px; font-size: 14pt; line-height: 1.25; }
+h3 { margin: 20px 0 6px; font-size: 10.5pt; }
+p { margin: 0 0 10px; }
+ul, ol { margin: 0 0 12px; padding-left: 20px; }
+li + li { margin-top: 4px; }
+strong { font-weight: 700; }
+
+.section-number { color: var(--accent); }
+.page { break-before: page; }
+
+/* The cover fills its page; the facts sit at its foot. */
+.cover { display: flex; flex-direction: column; min-height: 9.4in; }
+.cover header { display: flex; align-items: flex-start; justify-content: space-between; }
+.logos { display: flex; align-items: center; gap: 18px; }
+.logos img + img { padding-left: 18px; border-left: 1px solid var(--rule); }
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 7pt;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.cover h1 { margin-top: 88px; font-size: 30pt; line-height: 1.1; letter-spacing: -0.03em; }
+.prepared-for { margin-top: 14px; color: #52525b; }
+.summary { margin-top: 44px; padding-top: 22px; border-top: 2px solid var(--accent); }
+.summary .eyebrow { margin-bottom: 10px; color: var(--ink); }
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+.facts p { margin: 6px 0 0; font-size: 8.5pt; }
+
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.columns h3 { margin-top: 0; padding-top: 10px; border-top: 1px solid var(--rule); }
+.callout { margin: 18px 0; padding: 14px 16px; border: 1px solid #ccfbf1; background: var(--wash); }
+.callout p:last-child { margin-bottom: 0; }
+
+/* A numbered timeline down the page. */
+.timeline { margin: 18px 0; padding: 0; list-style: none; }
+.timeline li { position: relative; margin: 0; padding: 0 0 16px 40px; break-inside: avoid; }
+.timeline li::before {
+  content: counter(list-item, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #99f6e4;
+  border-radius: 50%;
+  background: var(--wash);
+  color: var(--accent);
+  font-size: 6.5pt;
+  line-height: 20px;
+  text-align: center;
+}
+.timeline li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 26px;
+  bottom: 2px;
+  border-left: 1px solid var(--rule);
+}
+.timeline strong { display: block; }
+.timeline p { margin: 2px 0 0; color: #52525b; }
+
+table { width: 100%; margin: 12px 0 20px; border: 1px solid var(--rule); border-collapse: collapse; }
+thead { display: table-header-group; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+th { color: var(--muted); font-size: 6.5pt; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; background: #fafafa; }
+tr { break-inside: avoid; }
+.amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+tfoot td { font-weight: 700; }
+
+/* Two parties side by side, a line to sign on each. */
+.signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--rule); break-inside: avoid; }
+.signature-line { height: 44px; border-bottom: 1px solid #a1a1aa; }
+.signatures .name { margin: 8px 0 0; font-weight: 600; }
+.signatures .organization { margin: 0; color: var(--muted); font-size: 8pt; }
+.signatures .dated { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+.signatures .dated span { display: block; padding-top: 22px; border-bottom: 1px solid #a1a1aa; color: var(--muted); font-size: 6.5pt; letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* On a phone the document is one sheet at the screen's width: the grids stack. */
+@media (max-width: 600px) {
+  .cover { min-height: 0; }
+  .columns, .facts, .signatures { grid-template-columns: 1fr; }
+  .cover header { flex-direction: column; gap: 12px; }
+  .cover h1 { margin-top: 48px; }
+  .logos { flex-wrap: wrap; }
+}

@@ -515,6 +515,44 @@ describe("publish_artifact", () => {
     })
   })
 
+  test("points the Agent at a designed document's pages, or its one sheet without paper", () => {
+    // Reproduce by wording a document's check as a deck's: the Agent looks for slide-NN.png.
+    const output = (screenshots: string[], pages?: number) => ({
+      artifactId: "art_pr0p0sa1x0",
+      version: 1,
+      revision: 3,
+      open: true,
+      kind: "document",
+      title: "Proposal",
+      warnings: [],
+      layoutCheck: { screenshots, ...(pages ? { pages } : {}) },
+    })
+    const check = (screenshots: string[], pages?: number) => {
+      const value = tools().version.toModelOutput?.(output(screenshots, pages), context)
+      return (value as { value: string }).value.split("\n").at(-1)
+    }
+    expect(
+      check(
+        [
+          ".sixb/agent/checks/art_pr0p0sa1x0-r3/phone.png",
+          ".sixb/agent/checks/art_pr0p0sa1x0-r3/page-01.png",
+          ".sixb/agent/checks/art_pr0p0sa1x0-r3/page-02.png",
+        ],
+        2
+      )
+    ).toBe(
+      "Layout check: each page as it prints is .sixb/agent/checks/art_pr0p0sa1x0-r3/page-NN.png (2 pages). .sixb/agent/checks/art_pr0p0sa1x0-r3/phone.png is its top 4000px on a phone (390px), where it shows as one sheet: check that nothing runs off the side. Open them with read, check where each page breaks and that nothing is cut off, fix what the warnings name, and update the artifact."
+    )
+    const unpaged = check([
+      ".sixb/agent/checks/art_pr0p0sa1x0-r3/document.png",
+      ".sixb/agent/checks/art_pr0p0sa1x0-r3/phone.png",
+    ])
+    expect(unpaged).toContain(
+      "the document as one sheet is .sixb/agent/checks/art_pr0p0sa1x0-r3/document.png. It has no paper"
+    )
+    expect(unpaged).toContain("art_pr0p0sa1x0-r3/phone.png is its top 4000px on a phone")
+  })
+
   test("points the Agent at a canvas's board screenshots", () => {
     // Reproduce by wording a canvas's check as a deck's: the Agent looks for slide-NN.png.
     const output = {
@@ -698,15 +736,24 @@ describe("publish_artifact", () => {
     ])
   })
 
-  test("publishes one Markdown file as a document and any other file under its name", async () => {
+  test("publishes one Markdown or HTML file as a document and any other file under its name", async () => {
+    // Reproduce the HTML case by storing every one-file document as document.md: a designed
+    // document's HTML is refused as Markdown with no title, or renders as its source.
     write("drafts/brief.md", "# Brief\n\nShort.\n")
+    write("drafts/letter.html", "<h1>Letter</h1><p>Dear Dana,</p>")
     write("exports/regions.csv", "region,visits\nNorth,1284\n")
 
     const document = await publish({ path: "drafts/brief.md", kind: "document", title: "Brief" })
+    const designed = await publish({
+      path: "drafts/letter.html",
+      kind: "document",
+      title: "Letter",
+    })
     const file = await publish({ path: "exports/regions.csv", kind: "file", title: "Regions" })
 
     for (const [output, path] of [
       [document, "document.md"],
+      [designed, "document.html"],
       [file, "regions.csv"],
     ] as const) {
       const artifactId = (output as { artifactId: string }).artifactId
@@ -1663,6 +1710,7 @@ describe("the sixb-artifacts skill's examples", () => {
     expect(directories).toEqual([
       "examples/document/operations-review",
       "examples/document/incident-report",
+      "examples/document/service-proposal",
       "examples/slides/q3-review",
       "examples/slides/launch-plan",
       "examples/sheet/service-metrics",
