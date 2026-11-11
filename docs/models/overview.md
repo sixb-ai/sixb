@@ -470,6 +470,7 @@ File: `app/_components/assistant.tsx`
 import {
   ArtifactPanelRoot,
   Composer,
+  QuestionComposer,
   SandboxRecovery,
   Transcript,
   useAgentConversation,
@@ -485,15 +486,21 @@ export function Assistant() {
   return (
     <ArtifactPanelRoot scopeKey={threadId ?? "new"}>
       <div className="flex h-full flex-col">
-        <Transcript {...conversation.transcriptProps} />
+        <Transcript
+          {...conversation.transcriptProps}
+          onAnswer={conversation.questionProps?.onAnswer}
+        />
         {conversation.sandboxRecoveryProps && (
           <SandboxRecovery {...conversation.sandboxRecoveryProps} />
         )}
-        <Composer
-          {...conversation.composerProps}
-          ambientContext={pageContext}
-          placeholder="Ask about invoices"
-        />
+        {conversation.questionProps && <QuestionComposer {...conversation.questionProps} />}
+        <div hidden={conversation.questionProps !== null}>
+          <Composer
+            {...conversation.composerProps}
+            ambientContext={pageContext}
+            placeholder="Ask about invoices"
+          />
+        </div>
       </div>
     </ArtifactPanelRoot>
   )
@@ -503,6 +510,10 @@ export function Assistant() {
 `ArtifactPanelRoot` opens the files and artifacts a reply shows. Without it, they cannot be opened.
 Pass `compact` when the chat is narrow so they open in a dialog. `SandboxRecovery` appears when a
 thread's sandbox stops responding; the composer stays disabled until the person starts over.
+`QuestionComposer` takes the composer's place while the agent asks the person a question; their
+answer is their next message. Escape brings the composer back, its draft still there. Pass its
+`onAnswer` to `Transcript` so the reply leaves the question to it; without it, the reply shows the
+question.
 
 Before showing the conversation, handle `conversation.agentLoading`, `conversation.agentError`, no
 `conversation.currentAgent` once loaded (the project has no agent), and
@@ -515,6 +526,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
 | `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, the [dictation](#dictation) microphone, and the context meter: how much of the model's limit the conversation uses (`contextMeter`, which `useAgentConversation` fills) |
+| `QuestionComposer` | The agent's question in the composer's place, from `questionProps` while it is set: a choice to pick or an answer to type, sent as the next message |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |

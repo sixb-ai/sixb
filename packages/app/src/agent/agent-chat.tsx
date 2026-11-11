@@ -196,6 +196,7 @@ export function AgentChat({
           ...(insertion ? { insertion } : {}),
           onInserted: inserted,
         }}
+        question={conversation.questionProps}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
         currentThread={conversation.currentThread}

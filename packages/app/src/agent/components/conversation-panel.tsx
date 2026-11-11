@@ -1,11 +1,10 @@
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Plus } from "lucide-react"
-import { type ReactNode, useState } from "react"
+import type { ReactNode } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
-import { openQuestion } from "../questions/interpret"
-import { QuestionComposer } from "../questions/question-composer"
+import { QuestionComposer, type QuestionComposerProps } from "../questions/question-composer"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
 import { Composer, type ComposerProps } from "./composer"
 import { ThreadsButton } from "./threads-button"
@@ -21,6 +20,8 @@ export interface ConversationPanelProps {
   readonly transcript: TranscriptProps
   /** The conversation's composer, and the page's choices for a conversation not created yet. */
   readonly composer: ConversationComposerProps & Pick<ComposerProps, "newThreadControls">
+  /** The Agent's question, which takes the composer's place while set. */
+  readonly question?: QuestionComposerProps | null
   readonly messagesLoading: boolean
   readonly messagesError: string | null
   /** The selected durable thread, or null while composing a new one. */
@@ -44,6 +45,7 @@ export function ConversationPanel({
   agent,
   transcript,
   composer,
+  question = null,
   messagesLoading,
   messagesError,
   currentThread,
@@ -68,22 +70,19 @@ export function ConversationPanel({
     transcript.messages.some((message) => message.id === null)
   const showWelcome =
     !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
-  // The Agent's questions take the composer's place until answered, or set aside to reply in words.
-  const asked = transcript.onAnswer ? openQuestion(transcript.messages, transcript.turn) : null
-  const [setAside, setSetAside] = useState<string | null>(null)
-  const asking = asked !== null && setAside !== asked.messageKey ? asked : null
+  // A reader who cannot write here cannot answer: the reply shows the question as waiting.
+  const asking = readOnly ? null : question
   const renderComposer = (wideClassName?: string) =>
     readOnly ? (
       // Where the composer would end, so the notice keeps its place at the foot of the pane.
       <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
     ) : (
       <>
-        {asking && transcript.onAnswer ? (
+        {asking ? (
           <QuestionComposer
-            key={asking.messageKey}
-            questions={asking.questions}
-            onAnswer={transcript.onAnswer}
-            onDismiss={() => setSetAside(asking.messageKey)}
+            // The question is the conversation's last message: a new one starts over.
+            key={transcript.messages.at(-1)?.key}
+            {...asking}
             className={compact ? "px-4 pt-2 pb-4" : wideClassName}
           />
         ) : null}
@@ -161,7 +160,7 @@ export function ConversationPanel({
                 <p className="max-w-md text-sm text-destructive">{messagesError}</p>
               </div>
             ) : (
-              <Transcript onNewThread={onNewChat} {...transcript} />
+              <Transcript onNewThread={onNewChat} {...transcript} onAnswer={asking?.onAnswer} />
             )}
           </div>
 

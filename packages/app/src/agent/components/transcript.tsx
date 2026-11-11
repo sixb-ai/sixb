@@ -77,8 +77,8 @@ export interface TranscriptProps {
    */
   readonly background?: TranscriptBackground
   /**
-   * Send the reader's answer to the Agent's questions as their next message: the composer becomes
-   * the question. Without it, as for an observer, the question reads as waiting.
+   * Given by a chat that shows `QuestionComposer`, from its `onAnswer`: the reply then leaves the
+   * question to it. Without it, the question reads in the reply as waiting.
    */
   readonly onAnswer?: (text: string) => void
 }

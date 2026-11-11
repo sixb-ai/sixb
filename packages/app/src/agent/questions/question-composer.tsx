@@ -4,6 +4,14 @@ import { useEffect, useRef, useState } from "react"
 import { useAgentMessages } from "../i18n"
 import { type AskedQuestion, answerText } from "./interpret"
 
+export interface QuestionComposerProps {
+  readonly questions: readonly AskedQuestion[]
+  readonly onAnswer: (text: string) => void
+  /** Back to the composer, to reply in words of one's own. */
+  readonly onDismiss: () => void
+  readonly className?: string
+}
+
 /**
  * The composer, become the Agent's question: the same surface in the same place, its questions one
  * at a time, each choice a row to pick and a last row to write something else. Picking the one
@@ -14,13 +22,7 @@ export function QuestionComposer({
   onAnswer,
   onDismiss,
   className,
-}: {
-  readonly questions: readonly AskedQuestion[]
-  readonly onAnswer: (text: string) => void
-  /** Back to the composer, to reply in words of one's own. */
-  readonly onDismiss: () => void
-  readonly className?: string
-}) {
+}: QuestionComposerProps) {
   const messages = useAgentMessages().questions
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<readonly (readonly string[])[]>(() =>
