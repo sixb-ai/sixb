@@ -33,6 +33,7 @@ import {
 } from "./run-environment"
 import { recordFate } from "./run-fate"
 import { SubagentCoordinator } from "./subagent-tools"
+import { createTodoTool } from "./todo-tool"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunSettings } from "./types"
 
@@ -115,8 +116,12 @@ export async function runConversationTurn(input: {
         runner.startChild(child, family, environment.networkPolicy)
       }
     )
-    // The Agent's own: its children, and its questions to the user, which end the turn.
-    const frameworkTools = [...(await delegation.createTools()), createAskUserTool()]
+    // The Agent's own: its children, its questions to the user, which end the turn, and its plan.
+    const frameworkTools = [
+      ...(await delegation.createTools()),
+      createAskUserTool(),
+      createTodoTool(),
+    ]
     environment = await createConversationAgentEnvironment({
       session,
       frameworkTools,

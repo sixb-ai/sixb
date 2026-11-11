@@ -859,13 +859,15 @@ function invalidStructuredAnswerModel(): WorkerTestModel {
 }
 
 function structuredToolThenAnswerModel(
-  captureSystem?: (system: string | undefined) => void
+  captureSystem?: (system: string | undefined) => void,
+  captureTools?: (names: readonly string[]) => void
 ): WorkerTestModel {
   let call = 0
   return new WorkerTestModel({
     modelId: "mock-model",
     generate: async (options) => {
       captureSystem?.(options.messages.find((message) => message.role === "system")?.content)
+      captureTools?.((options.tools ?? []).map((tool) => tool.name))
       call += 1
       if (call === 1) {
         return {
@@ -4231,8 +4233,9 @@ describe("AgentWorker", () => {
       completion.restore()
     }
   })
-  test("gives the conversational Agent its delegation tools", async () => {
-    // Regression proof: drop the SubagentCoordinator injection in the worker; this fails.
+  test("gives the conversational Agent its delegation tools, its questions and its plan", async () => {
+    // Regression proof: drop the SubagentCoordinator injection in the worker, or ask or todo from
+    // runConversationTurn's frameworkTools; this fails.
     let toolNames: readonly string[] = []
     const sixb = buildSixb(
       answerModel((names) => {
@@ -4258,6 +4261,8 @@ describe("AgentWorker", () => {
           "spawn_agent",
           "wait",
           "stop",
+          "ask",
+          "todo",
         ])
       )
       expect(
@@ -4269,6 +4274,68 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
       completion.restore()
+    }
+  })
+
+  test("keeps the Agent's plan in its messages, and the turn after replays it as the model read it", async () => {
+    // Reproduce: drop todo's toModelOutput; the model then reads the stored counts as JSON, not
+    // the line. Leave createTodoTool out of runConversationTurn's frameworkTools; the call is then
+    // refused as an unknown tool.
+    const plan = {
+      todos: [
+        { content: "Read the March invoices", status: "completed" },
+        { content: "Find the late ones", status: "in_progress" },
+        { content: "Draft the reminders", status: "pending" },
+      ],
+    }
+    const LINE = "Plan updated: 1 of 3 completed. In progress: Find the late ones."
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        requests.push(options)
+        return requests.length === 1
+          ? toolCallStream("plan", "todo", plan)
+          : answerStream("Two invoices are late.")
+      },
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Which March invoices are late?" })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+      const second = await requestAgent(sixb, {
+        threadId: first.run.threadId,
+        text: "And in April?",
+      })
+      expect((await waitForTerminalRun(storage, second.run.id)).status).toBe("succeeded")
+
+      // The message keeps the call's input, which is the plan, its counts, and the line.
+      const parts = (await listMessages(storage, first.run.threadId)).flatMap(
+        (message) => message.parts
+      )
+      expect(parts).toContainEqual(
+        expect.objectContaining({
+          type: "tool-call",
+          toolName: "todo",
+          input: plan,
+          state: "output-available",
+          output: { total: 3, completed: 1, inProgress: ["Find the late ones"] },
+          modelOutput: { type: "text", value: LINE },
+        })
+      )
+
+      // The model read the line, and the next turn sends it again with the same bytes.
+      expect(requests).toHaveLength(3)
+      expect(JSON.stringify(requests[1]?.messages)).toContain(LINE)
+      expectReplayedPrefix(requests[1], requests[2], model.providerId)
+    } finally {
+      await worker.stop()
     }
   })
 
@@ -5749,7 +5816,7 @@ describe("AgentWorker", () => {
     // half the limit as it is, and the turns after it compact again one after another.
     const requests: LanguageModelRequest[] = []
     const model = measuredConversationModel({
-      contextWindow: 21_000,
+      contextWindow: 22_000,
       maxOutputTokens: 2_048,
       answer: `Answered. ${"a".repeat(300)}`,
       // Each summary repeats the last one and adds to it, as a chained summary grew.
@@ -5782,8 +5849,10 @@ describe("AgentWorker", () => {
         compacted.push(names.includes("agent.compaction.completed"))
       }
 
-      // A 18,952-token limit: compaction leaves at most 60 % of it, room for the next turn and
-      // more, so no turn compacts right after the one that did.
+      // A 19,952-token limit: compaction leaves at most 60 % of it, room for the next turn and
+      // more, so no turn compacts right after the one that did. Those 60 % hold the system prompt
+      // and the tools, about 9,000 tokens, the summary and the latest turn: a new tool may need a
+      // larger window.
       expect(compacted.filter(Boolean)).toHaveLength(2)
       expect(compacted.some((now, turn) => now && compacted[turn - 1])).toBe(false)
       const checkpoints = await storage.checkpoints.getByRunIds({
@@ -5793,7 +5862,7 @@ describe("AgentWorker", () => {
       })
       expect(checkpoints).toHaveLength(compacted.filter(Boolean).length)
       for (const checkpoint of checkpoints) {
-        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(18_952 * 0.6))
+        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(19_952 * 0.6))
         // Written anew within its allowance of 1,024 tokens, never grown from the last.
         expect(new TextEncoder().encode(checkpoint.summary).byteLength).toBeLessThanOrEqual(3_072)
       }
@@ -6148,9 +6217,15 @@ describe("AgentWorker", () => {
 
   test("executes a headless workflow agent node and publishes its resume", async () => {
     let capturedSystem: string | undefined
-    const model = structuredToolThenAnswerModel((system) => {
-      capturedSystem ??= system
-    })
+    let capturedTools: readonly string[] = []
+    const model = structuredToolThenAnswerModel(
+      (system) => {
+        capturedSystem ??= system
+      },
+      (names) => {
+        if (capturedTools.length === 0) capturedTools = names
+      }
+    )
     let lookupCalls = 0
     let toolRun: AgentToolRunInfo | undefined
     const lookupProject = defineAgentTool("lookup_project")
@@ -6388,6 +6463,10 @@ describe("AgentWorker", () => {
       )
       expect(capturedSystem).toContain("headless workflow agent")
       expect(capturedSystem).toContain("never ask a user for approval or a follow-up question")
+      // A step keeps no plan: nobody follows it while it works.
+      // Reproduce: append createTodoTool() to the tools startAgentEnvironment builds.
+      expect(capturedTools).toEqual(expect.arrayContaining([lookupProject.name, "read", "bash"]))
+      expect(capturedTools).not.toContain("todo")
       // The task works for whoever started the workflow.
       expect(capturedSystem).toContain('they mean the user {"type":"user","id":"usr_requester"}.')
       // Regression proof: give workflow plans every project skill, or the conversation's
@@ -9194,6 +9273,9 @@ describe("AgentWorker", () => {
       )
       expect(childToolNames).not.toContain("spawn_agent")
       expect(childToolNames).not.toContain("message_agent")
+      // A child keeps no plan: it answers its parent, not the user.
+      // Reproduce: add createTodoTool() to the framework tools run-child gives its environment.
+      expect(childToolNames).not.toContain("todo")
       const childPrompt = JSON.stringify(childCalls[0]?.messages)
       expect(childPrompt).toContain("headless child agent")
       expect(childPrompt).toContain("Research the exact delegated fact.")

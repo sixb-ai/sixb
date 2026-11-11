@@ -20,6 +20,9 @@ The agent also knows which project member it works for: the one who asked, or wh
 workflow. A request such as "assign this to me" resolves to that member's
 [user reference](../ontology/properties.md#reference-a-user).
 
+For a request of several steps, the agent keeps a plan as it works, in the language of the
+conversation: the chat shows its steps, the one in progress and those done.
+
 The same agent can work across your application as its domain grows. Add
 [tools and skills](./tools-and-authorization.md) when it needs additional capabilities or
 instructions for a particular task.

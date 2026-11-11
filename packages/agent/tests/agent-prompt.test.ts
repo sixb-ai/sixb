@@ -452,6 +452,30 @@ describe("agent system prompt", () => {
     expect(parent).not.toContain("ask your parent")
   })
 
+  test("points the Agent to its plan, and nobody else", () => {
+    // Removal proof: drop the todo rule from conversationRules; the first line fails.
+    const parent = renderPrompt({ mode: "conversation", skills: [] })
+    const child = renderPrompt({ mode: "subagent", skills: [] })
+    const workflow = renderPrompt({ mode: "workflow-task", skills: [] })
+
+    expect(parent).toContain("make todo your first call, before you read or look up anything")
+    expect(parent).toContain("list the results the user asked for, in their words")
+    expect(parent).toContain("completed as soon as it is done, not all at the end")
+    expect(child).not.toContain("todo")
+    expect(workflow).not.toContain("todo")
+  })
+
+  test("asks for the plan before the rules about the work", () => {
+    // Removal proof: move the todo rule back to the end of conversationRules. Measured live: there,
+    // DeepSeek, GPT-5 mini and Haiku read and looked things up first, and mostly never planned.
+    const parent = renderPrompt({ mode: "conversation", skills: [] })
+    const plan = parent.indexOf("make todo your first call")
+
+    expect(plan).toBeGreaterThan(-1)
+    expect(plan).toBeLessThan(parent.indexOf("Keep intermediate work silent."))
+    expect(plan).toBeLessThan(parent.indexOf("When tools are needed, use them first"))
+  })
+
   test("tells the Agent when to delegate and when one generation is enough", () => {
     // Removal proof: drop the delegation rule from CONVERSATION_RULES.
     const prompt = renderPrompt({ mode: "conversation", skills: [] })

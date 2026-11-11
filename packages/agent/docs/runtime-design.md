@@ -394,6 +394,14 @@ user's answer is their next message, which the next turn reads right after the c
 for its input asks nothing and the turn goes on. A held call in the same step still pauses the turn
 `awaiting_approval`.
 
+## The plan
+
+The conversational Agent keeps its plan with `todo({ todos })` (`src/todo-tool.ts`), a framework
+tool beside `ask`; a child and a workflow step get none. Nothing stores it: each call sends the
+whole list, so the plan is the input of the thread's latest `todo` call that succeeded, and replay
+and compaction carry it with the messages. The call keeps counts (`{ total, completed,
+inProgress }`), and the model reads them as one line, never the list it sent.
+
 ## Questions to the parent
 
 A child asks with `ask({ questions })`, one to four of them, and waits for the answer within its
